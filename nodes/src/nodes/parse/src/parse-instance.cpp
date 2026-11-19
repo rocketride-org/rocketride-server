@@ -585,6 +585,13 @@ Error IFilterInstance::processObjectStreamData(
     // Write it to the tika buffer
     if (ccode = m_buffer.writeData(data)) return ccode;
 
+    // The end sets the flag before it completes the buffer, so a write the
+    // end cut short sees the flag here: fail the object instead of passing
+    // part of its text on as the whole document
+    if (m_tikaStop)
+        return APERR(Ec::Cancelled, "The parse filter ended before",
+                     currentEntry->fileName(), "was complete");
+
     // Process text returned by tika
     if (ccode = pumpTikaCallbacks()) return ccode;
 
