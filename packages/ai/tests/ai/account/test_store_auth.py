@@ -32,6 +32,7 @@ exclusion on shared team paths.
 """
 
 import shutil
+import sys
 import tempfile
 from types import SimpleNamespace
 
@@ -736,6 +737,14 @@ class TestSignedFetchUrls:
         assert response.status_code == 401, label
 
 
+def _require_env_can_hold(value: str) -> None:
+    """Skip when the process environment cannot encode value (ASCII locale runners)."""
+    try:
+        value.encode(sys.getfilesystemencoding(), sys.getfilesystemencodeerrors())
+    except UnicodeEncodeError:
+        pytest.skip('the process environment encoding cannot hold this non-ASCII key')
+
+
 class TestFetchSigningKeyStaysInTheEngine:
     """Issue #1070: pipeline code must not be able to mint /task/fetch tokens.
 
@@ -753,6 +762,7 @@ class TestFetchSigningKeyStaysInTheEngine:
     def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, key):
         from ai.modules import task
 
+        _require_env_can_hold(key)
         monkeypatch.setenv('RR_SIGNING_KEY', key)
         started = []
         monkeypatch.setattr(task, 'TaskServer', lambda *args, **kwargs: started.append(True))
@@ -763,6 +773,7 @@ class TestFetchSigningKeyStaysInTheEngine:
 
     @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
     def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
+        _require_env_can_hold(key)
         monkeypatch.setenv('RR_SIGNING_KEY', key)
         assert file_store.fetch_signing_key() == key
 
