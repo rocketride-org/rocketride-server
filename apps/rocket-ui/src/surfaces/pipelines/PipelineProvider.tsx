@@ -78,6 +78,19 @@ const styles = {
 };
 
 // =============================================================================
+// IN-FLIGHT CREATES
+// =============================================================================
+
+/**
+ * The pipeline folders a New Pipeline create is still scaffolding, lower-
+ * cased: the existence check and the first write are not one step at the
+ * store, so a second create for the same name while the first is in flight
+ * is refused here instead of overwriting the first's files. Module-level:
+ * two untitled editors share it.
+ */
+const creatingFolders = new Set<string>();
+
+// =============================================================================
 // PROPS
 // =============================================================================
 
@@ -174,6 +187,18 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	// --- Save logic -----------------------------------------------------------
 
 	/**
+	 * The content a save writes: the pipeline as it stands, with the default
+	 * store block stamped when the file has none (plan §9: every saved pipe
+	 * is listable, as every scaffolded one is). The same object comes back
+	 * when nothing is stamped, so callers can tell the two apart by identity.
+	 * The one helper both the save and the save-as call.
+	 *
+	 * @param project - The pipeline configuration about to be saved.
+	 * @returns The configuration to write.
+	 */
+	const stampStoreBlock = useCallback((project: PipelineConfig): PipelineConfig => (project.store ? project : { ...project, store: defaultStoreBlock() }), []);
+
+	/**
 	 * Saves the pipeline to disk and marks the document clean.
 	 *
 	 * @param saveFilename - The file path to save to.
@@ -189,9 +214,15 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				return;
 			}
 			try {
-				// A save stamps the store block when the file has none (plan §9):
-				// every saved pipe is listable, as every scaffolded one is.
-				await projectVfs.write(saveFilename, { ...project, store: project.store ?? defaultStoreBlock() });
+				// A save stamps the store block when the file has none.
+				const stamped = stampStoreBlock(project);
+				await projectVfs.write(saveFilename, stamped);
+				// The Documents save writes the DOCUMENT's content to the same
+				// path before it marks the document clean: the stamped content
+				// goes into the document first, so both writes carry one value
+				// (updateContent lands synchronously; only its notification is
+				// deferred).
+				if (stamped !== project) onContentChanged(stamped);
 				// Mark clean in Documents model
 				await getDocs()?.saveDocument(uri);
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
@@ -203,7 +234,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				if (opts?.rethrow) throw err;
 			}
 		},
-		[client, isConnected, projectId, uri, projectVfs]
+		[client, isConnected, projectId, uri, projectVfs, onContentChanged, stampStoreBlock]
 	);
 
 	// --- Pipeline run/stop/restart -------------------------------------------
@@ -302,7 +333,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			// pipeline's id lives inside the file and is not derived from it (the
 			// author picks it on PACKAGE › Identity).
 			const fileRelPath = pipeStemOf(dialogPath) ? dialogPath : `${dialogPath}.pipe`;
-			const saved: PipelineConfig = pipeline;
+			// A save-as is a save: the same stamping as performSave. The new
+			// file is re-opened from disk below, so the document carries it.
+			const saved = stampStoreBlock(pipeline);
 			try {
 				await projectVfs.write(fileRelPath, saved);
 			} catch (err) {
@@ -334,7 +367,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				executePipelineAction(deferredRun.action, deferredRun.source, saved);
 			}
 		},
-		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs]
+		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs, stampStoreBlock]
 	);
 
 	/** Pipeline action with the dirty-save prompt choreography. */
@@ -457,15 +490,25 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			if (!isShortId(name)) throw new Error('A pipeline id is one dot-free segment: letters, digits, _ and - only.');
 			const dir = settingDefaultDir === 'pipelines' ? '' : settingDefaultDir;
 			const folder = dir ? `${dir}/${name}` : name;
-			const taken = await projectVfs.list(dir).catch(() => []);
-			if (taken.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${folder}" already exists. Choose another name.`);
-			// The untitled document's content rides along (its components stay)
-			// on top of the scaffold's identity and store block.
-			const scaffolded = await scaffoldPipe(dir, name, displayName, project);
-			const docs = getDocs();
-			docs?.discardDocument(uri);
-			await docs?.openDocument(scaffolded.pipePath);
-			window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId: name } }));
+			// Step 1: reserve the name for the whole create — the store has no
+			// exclusive create, so the reservation is what keeps two overlapping
+			// creates of one name from writing over each other
+			const reservation = folder.toLowerCase();
+			if (creatingFolders.has(reservation)) throw new Error(`"${folder}" is being created. Choose another name.`);
+			creatingFolders.add(reservation);
+			try {
+				const taken = await projectVfs.list(dir).catch(() => []);
+				if (taken.some((e) => e.name.toLowerCase() === name.toLowerCase())) throw new Error(`"${folder}" already exists. Choose another name.`);
+				// Step 2: the untitled document's content rides along (its
+				// components stay) on top of the scaffold's identity and store block
+				const scaffolded = await scaffoldPipe(dir, name, displayName, project);
+				const docs = getDocs();
+				docs?.discardDocument(uri);
+				await docs?.openDocument(scaffolded.pipePath);
+				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId: name } }));
+			} finally {
+				creatingFolders.delete(reservation);
+			}
 		},
 		[client, isConnected, projectVfs, settingDefaultDir, uri]
 	);

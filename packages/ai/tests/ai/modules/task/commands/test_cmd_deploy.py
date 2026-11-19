@@ -251,13 +251,15 @@ class TestPublish:
 
     @pytest.mark.asyncio
     async def test_a_dict_deploy_without_a_block_is_an_unlisted_artifact(self, account_stub, monkeypatch):
-        """No block: no manifest in the metadata, no content stage, the registry still takes the version."""
+        """No block: no manifest in the metadata (a caller-supplied one is dropped), no content stage, the registry still takes the version."""
         from ai.modules.task.commands import cmd_deploy
 
         written = AsyncMock()
         monkeypatch.setattr(cmd_deploy, 'write_pipe_content', written)
         conn = _make_conn(_account_info())
-        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': {'ci': 'run-7'}})
+        resp = await conn._deploy_add_pipe(
+            {}, {'pipeline': PIPE, 'metadata': {'ci': 'run-7', 'manifest': {'mode': 'free', 'name': 'Forged'}}}
+        )
 
         assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'ci': 'run-7'}
         written.assert_not_awaited()

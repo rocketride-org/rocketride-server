@@ -79,6 +79,15 @@ describe('validateStoreBlock', () => {
 		const block = validateStoreBlock({ billing: { plans: [{ nickname: 'Pro', amountCents: '900', metadata: { seats: 3 }, extra: true }] } });
 		expect(block.billing?.plans).toEqual([{ nickname: 'Pro', amountCents: 900, currency: 'usd', interval: 'month', metadata: { seats: 3 }, extra: true }]);
 	});
+
+	it("applies the server door's declared-path, mode and billing-shape rules", () => {
+		// What the server refuses as written, the client refuses first
+		expect(() => validateStoreBlock({ icon: 'a/../icon.svg' })).toThrow(/store\.icon must stay inside/);
+		expect(validateStoreBlock({ readme: ' docs/README.md ' }).readme).toBe('docs/README.md');
+		expect(() => validateStoreBlock({ mode: ['free'] })).toThrow(/store\.mode must be/);
+		expect(() => validateStoreBlock({ billing: { plans: [], currency: 'usd' } })).toThrow(/store\.billing: unknown key "currency"/);
+		expect(() => validateStoreBlock({ billing: { plans: [null] } })).toThrow(/store\.billing\.plans must be a list of plan objects/);
+	});
 });
 
 describe('scanReadmeReferences', () => {
@@ -96,6 +105,11 @@ describe('scanReadmeReferences', () => {
 			'```',
 		].join('\n');
 		expect(scanReadmeReferences(md)).toEqual(['assets/flow.png', 'docs/guide.md', 'assets/shot 1.png', 'assets/b.gif']);
+	});
+
+	it('takes reference definitions and balanced parentheses, and skips tilde fences', () => {
+		const md = ['![Diagram][figure] and [the paper][ref]', '', '[figure]: assets/diagram.png', '[ref]: <https://example.com/paper.pdf> "Paper"', '![Plot](assets/plot(1).png)', '~~~markdown', '[Example](example.png)', '~~~'].join('\n');
+		expect(scanReadmeReferences(md)).toEqual(['assets/diagram.png', 'assets/plot(1).png']);
 	});
 
 	it('resolves references against the README and lays them out relative to the pipe', () => {
@@ -168,6 +182,9 @@ describe('packPipe', () => {
 		const escape = folderOf('d3', { 'd3.pipe': pipeJson({ readme: 'README.md' }), 'README.md': '![x](../secret.txt)' });
 		fs.writeFileSync(path.join(ws, 'pipelines', 'secret.txt'), 'not yours');
 		expect(() => packPipe(path.join(escape, 'd3.pipe'))).toThrow(/\.\.\/secret\.txt resolves outside/);
+		// A sibling .pipe at the root would be a second artifact: the door takes exactly one
+		const sibling = folderOf('d4', { 'd4.pipe': pipeJson({ readme: 'README.md' }), 'README.md': '[other](other.pipe)', 'other.pipe': '{}' });
+		expect(() => packPipe(path.join(sibling, 'd4.pipe'))).toThrow(/other\.pipe is another pipeline at the root/);
 	});
 
 	it('refuses a symlink whose real location leaves the pipe directory', () => {
@@ -210,5 +227,18 @@ describe('scaffoldPipe', () => {
 		scaffoldPipe(ws, 'ingest');
 		expect(() => scaffoldPipe(ws, 'ingest')).toThrow(/already exists/);
 		expect(scaffoldPipe(ws, 'ingest', { dir: 'flows' }).pipePath).toBe('flows/ingest/ingest.pipe');
+	});
+
+	it('never replaces an existing asset and stays inside the workspace', () => {
+		// An existing README beside a new pipe is kept (two pipes may share a folder)
+		const folder = path.join(ws, 'pipelines', 'shared');
+		fs.mkdirSync(folder, { recursive: true });
+		fs.writeFileSync(path.join(folder, 'README.md'), '# Mine\n');
+		expect(() => scaffoldPipe(ws, 'shared')).toThrow(/"pipelines\/shared\/README\.md" already exists/);
+		expect(fs.readFileSync(path.join(folder, 'README.md'), 'utf8')).toBe('# Mine\n');
+		expect(fs.existsSync(path.join(folder, 'shared.pipe'))).toBe(false);
+		// A dir outside the workspace is refused before any write
+		expect(() => scaffoldPipe(path.join(ws, 'inner'), 'ingest', { dir: '../outside' })).toThrow(/must resolve to a folder inside the workspace/);
+		expect(fs.existsSync(path.join(ws, 'outside'))).toBe(false);
 	});
 });

@@ -253,6 +253,15 @@ def test_unversioned_pipe_path_redirects_to_the_current_version(monkeypatch):
     assert resp.headers['cache-control'] == 'no-cache'
 
 
+def test_unversioned_redirect_re_encodes_the_decoded_segments(monkeypatch):
+    """The request path arrives decoded; the Location names the same file, encoded again (a space, a '#')."""
+    client = _client(monkeypatch)
+    resp = client.get('/pipelines/acme.doc/images/flow%20a%23b.png', follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers['location'] == '/pipelines/acme.doc/v4/images/flow%20a%23b.png'
+
+
 def test_unversioned_path_of_an_unresolvable_artifact_is_404_not_a_disk_read(monkeypatch):
     """The on-disk static tree is gone: nothing serves unversioned, and there is no root to probe."""
     client = _client(monkeypatch, apps=[], pin=None)

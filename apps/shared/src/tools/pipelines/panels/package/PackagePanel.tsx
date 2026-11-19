@@ -51,7 +51,7 @@
  * Store each offer the one button that stamps the SDK's default block.
  */
 
-import React, { CSSProperties, useCallback, useMemo, useState } from 'react';
+import React, { CSSProperties, useCallback, useMemo, useRef, useState } from 'react';
 import type { ViewMenu } from 'shell';
 import { Button, Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
 import type { BillingPlan, PipeStoreBlock, StoreMode, ServiceParamDescriptor } from 'rocketride';
@@ -237,6 +237,14 @@ const styles = {
 		...commonStyles.listRow(false),
 		padding: '3px 8px 3px 16px',
 	} as CSSProperties,
+	// An editable row is a native button (focusable, Enter/Space open it) drawn as the row.
+	planRowButton: {
+		width: '100%',
+		border: 'none',
+		background: 'transparent',
+		font: 'inherit',
+		textAlign: 'left',
+	} as CSSProperties,
 	planRowStatic: {
 		cursor: 'default',
 	} as CSSProperties,
@@ -280,6 +288,12 @@ function priceLabel(plan: BillingPlan): string {
 function planOrder(plan: BillingPlan): number {
 	const order = (plan.metadata as { order?: unknown } | undefined)?.order;
 	return typeof order === 'number' ? order : Number.MAX_SAFE_INTEGER;
+}
+
+/** The first `Link n` label no row carries — a count-based label would reuse one after a removal and overwrite its URL. */
+function freeLinkLabel(rows: Array<[string, string]>): string {
+	const taken = new Set(rows.map(([label]) => label.trim()));
+	for (let n = 1; ; n++) if (!taken.has(`Link ${n}`)) return `Link ${n}`;
 }
 
 /**
@@ -389,7 +403,7 @@ function IdentitySection(props: IPackagePanelProps): React.ReactElement {
 				))}
 				{!readonly && (
 					<div>
-						<Button variant="secondary" small onClick={() => writeLinks([...linkRows, [`Link ${linkRows.length + 1}`, '']])}>
+						<Button variant="secondary" small onClick={() => writeLinks([...linkRows, [freeLinkLabel(linkRows), '']])}>
 							Add link
 						</Button>
 					</div>
@@ -458,12 +472,19 @@ function StoreSection(props: IPackagePanelProps): React.ReactElement {
 							return (
 								<div key={key}>
 									<div style={styles.planGroup}>{label}</div>
-									{rows.map(({ plan, idx }) => (
-										<div key={idx} style={readonly ? { ...styles.planRow, ...styles.planRowStatic } : styles.planRow} onClick={readonly ? undefined : () => setPlanPanel({ idx })}>
-											<span style={styles.planName}>{plan.nickname}</span>
-											<span style={styles.planPrice}>{priceLabel(plan)}</span>
-										</div>
-									))}
+									{rows.map(({ plan, idx }) =>
+										readonly ? (
+											<div key={idx} style={{ ...styles.planRow, ...styles.planRowStatic }}>
+												<span style={styles.planName}>{plan.nickname}</span>
+												<span style={styles.planPrice}>{priceLabel(plan)}</span>
+											</div>
+										) : (
+											<button key={idx} type="button" style={{ ...styles.planRow, ...styles.planRowButton }} aria-label={`Edit plan ${plan.nickname}`} onClick={() => setPlanPanel({ idx })}>
+												<span style={styles.planName}>{plan.nickname}</span>
+												<span style={styles.planPrice}>{priceLabel(plan)}</span>
+											</button>
+										)
+									)}
 								</div>
 							);
 						})}
@@ -499,25 +520,29 @@ function StoreSection(props: IPackagePanelProps): React.ReactElement {
  */
 function AssetsSection(props: IPackagePanelProps): React.ReactElement {
 	const { project, assetsHost } = props;
-	const { readonly, write } = documentWriter(props);
+	const { readonly } = documentWriter(props);
 	const store = project.store ?? defaultStoreBlock();
 	const displayName = project.name || project.project_id || 'this pipeline';
 
+	// The props as they are NOW: a path change lands after an awaited file
+	// write, and the patch must go onto the document as it is THEN (a component
+	// added on the canvas meanwhile stays), not as it was when the drop began.
+	const latest = useRef(props);
+	latest.current = props;
+
 	// A '' in the patch clears the key: the block then declares no such file
 	// (validateStoreBlock refuses an empty path, so the key goes, not its value).
-	const onPathsChange = useCallback(
-		(patch: IAssetPaths): void => {
-			const next: PipeStoreBlock = { ...(project.store ?? defaultStoreBlock()) };
-			for (const key of ['icon', 'readme'] as const) {
-				const value = patch[key];
-				if (value === undefined) continue;
-				if (value === '') delete next[key];
-				else next[key] = value;
-			}
-			write({ store: next });
-		},
-		[project.store, write]
-	);
+	const onPathsChange = useCallback((patch: IAssetPaths): void => {
+		const current = latest.current;
+		const next: PipeStoreBlock = { ...(current.project.store ?? defaultStoreBlock()) };
+		for (const key of ['icon', 'readme'] as const) {
+			const value = patch[key];
+			if (value === undefined) continue;
+			if (value === '') delete next[key];
+			else next[key] = value;
+		}
+		documentWriter(current).write({ store: next });
+	}, []);
 
 	const readmeStub = useMemo(() => pipeReadmeStub(displayName), [displayName]);
 

@@ -1785,6 +1785,7 @@ async def test_resolve_rewrites_icon_and_readme_to_versioned_urls(registry):
         ('app', '/apps/acme.brandy/icon.svg', '/apps/acme.brandy/v3/icon.svg'),
         ('pipe', 'images/flow.png', '/pipelines/acme.brandy/v3/images/flow.png'),
         ('pipe', '/pipelines/acme.brandy/icon.svg', '/pipelines/acme.brandy/v3/icon.svg'),
+        ('pipe', 'icons/logo#dark v2.svg', '/pipelines/acme.brandy/v3/icons/logo%23dark%20v2.svg'),
         ('app', '', None),
         ('app', None, None),
         ('app', '../other/icon.svg', None),

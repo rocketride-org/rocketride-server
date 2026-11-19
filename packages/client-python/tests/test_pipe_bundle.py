@@ -88,6 +88,17 @@ def test_validate_accepts_the_default_block_and_names_bad_keys_modes_and_paths()
         validate_store_block([])
 
 
+def test_validate_applies_the_server_doors_declared_path_and_billing_shape_rules():
+    """What the server refuses as written, the client refuses first: a foldable '..', an extra billing key, a non-object plan."""
+    with pytest.raises(ValueError, match='store.icon must stay inside'):
+        validate_store_block({'icon': 'a/../icon.svg'})
+    assert validate_store_block({'readme': ' docs/README.md '})['readme'] == 'docs/README.md'
+    with pytest.raises(ValueError, match='store.billing: unknown key "currency"'):
+        validate_store_block({'billing': {'plans': [], 'currency': 'usd'}})
+    with pytest.raises(ValueError, match='store.billing.plans must be a list of plan objects'):
+        validate_store_block({'billing': {'plans': [None]}})
+
+
 def test_validate_normalises_billing_plans_like_the_app_listing():
     block = validate_store_block(
         {'billing': {'plans': [{'nickname': 'Pro', 'amountCents': '900', 'metadata': {'seats': 3}, 'extra': True}]}}
@@ -120,6 +131,22 @@ def test_scan_finds_markdown_and_html_references_in_order_skipping_urls_anchors_
         ]
     )
     assert scan_readme_references(md) == ['assets/flow.png', 'docs/guide.md', 'assets/shot 1.png', 'assets/b.gif']
+
+
+def test_scan_takes_reference_definitions_balanced_parentheses_and_skips_tilde_fences():
+    md = '\n'.join(
+        [
+            '![Diagram][figure] and [the paper][ref]',
+            '',
+            '[figure]: assets/diagram.png',
+            '[ref]: <https://example.com/paper.pdf> "Paper"',
+            '![Plot](assets/plot(1).png)',
+            '~~~markdown',
+            '[Example](example.png)',
+            '~~~',
+        ]
+    )
+    assert scan_readme_references(md) == ['assets/diagram.png', 'assets/plot(1).png']
 
 
 def test_store_files_resolve_against_the_readme_relative_to_the_pipe():
@@ -216,6 +243,14 @@ def test_pack_refuses_missing_declared_missing_referenced_and_upward_escape_by_n
     (tmp_path / 'pipelines' / 'secret.txt').write_text('not yours', encoding='utf-8')
     with pytest.raises(ValueError, match=r'\.\./secret.txt resolves outside'):
         pack_pipe(os.path.join(escape, 'd3.pipe'))
+    # A sibling .pipe at the root would be a second artifact: the door takes exactly one
+    sibling = _folder(
+        tmp_path,
+        'd4',
+        {'d4.pipe': _pipe_json({'readme': 'README.md'}), 'README.md': '[other](other.pipe)', 'other.pipe': '{}'},
+    )
+    with pytest.raises(ValueError, match='other.pipe is another pipeline at the root'):
+        pack_pipe(os.path.join(sibling, 'd4.pipe'))
 
 
 def test_pack_refuses_a_symlink_whose_real_location_leaves_the_pipe_directory(tmp_path):
@@ -283,3 +318,17 @@ def test_scaffold_refuses_an_invalid_id_and_an_existing_pipe_and_honours_dir(tmp
     with pytest.raises(ValueError, match='already exists'):
         scaffold_pipe(str(tmp_path), 'ingest')
     assert scaffold_pipe(str(tmp_path), 'ingest', dir='flows')['pipePath'] == 'flows/ingest/ingest.pipe'
+
+
+def test_scaffold_never_replaces_an_existing_asset_and_stays_inside_the_workspace(tmp_path):
+    """An existing README or icon beside a new pipe is kept (two pipes may share a folder); a dir outside the workspace is refused."""
+    folder = tmp_path / 'pipelines' / 'shared'
+    folder.mkdir(parents=True)
+    (folder / 'README.md').write_text('# Mine\n', encoding='utf-8')
+    with pytest.raises(ValueError, match='"pipelines/shared/README.md" already exists'):
+        scaffold_pipe(str(tmp_path), 'shared')
+    assert (folder / 'README.md').read_text(encoding='utf-8') == '# Mine\n'
+    assert not (folder / 'shared.pipe').exists()
+    with pytest.raises(ValueError, match='must resolve to a folder inside the workspace'):
+        scaffold_pipe(str(tmp_path / 'ws'), 'ingest', dir='../outside')
+    assert not (tmp_path / 'outside').exists()

@@ -19,7 +19,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { admitIcon, assetMarkdown, base64ToBytes, besidePath, bytesToBase64, dataUriByteLength, downscaleImage, fitWithin, formatBytes, ICON_SIZE_MESSAGE, ICON_TYPE_MESSAGE, iconPathFor, imageDataUri, imageTag, inlineImageReferences, insertAtCaret, lineCount, MAX_ICON_BYTES, pastedImageName, readmeReferences, referenceWidth, removeReference, safeAssetName, setReferenceWidth, uniqueAssetName } from './assetsModel';
+import { downscaleImage } from './assetsDownscale';
+import { admitIcon, assetMarkdown, base64ToBytes, besidePath, bytesToBase64, dataUriByteLength, fitWithin, formatBytes, ICON_SIZE_MESSAGE, ICON_TYPE_MESSAGE, iconPathFor, imageDataUri, imageTag, inlineImageReferences, insertAtCaret, lineCount, MAX_ICON_BYTES, pastedImageName, readmeReferences, referenceWidth, removeReference, safeAssetName, setReferenceWidth, uniqueAssetName } from './assetsModel';
 
 // =============================================================================
 // ICON ADMISSION
@@ -35,9 +36,11 @@ test('admitIcon: svg and png by extension, by media type for a paste, nothing el
 	assert.deepEqual(admitIcon({ name: 'readme.md', size: 10 }), { error: ICON_TYPE_MESSAGE });
 });
 
-test('admitIcon: the cap is 256 KB inclusive', () => {
-	assert.deepEqual(admitIcon({ name: 'icon.png', size: MAX_ICON_BYTES }), { kind: 'png' });
-	assert.deepEqual(admitIcon({ name: 'icon.png', size: MAX_ICON_BYTES + 1 }), { error: ICON_SIZE_MESSAGE });
+test('admitIcon: the cap is the packer\'s 256 KiB, inclusive', () => {
+	// The number itself, not the constant: the pane must refuse what the packer refuses
+	assert.equal(MAX_ICON_BYTES, 256 * 1024);
+	assert.deepEqual(admitIcon({ name: 'icon.png', size: 256 * 1024 }), { kind: 'png' });
+	assert.deepEqual(admitIcon({ name: 'icon.png', size: 256 * 1024 + 1 }), { error: ICON_SIZE_MESSAGE });
 });
 
 test('iconPathFor: the declared path is the scaffold spelling', () => {
@@ -80,10 +83,28 @@ test('removeReference: images, links and html img tags go; the emptied line goes
 	assert.equal(removeReference(md, 'assets/other.png'), md);
 });
 
+test('removeReference: every spelling of the file goes, a code example and another case stay', () => {
+	// The scanner lists the decoded, query-less path; the edit finds the encoded and ./-prefixed spellings of it
+	const md = '![a](assets/my%20shot.png?v=2)\n![b](./assets/my%20shot.png)\n<IMG SRC="assets/my shot.png#x">\n<img src="assets/My shot.png">\n`![c](assets/my shot.png)`\n\n```\n<img src="assets/my shot.png">\n```';
+	assert.equal(removeReference(md, 'assets/my shot.png'), '<img src="assets/My shot.png">\n`![c](assets/my shot.png)`\n\n```\n<img src="assets/my shot.png">\n```');
+});
+
+test('setReferenceWidth: every spelling is rewritten with its destination kept; code examples stay', () => {
+	assert.equal(setReferenceWidth('![a](./assets/a.png) `![a](assets/a.png)`', 'assets/a.png', 50), '<img src="./assets/a.png" alt="a" width="50"> `![a](assets/a.png)`');
+	assert.equal(setReferenceWidth('<img src="assets/A.png">', 'assets/a.png', 50), '<img src="assets/A.png">');
+	assert.equal(referenceWidth('```\n<img src="assets/a.png" width="9">\n```\n<img src="assets/a.png" width="300">', 'assets/a.png'), 300);
+});
+
 test('inlineImageReferences: resolvable images become data URIs, others stay', async () => {
 	const md = '![a](assets/a.png) ![b](assets/missing.png) <img src="assets/a.png">';
 	const out = await inlineImageReferences(md, async (ref) => (ref === 'assets/a.png' ? 'data:image/png;base64,AAAA' : null));
 	assert.equal(out, '![a](data:image/png;base64,AAAA) ![b](assets/missing.png) <img src="data:image/png;base64,AAAA">');
+});
+
+test('inlineImageReferences: a query, an encoding or a ./ prefix still names the file; titles, attributes and code stay', async () => {
+	const md = '![a](assets/my%20shot.png?v=2 "t") <img alt="x" src=\'./assets/my shot.png\' width="40"> `![a](assets/my shot.png)`';
+	const out = await inlineImageReferences(md, async (ref) => (ref === 'assets/my shot.png' ? 'data:image/png;base64,AAAA' : null));
+	assert.equal(out, '![a](data:image/png;base64,AAAA "t") <img alt="x" src=\'data:image/png;base64,AAAA\' width="40"> `![a](assets/my shot.png)`');
 });
 
 test('lineCount: a trailing newline adds no line; empty is one line', () => {
@@ -169,9 +190,13 @@ test('safeAssetName: basename only, spaces to dashes, odd characters dropped', (
 	assert.equal(safeAssetName('***'), 'file');
 });
 
-test('pastedImageName: <docStem>-<n>.png', () => {
+test('pastedImageName: <docStem>-<n>.<ext>, the extension from the clipboard type, png by default', () => {
 	assert.equal(pastedImageName('myPipe', 1), 'myPipe-1.png');
 	assert.equal(pastedImageName('my app', 3), 'my-app-3.png');
+	assert.equal(pastedImageName('myPipe', 2, 'image/svg+xml'), 'myPipe-2.svg');
+	assert.equal(pastedImageName('myPipe', 4, 'image/jpeg'), 'myPipe-4.jpg');
+	assert.equal(pastedImageName('myPipe', 5, 'image/gif'), 'myPipe-5.gif');
+	assert.equal(pastedImageName('myPipe', 6, 'image/tiff'), 'myPipe-6.png');
 });
 
 test('uniqueAssetName: collisions get -2, -3 before the extension', async () => {
@@ -193,6 +218,13 @@ test('besidePath: normalised, inside the folder, null on escape or empty', () =>
 	assert.equal(besidePath('../x'), null);
 	assert.equal(besidePath('.'), null);
 	assert.equal(besidePath(''), null);
+	// An absolute path is refused as written, never made relative by normalising
+	assert.equal(besidePath('/docs/README.md'), null);
+	assert.equal(besidePath('\\docs\\README.md'), null);
+	assert.equal(besidePath('C:/docs/README.md'), null);
+	assert.equal(besidePath('c:\\docs\\README.md'), null);
+	assert.equal(besidePath('//server/share/x.png'), null);
+	assert.equal(besidePath('\\\\server\\share\\x.png'), null);
 });
 
 // =============================================================================

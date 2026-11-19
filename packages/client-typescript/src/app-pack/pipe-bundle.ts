@@ -96,21 +96,25 @@ const PIPE_ID_RE = /^[A-Za-z0-9_-]+$/;
  * `fs.readFileSync` follows symlinks: a link inside the tree pointing at a
  * file outside it would pack that file, and a `..` reference would read a
  * sibling's. Every read resolves the real path and requires it under the
- * real directory of the pipe.
+ * real directory of the pipe. The size is checked BEFORE the read, so an
+ * oversized file is reported, never loaded.
  *
  * @param pipeDir - The pipe file's directory.
  * @param rel - The path relative to it (posix).
+ * @param cap - The role's byte cap (readme, icon, or any referenced file).
  * @returns The bytes.
- * @throws Error naming the path when it is missing, not a file, or outside.
+ * @throws Error naming the path when it is missing, not a file, outside, or over its cap.
  */
-function readContained(pipeDir: string, rel: string): Buffer {
+function readContained(pipeDir: string, rel: string, cap: number): Buffer {
 	if (rel.split('/')[0] === '..') throw new Error(`${rel} resolves outside the pipe file's directory`);
 	const root = fs.realpathSync(pipeDir);
 	const abs = path.join(pipeDir, ...rel.split('/'));
 	if (!fs.existsSync(abs)) throw new Error(`${rel} does not exist beside the pipe`);
 	const real = fs.realpathSync(abs);
 	if (!real.startsWith(root + path.sep)) throw new Error(`${rel} resolves outside the pipe file's directory`);
-	if (!fs.statSync(real).isFile()) throw new Error(`${rel} is not a file`);
+	const stat = fs.statSync(real);
+	if (!stat.isFile()) throw new Error(`${rel} is not a file`);
+	if (stat.size > cap) throw new Error(`${rel} exceeds ${cap} bytes`);
 	return fs.readFileSync(real);
 }
 
@@ -155,31 +159,28 @@ export function packPipe(pipePath: string): PackedPipe {
 	if (store && !store.icon) warnings.push('store.icon is not declared, so tiles show a generic glyph');
 	if (store && !store.readme) warnings.push('store.readme is not declared, so the listing has no page');
 
-	// Step 3: the declared files, each under its cap
+	// Step 3: the declared files, each under its cap (checked before the read)
 	const entries = new Map<string, Buffer>();
 	const readmeRel = store?.readme ? normalizePosixPath(store.readme) : null;
 	let readmeText: string | null = null;
 	if (readmeRel) {
-		const readme = readContained(pipeDir, readmeRel);
-		if (readme.byteLength > MAX_PIPE_README_BYTES) throw new Error(`${readmeRel} exceeds ${MAX_PIPE_README_BYTES} bytes`);
+		const readme = readContained(pipeDir, readmeRel, MAX_PIPE_README_BYTES);
 		entries.set(readmeRel, readme);
 		readmeText = readme.toString('utf8');
 	}
 	if (store?.icon) {
 		const iconRel = normalizePosixPath(store.icon);
-		const icon = readContained(pipeDir, iconRel);
-		if (icon.byteLength > MAX_ICON_BYTES) throw new Error(`${iconRel} exceeds ${MAX_ICON_BYTES} bytes`);
-		entries.set(iconRel, icon);
+		entries.set(iconRel, readContained(pipeDir, iconRel, MAX_ICON_BYTES));
 	}
 
 	// Step 4: the README's references, resolved against the README and laid
 	// out relative to the pipe; a reference that escapes upward is refused
-	// by the containment read, by name
+	// by the containment read, by name, and so is another .pipe at the root
+	// (the door takes exactly one)
 	for (const rel of pipeStoreFiles(store, readmeText, readmeRel).referenced) {
 		if (entries.has(rel) || rel === base) continue;
-		const bytes = readContained(pipeDir, rel);
-		if (bytes.byteLength > MAX_README_IMAGE_BYTES) throw new Error(`${rel} exceeds ${MAX_README_IMAGE_BYTES} bytes`);
-		entries.set(rel, bytes);
+		if (rel.endsWith('.pipe') && !rel.includes('/')) throw new Error(`${rel} is another pipeline at the root: a README may not reference a sibling .pipe`);
+		entries.set(rel, readContained(pipeDir, rel, MAX_README_IMAGE_BYTES));
 	}
 
 	// Step 5: the zip — pipe first, then code-point order (the Python
@@ -215,7 +216,8 @@ export function packPipe(pipePath: string): PackedPipe {
  * @param options.dir - The pipelines directory, relative to the workspace
  *   (default `pipelines`).
  * @returns The created folder, pipe path and files, workspace-relative.
- * @throws Error on an invalid id or an existing pipe file.
+ * @throws Error on an invalid id, a `dir` that resolves outside the
+ *   workspace, or an output file that already exists.
  */
 export function scaffoldPipe(workspaceRoot: string, pipeId: string, options: { name?: string; dir?: string } = {}): CreatedPipe {
 	// step: identity — validate before touching disk
@@ -223,9 +225,12 @@ export function scaffoldPipe(workspaceRoot: string, pipeId: string, options: { n
 	const dir = normalizePosixPath(options.dir ?? 'pipelines') || 'pipelines';
 	const folderRel = `${dir}/${pipeId}`;
 	const folderAbs = path.join(path.resolve(workspaceRoot), ...folderRel.split('/'));
+	// step: containment — `dir` is workspace-relative by contract; a `..` or
+	// a symlink that leaves the workspace is refused before any write
+	const rootReal = realpathOfTarget(path.resolve(workspaceRoot));
+	const folderReal = realpathOfTarget(folderAbs);
+	if (folderReal === rootReal || !folderReal.startsWith(rootReal + path.sep)) throw new Error(`"${folderRel}" must resolve to a folder inside the workspace.`);
 	const pipeRel = `${folderRel}/${pipeId}.pipe`;
-	const pipeAbs = path.join(folderAbs, `${pipeId}.pipe`);
-	if (fs.existsSync(pipeAbs)) throw new Error(`"${pipeRel}" already exists — pick another id or remove the file.`);
 
 	// step: the files — components first (the layout the editor expects),
 	// identity and the listing block after
@@ -236,7 +241,31 @@ export function scaffoldPipe(workspaceRoot: string, pipeId: string, options: { n
 		['icon.svg', PIPE_ICON_SVG],
 		['README.md', pipeReadmeStub(name)],
 	];
+	// step: every output is checked before the first write, and each is
+	// created exclusively — an existing README or icon is never replaced
+	// (two pipes may share a folder; a fresh scaffold in an empty one is fine)
+	for (const [rel] of files) {
+		if (fs.existsSync(path.join(folderAbs, rel))) throw new Error(`"${folderRel}/${rel}" already exists — pick another id or remove the file.`);
+	}
 	fs.mkdirSync(path.join(folderAbs, 'assets'), { recursive: true });
-	for (const [rel, content] of files) fs.writeFileSync(path.join(folderAbs, rel), content);
+	for (const [rel, content] of files) fs.writeFileSync(path.join(folderAbs, rel), content, { flag: 'wx' });
 	return { folder: folderRel, pipePath: pipeRel, files: files.map(([rel]) => `${folderRel}/${rel}`) };
+}
+
+/**
+ * The real path of a target that may not exist yet: the real path of its
+ * nearest existing ancestor, plus the part below it (what Python's
+ * `os.path.realpath` does for a missing tail).
+ *
+ * @param target - An absolute path.
+ * @returns The resolved absolute path.
+ */
+function realpathOfTarget(target: string): string {
+	let existing = target;
+	while (!fs.existsSync(existing)) {
+		const parent = path.dirname(existing);
+		if (parent === existing) return target;
+		existing = parent;
+	}
+	return path.join(fs.realpathSync(existing), path.relative(existing, target));
 }

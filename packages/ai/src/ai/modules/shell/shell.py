@@ -60,6 +60,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, List, Optional
+from urllib.parse import quote
 from xml.sax.saxutils import escape
 
 from fastapi import HTTPException
@@ -755,8 +756,11 @@ async def artifact_static(request: Request):
     Raises:
         HTTPException: 404 for every miss.
     """
-    # "/apps/rocketride.home/v7/remoteEntry.js" -> apps, [rocketride.home, v7, remoteEntry.js]
-    prefix, _, rest = request.url.path.lstrip('/').partition('/')
+    # "/apps/rocketride.home/v7/remoteEntry.js" -> apps, [rocketride.home, v7, remoteEntry.js].
+    # The ASGI path is the DECODED one (a file name's own '#', '?' and
+    # space); request.url.path re-escapes '#' and '?' and would read the
+    # store under the escaped spelling.
+    prefix, _, rest = request.scope['path'].lstrip('/').partition('/')
     kind = _KIND_OF_PREFIX.get(prefix)
     parts = [p for p in rest.split('/') if p]
     if kind is None or not parts or not _APP_ID_SEG.match(parts[0]):
@@ -780,7 +784,9 @@ async def artifact_static(request: Request):
         # Mutable resolution facts — never let a client pin them.
         return JSONResponse(info, headers={'Cache-Control': 'no-cache, must-revalidate'})
     _safe_segments(parts[1:])
-    location = f'/{prefix}/{artifact_id}/v{info["registryVersion"]}/' + '/'.join(parts[1:])
+    # request.url.path is DECODED: each segment is re-encoded as file-name
+    # data so a name holding a space or a literal '%' redirects to itself
+    location = f'/{prefix}/{artifact_id}/v{info["registryVersion"]}/' + '/'.join(quote(p, safe='') for p in parts[1:])
     return Response(status_code=302, headers={'Location': location, 'Cache-Control': 'no-cache'})
 
 

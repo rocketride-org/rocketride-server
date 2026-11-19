@@ -70,6 +70,13 @@ test('resolution keeps the base shape and leaves absolute and fragment URLs alon
 	assert.match(renderToStaticMarkup(<MarkdownRenderer content="[s](#section)" baseUrl={README_URL} />), />s</);
 });
 
+test('a scheme-relative source keeps its host under either base shape', () => {
+	// A path-only base cannot know the scheme: the result stays scheme-relative, never cut down to a path.
+	assert.match(renderToStaticMarkup(<MarkdownRenderer content="![i](//cdn.example/shot.png)" baseUrl={README_URL} />), /src="\/\/cdn\.example\/shot\.png"/);
+	// An absolute base lends its scheme.
+	assert.match(renderToStaticMarkup(<MarkdownRenderer content="![i](//cdn.example/shot.png)" baseUrl="https://rr.example/apps/a/v1/README.md" />), /src="https:\/\/cdn\.example\/shot\.png"/);
+});
+
 test('a foreign origin never qualifies as an artifact path, artifact-shaped or not', () => {
 	// The anchor renderer follows it because it is https (today's rule), not
 	// because of the artifact rule: a path that only LOOKS like an artifact on

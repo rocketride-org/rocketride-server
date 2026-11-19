@@ -424,8 +424,11 @@ export interface IAppBuilderHost {
 	 * inside the workspace. */
 	pickIncludePath?: () => Promise<string | null>;
 	/** Read one app-folder-relative text file (icon SVG, README markdown)
-	 * for preview. The host guards traversal and caps the size. */
-	readAppTextFile?: (relPath: string) => Promise<string>;
+	 * for preview. The host guards traversal and caps the size. Resolves
+	 * null ONLY when the file does not exist; any other failure (over the
+	 * cap, unreadable) rejects, so PACKAGE › Assets never writes its README
+	 * stub over a file that is there. */
+	readAppTextFile?: (relPath: string) => Promise<string | null>;
 	/** Read one app-folder-relative IMAGE as a data: URI (README images are
 	 * often binary — png/jpg — so text reads would corrupt them). null =
 	 * unreadable, unsupported type, or over the host's size cap. */

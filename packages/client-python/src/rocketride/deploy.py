@@ -399,7 +399,8 @@ class DeployApi:
             ``files`` (workspace-relative POSIX paths).
 
         Raises:
-            ValueError: On an invalid id or an existing pipe file.
+            ValueError: On an invalid id, a ``dir`` outside the workspace,
+                or an existing output file (the pipe, the icon, the README).
         """
         from ._pipe_bundle import scaffold_pipe
 

@@ -33,13 +33,14 @@ const ACCEPT: Record<'image' | 'markdown', string> = {
 /**
  * Opens the browser's file dialog and resolves the chosen file's name and
  * bytes — the cloud host's half of the Assets pane's `pickFile` (VS Code
- * uses its native dialog). Resolves null when the dialog is dismissed.
+ * uses its native dialog). Resolves null when the dialog is dismissed and
+ * rejects when the chosen file cannot be read, so the pane can say so.
  *
  * @param accept - Which kind of file to offer.
  * @returns The file, or null on cancel.
  */
 export function pickLocalFile(accept: 'image' | 'markdown'): Promise<{ name: string; data: Uint8Array } | null> {
-	return new Promise((resolve) => {
+	return new Promise((resolve, reject) => {
 		const input = document.createElement('input');
 		input.type = 'file';
 		input.accept = ACCEPT[accept];
@@ -54,7 +55,9 @@ export function pickLocalFile(accept: 'image' | 'markdown'): Promise<{ name: str
 				resolve(null);
 				return;
 			}
-			void file.arrayBuffer().then((buffer) => resolve({ name: file.name, data: new Uint8Array(buffer) }));
+			// step: a file that cannot be read settles the promise with the
+			// failure — a silently pending picker would leave the pane waiting
+			file.arrayBuffer().then((buffer) => resolve({ name: file.name, data: new Uint8Array(buffer) }), reject);
 		});
 		// step: a dismissed dialog fires `cancel` (no change) — resolve null
 		input.addEventListener('cancel', () => {

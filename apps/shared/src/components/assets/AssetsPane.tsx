@@ -43,7 +43,8 @@
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, commonStyles, MarkdownRenderer } from 'shell';
 import type { IAssetsHost, IReadmeReference } from './assetsModel';
-import { admitIcon, ASSETS_DIR, assetMarkdown, dataUriByteLength, downscaleImage, formatBytes, iconPathFor, inlineImageReferences, insertAtCaret, lineCount, pastedImageName, posixBasename, posixDirname, posixJoin, README_WRITE_DEBOUNCE_MS, readmeReferences, referenceWidth, removeReference, safeAssetName, setReferenceWidth, uniqueAssetName } from './assetsModel';
+import { downscaleImage } from './assetsDownscale';
+import { admitIcon, ASSETS_DIR, assetMarkdown, dataUriByteLength, extensionForMediaType, formatBytes, iconPathFor, inlineImageReferences, insertAtCaret, lineCount, pastedImageName, posixBasename, posixDirname, posixJoin, README_WRITE_DEBOUNCE_MS, readmeReferences, referenceWidth, removeReference, safeAssetName, setReferenceWidth, uniqueAssetName } from './assetsModel';
 
 // =============================================================================
 // TYPES
@@ -70,8 +71,12 @@ export interface IAssetsPaneProps {
 	docStem: string;
 	/** The declared icon and README paths. */
 	paths: IAssetPaths;
-	/** Receives a path change: a new path, or '' to clear it. */
-	onPathsChange: (patch: IAssetPaths) => void;
+	/**
+	 * Receives a path change: a new path, or '' to clear it. A host that
+	 * stores the path asynchronously returns the promise: the pane awaits
+	 * it and reports a failure as its notice (the file is on disk either way).
+	 */
+	onPathsChange: (patch: IAssetPaths) => void | Promise<void>;
 	/** The README written by "Write the README" (the kind's scaffold stub). */
 	readmeStub: string;
 	/** Read-only hosts: the pane shows, never writes. */
@@ -466,15 +471,25 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 				// Step 1: the file, as icon.svg or icon.png beside the document
 				const declared = iconPathFor(verdict.kind);
 				await host.writeFile(declared, file.data);
-				// Step 2: the path, through the caller's store
-				if (declared !== iconPath) onPathsChange({ icon: declared });
 				setIconVersion((v) => v + 1);
+				// Step 2: the path, through the caller's store — awaited, so a host that cannot store it says so here
+				if (declared !== iconPath) await onPathsChange({ icon: declared });
 			} catch (err) {
-				setNotice(`Could not write the icon: ${messageOf(err)}`);
+				setNotice(`Could not set the icon: ${messageOf(err)}`);
 			}
 		},
 		[host, iconPath, onPathsChange]
 	);
+
+	/** The bytes of a dropped or pasted file; a read the browser refuses names the file in the notice and answers null. */
+	const readTransferFile = useCallback(async (file: File): Promise<Uint8Array | null> => {
+		try {
+			return await fileBytes(file);
+		} catch (err) {
+			setNotice(`Could not read ${file.name || 'the file'}: ${messageOf(err)}`);
+			return null;
+		}
+	}, []);
 
 	const pickIcon = useCallback(async (): Promise<void> => {
 		if (readonly) return;
@@ -492,9 +507,11 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			setIconDrop(false);
 			if (readonly) return;
 			const [file] = transferFiles(event.dataTransfer);
-			if (file) await applyIcon({ name: file.name, type: file.type, data: await fileBytes(file) });
+			if (!file) return;
+			const data = await readTransferFile(file);
+			if (data) await applyIcon({ name: file.name, type: file.type, data });
 		},
-		[readonly, applyIcon]
+		[readonly, applyIcon, readTransferFile]
 	);
 
 	const onIconPaste = useCallback(
@@ -503,10 +520,10 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			const file = transferFiles(event.clipboardData).find((f) => f.type.startsWith('image/'));
 			if (!file) return;
 			event.preventDefault();
-			const ext = file.type === 'image/svg+xml' ? 'svg' : 'png';
-			await applyIcon({ name: file.name || `pasted.${ext}`, type: file.type, data: await fileBytes(file) });
+			const data = await readTransferFile(file);
+			if (data) await applyIcon({ name: file.name || `pasted.${extensionForMediaType(file.type)}`, type: file.type, data });
 		},
-		[readonly, applyIcon]
+		[readonly, applyIcon, readTransferFile]
 	);
 
 	const removeIcon = useCallback((): void => {
@@ -517,28 +534,44 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 	// ── README ───────────────────────────────────────────────────────────
 	// null = the file does not exist (or nothing is declared); undefined = reading.
 	const [text, setText] = useState<string | null | undefined>(undefined);
+	// A read that failed for a reason other than absence: the empty state names it and offers no stub over the file.
+	const [readProblem, setReadProblem] = useState<string | null>(null);
 	const [tab, setTab] = useState<EditorTab>('preview');
 	const [dirty, setDirty] = useState(false);
+	// A write that failed: the footer offers Retry, the text still in the editor.
+	const [saveFailed, setSaveFailed] = useState(false);
 	const [previewText, setPreviewText] = useState('');
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
+	// The draft as it is NOW, for work that completes after a render (an insertion behind a file write).
+	const textRef = useRef<string | null | undefined>(undefined);
+	textRef.current = text;
 	const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const pendingText = useRef<string | null>(null);
+	// Bumped by every edit: a write that finishes behind a newer edit leaves Unsaved standing.
+	const revision = useRef(0);
+	// Writes queue in order, so an older write can never land after a newer one.
+	const writeChain = useRef<Promise<void>>(Promise.resolve());
 	const pasteCount = useRef(0);
 	const caretAfterInsert = useRef<number | null>(null);
 	// Set by "Write the README": the reload its path change triggers opens on Edit, not Preview.
 	const openOnEdit = useRef(false);
 	const [textDrop, setTextDrop] = useState(false);
 	// The thumbnails already read, by document-relative path — a reference
-	// typed twice or re-rendered never re-reads its file.
+	// typed twice or re-rendered never re-reads its file. A MISSING image is
+	// not kept: a file added later (Explorer, a drop) shows at the next look.
 	const imageCache = useRef(new Map<string, Promise<string | null>>());
 
-	/** Reads an image beside the document once; a write to its path drops the cached read. */
+	/** Reads an image beside the document once; a write to its path or a miss drops the cached read. */
 	const readImage = useCallback(
 		(relPath: string): Promise<string | null> => {
 			let pending = imageCache.current.get(relPath);
 			if (!pending) {
-				pending = host.readImageDataUri(relPath).catch(() => null);
-				imageCache.current.set(relPath, pending);
+				const read = host.readImageDataUri(relPath).catch(() => null);
+				pending = read;
+				imageCache.current.set(relPath, read);
+				void read.then((uri) => {
+					if (uri === null && imageCache.current.get(relPath) === read) imageCache.current.delete(relPath);
+				});
 			}
 			return pending;
 		},
@@ -549,27 +582,35 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 		let cancelled = false;
 		pendingText.current = null;
 		setDirty(false);
+		setSaveFailed(false);
+		setReadProblem(null);
 		if (!readmePath) {
 			setText(null);
 			return;
 		}
 		setText(undefined);
-		void host
-			.readFile(readmePath)
-			.catch(() => null)
-			.then((loaded) => {
+		void host.readFile(readmePath).then(
+			(loaded) => {
 				if (cancelled) return;
 				setText(loaded);
 				// A README that exists opens on Preview; one just written opens on Edit (see writeReadme).
 				if (loaded !== null) setTab(openOnEdit.current ? 'edit' : 'preview');
 				openOnEdit.current = false;
-			});
+			},
+			(err: unknown) => {
+				// Not absence: the file is there and could not be read (over a cap, unreadable)
+				if (cancelled) return;
+				setReadProblem(messageOf(err));
+				setText(null);
+				openOnEdit.current = false;
+			}
+		);
 		return () => {
 			cancelled = true;
 		};
 	}, [host, readmePath]);
 
-	/** Writes the README now — the debounce's target and the flush. */
+	/** Writes the README now — the debounce's target, the flush and Retry. Writes queue in order. */
 	const writeNow = useCallback(
 		async (content: string): Promise<void> => {
 			if (writeTimer.current) {
@@ -577,10 +618,21 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 				writeTimer.current = null;
 			}
 			pendingText.current = null;
+			const rev = revision.current;
+			const target = readmePath || DEFAULT_README_PATH;
+			const write = writeChain.current.then(() => host.writeFile(target, content));
+			writeChain.current = write.catch(() => undefined);
 			try {
-				await host.writeFile(readmePath || DEFAULT_README_PATH, content);
-				setDirty(false);
+				await write;
+				// Step: only the latest revision's write clears Unsaved — an older one landed behind a newer edit
+				if (rev === revision.current) {
+					setDirty(false);
+					setSaveFailed(false);
+				}
 			} catch (err) {
+				// The text stays in the editor; Retry and the unmount flush take it again
+				if (rev === revision.current && pendingText.current === null) pendingText.current = content;
+				setSaveFailed(true);
 				setNotice(`Could not save the README: ${messageOf(err)}`);
 			}
 		},
@@ -590,8 +642,10 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 	/** Takes an edit: the text now, the file after the debounce. */
 	const editText = useCallback(
 		(next: string): void => {
+			textRef.current = next;
 			setText(next);
 			setDirty(true);
+			revision.current += 1;
 			pendingText.current = next;
 			if (writeTimer.current) clearTimeout(writeTimer.current);
 			writeTimer.current = setTimeout(() => {
@@ -603,12 +657,26 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 		[writeNow]
 	);
 
-	// An edit still waiting when the pane unmounts reaches the file anyway.
+	/** Retry after a failed save: the unacknowledged text, or the draft as it stands. */
+	const retrySave = useCallback((): void => {
+		const content = pendingText.current ?? (typeof textRef.current === 'string' ? textRef.current : null);
+		if (content !== null) void writeNow(content);
+	}, [writeNow]);
+
+	// An edit still waiting when the pane unmounts reaches the file anyway, in
+	// order behind the writes in flight. Nothing is mounted to show a failure,
+	// so the console carries it.
 	useEffect(
 		() => () => {
 			if (writeTimer.current) clearTimeout(writeTimer.current);
 			const content = pendingText.current;
-			if (content !== null) void host.writeFile(readmePath || DEFAULT_README_PATH, content).catch(() => undefined);
+			if (content === null) return;
+			const target = readmePath || DEFAULT_README_PATH;
+			writeChain.current = writeChain.current
+				.then(() => host.writeFile(target, content))
+				.catch((err: unknown) => {
+					console.error(`[AssetsPane] Could not save ${target} on close: ${messageOf(err)}`);
+				});
 		},
 		[host, readmePath]
 	);
@@ -629,45 +697,62 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 		const target = readmePath || DEFAULT_README_PATH;
 		setNotice('');
 		try {
+			// Step 1: the stub beside the document
 			await host.writeFile(target, readmeStub);
+			// Step 2: the declaration, awaited — the reload it triggers opens on Edit.
+			// A host that cannot store the path says so here and the empty state
+			// stays, so the next click retries it (the same stub over the same stub).
+			if (target !== readmePath) {
+				openOnEdit.current = true;
+				await onPathsChange({ readme: target });
+				return;
+			}
 			setText(readmeStub);
 			setDirty(false);
 			setTab('edit');
-			if (target !== readmePath) {
-				openOnEdit.current = true;
-				onPathsChange({ readme: target });
-			}
 		} catch (err) {
+			openOnEdit.current = false;
 			setNotice(`Could not write the README: ${messageOf(err)}`);
 		}
 	}, [host, readmePath, readmeStub, onPathsChange]);
 
 	/** Writes a dropped, pasted or picked file to assets/ beside the README and links it at the caret. */
 	const insertAsset = useCallback(
-		async (file: { name: string; data: Uint8Array }, pasted: boolean): Promise<void> => {
-			if (text === null || text === undefined) return;
+		async (file: { name: string; type?: string; data: Uint8Array }, pasted: boolean): Promise<void> => {
+			if (typeof textRef.current !== 'string') return;
 			setNotice('');
 			try {
-				// Step 1: the name — pasted images are numbered after the document; collisions get -2, -3, ...
-				const wanted = pasted ? pastedImageName(docStem, ++pasteCount.current) : safeAssetName(file.name);
+				// Step 1: the name — pasted images are numbered after the document in the
+				// clipboard's format; collisions get -2, -3, ... A name the host cannot
+				// read is taken, not free: only a confirmed absence is reused.
+				const wanted = pasted ? pastedImageName(docStem, ++pasteCount.current, file.type) : safeAssetName(file.name);
 				const assetsDir = posixJoin(readmeDir, ASSETS_DIR);
-				const name = await uniqueAssetName(wanted, async (candidate) => (await host.readFile(posixJoin(assetsDir, candidate)).catch(() => null)) !== null);
+				const name = await uniqueAssetName(wanted, async (candidate) => {
+					try {
+						return (await host.readFile(posixJoin(assetsDir, candidate))) !== null;
+					} catch {
+						return true;
+					}
+				});
 				// Step 2: the file — rasters scaled to fit 1024 x 800 first (SVG and GIF pass through)
 				const relPath = posixJoin(assetsDir, name);
 				await host.writeFile(relPath, await downscaleImage(name, file.data));
 				imageCache.current.delete(relPath);
-				// Step 3: the link at the caret, written with the text at once
-				const caret = textareaRef.current?.selectionStart ?? text.length;
-				const next = insertAtCaret(text, caret, assetMarkdown(`${ASSETS_DIR}/${name}`));
+				// Step 3: the link at the caret, into the draft as it is NOW (edits and
+				// other insertions landed while the file was written), through the same
+				// ordered save path as typing
+				const current = textRef.current;
+				if (typeof current !== 'string') return;
+				const caret = textareaRef.current?.selectionStart ?? current.length;
+				const next = insertAtCaret(current, caret, assetMarkdown(`${ASSETS_DIR}/${name}`));
 				caretAfterInsert.current = next.caret;
-				setText(next.text);
 				setTab('edit');
-				await writeNow(next.text);
+				editText(next.text);
 			} catch (err) {
 				setNotice(`Could not add the file: ${messageOf(err)}`);
 			}
 		},
-		[text, docStem, readmeDir, host, writeNow]
+		[docStem, readmeDir, host, editText]
 	);
 
 	const insertImage = useCallback(async (): Promise<void> => {
@@ -684,9 +769,13 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			event.preventDefault();
 			setTextDrop(false);
 			if (readonly) return;
-			for (const file of transferFiles(event.dataTransfer)) await insertAsset({ name: file.name, data: await fileBytes(file) }, false);
+			// Step: one file at a time; a file the browser cannot read is named and the rest still land
+			for (const file of transferFiles(event.dataTransfer)) {
+				const data = await readTransferFile(file);
+				if (data) await insertAsset({ name: file.name, type: file.type, data }, false);
+			}
 		},
-		[readonly, insertAsset]
+		[readonly, insertAsset, readTransferFile]
 	);
 
 	const onTextPaste = useCallback(
@@ -695,9 +784,10 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			const file = transferFiles(event.clipboardData).find((f) => f.type.startsWith('image/'));
 			if (!file) return;
 			event.preventDefault();
-			await insertAsset({ name: file.name, data: await fileBytes(file) }, true);
+			const data = await readTransferFile(file);
+			if (data) await insertAsset({ name: file.name, type: file.type, data }, true);
 		},
-		[readonly, insertAsset]
+		[readonly, insertAsset, readTransferFile]
 	);
 
 	const openInEditor = useCallback((): void => {
@@ -725,9 +815,10 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 		let cancelled = false;
 		void Promise.all(
 			references.map(async (reference): Promise<IReferenceTile> => {
-				// An image answers through the thumbnail read; anything else through the text read.
+				// An image answers through the thumbnail read; anything else through the
+				// text read, where only a null is absence (a read that fails is a file that is there).
 				const src = reference.isImage ? await readImage(reference.relPath) : null;
-				const present = src !== null || (await host.readFile(reference.relPath).catch(() => null)) !== null;
+				const present = src !== null || (await host.readFile(reference.relPath).catch(() => '')) !== null;
 				return { ...reference, src, missing: !present };
 			})
 		).then((resolved) => {
@@ -805,6 +896,10 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 	const editor =
 		text === undefined ? (
 			<div style={styles.help}>Reading the README…</div>
+		) : text === null && readProblem !== null ? (
+			<div style={styles.emptyReadme}>
+				<span style={styles.mono}>{posixBasename(readmePath)}</span> is declared but could not be read: {readProblem}
+			</div>
 		) : text === null ? (
 			<div style={styles.emptyReadme}>
 				No README yet. The store page is empty until there is one.
@@ -856,6 +951,11 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 				)}
 				<div style={styles.foot}>
 					{dirty ? <span style={styles.footDirty}>● Unsaved</span> : <span>Saved</span>}
+					{saveFailed && !readonly && (
+						<button type="button" style={styles.link} onClick={retrySave}>
+							Retry
+						</button>
+					)}
 					<span>·</span>
 					<span>
 						{posixBasename(readmePath || DEFAULT_README_PATH)} · {lineCount(text)} {lineCount(text) === 1 ? 'line' : 'lines'}

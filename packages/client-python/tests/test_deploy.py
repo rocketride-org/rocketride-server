@@ -40,7 +40,7 @@ import os
 
 import pytest
 
-from rocketride import LOCAL_DEVELOPER_ID, RocketRideClient, registry_id_of
+from rocketride import RocketRideClient, registry_id_of
 
 SERVER_URI = os.environ.get('ROCKETRIDE_URI', 'http://127.0.0.1:5565')
 
@@ -82,7 +82,11 @@ class TestDeploy:
         self.client = RocketRideClient(SERVER_URI, 'MYAPIKEY')
         result = await self.client.connect()
         org = result.get('organization') or {}
-        self.developer_id = org.get('developerId') or LOCAL_DEVELOPER_ID
+        # The server composes every registry name from the organization's
+        # developer id and refuses a deploy without one: there is no fallback
+        self.developer_id = org.get('developerId') or ''
+        if not self.developer_id:
+            pytest.fail('the test organization has no developer id; claim one before running the deploy suite')
         yield
         await self.client.disconnect()
 

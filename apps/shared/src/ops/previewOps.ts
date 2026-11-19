@@ -87,7 +87,7 @@ export interface PreviewHostOpMap extends ShellOpMap {
 	 *  cancel. */
 	'host.preview.pickIncludePath': ShellOpSpec<{ app: string }, string | null>;
 	/** One app-folder-relative text file (traversal-guarded, size-capped). */
-	'host.preview.readTextFile': ShellOpSpec<{ app: string; relPath: string }, string>;
+	'host.preview.readTextFile': ShellOpSpec<{ app: string; relPath: string }, string | null>;
 	/** One app-folder-relative image as a data: URI (null = unreadable,
 	 *  unsupported, or over the cap). */
 	'host.preview.readImage': ShellOpSpec<{ app: string; relPath: string }, string | null>;

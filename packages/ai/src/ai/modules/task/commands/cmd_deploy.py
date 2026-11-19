@@ -452,8 +452,10 @@ class DeployCommands(_DeployBase):
         # The listing manifest the publish row snapshots (plan 9): the store
         # block plus the pipe's own root keys, only when a block exists;
         # never a publisher or author (derived, plan S7). An unlisted deploy
-        # carries no manifest (the backends synthesize the display name).
-        metadata = dict(caller_meta)
+        # carries no manifest (the backends synthesize the display name), so
+        # a caller-supplied one is dropped: the block is the ONE source of a
+        # listing, and `is_listed` reads the manifest's `mode`.
+        metadata = {key: value for key, value in caller_meta.items() if key != 'manifest'}
         if store_block is not None:
             metadata['manifest'] = pipe_manifest(pipeline, store_block)
         # Born state (plan S8): every version is born 'private' (team and

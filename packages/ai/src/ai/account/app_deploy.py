@@ -66,6 +66,7 @@ org/user 'local') and SaaS alike — no marketplace dependency.
 import hashlib
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from rocketlib import debug
 
@@ -1245,6 +1246,9 @@ def artifact_file_url(kind: str, artifact_id: str, version: int, path: Any) -> O
     that tree into the version's dist/), so that prefix is the id's and the
     version slots in behind it. Empty or unsafe (traversal, another id's
     absolute path) resolves to None: the shell falls back to its monogram.
+    Every segment is percent-encoded as file-name data (``#``, ``?``, a
+    space), ``/`` alone staying the separator, so the browser asks for the
+    declared file and nothing less.
     """
     prefix = SERVING_PREFIX[kind]
     rel = str(path or '').strip().replace('\\', '/')
@@ -1258,7 +1262,7 @@ def artifact_file_url(kind: str, artifact_id: str, version: int, path: Any) -> O
     parts = [p for p in rel.split('/') if p not in ('', '.')]
     if not parts or '..' in parts:
         return None
-    return f'{prefix}/{artifact_id}/v{version}/' + '/'.join(parts)
+    return f'{prefix}/{artifact_id}/v{version}/' + '/'.join(quote(p, safe='') for p in parts)
 
 
 def _audience_handle(conn: Any, audience: Dict[str, str]) -> str:

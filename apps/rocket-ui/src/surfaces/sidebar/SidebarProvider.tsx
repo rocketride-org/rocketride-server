@@ -55,6 +55,7 @@ import DevToolMount from '../devtools/DevToolMount';
 import { isPipelineFile, pipelineExtension } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { getWorkspaceVfs, storePathToVirtual } from '../workspace/vfs/workspace';
+import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { downloadJson } from '../../utils/downloadFile';
 import { scanApps } from '../preview/session/appStore';
 import { INTRO_PAGES } from 'shared/tools/introCatalog';
@@ -330,11 +331,11 @@ const SidebarProvider: React.FC = () => {
 						// lives inside the file and is chosen on PACKAGE › Identity (the
 						// New Pipeline form is the path that asks the id up front).
 						const file = path.endsWith('.pipe') ? path : `${path}.pipe`;
-						const dir = file.includes('/') ? file.slice(0, file.lastIndexOf('/')) : '';
-						const leaf = file.slice(file.lastIndexOf('/') + 1);
-						// An existing pipeline at that path is never truncated.
-						const existing = await projectVfs.list(dir).catch(() => []);
-						if (existing.some((e) => e.type !== 'dir' && e.name === leaf)) {
+						// An existing entry at that path is never truncated: the
+						// view's stat answers null for a missing path (a missing
+						// parent folder included) and rejects on any other failure,
+						// so no error is mistaken for an empty folder.
+						if ((await scopedFileSystem(getWorkspaceVfs(), 'pipelines').stat(file)) !== null) {
 							throw new Error(`"${file}" already exists; choose another name.`);
 						}
 						await projectVfs.write(file, { project_id: crypto.randomUUID(), store: defaultStoreBlock(), components: [] });

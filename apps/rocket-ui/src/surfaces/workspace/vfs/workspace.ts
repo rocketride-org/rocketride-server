@@ -583,6 +583,11 @@ export async function readWorkspaceBytes(path: string, maxBytes: number): Promis
  * view stages strings only), records it in the view's inventory so the
  * Explorer lists it, and announces the change like a view write.
  *
+ * Bytes bypass staging (stagedFileSystem: binary paths flow through in
+ * write-through mode only), so the write is refused in manual mode: a byte
+ * write there would land in the store at once, where Discard could not
+ * take it back.
+ *
  * @param path - The virtual path.
  * @param data - The bytes.
  * @param origin - The writer's identity for the change notification.
@@ -592,13 +597,17 @@ export async function writeWorkspaceBytes(path: string, data: Uint8Array, origin
 	if (!vp.rest) throw new Error(`Cannot write to the ${vp.mount}/ root.`);
 	const client = requireClient();
 	const storePath = toStorePath(vp);
+	// step: the workspace that is current when the write STARTS is the one
+	// the inventory update reaches — a scope switch during the write must
+	// not list this file in the new scope's view
+	const { view, policy } = getWorkspace();
+	if (policy.getMode() === 'manual') throw new Error(`Cannot write ${path}: binary files are written straight to the store, which manual commit mode cannot stage. Commit or discard pending changes and turn auto-commit on first.`);
 	const { handle } = await client.fsOpen(storePath, 'w');
 	try {
 		await client.fsWrite(handle, data);
 	} finally {
 		await client.fsClose(handle, 'w');
 	}
-	const view = getWorkspaceVfs();
 	view.invalidate(path);
 	view.upsert(path, 'file');
 	emitFsChange(storePath, origin ?? DEFAULT_WRITE_ORIGIN);

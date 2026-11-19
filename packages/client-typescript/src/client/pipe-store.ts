@@ -175,21 +175,24 @@ function posixDirname(rel: string): string {
 }
 
 /**
- * Checks a declared icon/readme path: a relative path inside the pipe's
- * directory tree by SPELLING (no absolute path, no drive letter, no `..`
- * escape). Containment on the real file system is the packer's check.
+ * Checks a declared icon/readme path by SPELLING, the server door's rule:
+ * relative (no absolute path, no drive letter) and no `..` segment at all,
+ * not even one that would fold inside the tree (`a/../icon.svg`) — the
+ * server refuses the declaration as written, so the client refuses it
+ * first. Containment on the real file system is the packer's check.
  *
  * @param key - The block key, for the error.
  * @param value - The declared value.
- * @returns The value as given.
+ * @returns The value, surrounding whitespace stripped (as the server reads it).
  * @throws Error naming the key when the path is not relative-and-inside.
  */
 function checkRelativePath(key: StoreKey, value: unknown): string {
 	if (typeof value !== 'string' || value.trim() === '') throw new Error(`store.${key} must be a non-empty relative path`);
-	const posix = value.replace(/\\/g, '/');
-	if (posix.startsWith('/') || /^[A-Za-z]:/.test(posix)) throw new Error(`store.${key} must be a path relative to the pipe file, not "${value}"`);
-	if (normalizePosixPath(posix).split('/')[0] === '..') throw new Error(`store.${key} must stay inside the pipe file's directory, not "${value}"`);
-	return value;
+	const trimmed = value.trim();
+	const posix = trimmed.replace(/\\/g, '/');
+	if (posix.startsWith('/') || /^[A-Za-z]:/.test(posix)) throw new Error(`store.${key} must be a path relative to the pipe file, not "${trimmed}"`);
+	if (posix.split('/').includes('..')) throw new Error(`store.${key} must stay inside the pipe file's directory, not "${trimmed}"`);
+	return trimmed;
 }
 
 // =============================================================================
@@ -276,11 +279,17 @@ export function validateStoreBlock(store: unknown): PipeStoreBlock {
 		out.links = { ...(store.links as Record<string, string>) };
 	}
 	if (store.mode !== undefined) {
-		if (!(STORE_MODES as readonly string[]).includes(String(store.mode))) throw new Error(`store.mode must be ${STORE_MODES.join(', ')}, not ${JSON.stringify(store.mode)}`);
+		// step: a string, then one of the modes — `String(['free'])` would read as 'free'
+		if (typeof store.mode !== 'string' || !(STORE_MODES as readonly string[]).includes(store.mode)) throw new Error(`store.mode must be ${STORE_MODES.join(', ')}, not ${JSON.stringify(store.mode)}`);
 		out.mode = store.mode as StoreMode;
 	}
 	if (store.billing !== undefined) {
 		if (!isRecord(store.billing) || !Array.isArray(store.billing.plans)) throw new Error('store.billing must be { plans: [...] }');
+		// step: the raw shape is the server door's — an extra billing key or a
+		// plan that is not an object is refused here, never normalised away
+		const unknown = Object.keys(store.billing).filter((key) => key !== 'plans');
+		if (unknown.length > 0) throw new Error(`store.billing: unknown key "${unknown[0]}" (allowed: plans)`);
+		if (store.billing.plans.some((plan) => !isRecord(plan))) throw new Error('store.billing.plans must be a list of plan objects');
 		out.billing = { plans: store.billing.plans.map(normalizeBillingPlan) };
 	}
 	return out;
@@ -290,14 +299,24 @@ export function validateStoreBlock(store: unknown): PipeStoreBlock {
 // README REFERENCES
 // =============================================================================
 
-/** A markdown image or link: `![alt](path)` / `[text](path)`, optional title. */
-const MARKDOWN_REF_RE = /!?\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
+/**
+ * A markdown image or link: `![alt](path)` / `[text](path)`, optional title;
+ * the destination may hold one level of balanced parentheses
+ * (`plot(1).png`), as CommonMark allows.
+ */
+const MARKDOWN_REF_RE = /!?\[[^\]]*\]\(\s*<?((?:[^\s()<>]|\([^\s()]*\))+)>?(?:\s+["'][^"']*["'])?\s*\)/g;
+
+/**
+ * A markdown reference definition: `[label]: path` at the start of a line,
+ * the destination of a reference-style image or link (`![alt][label]`).
+ */
+const MARKDOWN_DEF_RE = /^[ \t]{0,3}\[[^\]]+\]:[ \t]*<?([^\s<>]+)>?/gm;
 
 /** An HTML image: `<img src="path">`, either quote. */
 const HTML_IMG_RE = /<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
 
-/** Fenced code blocks and inline code spans — never references. */
-const CODE_RE = /```[\s\S]*?```|`[^`\n]*`/g;
+/** Fenced code blocks (backtick or tilde fences) and inline code spans — never references. */
+const CODE_RE = /(```|~~~)[\s\S]*?\1|`[^`\n]*`/g;
 
 /**
  * Whether a reference names a local file: not a URL scheme (`http:`,
@@ -342,6 +361,7 @@ export function scanReadmeReferences(markdown: string): string[] {
 	// (the common case), then HTML images
 	const found: Array<{ index: number; ref: string }> = [];
 	for (const match of text.matchAll(MARKDOWN_REF_RE)) found.push({ index: match.index ?? 0, ref: match[1] });
+	for (const match of text.matchAll(MARKDOWN_DEF_RE)) found.push({ index: match.index ?? 0, ref: match[1] });
 	for (const match of text.matchAll(HTML_IMG_RE)) found.push({ index: match.index ?? 0, ref: match[1] ?? match[2] ?? '' });
 	found.sort((a, b) => a.index - b.index);
 	for (const { ref } of found) take(ref);

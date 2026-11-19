@@ -163,6 +163,14 @@ const styles: Record<string, React.CSSProperties> = {
 		...commonStyles.listRow(false),
 		padding: '3px 8px 3px 16px',
 	},
+	// An editable row is a native button (focusable, Enter/Space open it) drawn as the row.
+	planRowButton: {
+		width: '100%',
+		border: 'none',
+		background: 'transparent',
+		font: 'inherit',
+		textAlign: 'left' as const,
+	},
 	planRowStatic: {
 		cursor: 'default',
 	},
@@ -485,12 +493,19 @@ export const StoreView: React.FC<IStoreViewProps> = ({ host, app, readOnly, onNa
 										return (
 											<div key={key}>
 												<div style={styles.planGroup}>{label}</div>
-												{rows.map(({ plan, idx }) => (
-													<div key={idx} style={readOnly ? { ...styles.planRow, ...styles.planRowStatic } : styles.planRow} onClick={readOnly ? undefined : () => setPlanPanel({ idx })}>
-														<span style={styles.planName}>{plan.nickname}</span>
-														<span style={styles.planPrice}>{priceLabel(plan)}</span>
-													</div>
-												))}
+												{rows.map(({ plan, idx }) =>
+													readOnly ? (
+														<div key={idx} style={{ ...styles.planRow, ...styles.planRowStatic }}>
+															<span style={styles.planName}>{plan.nickname}</span>
+															<span style={styles.planPrice}>{priceLabel(plan)}</span>
+														</div>
+													) : (
+														<button key={idx} type="button" style={{ ...styles.planRow, ...styles.planRowButton }} aria-label={`Edit plan ${plan.nickname}`} onClick={() => setPlanPanel({ idx })}>
+															<span style={styles.planName}>{plan.nickname}</span>
+															<span style={styles.planPrice}>{priceLabel(plan)}</span>
+														</button>
+													)
+												)}
 											</div>
 										);
 									});

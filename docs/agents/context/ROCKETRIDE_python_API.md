@@ -850,7 +850,7 @@ await client.deploy.add_pipe('./pipelines/docBrain/docBrain.pipe', comment='v2: 
 
 #### `async deploy.create_pipe(pipe_id: str, *, workspace_root=None, name=None, dir='pipelines') -> dict`
 
-Scaffold a new pipeline — the programmatic twin of `rocketride pipe new` (mirrors the TypeScript `deploy.createPipe`). Writes `<dir>/<pipe_id>/<pipe_id>.pipe` carrying `components: []`, `project_id`, `name`, `description: ''` and the default `store` block, plus the placeholder `icon.svg` the app scaffold ships, a `README.md` stub and an empty `assets/` directory. `pipe_id` is one dot-free segment of letters, digits, `_` or `-`; the deploying organization attaches its developer id. Scaffolding only — `add_pipe` deploys it. Returns `{'folder', 'pipePath', 'files'}` (workspace-relative POSIX paths); raises `ValueError` on an invalid id or an existing pipe file.
+Scaffold a new pipeline — the programmatic twin of `rocketride pipe new` (mirrors the TypeScript `deploy.createPipe`). Writes `<dir>/<pipe_id>/<pipe_id>.pipe` carrying `components: []`, `project_id`, `name`, `description: ''` and the default `store` block, plus the placeholder `icon.svg` the app scaffold ships, a `README.md` stub and an empty `assets/` directory. `pipe_id` is one dot-free segment of letters, digits, `_` or `-`; the deploying organization attaches its developer id. Scaffolding only — `add_pipe` deploys it. Returns `{'folder', 'pipePath', 'files'}` (workspace-relative POSIX paths); raises `ValueError` on an invalid id, a `dir` outside the workspace, or an existing output file (the pipe, the icon, the README are never replaced).
 
 ```python
 created = await client.deploy.create_pipe('ingest', name='Document ingest')

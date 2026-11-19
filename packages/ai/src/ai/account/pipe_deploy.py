@@ -415,9 +415,14 @@ async def resolve_pipe_version(account_info: Optional['AccountInfo'], pipe_name:
 
     Returns:
         The serving pin, or None when nothing serves the caller.
+
+    Raises:
+        Exception: A failing store, propagated: a name is never reported
+            'not found' because the database was down (``publish_rows``).
     """
     from ai.account import account
     from ai.modules.task.address import build_address, parse_address
+    from ai.modules.task.types import TaskError
 
     try:
         parsed = parse_address(pipe_name)
@@ -426,9 +431,12 @@ async def resolve_pipe_version(account_info: Optional['AccountInfo'], pipe_name:
     if parsed.source is not None:
         return None
     if account_info is not None:
+        # Only the caller's own faults are a miss (the grammar, the key's
+        # scope, a team that is not theirs); a storage failure reaches the
+        # route's error handler as the error it is
         try:
             return (await resolve_pins('pipe', account_info, pipe_name)).first
-        except Exception:
+        except (TaskError, PermissionError):
             return None
     publisher_org = await account.get_org_of_developer_id(parsed.developer_id)
     if not publisher_org:

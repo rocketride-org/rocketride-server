@@ -147,9 +147,13 @@ function resolveAgainstBase(url: string, baseUrl?: string): string {
 		// Step 1: anchor a path-only base on the page origin (any origin does
 		// for a path-only result; the placeholder never leaks into it)
 		const baseIsAbsolute = HAS_SCHEME.test(baseUrl);
-		const anchor = baseIsAbsolute ? baseUrl : new URL(baseUrl, pageOrigin() ?? 'http://localhost').href;
+		const anchor = new URL(baseIsAbsolute ? baseUrl : new URL(baseUrl, pageOrigin() ?? 'http://localhost').href);
 		const resolved = new URL(url, anchor);
-		// Step 2: hand back the same shape the base had
+		// Step 2: a result on another origin (a scheme-relative `//cdn/...`
+		// carries an authority) keeps its host: absolute with an absolute base,
+		// scheme-relative with a path-only one so the placeholder scheme never leaks
+		if (resolved.origin !== anchor.origin) return baseIsAbsolute ? resolved.href : `//${resolved.host}${resolved.pathname}${resolved.search}${resolved.hash}`;
+		// Step 3: a same-origin result takes the shape the base had
 		return baseIsAbsolute ? resolved.href : `${resolved.pathname}${resolved.search}${resolved.hash}`;
 	} catch {
 		return url;

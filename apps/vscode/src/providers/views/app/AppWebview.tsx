@@ -918,7 +918,8 @@ const VscodeAppBuilder: React.FC<{ appId: string }> = ({ appId: stampedAppId }) 
 				return picked ? { name: picked.name, data: base64ToBytes(picked.dataB64) } : null;
 			},
 			pickIncludePath: async () => await req<string | null>('host.preview.pickIncludePath', { app: appId }),
-			readAppTextFile: async (relPath) => await req<string>('host.preview.readTextFile', { app: appId, relPath }),
+			// Null only when the file does not exist; any other failure rejects.
+			readAppTextFile: async (relPath) => await req<string | null>('host.preview.readTextFile', { app: appId, relPath }),
 			readAppImageDataUri: async (relPath) => await req<string | null>('host.preview.readImage', { app: appId, relPath }),
 			// PACKAGE › Assets writes and opens beside the manifest; bytes cross
 			// the bridge as base64 strings, like the image reads above.

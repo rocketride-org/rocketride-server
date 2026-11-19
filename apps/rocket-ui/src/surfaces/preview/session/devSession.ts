@@ -68,6 +68,7 @@ import { loadMonaco, setupAppTypescript, emitModel, detectLanguage } from 'share
 import type { Monaco, TypescriptSetupHandle } from 'shared/components/monaco';
 import { isTextFile } from './appFiles';
 import { readAppImageDataUri, readAppPackage, readAppText } from './appStore';
+import type { PackageJsonLike } from 'shared/tools/appdev';
 import { fetchPlatformTypeLibs } from './typesFeed';
 import { linkModules, revokeLink, ensureLexer } from './linker';
 import type { LinkModule, LinkResult } from './linker';
@@ -213,8 +214,8 @@ export class WebDevSession {
 				const rel = m.icon.replace(/^\.\//, '');
 				if (rel.toLowerCase().endsWith('.svg')) {
 					const svg = await readAppText(this.folder, rel);
-					const uri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
-					if (uri.length <= ICON_MAX_CHARS) meta.icon = uri;
+					const uri = svg !== null ? `data:image/svg+xml;utf8,${encodeURIComponent(svg)}` : null;
+					if (uri !== null && uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				} else {
 					const uri = await readAppImageDataUri(this.folder, rel);
 					if (uri && uri.length <= ICON_MAX_CHARS) meta.icon = uri;
@@ -496,6 +497,20 @@ export class WebDevSession {
 	}
 
 	/**
+	 * The parsed package.json when `path` is the icon its manifest declares
+	 * (`./icon.svg` and `icon.svg` name the same file), else null — unreadable
+	 * manifests answer null too.
+	 *
+	 * @param path - The project-relative path that changed.
+	 * @returns The manifest to refresh the registration meta from, or null.
+	 */
+	private async packageIfDeclaredIcon(path: string): Promise<PackageJsonLike | null> {
+		const pkg = await readAppPackage(this.folder).catch(() => null);
+		const icon = (pkg?.appManifest as Record<string, unknown> | undefined)?.icon;
+		return typeof icon === 'string' && icon.replace(/^\.\//, '') === path ? pkg : null;
+	}
+
+	/**
 	 * Adopts a foreign write: refreshes the file's model from the store
 	 * (CLEAN models only — a dirty model is the user's unsaved work and is
 	 * never clobbered; split panels share Monaco models, so the common case
@@ -512,11 +527,19 @@ export class WebDevSession {
 			this.deps = null;
 		}
 
+		// step: a replaced icon re-reads the registration meta from the
+		// manifest, so the preview chrome shows it without a restart (the
+		// meta reaches the shell on the rebuild below)
+		const iconPkg = await this.packageIfDeclaredIcon(path);
+		if (iconPkg) await this.refreshRegistrationMeta(iconPkg as Record<string, unknown>);
+
 		// step: a foreign BINARY change never becomes a model — record the
-		// entry (new assets appear in the tree) and drop stale cached bytes
+		// entry (new assets appear in the tree) and drop stale cached bytes;
+		// a binary ICON still re-registers through a rebuild
 		if (!isTextFile(path)) {
 			this.vfs.invalidate(path);
 			this.vfs.upsert(path, 'file');
+			if (iconPkg && this.previewWindow) await this.rebuild();
 			return;
 		}
 

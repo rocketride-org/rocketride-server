@@ -434,14 +434,10 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 		() =>
 			readAppTextFile && readAppImageDataUri && writeAppFile && pickAssetFile
 				? {
-						// The text reader rejects for a missing file; the pane wants null.
-						readFile: async (relPath) => {
-							try {
-								return await readAppTextFile(relPath);
-							} catch {
-								return null;
-							}
-						},
+						// The text reader answers null for a missing file and rejects for
+						// any other failure: the pane offers its stub only over a confirmed
+						// absence, never over a file it could not read.
+						readFile: readAppTextFile,
 						readImageDataUri: readAppImageDataUri,
 						writeFile: writeAppFile,
 						pickFile: pickAssetFile,
@@ -454,15 +450,17 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 	/** The pane declared an icon or README path ('' = none): saved to the
 	 *  manifest at once — the files are already on disk — through the same
 	 *  patch path the form uses, then the draft AND its baseline take the
-	 *  paths so an in-progress Identity edit is neither lost nor dirtied. */
+	 *  paths so an in-progress Identity edit is neither lost nor dirtied.
+	 *  The save is awaited by the pane: a failure is the pane's notice, and
+	 *  the pane keeps its state so the declaration can be retried. */
 	const onAssetPaths = useCallback(
 		async (patch: IAssetPaths): Promise<void> => {
 			if (!host.saveListing) return;
 			setError('');
+			await host.saveListing(patch);
+			setDraft((d) => (d ? { ...d, ...patch } : d));
+			setSaved((s) => (s ? { ...s, ...patch } : s));
 			try {
-				await host.saveListing(patch);
-				setDraft((d) => (d ? { ...d, ...patch } : d));
-				setSaved((s) => (s ? { ...s, ...patch } : s));
 				setChecks(await (host.runPreflight?.() ?? Promise.resolve([])));
 			} catch (e) {
 				setError(e instanceof Error ? e.message : String(e));

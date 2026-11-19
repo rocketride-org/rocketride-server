@@ -83,14 +83,20 @@ PIPE_ICON_SVG = PLACEHOLDER_ICON_SVG
 #: Pipe id grammar: one dot-free address segment (the developer id is attached at deploy).
 _PIPE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
-#: A markdown image or link: ``![alt](path)`` / ``[text](path)``, optional title.
-_MARKDOWN_REF_RE = re.compile(r'!?\[[^\]]*\]\(\s*<?([^\s)>]+)>?(?:\s+["\'][^"\']*["\'])?\s*\)')
+#: A markdown image or link: ``![alt](path)`` / ``[text](path)``, optional
+#: title; the destination may hold one level of balanced parentheses
+#: (``plot(1).png``), as CommonMark allows.
+_MARKDOWN_REF_RE = re.compile(r'!?\[[^\]]*\]\(\s*<?((?:[^\s()<>]|\([^\s()]*\))+)>?(?:\s+["\'][^"\']*["\'])?\s*\)')
+
+#: A markdown reference definition: ``[label]: path`` at the start of a line,
+#: the destination of a reference-style image or link (``![alt][label]``).
+_MARKDOWN_DEF_RE = re.compile(r'^[ \t]{0,3}\[[^\]]+\]:[ \t]*<?([^\s<>]+)>?', re.MULTILINE)
 
 #: An HTML image: ``<img src="path">``, either quote.
 _HTML_IMG_RE = re.compile(r'<img\b[^>]*?\bsrc\s*=\s*(?:"([^"]*)"|\'([^\']*)\')', re.IGNORECASE)
 
-#: Fenced code blocks and inline code spans — never references.
-_CODE_RE = re.compile(r'```.*?```|`[^`\n]*`', re.DOTALL)
+#: Fenced code blocks (backtick or tilde fences) and inline code spans — never references.
+_CODE_RE = re.compile(r'(```|~~~).*?\1|`[^`\n]*`', re.DOTALL)
 
 #: A URL scheme prefix (``http:``, ``data:``, ``mailto:`` ...).
 _SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*:')
@@ -165,26 +171,30 @@ def _posix_dirname(rel: str) -> str:
 
 
 def _check_relative_path(key: str, value: Any) -> str:
-    """Check a declared icon/readme path by SPELLING: relative, no ``..`` escape.
+    """Check a declared icon/readme path by SPELLING, the server door's rule.
 
-    Containment on the real file system is the packer's check.
+    Relative, and no ``..`` segment at all — not even one that would fold
+    inside the tree (``a/../icon.svg``): the server refuses the declaration
+    as written, so the client refuses it first. Containment on the real
+    file system is the packer's check.
 
     Args:
         key: The block key, for the error.
         value: The declared value.
 
     Returns:
-        The value as given.
+        The value, surrounding whitespace stripped (as the server reads it).
 
     Raises:
         ValueError: The path is not relative-and-inside, naming the key.
     """
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'store.{key} must be a non-empty relative path')
+    value = value.strip()
     posix = value.replace('\\', '/')
     if posix.startswith('/') or re.match(r'^[A-Za-z]:', posix):
         raise ValueError(f'store.{key} must be a path relative to the pipe file, not "{value}"')
-    if normalize_posix_path(posix).split('/')[0] == '..':
+    if '..' in posix.split('/'):
         raise ValueError(f'store.{key} must stay inside the pipe file\'s directory, not "{value}"')
     return value
 
@@ -293,6 +303,13 @@ def validate_store_block(store: Any) -> PipeStoreBlock:
         billing = store['billing']
         if not isinstance(billing, dict) or not isinstance(billing.get('plans'), list):
             raise ValueError('store.billing must be { plans: [...] }')
+        # step: the raw shape is the server door's — an extra billing key or
+        # a plan that is not an object is refused here, never normalised away
+        unknown = [key for key in billing if key != 'plans']
+        if unknown:
+            raise ValueError(f'store.billing: unknown key "{unknown[0]}" (allowed: plans)')
+        if any(not isinstance(plan, dict) for plan in billing['plans']):
+            raise ValueError('store.billing.plans must be a list of plan objects')
         out['billing'] = {'plans': [normalize_billing_plan(plan) for plan in billing['plans']]}
     return out  # type: ignore[return-value]
 
@@ -310,11 +327,12 @@ def _is_local_reference(ref: str) -> bool:
 def scan_readme_references(markdown: str) -> List[str]:
     """The relative files a README references.
 
-    Markdown images and links and HTML ``<img src>``, in order of appearance,
-    de-duplicated, percent-decoded, with any query string or fragment
-    stripped. URLs (``http(s)://``, ``data:``, ``mailto:`` and every other
-    scheme), protocol-relative refs and ``#anchors`` are skipped, as is
-    anything inside code.
+    Markdown images and links (inline, and the ``[label]: path`` definitions
+    of reference-style ones) and HTML ``<img src>``, in order of
+    appearance, de-duplicated, percent-decoded, with any query string or
+    fragment stripped. URLs (``http(s)://``, ``data:``, ``mailto:`` and
+    every other scheme), protocol-relative refs and ``#anchors`` are
+    skipped, as is anything inside code.
 
     Args:
         markdown: The README text.
@@ -324,6 +342,7 @@ def scan_readme_references(markdown: str) -> List[str]:
     """
     text = _CODE_RE.sub('', markdown)
     found = [(match.start(), match.group(1)) for match in _MARKDOWN_REF_RE.finditer(text)]
+    found += [(match.start(), match.group(1)) for match in _MARKDOWN_DEF_RE.finditer(text)]
     found += [(match.start(), match.group(1) or match.group(2) or '') for match in _HTML_IMG_RE.finditer(text)]
     found.sort(key=lambda item: item[0])
     refs: List[str] = []
@@ -392,23 +411,26 @@ class PackedPipe:
 # ==== Reads ===================================================================
 
 
-def _read_contained(pipe_dir: str, rel: str) -> bytes:
+def _read_contained(pipe_dir: str, rel: str, cap: int) -> bytes:
     """Read one file of the pipe's tree, refusing a real location outside it.
 
     ``open()`` follows symlinks: a link inside the tree pointing at a file
     outside it would pack that file, and a ``..`` reference would read a
     sibling's. Every read resolves the real path and requires it under the
-    real directory of the pipe.
+    real directory of the pipe. The size is checked BEFORE the read, so an
+    oversized file is reported, never loaded.
 
     Args:
         pipe_dir: The pipe file's directory.
         rel: The path relative to it (posix).
+        cap: The role's byte cap (readme, icon, or any referenced file).
 
     Returns:
         The bytes.
 
     Raises:
-        ValueError: Naming the path when it is missing, not a file, or outside.
+        ValueError: Naming the path when it is missing, not a file, outside,
+            or over its cap.
     """
     if rel.split('/')[0] == '..':
         raise ValueError(f"{rel} resolves outside the pipe file's directory")
@@ -421,6 +443,8 @@ def _read_contained(pipe_dir: str, rel: str) -> bytes:
         raise ValueError(f"{rel} resolves outside the pipe file's directory")
     if not os.path.isfile(real):
         raise ValueError(f'{rel} is not a file')
+    if os.path.getsize(real) > cap:
+        raise ValueError(f'{rel} exceeds {cap} bytes')
     with open(real, 'rb') as handle:
         return handle.read()
 
@@ -473,32 +497,27 @@ def pack_pipe(pipe_path: str) -> PackedPipe:
     if store is not None and not store.get('readme'):
         warnings.append('store.readme is not declared, so the listing has no page')
 
-    # Step 3: the declared files, each under its cap
+    # Step 3: the declared files, each under its cap (checked before the read)
     entries: Dict[str, bytes] = {}
     readme_rel = normalize_posix_path(store['readme']) if store and store.get('readme') else None
     readme_text: Optional[str] = None
     if readme_rel:
-        readme = _read_contained(pipe_dir, readme_rel)
-        if len(readme) > MAX_PIPE_README_BYTES:
-            raise ValueError(f'{readme_rel} exceeds {MAX_PIPE_README_BYTES} bytes')
+        readme = _read_contained(pipe_dir, readme_rel, MAX_PIPE_README_BYTES)
         entries[readme_rel] = readme
         readme_text = readme.decode('utf-8', errors='replace')
     if store and store.get('icon'):
         icon_rel = normalize_posix_path(store['icon'])
-        icon = _read_contained(pipe_dir, icon_rel)
-        if len(icon) > MAX_ICON_BYTES:
-            raise ValueError(f'{icon_rel} exceeds {MAX_ICON_BYTES} bytes')
-        entries[icon_rel] = icon
+        entries[icon_rel] = _read_contained(pipe_dir, icon_rel, MAX_ICON_BYTES)
 
     # Step 4: the README's references, resolved against the README and laid
-    # out relative to the pipe; an upward escape is refused by name
+    # out relative to the pipe; an upward escape is refused by name, and so
+    # is another .pipe at the root (the door takes exactly one)
     for rel in pipe_store_files(store, readme_text, readme_rel)['referenced']:
         if rel in entries or rel == base:
             continue
-        data = _read_contained(pipe_dir, rel)
-        if len(data) > MAX_README_IMAGE_BYTES:
-            raise ValueError(f'{rel} exceeds {MAX_README_IMAGE_BYTES} bytes')
-        entries[rel] = data
+        if rel.endswith('.pipe') and '/' not in rel:
+            raise ValueError(f'{rel} is another pipeline at the root: a README may not reference a sibling .pipe')
+        entries[rel] = _read_contained(pipe_dir, rel, MAX_README_IMAGE_BYTES)
 
     # Step 5: the zip — pipe first, then code-point order, fixed timestamps:
     # identical bytes on every pack
@@ -545,16 +564,21 @@ def scaffold_pipe(workspace_root: str, pipe_id: str, *, name: Optional[str] = No
         paths).
 
     Raises:
-        ValueError: An invalid id or an existing pipe file.
+        ValueError: An invalid id, a ``dir`` that resolves outside the
+            workspace, or an output file that already exists.
     """
     # step: identity — validate before touching disk
     if not _PIPE_ID_RE.match(pipe_id):
         raise ValueError(f'Pipeline id "{pipe_id}" is invalid — one dot-free segment of letters, digits, _ or -.')
     folder_rel = f'{normalize_posix_path(dir) or "pipelines"}/{pipe_id}'
     folder_abs = os.path.join(os.path.abspath(workspace_root), *folder_rel.split('/'))
+    # step: containment — `dir` is workspace-relative by contract; a `..`
+    # or a symlink that leaves the workspace is refused before any write
+    root_real = os.path.realpath(workspace_root)
+    folder_real = os.path.realpath(folder_abs)
+    if os.path.commonpath([root_real, folder_real]) != root_real or folder_real == root_real:
+        raise ValueError(f'"{folder_rel}" must resolve to a folder inside the workspace.')
     pipe_rel = f'{folder_rel}/{pipe_id}.pipe'
-    if os.path.exists(os.path.join(folder_abs, f'{pipe_id}.pipe')):
-        raise ValueError(f'"{pipe_rel}" already exists — pick another id or remove the file.')
 
     # step: the files — components first (the layout the editor expects),
     # identity and the listing block after
@@ -571,8 +595,14 @@ def scaffold_pipe(workspace_root: str, pipe_id: str, *, name: Optional[str] = No
         ('icon.svg', PIPE_ICON_SVG),
         ('README.md', pipe_readme_stub(display_name)),
     ]
+    # step: every output is checked before the first write, and each is
+    # created exclusively — an existing README or icon is never replaced
+    # (two pipes may share a folder; a fresh scaffold in an empty one is fine)
+    for rel, _ in files:
+        if os.path.exists(os.path.join(folder_abs, rel)):
+            raise ValueError(f'"{folder_rel}/{rel}" already exists — pick another id or remove the file.')
     os.makedirs(os.path.join(folder_abs, 'assets'), exist_ok=True)
     for rel, content in files:
-        with open(os.path.join(folder_abs, rel), 'w', encoding='utf-8', newline='\n') as handle:
+        with open(os.path.join(folder_abs, rel), 'x', encoding='utf-8', newline='\n') as handle:
             handle.write(content)
     return {'folder': folder_rel, 'pipePath': pipe_rel, 'files': [f'{folder_rel}/{rel}' for rel, _ in files]}

@@ -163,3 +163,15 @@ async def test_a_caller_gets_the_first_pin_and_a_bad_name_is_nothing(monkeypatch
     assert await resolve_pipe_version(info, 'acme.docBrain.chat') is None
     assert await resolve_pipe_version(info, 'not a name') is None
     assert await resolve_pipe_version(None, 'acme') is None
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_caller_is_nothing_but_a_failing_store_raises(monkeypatch):
+    """The caller's own faults (scope, team) answer None; a storage error is never a 'not found'."""
+    info = SimpleNamespace(userId='u1')
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(side_effect=PermissionError('scope')))
+    assert await resolve_pipe_version(info, 'acme.docBrain') is None
+
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(side_effect=RuntimeError('db down')))
+    with pytest.raises(RuntimeError, match='db down'):
+        await resolve_pipe_version(info, 'acme.docBrain')

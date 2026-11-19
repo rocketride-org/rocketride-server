@@ -23,6 +23,7 @@ import { ConnectionManager } from '../connection/connection';
 import { appIconDataUri, MAX_README_IMAGE_BYTES, scanWorkspaceApps } from 'shared/tools/appdev';
 import type { IScannedWorkspaceApp as ScannedApp } from 'shared/tools/appdev';
 import { hostWorkspaceFs } from '../providers/toolhost/hostWorkspaceFs';
+import { assertRealContained } from '../shared/util/realContainment';
 import { readAppListing, saveAppListing } from 'rocketride/app-pack';
 // Deep file imports (never the barrel — it drags the React view layer into
 // the extension-host bundle).
@@ -69,13 +70,19 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 		return app;
 	};
 
-	/** Traversal-guarded absolute path for an app-folder-relative file. */
-	const resolveAppFile = (folder: string, relPath: string): string => {
+	/**
+	 * Traversal-guarded absolute path for an app-folder-relative file: the
+	 * lexical rule first, then the RESOLVED one (a symlinked `assets/` must
+	 * not carry a read or write outside the app folder) — the same ruling
+	 * PACKAGE › Assets gets on the pipeline side.
+	 */
+	const resolveAppFile = async (folder: string, relPath: string): Promise<string> => {
 		const rel = String(relPath ?? '').replace(/^\.\//, '');
 		const abs = path.resolve(folder, ...rel.split('/'));
 		if (!abs.startsWith(path.resolve(folder) + path.sep)) {
 			throw new Error('Path escapes the app folder.');
 		}
+		await assertRealContained(folder, abs, 'Path escapes the app folder.');
 		return abs;
 	};
 
@@ -306,16 +313,23 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 
 		'host.preview.readTextFile': async (p) => {
 			// One app-folder-relative text file for preview (icon SVG, README
-			// markdown). Traversal-guarded and size-capped.
+			// markdown). Traversal-guarded and size-capped. Null ONLY when the
+			// file does not exist; everything else (the size refusal, a
+			// permission error) rejects.
 			const app = await resolveApp(p.app);
-			const abs = resolveAppFile(app.folder, p.relPath);
-			// Stat BEFORE reading: the manifest can name an arbitrarily large
-			// file, and checking byteLength after the read means the whole
-			// thing is already in memory by then.
-			const stat = await vscode.workspace.fs.stat(vscode.Uri.file(abs));
-			if (stat.size > 512 * 1024) throw new Error('File is over the 512KB preview limit.');
-			const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
-			return Buffer.from(bytes).toString('utf8');
+			const abs = await resolveAppFile(app.folder, p.relPath);
+			try {
+				// Stat BEFORE reading: the manifest can name an arbitrarily large
+				// file, and checking byteLength after the read means the whole
+				// thing is already in memory by then.
+				const stat = await vscode.workspace.fs.stat(vscode.Uri.file(abs));
+				if (stat.size > 512 * 1024) throw new Error('File is over the 512KB preview limit.');
+				const bytes = await vscode.workspace.fs.readFile(vscode.Uri.file(abs));
+				return Buffer.from(bytes).toString('utf8');
+			} catch (err) {
+				if (err instanceof vscode.FileSystemError && err.code === 'FileNotFound') return null;
+				throw err;
+			}
 		},
 
 		'host.preview.readImage': async (p) => {
@@ -323,16 +337,18 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 			// binary, so the text-read path would corrupt them. Reuses the icon
 			// inliner with the README size budget.
 			const app = await resolveApp(p.app);
-			const abs = resolveAppFile(app.folder, p.relPath);
+			const abs = await resolveAppFile(app.folder, p.relPath);
 			return (await appIconDataUri(hostWorkspaceFs, abs, MAX_README_IMAGE_BYTES)) ?? null;
 		},
 
 		'host.preview.writeFile': async (p) => {
 			// One app-folder-relative file from PACKAGE › Assets (the icon, the
-			// README, a dropped image). Same containment as the reads; the
-			// folder chain is created so `assets/` need not exist yet.
+			// README, a dropped image). Same containment as the reads — the
+			// resolved check runs BEFORE the folder chain is created, against
+			// the nearest existing ancestor, so no folder is ever created
+			// through a symlink that leaves the app; `assets/` need not exist.
 			const app = await resolveApp(p.app);
-			const abs = resolveAppFile(app.folder, p.relPath);
+			const abs = await resolveAppFile(app.folder, p.relPath);
 			const target = vscode.Uri.file(abs);
 			await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(target, '..'));
 			const bytes = p.dataB64 !== undefined ? Buffer.from(p.dataB64, 'base64') : Buffer.from(p.text ?? '', 'utf8');
@@ -342,7 +358,7 @@ export function registerVscodePreviewOps(bus: IOpBus, deps: IAppBuilderOpsDeps):
 		'host.preview.openFile': async (p) => {
 			// "Open in editor": the file in a text editor beside the App Builder.
 			const app = await resolveApp(p.app);
-			const abs = resolveAppFile(app.folder, p.relPath);
+			const abs = await resolveAppFile(app.folder, p.relPath);
 			const document = await vscode.workspace.openTextDocument(vscode.Uri.file(abs));
 			await vscode.window.showTextDocument(document, vscode.ViewColumn.Beside);
 		},

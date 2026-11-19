@@ -45,7 +45,11 @@ import { normalizePosixPath, scanReadmeReferences } from 'rocketride';
  * app folder). The pane never sees an absolute path.
  */
 export interface IAssetsHost {
-	/** A UTF-8 text file beside the document; null when it does not exist. */
+	/**
+	 * A UTF-8 text file beside the document; null ONLY when it does not exist.
+	 * Any other failure (over a cap, unreadable) rejects, so the pane never
+	 * offers a stub over a file that is there.
+	 */
 	readFile(relPath: string): Promise<string | null>;
 	/** An image beside the document as a `data:` URI (thumbnails, the icon tile); null when missing or not an image. */
 	readImageDataUri(relPath: string): Promise<string | null>;
@@ -87,15 +91,21 @@ export const ASSETS_DIR = 'assets';
 // PATHS (posix, relative to the document)
 // =============================================================================
 
+/** An absolute spelling, either separator: posix-rooted, drive-qualified or UNC. */
+const ABSOLUTE_PATH_RE = /^(?:[\\/]|[A-Za-z]:)/;
+
 /**
  * The path a host serves for a request beside the document: normalised,
- * and null when it is empty or escapes the document's folder. Both hosts
- * apply this to every read, write, pick target and open.
+ * and null when it is empty, absolute or escapes the document's folder.
+ * Both hosts apply this to every read, write, pick target and open.
  *
  * @param relPath - The requested path, either separator, './' allowed.
  * @returns The contained posix path, or null to refuse.
  */
 export function besidePath(relPath: string): string | null {
+	// Step 1: an absolute path is never beside the document — refused as
+	// written, before normalising would quietly make it relative
+	if (ABSOLUTE_PATH_RE.test(relPath)) return null;
 	const rel = normalizePosixPath(relPath);
 	if (rel === '' || rel.split('/')[0] === '..') return null;
 	return rel;
@@ -321,9 +331,85 @@ export function assetMarkdown(assetRelPath: string): string {
 	return isImageName(assetRelPath) ? imageTag(assetRelPath, stem, null) : `[${stem}](${assetRelPath})`;
 }
 
-/** The first `<img>` tag whose src is the reference, with its attributes. */
-function findImageTag(markdown: string, ref: string): RegExpMatchArray | null {
-	return markdown.match(new RegExp(`<img\\b([^>]*)\\ssrc=["']${escapeRegExp(ref)}["']([^>]*)>`, 'i'));
+// =============================================================================
+// REFERENCE MATCHING — the spelling in the text against the scanner's reference
+// =============================================================================
+
+/** Code the SDK scanner skips (fenced blocks and inline spans): an example is never a live reference. */
+const CODE_RE = /```[\s\S]*?```|`[^`\n]*`/g;
+
+/** A markdown image or link: `![alt](dest "title")`, `[text](dest)`; groups: the `!`, the text, the destination, the title part. */
+const MARKDOWN_LINK_RE = /(!?)\[([^\]]*)\]\(\s*<?([^)\s>]+)>?((?:\s+"[^"]*")?)\s*\)/g;
+
+/** An HTML `<img>` tag (the tag name case-insensitive; the path inside is compared exactly); group 1 = its attribute text. */
+const HTML_IMG_RE = /<img\b([^>]*)>/gi;
+
+/** The `src` attribute in an `<img>`'s attribute text; group 1 or 2 = the quoted value. */
+const SRC_ATTR_RE = /\ssrc\s*=\s*(?:"([^"]*)"|'([^']*)')/i;
+
+/** A `width` attribute in an `<img>`'s attribute text, for removal. */
+const WIDTH_ATTR_RE = /\swidth=(?:"[^"]*"|'[^']*'|[^\s>]+)/gi;
+
+/** A destination's predicate: which spellings an edit touches. */
+type Admits = (dest: string) => boolean;
+
+/**
+ * The file a destination as written names, in the scanner's spelling: the
+ * fragment and query dropped, percent-decoded, normalised — so
+ * `assets/my%20shot.png?v=2` and `./assets/my shot.png` name one file.
+ */
+function canonicalRef(dest: string): string {
+	return normalizePosixPath(safeDecode(dest.split('#')[0].split('?')[0]));
+}
+
+/** The predicate for one scanner reference (case-sensitive: `A.png` is not `a.png`). */
+function names(ref: string): Admits {
+	const wanted = normalizePosixPath(ref);
+	return (dest) => canonicalRef(dest) === wanted;
+}
+
+/** Applies a text transform to the parts of the markdown outside code, the code kept verbatim. */
+function outsideCode(markdown: string, transform: (segment: string) => string): string {
+	let out = '';
+	let last = 0;
+	for (const match of markdown.matchAll(CODE_RE)) {
+		const at = match.index ?? 0;
+		out += transform(markdown.slice(last, at)) + match[0];
+		last = at + match[0].length;
+	}
+	return out + transform(markdown.slice(last));
+}
+
+/**
+ * Rewrites the markdown images and links outside code whose destination the
+ * predicate admits; the rest of the text is untouched.
+ *
+ * @param markdown - The README text.
+ * @param admits - Which destinations to rewrite.
+ * @param imagesOnly - Leave plain links alone.
+ * @param rewrite - The replacement for one match (its `!`, text, destination and title part).
+ * @returns The rewritten text.
+ */
+function rewriteMarkdownLinks(markdown: string, admits: Admits, imagesOnly: boolean, rewrite: (bang: string, text: string, dest: string, title: string) => string): string {
+	return outsideCode(markdown, (segment) => segment.replace(MARKDOWN_LINK_RE, (m, bang: string, text: string, dest: string, title: string) => ((imagesOnly && bang === '') || !admits(dest) ? m : rewrite(bang, text, dest, title))));
+}
+
+/**
+ * Rewrites the `<img>` tags outside code whose `src` the predicate admits.
+ *
+ * @param markdown - The README text.
+ * @param admits - Which sources to rewrite.
+ * @param rewrite - The replacement for one tag (its attribute text and source as written).
+ * @returns The rewritten text.
+ */
+function rewriteImageTags(markdown: string, admits: Admits, rewrite: (attrs: string, src: string) => string): string {
+	return outsideCode(markdown, (segment) =>
+		segment.replace(HTML_IMG_RE, (tag, attrs: string) => {
+			const src = attrs.match(SRC_ATTR_RE);
+			const dest = src ? (src[1] ?? src[2] ?? '') : '';
+			return dest !== '' && admits(dest) ? rewrite(attrs, dest) : tag;
+		})
+	);
 }
 
 /**
@@ -332,37 +418,39 @@ function findImageTag(markdown: string, ref: string): RegExpMatchArray | null {
  * markdown image or has no width.
  *
  * @param markdown - The README text.
- * @param ref - The reference as written.
+ * @param ref - The reference as the scanner lists it.
  * @returns The width in pixels, or null.
  */
 export function referenceWidth(markdown: string, ref: string): number | null {
-	const tag = findImageTag(markdown, ref);
-	if (!tag) return null;
-	const attribute = `${tag[1]} ${tag[2]}`.match(/\swidth=["']?(\d+)/i);
+	// Step: the first matching tag's attribute text, collected through the rewriter (its output is discarded)
+	const found: { attrs: string | null } = { attrs: null };
+	rewriteImageTags(markdown, names(ref), (attrs) => {
+		if (found.attrs === null) found.attrs = attrs;
+		return '';
+	});
+	const attribute = found.attrs?.match(/\swidth=["']?(\d+)/i);
 	return attribute ? Number(attribute[1]) : null;
 }
 
 /**
- * Rewrites every reference to one image so it carries the given width (or
- * none): a markdown `![alt](ref)` becomes the `<img>` form (its alt kept),
- * an existing `<img>` keeps its other attributes and gets its `width`
- * replaced, added or removed.
+ * Rewrites every live reference to one image so it carries the given width
+ * (or none): a markdown `![alt](ref)` becomes the `<img>` form (its alt and
+ * destination kept as written), an existing `<img>` keeps its other
+ * attributes and gets its `width` replaced, added or removed. Code examples
+ * are left alone.
  *
  * @param markdown - The README text.
- * @param ref - The reference as written.
+ * @param ref - The reference as the scanner lists it.
  * @param width - The width in pixels, or null to remove the attribute.
  * @returns The rewritten text (unchanged when nothing references the image).
  */
 export function setReferenceWidth(markdown: string, ref: string, width: number | null): string {
-	const target = escapeRegExp(ref);
+	const admits = names(ref);
 	const size = width !== null && Number.isFinite(width) && width > 0 ? ` width="${Math.round(width)}"` : '';
 	// Step 1: markdown images become img tags
-	const fromMarkdown = markdown.replace(new RegExp(`!\\[([^\\]]*)\\]\\(\\s*<?${target}>?(?:\\s+"[^"]*")?\\s*\\)`, 'g'), (_m, alt: string) => imageTag(ref, alt, width));
+	const fromMarkdown = rewriteMarkdownLinks(markdown, admits, true, (_bang, alt, dest) => imageTag(dest, alt, width));
 	// Step 2: img tags keep their other attributes, width replaced or dropped
-	return fromMarkdown.replace(new RegExp(`<img\\b([^>]*\\ssrc=["']${target}["'][^>]*)>`, 'gi'), (_m, attrs: string) => {
-		const rest = attrs.replace(/\swidth=(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/\s+$/, '');
-		return `<img${rest}${size}>`;
-	});
+	return rewriteImageTags(fromMarkdown, admits, (attrs) => `<img${attrs.replace(WIDTH_ATTR_RE, '').replace(/\s+$/, '')}${size}>`);
 }
 
 /**
@@ -380,14 +468,29 @@ export function safeAssetName(name: string): string {
 }
 
 /**
- * The name a pasted image gets: `<docStem>-<n>.png`.
+ * The extension an image media type is written as; `png` for an unknown or
+ * absent type (what a browser clipboard carries for a screenshot).
+ *
+ * @param type - The media type (`image/svg+xml`, `image/jpeg`, ...).
+ * @returns The extension without the dot.
+ */
+export function extensionForMediaType(type: string | undefined): string {
+	const media = (type ?? '').toLowerCase();
+	const found = Object.entries(IMAGE_MEDIA_TYPES).find(([, mediaType]) => mediaType === media);
+	return found ? found[0] : 'png';
+}
+
+/**
+ * The name a pasted image gets: `<docStem>-<n>.<ext>`, the extension from
+ * the clipboard's media type so the bytes are labelled as what they are.
  *
  * @param docStem - The document's stem (the pipeline id or the app slug).
  * @param n - The 1-based paste ordinal.
+ * @param type - The clipboard's media type; absent = PNG.
  * @returns The file name.
  */
-export function pastedImageName(docStem: string, n: number): string {
-	return `${safeAssetName(docStem) || 'image'}-${n}.png`;
+export function pastedImageName(docStem: string, n: number, type?: string): string {
+	return `${safeAssetName(docStem) || 'image'}-${n}.${extensionForMediaType(type)}`;
 }
 
 /**
@@ -409,27 +512,20 @@ export async function uniqueAssetName(name: string, exists: (candidate: string) 
 	}
 }
 
-/** Escapes a string for use inside a RegExp. */
-function escapeRegExp(text: string): string {
-	return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /**
- * Removes every reference to one file from the README text: markdown images
- * and links written with that reference (`![alt](ref)`, `[text](ref)`,
- * with or without a title) and HTML `<img>` tags whose `src` is it. A line
- * left empty by the removal is dropped so no blank hole remains. The file
- * itself is untouched.
+ * Removes every live reference to one file from the README text: markdown
+ * images and links whose destination names it (`![alt](ref)`, `[text](ref)`,
+ * with or without a title, in any spelling of the path) and HTML `<img>`
+ * tags whose `src` does. Code examples stay. A line left empty by the
+ * removal is dropped so no blank hole remains. The file itself is untouched.
  *
  * @param markdown - The README text.
- * @param ref - The reference as written (see {@link IReadmeReference.ref}).
+ * @param ref - The reference as the scanner lists it (see {@link IReadmeReference.ref}).
  * @returns The text without the reference.
  */
 export function removeReference(markdown: string, ref: string): string {
-	const target = escapeRegExp(ref);
-	const markdownRef = new RegExp(`!?\\[[^\\]]*\\]\\(\\s*<?${target}>?(?:\\s+"[^"]*")?\\s*\\)`, 'g');
-	const htmlImg = new RegExp(`<img\\b[^>]*\\ssrc=["']${target}["'][^>]*>`, 'gi');
-	const stripped = markdown.replace(markdownRef, '').replace(htmlImg, '');
+	const admits = names(ref);
+	const stripped = rewriteImageTags(rewriteMarkdownLinks(markdown, admits, false, () => ''), admits, () => '');
 	if (stripped === markdown) return markdown;
 	// Step: drop the lines the removal emptied (only those that held a reference)
 	const before = markdown.split('\n');
@@ -448,17 +544,19 @@ export function removeReference(markdown: string, ref: string): string {
  * @returns The markdown with the resolvable images inlined.
  */
 export async function inlineImageReferences(markdown: string, resolve: (ref: string) => Promise<string | null>): Promise<string> {
+	// Step 1: one read per file, keyed by the canonical path so every spelling of it swaps
 	const inlined = new Map<string, string>();
 	for (const ref of scanReadmeReferences(markdown)) {
 		if (!isImageName(ref)) continue;
 		const uri = await resolve(ref).catch(() => null);
-		if (uri) inlined.set(ref, uri);
+		if (uri) inlined.set(normalizePosixPath(ref), uri);
 	}
 	if (inlined.size === 0) return markdown;
-	const swap = (ref: string): string => inlined.get(ref) ?? inlined.get(safeDecode(ref)) ?? ref;
-	return markdown
-		.replace(/(!\[[^\]]*\]\()\s*<?([^)\s>]+)>?((?:\s+"[^"]*")?\s*\))/g, (m, pre: string, ref: string, post: string) => (swap(ref) !== ref ? `${pre}${swap(ref)}${post}` : m))
-		.replace(/(<img\b[^>]*\ssrc=["'])([^"']+)(["'])/gi, (m, pre: string, ref: string, post: string) => (swap(ref) !== ref ? `${pre}${swap(ref)}${post}` : m));
+	const admits: Admits = (dest) => inlined.has(canonicalRef(dest));
+	const uriOf = (dest: string): string => inlined.get(canonicalRef(dest)) ?? dest;
+	// Step 2: the swap, outside code, titles and other attributes kept
+	const withMarkdown = rewriteMarkdownLinks(markdown, admits, true, (bang, alt, dest, title) => `${bang}[${alt}](${uriOf(dest)}${title})`);
+	return rewriteImageTags(withMarkdown, admits, (attrs, dest) => `<img${attrs.replace(SRC_ATTR_RE, (attribute) => attribute.replace(dest, () => uriOf(dest)))}>`);
 }
 
 /** Percent-decodes when the text is a valid encoding; the text otherwise. */
@@ -484,27 +582,17 @@ export function lineCount(text: string): number {
 }
 
 // =============================================================================
-// DOWNSCALE — raster images the pane writes fit inside 1024 x 800
+// DOWNSCALE — raster images the pane writes fit inside 1024 x 800 (the math;
+// the canvas work is `assetsDownscale`, browser-only)
 // =============================================================================
 
 /** The box every inserted raster image is scaled to fit (never upscaled). */
 export const MAX_ASSET_WIDTH = 1024;
 export const MAX_ASSET_HEIGHT = 800;
 
-/** The JPEG and WebP re-encode quality. */
-const RASTER_QUALITY = 0.85;
-
-/** The raster types the pane re-encodes; SVG (no pixels) and GIF (animation) pass through. */
-const DOWNSCALED_TYPES: Record<string, string> = {
-	png: 'image/png',
-	jpg: 'image/jpeg',
-	jpeg: 'image/jpeg',
-	webp: 'image/webp',
-};
-
 /**
  * The size an image takes inside the box: shrunk to fit with its aspect
- * kept, never grown. The pure math behind {@link downscaleImage}.
+ * kept, never grown. The pure math behind the pane's downscale.
  *
  * @param width - The source width.
  * @param height - The source height.
@@ -517,56 +605,6 @@ export function fitWithin(width: number, height: number, maxWidth: number = MAX_
 	const ratio = Math.min(maxWidth / width, maxHeight / height);
 	if (ratio >= 1) return { width, height, scaled: false };
 	return { width: Math.max(1, Math.round(width * ratio)), height: Math.max(1, Math.round(height * ratio)), scaled: true };
-}
-
-/**
- * Scales a raster image to fit {@link MAX_ASSET_WIDTH} x {@link MAX_ASSET_HEIGHT}
- * in the browser (a canvas in the webview and the page alike) and re-encodes
- * it in its own format: PNG stays PNG, JPEG and WebP at {@link RASTER_QUALITY}.
- * An image that already fits, an SVG, a GIF, a non-image, and any decode or
- * encode failure all answer the original bytes.
- *
- * @param name - The file name (its extension picks the format).
- * @param bytes - The image bytes.
- * @returns The bytes to write.
- */
-export async function downscaleImage(name: string, bytes: Uint8Array): Promise<Uint8Array> {
-	const type = DOWNSCALED_TYPES[extensionOf(name)];
-	if (!type || typeof createImageBitmap !== 'function') return bytes;
-	try {
-		// Step 1: decode and measure (a fresh copy: a Blob part must sit on a plain ArrayBuffer)
-		const bitmap = await createImageBitmap(new Blob([new Uint8Array(bytes)], { type }));
-		try {
-			const fit = fitWithin(bitmap.width, bitmap.height);
-			if (!fit.scaled) return bytes;
-			// Step 2: draw at the fitted size and re-encode in the same format
-			const blob = await encodeBitmap(bitmap, fit.width, fit.height, type);
-			return blob ? new Uint8Array(await blob.arrayBuffer()) : bytes;
-		} finally {
-			bitmap.close();
-		}
-	} catch {
-		return bytes;
-	}
-}
-
-/** Draws a bitmap onto a canvas of the given size and encodes it. */
-async function encodeBitmap(bitmap: ImageBitmap, width: number, height: number, type: string): Promise<Blob | null> {
-	const quality = type === 'image/png' ? undefined : RASTER_QUALITY;
-	if (typeof OffscreenCanvas === 'function') {
-		const canvas = new OffscreenCanvas(width, height);
-		const context = canvas.getContext('2d');
-		if (!context) return null;
-		context.drawImage(bitmap, 0, 0, width, height);
-		return canvas.convertToBlob({ type, quality });
-	}
-	const canvas = document.createElement('canvas');
-	canvas.width = width;
-	canvas.height = height;
-	const context = canvas.getContext('2d');
-	if (!context) return null;
-	context.drawImage(bitmap, 0, 0, width, height);
-	return new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, type, quality));
 }
 
 // =============================================================================

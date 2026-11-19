@@ -845,7 +845,7 @@ await client.deploy.addPipe('./pipelines/docBrain/docBrain.pipe', { comment: 'v2
 
 ##### `client.deploy.createPipe(pipeId: string, { workspaceRoot?, name?, dir? }): Promise<CreatedPipe>`
 
-Scaffold a new pipeline — the programmatic twin of `rocketride pipe new` (Node.js only). Writes `<dir>/<pipeId>/<pipeId>.pipe` (`dir` defaults to `pipelines`) carrying `components: []`, `project_id`, `name`, `description: ''` and the default `store` block, plus the placeholder `icon.svg` the app scaffold ships, a `README.md` stub and an empty `assets/` directory. `pipeId` is one dot-free segment of letters, digits, `_` or `-`; the deploying organization attaches its developer id. Scaffolding only — `addPipe` deploys it. Returns `{ folder, pipePath, files }` (workspace-relative POSIX paths); throws on an invalid id or an existing pipe file.
+Scaffold a new pipeline — the programmatic twin of `rocketride pipe new` (Node.js only). Writes `<dir>/<pipeId>/<pipeId>.pipe` (`dir` defaults to `pipelines`) carrying `components: []`, `project_id`, `name`, `description: ''` and the default `store` block, plus the placeholder `icon.svg` the app scaffold ships, a `README.md` stub and an empty `assets/` directory. `pipeId` is one dot-free segment of letters, digits, `_` or `-`; the deploying organization attaches its developer id. Scaffolding only — `addPipe` deploys it. Returns `{ folder, pipePath, files }` (workspace-relative POSIX paths); throws on an invalid id, a `dir` outside the workspace, or an existing output file (the pipe, the icon, the README are never replaced).
 
 ```typescript
 const created = await client.deploy.createPipe('ingest', { name: 'Document ingest' });

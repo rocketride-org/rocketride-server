@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { LOCAL_DEVELOPER_ID, RocketRideClient, registryIdOf } from '../src/client';
+import { RocketRideClient, registryIdOf } from '../src/client';
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { withTimeoutGuard } from './timeoutGuard';
 
@@ -173,7 +173,10 @@ describe('Deploy API Integration Tests', () => {
 	beforeEach(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
 		const connected = await client.connect();
-		developerId = connected.organization?.developerId ?? LOCAL_DEVELOPER_ID;
+		// The server composes every registry name from the organization's
+		// developer id and refuses a deploy without one: there is no fallback
+		developerId = connected.organization?.developerId ?? '';
+		if (!developerId) throw new Error('the test organization has no developer id; claim one before running the deploy suite');
 	});
 
 	afterEach(async () => {

@@ -106,7 +106,7 @@ class BillingPlan(TypedDict, total=False):
     """
 
     nickname: str  # Plan display name ("Starter", "Pro")
-    amountCents: int  # Price in cents
+    amountCents: int | float  # Price in cents, as declared (the TypeScript `number`); whole cents in practice
     currency: str  # ISO currency code
     interval: str  # Billing interval ("month", "year", "one_time")
     metadata: dict[str, Any]  # Opaque plan metadata, preserved verbatim

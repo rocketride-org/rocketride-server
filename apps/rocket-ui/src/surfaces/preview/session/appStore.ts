@@ -205,12 +205,19 @@ export async function writeAppPackage(folder: string, pkg: PackageJsonLike, orig
  * Traversal-guarded; size-capped after the read (the store has no cheap
  * stat, and preview files are small by convention).
  *
+ * Null ONLY when the file does not exist (the view's stat, as
+ * {@link appFileExists} asks it); anything else — the size refusal, a
+ * failed read — rejects.
+ *
  * @param folder - The app's folder name under .appdev.
  * @param relPath - App-folder-relative path from the manifest.
- * @returns The file text.
+ * @returns The file text, or null when the file is absent.
  */
-export async function readAppText(folder: string, relPath: string): Promise<string> {
-	const text = String(await getWorkspaceVfs().read(`apps/${folder}/${safeRel(relPath)}`));
+export async function readAppText(folder: string, relPath: string): Promise<string | null> {
+	const virtual = `apps/${folder}/${safeRel(relPath)}`;
+	// step: absent is an answer, not a failure
+	if ((await getWorkspaceVfs().stat(virtual)) === null) return null;
+	const text = String(await getWorkspaceVfs().read(virtual));
 	if (text.length > MAX_PREVIEW_BYTES) throw new Error('File is over the 512KB preview limit.');
 	return text;
 }

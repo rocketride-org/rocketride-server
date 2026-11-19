@@ -81,6 +81,13 @@ export interface ToolDetailsViewProps {
 	onInstall: () => void;
 	/** Unpins the tool (the host also closes its open surfaces). */
 	onRemove: () => void;
+	/**
+	 * Loads the README text behind its URL on hosts whose page origin cannot
+	 * fetch the server directly (the VS Code webview: the extension fetches
+	 * it). Resolves null for no README; a rejection is the error line. Absent
+	 * = the view fetches the URL itself (same-origin browser views).
+	 */
+	loadReadme?: (url: string) => Promise<string | null>;
 }
 
 // =============================================================================
@@ -185,15 +192,31 @@ function readmeBaseOf(url: string): string {
 }
 
 /**
- * Fetches the README behind a catalog URL. The entitlement cookie rides the
- * request (`credentials: 'include'`: the shell primes it on the server
- * origin, which may differ from the page's in VS Code). A 404 or an empty
- * body is the no-README state; any other failure is an error state.
+ * The README text behind a catalog URL by direct fetch: the entitlement
+ * cookie rides the request (`credentials: 'include'`, the shell primes it on
+ * the page origin). A 404 is no README; any other failure throws.
+ *
+ * @param url - The README URL.
+ * @returns The markdown, or null for no README.
+ */
+async function fetchReadme(url: string): Promise<string | null> {
+	const response = await fetch(url, { credentials: 'include' });
+	if (response.status === 404) return null;
+	if (!response.ok) throw new Error(`HTTP ${response.status}`);
+	return response.text();
+}
+
+/**
+ * Loads the README behind a catalog URL through the host's loader when it
+ * has one (a page origin that cannot reach the server itself), by direct
+ * fetch otherwise. A null or empty body is the no-README state; any failure
+ * is an error state.
  *
  * @param url - The README URL, or undefined when the row declares none.
+ * @param loadReadme - The host's loader, or undefined for the direct fetch.
  * @returns The README state, loading first.
  */
-function useReadme(url: string | undefined): ReadmeState {
+function useReadme(url: string | undefined, loadReadme: ((url: string) => Promise<string | null>) | undefined): ReadmeState {
 	const [state, setState] = useState<ReadmeState>(() => (url ? { kind: 'loading' } : { kind: 'none' }));
 
 	useEffect(() => {
@@ -203,23 +226,20 @@ function useReadme(url: string | undefined): ReadmeState {
 		}
 		let cancelled = false;
 		setState({ kind: 'loading' });
-		// Step 1: fetch with the entitlement cookie; 404 = no README
-		fetch(url, { credentials: 'include' })
-			.then(async (response) => {
-				if (response.status === 404) return { kind: 'none' } as ReadmeState;
-				if (!response.ok) return { kind: 'error', message: `The README could not be loaded (HTTP ${response.status}).` } as ReadmeState;
-				const markdown = await response.text();
+		// Step 1: the text, through the host or by fetch; null = no README
+		(loadReadme ?? fetchReadme)(url)
+			.then((markdown): ReadmeState => {
 				// Step 2: an empty body reads as no README, not as a blank sheet
-				return (markdown.trim() ? { kind: 'ready', markdown } : { kind: 'none' }) as ReadmeState;
+				return markdown !== null && markdown.trim() ? { kind: 'ready', markdown } : { kind: 'none' };
 			})
-			.catch((err: unknown) => ({ kind: 'error', message: `The README could not be loaded: ${err instanceof Error ? err.message : String(err)}` }) as ReadmeState)
+			.catch((err: unknown): ReadmeState => ({ kind: 'error', message: `The README could not be loaded: ${err instanceof Error ? err.message : String(err)}` }))
 			.then((next) => {
 				if (!cancelled) setState(next);
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [url]);
+	}, [url, loadReadme]);
 
 	return state;
 }
@@ -233,8 +253,8 @@ function useReadme(url: string | undefined): ReadmeState {
  *
  * @param props - {@link ToolDetailsViewProps}.
  */
-export const ToolDetailsView: React.FC<ToolDetailsViewProps> = ({ tool, installed, connected, onInstall, onRemove }) => {
-	const readme = useReadme(tool.readme);
+export const ToolDetailsView: React.FC<ToolDetailsViewProps> = ({ tool, installed, connected, onInstall, onRemove, loadReadme }) => {
+	const readme = useReadme(tool.readme, loadReadme);
 
 	// Step 1: the README body by fetch state
 	let body: React.ReactNode;

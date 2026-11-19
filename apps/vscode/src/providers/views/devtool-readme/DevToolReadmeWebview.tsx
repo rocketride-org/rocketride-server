@@ -16,7 +16,7 @@
  * engine URLs; the page CSP admits the engine origin.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ConnectionManager } from 'shell';
 import { ToolDetailsView } from 'shared/tools/core/chrome/ToolDetailsView';
@@ -77,6 +77,15 @@ const DevToolReadmeWebview: React.FC = () => {
 
 	const row = connected ? catalog?.find((a) => a?.id === appId) : undefined;
 
+	// The README text through the extension host (null = no README; a
+	// rejection is the view's error line). Stable: the view re-loads when
+	// this changes identity.
+	const loadReadme = useCallback(
+		(url: string): Promise<string | null> => (cm.request('host.devtools.readmeText', { url }) as Promise<{ markdown: string | null }>).then((r) => r.markdown),
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- cm is a singleton
+		[]
+	);
+
 	if (installedIds === null || (connected && catalog === null) || !row) {
 		return <div style={statusStyle}>{installedIds === null || (connected && catalog === null) ? 'Loading…' : connected ? 'This tool is no longer available on the server.' : 'Connect to a RocketRide server to view this tool.'}</div>;
 	}
@@ -101,6 +110,9 @@ const DevToolReadmeWebview: React.FC = () => {
 			}}
 			installed={installedIds.includes(appId)}
 			connected={connected}
+			// This webview's origin cannot fetch the engine (CORS, no artifact
+			// cookie): the extension fetches the README text for it.
+			loadReadme={loadReadme}
 			onInstall={() => cm.emitOp('host.devtools.install', { appId })}
 			onRemove={() => cm.emitOp('host.devtools.remove', { appId })}
 		/>
