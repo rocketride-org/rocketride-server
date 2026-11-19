@@ -100,7 +100,8 @@ class SentenceTransformerLoader(BaseLoader):
 
         Kept in ``_model_calls`` like the lock registry. Any error while checking the model
         gives 1, with a warning: the check must not fail a forward that runs one at a time
-        today.
+        today. A model that cannot be weak-referenced gives 1 too: its entry is never dropped,
+        so a later object given its id inherits the entry.
         """
         model_id = id(model)
         with cls._locks_lock:
@@ -111,11 +112,11 @@ class SentenceTransformerLoader(BaseLoader):
                 except Exception as e:
                     logger.warning('Cannot check the model for concurrent CPU forwards (%s); one at a time', e)
                     calls = 1
-                cls._model_calls[model_id] = calls
                 try:
                     weakref.finalize(model, cls._drop_model_lock, model_id)
                 except TypeError:
-                    pass
+                    calls = 1
+                cls._model_calls[model_id] = calls
                 if calls > 1:
                     version = getattr(sys.modules.get('transformers'), '__version__', 'unknown')
                     logger.info('Up to %d CPU forwards of this model at once (transformers %s)', calls, version)
@@ -126,9 +127,10 @@ class SentenceTransformerLoader(BaseLoader):
         """Choose from the loaded implementation, never a machine or model name.
 
         Only a stock Hugging Face ``BertModel`` encoder qualifies: in evaluation mode, built
-        from torch and BERT modules only, with no instance ``forward`` or forward hooks, and
-        with CPU tensors, float32 where floating. Its forward then only reads the module. The
-        check assumes the loaded model is not trained, moved or changed afterwards.
+        from torch and BERT modules only, with no instance ``forward``, forward hooks (its own
+        or global) or ``max_norm`` embedding, with eager or SDPA attention, and with CPU
+        tensors, float32 where floating. Its forward then only reads the module. The check
+        assumes the loaded model is not trained, moved or changed afterwards.
 
         Args:
             model: The loaded SentenceTransformer.
@@ -151,17 +153,26 @@ class SentenceTransformerLoader(BaseLoader):
             type(transformer) is not BertModel
             or transformer.config.is_decoder
             or transformer.config.add_cross_attention
+            or getattr(transformer.config, '_attn_implementation', None) not in (None, 'eager', 'sdpa')
         ):
             return 1
+        # Hooks registered for every module (kept in torch.nn.modules.module) run in this forward too.
+        registry = getattr(getattr(torch.nn, 'modules', None), 'module', None)
+        if getattr(registry, '_global_forward_hooks', None) or getattr(registry, '_global_forward_pre_hooks', None):
+            return 1
         for module in transformer.modules():
+            origin = type(module).__module__
             if (
                 module.training
-                or not type(module).__module__.startswith(
-                    ('torch.nn.', 'transformers.models.bert.', 'transformers.activations')
+                or not (
+                    origin == 'transformers.activations'
+                    or origin.startswith(('torch.nn.', 'transformers.models.bert.'))
                 )
                 or 'forward' in module.__dict__
                 or module._forward_hooks
                 or module._forward_pre_hooks
+                # an Embedding with max_norm renormalises its weight in place during forward
+                or getattr(module, 'max_norm', None) is not None
             ):
                 return 1
         for tensor in (*transformer.parameters(), *transformer.buffers()):

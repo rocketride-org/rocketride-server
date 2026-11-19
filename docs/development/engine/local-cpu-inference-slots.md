@@ -4,7 +4,8 @@ In local mode (no `--modelserver`) a task runs its models inside its own process
 On a GPU, `ai.common.models.device_budget` admits a call when its memory fits. On
 the CPU the same module keeps one count of calls for the whole process: its CPU
 slots. A model class that wants more than one call at a time on the CPU asks for
-a place there, so several models never add up to more calls than the CPU can take.
+a place there, so the further calls of several models never add up to more than
+the slots (each model's first call enters beyond them).
 
 ## The rule
 
@@ -18,7 +19,9 @@ model may be inside at once (`calls`). Calls that name no model share one group.
    calls of every model count in that total.
 3. Calls of one model enter in arrival order. Calls waiting for a free slot enter
    in arrival order across models. A call that waits only because its own model
-   is at its limit does not hold back a later call of another model.
+   is at its limit does not hold back a later call of another model. A call
+   whose model has no call inside enters as that model's first call even while
+   an earlier call of another model waits for a slot.
 
 With one slot, every model runs one call at a time, as before.
 
@@ -30,7 +33,9 @@ calls inside than slots. Only the further calls of a model are limited.
 The usable cores are the fewest of:
 
 - the physical cores (`psutil`, SMT siblings not counted),
-- the CPUs the process may run on (its affinity on Linux, else all CPUs),
+- the CPUs the process may run on (its affinity on Linux, else all CPUs). These
+  are logical CPUs, SMT siblings included, so with a cpuset narrower than the
+  physical cores the count can include siblings,
 - the container's CPU quota (cgroup v2 `cpu.max` or v1 `cpu.cfs_quota_us`),
   rounded up to whole CPUs.
 
@@ -51,8 +56,9 @@ logged as a warning and the computed count applies.
   model once: evaluation mode, torch and BERT modules only, no hooks or replaced
   `forward`, float32 CPU tensors. Any other embedding model asks for 1.
 - OCR (EasyOCR, docTR, Surya, TrOCR) names no model, so it stays at one call at a
-  time on the CPU across all OCR nodes, as before. It does not wait for the
-  embedding model, and the embedding model does not wait for it.
+  time on the CPU across all OCR nodes, as before. An OCR call never waits for
+  the embedding model, and the embedding model's first forward never waits for
+  OCR; its further forwards count the OCR call inside.
 
 ## What does not change
 
@@ -74,6 +80,7 @@ logged as a warning and the computed count applies.
 - The quota is read at the cgroup mount root, which is the container's own limit
   inside a container. A quota set on a host process through a nested cgroup (a
   systemd slice) is not seen.
+- Process affinity is not read on Windows; there all CPUs count.
 
 ## Adding a model class
 

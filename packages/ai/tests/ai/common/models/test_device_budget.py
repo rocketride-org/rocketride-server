@@ -603,6 +603,47 @@ def test_a_failed_call_leaves_the_cpu_guard():
     _leave_all(calls)
 
 
+def test_a_waiting_cpu_call_is_woken_when_the_call_inside_leaves(monkeypatch):
+    """A waiting call enters as soon as the call inside leaves, not at the next re-check a minute later."""
+    monkeypatch.setattr(budgetmod, 'RECHECK_S', 60.0)
+    budget = _cpu(1)
+    model = object()
+    first = _Call(budget, None, model=model, calls=1)
+    assert first.enters()
+    second = _Call(budget, None, model=model, calls=1)
+    assert second.stays_out()
+    first.leave()
+    assert second.entered.wait(5.0)
+    second.leave()
+
+
+def test_a_call_that_fails_while_waiting_leaves_the_cpu_queue(monkeypatch):
+    """A waiting call that raises leaves the queue, so a later call of its model still enters after the first."""
+    budget = _cpu(2)
+    model = object()
+    first = _Call(budget, None, model=model, calls=1)
+    assert first.enters()
+    turn, failed = budget._turn, []
+
+    def failing_turn(ticket):
+        """Raise for the first call that asks, then decide as the guard does."""
+        if not failed:
+            failed.append(ticket)
+            raise RuntimeError('admission check failed')
+        return turn(ticket)
+
+    monkeypatch.setattr(budget, '_turn', failing_turn)
+    with pytest.raises(RuntimeError):
+        with budget.reserve(None, model=model, calls=1):
+            pass
+    assert list(budget._queue) == [] and budget._by_model == {id(model): 1}
+    later = _Call(budget, None, model=model, calls=1)
+    assert later.stays_out()
+    first.leave()
+    assert later.enters()
+    later.leave()
+
+
 def test_another_non_cuda_device_keeps_one_slot(monkeypatch):
     """A device other than ``cpu`` and CUDA (``mps``) keeps one slot whatever the CPU has; ``cpu`` takes ``cpu_slots()``."""
     infos = []

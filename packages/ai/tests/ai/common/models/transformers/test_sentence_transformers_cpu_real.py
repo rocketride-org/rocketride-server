@@ -113,8 +113,9 @@ def test_a_small_random_bert_keeps_its_results_and_weights(monkeypatch):
         intermediate_size=96,
         max_position_embeddings=64,
     )
-    with torch.random.fork_rng():
-        torch.manual_seed(19)
+    # devices=[]: only the CPU generator is saved and seeded, never a GPU's
+    with torch.random.fork_rng(devices=[]):
+        torch.random.default_generator.manual_seed(19)
         transformer = BertModel(config).eval()
 
     class ModelBundle(list):

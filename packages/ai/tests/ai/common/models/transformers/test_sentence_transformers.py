@@ -579,13 +579,15 @@ def native_bert(monkeypatch, fake_torch):
 
         def __init__(self):
             self.training = False
-            self.config = types.SimpleNamespace(is_decoder=False, add_cross_attention=False)
+            self.config = types.SimpleNamespace(
+                is_decoder=False, add_cross_attention=False, _attn_implementation='sdpa'
+            )
             self._forward_hooks = {}
             self._forward_pre_hooks = {}
             self.weight = types.SimpleNamespace(
                 device=types.SimpleNamespace(type='cpu'), dtype=fp32, is_floating_point=lambda: True
             )
-            self.extra_modules = [_submodule()]
+            self.extra_modules = [_submodule(), _submodule(module='transformers.activations')]
 
         def modules(self):
             return iter([self, *self.extra_modules])
@@ -610,15 +612,37 @@ def test_a_stock_bert_encoder_qualifies(native_bert):
 
 @pytest.mark.parametrize(
     'change',
-    ['decoder', 'cross_attention', 'training_submodule', 'hook', 'pre_hook', 'forward', 'float16', 'device', 'custom'],
+    [
+        'decoder',
+        'cross_attention',
+        'training_submodule',
+        'hook',
+        'pre_hook',
+        'forward',
+        'float16',
+        'device',
+        'custom',
+        'max_norm',
+        'global_hook',
+        'global_pre_hook',
+        'attention',
+        'activations_sibling',
+    ],
 )
-def test_anything_but_a_stock_encoder_keeps_one_call(native_bert, change):
+def test_anything_but_a_stock_encoder_keeps_one_call(monkeypatch, native_bert, change):
     """What the loaded model does, not its name or the machine, decides: each change keeps one forward at a time.
 
     Args:
+        monkeypatch: The test's monkeypatch fixture.
         change: What differs from a stock encoder.
     """
     transformer = native_bert[0].auto_model
+    global_hooks = {'global_hook': '_global_forward_hooks', 'global_pre_hook': '_global_forward_pre_hooks'}
+    if change in global_hooks:
+        hooks = {'_global_forward_hooks': {}, '_global_forward_pre_hooks': {}}
+        hooks[global_hooks[change]][0] = lambda *args: None
+        modules = types.SimpleNamespace(module=types.SimpleNamespace(**hooks))
+        monkeypatch.setattr(_FakeNN, 'modules', modules, raising=False)
     if change == 'decoder':
         transformer.config.is_decoder = True
     elif change == 'cross_attention':
@@ -635,9 +659,28 @@ def test_anything_but_a_stock_encoder_keeps_one_call(native_bert, change):
         transformer.weight.dtype = object()  # any dtype but float32
     elif change == 'device':
         transformer.weight.device.type = 'cuda'
-    else:
+    elif change == 'custom':
         transformer.extra_modules.append(_submodule(module='custom_layers'))
+    elif change == 'max_norm':
+        embedding = _submodule(module='torch.nn.modules.sparse')
+        embedding.max_norm = 1.0  # renormalises its weight in place during forward
+        transformer.extra_modules.append(embedding)
+    elif change == 'attention':
+        transformer.config._attn_implementation = 'flash_attention_2'
+    elif change == 'activations_sibling':
+        transformer.extra_modules.append(_submodule(module='transformers.activations_tf'))
     assert SentenceTransformerLoader._local_cpu_forward_calls(native_bert) == 1
+
+
+def test_a_model_that_cannot_be_weak_referenced_keeps_one_call(native_bert):
+    """A qualified model whose entry can never be dropped stays at one call, so an object given its id inherits no more."""
+    model = list(native_bert)  # a plain list cannot be weak-referenced
+    assert SentenceTransformerLoader._local_cpu_forward_calls(model) == SentenceTransformerLoader.LOCAL_CPU_CALLS
+    try:
+        assert SentenceTransformerLoader._local_cpu_calls(model) == 1
+        assert SentenceTransformerLoader._model_calls[id(model)] == 1
+    finally:
+        SentenceTransformerLoader._drop_model_lock(id(model))
 
 
 def test_a_custom_bert_class_keeps_one_call(native_bert):

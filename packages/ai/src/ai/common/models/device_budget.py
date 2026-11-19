@@ -22,9 +22,10 @@ model enters while the model has fewer than that many inside and the device has 
 its slots inside in total, first calls included. Calls of one model enter in arrival
 order, and so do calls competing for a free slot, across models; a call that waits only
 because its own model is at its limit does not hold back a later call of another model.
-The device ``'cpu'`` has ``cpu_slots()`` slots: one per ``CPU_CORES_PER_CALL`` usable
-cores, at most ``MAX_CPU_SLOTS``, unless the operator sets ``RR_CPU_INFERENCE_SLOTS``.
-Any other device (``mps``) has one.
+A call whose model has no call inside enters as that model's first call even while an
+earlier call of another model waits for a slot. The device ``'cpu'`` has ``cpu_slots()``
+slots: one per ``CPU_CORES_PER_CALL`` usable cores, at most ``MAX_CPU_SLOTS``, unless the
+operator sets ``RR_CPU_INFERENCE_SLOTS``. Any other device (``mps``) has one.
 
 Another engine process on the same GPU reads the same free memory, so two budgets would
 over-commit the card. While NVML lists one there (or a process it cannot name) and has
@@ -457,7 +458,8 @@ class DeviceBudget:
             release: Hands this process's unused cache back; ``torch.cuda.empty_cache`` by default on a GPU.
             warm: Creates the calling thread's cuBLAS workspace in a pool of its own; by default on a GPU.
             slots: How many calls a device other than a GPU admits in total; a model's first call enters
-                beyond it. By default ``cpu_slots()`` on ``'cpu'`` and 1 on any other. Tests set it.
+                beyond it. By default ``cpu_slots()`` on ``'cpu'`` and 1 on any other; not used on a GPU.
+                Tests set it.
         """
         self.device = device
         self._gpu = device.startswith('cuda')
@@ -496,6 +498,8 @@ class DeviceBudget:
             model: The model copy the call runs on, told apart by identity; ``None`` joins the calls that
                 name none. Ignored on a GPU.
             calls: How many calls of ``model`` may be inside at once (below 1 counts as 1). Ignored on a GPU.
+                Pass the same value for every call of one model: with different values a free slot can
+                stay unused until the call with the lower limit enters.
 
         Yields:
             None, while the call holds its place.
