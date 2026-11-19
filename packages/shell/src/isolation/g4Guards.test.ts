@@ -35,7 +35,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { ConnectionManager } from '../connection/connection';
 
-test('G4 enterGuestMode throws outside a guest realm (it is frozen in v13)', () => {
+test('G4 enterGuestMode throws outside a guest realm (it is frozen in v14)', () => {
 	const cm = Reflect.construct(ConnectionManager, []) as ConnectionManager & { enterGuestMode(i: unknown): void };
 	assert.throws(() => cm.enterGuestMode({ type: 'rr:bridge:init', proto: 1, entryPrefix: '/_t/x/v1/', expiresAt: 1, theme: {}, identity: null, props: { isConnected: true, activeView: '', activeActivity: null, sidePanelOpen: false, theme: '' }, capabilities: [], appId: 'a.b', appKey: 'a', moduleId: 'a_b', viewId: '', engineHttpUrl: 'http://x' }));
 	assert.equal(Reflect.get(cm, 'mirrorConnected'), null, 'nothing was seeded');

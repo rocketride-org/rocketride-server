@@ -48,7 +48,7 @@ export interface IAppIsolationInfo {
 	protoMax: number;
 }
 
-/** What `getIsolation()` hands apps (contract v13). `null` under `off`. */
+/** What `getIsolation()` hands apps (contract v14). `null` under `off`. */
 export interface IIsolationView {
 	mode: 'optin' | 'enforce' | 'unknown';
 	originTemplate: string | null;
@@ -104,7 +104,7 @@ export function isIsolatedEntry(entry: { id: string; isolated?: boolean; firstPa
 	return installed?.mode === 'enforce' && entry.firstParty !== true;
 }
 
-/** The v13 channel (`shellApi.getIsolation()`). */
+/** The v14 channel (`shellApi.getIsolation()`). */
 export function getIsolation(): IIsolationView | null {
 	if (!installed) return null;
 	const { mode, originTemplate } = installed;

@@ -73,9 +73,11 @@ import { useAppComponent } from './hooks/useAppComponent';
 
 // Telemetry: the bound per-app reporter and the consent surface (the shell
 // owns the one analytics transport; apps carry no keys and no SDK). The
-// reporter is HANDED to the app — TelemetryProvider wraps the app outlet and
-// useReport() reads it; there is deliberately no public by-name registry, so
-// an app cannot name itself (or another app) into a reporter.
+// reporter is HANDED to the app: TelemetryProvider wraps the app outlet and
+// useReport() reads it. There is deliberately no public by-name registry. The
+// shell picks the stamp once, when it binds the reporter: the descriptor id,
+// or a telemetryId alias that only a first-party rocketride.* descriptor may
+// choose, and never 'shell' or another registered app's id.
 import { TelemetryProvider, useConsent, useReport } from './telemetry/TelemetryContext';
 import { openConsentBanner } from './telemetry/consentUi';
 // Module-level consent/experiment seams for app code that runs outside React
@@ -741,7 +743,7 @@ export const shellApi = {
 	// Stable versioned entry URL (constructed, never minted — the server
 	// enforces entitlement per request on the /apps/<id>/v<N>/ route)
 	get versionedEntryUrl() { return versionedEntryUrl; },
-	// Separate-origin app isolation (#1022, v13): the isolation state
+	// Separate-origin app isolation (#1022, v14): the isolation state
 	// (null under `off`), the shell's capabilities, and the one error an
 	// isolated app sees for a refused operation.
 	get getIsolation() { return getIsolation; },
@@ -793,7 +795,7 @@ export {
 	TelemetryProvider, useReport, useConsent, openConsentBanner,
 	// Module-level consent/experiment seams (roulette, signup attribution, replay resume)
 	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, resumeSignedOutCapture,
-	// Separate-origin app isolation (v13)
+	// Separate-origin app isolation (v14)
 	getIsolation, SHELL_CAPS, CapabilityDeniedError,
 };
 

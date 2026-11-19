@@ -785,7 +785,9 @@ export class ConnectionManager implements IConnectionManager {
 		this.oauthStarted = true;
 		// auth:start is raised after the guard, so a failed start that releases it is reported
 		// again on retry. The embedded flow signs in through the auth popup and is not reported.
-		const startProps: Record<string, unknown> = { register: !!register };
+		// is_authed is pinned to what was true when the fact happened (signed out: a sign-in is starting); the
+		// registered super property would otherwise stamp the replay on the callback page with that load's state.
+		const startProps: Record<string, unknown> = { register: !!register, is_authed: false };
 		const appId = context?.appId || this.getPendingAppId();
 		if (appId) {
 			startProps.app_id = appId;
@@ -1044,7 +1046,9 @@ export class ConnectionManager implements IConnectionManager {
 					// The shell's own reporter: lands even when NO app ever mounts (a
 				// waitlisted sign-up closing the tab) — the reason the old held
 				// channel and the home remote's ./telemetry expose existed.
-				shellReporter()('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs() });
+				// is_authed: true pins the fact to its moment (an identity resolved, waitlisted or not),
+				// whatever the super property says on the page load that sends it.
+				shellReporter()('auth:complete', { is_new: isNew, waitlisted, source: 'shell', duration_ms: this.takeAuthRoundTripMs(), is_authed: true });
 				}
 				return completed;
 			} catch (error) {
@@ -2316,7 +2320,7 @@ export class ConnectionManager implements IConnectionManager {
 	 * @param init - The accepted bridge init.
 	 */
 	public enterGuestMode(init: BridgeInit): void {
-		// Frozen in v13: on the root it would replace the real session state (G4, DA LOW 3).
+		// Frozen in v14: on the root it would replace the real session state (G4, DA LOW 3).
 		if (!isGuestRealm()) throw new Error('enterGuestMode: not an isolated app guest realm');
 		this.mirrorConnected = init.props.isConnected === true;
 		this.serverUri = init.engineHttpUrl;
