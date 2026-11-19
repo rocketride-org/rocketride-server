@@ -57,7 +57,7 @@ import LoadingScreen from './LoadingScreen';
 import DebugPanel from './DebugPanel';
 import { ConsentBannerHost } from '../../telemetry/ConsentBannerHost';
 import { TelemetryProvider } from '../../telemetry/TelemetryContext';
-import { getReporter } from '../../telemetry/host';
+import { appReporter } from '../../telemetry/host';
 import { ConnectionErrorBanner } from './ConnectionErrorBanner';
 import { SignedOutScreen } from './SignedOutScreen';
 import { AuthPhase } from '../../types/connection';
@@ -527,6 +527,8 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 
 	// --- Auth gate: auto-trigger login for authenticated apps ----------------
 	const activeManifest = appManifest.find((m) => m.id === activeAppId);
+	// Every registered app id, so an app's telemetry alias cannot take another app's stamp.
+	const registeredAppIds = useMemo(() => appManifest.map((m) => m.id), [appManifest]);
 	const authGateTriggeredRef = useRef<string | null>(null);
 
 	// Remember the locked app's identity WHILE the manifest is in hand: the
@@ -723,8 +725,9 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 				    the shell's cookieless telemetry already captures on it — so
 				    the visitor is asked here too, and a "Privacy settings"
 				    request (openConsentBanner) reopens the banner for a
-				    withdrawal. The host itself renders nothing when telemetry
-				    is off or the embedding host owns the switch. */}
+				    withdrawal. The host renders nothing with no key or when the
+				    embedding host owns the switch. Under a privacy signal it
+				    mounts only when Privacy settings asks for it. */}
 				<ConsentBannerHost signedOut />
 				<SignedOutScreen
 					appName={activeManifest?.name ?? remembered?.appName ?? activeAppId}
@@ -782,9 +785,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 		<CompactNavProvider value={compactNav}>
 		<div style={styles.shell}>
 			<ConnectionErrorBanner />
-			{/* The consent banner, shell-owned: renders nothing when telemetry is
-			    off (no probe key), in VS Code (the editor's telemetry setting is
-			    the one switch), or until the page settles. The footer's "Privacy
+			{/* The consent banner, shell-owned: renders nothing with no key (no
+			    probe key) or when the embedding host owns the switch (VS Code,
+			    where the editor's telemetry setting governs), and waits for the
+			    page to settle. Under a privacy signal it mounts only when
+			    Privacy settings asks for it. The footer's "Privacy
 			    settings" link reopens it on any surface, signed in too. */}
 			<ConsentBannerHost signedOut={identity === null} />
 			{/* The way to the navigation once it is a drawer. Renders nothing for
@@ -811,10 +816,11 @@ export const ShellLayout: React.FC<ShellLayoutProps> = ({
 						{hasAppUi && activeApp ? (
 							// The framing control mounts the descriptor's `app`
 							// component raw; the app declares its layout inside.
-							// The reporter is bound to the DESCRIPTOR's id — a late
+							// The reporter is bound to the DESCRIPTOR via appReporter
+							// (a first-party telemetryId alias, else its id), so a late
 							// event from a backgrounded app stamps its true emitter.
 							<AppErrorBoundary key={activeAppId} appName={appName}>
-								<TelemetryProvider reporter={getReporter(activeAppId)}>
+								<TelemetryProvider reporter={appReporter(activeAppId, activeApp, registeredAppIds)}>
 									<AppFrame
 										app={activeApp}
 										isConnected={isConnected}
