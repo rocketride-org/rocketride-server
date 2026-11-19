@@ -53,7 +53,11 @@ const IMPLEMENTED = ((): boolean => {
 async function driveSdk(_t: ITestRoot, realm: IOpenedRealm): Promise<{ token: string; projectId: string; pipeId: number }> {
 	const key = refAppKey(ENTRY_A.id);
 	const p = (name: string): string => `apps/${key}/${name}`;
-	const client = new RocketRideClientProxy({ request: (op, params, timeoutMs) => realm.bus.request(op, params, timeoutMs === undefined ? undefined : { timeoutMs }) }, {});
+	// `env: {}` is what a guest realm gets: in a browser the SDK has no
+	// process.env to copy. Under Node it would copy the runner's process.env,
+	// so any ROCKETRIDE_* variable on the host (CI sets several) would ride
+	// along as `execute.env`, a key the gate rightly refuses.
+	const client = new RocketRideClientProxy({ request: (op, params, timeoutMs) => realm.bus.request(op, params, timeoutMs === undefined ? undefined : { timeoutMs }) }, { env: {} });
 
 	const run = await client.use({ pipeline: { components: [], source: 'chat_1', project_id: 'caller-chosen' } as never, source: 'chat_1', ttl: 60 });
 	const token = run.token;
