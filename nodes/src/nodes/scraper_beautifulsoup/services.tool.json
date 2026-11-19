@@ -1,0 +1,94 @@
+{
+	"title": "Web Scraper",
+	"protocol": "scraper_beautifulsoup://",
+	"classType": ["tool"],
+	"capabilities": ["invoke"],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.scraper_beautifulsoup",
+	"prefix": "scraper",
+	"icon": "scraper.svg",
+	"documentation": "https://docs.rocketride.org/nodes/scraper_beautifulsoup",
+	"description": ["Web scraping tools for agents, built on BeautifulSoup. No API key or paid service needed.", "fetch_page returns a public page as markdown, text, raw HTML or its links; extract pulls repeated items with CSS selectors; fetch_feed reads RSS/Atom; fetch_json calls public JSON APIs (GET or POST).", "Only public hosts are reachable: every request and redirect hop is re-validated, responses are size-capped, and requests to the same host are paced. An optional URL allow-list narrows it further."],
+	"tile": [],
+	"lanes": {},
+	"propertyDefinitions": {
+		"scraper.timeout": {
+			"param": true,
+			"tool": false,
+			"type": "number",
+			"title": "Timeout (seconds)",
+			"description": "Time limit for one whole fetch, 1-120 seconds: DNS lookup, connecting, the TLS handshake, response headers, redirects and the body all count toward it.",
+			"default": 20
+		},
+		"scraper.maxResponseKB": {
+			"param": true,
+			"tool": false,
+			"type": "number",
+			"title": "Max response size (KB)",
+			"description": "Response bodies are read up to this size; anything beyond is dropped and the result is marked truncated.",
+			"default": 5120
+		},
+		"scraper.requestIntervalMs": {
+			"param": true,
+			"tool": false,
+			"type": "number",
+			"title": "Delay between requests to one host (ms)",
+			"description": "Politeness pacing: minimum gap between two requests to the same host. 0 disables pacing.",
+			"default": 250
+		},
+		"scraper.maxBodyChars": {
+			"param": true,
+			"tool": false,
+			"type": "number",
+			"title": "Max item body characters",
+			"description": "Feed item bodies are trimmed to this many characters.",
+			"default": 20000
+		},
+		"scraper.maxToolChars": {
+			"param": true,
+			"tool": false,
+			"type": "number",
+			"title": "Max characters per tool result",
+			"description": "Ceiling on what one tool call returns to the agent, 1000-200000 characters. The agent's max_chars can only lower it; longer content and item lists are cut and marked truncated.",
+			"default": 20000
+		},
+		"scraper.userAgent": {
+			"param": true,
+			"tool": false,
+			"type": "string",
+			"title": "User agent",
+			"description": "User-Agent header sent with every request. Leave blank for the default.",
+			"default": ""
+		},
+		"scraper.allowPattern": {
+			"type": "string",
+			"title": "URL pattern (regex)",
+			"description": "Python regex matched from the start of the URL. It must begin with the literal scheme and host, closed by /, \\?, (?=/|$) or $, e.g. ^https://news\\.ycombinator\\.com/",
+			"default": ""
+		},
+		"scraper.urlAllowList": {
+			"param": true,
+			"tool": false,
+			"title": "URL allow-list",
+			"description": "Optional. When one or more patterns are set, a URL (and every redirect target) must match at least one. Empty allows every public URL; private and local addresses are always blocked.",
+			"type": "array",
+			"minItems": 0,
+			"item": {
+				"name": "entry",
+				"properties": ["scraper.allowPattern"]
+			}
+		}
+	},
+	"properties": ["type", "scraper.timeout", "scraper.maxResponseKB", "scraper.requestIntervalMs", "scraper.maxBodyChars", "scraper.maxToolChars", "scraper.userAgent", "scraper.urlAllowList"],
+	"legacy": {
+		"selector": "profile",
+		"default": "default",
+		"profiles": {
+			"default": {
+				"title": "Default"
+			}
+		},
+		"dropped": []
+	}
+}
