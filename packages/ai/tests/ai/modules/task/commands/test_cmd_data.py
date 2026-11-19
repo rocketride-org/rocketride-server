@@ -22,17 +22,20 @@
 
 """The data path's trust boundary (plan 0 S2/S3/S9, 3.1 P1/P2, 5.3): ``DataCommands.on_rrext_process``.
 
-Every frame is stripped of client-sent context and stamped with the server's
-``_caller``; a frame naming a pipe must find it on the CALLER's control and
-goes to the engine that pipe opened on; params are admitted by name and by
-descriptor before anything is forwarded; credit is asked once per allow
-window. The engine is a recorded ``_send_data``.
+Every frame is stripped of client-sent context (``_caller``, ``_ctx``,
+``config``, ``controlId``) and stamped with the server's ``_caller`` (the
+control id on every frame, the control's config on the open); a frame naming
+a pipe must find it on the CALLER's control and goes to the engine that pipe
+opened on; the token slot names a control id, re-checked against the caller,
+and a standalone ``tool`` borrow may name an address instead; params are
+admitted by name and by descriptor before anything is forwarded; credit is
+asked once per allow window. The engine is a recorded ``_send_data``.
 """
 
 from __future__ import annotations
 
-import asyncio
 import time
+from types import MethodType
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock
 
@@ -42,6 +45,8 @@ from ai.account.base import OutOfCreditsError
 from ai.account.models import RequestContext
 from ai.modules.task import caller_stamp
 from ai.modules.task.commands.cmd_data import DataCommands
+from ai.modules.task.task_conn import TaskConn
+from ai.modules.task.task_control import is_control_id
 from ai.modules.task.task_engine import TaskEngine
 from ai.modules.task.types import TaskError
 
@@ -109,122 +114,34 @@ async def test_a_dev_run_whose_org_is_out_of_credit_is_refused_at_start(catalog,
 
 
 # =============================================================================
-# THE DRAINING ENGINE (plan 7.2 P2)
-# =============================================================================
-
-
-@pytest.mark.asyncio
-async def test_a_repoint_with_open_pipes_keeps_the_control_on_the_old_engine_until_they_close(
-    catalog, engines, engine_log
-):
-    """The slots a client names are ONE engine's: while a pipe is open the control keeps opening on the
-    engine it repointed away from, and that engine's hold goes at the last close.
-    """
-    ts = _server()
-    control = await _start(ts, _pipeline())
-    conn = _data_conn(ts, control)
-    old = control.task
-    slot = await _opened(ts, conn)
-
-    await ts._repoint(control, _pipeline(instructions=['other']), launch_args={}, env=None, env_source=None)
-    assert control.task is not old and control.draining is old and old.is_live
-
-    # Every frame of the control, a new open included, still lands on the old engine
-    engine_log.clear()
-    second = await _opened(ts, conn)
-    await _frame(conn, subcommand='write', pipeId=slot, data=b'x')
-    assert second != slot and [entry['engine'] for entry in engine_log] == [old, old]
-
-    # The first close leaves the other binding open: the old engine stays held
-    await _frame(conn, subcommand='close', pipeId=slot)
-    assert control.draining is old and set(control.open_pipes) == {second} and old.is_live
-
-    # The LAST close drains it: the hold goes and, as its last, stops the old engine
-    await _frame(conn, subcommand='close', pipeId=second)
-    assert control.draining is None and control.open_pipes == {}
-    assert (old, 'repointed') in engines
-    engine_log.clear()
-    await _opened(ts, conn)
-    assert engine_log[-1]['engine'] is control.task
-
-
-@pytest.mark.asyncio
-async def test_a_repoint_back_onto_the_draining_engine_makes_it_current_again(catalog, engines, engine_log):
-    """A -> B -> A before the pipe closes: A's hold is the current one, nothing is left to drain, and the
-    last close releases nothing.
-    """
-    ts = _server()
-    control = await _start(ts, _pipeline())
-    conn = _data_conn(ts, control)
-    first = control.task
-    slot = await _opened(ts, conn)
-
-    await ts._repoint(control, _pipeline(instructions=['other']), launch_args={}, env=None, env_source=None)
-    second = control.task
-    await ts._repoint(control, _pipeline(), launch_args={}, env=None, env_source=None)
-    assert control.task is first and control.draining is None
-    # The engine the control passed through lost its only hold
-    assert (second, 'repointed') in engines
-
-    await _frame(conn, subcommand='close', pipeId=slot)
-    assert first.is_live and control.task is first and (first, 'repointed') not in engines
-
-
-@pytest.mark.asyncio
-async def test_an_open_still_in_flight_keeps_the_old_engine_through_a_repoint(catalog, engines, monkeypatch):
-    """An open the engine has not answered has no record yet; a repoint meanwhile must not release the
-    engine that is about to answer it.
-    """
-    ts = _server()
-    control = await _start(ts, _pipeline())
-    conn = _data_conn(ts, control)
-    old = control.task
-    gate = asyncio.Event()
-    sent: List[Dict[str, Any]] = []
-
-    async def send(self, request):
-        sent.append({'engine': self, **request['arguments']})
-        if request['arguments'].get('subcommand') == 'open':
-            await gate.wait()
-            return {'body': {'pipeId': 1, 'traceId': '1.1.7'}}
-        return {'body': {'ok': True}}
-
-    monkeypatch.setattr(TaskEngine, '_send_data', send)
-    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock())
-
-    opening = asyncio.create_task(_opened(ts, conn))
-    for _ in range(10):
-        await asyncio.sleep(0)
-        if control.pending_open_count == 1:
-            break
-    assert control.pending_opens == {old: 1}
-
-    await ts._repoint(control, _pipeline(instructions=['other']), launch_args={}, env=None, env_source=None)
-    assert control.draining is old and old.is_live
-
-    gate.set()
-    slot = await opening
-    assert control.open_pipes[slot].engine is old and control.pending_opens == {}
-    await _frame(conn, subcommand='close', pipeId=slot)
-    assert control.draining is None and (old, 'repointed') in engines
-
-
-# =============================================================================
 # STRIP THEN INJECT (S2)
 # =============================================================================
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('identity', ['saas', 'oss'])
 @pytest.mark.parametrize('subcommand', ['open', 'write', 'close', 'tool'])
-async def test_a_client_sent_caller_never_reaches_the_engine(catalog, engines, engine_log, subcommand):
-    """_caller and _ctx at the top level and inside the object info are removed on every subcommand."""
+async def test_a_client_sent_reserved_key_never_reaches_the_engine(catalog, engines, engine_log, subcommand, identity):
+    """The four reserved keys (``_caller``, ``_ctx``, ``config``, ``controlId``) are removed at the top level and
+    inside the object info on every subcommand, for a SaaS client and for the OSS local identity alike.
+    """
     ts = _server()
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
-    smuggled = {'userId': 'admin', 'params': {'prompt_1': {'instructions': 'be evil'}}}
-    arguments: Dict[str, Any] = {'subcommand': subcommand, '_caller': smuggled, '_ctx': {'conn_id': 'internal:x'}}
+    if identity == 'oss':
+        # The OSS local identity carries the internal bit and is still a client connection
+        conn._account_info.sysPermissions = ['internal']
+        conn.request_context = lambda: RequestContext(account_info=conn._account_info, conn_id='conn-1')
+    smuggled = {'userId': 'admin', 'params': {'prompt_1': {'instructions': 'be evil'}}, 'controlId': 'f' * 32}
+    reserved: Dict[str, Any] = {
+        '_caller': smuggled,
+        '_ctx': {'conn_id': 'internal:x'},
+        'config': [{'instructions': ['be evil']}],
+        'controlId': 'f' * 32,
+    }
+    arguments: Dict[str, Any] = {'subcommand': subcommand, **reserved}
     if subcommand == 'open':
-        arguments.update(object={'name': 'x', '_caller': smuggled}, mimeType='text/plain')
+        arguments.update(object={'name': 'x', **reserved}, mimeType='text/plain')
     else:
         arguments['pipeId'] = await _opened(ts, conn)
         engine_log.clear()
@@ -234,11 +151,36 @@ async def test_a_client_sent_caller_never_reaches_the_engine(catalog, engines, e
     await _frame(conn, **arguments)
 
     forwarded = engine_log[-1]
-    assert '_ctx' not in forwarded
+    assert all(key not in forwarded for key in ('_ctx', 'config', 'controlId'))
     assert forwarded['_caller']['userId'] == 'user-a'
     assert forwarded['_caller']['params'] == {}
+    # The server's own control id and, on the open only (the tool frame here is attached), the control's config
+    assert forwarded['_caller']['controlId'] == control.control_id
+    assert ('config' in forwarded['_caller']) == (subcommand == 'open')
     if subcommand == 'open':
-        assert '_caller' not in forwarded['object']
+        assert all(key not in forwarded['object'] for key in reserved)
+        assert forwarded['_caller']['config'] != reserved['config']
+
+
+@pytest.mark.asyncio
+async def test_the_open_carries_the_controls_config_by_stack_index_and_the_other_frames_do_not(
+    catalog, engines, engine_log
+):
+    """``_caller.config`` is the resolved component config in the spec's component order, on the open only (plan 5.3)."""
+    ts = _server()
+    control = await _start(ts, _pipeline(instructions=['dry']))
+    conn = _data_conn(ts, control)
+
+    slot = await _opened(ts, conn)
+    await _frame(conn, subcommand='write', pipeId=slot, data=b'x')
+    await _frame(conn, subcommand='close', pipeId=slot)
+
+    opened, written, closed = engine_log
+    assert opened['_caller']['config'] == control.config
+    # As the spec stores it (the engine resolves it): the prompt's instructions, the webhook's empty config
+    assert opened['_caller']['config'] == [{'instructions': ['dry']}, {}]
+    assert 'config' not in written['_caller'] and 'config' not in closed['_caller']
+    assert {f['_caller']['controlId'] for f in engine_log} == {control.control_id}
 
 
 # =============================================================================
@@ -247,17 +189,93 @@ async def test_a_client_sent_caller_never_reaches_the_engine(catalog, engines, e
 
 
 @pytest.mark.asyncio
-async def test_a_standalone_tool_frame_resolves_like_an_open(catalog, engines, engine_log):
-    """A ``tool`` frame naming no pipe opens its own binding, so it may start a dormant publication."""
+async def test_a_standalone_tool_frame_with_an_address_resolves_like_submit(catalog, engines, engine_log):
+    """A ``tool`` frame naming no pipe opens its own binding: an ADDRESS in its token slot resolves the way
+    submit() does, so it may start a dormant publication (plan 3.6).
+    """
     ts = _server()
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
 
-    await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={})
+    await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.address)
 
     conn.resolve_control_or_start.assert_awaited_once()
     conn.get_control.assert_not_called()
     assert engine_log[-1]['subcommand'] == 'tool'
+
+
+@pytest.mark.asyncio
+async def test_a_standalone_tool_frame_carries_the_config_and_an_attached_one_does_not(catalog, engines, engine_log):
+    """A standalone tool borrow is its own binding, often the control's first frame on the engine: its _caller
+    carries the control's config like an open; a tool call on an open pipe carries the control id alone.
+    """
+    ts = _server()
+    control = await _start(ts, _pipeline(instructions=['dry']))
+    conn = _data_conn(ts, control)
+
+    await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.control_id)
+    slot = await _opened(ts, conn)
+    await _frame(conn, subcommand='tool', tool='ask', pipeId=slot)
+
+    standalone, opened, attached = engine_log
+    assert standalone['_caller']['config'] == control.config == opened['_caller']['config']
+    assert 'config' not in attached['_caller']
+    assert {f['_caller']['controlId'] for f in engine_log} == {control.control_id}
+
+
+@pytest.mark.asyncio
+async def test_a_standalone_tool_frame_with_a_control_id_is_the_controls(catalog, engines, engine_log):
+    """A 32-hex token on a standalone ``tool`` frame is a control id: the registry hit and the caller check, no resolution."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+
+    await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.control_id)
+
+    conn.get_control.assert_called_once()
+    conn.resolve_control_or_start.assert_not_awaited()
+    assert engine_log[-1]['_caller']['controlId'] == control.control_id
+
+
+@pytest.mark.asyncio
+async def test_an_open_names_a_control_id_never_an_address(catalog, engines, engine_log):
+    """send/pipe take the control id only (hard break inside the branch): an address on an open is refused."""
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    conn.get_control = MethodType(TaskConn.get_control, conn)
+    conn.get_token_slot = MethodType(TaskConn.get_token_slot, conn)
+
+    with pytest.raises(PermissionError, match='control id'):
+        await _opened(ts, conn, token=control.address)
+    assert engine_log == []
+
+    slot = await _opened(ts, conn, token=control.control_id)
+    assert slot == 1 and engine_log[-1]['_caller']['controlId'] == control.control_id
+
+
+@pytest.mark.asyncio
+async def test_a_foreign_or_unknown_control_id_is_permission_denied_never_not_found(catalog, engines, engine_log):
+    """Every verb re-checks the caller against the control it names; the registry is no existence oracle."""
+    ts = _server()
+    control = await _start(ts, _pipeline(), user='user-a')
+    theirs = _data_conn(ts, control)
+    theirs._account_info = _caller('user-b')
+    theirs.get_control = MethodType(TaskConn.get_control, theirs)
+    theirs.get_token_slot = MethodType(TaskConn.get_token_slot, theirs)
+
+    for token in (control.control_id, 'e' * 32):
+        with pytest.raises(PermissionError, match='not your control') as refused:
+            await _opened(ts, theirs, token=token)
+        assert not isinstance(refused.value, TaskError)
+    assert engine_log == []
+
+    # The owner, and an operator, reach it
+    assert ts.control_by_id(control.control_id, _caller('user-a'), 'task.data') is control
+    admin = _caller('user-c')
+    admin.sysPermissions = ['sys.admin']
+    assert ts.control_by_id(control.control_id, admin, 'task.data') is control
+    assert is_control_id(control.control_id)
 
 
 @pytest.mark.asyncio
@@ -294,8 +312,9 @@ async def test_the_stamp_names_the_control_and_its_request(catalog, engines, eng
         'user-a',
         'org-1',
         control.address,
-        'dev',
+        'spec',
     )
+    assert stamp['controlId'] == control.control_id and is_control_id(stamp['controlId'])
     assert stamp['teamId'] == control.team_context.team_id
     assert stamp['correlationId'] == engine_log[0]['correlationId']
     assert len(stamp['correlationId']) == 32
@@ -347,7 +366,7 @@ async def test_a_frame_on_a_slot_not_open_on_the_callers_control_is_refused_befo
 
 @pytest.mark.asyncio
 async def test_frames_of_an_open_pipe_stay_on_the_engine_it_opened_on(catalog, engines, engine_log):
-    """A repoint between open and close never redirects the request: the record pins the engine."""
+    """The record pins the engine: later frames go where the pipe opened, whatever the control holds now."""
     ts = _server()
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
@@ -356,7 +375,7 @@ async def test_frames_of_an_open_pipe_stay_on_the_engine_it_opened_on(catalog, e
     assert control.open_pipes[slot].engine is opened_on
     assert control.open_pipes[slot].trace_id == '1.1.7'
 
-    # The control moves to another engine (what a repoint does)
+    # The control moves to another engine (an engine started again for a dormant control)
     control.task = MagicMock(name='new-engine')
 
     await _frame(conn, subcommand='write', pipeId=slot, data=b'x')
@@ -498,7 +517,8 @@ async def test_an_allow_is_trusted_for_the_window_and_a_refusal_never_is(catalog
 def test_the_stamp_and_record_cost_microseconds():
     """The per-frame additions (strip, stamp, record) stay well under a tenth of a millisecond each."""
     ts = _server()
-    control = MagicMock(address='acme.docBrain.webhook_1', rung='dev', orgId='org-1', env={}, trace_level=None)
+    control = MagicMock(address='acme.docBrain.webhook_1', rung='spec', orgId='org-1', env={}, trace_level=None)
+    control.control_id = 'a' * 32
     control.team_context.team_id = 'team-1'
     conn = MagicMock(_account_info=_caller(), request_context=None)
     arguments = {'subcommand': 'write', 'pipeId': 1, 'data': b'x' * 65536, '_caller': {'userId': 'x'}}

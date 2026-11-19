@@ -30,7 +30,7 @@ Direct mode (target is None):
     Profiles the local server process (eaas) by calling the process-level
     CProfileManager singleton directly.
 
-Proxy mode (target is a task token):
+Proxy mode (target is a control id):
     Forwards the profiling command to a pipeline's engine subprocess via
     Task._send_data(), the same mechanism used for rrext_process commands.
     The engine subprocess has its own CProfileManager singleton.
@@ -71,7 +71,7 @@ if TYPE_CHECKING:
 PROFILE_REQUIRED = 'private engine or sys.admin'
 
 #: The rungs whose controls may profile their own private engine.
-_PROFILE_RUNGS = ('dev', 'me')
+_PROFILE_RUNGS = ('spec', 'me')
 
 
 # =============================================================================
@@ -126,7 +126,7 @@ class CProfileCommands(DAPConn):
 
         An engine profile is engine-level signal (plan 7.5): ``sys.admin`` and
         ``internal`` may profile any control on any engine. Anyone else may
-        profile only a ``@dev`` or ``@me`` control whose engine is private to
+        profile only a ``@spec`` or ``@me`` control whose engine is private to
         that control's owner (key ``hash:owner``, not shared).
 
         Args:
@@ -141,7 +141,7 @@ class CProfileCommands(DAPConn):
         if 'sys.admin' in sys_perms or 'internal' in sys_perms:
             return
 
-        # Step 2: anyone else, only their own private engine on @dev / @me
+        # Step 2: anyone else, only their own private engine on @spec / @me
         engine = control.task
         if control.rung in _PROFILE_RUNGS and engine is not None and not engine.shared:
             _, qualified, owner = engine.engine_key.rpartition(':')
@@ -157,7 +157,7 @@ class CProfileCommands(DAPConn):
         """
         Forward a cProfile command to a pipeline's engine subprocess.
 
-        Looks up the task by its token, checks the profiler gate (a private
+        Looks up the control by its id, checks the profiler gate (a private
         engine or sys.admin), starts the engine again if it stopped on its
         inactivity timer, waits for it to be running, then sends the request
         via Task._send_data().  The subprocess response body is re-wrapped
@@ -165,16 +165,16 @@ class CProfileCommands(DAPConn):
 
         Args:
             request: The original inbound DAP request from the client.
-            target: The task address identifying which pipeline to profile.
+            target: The control id naming which pipeline to profile.
 
         Returns:
             DAP response with the subprocess result body.
         """
-        # Resolve the address under the caller's account, requiring
-        # task.control on the TASK'S run. Without this, any dev-team
+        # The control by its id, re-checked against the caller (plan section
+        # 1): task.control on the TASK'S run. Without this, any dev-team
         # task.control holder could drive the profiler inside another team's
         # engine subprocess.
-        control = self._server.resolve_control(target, self._account_info, 'task.control')
+        control = self._server.control_by_id(target, self._account_info, 'task.control')
 
         # A profile is engine-level signal: a private engine or sys.admin only
         self._check_profile_access(control)
@@ -208,12 +208,12 @@ class CProfileCommands(DAPConn):
         Handle DAP 'rrext_cprofile_start' command to begin profiling.
 
         If target is None, profiles the local eaas server process.
-        If target is a task token, proxies the command to that pipeline's
+        If target is a control id, proxies the command to that pipeline's
         engine subprocess.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - arguments.target (str, optional): Task token, or None for local
+                - arguments.target (str, optional): Control id, or None for local
                 - arguments.session (str, optional): Human-readable session name
 
         Returns:
@@ -221,7 +221,7 @@ class CProfileCommands(DAPConn):
 
         Usage Examples:
         - Local: { "command": "rrext_cprofile_start", "arguments": { "session": "test" } }
-        - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "acme.docBrain.parsePDF", "session": "test" } }
+        - Proxy: { "command": "rrext_cprofile_start", "arguments": { "target": "<control id>", "session": "test" } }
         """
         self.verify_permission('task.control')
         args = request.get('arguments', {})
@@ -241,12 +241,12 @@ class CProfileCommands(DAPConn):
         Handle DAP 'rrext_cprofile_stop' command to end profiling.
 
         If target is None, stops profiling on the local process.
-        If target is a task token, proxies to the engine subprocess.
+        If target is a control id, proxies to the engine subprocess.
         Only the connection that started the session can stop it.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - arguments.target (str, optional): Task token, or None for local
+                - arguments.target (str, optional): Control id, or None for local
 
         Returns:
             Dict[str, Any]: DAP response with status, session, runtime
@@ -275,7 +275,7 @@ class CProfileCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - arguments.target (str, optional): Task token, or None for local
+                - arguments.target (str, optional): Control id, or None for local
 
         Returns:
             Dict[str, Any]: DAP response with active, owner, session, runtime
@@ -304,7 +304,7 @@ class CProfileCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - arguments.target (str, optional): Task token, or None for local
+                - arguments.target (str, optional): Control id, or None for local
 
         Returns:
             Dict[str, Any]: DAP response with report text
@@ -334,7 +334,7 @@ class CProfileCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - arguments.target (str, optional): Task token, or None for local
+                - arguments.target (str, optional): Control id, or None for local
                 - arguments.max_depth (int, optional): Max tree depth (default 50)
                 - arguments.min_pct (float, optional): Min cumtime % threshold (default 0.1)
                 - arguments.thread (int, optional): Thread id from rrext_cprofile_threads;
@@ -376,7 +376,7 @@ class CProfileCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - arguments.target (str, optional): Task token, or None for local
+                - arguments.target (str, optional): Control id, or None for local
 
         Returns:
             Dict[str, Any]: DAP response with threads

@@ -695,10 +695,7 @@ class IEndpointBase:
 # ---- config.py ----
 
 class ConfigError(ValueError):
-    """A node configuration does not fit its schema (hard error at validate and execute)."""
-
-class TenancyViolation(Exception):
-    """A node read per-caller data where only shared state may live."""
+    """A node configuration does not fit its schema, or a param-flagged key was read from IGlobal.config."""
 
 class ConfigView(Mapping[str, Any]):
     """Read-only, schema-only node configuration with attribute and item access."""
@@ -718,17 +715,16 @@ class ConfigView(Mapping[str, Any]):
     def path_of(self, key: str) -> str: ...
     def descriptor_of(self, key: str) -> Dict[str, Any]: ...
     def to_dict(self) -> Dict[str, Any]: ...
-    def restricted(self, *, refuse_params: bool, refuse_env: bool) -> ConfigView: ...
-    def expand_env(self, env: Optional[Mapping[str, Any]]) -> ConfigView: ...
+    def restricted(self, *, refuse_params: bool) -> ConfigView: ...
     def overlay(self, params: Optional[Mapping[str, Any]]) -> ConfigView: ...
 
 def resolveConfig(schema: Dict[str, Any], connConfig: Any) -> ConfigView: ...
 
 class IGlobalBase:
-    """Base class for all Python global driver implementations."""
+    """Base class for all Python global driver implementations: one object per CONTROL per node."""
 
     IEndpoint: IEndpointBase
-    glb: Any  # IFilterGlobal Protocol — logicalType, physicalType, connConfig
+    glb: Any  # IFilterGlobal Protocol - controlId, logicalType, physicalType, connConfig (the control's)
 
     @property
     def config(self) -> ConfigView: ...
@@ -757,9 +753,8 @@ class IInstanceBase:
     """Base class for all Python instance driver implementations."""
 
     IEndpoint: IEndpointBase
-    IGlobal: IGlobalBase
+    IGlobal: IGlobalBase  # The IGlobal of this binding's control
     instance: IServiceFilterPipe
-    iglobal_methods_only: bool
     _caller: Optional[Dict[str, Any]]
     _settings: Optional[ConfigView]
 

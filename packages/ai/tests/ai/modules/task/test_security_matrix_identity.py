@@ -50,7 +50,7 @@ from ai.modules.task.address import (
 )
 from ai.modules.task.commands.cmd_misc import MiscCommands
 from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
-from ai.modules.task.task_control import TaskControl, control_key, rung_of
+from ai.modules.task.task_control import TaskControl, mint_control_id, rung_of
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
 from ai.modules.task.trace_owner import TraceOwners
@@ -131,7 +131,7 @@ def _control(
     control.address = build_address(developer_id, project_id, source)
     control.id = control.address
     control.rung = rung_of(control.run_kind, control.owner_kind)
-    control.key = control_key(control.rung, control.owner_id, control.address)
+    control.control_id = control.key = mint_control_id()
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
     control.task.dormant_reason = None
@@ -206,7 +206,7 @@ def test_s4_unscoped_lookup_no_longer_exists():
 
 
 def test_s4_user_b_never_resolves_user_a_dev_control():
-    """B's resolution of A's @dev address walks B's rungs and finds nothing."""
+    """B's resolution of A's @spec address walks B's rungs and finds nothing."""
     ts = _server()
     a_control = _control(ts, user_id='user-a')
 
@@ -244,7 +244,7 @@ def test_s4_resolution_requires_the_permission_on_every_call():
 
 
 def test_s4_a_foreign_developer_prefix_is_not_the_callers_dev_rung():
-    """The @dev rung matches only when the address prefix is the caller's developer id."""
+    """The @spec rung matches only when the address prefix is the caller's developer id."""
     ts = _server()
     control = _control(ts, developer_id='acme')
     with pytest.raises(TaskError):
@@ -296,14 +296,14 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
 
 def test_the_resolver_can_be_held_to_one_rung():
     """A subscription keyed to the caller's dev run never reads their personal deploy of the address, nor the
-    reverse: ``rung=`` holds the walk to the continuum the key names (a live @dev would otherwise answer first).
+    reverse: ``rung=`` holds the walk to the continuum the key names (a live @spec would otherwise answer first).
     """
     ts = _server()
     dev = _control(ts, run_kind='dev')
     me = _control(ts, run_kind='deploy', owner_kind='user')
     caller = _account(developer_id='acme')
     assert ts.resolve_control(dev.address, caller, 'task.monitor') is dev
-    assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='dev') is dev
+    assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='spec') is dev
     assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='me') is me
     with pytest.raises(TaskError) as err:
         ts.resolve_control(dev.address, caller, 'task.monitor', rung='team')
@@ -311,7 +311,7 @@ def test_the_resolver_can_be_held_to_one_rung():
 
 
 # =============================================================================
-# S4 — live controls answer first; a stopped @dev control ends with its run
+# S4 — live controls answer first; a stopped @spec control ends with its run
 # =============================================================================
 
 
@@ -325,7 +325,7 @@ def _finish(control: TaskControl) -> TaskControl:
 
 @pytest.mark.asyncio
 async def test_s4_a_stopped_dev_control_does_not_shadow_a_live_team_control():
-    """A dead @dev falls through (plan 3.2): terminate, status and monitor
+    """A dead @spec falls through (plan 3.2): terminate, status and monitor
     reach the live team run at the same address, never the stopped dev run.
     """
     ts = _server()
@@ -361,7 +361,7 @@ def test_s4_a_finished_run_stays_readable_when_nothing_live_answers():
 
 @pytest.mark.asyncio
 async def test_s4_terminating_a_dev_control_removes_it_after_teardown():
-    """Stop on @dev removes the control immediately (plan 7.1), once the
+    """Stop on @spec removes the control immediately (plan 7.1), once the
     run's teardown has delivered its final events; a deploy run stays for the
     cleanup pass.
     """
@@ -380,19 +380,20 @@ async def test_s4_terminating_a_dev_control_removes_it_after_teardown():
 
 
 @pytest.mark.asyncio
-async def test_s4_terminating_a_dev_control_leaves_a_new_run_under_its_key():
-    """A run started under the same key while the old one tore down is kept."""
+async def test_s4_terminating_a_dev_control_leaves_a_new_run_of_the_same_address():
+    """A run started at the same address while the old one tore down is kept: only the old control goes."""
     ts = _server()
     old_run = _control(ts)
+    started = []
 
     async def restarted() -> None:
-        _control(ts)
+        started.append(_control(ts))
 
     old_run.task.wait_terminated = AsyncMock(side_effect=restarted)
     await ts.stop_task(old_run.key)
 
-    assert old_run.key in ts._task_control
-    assert ts._task_control[old_run.key] is not old_run
+    assert old_run.key not in ts._task_control
+    assert list(ts._task_control.values()) == started
 
 
 @pytest.mark.asyncio
@@ -546,8 +547,8 @@ def test_s6_identity_boundary_rejects_path_and_scope_characters(bad):
 
 
 @pytest.mark.asyncio
-async def test_s6_start_task_returns_the_address_in_the_token_slot():
-    """use() hands back the address where the token used to be."""
+async def test_s6_start_task_returns_the_control_id_in_the_token_slot_and_the_address_beside_it():
+    """use() hands back the control id where the token used to be, the address beside it (plan section 1)."""
     ts = _server()
     with patch('ai.modules.task.task_server.TaskEngine') as task_cls:
         task = task_cls.return_value
@@ -564,10 +565,11 @@ async def test_s6_start_task_returns_the_address_in_the_token_slot():
             org_id='org-1',
             developer_id='acme',
         )
-    assert result['token'] == 'acme.docBrain.parsePDF'
+    assert result['address'] == 'acme.docBrain.parsePDF'
     assert 'publicToken' not in result
     assert result['id'] == 'acme.docBrain.parsePDF'
-    assert list(ts._task_control) == ['dev.user-a.acme.docBrain.parsePDF']
+    assert list(ts._task_control) == [result['token']]
+    assert ts._task_control[result['token']].index_key == 'spec.user-a.acme.docBrain.parsePDF'
 
 
 async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_id='acme') -> dict:
@@ -600,13 +602,14 @@ async def test_s6_token_overrides_the_pipeline_id_of_the_address():
     result = await _start(ts, _launch_request(pipeline, token='runA'))
 
     # Step 1: the token replaced the spec's project_id in the address
-    assert result['token'] == 'acme.runA.parsePDF'
+    assert result['address'] == 'acme.runA.parsePDF'
     assert result['id'] == 'acme.runA.parsePDF'
     assert result['projectId'] == 'runA'
-    assert list(ts._task_control) == ['dev.user-a.acme.runA.parsePDF']
+    control = ts._task_control[result['token']]
+    assert [c.index_key for c in ts._task_control.values()] == ['spec.user-a.acme.runA.parsePDF']
 
     # Step 2: the control records the overridden spec; the caller's object is untouched
-    assert ts._task_control['dev.user-a.acme.runA.parsePDF'].pipeline['project_id'] == 'runA'
+    assert control.pipeline['project_id'] == 'runA'
     assert pipeline['project_id'] == 'docBrain'
 
 
@@ -630,27 +633,27 @@ async def test_s6_different_tokens_on_one_spec_are_two_controls():
     first = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
     second = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runB'))
 
-    assert first['token'] == 'acme.runA.parsePDF'
-    assert second['token'] == 'acme.runB.parsePDF'
-    assert sorted(ts._task_control) == ['dev.user-a.acme.runA.parsePDF', 'dev.user-a.acme.runB.parsePDF']
+    assert first['address'] == 'acme.runA.parsePDF'
+    assert second['address'] == 'acme.runB.parsePDF'
+    assert first['token'] != second['token']
+    assert sorted(c.index_key for c in ts._task_control.values()) == [
+        'spec.user-a.acme.runA.parsePDF',
+        'spec.user-a.acme.runB.parsePDF',
+    ]
 
 
 @pytest.mark.asyncio
-async def test_s6_use_existing_with_the_same_token_attaches():
-    """A useExisting call with the same token attaches to the live control at that address."""
+async def test_s6_a_second_call_with_the_same_token_answers_with_the_live_control():
+    """The same identity (owner, project_id, configuration) answers with the live control and its id."""
     ts = _server()
-    await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
-    live = ts._task_control['dev.user-a.acme.runA.parsePDF']
+    first = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    live = ts._task_control[first['token']]
 
-    again = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA', useExisting=True))
+    again = await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
 
-    assert again['token'] == 'acme.runA.parsePDF'
+    assert again['token'] == first['token'] and again['address'] == 'acme.runA.parsePDF'
     assert again['reused'] is True
-    assert ts._task_control == {'dev.user-a.acme.runA.parsePDF': live}
-
-    # Without useExisting the same address is already running: refused
-    with pytest.raises(ValueError):
-        await _start(ts, _launch_request(_pipeline('parsePDF'), token='runA'))
+    assert ts._task_control == {first['token']: live}
 
 
 @pytest.mark.asyncio
@@ -661,8 +664,8 @@ async def test_s6_token_override_stays_inside_the_callers_namespace():
         ts, _launch_request(_pipeline('parsePDF'), token='runA'), user_id='user-b', developer_id='globex'
     )
 
-    assert result['token'] == 'globex.runA.parsePDF'
-    assert list(ts._task_control) == ['dev.user-b.globex.runA.parsePDF']
+    assert result['address'] == 'globex.runA.parsePDF'
+    assert [c.index_key for c in ts._task_control.values()] == ['spec.user-b.globex.runA.parsePDF']
 
 
 # =============================================================================

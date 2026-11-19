@@ -351,9 +351,10 @@ class RocketRideClient(
             tool: Name of the @tool_function to invoke (e.g. ``'search'``,
                 ``'list'``, ``'execute'``).
             address: The pipe's address (``developerId.pipelineId[.source]``),
-                or the address a :meth:`use`/:meth:`submit` result returned.
-            token: Deprecated spelling of ``address`` (the token slot carries
-                the address); one of the two is required.
+                or the ``address`` a :meth:`use`/:meth:`submit` result
+                returned beside its control id.
+            token: Deprecated spelling of ``address``; one of the two is
+                required.
             node_id: Target node ID.  When empty the call broadcasts to all
                 tool-lane nodes; the first node that owns the tool handles it.
             input: Arguments forwarded to the tool function.

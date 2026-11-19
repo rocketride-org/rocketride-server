@@ -24,10 +24,12 @@
 
 One-of validation; name calls walk the rungs and start a published rung from
 its artifact, ignoring server-controlled arguments into ``ignored``; spec
-calls address the caller's @dev presence and converge per ``onChange``
-(repoint, never kill); inline delivery runs open/write/close in process with
-a server-minted ``correlationId``; the server adds no deadline; the probe
-advertises ``submit``.
+calls address the caller's @spec control of the spec's identity (a
+``project_id`` is required; the same configuration reuses, another
+configuration is another control on the same engine, another user gets
+another engine); the token slot carries the control id; inline delivery runs
+open/write/close in process with a server-minted ``correlationId``; the
+server adds no deadline; the probe advertises ``submit``.
 """
 
 from __future__ import annotations
@@ -40,14 +42,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from ai.constants import CONST_DEFAULT_MAX_THREADS
-from ai.modules.task import task_server
 from ai.modules.task.commands import cmd_submit
+from ai.modules.task.run_log import stream_name
+from ai.modules.task.task_control import is_control_id
 from ai.modules.task.task_engine import TaskEngine
 from ai.modules.task.task_server_facade import _InProcessConn
 from ai.modules.task.types import TaskError
 
 from .. import test_task_engine_sharing as sharing
-from ..test_task_engine_sharing import ADDRESS, _caller, _pipeline, _server, _start
+from ..test_task_engine_sharing import ADDRESS, _caller, _pipeline, _server
 
 # The runtime-model fixtures, shared with the engine-sharing tests
 catalog = sharing.catalog
@@ -134,11 +137,12 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
     body = await _submit(conn, name=ADDRESS, data=b'hello', threads=4, ttl=5, objinfo={'name': 'q'})
 
     assert body['answer'] == 'ok'
-    assert body['token'] == ADDRESS
-    assert (body['resolved'], body['team'], body['version']) == ('@team', 'team-1', 1)
-    assert (body['converged'], body['specMatch']) == ('started', True)
-    assert body['ignored'] == ['threads', 'ttl']
     control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    assert body['token'] == control.control_id and is_control_id(body['token'])
+    assert body['address'] == ADDRESS
+    assert (body['resolved'], body['team'], body['version']) == ('@team', 'team-1', 1)
+    assert body['converged'] == 'started'
+    assert body['ignored'] == ['threads', 'ttl']
     assert body['engineKey'] == control.task.engine_key
     assert control.task._threads == CONST_DEFAULT_MAX_THREADS
 
@@ -200,14 +204,15 @@ async def test_a_close_that_carries_the_objects_error_counts_the_binding_failed(
 
 
 @pytest.mark.asyncio
-async def test_without_data_the_call_returns_the_address_for_streaming(catalog, engines, deployments, data_path):
-    """No inline data (on_sse, or a large payload): stamps and the address, nothing delivered."""
+async def test_without_data_the_call_returns_the_control_id_for_streaming(catalog, engines, deployments, data_path):
+    """No inline data (on_sse, or a large payload): stamps and the control id, nothing delivered."""
     ts = _server()
     deployments.deploy('team-1')
 
     body = await _submit(_conn(ts, _caller()), name='acme.docBrain')
 
-    assert body['token'] == ADDRESS and body['resolved'] == '@team'
+    control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    assert body['token'] == control.control_id and body['address'] == ADDRESS and body['resolved'] == '@team'
     assert data_path == []
 
 
@@ -217,7 +222,7 @@ async def test_rung_order_and_the_rungs_tried(catalog, engines, deployments):
     with pytest.raises(TaskError) as err:
         await _submit(_conn(_server(), _caller()), name=ADDRESS)
     assert err.value.code == TaskError.NOT_REGISTERED
-    assert err.value.rungsTried == ['@dev', '@me', '@team', '@public']
+    assert err.value.rungsTried == ['@spec', '@me', '@team', '@public']
 
 
 @pytest.mark.asyncio
@@ -325,7 +330,9 @@ async def test_a_start_that_never_confirms_running_is_engine_start_failed(
     with pytest.raises(TaskError) as err:
         await _submit(conn, name=ADDRESS, data=b'x')
     assert err.value.code == TaskError.ENGINE_START_FAILED
-    assert isinstance(err.value.engineKey, str) and len(err.value.engineKey) == 64, 'the content key rides the error'
+    assert isinstance(err.value.engineKey, str) and len(err.value.engineKey.split(':')[0]) == 64, (
+        'the key rides the error'
+    )
     # A start that never confirmed is not retried and leaves nothing registered (plan 7.2)
     assert ts._task_control == {} and ts._engines == {}
 
@@ -336,98 +343,101 @@ async def test_a_start_that_never_confirms_running_is_engine_start_failed(
 
 
 @pytest.mark.asyncio
-async def test_a_spec_call_creates_then_reuses_the_dev_presence(catalog, engines, deployments, data_path):
-    """submit(spec) starts the caller's @dev control; the same hash reuses it."""
+async def test_a_spec_call_creates_then_reuses_the_spec_control(catalog, engines, deployments, data_path):
+    """submit(spec) creates the caller's @spec control; the same identity answers with the same id."""
     ts = _server()
     conn = _conn(ts, _caller())
 
     first = await _submit(conn, pipeline=_pipeline(), data=b'a')
     second = await _submit(conn, pipeline=_pipeline(), data=b'b')
 
-    assert (first['resolved'], first['converged']) == ('@dev', 'started')
-    assert 'version' not in first
-    assert (second['converged'], second['specMatch']) == ('none', True)
+    assert (first['resolved'], first['converged']) == ('@spec', 'started')
+    assert 'version' not in first and is_control_id(first['token']) and first['address'] == ADDRESS
+    assert (second['token'], second['converged']) == (first['token'], 'none')
     assert first['engineKey'] == second['engineKey']
-    # A name call by the owner attaches to the same presence
-    assert (await _submit(conn, name=ADDRESS))['resolved'] == '@dev'
+    # A name call by the owner attaches to the same control
+    named = await _submit(conn, name=ADDRESS)
+    assert (named['resolved'], named['token']) == ('@spec', first['token'])
 
 
 @pytest.mark.asyncio
-async def test_on_change_error_keep_and_auto(catalog, engines, deployments, data_path):
-    """On a changed spec: error refuses with both hashes, keep uses the old engine, auto repoints."""
+async def test_five_submits_of_three_configs_are_one_engine_and_three_controls(
+    catalog, engines, deployments, data_path
+):
+    """The Step 3c exit (plan 13, C.22): database1/p1, database2/p2, database1/p1, database2/p2, database3/p3."""
+    ts = _server()
+    conn = _conn(ts, _caller())
+    calls = [('database1', 'p1'), ('database2', 'p2'), ('database1', 'p1'), ('database2', 'p2'), ('database3', 'p3')]
+
+    results = [
+        await _submit(conn, pipeline=_pipeline(project_id=project, instructions=[config]), data=b'x')
+        for project, config in calls
+    ]
+
+    # ONE engine, THREE controls, three ids; calls 3 and 4 answer with the ids of 1 and 2
+    assert len(ts._engines) == 1 and len(ts._task_control) == 3
+    tokens = [r['token'] for r in results]
+    assert (tokens[2], tokens[3]) == (tokens[0], tokens[1]) and len(set(tokens)) == 3
+    assert [r['converged'] for r in results] == ['started', 'started', 'none', 'none', 'started']
+    assert {r['engineKey'] for r in results} == set(ts._engines)
+    controls = [ts._task_control[token] for token in (tokens[0], tokens[1], tokens[4])]
+    assert {c.task for c in controls} == set(ts._engines.values())
+    assert len({c.config_hash for c in controls}) == 3
+    # Each open carried ITS control's config: three IGlobal sets for the engine to build (plan 5.3)
+    opens = [arguments for _engine, sub, arguments in data_path if sub == 'open']
+    assert [o['_caller']['controlId'] for o in opens] == [tokens[0], tokens[1], tokens[0], tokens[1], tokens[4]]
+    assert [o['_caller']['config'][0]['instructions'] for o in opens] == [['p1'], ['p2'], ['p1'], ['p2'], ['p3']]
+    # Three run-log continua, named by the stable identity, never by the control id (plan 15 item 20)
+    continua = [stream_name(c.project_id, c.source, c.run_kind) for c in controls]
+    assert continua == ['database1.webhook_1.dev', 'database2.webhook_1.dev', 'database3.webhook_1.dev']
+    assert all(c.control_id not in name for c in controls for name in continua)
+
+
+@pytest.mark.asyncio
+async def test_a_spec_without_a_project_id_is_refused_naming_the_field(catalog, engines, deployments, data_path):
+    """project_id is required on every spec door (plan 2.2): nothing is minted in its place."""
+    ts = _server()
+    pipeline = _pipeline()
+    del pipeline['project_id']
+
+    with pytest.raises(TaskError) as err:
+        await _submit(_conn(ts, _caller()), pipeline=pipeline, data=b'x')
+
+    assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'project_id')
+    assert ts._task_control == {} and ts._engines == {} and data_path == []
+
+
+@pytest.mark.asyncio
+async def test_a_second_users_identical_spec_gets_a_second_engine(catalog, engines, deployments, data_path):
+    """Engines are owner-qualified on every rung in this PR: no cross-owner sharing before C.25."""
+    ts = _server()
+    mine = await _submit(_conn(ts, _caller('user-a')), pipeline=_pipeline(), data=b'x')
+    theirs = await _submit(_conn(ts, _caller('user-b')), pipeline=_pipeline(), data=b'x')
+
+    assert mine['token'] != theirs['token'] and mine['engineKey'] != theirs['engineKey']
+    assert len(ts._engines) == 2 and len(ts._task_control) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_differing_configuration_is_another_control_on_the_same_engine(
+    catalog, engines, deployments, data_path
+):
+    """Plan 3.4: nothing is moved between engines and nothing is refused; both controls live on the one engine."""
     ts = _server()
     conn = _conn(ts, _caller())
     old = await _submit(conn, pipeline=_pipeline())
+    new = await _submit(conn, pipeline=_pipeline(instructions=['new']))
 
-    with pytest.raises(TaskError) as err:
-        await _submit(conn, pipeline=_pipeline(instructions=['new']))
-    assert err.value.code == TaskError.SPEC_CHANGED
-    assert err.value.currentHash == old['engineKey'].split(':')[0] and err.value.newHash != err.value.currentHash
-
-    kept = await _submit(conn, pipeline=_pipeline(instructions=['new']), onChange='keep')
-    assert (kept['specMatch'], kept['engineKey']) == (False, old['engineKey'])
-
-    moved = await _submit(conn, pipeline=_pipeline(instructions=['new']), onChange='auto')
-    assert (moved['converged'], moved['specMatch']) == ('repointed', True)
-    assert moved['engineKey'] != old['engineKey']
-
-    with pytest.raises(TaskError) as err:
-        await _submit(conn, pipeline=_pipeline(), onChange='sometimes')
-    assert err.value.code == TaskError.INVALID_ARGUMENT
-
-
-@pytest.mark.asyncio
-async def test_a_repoint_never_interrupts_the_old_engines_other_holder(catalog, engines, deployments, data_path):
-    """Nothing is killed: the old engine keeps serving user-b; the last hold dropping stops it."""
-    ts = _server()
-    mine = _conn(ts, _caller('user-a'))
-    await _submit(mine, pipeline=_pipeline())
-    theirs = await _start(ts, _pipeline(), user='user-b')
-    shared = theirs.task
-
-    await _submit(mine, pipeline=_pipeline(instructions=['new']), onChange='auto')
-
-    assert shared.holds == frozenset({theirs.key})
-    assert engines == []
-
-    # Alone on its engine, a repoint stops the old one at once
-    await _submit(mine, pipeline=_pipeline(instructions=['newer']), onChange='auto')
-    assert [reason for _, reason in engines] == ['repointed']
-
-
-@pytest.mark.asyncio
-async def test_a_differing_spec_from_anywhere_is_spec_changed_with_no_collision_warning(
-    catalog, engines, deployments, data_path
-):
-    """No cross-workspace collision warning (plan 2.3, 2026-11-16): a spec call meeting a live presence
-    whose engine runs other content is the ordinary spec_changed, whatever workspace it came from, and an
-    identical spec attaches with no warnings at all.
-    """
-    ts = _server()
-    conn = _conn(ts, _caller())
-    await _submit(conn, pipeline=_pipeline())
-
-    with pytest.raises(TaskError) as err:
-        await _submit(conn, pipeline=_pipeline(instructions=['x']))
-    assert err.value.code == 'TASK_SPEC_CHANGED'
-    assert not err.value.warnings
-
-    same = await _submit(conn, pipeline=_pipeline())
-    assert 'warnings' not in same
-
-
-@pytest.mark.asyncio
-async def test_repointing_one_address_too_often_warns_of_a_storm(catalog, engines, deployments, data_path, monkeypatch):
-    """More than N repoints a minute by one owner: repoint_storm."""
-    monkeypatch.setattr(task_server, 'CONST_REPOINT_STORM_MAX', 2)
-    ts = _server()
-    conn = _conn(ts, _caller())
-    await _submit(conn, pipeline=_pipeline())
-
-    results = [await _submit(conn, pipeline=_pipeline(instructions=[f'v{n}']), onChange='auto') for n in range(3)]
-
-    assert all('warnings' not in r for r in results[:2])
-    assert results[2]['warnings'] == [{'code': 'repoint_storm', 'address': ADDRESS, 'count': 3, 'window': 60}]
+    assert old['token'] != new['token'] and old['engineKey'] == new['engineKey']
+    assert (old['converged'], new['converged']) == ('started', 'started')
+    assert len(ts._engines) == 1 and len(ts._task_control) == 2
+    assert ts._task_control[old['token']].live and ts._task_control[new['token']].live
+    # The most recently touched one answers a name call (plan 3.2)
+    older, newer = ts._task_control[old['token']], ts._task_control[new['token']]
+    newer.last_activity = older.last_activity + 1
+    assert (await _submit(conn, name=ADDRESS))['token'] == new['token']
+    older.last_activity = newer.last_activity + 1
+    assert (await _submit(conn, name=ADDRESS))['token'] == old['token']
 
 
 # =============================================================================

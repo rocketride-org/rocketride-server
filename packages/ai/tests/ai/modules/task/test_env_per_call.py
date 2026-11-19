@@ -22,11 +22,11 @@
 
 """Environment per call (plan 6.2, 0 S5): the spec keeps its placeholders, each control resolves its own values.
 
-The engine's content key and task file are env-independent; a private engine
-carries its owner's referenced values as its default env; a control's values
-come from ITS team context and ride ``_caller.env`` on every frame; a
-placeholder is legal only in a config value and only for a ``ROCKETRIDE_*``
-name.
+The engine key and task file are env-independent; a private engine carries
+its owner's referenced values as its default env; a control's values come
+from ITS team context and ride ``_caller.env`` on every frame, and expand the
+control's config on the open (``_caller.config``); a placeholder is legal
+only in a config value and only for a ``ROCKETRIDE_*`` name.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from ai.modules.task import caller_stamp
 from ai.modules.task.pipeline import validate_placeholders
 from ai.modules.task.task_control import TeamContext
 from ai.modules.task.types import TaskError
@@ -134,18 +135,26 @@ async def test_a_spec_without_placeholders_asks_the_account_nothing(catalog, eng
 
 @pytest.mark.asyncio
 async def test_two_controls_on_one_engine_carry_their_own_values(catalog, engines, deployments, monkeypatch):
-    """Identical specs, one engine, two callers: each control's env is its own; the engine key is shared."""
+    """One owner, one shape, two team contexts: one engine, each control's env is its own and expands ITS config."""
 
     async def merged(user_id, org_id, team_id):
-        return {'ROCKETRIDE_TONE': f'tone-of-{user_id}'}
+        return {'ROCKETRIDE_TONE': f'tone-of-{team_id}'}
 
     monkeypatch.setattr(deployments, 'get_merged_env', merged)
     ts = _server()
-    a = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']), user='user-a')
-    b = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']), user='user-b')
+    a = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']), user='user-a', team='team-1')
+    b = await _start(
+        ts, _pipeline(project_id='other', instructions=['${ROCKETRIDE_TONE}']), user='user-a', team='team-2'
+    )
 
     assert a.task is b.task
-    assert (a.env, b.env) == ({'ROCKETRIDE_TONE': 'tone-of-user-a'}, {'ROCKETRIDE_TONE': 'tone-of-user-b'})
+    assert (a.env, b.env) == ({'ROCKETRIDE_TONE': 'tone-of-team-1'}, {'ROCKETRIDE_TONE': 'tone-of-team-2'})
+    # The identity keeps the placeholder; the open carries each control's expansion (plan 5.3)
+    assert a.config_hash == b.config_hash and a.config[0]['instructions'] == ['${ROCKETRIDE_TONE}']
+    stamps = [caller_stamp.mint(sharing._caller(), c, correlation_id='r', subcommand='open') for c in (a, b)]
+    assert [s['config'][0]['instructions'] for s in stamps] == [['tone-of-team-1'], ['tone-of-team-2']]
+    assert all(s['controlId'] == c.control_id for s, c in zip(stamps, (a, b)))
+    assert 'config' not in caller_stamp.mint(sharing._caller(), a, correlation_id='r', subcommand='write')
 
 
 @pytest.mark.asyncio
@@ -183,7 +192,8 @@ async def test_a_private_engines_default_env_is_its_owners_referenced_values():
     assert await engine._default_env(spec) == {'ROCKETRIDE_TONE': 'dry'}
     assert (await engine._resolve_pipeline(spec))['components'][0]['config']['instructions'] == 'dry'
     task = engine._build_task(spec, {'ROCKETRIDE_TONE': 'dry'})
-    assert task['config']['pipeline']['components'][0]['config']['instructions'] == '${ROCKETRIDE_TONE}'
+    # The task file is the SHAPE (C.22): no config at all, the default env beside it
+    assert task['config']['pipeline']['components'][0] == {'id': 'c', 'provider': 'prompt', 'config': {}}
     assert task['config']['env'] == {'ROCKETRIDE_TONE': 'dry'}
 
 

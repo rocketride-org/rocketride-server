@@ -29,7 +29,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from rocketlib.config import ConfigError, ConfigView, TenancyViolation, resolveConfig
+from rocketlib.config import ConfigError, ConfigView, resolveConfig
 
 from tests.rocketlib.schemas import CAP_GPU, CAP_MULTITENANT, DEPTH_ESTIMATE, GOOGLE_WORKSPACE, QDRANT, multitenant
 
@@ -292,36 +292,27 @@ class TestConfigView:
         assert resolveConfig(multitenant(DEPTH_ESTIMATE), {}).capabilities & CAP_MULTITENANT
 
     def test_restricted_refuses_param_always(self, view):
-        restricted = view.restricted(refuse_params=True, refuse_env=False)
-        with pytest.raises(TenancyViolation, match='"maxEdge" is a parameter; read it from self.settings in IInstance'):
+        restricted = view.restricted(refuse_params=True)
+        with pytest.raises(ConfigError, match='"maxEdge" is a parameter; read it from self.settings in IInstance'):
             restricted.maxEdge
-        with pytest.raises(TenancyViolation):
+        with pytest.raises(ConfigError):
             restricted['maxEdge']
         assert restricted.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
+        assert restricted.restricted(refuse_params=False).maxEdge == 640
 
-    def test_restricted_refuses_env_when_asked(self, view):
-        restricted = view.restricted(refuse_params=True, refuse_env=True)
-        with pytest.raises(TenancyViolation, match='"apikey" is set from the caller\'s environment'):
-            restricted.apikey
-        assert restricted.model == 'tiny'
-
-    def test_expand_env(self, view):
-        expanded = view.expand_env({'ROCKETRIDE_DEPTH_APIKEY': 'sk-123'})
+    def test_env_keys_are_a_fact_of_the_spec(self, view):
+        # Which keys the environment decides is a fact of the spec, not of the
+        # values in them: a view the server already expanded still knows them
+        expanded = resolveConfig(DEPTH_ESTIMATE, {'model': 'tiny', 'apikey': 'sk-123'})
         assert expanded.apikey == 'sk-123'
-        # Which keys the caller's environment decides is a fact of the spec: the
-        # per-call client caches (provider_client) key on it after expansion
-        assert expanded.env_keys == frozenset({'apikey'})
-        assert expanded.overlay({'maxEdge': 320}).env_keys == frozenset({'apikey'})
-        assert view.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
+        assert expanded.env_keys == frozenset()
+        assert view.overlay({'maxEdge': 320}).env_keys == frozenset({'apikey'})
+        assert view.restricted(refuse_params=True).env_keys == frozenset({'apikey'})
 
-    def test_expand_env_leaves_unknown_names(self, view):
-        assert view.expand_env({'ROCKETRIDE_OTHER': 'x'}).apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
-
-    def test_expand_env_coerces_and_validates(self):
+    def test_a_placeholder_value_is_not_validated(self):
         view = resolveConfig(DEPTH_ESTIMATE, {'maxEdge': '${ROCKETRIDE_EDGE}'})
-        assert view.expand_env({'ROCKETRIDE_EDGE': '1024'}).maxEdge == 1024
-        with pytest.raises(ConfigError, match='"maxEdge" must be <= 4096'):
-            view.expand_env({'ROCKETRIDE_EDGE': '9000'})
+        assert view.maxEdge == '${ROCKETRIDE_EDGE}'
+        assert view.env_keys == frozenset({'apikey', 'maxEdge'})
 
     def test_overlay_params_by_path_or_name(self, view):
         assert view.overlay({'maxEdge': 1024}).maxEdge == 1024

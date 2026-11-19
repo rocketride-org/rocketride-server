@@ -130,13 +130,58 @@ private:
 
 //-------------------------------------------------------------------------
 /// @details
-///		Define the common class for this filter
+///		A control's IGlobal on a node is ended and dropped by the engine's
+///		idle sweep once no binding has touched it for this long (plan 4.1
+///		rule 1, 15 minutes). The next open rebuilds it from its config
+//-------------------------------------------------------------------------
+_const int CONST_IGLOBAL_IDLE_SECONDS = 900;
+
+//-------------------------------------------------------------------------
+/// @details
+///		How often the engine-wide sweep runs over every node's controls
+//-------------------------------------------------------------------------
+_const int CONST_IGLOBAL_SWEEP_SECONDS = 60;
+
+//-------------------------------------------------------------------------
+/// @details
+///		What rocketlib reads as IGlobal.glb: one control's view of the
+///		node. The node is one C++ global; the configuration is the
+///		control's (the resolved config that rode its open, plan 5.3), so
+///		every IGlobal object carries its own copy of this
+//-------------------------------------------------------------------------
+struct GlobalContext {
+    Text controlId;
+    Text logicalType;
+    Text physicalType;
+    json::Value connConfig;
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///		Define the common class for this filter.
+///
+///		One C++ global per node; one Python IGlobal per CONTROL on it
+///		(plan 4.1 rule 1). The IGlobals live in a map keyed by the control
+///		id and are built LAZILY: the first binding that touches the node
+///		under a control (the binder's first touch, beginBinding) builds
+///		the slot under its own lock - construct, inject IEndpoint and the
+///		control's glb, beginGlobal() - so concurrent bindings of one
+///		control wait on that lock and different controls never wait on
+///		each other. Every binding touches its slot when it binds and when
+///		it releases; the engine-wide sweep (one thread, every
+///		CONST_IGLOBAL_SWEEP_SECONDS) ends and erases a slot idle longer
+///		than CONST_IGLOBAL_IDLE_SECONDS with no open binding. Nothing
+///		per control is built at launch: beginGlobal runs when a control's
+///		open arrives. A binding without a caller (C++-driven work: a scan
+///		source, a test) binds the default slot, keyed by the empty id and
+///		configured from the task file.
 //-------------------------------------------------------------------------
 class IPythonGlobalBase : public IServiceFilterGlobal {
 public:
     using Config = IServiceConfig;
     using Parent = IServiceFilterGlobal;
     using Parent::Parent;
+    using Clock = std::chrono::steady_clock;
 
     //-----------------------------------------------------------------
     ///	@details
@@ -153,6 +198,49 @@ public:
     friend IPythonInstanceBase;
 
     //-----------------------------------------------------------------
+    /// @details
+    ///		One control's IGlobal on this node
+    //-----------------------------------------------------------------
+    struct GlobalSlot {
+        //---------------------------------------------------------
+        /// The node's IGlobal object for this control; empty until
+        /// built
+        //---------------------------------------------------------
+        py::object global;
+
+        //---------------------------------------------------------
+        /// Serializes the build, the end and every binding's claim
+        /// of this slot. Taken with the GIL RELEASED, so a waiter
+        /// never holds the interpreter while the builder needs it
+        //---------------------------------------------------------
+        std::mutex lock;
+
+        //---------------------------------------------------------
+        /// When a binding last bound or released this slot
+        //---------------------------------------------------------
+        Clock::time_point lastTouch = Clock::now();
+
+        //---------------------------------------------------------
+        /// beginGlobal() has run
+        //---------------------------------------------------------
+        bool built = false;
+
+        //---------------------------------------------------------
+        /// Ended by the sweep or the endpoint: no longer in the
+        /// map, never served again. A waiter that wakes on a
+        /// retired slot goes back to the map for a fresh one
+        //---------------------------------------------------------
+        bool retired = false;
+
+        //---------------------------------------------------------
+        /// Open bindings holding this slot: the sweep skips a slot
+        /// with any
+        //---------------------------------------------------------
+        std::atomic<int> bindings{0};
+    };
+    using SlotPtr = std::shared_ptr<GlobalSlot>;
+
+    //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
     IPythonGlobalBase(const FactoryArgs &args) noexcept;
@@ -166,7 +254,57 @@ public:
 
     virtual Error validateConfig() noexcept override;
 
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Bind a binding to the IGlobal of its control: the control is
+    ///		`caller['controlId']` (none = the default slot) and, when the
+    ///		slot is not built yet, `caller['config'][stackIndex]` is its
+    ///		configuration (the open carries it; write/close/tool carry
+    ///		the id alone and find the slot the open built). Builds the
+    ///		slot on the first touch under its lock, counts the binding
+    ///		and touches it. Must be called with the GIL held; it releases
+    ///		the GIL while it waits for the slot
+    ///	@param[in]	caller
+    ///		The binding's caller context (pipe->caller), or none
+    ///	@returns
+    ///		The slot the binding holds until releaseSlot()
+    //-----------------------------------------------------------------
+    ErrorOr<SlotPtr> acquireSlot(const py::object &caller) noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Release a binding's hold on its slot and touch it
+    //-----------------------------------------------------------------
+    void releaseSlot(SlotPtr &slot) noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The engine-wide sweep: on every node, end (endGlobal) and
+    ///		erase each control's slot that no binding holds and that was
+    ///		last touched longer than `idle` ago. The sweep thread calls
+    ///		this with CONST_IGLOBAL_IDLE_SECONDS; a test may call it with
+    ///		any threshold. An endGlobal that raises is logged to OPS and
+    ///		the slot is erased anyway
+    //-----------------------------------------------------------------
+    static void sweepIdleGlobals(std::chrono::seconds idle) noexcept;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		The controls holding an IGlobal on this node right now
+    //-----------------------------------------------------------------
+    std::vector<Text> controlIds() noexcept;
+
 private:
+    //-----------------------------------------------------------------
+    // Private API	: python-global.cpp
+    //-----------------------------------------------------------------
+    Error buildSlot(GlobalSlot &slot, const Text &controlId,
+                    json::Value connConfig) noexcept;
+    Error endSlot(GlobalSlot &slot) noexcept;
+    void sweepIdle(Clock::time_point before) noexcept;
+    size_t stackIndex() noexcept;
+    static void sweepProcess() noexcept;
+
     //-------------------------------------------------------------
     /// @details
     ///		The node package (serviceDef.nodePath or the logical type)
@@ -184,22 +322,57 @@ private:
 
     //-------------------------------------------------------------
     /// @details
+    ///		The IGlobal class every control's object is constructed
+    ///		from: the node's own, or rocketlib.IGlobalBase when the node
+    ///		ships no IGlobal.py
+    //-------------------------------------------------------------
+    py::object m_pyGlobalClass;
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Handle to our python IEndpoint object
     //-------------------------------------------------------------
     py::object m_pyEndpoint;
 
     //-------------------------------------------------------------
     /// @details
-    ///		Handle to our python IGlobal object - in config mode this is
-    ///		the IValidator (the node's own, or rocketlib.IValidatorBase)
+    ///		CONFIG / PIPELINE_CONFIG mode only: the IValidator (the
+    ///		node's own, or rocketlib.IValidatorBase) that validateConfig
+    ///		runs. No control exists in config mode, so no slot does
     //-------------------------------------------------------------
-    py::object m_pyGlobal;
+    py::object m_pyValidator;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		The per-control IGlobals, keyed by control id ("" = the
+    ///		default slot of a binding without a caller). Guarded by
+    ///		m_slotsLock, which is never held across a Python call
+    //-------------------------------------------------------------
+    std::map<std::string, SlotPtr> m_slots;
+    std::mutex m_slotsLock;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		This node's position in the task file's component list -
+    ///		the index `caller['config']` is addressed by
+    //-------------------------------------------------------------
+    size_t m_stackIndex = 0;
 
     //-------------------------------------------------------------
     /// @details
     ///        The result of binding python objects to handles.
     //-------------------------------------------------------------
     Error m_boundError;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		Every live node global, for the engine-wide sweep, and the
+    ///		one sweep thread: started with the first global, stopped
+    ///		with the last
+    //-------------------------------------------------------------
+    static std::mutex s_registryLock;
+    static std::set<IPythonGlobalBase *> s_registry;
+    static Opt<async::Thread> s_sweeper;
 };
 
 //-------------------------------------------------------------------------
@@ -380,6 +553,13 @@ private:
     ///		between bindings
     //-------------------------------------------------------------
     py::object m_pyInstance;
+
+    //-------------------------------------------------------------
+    /// @details
+    ///		The control's IGlobal slot the current binding holds on the
+    ///		global (plan 4.1 rule 1); released with the binding
+    //-------------------------------------------------------------
+    IPythonGlobalBase::SlotPtr m_slot;
 
     //-------------------------------------------------------------
     /// @details

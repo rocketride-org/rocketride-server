@@ -1085,20 +1085,27 @@ your app bundle or `.pipe` file.
 ### Token management
 
 `use()` starts (or attaches to) a pipeline task and returns its `token` —
-the handle for everything that follows:
+the CONTROL ID, the handle for everything that follows. It is opaque and
+transient: valid for the life of the control, dead once the control stops,
+and re-minted by a restart. Never persist it (not in storage, not in a URL);
+recover it from `getTaskToken()` after a reload. The task address
+`developerId.pipelineId[.source]` rides beside it as `address` and is the
+stable identity. The spec's `project_id` is required.
 
 ```typescript
-// Start once, reuse: useExisting attaches to a running instance of the
-// same pipeline instead of starting a second one.
+// Start once, reuse: the same spec (project_id + configuration) returns the
+// same control id; useExisting attaches to the control already live for the
+// project_id whatever its configuration.
 const { token } = await client.use({ pipeline, useExisting: true, ttl: 900 });
 
-// Recover a token after a reload (project_id + source identify the task):
+// Recover the control id after a reload (project_id + source identify the task):
 const existing = await client.getTaskToken({ projectId, source: 'input' });
 
-// Pre-flight check, restart with a new config, stop:
+// Pre-flight check, restart with a new config (a NEW control id), stop:
 await client.validate({ pipeline });
 await client.restart({ projectId, source: 'input', pipeline });
-await client.terminate(token);
+const fresh = await client.getTaskToken({ projectId, source: 'input' });
+await client.terminate(fresh!);
 ```
 
 `use()` is expensive — start the pipeline once per session and keep the
@@ -1114,33 +1121,28 @@ to your longest quiet step plus at least a minute of margin.
 
 ### One task for everyone vs a task per user
 
-A task's identity is owner + `project_id` + source component — and when
-your app calls `use()`, the owner is the signed-in **user**. So every user
-of your app gets their own instance of the pipeline, automatically.
-`useExisting` does not change that: it attaches to *that user's* own
-already-running instance (a reload, a second tab, a second component)
-instead of failing with 'Pipeline is already running' — with the default
-token it never crosses user boundaries. (A custom token is looked up by its
-value alone; see below.)
+A control's identity is owner + rung + `project_id` + the resolved
+configuration — and when your app calls `use()`, the owner is the signed-in
+**user**. So every user of your app gets their own control of the pipeline,
+automatically, and a control id never crosses user boundaries: a request
+naming another user's id is `permission_denied`. The same spec from the same
+user reuses the live control (the same id comes back); a spec whose
+configuration differs under the same `project_id` is a second control on the
+same engine. `useExisting` attaches to the control already live for the
+`project_id` whatever its configuration (a reload, a second tab, a second
+component).
 
 To run two instances of one pipeline for the same user at once (a second
-tab, say), give each `use()` its own `token`: the server then keys the task
-on that token instead of the hash. Use an unguessable value that keeps the
-`tk_` prefix (`tk_` plus a UUID, for example): the value is the run's private
-token (full control for anyone who presents it), tokens share one namespace
-across every user of the server, and a token without the prefix cannot serve
-as a private token on webhook or dropper endpoints. With `useExisting`, a
-token that matches a running task attaches to it, whoever started it: one
-more reason the value must be unguessable. Keep the tokens you chose: both
-instances get the same `pk_` public authorization key, and a webhook call or
-dropper upload that uses it always reaches the instance that started first
-(to send data to one specific instance, use its `tk_` token); `getTaskToken()`
-is keyed by `projectId` and source, so it returns only one of them. Monitor
-subscriptions are keyed the same way: both instances' events arrive in one
-subscription (each event's `body.__id` names the emitting run, best effort),
-and a few minutes after one instance ends the shared subscription is
-dropped, so resubscribe. The run log is not built for two instances of one
-identity; treat it as unreliable.
+tab, say), give each `use()` its own `token` option: it overrides the
+pipeline-id segment of the address (`developerId.<token>.source`), so each
+instance is its own `project_id` with its own control id. The value is a
+name inside your own namespace, not a credential (one segment of letters,
+digits, `_` and `-`); authority comes from the account on the request.
+`getTaskToken()` is keyed by `projectId` and source, so look each instance up
+by the segment you chose. Monitor by control id (`{ token }`) to watch one
+instance; a project/source subscription sees every instance of that
+identity. The run log is not built for two instances of one identity; treat
+it as unreliable.
 
 **Per-user tasks (the default, and the only behavior `use()` can produce):**
 

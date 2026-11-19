@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from ai.common.dap import TransportBase
 
 from .task_conn import TaskConn
-from .task_control import DeploymentRef, TeamContext, control_key, rung_of
+from .task_control import DeploymentRef, TeamContext
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -198,15 +198,13 @@ async def start_server_task_as_team(
         arguments['args'] = ['--trace=debugOut']
     exec_response = await conn.request('execute', arguments=arguments)
 
-    # The response carries the address; the in-process callers hold the key.
-    # The deploy run's key is built from its owner and rung, never resolved
+    # The response carries the control id in the token slot (plan section
+    # 1): the registry key the in-process callers hold. Nothing is resolved
     # through the caller rungs: for a @me deploy the synthetic account IS the
-    # owning user, so the resolver would try @dev first and hand back that
+    # owning user, so a name walk would try @spec first and hand back that
     # user's Play'd run of the same pipeline (same address) instead of this
     # deploy run.
-    address = exec_response['body']['token']
-    owner_id = owner_user_id if owner_kind == 'user' else team_id
-    return server.control_by_key(control_key(rung or rung_of('deploy', owner_kind), owner_id, address)).key
+    return server.control_by_key(exec_response['body']['token']).key
 
 
 # =============================================================================

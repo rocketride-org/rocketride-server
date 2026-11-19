@@ -126,8 +126,8 @@ export interface DeployHistoryEntry {
 	    second lookup). `reply` rows carry the review-thread message and its
 	    side. App audience rows (publish binds, removed/disabled/enabled)
 	    carry the audience WITH its server-dereferenced display facts
-	    (`name`, `handle`), plus `previousVersion` when a publish repointed
-	    an existing binding. A `publish` row without an audience is the
+	    (`name`, `handle`), plus `previousVersion` when a publish moved an
+	    existing binding's pointer. A `publish` row without an audience is the
 	    registry write (the DEPLOY) and rides the deploy `comment`; review
 	    transitions carry both endpoints (`from`/`to`). */
 	data?: {

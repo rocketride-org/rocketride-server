@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-19T18:25:41.060Z
-// Source commit: b02b8bb9e7e23857e5698654a94ae90705c92d91
+// Generated:     2026-11-19T20:06:33.715Z
+// Source commit: 808efac80ba116b4ac72897146ceaf60af8c5a8b
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1353,24 +1353,26 @@ export interface PipelineConfig {
  * The close body's own fields (`result_types`, `objects` ...) ride beside these.
  */
 export interface SUBMIT_RESULT {
-    /** The address that answered: `developerId.pipelineId.source` */
+    /**
+     * The control id that answered: an opaque transient handle, valid for the
+     * life of the control, that every data and control verb takes. Never
+     * persist it: it dies with the control and a restart mints a new one.
+     */
     token: string;
+    /** The address that answered: `developerId.pipelineId.source` (the stable identity, beside the id) */
+    address?: string;
     /** The rung that answered */
-    resolved: "@dev" | "@me" | "@team" | "@public";
+    resolved: "@spec" | "@me" | "@team" | "@public";
     /** On `@team`: the answering team */
     team?: string;
-    /** The artifact version (absent on `@dev`) */
+    /** The artifact version (absent on `@spec`) */
     version?: number;
-    /** The engine the request ran on (content hash, owner-qualified when private) */
+    /** The engine the request ran on (shape key, owner-qualified) */
     engineKey: string;
-    /** False when `onChange: 'keep'` delivered to an engine running another spec */
-    specMatch: boolean;
-    /** What resolution did to reach an engine */
-    converged: "none" | "started" | "repointed";
+    /** `'none'` when an existing control answered, `'started'` when this call created one */
+    converged: "none" | "started";
     /** Server-controlled arguments a name call passed (threads/args/env/ttl) */
     ignored: string[];
-    /** `address_collision` / `repoint_storm` warnings, when any */
-    warnings?: Array<Record<string, unknown>>;
     /** The close body's fields */
     [key: string]: unknown;
 }
@@ -1394,9 +1396,9 @@ export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]
 export interface PipeInterfaces {
     /** The pipe address (`developerId.pipelineId`). */
     address: string;
-    /** The rung that answers you: `dev` (your own run, no publication), `me`, `team` or `public`. */
-    rung: "dev" | "me" | "team" | "public";
-    /** The registry version that publication points at; null when your own `dev` run answered (it has none). */
+    /** The rung that answers you: `spec` (your own live control, no publication), `me`, `team` or `public`. */
+    rung: "spec" | "me" | "team" | "public";
+    /** The registry version that publication points at; null when your own `spec` control answered (it has none). */
     version: number | null;
     /** The answering team on the `team` rung. */
     teamId?: string;
@@ -1487,8 +1489,8 @@ export interface DeployHistoryEntry {
         second lookup). `reply` rows carry the review-thread message and its
         side. App audience rows (publish binds, removed/disabled/enabled)
         carry the audience WITH its server-dereferenced display facts
-        (`name`, `handle`), plus `previousVersion` when a publish repointed
-        an existing binding. A `publish` row without an audience is the
+        (`name`, `handle`), plus `previousVersion` when a publish moved an
+        existing binding's pointer. A `publish` row without an audience is the
         registry write (the DEPLOY) and rides the deploy `comment`; review
         transitions carry both endpoints (`from`/`to`). */
     data?: {
@@ -5339,7 +5341,7 @@ export declare class DataPipe {
      * Creates a new DataPipe instance.
      *
      * @param client - The RocketRideClient instance managing this pipe
-     * @param token - Task token for the pipeline receiving the data
+     * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data
      * @param objinfo - Metadata about the object being sent (e.g., filename, size)
      * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
      * @param provider - Optional provider name for the data source
@@ -5478,7 +5480,8 @@ export declare class DataPipe {
 /**
  * Identifies a monitor subscription key.
  *
- * - `{ token }` — monitors a specific running task by its session token.
+ * - `{ token }` — monitors one control by its control id (a `use()`/`submit()`
+ *   result's `token`); a restart mints a new id, so resubscribe after one.
  * - `{ projectId, source }` — monitors the CALLER's own dev run of the
  *   project/source (the server binds the connection's user identity).
  * - `{ teamId, projectId, source }` — monitors the team's DEPLOYED run.
@@ -5778,20 +5781,28 @@ export declare class RocketRideClient extends DAPClient {
      *
      * When passing a `pipeline` object directly, provide a flat `PipelineConfig` with
      * `components`, `source`, and `project_id` at the top level — do NOT wrap it in
-     * `{ pipeline: { ... } }`.
+     * `{ pipeline: { ... } }`. `project_id` is REQUIRED: a spec without one is
+     * refused with `invalid_argument` naming the field.
+     *
+     * A spec call addresses your own `@spec` rung. The server looks for your live
+     * control with the same `project_id` and the same resolved configuration and
+     * reuses it (the same `token` comes back); otherwise it creates one. A spec
+     * whose configuration differs under the same `project_id` is a NEW control
+     * on the same engine, and the earlier one lives until it is stopped or its
+     * idle ttl ends.
      *
      * @param options - Pipeline execution options
-     * @param options.token - Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. The returned `token` is the full address. Not a credential: the developer id and the owner come from the account
+     * @param options.token - Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. Not a credential, and NOT the value the result's `token` carries: the developer id and the owner come from the account
      * @param options.filepath - Path to a `.pipe` or JSON file containing pipeline configuration (Node.js only)
      * @param options.pipeline - Flat PipelineConfig object (alternative to filepath)
      * @param options.source - Override pipeline source
      * @param options.threads - Number of threads for execution (omit to let the server decide)
-     * @param options.useExisting - Attach to the task already running at the same address instead of failing with "Pipeline is already running"
+     * @param options.useExisting - Attach to the control already live for this `project_id` whatever its configuration (the result's `reused` flag says it happened)
      * @param options.args - Command line arguments to pass to pipeline
      * @param options.ttl - Time-to-live in seconds for idle pipelines (optional, server default if not provided; use 0 for no timeout)
      * @param options.pipelineTraceLevel - Trace level: 'none' | 'metadata' | 'summary' | 'full'. When set, captures every lane write and invoke call in the response under '_trace'.
      *
-     * @returns Promise resolving to an object whose `token` is the task address `developerId.pipelineId[.source]`, plus other metadata
+     * @returns Promise resolving to an object whose `token` is the CONTROL ID: an opaque transient handle, valid for the life of the control, that `send()`, `pipe()`, `terminate()`, `getTaskStatus()` and the monitor verbs take. Never persist it: it dies with the control and a restart mints a new one. The task address `developerId.pipelineId[.source]` rides beside it as `address`
      * @throws Error if neither pipeline nor filepath is provided
      *
      * @example
@@ -5823,13 +5834,6 @@ export declare class RocketRideClient extends DAPClient {
         name?: string;
         /** Unfiltered per-use values merged over the filtered `ROCKETRIDE_*` client environment. */
         env?: Record<string, string>;
-        /**
-         * A spec call's answer to a live `@dev` presence running OTHER content
-         * (plan §3.4): 'error' fails with `spec_changed` (the server default),
-         * 'keep' delivers to the running engine, 'auto' repoints the control
-         * to the new content. The IDEs pass their restart-behavior setting.
-         */
-        onChange?: "error" | "keep" | "auto";
     }): Promise<Record<string, unknown> & {
         token: string;
     }>;
@@ -5838,22 +5842,23 @@ export declare class RocketRideClient extends DAPClient {
      *
      * Exactly one of `name`, `pipeline` or `filepath`. A `name` is the address
      * `developerId.pipelineId[.source]` and resolves through the fixed rungs: your
-     * live `@dev` presence (attach only), your `@me` deployment, the first team in
+     * live `@spec` control (attach only), your `@me` deployment, the first team in
      * your team order that publishes it (`team` overrides the order for this call),
      * then `@public`; a published rung starts from its artifact when nothing is
-     * live. A `pipeline`/`filepath` addresses your own `@dev` presence for that
-     * spec; when it already runs other content, `onChange` decides: `'error'`
-     * (default), `'keep'` (use the running engine) or `'auto'` (move to the new
-     * spec; nothing is stopped for anyone else).
+     * live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
+     * with the same `project_id` and resolved configuration is reused, otherwise
+     * one is created (`converged: 'started'`); a different configuration under
+     * the same `project_id` is a new control on the same engine. `project_id`
+     * is REQUIRED on a spec call (`invalid_argument` naming the field).
      *
      * The pipeline stays up after the call and expires on its idle ttl.
      * `threads`/`args`/`env`/`ttl` apply to spec calls only; a name call ignores
      * them and lists them in `ignored`. Data up to `SUBMIT_INLINE_MAX` bytes
      * travels inline in the one request; larger data, and every call with
-     * `onSSE`, streams through a pipe to the address the server answered with.
+     * `onSSE`, streams through a pipe on the control the server answered with.
      *
      * @param options.name - The pipeline's address (XOR with pipeline/filepath)
-     * @param options.pipeline - An inline flat PipelineConfig (XOR)
+     * @param options.pipeline - An inline flat PipelineConfig (XOR; `project_id` required)
      * @param options.filepath - A `.pipe`/JSON file, loaded here (Node only, XOR)
      * @param options.source - The entry component; overrides the address's third segment
      * @param options.params - Per-call parameter values by public name
@@ -5866,9 +5871,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.ttl - Idle ttl in seconds (spec calls only)
      * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
      * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
-     * @param options.onChange - `'error'` | `'keep'` | `'auto'` (spec calls)
      * @param options.team - Answer `@team` from this one of your teams
-     * @returns The pipe close body plus `token`, `resolved`, `team`, `version`, `engineKey`, `specMatch`, `converged`, `ignored` and any `warnings`
+     * @returns The pipe close body plus `token` (the control id: opaque, transient, valid for the life of the control; never persist it), `address`, `resolved`, `team`, `version`, `engineKey`, `converged` and `ignored`
      * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
      *
      * @example
@@ -5892,11 +5896,13 @@ export declare class RocketRideClient extends DAPClient {
         ttl?: number;
         env?: Record<string, string>;
         pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
-        onChange?: "error" | "keep" | "auto";
         team?: string;
     }): Promise<SUBMIT_RESULT>;
     /**
      * Terminate a running pipeline.
+     *
+     * @param token - The control id a `use()`/`submit()` result returned. The
+     *                control is removed at once; its id is dead afterwards.
      */
     terminate(token: string): Promise<void>;
     /**
@@ -5904,8 +5910,9 @@ export declare class RocketRideClient extends DAPClient {
      *
      * Returns the tasks visible to the authenticated user (running and
      * recently completed pipeline executions), as reported by the server.
-     * Each row includes the task token plus display fields such as name,
-     * state, and timing; the exact field set is server-defined.
+     * Each row carries the control id (`controlId`) beside its `address`,
+     * plus display fields such as name, state, and timing; the exact field
+     * set is server-defined.
      *
      * Mirrors the Python SDK's `get_tasks`.
      */
@@ -5913,10 +5920,13 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Restart a running pipeline with a new configuration.
      *
-     * Looks up the existing task by project/source, terminates it, and
-     * starts a new execution in one server round-trip.
+     * Looks up the existing task by project/source, terminates its control
+     * and creates a new one in one server round-trip. The restart MINTS A NEW
+     * CONTROL ID: the id you held before is dead afterwards, so read the
+     * replacement from `getTaskToken()` (or the next `use()`) before sending
+     * again. Play on a changed spec in the IDEs is this same restart.
      *
-     * @param options.token - Existing task token (optional, resolved server-side if omitted).
+     * @param options.token - The existing control id (optional, resolved server-side from project/source when omitted).
      * @param options.projectId - The project identifier.
      * @param options.source - The source component identifier.
      * @param options.pipeline - The pipeline configuration to restart with.
@@ -5935,14 +5945,17 @@ export declare class RocketRideClient extends DAPClient {
      * By default this call is bounded to 15s so callers/tests don't hang forever if the engine
      * stops responding mid-request (especially important in CI). Pass `{ timeout: false }` to
      * restore the previous behavior of using only the client-level request timeout (if any).
+     *
+     * @param token - The control id a `use()`/`submit()` result returned; the body carries `controlId` beside the status fields.
      */
     getTaskStatus(token: string, options?: {
         timeout?: number | false;
     }): Promise<TASK_STATUS>;
     /**
-     * Resolve a running task's token from its project ID and source component.
+     * Resolve a running task's control id from its project ID and source component.
      *
-     * The token is required for operations like terminate and restart.
+     * The control id is what terminate, restart, send and the status verbs
+     * take; look it up again after a restart, which mints a new one.
      * Returns undefined if no task is currently running for the given project/source.
      *
      * The scope IS the kind: pass teamId to resolve the team's DEPLOYED run;
@@ -5963,7 +5976,7 @@ export declare class RocketRideClient extends DAPClient {
      * The pipeline is returned exactly as stored — ${ROCKETRIDE_*} placeholders are
      * NOT substituted, so no secrets are included in the response.
      *
-     * @param token - Task token returned by {@link getTaskToken}.
+     * @param token - The control id returned by {@link getTaskToken} or a `use()` result.
      * @returns The unresolved pipeline dict, or undefined if the task is not found.
      */
     getTaskPipeline(token: string): Promise<Record<string, unknown> | undefined>;
@@ -6008,7 +6021,7 @@ export declare class RocketRideClient extends DAPClient {
      * (matching Python client behavior) rather than through a callback parameter.
      *
      * @param files - Array of file objects with optional metadata and MIME types
-     * @param token - Pipeline task token to receive the uploads
+     * @param token - The control id of the control receiving the uploads
      * @param maxConcurrent - Maximum number of concurrent uploads (default: 5)
      *
      * @returns Promise resolving to array of UPLOAD_RESULT objects in the same order as input
@@ -6078,7 +6091,7 @@ export declare class RocketRideClient extends DAPClient {
      * Add a monitor subscription. If the key already exists, the new types are
      * merged via reference counting and the merged set is sent to the server.
      *
-     * @param key - Monitor key: `{ token }` for a running task, or `{ projectId, source }` for a project.
+     * @param key - Monitor key: `{ token }` (the control id) for one control, or `{ projectId, source }` for a project.
      * @param types - Event types to subscribe to (e.g. `['summary', 'flow']`).
      */
     addMonitor(key: MonitorKey, types: string[]): Promise<void>;
@@ -6592,7 +6605,7 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Start a cProfile profiling session on the server process or a pipeline.
      *
-     * @param target  - Task token to profile a pipeline subprocess, or
+     * @param target  - Control id to profile that control's engine subprocess, or
      *                  undefined/null to profile the server process itself.
      * @param session - Optional human-readable session name.
      * @returns Status object with session info and start time. If a session is
@@ -6604,7 +6617,7 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Stop the active cProfile profiling session.
      *
-     * @param target - Task token if profiling a pipeline, or undefined for server.
+     * @param target - Control id if profiling a pipeline, or undefined for server.
      * @returns Result with session name and runtime. With no active session, or a
      *          server-process session another connection started, status is
      *          'error' with a message instead.
@@ -6615,7 +6628,7 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Get the current cProfile profiling status.
      *
-     * @param target - Task token if querying a pipeline, or undefined for server.
+     * @param target - Control id if querying a pipeline, or undefined for server.
      * @returns Status indicating active/inactive, owner, runtime.
      * @throws Error if the caller lacks task.control, or the target is not a
      *         task the caller may control.
@@ -6624,7 +6637,7 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * Get the full cProfile report from the last completed session.
      *
-     * @param target - Task token if querying a pipeline, or undefined for server.
+     * @param target - Control id if querying a pipeline, or undefined for server.
      * @returns Object containing the full pstats text report, or a placeholder
      *          message when no session has completed.
      * @throws Error if the caller lacks task.control, or the target is not a
@@ -6638,7 +6651,7 @@ export declare class RocketRideClient extends DAPClient {
      * and icicle visualisations.  Supports optional depth and minimum
      * percentage pruning parameters.
      *
-     * @param target   - Task token if querying a pipeline, or undefined for server.
+     * @param target   - Control id if querying a pipeline, or undefined for server.
      * @param maxDepth - Maximum tree depth (default 50).
      * @param minPct   - Minimum cumtime percentage threshold (default 0.1).
      * @param includeSystem - Keep stdlib/system functions in the tree (server default true).
@@ -6654,7 +6667,7 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * List the threads profiled in the last completed session.
      *
-     * @param target - Task token if querying a pipeline, or undefined for server.
+     * @param target - Control id if querying a pipeline, or undefined for server.
      * @returns Object containing the threads, busiest first. With no completed
      *          session, threads is empty and error holds the message.
      * @throws Error if the caller lacks task.control, or the target is not a
@@ -6837,9 +6850,9 @@ export declare class RocketRideClient extends DAPClient {
      * recently. A node the entry source did not load fails at the engine.
      *
      * @param options.address - The pipe's address (`developerId.pipelineId[.source]`),
-     *                          or the address a `use()`/`submit()` result returned
-     * @param options.token - Deprecated spelling of `address` (the token slot carries the
-     *                        address); one of the two is required
+     *                          or the `address` a `use()`/`submit()` result returned beside
+     *                          its control id
+     * @param options.token - Deprecated spelling of `address`; one of the two is required
      * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
      * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
      *                         tool-lane nodes; the first node that owns the tool handles it.

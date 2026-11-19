@@ -30,7 +30,7 @@ same rule, so a source segment is always one component id and the address
 splits unambiguously on its dots — no prefix matching anywhere.
 
 The address omits the owner on purpose: the server resolves WHOSE control
-from the account on the request (the caller's @dev presence, else their
+from the account on the request (the caller's @spec presence, else their
 @me deployment, then team, then public). It is public information — the
 registry key, display id, monitor key and run-log path — never a secret.
 The account API key (``rr_``) is the only credential; a key may carry an

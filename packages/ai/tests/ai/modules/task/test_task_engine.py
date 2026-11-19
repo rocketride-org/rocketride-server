@@ -214,13 +214,14 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     assert config['taskId'] == 'enginehash:user-1'
     assert config['config']['threadCount'] == 4
     assert config['config']['pipelineTraceLevel'] is None
+    # The SHAPE of the spec (C.22): the components with empty configs, the parameters map beside them
     assert config['config']['pipeline'] == {
         'version': 2,
         'source': 'src',
         'project_id': 'proj-1',
         'name': 'my-pipeline',
         'description': 'desc',
-        'components': [{'id': 'src'}],
+        'components': [{'id': 'src', 'config': {}}],
         'parameters': {},
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'

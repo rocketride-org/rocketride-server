@@ -39,6 +39,9 @@ import ai.modules.task.task_server_facade as facade_mod
 from ai.modules.task.task_control import DeploymentRef
 from ai.modules.task.task_server_facade import start_server_task_as_team
 
+#: The control id the execute answers with (the token slot, plan section 1).
+CONTROL_ID = '0123456789abcdef0123456789abcdef'
+
 
 # ============================================================================
 # Helpers
@@ -53,7 +56,8 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
         owner_kind: ``'team'`` (@team deploy) or ``'user'`` (@me deploy).
         owner_user_id: The owning user of a @me deploy.
         controls: The live registry the server answers ``control_by_key``
-            from; defaults to the one deploy control this dispatch starts.
+            from, by control id; defaults to the one deploy control this
+            dispatch starts.
 
     Returns:
         Dict with the execute ``arguments``, the synthetic ``account_info``,
@@ -68,16 +72,14 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
         captured['arguments'] = arguments
         captured['account_info'] = self._account_info
         captured['deployment'] = self._trusted_deployment
-        # Step 2: answer like a successful execute (the address in the token slot).
-        return {'success': True, 'body': {'token': 'acme.proj-1.src-1'}}
+        # Step 2: answer like a successful execute (the control id in the token slot).
+        return {'success': True, 'body': {'token': CONTROL_ID, 'address': 'acme.proj-1.src-1'}}
 
-    # The server's live registry, by key. The facade must look its run up by
-    # the deploy rung's key and never walk the caller rungs (resolve_control).
-    owner_id = owner_user_id if owner_kind == 'user' else 'team-1'
+    # The server's live registry, by control id. The facade must look its run
+    # up by the id the execute answered with and never walk the caller rungs
+    # (resolve_control).
     if controls is None:
-        rung = 'me' if owner_kind == 'user' else 'team'
-        key = f'{rung}.{owner_id}.acme.proj-1.src-1'
-        controls = {key: SimpleNamespace(key=key)}
+        controls = {CONTROL_ID: SimpleNamespace(key=CONTROL_ID)}
     server = MagicMock()
     server.control_by_key = MagicMock(side_effect=lambda key: controls[key])
     server.resolve_control = MagicMock(side_effect=AssertionError('the facade must not resolve through the rungs'))
@@ -150,25 +152,24 @@ async def test_deploy_dispatch_carries_no_human_identity():
 
 
 @pytest.mark.asyncio
-async def test_team_deploy_returns_the_team_deploy_key():
-    """A @team deploy hands back the key of the run it started: team.<team>.<address>."""
+async def test_team_deploy_returns_the_key_of_the_run_it_started():
+    """A @team deploy hands back the key (the control id) of the run the execute answered with."""
     captured = await _dispatch(None)
-    assert captured['key'] == 'team.team-1.acme.proj-1.src-1'
-    captured['server'].control_by_key.assert_called_once_with('team.team-1.acme.proj-1.src-1')
+    assert captured['key'] == CONTROL_ID
+    captured['server'].control_by_key.assert_called_once_with(CONTROL_ID)
     captured['server'].resolve_control.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipeline():
     """A @me deploy shares its address with the owner's dev run of the same pipeline.
-    The facade must hand back the DEPLOY run's key, never the Play'd dev run's.
+    The facade hands back the DEPLOY run's id, never the Play'd dev run's: the
+    execute answered with it, and no rung is walked.
     """
-    controls = {
-        'dev.user-7.acme.proj-1.src-1': SimpleNamespace(key='dev.user-7.acme.proj-1.src-1'),
-        'me.user-7.acme.proj-1.src-1': SimpleNamespace(key='me.user-7.acme.proj-1.src-1'),
-    }
+    played = 'feedfacefeedfacefeedfacefeedface'
+    controls = {played: SimpleNamespace(key=played), CONTROL_ID: SimpleNamespace(key=CONTROL_ID)}
     captured = await _dispatch(None, owner_kind='user', owner_user_id='user-7', controls=controls)
-    assert captured['key'] == 'me.user-7.acme.proj-1.src-1'
+    assert captured['key'] == CONTROL_ID
     assert captured['account_info'].userId == 'user-7'
     captured['server'].resolve_control.assert_not_called()
 

@@ -56,8 +56,10 @@ export interface SqlEndpoint {
 	/** Stable identity for lists/maps: `${address}:${nodeId}`. */
 	key: string;
 	/**
-	 * The pipe address the tool call is made on (`developerId.pipelineId` or
-	 * `developerId.pipelineId.source`) — what `client.tool()` takes.
+	 * What the tool call is made on — what `client.tool()` takes: the pipe
+	 * address (`developerId.pipelineId` or `developerId.pipelineId.source`)
+	 * of a pipeline-bound endpoint, or the control id a direct connection's
+	 * temp pipeline answered with (the `use()` token slot, C.22).
 	 */
 	address: string;
 	/** Display name of the pipeline (its task name, else the pipe id). */

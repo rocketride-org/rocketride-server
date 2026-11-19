@@ -390,6 +390,8 @@ def _team_run(address, task_id):
     return SimpleNamespace(
         id=task_id,
         key=f'team.team-1.{address}',
+        index_key=f'team.team-1.{address}',
+        control_id=task_id,
         address=address,
         developer_id=developer_id,
         project_id=project_id,

@@ -36,8 +36,8 @@ from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskSer
 from ai.modules.task.types import TaskError
 from ai.modules.task.trace_owner import TraceOwners
 
-# A registry key in the ``runKind.ownerId.address`` layout start_task builds.
-KEY = 'dev.user-1.acme.proj-1.src-1'
+# A registry key: the control id start_task mints (32 hex characters).
+KEY = 'c0ffee00c0ffee00c0ffee00c0ffee00'
 
 
 def _make_server(*, config=None, web_server=None):
@@ -87,7 +87,7 @@ def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None, ttl
     lookups, the broadcast path and the cleanup loops read.
 
     Args:
-        key: registry key (``runKind.ownerId.address``; lookup key in ``_task_control``).
+        key: registry key (the control id; lookup key in ``_task_control``).
         user_id: owner user id (used by run-scoped checks).
         team_id: owning team id (used by permission resolution).
         task: the underlying engine stand-in (defaults to a MagicMock).
@@ -99,6 +99,10 @@ def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None, ttl
     return SimpleNamespace(
         id='acme.proj-1.src-1',
         key=key,
+        control_id=key,
+        index_key=f'spec.{user_id}.acme.proj-1.src-1',
+        config_hash='',
+        last_activity=0.0,
         address='acme.proj-1.src-1',
         developer_id='acme',
         userId=user_id,
@@ -516,14 +520,14 @@ def test_control_by_key_unknown_key_raises_runtime():
     """An unknown key raises RuntimeError (existing handlers still catch it)."""
     ts = _make_server()
     with pytest.raises(RuntimeError, match='not running'):
-        ts.control_by_key('dev.user-1.acme.proj-1.unknown')
+        ts.control_by_key('deadbeefdeadbeefdeadbeefdeadbeef')
 
 
 def test_control_by_key_unknown_key_carries_a_code():
     """The failure is classifiable without matching the English message (#2097)."""
     ts = _make_server()
     with pytest.raises(TaskError) as excinfo:
-        ts.control_by_key('dev.user-1.acme.proj-1.unknown')
+        ts.control_by_key('deadbeefdeadbeefdeadbeefdeadbeef')
     assert excinfo.value.code == TaskError.NOT_REGISTERED
     assert isinstance(excinfo.value, RuntimeError)
 
@@ -755,12 +759,14 @@ async def test_cleanup_tasks_removes_completed_expired_task(monkeypatch):
     task.is_task_complete = MagicMock(return_value=True)
     # endTime well in the past: 10000 - 200 -> grace window expired
     task.get_status = MagicMock(return_value=SimpleNamespace(endTime=9_000.0))
-    ts._task_control['dev.user-1.acme.proj-1.old'] = _make_control(key='dev.user-1.acme.proj-1.old', task=task)
+    ts._task_control['01d001d001d001d001d001d001d001d0'] = _make_control(
+        key='01d001d001d001d001d001d001d001d0', task=task
+    )
 
     with pytest.raises(_LoopBreak):
         await TaskServer._cleanup_tasks(ts)
 
-    ts.remove_task.assert_awaited_once_with('dev.user-1.acme.proj-1.old')
+    ts.remove_task.assert_awaited_once_with('01d001d001d001d001d001d001d001d0')
 
 
 @pytest.mark.asyncio
@@ -779,7 +785,9 @@ async def test_cleanup_tasks_skips_running_task(monkeypatch):
 
     task = MagicMock()
     task.is_task_complete = MagicMock(return_value=False)
-    ts._task_control['dev.user-1.acme.proj-1.run'] = _make_control(key='dev.user-1.acme.proj-1.run', task=task)
+    ts._task_control['a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0'] = _make_control(
+        key='a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', task=task
+    )
 
     with pytest.raises(_LoopBreak):
         await TaskServer._cleanup_tasks(ts)
@@ -835,14 +843,14 @@ async def test_monitor_ttl_terminates_idle_task(monkeypatch):
 
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    _ttl_control(ts, 'dev.user-1.acme.proj-1.idle', ttl=100, idle=100)
+    _ttl_control(ts, 'idle', ttl=100, idle=100)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
 
     # The reason MUST be 'ttl': it is what makes the run record as a
     # completed window instead of a cancelled run.
-    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.idle', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('idle', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -862,7 +870,7 @@ async def test_monitor_ttl_skips_task_with_zero_ttl(monkeypatch):
 
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    _ttl_control(ts, 'dev.user-1.acme.proj-1.immortal', ttl=0, idle=999_999)
+    _ttl_control(ts, 'immortal', ttl=0, idle=999_999)
 
     with pytest.raises(_LoopBreak):
         await TaskServer._monitor_ttl(ts)
@@ -885,7 +893,7 @@ async def test_remove_task_unknown_key_carries_a_code():
     """
     ts = _make_server()
     with pytest.raises(TaskError) as excinfo:
-        await ts.remove_task('dev.user-1.acme.proj-1.unknown')
+        await ts.remove_task('deadbeefdeadbeefdeadbeefdeadbeef')
     assert excinfo.value.code == TaskError.NOT_REGISTERED
 
 
@@ -902,7 +910,9 @@ async def test_remove_task_calls_stop_and_broadcasts():
     task.release.return_value = 0
     control = SimpleNamespace(
         id='acme.proj-1.src-1',
-        key='dev.user-1.acme.proj-1.rm',
+        key='d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0',
+        control_id='d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0',
+        index_key='spec.u1.acme.proj-1.src-1',
         address='acme.proj-1.src-1',
         developer_id='acme',
         userId='u1',
@@ -911,7 +921,6 @@ async def test_remove_task_calls_stop_and_broadcasts():
         # Monitor-key cleanup builds the owner-scoped key from the control.
         owner_id='u1',
         task=task,
-        draining=None,
         project_id='proj-1',
         source='src-1',
         apikey='ak_x',
@@ -919,12 +928,12 @@ async def test_remove_task_calls_stop_and_broadcasts():
         registered_at=0.0,
         launch_owner=None,
     )
-    ts._task_control['dev.user-1.acme.proj-1.rm'] = control
+    ts._task_control[control.key] = control
 
-    result = await TaskServer.remove_task(ts, 'dev.user-1.acme.proj-1.rm')
+    result = await TaskServer.remove_task(ts, control.key)
 
     assert result is control
-    assert 'dev.user-1.acme.proj-1.rm' not in ts._task_control
+    assert control.key not in ts._task_control
     task.stop_task.assert_awaited_once()
     ts.broadcast_server_event.assert_awaited_once()
 
@@ -1140,7 +1149,7 @@ async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
     """A control nothing has touched still ages, so the reaper is not disabled."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.quiet', ttl=900, idle=0)
+    control = _ttl_control(ts, 'quiet', ttl=900, idle=0)
 
     # Not due yet: the pass pops nothing
     await _one_ttl_cycle(monkeypatch, ts)
@@ -1148,7 +1157,7 @@ async def test_monitor_ttl_ages_a_silent_task(monkeypatch):
 
     # Its own clock runs on: at its ttl it is released
     assert await ts._ttl_cycle(control.last_activity + 900) == 1
-    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.quiet', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('quiet', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -1156,7 +1165,7 @@ async def test_monitor_ttl_holds_a_control_with_a_request_in_flight():
     """A call longer than the ttl is never expired mid-flight; the clock restarts when it ends."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.slow', ttl=900, idle=0)
+    control = _ttl_control(ts, 'slow', ttl=900, idle=0)
 
     # The request starts; its ttl comes and goes while it runs: re-armed, not released
     control.begin_request()
@@ -1172,7 +1181,7 @@ async def test_monitor_ttl_holds_a_control_with_a_request_in_flight():
     assert await ts._ttl_cycle(started + 1799) == 0
     ts.stop_task.assert_not_awaited()
     assert await ts._ttl_cycle(started + 1800) == 1
-    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.slow', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('slow', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -1180,11 +1189,11 @@ async def test_monitor_ttl_reaps_a_task_that_stayed_silent(monkeypatch):
     """The other half of the trade: an abandoned control is still collected."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    _ttl_control(ts, 'dev.user-1.acme.proj-1.abandoned', ttl=900, idle=900)
+    _ttl_control(ts, 'abandoned', ttl=900, idle=900)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
-    ts.stop_task.assert_awaited_once_with('dev.user-1.acme.proj-1.abandoned', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('abandoned', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -1192,7 +1201,7 @@ async def test_monitor_ttl_spares_a_task_whose_clock_was_reset(monkeypatch):
     """Activity after scheduling re-schedules: a busy control survives its stale deadline."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    control = _ttl_control(ts, 'dev.user-1.acme.proj-1.busy', ttl=900, idle=900)
+    control = _ttl_control(ts, 'busy', ttl=900, idle=900)
     control.touch()  # a request through the control
 
     await _one_ttl_cycle(monkeypatch, ts)
@@ -1209,12 +1218,12 @@ async def test_monitor_ttl_counts_pipeline_events_for_a_dev_control_only(monkeyp
     ts = _make_server()
     ts.stop_task = AsyncMock()
     busy = time.monotonic()
-    _ttl_control(ts, 'dev.user-1.acme.proj-1.dev', ttl=900, idle=900, pipeline_event=busy)
-    _ttl_control(ts, 'team.team-1.acme.proj-1.dep', ttl=900, idle=900, run_kind='deploy', pipeline_event=busy)
+    _ttl_control(ts, 'dev', ttl=900, idle=900, pipeline_event=busy)
+    _ttl_control(ts, 'dep', ttl=900, idle=900, run_kind='deploy', pipeline_event=busy)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
-    ts.stop_task.assert_awaited_once_with('team.team-1.acme.proj-1.dep', reason='ttl')
+    ts.stop_task.assert_awaited_once_with('dep', reason='ttl')
 
 
 @pytest.mark.asyncio
@@ -1222,8 +1231,8 @@ async def test_monitor_ttl_drops_the_stale_entry_of_a_replaced_control(monkeypat
     """A control replaced under its key is not released at its predecessor's deadline."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    _ttl_control(ts, 'dev.user-1.acme.proj-1.run', ttl=60, idle=60)
-    _ttl_control(ts, 'dev.user-1.acme.proj-1.run', ttl=600, idle=0)
+    _ttl_control(ts, 'a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', ttl=60, idle=60)
+    _ttl_control(ts, 'a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', ttl=600, idle=0)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
@@ -1255,18 +1264,27 @@ def _launch_pipeline():
 # is refused, never the caller.
 LAUNCH_IDENTITY = {'client_id': 'user-1', 'user_id': 'user-1', 'team_id': 'team-1', 'developer_id': 'acme'}
 
-# The address and registry key a dev launch of ``_launch_pipeline()`` builds.
+# The address, the index key and the control id of a dev launch of ``_launch_pipeline()``.
 LAUNCH_ADDRESS = 'acme.project-1.src'
-LAUNCH_KEY = f'dev.user-1.{LAUNCH_ADDRESS}'
+LAUNCH_INDEX = f'spec.user-1.{LAUNCH_ADDRESS}'
+LAUNCH_ID = 'ab1e5ab1e5ab1e5ab1e5ab1e5ab1e5ab'
 
 
 def _seed_running_task(ts):
-    """Register a live (not complete) run of ``_launch_pipeline()`` at the key a dev launch of it builds."""
+    """Register a live (not complete) run of ``_launch_pipeline()`` with the identity a dev launch of it builds."""
+    from ai.modules.task.engine_key import engine_content
+    from ai.modules.task.task_control import config_hash
+    from ai.modules.task.task_engine import component_facts
+
     task = MagicMock()
     task.is_task_complete.return_value = False
+    task.dormant_reason = None
     control = SimpleNamespace(
         id=LAUNCH_ADDRESS,
-        key=LAUNCH_KEY,
+        key=LAUNCH_ID,
+        control_id=LAUNCH_ID,
+        index_key=LAUNCH_INDEX,
+        config_hash=config_hash(engine_content(_launch_pipeline(), 'src', component_facts).config_by_index),
         address=LAUNCH_ADDRESS,
         deployment=None,
         registered_at=0.0,
@@ -1274,59 +1292,57 @@ def _seed_running_task(ts):
         developer_id='acme',
         project_id='project-1',
         source='src',
+        provider='webhook',
         owner_id='user-1',
         pipeline=_launch_pipeline(),
         task=task,
+        dormant=False,
+        last_activity=0.0,
     )
-    ts._task_control[LAUNCH_KEY] = control
+    ts._task_control[LAUNCH_ID] = control
     return control
 
 
-def _assert_says_how_to_run_or_attach(message: str, display_id: str) -> None:
-    """Name the existing run without implying that other pipelines cannot run."""
-    assert message == (
-        f'Pipeline is already running (task {display_id}). Reuse it (useExisting / use_existing), or stop it and run again.'
-    )
-
-
 @pytest.mark.asyncio
-async def test_start_task_already_running_at_the_same_address_says_how_to_run_or_attach():
-    """The second launch of the same pipe by the same owner derives the first
-    one's address and registry key, so the refusal must identify that existing
-    run, and the running control is left in place.
+async def test_start_task_a_second_launch_of_the_same_spec_answers_with_the_running_control():
+    """The same owner, project_id and configuration is the same identity (plan section 1): the running
+    control answers, with its id in the token slot, and nothing else is registered or started.
     """
     ts = _make_server()
     running = _seed_running_task(ts)
 
-    with pytest.raises(ValueError) as excinfo:
-        await ts.start_task(
-            {'command': 'launch', 'arguments': {'pipeline': _launch_pipeline()}}, conn=MagicMock(), **LAUNCH_IDENTITY
-        )
+    result = await ts.start_task(
+        {'command': 'launch', 'arguments': {'pipeline': _launch_pipeline()}}, conn=MagicMock(), **LAUNCH_IDENTITY
+    )
 
-    _assert_says_how_to_run_or_attach(str(excinfo.value), LAUNCH_ADDRESS)
-    assert ts._task_control == {LAUNCH_KEY: running}
+    assert (result['token'], result['address'], result['reused'], result['converged']) == (
+        LAUNCH_ID,
+        LAUNCH_ADDRESS,
+        True,
+        'none',
+    )
+    assert ts._task_control == {LAUNCH_ID: running} and ts._engines == {}
 
 
 @pytest.mark.asyncio
 async def test_start_task_token_override_lands_on_the_address_it_names():
     """A caller token overrides the spec's project_id (plan B1): it names the
     address the run takes, so a token equal to a running run's pipeline id is
-    that run's address and gets the same already-running refusal, whatever the
-    spec's own project_id says.
+    that run's identity and answers with that run, whatever the spec's own
+    project_id says.
     """
     ts = _make_server()
     running = _seed_running_task(ts)
     pipeline = {**_launch_pipeline(), 'project_id': 'other'}
 
-    with pytest.raises(ValueError) as excinfo:
-        await ts.start_task(
-            {'command': 'launch', 'arguments': {'token': 'project-1', 'pipeline': pipeline}},
-            conn=MagicMock(),
-            **LAUNCH_IDENTITY,
-        )
+    result = await ts.start_task(
+        {'command': 'launch', 'arguments': {'token': 'project-1', 'pipeline': pipeline}},
+        conn=MagicMock(),
+        **LAUNCH_IDENTITY,
+    )
 
-    _assert_says_how_to_run_or_attach(str(excinfo.value), LAUNCH_ADDRESS)
-    assert ts._task_control == {LAUNCH_KEY: running}
+    assert result['token'] == LAUNCH_ID and result['reused'] is True
+    assert ts._task_control == {LAUNCH_ID: running}
 
 
 @pytest.mark.asyncio
@@ -1350,7 +1366,7 @@ async def test_start_task_refuses_a_token_that_is_not_an_address_segment():
         assert str(excinfo.value) == (
             f'token {bad!r} is not a valid address segment: use only letters, digits, "_" and "-"'
         )
-    assert ts._task_control == {LAUNCH_KEY: running}
+    assert ts._task_control == {LAUNCH_ID: running}
 
 
 @pytest.mark.parametrize(
@@ -1412,4 +1428,21 @@ async def test_start_task_without_a_source_component_says_how_to_add_one():
 
     message = str(excinfo.value)
     assert message == 'Pipeline has no source. Select a source component or add a node configured as a source.'
+    assert ts._task_control == {}
+
+
+@pytest.mark.asyncio
+async def test_start_task_refuses_a_spec_without_a_project_id_naming_the_field():
+    """project_id is required (plan 2.2, section 1): nothing is minted in its place and nothing is registered."""
+    ts = _make_server()
+    pipeline = _launch_pipeline()
+    del pipeline['project_id']
+
+    with pytest.raises(TaskError) as excinfo:
+        await ts.start_task(
+            {'command': 'launch', 'arguments': {'pipeline': pipeline}}, conn=MagicMock(), **LAUNCH_IDENTITY
+        )
+
+    assert excinfo.value.code == TaskError.INVALID_ARGUMENT
+    assert excinfo.value.field == 'project_id'
     assert ts._task_control == {}

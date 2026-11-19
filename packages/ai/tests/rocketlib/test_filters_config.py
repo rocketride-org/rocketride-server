@@ -22,7 +22,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""``IGlobalBase.config``, ``IInstanceBase.settings``, ``IValidatorBase`` and the methods-only IGlobal facade."""
+"""``IGlobalBase.config``, ``IInstanceBase.settings`` and ``IValidatorBase``: one IGlobal per control."""
 
 from __future__ import annotations
 
@@ -30,14 +30,14 @@ from types import SimpleNamespace
 
 import pytest
 import rocketlib.engine
-from rocketlib.config import ConfigError, ConfigView, TenancyViolation
+from rocketlib.config import ConfigError, ConfigView
 from rocketlib.filters import IGlobalBase, IInstanceBase, IValidatorBase
 
-from tests.rocketlib.schemas import DEPTH_ESTIMATE, multitenant
+from tests.rocketlib.schemas import DEPTH_ESTIMATE
 
 # ==== Fixtures ===============================================================
 
-SCHEMAS = {'depth_estimate': DEPTH_ESTIMATE, 'depth_estimate_mt': multitenant(DEPTH_ESTIMATE)}
+SCHEMAS = {'depth_estimate': DEPTH_ESTIMATE}
 
 
 @pytest.fixture(autouse=True)
@@ -47,10 +47,10 @@ def _engine_schemas(monkeypatch):
 
 
 class _Global(IGlobalBase):
-    """A node global the way the engine builds it: glb set before beginGlobal."""
+    """A node global the way the engine builds it for ONE control: glb set before beginGlobal."""
 
-    def __init__(self, logical_type: str = 'depth_estimate', conn_config=None):
-        self.glb = SimpleNamespace(logicalType=logical_type, connConfig=conn_config or {})
+    def __init__(self, logical_type: str = 'depth_estimate', conn_config=None, control_id: str = 'control-1'):
+        self.glb = SimpleNamespace(controlId=control_id, logicalType=logical_type, connConfig=conn_config or {})
         self.counter = 0
 
     def bump(self) -> int:
@@ -59,24 +59,18 @@ class _Global(IGlobalBase):
 
 
 class _Instance(IInstanceBase):
-    """A node instance the way the engine builds it: instance + IGlobal assigned by C++."""
+    """A node instance the way the engine builds it: instance + its control's IGlobal assigned by C++."""
 
     def __init__(self, glb: _Global, node_id: str = 'depth_estimate_1'):
         self.instance = SimpleNamespace(pipeType=SimpleNamespace(id=node_id))
         self.IGlobal = glb
 
 
-class _MethodsOnlyInstance(_Instance):
-    """A certified node that opted into the methods-only facade."""
-
-    iglobal_methods_only = True
-
-
 # ==== IGlobalBase.config =====================================================
 
 
 class TestGlobalConfig:
-    """Lazy, cached, flattened, and refusing per-caller keys with a teaching message."""
+    """Lazy, cached, flattened, the control's own values; refusing a per-call key with a teaching message."""
 
     def test_lazy_and_cached(self):
         glb = _Global(conn_config={'model': 'tiny'})
@@ -91,15 +85,24 @@ class TestGlobalConfig:
             _Global().config.mdoel
 
     def test_param_key_refused_with_teaching_error(self):
-        with pytest.raises(TenancyViolation, match='"maxEdge" is a parameter; read it from self.settings in IInstance'):
+        with pytest.raises(ConfigError, match='"maxEdge" is a parameter; read it from self.settings in IInstance'):
             _Global().config.maxEdge
+        with pytest.raises(ConfigError):
+            _Global().config['maxEdge']
 
-    def test_env_valued_key_served_on_uncertified_node(self):
+    def test_env_valued_key_is_served_as_the_server_delivered_it(self):
+        # The server expands ${ROCKETRIDE_*} from the control's environment
+        # before the config reaches the engine: the global reads a value
+        assert _Global(conn_config={'apikey': 'sk-control'}).config.apikey == 'sk-control'
+
+    def test_a_placeholder_the_server_left_is_served_as_written(self):
         assert _Global().config.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
 
-    def test_env_valued_key_refused_on_multitenant_node(self):
-        with pytest.raises(TenancyViolation, match='"apikey" is set from the caller\'s environment'):
-            _Global('depth_estimate_mt').config.apikey
+    def test_two_controls_two_globals_two_configs(self):
+        a = _Global(conn_config={'model': 'tiny', 'apikey': 'sk-a'}, control_id='control-a')
+        b = _Global(conn_config={'model': 'base', 'apikey': 'sk-b'}, control_id='control-b')
+        assert (a.glb.controlId, a.config.model, a.config.apikey) == ('control-a', 'tiny', 'sk-a')
+        assert (b.glb.controlId, b.config.model, b.config.apikey) == ('control-b', 'base', 'sk-b')
 
     def test_invalid_config_fails_at_resolve(self):
         with pytest.raises(ConfigError, match='unknown config key "mdoel"'):
@@ -123,13 +126,13 @@ class TestValidatorBase:
 
     def test_valid_config_passes(self):
         validator = IValidatorBase()
-        validator.glb = SimpleNamespace(logicalType='depth_estimate', connConfig={'maxEdge': 128})
+        validator.glb = SimpleNamespace(controlId='', logicalType='depth_estimate', connConfig={'maxEdge': 128})
         validator.validateConfig()
         validator.validateConfig(True)
 
     def test_invalid_config_raises(self):
         validator = IValidatorBase()
-        validator.glb = SimpleNamespace(logicalType='depth_estimate', connConfig={'maxEdge': 9000})
+        validator.glb = SimpleNamespace(controlId='', logicalType='depth_estimate', connConfig={'maxEdge': 9000})
         with pytest.raises(ConfigError, match='"maxEdge" must be <= 4096'):
             validator.validateConfig()
 
@@ -138,11 +141,11 @@ class TestValidatorBase:
 
 
 class TestInstanceSettings:
-    """Per call: config + env expansion + the node's filtered params, read from the stamped self._caller."""
+    """Per call: the control's config + the node's filtered params, read from the stamped self._caller."""
 
     def test_param_key_readable_via_settings(self):
         inst = _Instance(_Global())
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}, 'env': {}}
+        inst._caller = {'controlId': 'control-1', 'params': {'depth_estimate_1': {'maxEdge': 1024}}}
         assert inst.settings.maxEdge == 1024
         assert inst.settings['maxEdge'] == 1024
 
@@ -151,26 +154,36 @@ class TestInstanceSettings:
         inst._caller = {'params': {'other_node': {'maxEdge': 1024}}}
         assert inst.settings.maxEdge == 640
 
-    def test_env_expanded_from_caller(self):
-        inst = _Instance(_Global())
-        inst._caller = {'env': {'ROCKETRIDE_DEPTH_APIKEY': 'sk-caller'}}
-        assert inst.settings.apikey == 'sk-caller'
+    def test_settings_are_the_controls_config_plus_params(self):
+        inst = _Instance(_Global(conn_config={'apikey': 'sk-control'}))
+        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}}
+        assert (inst.settings.apikey, inst.settings.maxEdge) == ('sk-control', 1024)
 
-    def test_two_callers_same_instance_see_their_own_values(self):
-        glb = _Global()
-        inst = _Instance(glb)
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 640}}, 'env': {'ROCKETRIDE_DEPTH_APIKEY': 'a'}}
-        assert (inst.settings.maxEdge, inst.settings.apikey) == (640, 'a')
-        inst._caller = None
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}, 'env': {'ROCKETRIDE_DEPTH_APIKEY': 'b'}}
-        inst._settings = None
-        assert (inst.settings.maxEdge, inst.settings.apikey) == (1024, 'b')
-        assert glb._resolved().maxEdge == 640
-
-    def test_no_context_is_plain_config(self):
+    def test_no_context_is_the_controls_config(self):
         inst = _Instance(_Global(conn_config={'maxEdge': 128}))
         assert inst.settings.maxEdge == 128
         assert inst.settings.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
+
+    def test_instances_of_two_controls_read_their_own_global(self):
+        a = _Global(conn_config={'model': 'tiny'}, control_id='control-a')
+        b = _Global(conn_config={'model': 'base'}, control_id='control-b')
+        inst_a, inst_b = _Instance(a), _Instance(b)
+        inst_a._caller = {'controlId': 'control-a'}
+        inst_b._caller = {'controlId': 'control-b'}
+        assert inst_a.IGlobal is a and inst_b.IGlobal is b
+        assert (inst_a.settings.model, inst_b.settings.model) == ('tiny', 'base')
+
+    def test_iglobal_is_the_plain_object(self):
+        # No facade: an instance reaches only its own control's IGlobal, so
+        # its data is read and written directly
+        glb = _Global()
+        inst = _Instance(glb)
+        assert inst.IGlobal is glb
+        assert inst.IGlobal.bump() == 1
+        assert inst.IGlobal.counter == 1
+        inst.IGlobal.counter = 5
+        assert glb.counter == 5
+        assert IInstanceBase.IGlobal is None
 
     def test_caller_and_cache_default_to_none_on_the_base(self):
         assert IInstanceBase._caller is None
@@ -204,78 +217,21 @@ class TestInstanceSettings:
         assert inst.settings.maxEdge == 640
 
     def test_settings_never_refuse(self):
-        inst = _Instance(_Global('depth_estimate_mt'))
-        inst._caller = {'env': {'ROCKETRIDE_DEPTH_APIKEY': 'sk'}}
-        assert inst.settings.apikey == 'sk'
+        inst = _Instance(_Global(conn_config={'apikey': 'sk-control'}))
+        assert inst.settings.apikey == 'sk-control'
         assert inst.settings.maxEdge == 640
 
-    def test_settings_bypass_methods_only_facade(self):
-        inst = _MethodsOnlyInstance(_Global())
+    def test_settings_do_not_touch_the_globals_cached_config(self):
+        glb = _Global()
+        inst = _Instance(glb)
         inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}}
         assert inst.settings.maxEdge == 1024
+        assert glb._resolved().maxEdge == 640
+        with pytest.raises(ConfigError):
+            glb.config.maxEdge
 
     def test_settings_before_iglobal_bound(self):
         inst = _Instance.__new__(_Instance)
         inst.instance = SimpleNamespace(pipeType=SimpleNamespace(id='x'))
         with pytest.raises(AttributeError):
             inst.settings
-
-
-# ==== Methods-only IGlobal facade ============================================
-
-
-class TestIGlobalFacade:
-    """Opt-in: callables pass through, data reads and writes raise, whitelist reaches through."""
-
-    def test_default_is_the_raw_global(self):
-        glb = _Global()
-        inst = _Instance(glb)
-        assert inst.IGlobal is glb
-        assert inst.IGlobal.counter == 0
-
-    def test_methods_run_with_the_real_self(self):
-        glb = _Global()
-        inst = _MethodsOnlyInstance(glb)
-        assert inst.IGlobal.bump() == 1
-        assert glb.counter == 1
-
-    def test_data_read_raises_teaching_error(self):
-        inst = _MethodsOnlyInstance(_Global())
-        with pytest.raises(TenancyViolation, match='IGlobal.counter is shared state read from an instance'):
-            inst.IGlobal.counter
-
-    def test_config_read_through_facade_raises(self):
-        inst = _MethodsOnlyInstance(_Global())
-        with pytest.raises(TenancyViolation):
-            inst.IGlobal.config
-
-    def test_writes_raise(self):
-        inst = _MethodsOnlyInstance(_Global())
-        with pytest.raises(TenancyViolation, match='cannot set IGlobal.counter'):
-            inst.IGlobal.counter = 5
-        with pytest.raises(TenancyViolation):
-            del inst.IGlobal.counter
-
-    def test_whitelist_reaches_through(self):
-        glb = _Global()
-        glb.tool_description = 'A database of world cities'
-        inst = _MethodsOnlyInstance(glb)
-        assert inst.IGlobal.glb.logicalType == 'depth_estimate'
-        assert inst.IGlobal.tool_description == 'A database of world cities'
-        assert inst._tool_config_description() == 'A database of world cities'
-
-    def test_whitelist_missing_attribute_is_attribute_error(self):
-        inst = _MethodsOnlyInstance(_Global())
-        assert getattr(inst.IGlobal, 'tool_description', None) is None
-
-    def test_class_level_access_is_none(self):
-        assert IInstanceBase.IGlobal is None
-        assert _MethodsOnlyInstance.IGlobal is None
-
-    def test_reassignment_and_delete(self):
-        first, second = _Global(), _Global()
-        inst = _Instance(first)
-        inst.IGlobal = second
-        assert inst.IGlobal is second
-        del inst.IGlobal
-        assert inst.IGlobal is None

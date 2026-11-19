@@ -45,10 +45,14 @@ class TestLogStreams:
         project = fresh_project()
         pipeline = make_pipeline(project)
         try:
+            # Both doors return the control id (32 hex) in the token slot;
+            # terminate takes that id, never an address.
             dev = await self.client.use(pipeline=pipeline)
+            assert len(dev['token']) == 32 and all(c in '0123456789abcdef' for c in dev['token'])
             await self.client.terminate(dev['token'])
             await self.client.deploy.add(pipeline, deploy_to=TEAM)
             team = await self.client.deploy.run(project, SOURCE, TEAM)
+            assert len(team['token']) == 32 and all(c in '0123456789abcdef' for c in team['token'])
             await self.client.terminate(team['token'])
 
             streams = await _streams_of(self.client, project, want=2)

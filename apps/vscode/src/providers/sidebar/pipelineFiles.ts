@@ -34,7 +34,6 @@ import type { ConnectionManager } from '../../connection/connection';
 // controller, which carries sidebar view types the extension host's no-DOM
 // compile must never see. parse.ts is the pure parsing contract.
 import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
-import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import type { ParsedPipelineFile, ServiceClassInfo } from 'shared/tools/pipelines/utils/parse';
 import { checkMissingEnvVars } from '../../shared/util/envVarCheck';
 import { getLogger } from '../../shared/util/output';
@@ -420,9 +419,6 @@ export class PipelineFiles {
 				args: ConfigManager.getInstance().getTaskArgs(),
 				name: pipeName,
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
-				// The restart setting is also this Play's answer to a live run of
-				// other content (plan §3.4).
-				...onChangeArgs(cfg.pipelineRestartBehavior),
 			});
 		} catch (error) {
 			vscode.window.showErrorMessage(`Failed to run pipeline: ${error}`);

@@ -22,8 +22,10 @@ send so you can debug, trace, or build your own client.
   key (`{ "auth": "$ROCKETRIDE_APIKEY", "clientName": "...", "clientVersion": "..." }`);
   the SDKs read the key from the `ROCKETRIDE_APIKEY` env var (engine URI from
   `ROCKETRIDE_URI`). If `auth` fails the request errors. Once authenticated, each
-  task request carries the task `token` returned by `execute` (the SDK's `use()`)
-  in its `arguments`.
+  task request carries the `token` returned by `execute` (the SDK's `use()`) in
+  its `arguments`: the CONTROL ID, an opaque transient handle valid for the life
+  of the control (never persist it; `execute` returns the task's `address` beside
+  it).
   Cloud requires a key; a local engine typically does not.
 
 The default port is applied only when the URI omits one, point the client at a
@@ -73,9 +75,10 @@ then the raw bytes, so the frame on the wire is `<json-header>\n<binary-payload>
 }
 ```
 
-This particular request -- opening a data pipe -- carries the task's own
-`token` (returned by `execute`): a pipe is always opened on an already-running
-task. Every request on the pipe (`write`, `close`, ...) carries that same
+This particular request -- opening a data pipe -- carries the control's own
+`token` (the control id returned by `execute`): a pipe is always opened on an
+already-running control, and the slot takes the control id only, never an
+address. Every request on the pipe (`write`, `close`, ...) carries that same
 `token` in `arguments`, for example:
 
 ```json
@@ -131,7 +134,7 @@ than inferring one from the prose.
 
 | `code` | Meaning |
 | --- | --- |
-| `TASK_NOT_REGISTERED` | The token, public key or project/source names no live task: never started, terminated, replaced by another client, or the engine restarted (the task registry is in-memory and rebuilt at boot, so every previously issued token is invalid after a restart). |
+| `TASK_NOT_REGISTERED` | The control id or project/source names no live control of yours: never started, terminated, restarted (a restart mints a new control id), or the server restarted (the control registry is in-memory and rebuilt at boot, so every previously issued control id is invalid after a restart). A control id another account owns is `permission_denied`, never this code. |
 | `TASK_AMBIGUOUS` | An unscoped lookup matched several running tasks; retry with a scope. |
 | `TASK_COMPLETED` | The task finished before the request could be served. |
 | `TASK_STOPPED` | The task was stopped or cancelled before the request. |
@@ -177,8 +180,8 @@ A typical run is one request/response/event conversation over a single open
 socket, opened with the `auth` handshake above. The SDK methods map onto engine
 commands:
 
-1. **Start**: `use()` starts the pipeline (`execute`) and gets back a task
-   token.
+1. **Start**: `use()` starts the pipeline (`execute`) and gets back the
+   control id in `token` (and the address beside it).
 2. **Feed**: `send()` / `pipe()` push input (`rrext_process` / `write`), with
    file bytes in the request's `data` field; `chat()` drives a streaming,
    conversational exchange.

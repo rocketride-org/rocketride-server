@@ -134,7 +134,7 @@ class AccountInfo(BaseModel):
     # None = unscoped (every address the account may reach). Loaded at
     # hydration; ENFORCED where the task address is resolved (the shared
     # resolver and the HTTP door). A scoped key never attaches to the owner's
-    # @dev presence.
+    # @spec presence.
     endpoints: Optional[list[str]] = None
 
     # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
@@ -462,7 +462,7 @@ def team_order(account_info: AccountInfo) -> list[str]:
     The first team in the order that holds a name answers for it; teams that
     hold nothing are skipped; the order is total, so there is no tie rule. The
     first entry is the caller's HOME team (``home_team``): the team context of
-    ``@dev``, ``@me`` and a cross-org ``@public`` run, and the team every
+    ``@spec``, ``@me`` and a cross-org ``@public`` run, and the team every
     ledger row is attributed to.
 
     Source of the order: the STORED order on the membership

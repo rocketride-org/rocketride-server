@@ -603,8 +603,8 @@ pair unless --no-deploy.`,
 				// re-vendor that changed a tarball — a file: spec only links
 				// new bytes through pnpm, so vendoring without installing
 				// would leave the workspace running the previous client.
-				const repointed = repointClientDependency(workspaceRoot, out);
-				if ((repointed || shellChanged || clientChanged) && options.install !== false) {
+				const dependencyMoved = repointClientDependency(workspaceRoot, out);
+				if ((dependencyMoved || shellChanged || clientChanged) && options.install !== false) {
 					try {
 						out.line('Running pnpm install...');
 						execSync('pnpm install', { cwd: workspaceRoot, stdio: 'ignore' });

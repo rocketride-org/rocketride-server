@@ -848,20 +848,47 @@ class TestWriterControlLoad:
 
 @pytest.mark.asyncio
 async def test_an_older_writer_closing_leaves_the_newer_one_registered(istore, spool_root):
-    """Two writers opened on one stream (a control draining on the engine it left while the new engine serves it):
-    the registry names the newer one, and the older one's end_run deregisters only itself.
+    """Two writers opened on one stream (the engine a dormant control held still closing while the one started
+    again for it serves): the registry names the newer one, and the older one's end_run deregisters only itself.
     """
     older = await open_writer(istore, spool_root)
     newer = await open_writer(istore, spool_root)
     assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
-    await older.end_run('ok', '', reason='repointed')
+    await older.end_run('ok', '', reason='ttl')
     assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
     await newer.end_run('ok', '', reason='user')
     assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
 
 
 # =============================================================================
-# THE SHARED CONTINUUM (a control draining on the engine it left)
+# THE GRAMMAR: projectId.source.runKind, never the control id (plan 15 item 20)
+# =============================================================================
+
+
+def test_the_continuum_is_named_by_the_stable_identity_never_the_control_id():
+    """C.22 changes no run-log grammar: the stream, control and segment paths are built from the project,
+    the source and the run kind alone; the transient control id (32 hex) never enters a stored name.
+    """
+    from ai.modules.task.task_control import CONTROL_ID, mint_control_id
+
+    control_id = mint_control_id()
+    assert CONTROL_ID.match(control_id)
+    assert stream_name(PROJECT, SOURCE, KIND) == 'proj-1.chat_1.dev'
+    assert control_store_path(PROJECT, SOURCE, KIND) == '.logs/proj-1/chat_1.dev.json'
+    assert segment_store_path(PROJECT, SOURCE, KIND, 7) == '.logs/proj-1/chat_1.dev.000007.jsonl'
+    assert spool_path('/spool', CLIENT, STREAM, 7) == os.path.join('/spool', 'user-1.proj-1.chat_1.dev.000007.jsonl')
+    # Nothing in the writer's signature takes a control id: the identity is (owner, project, source, kind)
+    import inspect
+
+    assert 'control_id' not in inspect.signature(RunLogWriter.__init__).parameters
+    assert all(
+        control_id not in name
+        for name in (stream_name(PROJECT, SOURCE, KIND), control_store_path(PROJECT, SOURCE, KIND))
+    )
+
+
+# =============================================================================
+# THE SHARED CONTINUUM (two engines of one control, one closing while the next starts)
 # =============================================================================
 
 

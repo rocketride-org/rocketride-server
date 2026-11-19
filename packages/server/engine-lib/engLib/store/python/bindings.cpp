@@ -970,16 +970,21 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
-    ///		Declare the IServiceFilterGlobal
+    ///		Declare IGlobal.glb: one CONTROL's view of the node (plan
+    ///		4.1 rule 1). The node is one C++ global; each control's
+    ///		IGlobal object carries its own copy of this, so connConfig
+    ///		is that control's resolved configuration and controlId
+    ///		names it ("" for the default slot of a binding without a
+    ///		caller)
     ///------------------------------------------------------------
-    py::class_<IServiceFilterGlobal>(engLib, "IServiceFilterGlobal");
-    py::class_<IPythonGlobalBase, IServiceFilterGlobal>(engLib, "IFilterGlobal")
-        .PYBIND_PROP_READONLY(IServiceFilterGlobal, IJson, connConfig,
-                              pipeType.connConfig)
-        .PYBIND_PROP_READONLY(IServiceFilterGlobal, std::string, logicalType,
-                              pipeType.logicalType)
-        .PYBIND_PROP_READONLY(IServiceFilterGlobal, std::string, physicalType,
-                              pipeType.physicalType);
+    py::class_<GlobalContext>(engLib, "IFilterGlobal")
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, controlId,
+                              controlId)
+        .PYBIND_PROP_READONLY(GlobalContext, IJson, connConfig, connConfig)
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, logicalType,
+                              logicalType)
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, physicalType,
+                              physicalType);
 
     //-------------------------------------------------------------
     /// @details

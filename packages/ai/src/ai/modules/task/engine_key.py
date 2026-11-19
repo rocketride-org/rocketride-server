@@ -32,12 +32,17 @@ front end that is not the task server computes the same key from the same
 inputs; ``test_engine_key_parity`` holds a server process and a bare
 ``python -c`` import of this file to the same answer.
 
-IN the key: every component's resolved config and type, the connections in a
-stable order, and the entry ``source``. OUT of the key: the ``parameters``
-map, the trace level, threads, args, env values, per-call params, the owner,
-``project_id``/``name``/``description``, layout and ttl. A spec that is not
-shareable across users gets the key ``hash:ownerId``: every control of that
-owner with the same content shares it, nobody else does.
+IN the key: every component's provider, the connections in a stable order,
+the entry ``source`` and ``avoidMocks``: the SHAPE of the spec. OUT of the
+key: every component's configuration (per control: it rides the control's
+first open, plan 5.3), the ``parameters`` map, the trace level, threads,
+args, env values, per-call params, the owner, ``project_id``/``name``/
+``description``, layout and ttl. The resolved config is still computed here
+(``EngineContent.resolved_config`` / ``config_by_index``): it validates the
+spec and is the control's configuration identity, never hashed into the
+engine key. In this PR every rung qualifies the key by its owner,
+``hash:ownerId`` (plan 13 Step 3c PR 1); C.25 leaves the published rungs
+bare.
 """
 
 import hashlib
@@ -55,10 +60,39 @@ CONST_SHAREABLE_SOURCES = frozenset({'webhook', 'chat', 'dropper'})
 #: anything else (``local_nodes``, a workspace node) is not a catalog node.
 CONST_CATALOG_NODE_PREFIX = 'nodes.'
 
+#: The rungs whose engines are keyed ``hash:ownerId``: every rung in this PR
+#: (no cross-owner sharing before C.25, which shrinks this to ``spec``).
+OWNER_QUALIFIED_RUNGS = frozenset({'spec', 'me', 'team', 'public'})
+
 #: What the caller's catalog says about one component: its resolved config
 #: and whether it may run on a cross-user engine (``multitenant`` certified
 #: and from the catalog). Called as ``facts(provider, stored_config)``.
 ComponentFacts = Callable[[str, Dict[str, Any]], Tuple[Dict[str, Any], bool]]
+
+
+# ==== The stack order ============================================================
+
+
+def stack_order(components: List[Any]) -> List[Any]:
+    """
+    The components of a spec in STACK ORDER: the one order the task file writes and the open's config follows (C.22).
+
+    The engine indexes ``_caller.config`` by a component's position in the
+    task file's ``pipeline.components``; the server must therefore write the
+    task file and build every control's config from ONE rule that does not
+    depend on how a spec happens to list its components (two controls of one
+    shape may list them differently). Until C.23 brings the canonical walk,
+    the rule is the component id order.
+
+    Args:
+        components: The spec's ``components`` entries.
+
+    Returns:
+        The same entries, ordered by component id.
+    """
+    return sorted(
+        components, key=lambda component: str((component or {}).get('id') if isinstance(component, dict) else '')
+    )
 
 
 # ==== The pure key =============================================================
@@ -91,7 +125,6 @@ def connections_of(component: Mapping[str, Any]) -> Dict[str, List[Dict[str, str
 
 
 def content_hash(
-    resolved_config: Mapping[str, Dict[str, Any]],
     types: Mapping[str, str],
     connections: Mapping[str, Mapping[str, List[Dict[str, str]]]],
     source: str,
@@ -99,11 +132,12 @@ def content_hash(
     avoid_mocks: bool = False,
 ) -> str:
     """
-    sha256 over the sort-keyed JSON of the resolved spec.
+    sha256 over the sort-keyed JSON of the spec's shape: providers, wiring, source.
+
+    Configuration is not here (plan 7.2): a spec that differs only in a config
+    value is another control on the same engine.
 
     Args:
-        resolved_config: Component id -> resolved config (defaults applied,
-            ``${ROCKETRIDE_*}`` placeholders UNEXPANDED).
         types: Component id -> provider.
         connections: Component id -> ``connections_of(component)``.
         source: The entry component id.
@@ -119,7 +153,6 @@ def content_hash(
             {
                 'id': component_id,
                 'provider': str(types.get(component_id) or ''),
-                'config': resolved_config.get(component_id) or {},
                 'input': list((connections.get(component_id) or {}).get('input') or []),
                 'control': list((connections.get(component_id) or {}).get('control') or []),
             }
@@ -134,49 +167,50 @@ def content_hash(
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
-def qualified_key(hash_value: str, *, shareable: bool, owner_id: str) -> str:
+def qualified_key(hash_value: str, *, rung: str, owner_id: str) -> str:
     """
-    The registry key of an engine: the hash, qualified by its owner when private.
+    The registry key of an engine: the shape hash, qualified by its owner on an owner-qualified rung.
 
     Args:
-        hash_value: The spec's content hash.
-        shareable: True for a cross-user engine.
+        hash_value: The spec's shape hash.
+        rung: The rung the control resolved on (``spec``, ``me``, ``team``, ``public``).
         owner_id: The owning user (or team, for a team-owned run).
 
     Returns:
-        ``hash`` for a cross-user engine, ``hash:ownerId`` otherwise.
+        ``hash:ownerId`` on a rung in :data:`OWNER_QUALIFIED_RUNGS` (every
+        rung in this PR), the bare ``hash`` otherwise.
     """
-    return hash_value if shareable or not owner_id else f'{hash_value}:{owner_id}'
+    if rung not in OWNER_QUALIFIED_RUNGS or not owner_id:
+        return hash_value
+    return f'{hash_value}:{owner_id}'
 
 
 def engine_key(
-    resolved_config: Mapping[str, Dict[str, Any]],
     types: Mapping[str, str],
     connections: Mapping[str, Mapping[str, List[Dict[str, str]]]],
     source: str,
     *,
-    shareable: bool,
+    rung: str,
     owner_id: str,
     avoid_mocks: bool = False,
 ) -> str:
     """
-    The engine key of a resolved spec (plan 7.2, ALB seam 1).
+    The engine key of a spec's shape (plan 7.2, ALB seam 1).
 
     Args:
-        resolved_config: Component id -> resolved config.
         types: Component id -> provider.
         connections: Component id -> its stable-order wiring.
         source: The entry component id.
-        shareable: True when the engine may be held across users.
-        owner_id: The owner the key is qualified with when not shareable.
+        rung: The rung the control resolved on.
+        owner_id: The owner the key is qualified with.
         avoid_mocks: The spec's ``avoidMocks`` flag (see ``content_hash``).
 
     Returns:
         The engine key, also the task file's ``taskId``.
     """
     return qualified_key(
-        content_hash(resolved_config, types, connections, source, avoid_mocks=avoid_mocks),
-        shareable=shareable,
+        content_hash(types, connections, source, avoid_mocks=avoid_mocks),
+        rung=rung,
         owner_id=owner_id,
     )
 
@@ -186,66 +220,91 @@ def engine_key(
 
 class EngineContent:
     """
-    The content identity of a pipeline spec: its resolved parts, hash and shareability.
+    The identity of a pipeline spec: its shape hash (the engine's) and its resolved config (the control's).
 
     Attributes:
-        resolved_config: Component id -> resolved config.
+        resolved_config: Component id -> resolved config (defaults applied,
+            placeholders unexpanded). Never hashed into the engine key.
+        config_by_index: The same RESOLVED configs as a list by STACK INDEX
+            (``stack_order``, the component order the task file carries,
+            plan C.22; C.23 replaces it with the canonical walk): the
+            control's configuration identity (a spelled-out default and an
+            omitted one are one control).
+        stored_by_index: The configs AS THE SPEC STORES THEM, by the same
+            index: what the control's open delivers to the engine, which
+            resolves them against the node schemas itself (a resolved,
+            flattened view would not round-trip through the resolver).
         types: Component id -> provider.
         connections: Component id -> stable-order wiring.
         source: The entry component id.
-        content_hash: sha256 over the sort-keyed JSON of the resolved spec.
-        shareable: True when the engine may be held by controls of different
-            users (a request/response source and every component certified
-            ``multitenant`` and from the catalog).
-        avoid_mocks: The spec's ``avoidMocks`` flag; part of the identity.
+        content_hash: sha256 over the sort-keyed JSON of the shape.
+        shareable: What the catalog certifies (a request/response source and
+            every component ``multitenant`` from the catalog). Not consulted
+            for the key in this PR (every rung is owner-qualified); C.25
+            removes it with the certification.
+        avoid_mocks: The spec's ``avoidMocks`` flag; part of the shape.
     """
 
-    __slots__ = ('resolved_config', 'types', 'connections', 'source', 'content_hash', 'shareable', 'avoid_mocks')
+    __slots__ = (
+        'resolved_config',
+        'config_by_index',
+        'stored_by_index',
+        'types',
+        'connections',
+        'source',
+        'content_hash',
+        'shareable',
+        'avoid_mocks',
+    )
 
     def __init__(
         self,
         resolved_config: Dict[str, Dict[str, Any]],
+        config_by_index: List[Dict[str, Any]],
+        stored_by_index: List[Dict[str, Any]],
         types: Dict[str, str],
         connections: Dict[str, Dict[str, List[Dict[str, str]]]],
         source: str,
         shareable: bool,
         avoid_mocks: bool = False,
     ) -> None:
-        """Hold the resolved parts and derive the hash."""
+        """Hold the resolved parts and derive the shape hash."""
         self.resolved_config = resolved_config
+        self.config_by_index = config_by_index
+        self.stored_by_index = stored_by_index
         self.types = types
         self.connections = connections
         self.source = source
         self.shareable = shareable
         self.avoid_mocks = avoid_mocks
-        self.content_hash = content_hash(resolved_config, types, connections, source, avoid_mocks=avoid_mocks)
+        self.content_hash = content_hash(types, connections, source, avoid_mocks=avoid_mocks)
 
-    def key(self, *, shared: bool, owner_id: str) -> str:
+    def key(self, *, rung: str, owner_id: str) -> str:
         """
-        The engine key for this content.
+        The engine key for this shape.
 
         Args:
-            shared: True to key a cross-user engine (only when ``shareable``
-                and the caller's engine shape is the policy one).
-            owner_id: The owner a private key is qualified with.
+            rung: The rung the control resolved on.
+            owner_id: The owner the key is qualified with.
 
         Returns:
             The engine key.
         """
-        return qualified_key(self.content_hash, shareable=shared and self.shareable, owner_id=owner_id)
+        return qualified_key(self.content_hash, rung=rung, owner_id=owner_id)
 
 
 def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFacts) -> EngineContent:
     """
-    Compute the content identity of a pipeline spec.
+    Compute the identity of a pipeline spec: its shape and its resolved config.
 
-    Shareable across users iff the entry source is a request/response source
-    (webhook, chat, dropper) AND ``facts`` says every component may run on a
-    cross-user engine (plan section 1, 4.4); anything else is shared per
-    owner only. A component ``facts`` cannot resolve (an unknown node, a
-    config that does not fit its schema) is an ERROR, raised as ``facts``
-    raised it: a spec that cannot be keyed is never run under a private key
-    over its raw config (audit 2026-11-12).
+    The config of every component is resolved through ``facts`` (defaults
+    applied) in the spec's component order, which is the stack index the
+    task file carries (C.22). A component ``facts`` cannot resolve (an
+    unknown node, a config that does not fit its schema) is an ERROR, raised
+    as ``facts`` raised it: a spec that cannot be keyed is never run
+    (audit 2026-11-12). ``shareable`` records what the catalog certifies
+    (a request/response source and every component ``multitenant`` from the
+    catalog); nothing reads it for the key in this PR.
 
     Args:
         pipeline: The spec as submitted (placeholders unexpanded).
@@ -253,21 +312,34 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
         facts: The caller's catalog: ``facts(provider, stored) -> (resolved, shareable)``.
 
     Returns:
-        EngineContent: the resolved parts, the hash and the cross-user shareability.
+        EngineContent: the resolved parts, the shape hash and the certification.
     """
     resolved: Dict[str, Dict[str, Any]] = {}
+    by_index: List[Dict[str, Any]] = []
+    stored_by_index: List[Dict[str, Any]] = []
     types: Dict[str, str] = {}
     wiring: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
     shareable = True
-    for component in pipeline.get('components', []) or []:
+    for component in stack_order(pipeline.get('components', []) or []):
         component_id = str(component.get('id'))
         provider = str(component.get('provider') or '')
         stored = component.get('config') or {}
         config, component_shareable = facts(provider, stored)
         resolved[component_id] = config
+        by_index.append(config)
+        stored_by_index.append(dict(stored))
         types[component_id] = provider
         wiring[component_id] = connections_of(component)
         shareable = shareable and component_shareable
     source_provider: Optional[str] = types.get(str(source))
     shareable = shareable and source_provider in CONST_SHAREABLE_SOURCES
-    return EngineContent(resolved, types, wiring, source, shareable, avoid_mocks=bool(pipeline.get('avoidMocks')))
+    return EngineContent(
+        resolved,
+        by_index,
+        stored_by_index,
+        types,
+        wiring,
+        source,
+        shareable,
+        avoid_mocks=bool(pipeline.get('avoidMocks')),
+    )

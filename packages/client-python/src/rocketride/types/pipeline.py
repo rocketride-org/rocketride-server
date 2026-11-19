@@ -195,12 +195,11 @@ class SUBMIT_RESULT(TypedDict, total=False):
     beside these. Stamps:
     """
 
-    token: str  # The address that answered: developerId.pipelineId.source
-    resolved: Literal['@dev', '@me', '@team', '@public']  # The rung that answered
+    token: str  # The control id that answered: opaque, transient, valid for the life of the control; never persist it
+    address: str  # The address that answered: developerId.pipelineId.source (the stable identity, beside the id)
+    resolved: Literal['@spec', '@me', '@team', '@public']  # The rung that answered
     team: str  # On '@team': the answering team
-    version: int  # The artifact version (absent on '@dev')
-    engineKey: str  # The engine the request ran on (content hash, owner-qualified when private)
-    specMatch: bool  # False when on_change='keep' delivered to an engine running another spec
-    converged: Literal['none', 'started', 'repointed']  # What resolution did to reach an engine
+    version: int  # The artifact version (absent on '@spec')
+    engineKey: str  # The engine the request ran on (shape key, owner-qualified)
+    converged: Literal['none', 'started']  # 'none': an existing control answered; 'started': this call created one
     ignored: List[str]  # Server-controlled arguments a name call passed (threads/args/env/ttl)
-    warnings: List[dict]  # repoint_storm warnings, when any

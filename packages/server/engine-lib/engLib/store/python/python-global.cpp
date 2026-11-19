@@ -26,6 +26,15 @@
 namespace engine::store::pythonBase {
 //-------------------------------------------------------------------------
 /// @details
+///		The registry of live node globals the engine-wide sweep walks, and
+///		the one sweep thread
+//-------------------------------------------------------------------------
+std::mutex IPythonGlobalBase::s_registryLock;
+std::set<IPythonGlobalBase *> IPythonGlobalBase::s_registry;
+Opt<async::Thread> IPythonGlobalBase::s_sweeper;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Imports <path>.<name> from the node package. The file is optional:
 ///		an absent file returns an empty handle, while a file that fails
 ///		to import is an error.
@@ -57,13 +66,15 @@ static ErrorOr<py::object> loadOptionalSubmodule(const Text &path,
 
 //-------------------------------------------------------------------------
 /// @details
-///		Constructor - creates underlying python objects and binds them
-///		to the handles. The node package contract is file-per-class:
-///		<path>.IGlobal is imported when the pipe runs (falling back to
-///		rocketlib.IGlobalBase, so an instance's settings resolve for a
-///		node that ships only IInstance.py), and in CONFIG /
+///		Constructor - resolves the node package and the class every
+///		control's IGlobal is built from. The node package contract is
+///		file-per-class: <path>.IGlobal is imported when the pipe runs
+///		(falling back to rocketlib.IGlobalBase, so an instance's settings
+///		resolve for a node that ships only IInstance.py), and in CONFIG /
 ///		PIPELINE_CONFIG mode only <path>.IValidator (falling back to
 ///		rocketlib.IValidatorBase) - IGlobal.py is never imported there.
+///		No IGlobal object is constructed here: each control's is built on
+///		the first binding that touches the node under it (acquireSlot)
 //-------------------------------------------------------------------------
 IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
     : Parent(args) {
@@ -123,6 +134,8 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
         if (!pyModule) return pyModule.ccode();
         m_pyModule = *pyModule;
 
+        // The class every object is constructed from
+        py::object pyClass;
         if (m_pyModule) {
             // The file is present, so the class is not optional
             if (!py::hasattr(m_pyModule, className))
@@ -130,8 +143,7 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
                              "is missing from", _ts(m_modulePath, ".",
                                                     className));
 
-            // Create an instance of the IGlobal / IValidator class
-            m_pyGlobal = m_pyModule.attr(className)();
+            pyClass = m_pyModule.attr(className);
         } else {
             // No IValidator.py / IGlobal.py: the framework default. The
             // validator checks the configuration against the schema; the
@@ -147,104 +159,176 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
                 return APERR(Ec::InvalidModule, "The", baseName,
                              "template is missing");
 
-            m_pyGlobal = pyUtil->attr(baseName)();
+            pyClass = pyUtil->attr(baseName);
         }
 
-        // If we have a global data instance, bind it to this host service
-        if (m_pyGlobal) {
-            // Initialize the python endpoint with this host service
-            m_pyGlobal.attr("IEndpoint") = m_pyEndpoint;
-
-            // Save the info into pythons IGlobal
-            m_pyGlobal.attr("glb") = this;
+        if (configMode) {
+            // No control exists in config mode: the one validator reads the
+            // task file's configuration through the same glb an IGlobal does
+            m_pyValidator = pyClass();
+            m_pyValidator.attr("IEndpoint") = m_pyEndpoint;
+            m_pyValidator.attr("glb") = py::cast(GlobalContext{
+                {}, pipeType.logicalType, pipeType.physicalType,
+                pipeType.connConfig});
+            return {};
         }
 
-        // And done
+        // The IGlobal class: one object per control, built on first touch
+        m_pyGlobalClass = pyClass;
+
+        // Where this node's configuration sits in the open's config list:
+        // the task file's component order, which is what the server wrote
+        // and reads back (plan 5.3). Outside a pipeline (a filter stack
+        // named by type) it is the stack position
+        m_stackIndex = stackIndex();
         return {};
     };
 
     m_boundError = callPython(python);
+
+    // Config mode has nothing to sweep; a pipe-mode node joins the sweep
+    if (!m_boundError && m_pyGlobalClass) {
+        std::lock_guard<std::mutex> guard(s_registryLock);
+
+        s_registry.insert(this);
+
+        // The first live global starts the one sweep thread
+        if (!s_sweeper) {
+            s_sweeper.emplace(_location, "IGlobalSweep",
+                              &IPythonGlobalBase::sweepProcess);
+            s_sweeper->start();
+        }
+    }
 }
 
 //-------------------------------------------------------------------------
 /// @details
-///		Destructor - ends the endpoint. We need to do this here since, if
-///		we just let the IServiceEndpoint do it, it will only clean up
-///		itself, not our allocations. We will also make sure our python
-///		ptrs are clean up properly
+///		Destructor - leaves the sweep (stopping the sweep thread with the
+///		last global, outside the registry lock the thread itself takes)
+///		and drops the Python handles under the GIL. The slots were ended
+///		by endFilterGlobal; whatever is still here is released without
+///		calling into the node
 //-------------------------------------------------------------------------
 IPythonGlobalBase::~IPythonGlobalBase() noexcept {
-    // Clean up python side
-    _block(){engine::python::LockPython lock;
+    // Leave the registry; take the thread with us when we were the last
+    Opt<async::Thread> retire;
+    _block() {
+        std::lock_guard<std::mutex> guard(s_registryLock);
 
-m_pyEndpoint = {};
-m_pyModule = {};
-m_pyGlobal = {};
-}  // namespace engine::store::pythonBase
+        s_registry.erase(this);
+        if (s_registry.empty()) {
+            retire = _mv(s_sweeper);
+            s_sweeper.reset();
+        }
+    }
+    retire.reset();
+
+    // Clean up python side
+    _block() {
+        engine::python::LockPython lock;
+
+        _block() {
+            std::lock_guard<std::mutex> guard(m_slotsLock);
+            m_slots.clear();
+        }
+        m_pyValidator = {};
+        m_pyGlobalClass = {};
+        m_pyEndpoint = {};
+        m_pyModule = {};
+    }
 }
-;
 
 //-------------------------------------------------------------------------
 /// @details
-///		Within the python model, global data is not necessary as all
-///		values can be stored within the IEndpoint itself
+///		This node's index in the task file's component list - the index
+///		the open's `config` list is addressed by. A stack built without a
+///		pipeline (a filter stack named by type) uses the stack position
+//-------------------------------------------------------------------------
+size_t IPythonGlobalBase::stackIndex() noexcept {
+    // Step 1: the pipeline's component order, when there is one
+    auto &components = endpoint->config.pipeline.components();
+    if (components.isArray()) {
+        for (json::Value::ArrayIndex i = 0; i < components.size(); ++i)
+            if (components[i].isObject() &&
+                components[i].lookup<Text>("id", "") == pipeType.id)
+                return i;
+    }
+
+    // Step 2: otherwise the position in the endpoint's stack
+    for (size_t i = 0; i < endpoint->pipeStack.size(); ++i)
+        if (endpoint->pipeStack[i].id == pipeType.id) return i;
+
+    return 0;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Nothing per control is begun with the endpoint: a control's
+///		IGlobal is built by the first binding under it (acquireSlot)
 //-------------------------------------------------------------------------
 Error IPythonGlobalBase::beginFilterGlobal() noexcept {
     LOGPIPE();
 
     if (m_boundError) return m_boundError;
 
-    // Begin the instance filter
-    auto python = localfcn()->Error {
-        // If we have an end function
-        if (m_pyGlobal && py::hasattr(m_pyGlobal, "beginGlobal"))
-            m_pyGlobal.attr("beginGlobal")();
-        return {};
-    };
-
-    auto ccode = callPython(python);
-
-    return checkCallParent(ccode) ? Parent::beginFilterGlobal() : ccode;
+    return Parent::beginFilterGlobal();
 };
 
 //-------------------------------------------------------------------------
 /// @details
-///		Within the python model, global data is not necessary as all
-///		values can be stored within the IEndpoint itself
+///		Ends every control's IGlobal still on this node (endGlobal) and
+///		releases the Python handles. A node whose endGlobal fails is
+///		reported after every slot had its turn
 //-------------------------------------------------------------------------
 Error IPythonGlobalBase::endFilterGlobal() noexcept {
     LOGPIPE();
 
     if (m_boundError) return m_boundError;
 
-    // End the instance filter
-    const auto python = localfcn()->Error {
-        // If we have an end function
-        if (m_pyGlobal && py::hasattr(m_pyGlobal, "endGlobal"))
-            m_pyGlobal.attr("endGlobal")();
+    // Take every slot out of the map: nothing can find one from here on
+    std::map<std::string, SlotPtr> slots;
+    _block() {
+        std::lock_guard<std::mutex> guard(m_slotsLock);
+        slots.swap(m_slots);
+    }
 
-        // Release the endpoint, the global and the module
+    // End them one by one, each under its own lock
+    Error ccode;
+    for (auto &[controlId, slot] : slots) {
+        std::lock_guard<std::mutex> guard(slot->lock);
+
+        slot->retired = true;
+        ccode = endSlot(*slot) || ccode;
+    }
+
+    // Release the endpoint, the class and the module
+    _block() {
+        engine::python::LockPython lock;
+
         m_pyEndpoint = {};
-        m_pyGlobal = {};
+        m_pyGlobalClass = {};
+        m_pyValidator = {};
         m_pyModule = {};
-        return {};
-    };
-
-    auto ccode = callPython(python);
+    }
 
     return checkCallParent(ccode) ? Parent::endFilterGlobal() : ccode;
 };
 
+//-------------------------------------------------------------------------
+/// @details
+///		Config mode: run the node's IValidator over the task file's
+///		configuration
+//-------------------------------------------------------------------------
 Error IPythonGlobalBase::validateConfig() noexcept {
     LOGPIPE();
 
     if (m_boundError) return m_boundError;
 
     const auto python = localfcn()->Error {
-        // If we have an IGlobal
-        if (m_pyGlobal) {
-            if (py::hasattr(m_pyGlobal, "validateConfig"))
-                m_pyGlobal.attr("validateConfig")();
+        // If we have an IValidator
+        if (m_pyValidator) {
+            if (py::hasattr(m_pyValidator, "validateConfig"))
+                m_pyValidator.attr("validateConfig")();
         }
         return {};
     };
@@ -252,6 +336,276 @@ Error IPythonGlobalBase::validateConfig() noexcept {
     auto ccode = callPython(python);
 
     return checkCallParent(ccode) ? Parent::validateConfig() : ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Build one control's IGlobal: construct it from the node's class,
+///		inject IEndpoint and the control's glb (its id and configuration),
+///		run beginGlobal(). Called with the GIL held and the slot locked.
+///		A build that fails leaves no object behind
+//-------------------------------------------------------------------------
+Error IPythonGlobalBase::buildSlot(GlobalSlot &slot, const Text &controlId,
+                                   json::Value connConfig) noexcept {
+    // The control's config arrives as the pipeline stores it: a secret leaf
+    // rides its `secureParameters` token (plan 12 F). The task-file launch
+    // decoded it with the deployment secret before any node ran
+    // (Pipeline.cpp, PipelineConfig::decrypt); the same decode runs here,
+    // so the node reads plaintext exactly as it did from the task file
+    if (auto ccode = pipeline::PipelineConfig::decryptSection(connConfig))
+        return APERR(ccode, "Control", controlId, "config of", pipeType.id,
+                     ccode.message());
+
+    const auto python = localfcn()->Error {
+        // Create the IGlobal of this control
+        slot.global = m_pyGlobalClass();
+
+        // Initialize it with the host endpoint
+        slot.global.attr("IEndpoint") = m_pyEndpoint;
+
+        // The control's view of the node: rocketlib resolves self.config
+        // from glb.connConfig, the control's resolved configuration
+        slot.global.attr("glb") = py::cast(GlobalContext{
+            controlId, pipeType.logicalType, pipeType.physicalType,
+            _mv(connConfig)});
+
+        // Begin it
+        if (py::hasattr(slot.global, "beginGlobal"))
+            slot.global.attr("beginGlobal")();
+        return {};
+    };
+
+    if (auto ccode = callPython(python)) {
+        slot.global = {};
+        return ccode;
+    }
+
+    slot.built = true;
+    LOG(Python, "Built the IGlobal of control", controlId, "on", pipeType.id);
+    return {};
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		End one control's IGlobal: endGlobal() when it was begun, then the
+///		object is dropped under the GIL. Called with the slot locked
+//-------------------------------------------------------------------------
+Error IPythonGlobalBase::endSlot(GlobalSlot &slot) noexcept {
+    Error ccode;
+
+    if (slot.built) {
+        const auto python = localfcn()->Error {
+            if (py::hasattr(slot.global, "endGlobal"))
+                slot.global.attr("endGlobal")();
+            return {};
+        };
+
+        ccode = callPython(python);
+    }
+
+    // The object goes whether or not endGlobal succeeded
+    _block() {
+        engine::python::LockPython lock;
+
+        slot.global = {};
+    }
+    slot.built = false;
+
+    return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Bind a binding to its control's IGlobal, building it on the first
+///		touch (plan 4.1 rules 1-2)
+//-------------------------------------------------------------------------
+ErrorOr<IPythonGlobalBase::SlotPtr> IPythonGlobalBase::acquireSlot(
+    const py::object &caller) noexcept {
+    if (m_boundError) return m_boundError;
+
+    if (!m_pyGlobalClass)
+        return APERR(Ec::InvalidCommand, "No IGlobal is built in config mode",
+                     pipeType.id);
+
+    // Step 1: which control this binding runs under, and the configuration
+    // its open carried for this node (the open only; a write/close/tool
+    // names the control alone and finds the slot the open built)
+    Text controlId;
+    std::optional<json::Value> config;
+    const auto readCaller = localfcn()->Error {
+        if (!caller || !py::isinstance<py::dict>(caller)) return {};
+        const py::dict dict = py::reinterpret_borrow<py::dict>(caller);
+
+        if (dict.contains("controlId") && !dict["controlId"].is_none())
+            controlId = py::cast<std::string>(dict["controlId"]);
+
+        if (dict.contains("config") && py::isinstance<py::list>(dict["config"])) {
+            const py::list list = dict["config"];
+            if (m_stackIndex < list.size() &&
+                py::isinstance<py::dict>(list[m_stackIndex]))
+                config = engine::python::pyjson::dictToJson(
+                    list[m_stackIndex].cast<py::dict>());
+        }
+        return {};
+    };
+    if (auto ccode = callPython(readCaller)) return ccode;
+
+    // Step 2: find or create the slot and claim it. The wait releases the
+    // GIL, so the binding that is building it can run Python meanwhile; a
+    // slot the sweep retired while we waited sends us back for a new one
+    for (;;) {
+        SlotPtr slot;
+        _block() {
+            std::lock_guard<std::mutex> guard(m_slotsLock);
+            auto &entry = m_slots[controlId];
+            if (!entry) entry = std::make_shared<GlobalSlot>();
+            slot = entry;
+        }
+
+        // The guard unlocks through the slot itself, never through the
+        // handle: `return slot` moves the handle out before the guard runs
+        GlobalSlot &held = *slot;
+        _block() {
+            engine::python::UnlockPython unlock;
+            held.lock.lock();
+        }
+        util::Guard unlockSlot{[] {}, [&held] { held.lock.unlock(); }};
+
+        if (slot->retired) continue;
+
+        // Step 3: the first touch builds it
+        if (!slot->built) {
+            // A control's configuration comes with its open; the default
+            // slot (no caller) runs on the task file's
+            json::Value connConfig;
+            if (config)
+                connConfig = _mv(*config);
+            else if (controlId.empty())
+                connConfig = pipeType.connConfig;
+
+            Error ccode;
+            if (!config && !controlId.empty())
+                ccode = APERR(Ec::InvalidCommand, "No configuration for control",
+                              controlId, "on node", pipeType.id,
+                              "- the control's open did not reach this engine");
+            else
+                ccode = buildSlot(*slot, controlId, _mv(connConfig));
+
+            // A build that failed is not a slot: the next open tries again
+            if (ccode) {
+                slot->retired = true;
+                std::lock_guard<std::mutex> guard(m_slotsLock);
+                if (auto it = m_slots.find(controlId);
+                    it != m_slots.end() && it->second == slot)
+                    m_slots.erase(it);
+                return ccode;
+            }
+        }
+
+        // Step 4: the binding holds the slot from here to releaseSlot
+        ++slot->bindings;
+        slot->lastTouch = Clock::now();
+        return slot;
+    }
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Release a binding's hold and touch the slot
+//-------------------------------------------------------------------------
+void IPythonGlobalBase::releaseSlot(SlotPtr &slot) noexcept {
+    if (!slot) return;
+
+    slot->lastTouch = Clock::now();
+    --slot->bindings;
+    slot.reset();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		The controls holding an IGlobal on this node
+//-------------------------------------------------------------------------
+std::vector<Text> IPythonGlobalBase::controlIds() noexcept {
+    std::vector<Text> ids;
+
+    std::lock_guard<std::mutex> guard(m_slotsLock);
+    for (auto &[controlId, slot] : m_slots)
+        if (slot->built) ids.push_back(controlId);
+    return ids;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		End and erase every slot of this node idle since `before` with no
+///		open binding. The candidates are picked under the map lock, then
+///		each is re-checked under its own lock: a binding that claimed it
+///		meanwhile keeps it. The slot leaves the map BEFORE endGlobal runs,
+///		so a binding arriving during a slow endGlobal builds a fresh one
+///		instead of waiting
+//-------------------------------------------------------------------------
+void IPythonGlobalBase::sweepIdle(Clock::time_point before) noexcept {
+    // Step 1: the idle candidates
+    std::vector<std::pair<std::string, SlotPtr>> candidates;
+    _block() {
+        std::lock_guard<std::mutex> guard(m_slotsLock);
+        for (auto &[controlId, slot] : m_slots)
+            if (slot->built && slot->bindings.load() == 0 &&
+                slot->lastTouch < before)
+                candidates.emplace_back(controlId, slot);
+    }
+
+    // Step 2: end each one that is still idle
+    for (auto &[controlId, slot] : candidates) {
+        std::lock_guard<std::mutex> guard(slot->lock);
+
+        if (slot->retired || !slot->built || slot->bindings.load() != 0 ||
+            slot->lastTouch >= before)
+            continue;
+
+        slot->retired = true;
+        _block() {
+            std::lock_guard<std::mutex> mapGuard(m_slotsLock);
+            if (auto it = m_slots.find(controlId);
+                it != m_slots.end() && it->second == slot)
+                m_slots.erase(it);
+        }
+
+        // An endGlobal that fails is the ops stream's to know (>ERR); the
+        // slot is gone either way
+        if (auto ccode = endSlot(*slot); ccode && ::engine::config::monitor())
+            ::engine::config::monitor()->error(_mv(ccode));
+
+        LOG(Python, "Ended the idle IGlobal of control", controlId, "on",
+            pipeType.id);
+    }
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		The engine-wide sweep over every live node global
+//-------------------------------------------------------------------------
+void IPythonGlobalBase::sweepIdleGlobals(std::chrono::seconds idle) noexcept {
+    const auto before = Clock::now() - idle;
+
+    std::lock_guard<std::mutex> guard(s_registryLock);
+    for (auto *global : s_registry) global->sweepIdle(before);
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		The sweep thread: every CONST_IGLOBAL_SWEEP_SECONDS, end the
+///		controls idle longer than CONST_IGLOBAL_IDLE_SECONDS
+//-------------------------------------------------------------------------
+void IPythonGlobalBase::sweepProcess() noexcept {
+    while (!async::cancelled()) {
+        // Sleep the period in short steps so a stop is prompt
+        for (int tick = 0; tick < CONST_IGLOBAL_SWEEP_SECONDS * 10; ++tick) {
+            if (async::cancelled()) return;
+            async::sleep(100ms);
+        }
+
+        sweepIdleGlobals(std::chrono::seconds(CONST_IGLOBAL_IDLE_SECONDS));
+    }
 }
 
 }  // namespace engine::store::pythonBase

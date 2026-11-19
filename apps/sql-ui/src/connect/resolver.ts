@@ -25,9 +25,10 @@
 // A PIPELINE-BOUND connection already is its endpoint: the address and the
 // node it saved. A DIRECT connection has no pipe of its own, so this module
 // starts one for it — a two-node spec (a `tools` source hosting the
-// configured database node) through `client.use()`, which answers the
-// address the caller's @dev control took. That address is what every tool
-// call on the direct endpoint is made on; it is remembered per endpoint key
+// configured database node) through `client.use()`, which answers the id
+// of the caller's @spec control in the token slot. That control id is what
+// every tool call on the direct endpoint is made on (the slot `client.tool()`
+// sends its `address` in); it is remembered per endpoint key
 // along with the start procedure (revival) and a holder count, so the temp
 // pipeline is torn down when its last document closes and revived if its
 // idle ttl ended it between two statements.
@@ -126,8 +127,8 @@ export function revivalFor(key: string): (() => Promise<void>) | undefined {
  * The endpoint of a saved connection, without starting anything.
  *
  * @param conn - The saved connection.
- * @returns The endpoint; a direct connection's `address` is the one its
- *          temp pipeline last answered on, or '' before it was started.
+ * @returns The endpoint; a direct connection's `address` is the control id
+ *          its temp pipeline last answered with, or '' before it was started.
  */
 export function endpointForConnection(conn: SavedSqlConnection): SqlEndpoint {
 	if (conn.mode === 'pipeline') {
@@ -182,7 +183,8 @@ export async function resolveEndpoint(client: RocketRideClient, conn: SavedSqlCo
 			ttl: DIRECT_TTL_SECONDS,
 			name: `SQL: ${conn.name}`,
 		});
-		// The token slot carries the address the control took
+		// The token slot carries the control id (C.22); the direct endpoint's
+		// "address" is that id, since tool() sends it in the same slot.
 		addresses.set(key, started.token);
 	};
 	await start();

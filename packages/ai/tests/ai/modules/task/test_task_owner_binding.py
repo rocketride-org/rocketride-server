@@ -44,10 +44,10 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from ai.modules.task.task_engine import TaskEngine
-from ai.modules.task.task_control import TaskControl
+from ai.modules.task.engine_key import engine_content
+from ai.modules.task.task_engine import TaskEngine, component_facts
+from ai.modules.task.task_control import TaskControl, config_hash, mint_control_id
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
-from ai.modules.task.types import TaskError
 from ai.modules.task.trace_owner import TraceOwners
 
 ADDRESS = 'acme.proj-tk.src'
@@ -137,7 +137,9 @@ def _live_run(user_id='user-1', complete=False):
     control.project_id = 'proj-tk'
     control.address = ADDRESS
     control.id = ADDRESS
-    control.key = f'dev.{user_id}.{ADDRESS}'
+    control.control_id = control.key = mint_control_id()
+    control.config = engine_content(control.pipeline, 'src', component_facts).config_by_index
+    control.config_hash = config_hash(control.config)
     control.task = SimpleNamespace(
         is_task_complete=lambda: complete,
         dormant_reason=None,
@@ -154,16 +156,19 @@ def _live_run(user_id='user-1', complete=False):
 
 
 @pytest.mark.asyncio
-async def test_another_users_session_cannot_reuse_a_run_by_naming_its_key():
+async def test_another_users_session_cannot_reuse_a_run_by_naming_its_id(no_launch):
+    """A control id in the ``token`` of a spec call is a project_id override inside the CALLER's namespace:
+    it names a pipeline of their own, never another user's control.
+    """
     ts = _server()
     control = _live_run(user_id='user-1')
     ts._task_control[control.key] = control
 
-    with pytest.raises(TaskError) as excinfo:
-        await _start(ts, user_id='user-2', useExisting=True, token=control.key)
-    assert excinfo.value.field == 'token'
+    result = await _start(ts, user_id='user-2', token=control.key)
+    assert result['reused'] is False and result['token'] != control.key
+    assert result['address'] == f'acme.{control.key}.src'
     control.task.wait_for_running.assert_not_awaited()
-    assert ts._task_control == {control.key: control}
+    assert ts._task_control[control.key] is control and ts._task_control[result['token']].userId == 'user-2'
 
 
 @pytest.mark.asyncio
@@ -172,10 +177,10 @@ async def test_another_users_session_does_not_reuse_a_run_of_the_same_address(no
     control = _live_run(user_id='user-1')
     ts._task_control[control.key] = control
 
-    result = await _start(ts, user_id='user-2', useExisting=True)
+    result = await _start(ts, user_id='user-2')
     assert result['reused'] is False
     assert ts._task_control[control.key] is control
-    assert ts._task_control[f'dev.user-2.{ADDRESS}'].userId == 'user-2'
+    assert ts._task_control[result['token']].userId == 'user-2'
     control.task.wait_for_running.assert_not_awaited()
 
 
@@ -185,22 +190,22 @@ async def test_another_user_cannot_take_over_a_finished_run(no_launch):
     control = _live_run(user_id='user-1', complete=True)
     ts._task_control[control.key] = control
 
-    await _start(ts, user_id='user-2')
+    result = await _start(ts, user_id='user-2')
     assert ts._task_control[control.key] is control
-    assert f'dev.user-2.{ADDRESS}' in ts._task_control
+    assert ts._task_control[result['token']].index_key == f'spec.user-2.{ADDRESS}'
 
 
 @pytest.mark.asyncio
 async def test_a_personal_deploy_does_not_reuse_the_same_users_dev_run(no_launch):
-    """Same user and address, different rung: a different control (@me, not @dev)."""
+    """Same user and address, different rung: a different control (@me, not @spec)."""
     ts = _server()
     control = _live_run(user_id='user-1')
     ts._task_control[control.key] = control
 
-    result = await _start(ts, user_id='user-1', run_kind='deploy', owner_kind='user', useExisting=True)
+    result = await _start(ts, user_id='user-1', run_kind='deploy', owner_kind='user')
     assert result['reused'] is False
     assert ts._task_control[control.key] is control
-    assert f'me.user-1.{ADDRESS}' in ts._task_control
+    assert ts._task_control[result['token']].index_key == f'me.user-1.{ADDRESS}'
     control.task.wait_for_running.assert_not_awaited()
 
 
@@ -210,5 +215,5 @@ async def test_the_owner_still_reuses_its_run():
     control = _live_run(user_id='user-1')
     ts._task_control[control.key] = control
 
-    result = await _start(ts, user_id='user-1', useExisting=True)
-    assert result['reused'] is True and result['token'] == ADDRESS
+    result = await _start(ts, user_id='user-1')
+    assert result['reused'] is True and result['token'] == control.key and result['address'] == ADDRESS

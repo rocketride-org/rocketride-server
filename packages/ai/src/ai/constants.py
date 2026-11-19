@@ -71,8 +71,6 @@ CONST_TASK_CANCELLED_CODE = 'TASK_CANCELLED'  # DAP error code of a request the 
 CONST_SUBMIT_CLOSE_SECONDS = (
     5.0  # bound on the CLEANUP close after a failed submit() write; the write's failure is what the caller sees
 )
-CONST_REPOINT_STORM_MAX = 10  # repoints of one address by one owner per window before a repoint_storm warning
-CONST_REPOINT_STORM_WINDOW = 60  # seconds: the repoint-storm window (plan 7.3)
 CONST_SUBMIT_INLINE_MAX = 1024 * 1024  # bytes: submit() data delivered inline in one request (plan 3.1)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
@@ -136,7 +134,7 @@ CONST_LOG_KF_OPEN_CEILING = 4096
 # Task Server Configuration
 # =============================================================================
 CONST_CLEANUP_DELAY_TIME = 5 * 60  # seconds grace period to keep completed tasks (5 minutes)
-CONST_TEARDOWN_WAIT_TIMEOUT = 30.0  # seconds stop_task waits for a @dev run's teardown before leaving it to cleanup
+CONST_TEARDOWN_WAIT_TIMEOUT = 30.0  # seconds stop_task waits for a @spec run's teardown before leaving it to cleanup
 CONST_CLEANUP_SLEEP_TIME = 1 * 60  # seconds between cleanup scans (1 minute)
 
 # =============================================================================

@@ -142,7 +142,6 @@ class ExecutionMixin(DAPClient):
         ttl: int = None,
         env: Dict[str, str] = None,
         pipeline_trace_level: str = None,
-        on_change: str = 'error',
         team: str = None,
     ) -> SUBMIT_RESULT:
         """
@@ -150,14 +149,16 @@ class ExecutionMixin(DAPClient):
 
         Exactly one of ``name``, ``pipeline`` or ``filepath``. A ``name`` is
         the address ``developerId.pipelineId[.source]`` and resolves through
-        the fixed rungs: your live ``@dev`` presence (attach only), your
+        the fixed rungs: your live ``@spec`` control (attach only), your
         ``@me`` deployment, the first team in your team order that publishes
         it (``team`` overrides the order for this call), then ``@public``;
         a published rung starts from its artifact when nothing is live. A
-        ``pipeline``/``filepath`` addresses your own ``@dev`` presence for that
-        spec; when it already runs other content, ``on_change`` decides:
-        ``'error'`` (default), ``'keep'`` (use the running engine) or
-        ``'auto'`` (move to the new spec; nothing is stopped for anyone else).
+        ``pipeline``/``filepath`` addresses your own ``@spec`` rung: the
+        control with the same ``project_id`` and resolved configuration is
+        reused, otherwise one is created (``converged: 'started'``); a
+        different configuration under the same ``project_id`` is a new
+        control on the same engine. ``project_id`` is REQUIRED on a spec
+        call (``invalid_argument`` naming the field).
 
         The pipeline stays up after the call and expires on its idle ttl.
         ``threads``/``args``/``env``/``ttl`` apply to spec calls only; a name
@@ -165,11 +166,11 @@ class ExecutionMixin(DAPClient):
 
         Data up to ``SUBMIT_INLINE_MAX`` bytes travels inline in the one
         request; larger data, and every call with ``on_sse``, streams through
-        a pipe to the address the server answered with (same result).
+        a pipe on the control the server answered with (same result).
 
         Args:
             name: The pipeline's address (XOR with pipeline/filepath).
-            pipeline: An inline flat PipelineConfig (XOR).
+            pipeline: An inline flat PipelineConfig (XOR; ``project_id`` required).
             filepath: A ``.pipe``/JSON file, loaded here (XOR).
             source: The entry component; overrides the address's third segment.
             params: Per-call parameter values by public name.
@@ -183,20 +184,21 @@ class ExecutionMixin(DAPClient):
             env: ``ROCKETRIDE_*`` overrides (spec calls only).
             pipeline_trace_level: Trace level for this pipeline's requests
                 (``'none'``, ``'metadata'``, ``'summary'``, ``'full'``).
-            on_change: ``'error'`` | ``'keep'`` | ``'auto'`` (spec calls).
             team: Answer ``@team`` from this one of your teams.
 
         Returns:
-            SUBMIT_RESULT: the pipe close body plus ``token``, ``resolved``,
-            ``team`` (on ``@team``), ``version`` (not on ``@dev``),
-            ``engineKey``, ``specMatch``, ``converged``, ``ignored`` and any
-            ``warnings``.
+            SUBMIT_RESULT: the pipe close body plus ``token`` (the control
+            id: opaque, transient, valid for the life of the control; never
+            persist it), ``address``, ``resolved``, ``team`` (on ``@team``),
+            ``version`` (not on ``@spec``), ``engineKey``, ``converged`` and
+            ``ignored``.
 
         Raises:
             ValueError: Not exactly one of name/pipeline/filepath, or data
                 that is neither str nor bytes.
-            RuntimeError: The server refused (not found, spec changed,
-                permission ...), or does not support ``submit``.
+            RuntimeError: The server refused (not found, missing
+                ``project_id``, permission ...), or does not support
+                ``submit``.
 
         ``submit()`` adds no deadline of its own and neither does the
         server: the request runs until the pipeline answers or fails. A
@@ -224,7 +226,6 @@ class ExecutionMixin(DAPClient):
             spec = await self._read_pipeline_file(filepath) if filepath is not None else pipeline
             spec = copy.deepcopy(spec.get('pipeline', spec) if isinstance(spec, dict) else spec)
             arguments['pipeline'] = spec
-            arguments['onChange'] = on_change
         optional = {
             'source': source,
             'team': team,
@@ -264,9 +265,9 @@ class ExecutionMixin(DAPClient):
         if inline or data is None:
             return stamps
 
-        # Step 4: stream to the address the server answered with, through
-        # the team that answered (``@team``): the data path resolves the
-        # address again and must land on the same control.
+        # Step 4: stream on the control the server answered with: its id
+        # rides the token slot, so the data path lands on that control
+        # without a second resolution (the team stamp rides along).
         result = await self.send(
             stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'), params=params
         )
@@ -286,7 +287,6 @@ class ExecutionMixin(DAPClient):
         pipelineTraceLevel: str = None,
         name: str = None,
         env: Dict[str, str] = None,
-        on_change: str = None,
     ) -> Dict[str, Any]:
         """
         Start an RocketRide pipeline for processing data.
@@ -307,36 +307,45 @@ class ExecutionMixin(DAPClient):
 
         When passing a ``pipeline`` dict directly, provide a flat PipelineConfig with
         ``components``, ``source``, and ``project_id`` at the top level — do NOT wrap
-        it in ``{ "pipeline": { ... } }``.
+        it in ``{ "pipeline": { ... } }``. ``project_id`` is REQUIRED: a spec
+        without one is refused with ``invalid_argument`` naming the field.
+
+        A spec call addresses your own ``@spec`` rung. The server looks for
+        your live control with the same ``project_id`` and the same resolved
+        configuration and reuses it (the same ``token`` comes back);
+        otherwise it creates one. A spec whose configuration differs under
+        the same ``project_id`` is a NEW control on the same engine, and the
+        earlier one lives until it is stopped or its idle ttl ends.
 
         Args:
             token: Overrides the pipeline-id segment of the task address (the
                 ``project_id`` of the spec): the run is addressed
                 ``developerId.<token>.source``. One segment of letters, digits,
-                ``_`` and ``-``. The returned value is the full address. Not a
-                credential: the developer id and the owner come from the account
+                ``_`` and ``-``. Not a credential, and NOT the value the
+                result's ``token`` carries: the developer id and the owner
+                come from the account
             filepath: Path to a ``.pipe`` or JSON/JSON5 pipeline configuration file
             pipeline: Flat PipelineConfig dict (components, source, project_id at top level)
             source: Override the source specified in the pipeline config
             threads: Number of processing threads to use (default: server decides)
-            use_existing: Attach to the task already running at the same address
-                instead of failing with "Pipeline is already running"
+            use_existing: Attach to the control already live for this
+                ``project_id`` whatever its configuration (the result's
+                ``reused`` flag says it happened)
             args: Command-line style arguments to pass to the pipeline
             ttl: Time-to-live in seconds for idle pipelines (optional, server default
                 if not provided; use 0 for no timeout)
             pipelineTraceLevel: Pipeline trace level ('none', 'metadata', 'summary',
                 'full'). When set, captures every lane write and invoke call in the
                 response under '_trace'.
-            on_change: A spec call's answer to a live ``@dev`` presence running
-                OTHER content (plan 3.4): ``'error'`` fails with ``spec_changed``
-                (the server default), ``'keep'`` delivers to the running engine,
-                ``'auto'`` repoints the control to the new content. The IDEs pass
-                their restart-behavior setting.
 
         Returns:
             Dict containing:
-            - token: The task address ``developerId.pipelineId[.source]`` that
-              send/pipe/terminate/get_task_status take (str)
+            - token: The CONTROL ID (str): an opaque transient handle, valid
+              for the life of the control, that send/pipe/terminate/
+              get_task_status and the monitor verbs take. Never persist it:
+              it dies with the control and a restart mints a new one
+            - address: The task address ``developerId.pipelineId[.source]``,
+              the stable identity, beside the id
             - Additional pipeline startup information
 
         Raises:
@@ -393,7 +402,7 @@ class ExecutionMixin(DAPClient):
             - JSON5 files support comments and trailing commas for easier editing
             - Use threads parameter for CPU-intensive operations
             - Custom args are passed to pipeline steps that support them
-            - The returned token is needed for all data operations with this pipeline
+            - The returned token (the control id) is needed for all data operations with this pipeline
         """
         # Validate required parameters
         if not pipeline and not filepath:
@@ -430,8 +439,6 @@ class ExecutionMixin(DAPClient):
             arguments['threads'] = threads
         if use_existing is not None:
             arguments['useExisting'] = use_existing
-        if on_change is not None:
-            arguments['onChange'] = on_change
         if pipelineTraceLevel is not None:
             arguments['pipelineTraceLevel'] = pipelineTraceLevel
         # Build ROCKETRIDE_* env from client's .env + caller overrides
@@ -452,13 +459,13 @@ class ExecutionMixin(DAPClient):
         # Send execution request to server
         response_body = await self.call('execute', **arguments)
 
-        # Extract and validate response
-        task_token = response_body.get('token', '')
+        # Extract and validate response: the token slot carries the control id
+        control_id = response_body.get('token', '')
 
-        if not task_token:
-            raise RuntimeError('Server did not return a task token in successful response')
+        if not control_id:
+            raise RuntimeError('Server did not return a control id in successful response')
 
-        self.debug_message(f'Pipeline execution started successfully, task token: {task_token}')
+        self.debug_message(f'Pipeline execution started successfully, control id: {control_id}')
         return response_body
 
     async def terminate(self, token: str) -> None:
@@ -470,7 +477,9 @@ class ExecutionMixin(DAPClient):
         you need to stop a long-running or problematic pipeline.
 
         Args:
-            token: Task token of the pipeline to terminate (from use())
+            token: The control id of the pipeline to terminate (a ``use()``/
+                ``submit()`` result's ``token``). The control is removed at
+                once; its id is dead afterwards
 
         Raises:
             RuntimeError: If termination fails
@@ -508,9 +517,10 @@ class ExecutionMixin(DAPClient):
         recently completed pipeline executions), as reported by the server.
 
         Returns:
-            List of task descriptor dictionaries. Each row includes the
-            task token plus display fields such as name, state, and
-            timing; the exact field set is server-defined.
+            List of task descriptor dictionaries. Each row carries the
+            control id (``controlId``) beside its ``address``, plus display
+            fields such as name, state, and timing; the exact field set is
+            server-defined.
 
         Raises:
             RuntimeError: If the server signals failure.
@@ -536,8 +546,12 @@ class ExecutionMixin(DAPClient):
         """
         Restart a running pipeline with a new configuration.
 
-        Looks up the existing task by project/source, terminates it, and starts
-        a new execution in one server round-trip.
+        Looks up the existing task by project/source, terminates its control
+        and creates a new one in one server round-trip. The restart MINTS A
+        NEW CONTROL ID: the id you held before is dead afterwards, so read
+        the replacement from :meth:`get_task_token` (or the next ``use()``)
+        before sending again. Play on a changed spec in the IDEs is this
+        same restart.
 
         The scope IS the kind: pass ``team_id`` to address the team's
         DEPLOYED run; omit it to address your own dev run.
@@ -546,7 +560,8 @@ class ExecutionMixin(DAPClient):
             project_id: The project identifier.
             source: The source component identifier.
             pipeline: The pipeline configuration to restart with.
-            token: Existing task token (optional; resolved server-side if omitted).
+            token: The existing control id (optional; resolved server-side
+                from project/source when omitted).
             team_id: Address the team's deploy run; empty for your own dev run.
 
         Raises:
@@ -577,7 +592,9 @@ class ExecutionMixin(DAPClient):
         long-running pipelines and provide user feedback.
 
         Args:
-            token: Task token of the pipeline to check (from use())
+            token: The control id of the pipeline to check (a ``use()``/
+                ``submit()`` result's ``token``); the body carries
+                ``controlId`` beside the status fields
 
         Returns:
             Dict containing status information:
@@ -638,9 +655,10 @@ class ExecutionMixin(DAPClient):
 
     async def get_task_token(self, project_id: str, source: str, *, team_id: str = '') -> str | None:
         """
-        Resolve a running task's token from its project ID and source component.
+        Resolve a running task's control id from its project ID and source component.
 
-        The token is required for operations like terminate and restart.
+        The control id is what terminate, restart, send and the status verbs
+        take; look it up again after a restart, which mints a new one.
         Returns None if no task is currently running for the given project/source.
 
         The scope IS the kind: pass ``team_id`` to resolve the team's
@@ -652,7 +670,7 @@ class ExecutionMixin(DAPClient):
             team_id: Address the team's deploy run; empty for your own dev run.
 
         Returns:
-            The task token string, or None if no running task was found.
+            The control id string, or None if no running task was found.
         """
         try:
             args: Dict[str, Any] = {'projectId': project_id, 'source': source}

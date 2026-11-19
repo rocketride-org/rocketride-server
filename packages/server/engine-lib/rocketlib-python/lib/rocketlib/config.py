@@ -54,8 +54,9 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 # ==== Constants ==============================================================
 
-#: A ``${ROCKETRIDE_*}`` placeholder inside a config VALUE. Such a value is
-#: resolved per caller at read time, so it is never baked at global scope.
+#: A ``${ROCKETRIDE_*}`` placeholder inside a config VALUE. The server expands
+#: it from the control's environment before the config reaches the engine;
+#: a value still carrying one (the editor, validation) is not validated.
 ENV_PLACEHOLDER = re.compile(r'\$\{(ROCKETRIDE_[A-Za-z0-9_]*)\}')
 
 #: Root-level keys the editor owns that are not node configuration.
@@ -88,11 +89,13 @@ except ImportError:
 
 
 class ConfigError(ValueError):
-    """A node configuration does not fit its schema. Hard error at validate AND execute."""
+    """
+    A node configuration does not fit its schema, or a node read it wrongly.
 
-
-class TenancyViolation(Exception):
-    """A node read per-caller data where only shared state may live. Carries a teaching message."""
+    Hard error at validate AND execute. Also raised, with a teaching message,
+    when a node reads a ``param``-flagged key from ``IGlobal.config``: a
+    parameter is per call and lives on ``IInstance.settings``.
+    """
 
 
 # ==== Schema walk ============================================================
@@ -231,22 +234,6 @@ def _has_placeholder(value: Any) -> bool:
     return False
 
 
-def _expand(value: Any, env: Mapping[str, Any]) -> Any:
-    """Replace every ${ROCKETRIDE_*} placeholder in ``value`` from ``env``; unknown names stay as written."""
-    if isinstance(value, str):
-
-        def _sub(match: re.Match) -> str:
-            name = match.group(1)
-            return str(env[name]) if name in env else match.group(0)
-
-        return ENV_PLACEHOLDER.sub(_sub, value)
-    if isinstance(value, dict):
-        return {key: _expand(item, env) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_expand(item, env) for item in value]
-    return value
-
-
 def _enum_values(enum: Any) -> Optional[List[Any]]:
     """Return the allowed values of an enum member in any of its three forms, or None."""
     if isinstance(enum, dict):
@@ -348,9 +335,10 @@ class ConfigView(Mapping):
     Read-only, with attribute and item access (``config.model``,
     ``settings['maxEdge']``), and SCHEMA-ONLY: a key the schema does not declare
     is an ``AttributeError``/``KeyError``, never a silent None. The view knows
-    which keys are ``param``-flagged and which hold a per-caller
-    ``${ROCKETRIDE_*}`` value, so ``IGlobal.config`` can refuse them with a
-    teaching message while ``settings`` serves them.
+    which keys are ``param``-flagged, so ``IGlobal.config`` can refuse them
+    with a teaching message while ``settings`` serves them, and which keys
+    the spec sets from the environment (``${ROCKETRIDE_*}``; the server
+    expands them before the config reaches the control's IGlobal).
     """
 
     __slots__ = (
@@ -362,7 +350,6 @@ class ConfigView(Mapping):
         '_params',
         '_capabilities',
         '_refuse_params',
-        '_refuse_env',
     )
 
     def __init__(
@@ -374,7 +361,6 @@ class ConfigView(Mapping):
         capabilities: int = 0,
         *,
         refuse_params: bool = False,
-        refuse_env: bool = False,
         env_keys: Optional[frozenset] = None,
     ):
         """
@@ -386,13 +372,11 @@ class ConfigView(Mapping):
             paths (dict): Short name -> the leaf's dotted path.
             params (list): The node's self-contained ``params`` descriptors.
             capabilities (int): The node's PROTOCOL_CAPS bitmask.
-            refuse_params (bool): Raise ``TenancyViolation`` on param-flagged keys.
-            refuse_env (bool): Raise ``TenancyViolation`` on env-valued keys.
+            refuse_params (bool): Raise ``ConfigError`` on param-flagged keys.
             env_keys (frozenset): The env-valued keys of the view this one
-                derives from. A derived view (expanded, overlaid, restricted)
-                keeps them: which keys a caller's environment decides is a
-                fact of the SPEC, not of the values currently in them, and
-                the per-call client caches key on it.
+                derives from. A derived view (overlaid, restricted) keeps
+                them: which keys the environment decides is a fact of the
+                SPEC, not of the values currently in them.
         """
         object.__setattr__(self, '_values', dict(values))
         object.__setattr__(self, '_descriptors', dict(descriptors))
@@ -400,7 +384,6 @@ class ConfigView(Mapping):
         object.__setattr__(self, '_params', list(params))
         object.__setattr__(self, '_capabilities', int(capabilities))
         object.__setattr__(self, '_refuse_params', refuse_params)
-        object.__setattr__(self, '_refuse_env', refuse_env)
         object.__setattr__(
             self, '_param_keys', frozenset(key for key, desc in descriptors.items() if desc.get('param'))
         )
@@ -502,8 +485,8 @@ class ConfigView(Mapping):
 
     # ---- Derived views ----------------------------------------------------
 
-    def restricted(self, *, refuse_params: bool, refuse_env: bool) -> 'ConfigView':
-        """Return the same values behind the node-facing refusals of ``IGlobal.config``."""
+    def restricted(self, *, refuse_params: bool) -> 'ConfigView':
+        """Return the same values behind the node-facing refusal of ``IGlobal.config``."""
         return ConfigView(
             self._values,
             self._descriptors,
@@ -511,30 +494,8 @@ class ConfigView(Mapping):
             self._params,
             self._capabilities,
             refuse_params=refuse_params,
-            refuse_env=refuse_env,
             env_keys=self._env_keys,
         )
-
-    def expand_env(self, env: Optional[Mapping[str, Any]]) -> 'ConfigView':
-        """
-        Return a view with every ``${ROCKETRIDE_*}`` placeholder filled from ``env``.
-
-        A filled scalar is coerced to the leaf's declared type and re-validated;
-        a name ``env`` does not hold stays as written.
-        """
-        if not env or not self._env_keys:
-            return self._with_values(self._values)
-        values = dict(self._values)
-        problems: List[str] = []
-        for key in self._env_keys:
-            expanded = _expand(values[key], env)
-            if not _has_placeholder(expanded):
-                expanded = _coerce(expanded, self._descriptors[key])
-            _validate_value(key, expanded, self._descriptors[key], problems)
-            values[key] = expanded
-        if problems:
-            raise ConfigError('environment expansion: ' + '; '.join(problems))
-        return self._with_values(values)
 
     def overlay(self, params: Optional[Mapping[str, Any]]) -> 'ConfigView':
         """
@@ -569,7 +530,7 @@ class ConfigView(Mapping):
     # ---- Internals --------------------------------------------------------
 
     def _with_values(self, values: Dict[str, Any]) -> 'ConfigView':
-        """Clone with ``values`` and no refusals (settings never refuses); the env-valued keys stay known."""
+        """Clone with ``values`` and no refusal (settings never refuses); the env-valued keys stay known."""
         return ConfigView(
             values, self._descriptors, self._paths, self._params, self._capabilities, env_keys=self._env_keys
         )
@@ -577,14 +538,9 @@ class ConfigView(Mapping):
     def _refuse(self, key: str) -> None:
         """Raise the teaching error for a key this view must not serve."""
         if self._refuse_params and key in self._param_keys:
-            raise TenancyViolation(
+            raise ConfigError(
                 f'"{key}" is a parameter; read it from self.settings in IInstance. '
-                'IGlobal.config holds only values shared by every caller.'
-            )
-        if self._refuse_env and key in self._env_keys:
-            raise TenancyViolation(
-                f'"{key}" is set from the caller\'s environment (${{ROCKETRIDE_*}}); read it from '
-                'self.settings in IInstance. IGlobal.config holds only values shared by every caller.'
+                'IGlobal.config holds only the values of the control, not of one call.'
             )
 
     def _unknown_message(self, key: str) -> str:

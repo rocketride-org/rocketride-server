@@ -89,7 +89,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .engine_key import CONST_CATALOG_NODE_PREFIX, engine_content
+from .engine_key import CONST_CATALOG_NODE_PREFIX, engine_content, stack_order
 from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
@@ -713,7 +713,7 @@ class TaskEngine(DAPBase):
             launch_type: Task creation mode (launch/attach)
             shared: True for a cross-user engine: its task-file identity names
                 no user and it gets no storage anchor (S13)
-            threads: The engine's thread count (policy outside @dev)
+            threads: The engine's thread count (policy outside @spec)
             trace_level: The engine's DEFAULT trace level for work outside any
                 binding (``'none'`` on a cross-user engine, the starting
                 control's level on a private one; plan 7.4)
@@ -1260,15 +1260,21 @@ class TaskEngine(DAPBase):
 
     def _build_task(self, pipeline: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
         """
-        Construct complete task configuration for subprocess.
+        Construct complete task configuration for subprocess: the SHAPE of the spec.
+
+        The task file carries the components with their provider and wiring
+        and EMPTY configs (C.22): the engine builds its stack from it and
+        bakes nothing per control at launch. Each control's resolved config
+        rides its first open as ``_caller.config`` by stack index (the
+        component order written here), from which the engine builds that
+        control's IGlobal set (plan 5.3).
 
         Args:
             pipeline: The pipeline dict as the engine runs it: ``${ROCKETRIDE_*}``
                       placeholders KEPT (plan 6.2). Must not be stored.
             env: The engine's default environment, the referenced
                  ``ROCKETRIDE_*`` values of a private engine's owner (empty on
-                 a shared engine): what a binding without a caller and an
-                 uncertified node's global config read.
+                 a shared engine): what a binding without a caller reads.
 
         Returns:
             Complete subprocess task configuration
@@ -1285,7 +1291,15 @@ class TaskEngine(DAPBase):
                 'project_id': pipeline.get('project_id'),
                 'name': pipeline.get('name'),
                 'description': pipeline.get('description'),
-                'components': pipeline.get('components', []),
+                # The shape: provider and wiring per component, in STACK
+                # ORDER (engine_key.stack_order, the one rule every control's
+                # config follows, so the engine's index i is the same component
+                # for every holder); the configs themselves never enter the
+                # task file
+                'components': [
+                    {**component, 'config': {}} if isinstance(component, dict) else component
+                    for component in stack_order(pipeline.get('components', []))
+                ],
                 # The public-name map of the pipeline's per-call params
                 # (plan 5.2). Not part of the engine key: specs differing only
                 # here run on one engine.
@@ -2488,10 +2502,10 @@ class TaskEngine(DAPBase):
         async with self._run_log_open_lock:
             writer = self._run_logs.get(key)
             if writer is None and key not in self._run_log_failed:
-                # A control draining its open pipes on the engine it left has
-                # that engine's writer open on its continuum: append through
-                # it rather than open a competitor (one writer per stream);
-                # this engine's own writer opens once that one has closed
+                # The engine a dormant control held may still have its
+                # writer open on the continuum while this one starts: append
+                # through it rather than open a competitor (one writer per
+                # stream); this engine's own writer opens once that has closed
                 shared = await self._shared_run_log(key)
                 if shared is not None:
                     return shared
