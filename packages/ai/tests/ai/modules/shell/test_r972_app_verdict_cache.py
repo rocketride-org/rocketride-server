@@ -134,6 +134,38 @@ def test_r972_1a_app_entry_info_auth_exception_answers_anonymously(monkeypatch):
     assert asyncio.run(shell_mod._app_entry_info('tok', 'app.x')) is None
 
 
+def test_r972_1a_public_app_still_serves_during_auth_outage(monkeypatch):
+    """A public app (the pre-auth landing) still authorizes and resolves while
+    authenticate raises, through the anonymous path, and nothing is cached.
+    """
+    account = _Account(outages=10)
+    _setup(monkeypatch, account)
+
+    async def get_public_apps():
+        return [{'id': 'app.pub', 'name': 'Public', 'version': '1.0.0', 'registryVersion': 1}]
+
+    async def entitled_version_dirs(info, app_id):
+        if info is None and app_id == 'app.pub':
+            return {1: 'app.pub/v1/dist'}
+        return {}
+
+    account.get_public_apps = get_public_apps
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+
+    assert asyncio.run(shell_mod._authorize_app('tok', 'app.pub')) is True
+    assert asyncio.run(shell_mod._version_dirs_for('tok', 'app.pub', want=1)) == {1: 'app.pub/v1/dist'}
+    assert asyncio.run(shell_mod._app_entry_info('tok', 'app.pub')) == {
+        'appId': 'app.pub',
+        'name': 'Public',
+        'version': '1.0.0',
+        'registryVersion': 1,
+        'entry': '/apps/app.pub/v1/remoteEntry.js',
+    }
+    assert account.authentications == 4
+    assert shell_mod._app_auth_cache == {}
+    assert shell_mod._version_dir_cache == {}
+
+
 def test_r972_1a_real_deny_is_still_cached(monkeypatch):
     """Control: an error tuple from authenticate (a real deny) is cached as before."""
     account = _Account()

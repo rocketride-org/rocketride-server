@@ -1198,9 +1198,39 @@ class TaskServer(DAPBase):
         connections keep today's behaviour otherwise: log on error, replace
         on success. The notice send is bounded by NOTICE_SEND_TIMEOUT.
 
+        Rebuilds of one connection run one at a time (a per-connection lock
+        around the identity read, the rebuild and the install). A rebuild that
+        waited behind another starts from the identity that one installed,
+        when it is still the same full user's: otherwise two overlapping
+        pushes both start from the old identity, the unchanged result installs
+        first, and the narrowed one's revoke is refused because the
+        connection no longer holds the identity it expected.
+
         Returns:
             bool: True when a fresh identity was installed and pushed.
         """
+        lock = getattr(conn, '_rebuild_lock', None)
+        if lock is None:
+            lock = asyncio.Lock()
+            conn._rebuild_lock = lock
+        async with lock:
+            current = conn._account_info
+            if current is not info:
+                # Changed while this push waited: continue only from the same
+                # full user's identity (a rebuild that just installed, or a
+                # re-auth as that user); a deauth or another user wins.
+                if (
+                    current is None
+                    or not getattr(conn, '_authenticated', False)
+                    or current.userId != info.userId
+                    or (getattr(current, 'auth', '') or '').startswith(('pk_', 'tk_'))
+                ):
+                    return False
+                info = current
+            return await self._push_rebuilt_locked(account, conn, info, label)
+
+    async def _push_rebuilt_locked(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """The body of ``_push_rebuilt``, run under the connection's rebuild lock."""
         subject = authority_subject(info)
         authz = self._authz
         t0 = authz.clock() if authz is not None else None
@@ -1682,6 +1712,20 @@ class TaskServer(DAPBase):
                         )
                     if wait_for_running:
                         await existing_control.task.wait_for_running()
+                    # Reusing hands this caller the live run, whose subprocess
+                    # already holds the databases it was authorized for under
+                    # whatever credential started it. The caller's own
+                    # credential must reach them too, or a restricted key would
+                    # ride a wider run of the same owner. Checked AFTER the
+                    # wait and right before the run is returned: a restart that
+                    # lands while waiting swaps in new databases, and the check
+                    # must see the ones the caller is about to get. Refused, not
+                    # restarted: the run is the owner's and still running, and
+                    # a submitted pipeline is never applied to it anyway.
+                    try:
+                        await existing_control.task.authorize_reuse(credential=self._presenting_credential(conn))
+                    except PermissionError as e:
+                        raise PermissionError(f'Cannot reuse the running task "{existing_control.id}": {e}') from e
                     return _return_results(existing_control, reused=True)
 
                 # We are absolutely supposed to create a task or the user did
@@ -1735,8 +1779,10 @@ class TaskServer(DAPBase):
             # Register task in central registry
             self._task_control[control.token] = control
 
-            # Start task execution
-            await control.task.start_task()
+            # Start task execution. The connection's credential goes down as a
+            # call argument only, to authorize the run's cloud databases: it is
+            # not kept on the Task or the control, and not logged.
+            await control.task.start_task(credential=self._presenting_credential(conn))
 
             self._debug_task_started(control, trigger, ttl)
 
@@ -1768,6 +1814,20 @@ class TaskServer(DAPBase):
                         self.debug_message(f'Warning: failed to stop orphaned task: {control.id}')
             self._task_control.pop(control.token, None)
             raise
+
+    @staticmethod
+    def _presenting_credential(conn: TaskConn) -> Optional[str]:
+        """The ``AccountInfo.auth`` of the connection that supplied a pipeline.
+
+        ``''`` for the trusted in-process deploy dispatch, which holds none.
+        ``None`` when the connection carries no account info to read. Used only
+        as an argument to the database authorization; callers must not keep it.
+        """
+        info = getattr(conn, '_account_info', None)
+        if info is None:
+            return None
+        auth = getattr(info, 'auth', None)
+        return auth if isinstance(auth, str) else None
 
     async def restart_task(
         self,
@@ -1897,6 +1957,9 @@ class TaskServer(DAPBase):
                 project_id=control.project_id,
                 source=control.source,
                 provider=control.provider,
+                # The restarter supplied this pipeline, so the restarter's
+                # credential, not the original starter's, authorizes its databases.
+                credential=self._presenting_credential(conn),
             )
 
             # The control now describes the pipeline that is running: without this the

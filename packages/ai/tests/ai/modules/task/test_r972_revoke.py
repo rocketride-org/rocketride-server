@@ -358,3 +358,39 @@ async def test_r972_1a_push_never_installs_over_a_deauth(monkeypatch, perms):
     assert conn._account_info.userId == ''
     assert conn._account_info.sysPermissions == []
     assert events(conn, 'apaext_account') == []
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_overlapping_pushes_narrowed_rebuild_still_revokes(monkeypatch):
+    """Two pushes for one admin overlap: the unchanged rebuild installs first,
+    the narrowed one then revokes against the identity that was installed.
+    """
+    account = FakeAccount({'admin': (True, ADMIN)})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN), monitors=WILDCARD_ALL)
+    original = conn._account_info
+    started_from = []
+
+    async def rebuild(info):
+        started_from.append(info)
+        if len(started_from) == 1:
+            await asyncio.sleep(0)
+            return identity('admin', ADMIN)
+        # The second rebuild finishes only after the first has installed.
+        for _ in range(100):
+            if conn._account_info is not original:
+                break
+            await asyncio.sleep(0)
+        return identity('admin', frozenset())
+
+    account.rebuild_account_info = rebuild
+
+    await asyncio.wait_for(asyncio.gather(server.push_account_update('admin'), server.push_account_update('admin')), 1)
+
+    assert len(started_from) == 2
+    assert started_from[0] is original
+    assert started_from[1] is not original
+    conn._transport.disconnect.assert_called_once()
+    assert conn._revoked is True
+    assert conn._authenticated is False
+    assert conn._account_info.sysPermissions == []

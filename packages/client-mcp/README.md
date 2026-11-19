@@ -50,6 +50,8 @@ claude mcp add --transport http rocketride https://api.rocketride.ai/mcp
 
 For every other client and for sign-in details, see
 [Connect a client](https://docs.rocketride.org/connect/mcp/http/connect).
+To run the engine locally and connect a coding agent to it, start at the
+[coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/).
 
 The rest of this page is about the deprecated stdio package. If you must stay
 on it, the install and config commands are in the last section, "Only if you
@@ -77,11 +79,10 @@ Running pipelines are discovered automatically - start a pipeline in VS Code or 
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline platform.
-It lets you build, debug, and deploy production AI workflows without leaving your IDE --
-using a visual drag-and-drop canvas or code-first with TypeScript and Python SDKs.
+[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
+Build, test and publish durable agents that scale in production.
 
-- **100+ ready-to-use nodes** - 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, and more
+- **Ready-to-use nodes** - LLM providers, vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability
 - **Deploy anywhere** - locally, on-premises, or self-hosted with Docker
 - **MIT licensed** - fully open-source, OSI-compliant
