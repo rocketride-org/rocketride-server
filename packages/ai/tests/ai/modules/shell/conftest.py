@@ -18,11 +18,13 @@
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
-"""Shared fixtures for the #1022 PR1 (app-origin) tests. See ``isolation_support``."""
+"""Shared fixtures for the shell module tests: page-map isolation, and the #1022 app-origin tests (see ``isolation_support``)."""
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -30,6 +32,61 @@ import pytest
 import ai.modules.shell.shell as shell_mod
 
 from . import isolation_support as sup
+
+
+@pytest.fixture(autouse=True)
+def _public_pages_state(monkeypatch):
+    """Every test starts on a fresh page map and an empty store.
+
+    The fresh ``PageMap`` holds the legacy aggregate, runs no rebuild and has
+    its own rebuild lock (a lock binds to the event loop that first waits on
+    it). ``_built_at = inf`` keeps the refresh backstop from scheduling a
+    rebuild against the real account singleton. No web server is wired, so no
+    live route check is installed. The render caches start empty and are
+    dropped on every swap and data-source invalidation, as after startup;
+    swap and data-source listeners a test adds are dropped with the page map.
+    The artifact store is the hostile fixture's in-memory ``FILES`` (empty
+    unless a test seeds it), so unit tests never touch a real store. The
+    render, snapshot and feed caches, the unusable-snapshot memory, the
+    storage-warning and storage-failure memories and the snapshot reads in
+    flight start empty, with their production budgets, and the store read
+    slots start free.
+    """
+    import ai.modules.shell.data_sources as ds
+    import ai.modules.shell.pages as pages
+    import ai.modules.shell.public_pages as pp
+
+    from .hostile_fixtures import FILES, file_info, read_file
+
+    fresh = pp.PageMap()
+    fresh._built_at = float('inf')
+    monkeypatch.setattr(pp, 'page_map', fresh)
+    monkeypatch.setattr(pages, '_web_server', None)
+    monkeypatch.setattr(
+        pages, '_render_cache', pages._FifoCache(pages._RENDER_CACHE_MAX_BYTES, pages._RENDER_CACHE_MAX)
+    )
+    monkeypatch.setattr(pages, '_snapshot_cache', pages._FifoCache(pages._SNAPSHOT_CACHE_MAX_BYTES))
+    monkeypatch.setattr(pages, '_atom_cache', {})
+    monkeypatch.setattr(
+        pages, '_unusable_snapshots', pages._FifoCache(pages._UNUSABLE_SNAPSHOTS_MAX, pages._UNUSABLE_SNAPSHOTS_MAX)
+    )
+    monkeypatch.setattr(
+        pages, '_storage_warned', pages._FifoCache(pages._STORAGE_WARNED_MAX, pages._STORAGE_WARNED_MAX)
+    )
+    monkeypatch.setattr(
+        pages, '_storage_failures', pages._FifoCache(pages._STORAGE_FAILURES_MAX, pages._STORAGE_FAILURES_MAX)
+    )
+    monkeypatch.setattr(pages, '_snapshot_reads', {})
+    # A semaphore binds to the event loop it first waits on; TestClient runs each request on a fresh one.
+    monkeypatch.setattr(pages, '_snapshot_read_slots', asyncio.Semaphore(pages._SNAPSHOT_READ_SLOTS))
+    monkeypatch.setattr(pages, '_documents', {})
+    monkeypatch.setattr(ds, '_listeners', [])
+    # As register_public_pages installs them.
+    pp.on_swap(pages._clear_rendered)
+    ds.on_invalidate(pages._drop_rendered_for)
+    FILES.clear()
+    monkeypatch.setattr(pp, 'read_artifact_file', read_file)
+    monkeypatch.setattr(pp, 'artifact_file_info', file_info)
 
 
 def _clear_caches() -> None:

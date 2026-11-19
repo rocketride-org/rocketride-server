@@ -1114,7 +1114,7 @@ def client_ip(headers: Any, peer: str, config: IsolationConfig) -> str:
 async def _version_facts(app_id: str, version: int, dist_dir: str) -> Optional[Tuple[str, str, dict]]:
     """``(binding org, frame state, metadata)`` of the version behind one entitled dist dir."""
     from ai.account import account
-    from ai.account.app_deploy import _dist_dir_of
+    from ai.account.app_rows import dist_dir_of
 
     match = _ORG_OF_DIST.match(dist_dir)
     if match is None:
@@ -1125,7 +1125,7 @@ async def _version_facts(app_id: str, version: int, dist_dir: str) -> Optional[T
     except Exception:
         return None
     for entry in entries or []:
-        if int(entry.get('version', 0)) != version or _dist_dir_of(str(entry.get('artifactPath') or '')) != dist_dir:
+        if int(entry.get('version', 0)) != version or dist_dir_of(str(entry.get('artifactPath') or '')) != dist_dir:
             continue
         deploy_state = str(entry.get('state') or '')
         state = deploy_state if deploy_state in ('ready', 'submit') else 'internal'
