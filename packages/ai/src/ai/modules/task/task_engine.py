@@ -249,6 +249,9 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         # Operator opt-in that makes task processes hide their /proc entries
         # (ai.proc_privacy); non-secret, and tasks must see it to act on it
         'RR_PROC_PRIVATE',
+        # Operator setting for the number of CPU inference slots of a task
+        # (ai.common.models.device_budget); non-secret, and tasks must see it to act on it
+        'RR_CPU_INFERENCE_SLOTS',
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks

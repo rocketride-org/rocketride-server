@@ -79,28 +79,32 @@ class _Release:
 class _Call:
     """One call held inside the guard until ``leave``."""
 
-    def __init__(self, budget, cost):
+    def __init__(self, budget, cost, model=None, calls=1):
         """Start the call in its own thread.
 
         Args:
             budget: The guard to enter.
             cost: The call's cost in MB, or ``None``.
+            model: The model copy the call names, or ``None`` for none.
+            calls: How many calls of that model may be inside at once off a GPU.
         """
         self._budget = budget
         self.entered = threading.Event()
         self.out = threading.Event()
         self._leave = threading.Event()
-        self._thread = threading.Thread(target=self._run, args=(budget, cost), daemon=True)
+        self._thread = threading.Thread(target=self._run, args=(budget, cost, model, calls), daemon=True)
         self._thread.start()
 
-    def _run(self, budget, cost):
+    def _run(self, budget, cost, model, calls):
         """Enter the guard, signal it, and hold the place until ``leave``.
 
         Args:
             budget: The guard to enter.
             cost: The call's cost in MB, or ``None``.
+            model: The model copy the call names, or ``None``.
+            calls: How many calls of that model may be inside at once off a GPU.
         """
-        with budget.reserve(cost):
+        with budget.reserve(cost, model=model, calls=calls):
             self.entered.set()
             self._leave.wait(_HOLD)
         self.out.set()
@@ -442,12 +446,306 @@ def test_unknown_cost_runs_alone():
     after.leave()
 
 
-def test_cpu_slots():
-    """A CPU guard admits ``CPU_SLOTS`` calls."""
-    budget = _watched(DeviceBudget('cpu'))
-    calls = [_Call(budget, 1) for _ in range(budgetmod.CPU_SLOTS + 1)]
-    assert _inside(calls, budgetmod.CPU_SLOTS) == budgetmod.CPU_SLOTS
+def _cpu(slots):
+    """Build a CPU guard with a given number of slots, whatever this machine's cores.
+
+    Args:
+        slots: The guard's slots.
+
+    Returns:
+        The guard of ``cpu``.
+    """
+    return _watched(DeviceBudget('cpu', slots=slots))
+
+
+def _live(calls):
+    """Return the calls that have not left, for ``_inside``.
+
+    Args:
+        calls: The calls started.
+
+    Returns:
+        Those still inside or waiting.
+    """
+    return [c for c in calls if not c.out.is_set()]
+
+
+@pytest.mark.parametrize('slots', [1, 4, 16])
+def test_cpu_slots(slots):
+    """Calls that name no model (the OCR models) run one at a time on the CPU, whatever its slots."""
+    budget = _cpu(slots)
+    calls = [_Call(budget, 1), _Call(budget, None), _Call(budget, 1)]
+    assert _inside(calls, 1) == 1
     _leave_all(calls)
+
+
+def test_a_models_first_call_enters_beside_other_models():
+    """A model's first call enters at once beside other models' calls, even with one slot."""
+    budget = _cpu(1)
+    first = _Call(budget, None, model=object(), calls=4)
+    assert first.enters()
+    other = _Call(budget, None, model=object(), calls=4)
+    assert other.enters()
+    unnamed = _Call(budget, 1)  # the OCR group has its own first slot too
+    assert unnamed.enters()
+    _leave_all([first, other, unnamed])
+
+
+@pytest.mark.parametrize('calls, slots, expected', [(3, 4, 3), (4, 2, 2)])
+def test_a_model_has_at_most_its_calls_and_the_slots_inside(calls, slots, expected):
+    """A model's calls inside stop at its own limit and at the device's slots, whichever is lower.
+
+    Args:
+        calls: The model's limit.
+        slots: The device's slots.
+        expected: How many of its calls get in.
+    """
+    budget = _cpu(slots)
+    model = object()
+    pending = [_Call(budget, None, model=model, calls=calls) for _ in range(5)]
+    assert _inside(pending, expected) == expected
+    _leave_all(pending)
+
+
+def test_two_models_extras_stay_within_the_slots():
+    """Extra calls of two models never take the device past its slots; a model's first call still enters a full one."""
+    budget = _cpu(3)
+    a, b = object(), object()
+    a_calls = [_Call(budget, None, model=a, calls=4) for _ in range(4)]
+    assert _inside(a_calls, 3) == 3
+    b_calls = [_Call(budget, None, model=b, calls=4) for _ in range(3)]
+    assert _inside(b_calls, 1) == 1  # its own slot, beside a full device
+    everyone = a_calls + b_calls
+    a_inside = [c for c in a_calls if c.inside]
+    a_inside[0].leave()
+    assert _inside(_live(everyone), 3) == 3  # three inside: no extra enters
+    a_inside[1].leave()
+    assert _inside(_live(everyone), 3) == 3  # one slot free: one extra enters, not two
+    _leave_all(everyone)
+
+
+def test_calls_of_one_model_enter_in_arrival_order():
+    """A model's earlier waiting call enters before a later one, even when the later one checks first."""
+    budget = _cpu(4)
+    model = object()
+    inside = [_Call(budget, None, model=model, calls=2) for _ in range(2)]
+    assert _inside(inside, 2) == 2
+    early = _Call(budget, None, model=model, calls=2)
+    assert early.stays_out()
+    late = _Call(budget, None, model=model, calls=2)
+    assert late.stays_out()
+    budget._cond.hold(early._thread)  # the later call gets the first look at the free place
+    inside[0].leave()
+    assert late.stays_out()
+    budget._cond.let_go(early._thread)
+    assert early.enters()
+    assert late.stays_out()
+    _leave_all([inside[1], early, late])
+
+
+def test_calls_of_two_models_take_a_free_slot_in_arrival_order():
+    """A slot that frees goes to the call that waited longest for one, whatever its model."""
+    budget = _cpu(3)
+    a, b = object(), object()
+    a_calls = [_Call(budget, None, model=a, calls=4) for _ in range(2)]
+    assert _inside(a_calls, 2) == 2
+    b_first = _Call(budget, None, model=b, calls=4)
+    assert b_first.enters()
+    a_extra = _Call(budget, None, model=a, calls=4)
+    assert a_extra.stays_out()
+    b_extra = _Call(budget, None, model=b, calls=4)
+    assert b_extra.stays_out()
+    budget._cond.hold(a_extra._thread)  # the later call gets the first look at the free slot
+    a_calls[1].leave()
+    assert b_extra.stays_out()
+    budget._cond.let_go(a_extra._thread)
+    assert a_extra.enters()
+    assert b_extra.stays_out()
+    _leave_all([a_calls[0], b_first, a_extra, b_extra])
+
+
+def test_a_call_held_by_its_own_models_limit_does_not_hold_back_another_model():
+    """A waiting OCR call (one at a time) does not keep a later extra call of another model out of a free slot."""
+    budget = _cpu(3)
+    ocr = _Call(budget, 100)
+    assert ocr.enters()
+    model = object()
+    first = _Call(budget, None, model=model, calls=4)
+    assert first.enters()
+    ocr_waiting = _Call(budget, 100)
+    assert ocr_waiting.stays_out()
+    extra = _Call(budget, None, model=model, calls=4)
+    assert extra.enters()
+    _leave_all([ocr, first, ocr_waiting, extra])
+
+
+def test_one_slot_keeps_every_model_at_one_call():
+    """With one slot each model runs one call at a time, as its old lock did, beside the other models."""
+    budget = _cpu(1)
+    a, b = object(), object()
+    a_calls = [_Call(budget, None, model=a, calls=4) for _ in range(3)]
+    b_calls = [_Call(budget, None, model=b, calls=4) for _ in range(3)]
+    assert _inside(a_calls + b_calls, 2) == 2
+    assert sum(c.inside for c in a_calls) == 1 and sum(c.inside for c in b_calls) == 1
+    _leave_all(a_calls + b_calls)
+
+
+def test_a_failed_call_leaves_the_cpu_guard():
+    """A call that raises frees its place and its model's count."""
+    budget = _cpu(2)
+    model = object()
+    with pytest.raises(RuntimeError):
+        with budget.reserve(None, model=model, calls=2):
+            raise RuntimeError('forward failed')
+    assert budget._inside == [] and budget._by_model == {}
+    calls = [_Call(budget, None, model=model, calls=2) for _ in range(2)]
+    assert _inside(calls, 2) == 2
+    _leave_all(calls)
+
+
+def test_another_non_cuda_device_keeps_one_slot(monkeypatch):
+    """A device other than ``cpu`` and CUDA (``mps``) keeps one slot whatever the CPU has; ``cpu`` takes ``cpu_slots()``."""
+    infos = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(info=lambda *args: infos.append(args)))
+    monkeypatch.setattr(budgetmod, 'cpu_slots', lambda: 4)
+    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 16)
+    budget = _watched(DeviceBudget('mps'))
+    model = object()
+    calls = [_Call(budget, None, model=model, calls=4) for _ in range(3)]
+    assert _inside(calls, 1) == 1
+    _leave_all(calls)
+    assert infos == []
+    assert DeviceBudget('cpu')._slots == 4
+    assert len(infos) == 1 and infos[0][1:] == (4, 16)  # said once, with the usable cores
+    assert DeviceBudget('cpu', slots=2)._slots == 2 and len(infos) == 1
+
+
+def test_on_a_gpu_the_model_and_its_calls_are_ignored():
+    """On a GPU the memory rule alone decides: two calls of a model limited to one call both enter if they fit."""
+    budget = _gpu(_Probe(free=1e6))
+    model = object()
+    calls = [_Call(budget, 100, model=model, calls=1) for _ in range(2)]
+    assert _inside(calls, 2) == 2
+    _leave_all(calls)
+
+
+@pytest.mark.parametrize('cores, slots', [(1, 1), (3, 1), (4, 1), (7, 1), (8, 2), (12, 3), (16, 4), (64, 4)])
+def test_cpu_slots_follow_the_usable_cores(monkeypatch, cores, slots):
+    """One slot per four usable cores, at least one and at most ``MAX_CPU_SLOTS``.
+
+    Args:
+        cores: The usable cores.
+        slots: The slots they give.
+    """
+    monkeypatch.delenv(budgetmod.CPU_SLOTS_ENV, raising=False)
+    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: cores)
+    assert budgetmod.cpu_slots() == slots
+
+
+@pytest.mark.parametrize('value, slots', [('1', 1), ('16', 16)])
+def test_the_operator_sets_the_cpu_slots(monkeypatch, value, slots):
+    """``RR_CPU_INFERENCE_SLOTS`` from 1 to 16 replaces the computed slots.
+
+    Args:
+        value: The variable's value.
+        slots: The slots it gives.
+    """
+    monkeypatch.setenv('RR_CPU_INFERENCE_SLOTS', value)
+    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 8)
+    assert budgetmod.cpu_slots() == slots
+
+
+@pytest.mark.parametrize('value, warned', [('0', True), ('17', True), ('abc', True), ('', False)])
+def test_an_invalid_cpu_slots_setting_falls_back(monkeypatch, value, warned):
+    """A value outside 1 to 16 is logged once, naming the variable, and the computed slots apply; empty is unset.
+
+    Args:
+        value: The variable's value.
+        warned: Whether a warning is expected.
+    """
+    warnings = []
+    monkeypatch.setattr(budgetmod, 'logger', types.SimpleNamespace(warning=lambda *args: warnings.append(args)))
+    monkeypatch.setenv('RR_CPU_INFERENCE_SLOTS', value)
+    monkeypatch.setattr(budgetmod, '_usable_cores', lambda: 8)
+    assert budgetmod.cpu_slots() == 2
+    assert len(warnings) == int(warned)
+    if warned:
+        assert 'RR_CPU_INFERENCE_SLOTS' in warnings[0][0] % warnings[0][1:]
+
+
+@pytest.mark.parametrize(
+    'physical, affinity, cpu_count, quota, usable',
+    [
+        (16, 12, 32, 6, 6),  # the container quota is the fewest
+        (16, 32, 32, None, 16),  # physical cores, not SMT siblings
+        (None, 12, 32, None, 12),  # psutil cannot count physical cores
+        ('missing', None, 3, None, 3),  # no psutil, no affinity call: os.cpu_count
+        ('missing', None, None, None, 1),  # nothing known
+    ],
+)
+def test_usable_cores_are_the_fewest_known(monkeypatch, physical, affinity, cpu_count, quota, usable):
+    """Usable cores are the fewest of physical cores, CPUs the process may use and the quota; unknown ones are skipped.
+
+    Args:
+        physical: What psutil counts as physical cores; ``'missing'`` without psutil.
+        affinity: How many CPUs ``os.sched_getaffinity`` lists; ``None`` where it does not exist.
+        cpu_count: What ``os.cpu_count`` returns.
+        quota: The container quota in CPUs, or ``None``.
+        usable: The cores expected.
+    """
+    if physical == 'missing':
+        monkeypatch.setitem(sys.modules, 'psutil', None)
+    else:
+        psutil = types.SimpleNamespace(cpu_count=lambda logical=True: 999 if logical else physical)
+        monkeypatch.setitem(sys.modules, 'psutil', psutil)
+    if affinity is None:
+        monkeypatch.delattr(budgetmod.os, 'sched_getaffinity', raising=False)
+    else:
+        monkeypatch.setattr(budgetmod.os, 'sched_getaffinity', lambda pid: set(range(affinity)), raising=False)
+    monkeypatch.setattr(budgetmod.os, 'cpu_count', lambda: cpu_count)
+    monkeypatch.setattr(budgetmod, '_cgroup_cpus', lambda: quota)
+    assert budgetmod._usable_cores() == usable
+
+
+@pytest.mark.parametrize(
+    'files, cpus',
+    [
+        ({'cpu.max': 'max 100000\n'}, None),
+        ({'cpu.max': '150000 100000\n'}, 2),
+        ({'cpu.max': '400000 100000\n'}, 4),
+        ({'cpu/cpu.cfs_quota_us': '250000\n', 'cpu/cpu.cfs_period_us': '100000\n'}, 3),
+        ({'cpu/cpu.cfs_quota_us': '-1\n', 'cpu/cpu.cfs_period_us': '100000\n'}, None),
+        ({}, None),
+        ({'cpu.max': 'garbage\n'}, None),
+        ({'cpu.max': '0 100000\n'}, None),
+        ({'cpu/cpu.cfs_quota_us': 'x\n', 'cpu/cpu.cfs_period_us': '100000\n'}, None),
+    ],
+)
+def test_cgroup_cpus(tmp_path, files, cpus):
+    """The container quota is read from cgroup v2 or v1 and rounded up; no quota or a file it cannot read gives None.
+
+    Args:
+        files: The cgroup files and their text.
+        cpus: The CPUs expected.
+    """
+    for name, text in files.items():
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+    assert budgetmod._cgroup_cpus(str(tmp_path)) == cpus
+
+
+def test_with_the_model_server_the_cpu_guard_admits_named_calls_at_once(monkeypatch):
+    """With ``--modelserver`` in the arguments the CPU guard is the no-op one, and calls naming a model pass it."""
+    monkeypatch.setattr(sys, 'argv', [*sys.argv, '--modelserver=5590'])
+    guard = device_budget('cpu')
+    assert guard is budgetmod._NO_BUDGET
+    model = object()
+    held = [guard.reserve(None, model=model, calls=4) for _ in range(8)]
+    for cm in held:
+        cm.__enter__()
+    for cm in held:
+        cm.__exit__(None, None, None)
 
 
 def test_a_failed_call_leaves_the_guard():

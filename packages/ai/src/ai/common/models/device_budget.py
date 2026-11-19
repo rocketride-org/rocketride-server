@@ -12,8 +12,19 @@ desktop or another process. What the calls inside already hold is measured from 
 allocation seen when the device was last idle (the base), so a lasting allocation made
 meanwhile (cuBLAS workspaces) counts as their progress until it drains again. A model
 loaded through ``loading_model`` while calls run does so only until its load ends: then its
-weights, counted from its own tensors, join the base. Other devices (CPU) admit up to
-``CPU_SLOTS`` calls.
+weights, counted from its own tensors, join the base.
+
+Other devices do not weigh memory. A call names the model copy it runs on (the calls that
+name none, as the OCR models do, share one group) and how many calls of that model may be
+inside at once. A model's first call enters at once and never waits for another model's
+calls: that is the model's own slot, as its old lock gave it. A further call of the same
+model enters while the model has fewer than that many inside and the device has fewer than
+its slots inside in total, first calls included. Calls of one model enter in arrival
+order, and so do calls competing for a free slot, across models; a call that waits only
+because its own model is at its limit does not hold back a later call of another model.
+The device ``'cpu'`` has ``cpu_slots()`` slots: one per ``CPU_CORES_PER_CALL`` usable
+cores, at most ``MAX_CPU_SLOTS``, unless the operator sets ``RR_CPU_INFERENCE_SLOTS``.
+Any other device (``mps``) has one.
 
 Another engine process on the same GPU reads the same free memory, so two budgets would
 over-commit the card. While NVML lists one there (or a process it cannot name) and has
@@ -80,8 +91,13 @@ logger = logging.getLogger('rocketlib.models.device_budget')
 # Calls inside one GPU at once, whatever memory is left
 MAX_CONCURRENT = 4
 
-# Calls inside one CPU (or another non-CUDA device) at once
-CPU_SLOTS = 1
+# Calls inside the CPU at once: one per CPU_CORES_PER_CALL usable cores, at most MAX_CPU_SLOTS
+CPU_CORES_PER_CALL = 4
+MAX_CPU_SLOTS = 4
+
+# The operator's own number of CPU slots (1 to CPU_SLOTS_LIMIT); 1 keeps every model at one call at a time
+CPU_SLOTS_ENV = 'RR_CPU_INFERENCE_SLOTS'
+CPU_SLOTS_LIMIT = 16
 
 # Memory left for the desktop and for estimate errors
 MARGIN_MB = 512
@@ -323,6 +339,102 @@ def _nvml_neighbours(device: str) -> Neighbours:
     return neighbours
 
 
+def _cgroup_cpus(root: str = '/sys/fs/cgroup') -> Optional[int]:
+    """Read the CPU quota of this process's container.
+
+    Args:
+        root: Where the cgroup file system is mounted.
+
+    Returns:
+        The quota rounded up to whole CPUs; ``None`` without a quota or when it cannot be read.
+    """
+
+    def read(*path: str) -> str:
+        """Return the text of a file under ``root``."""
+        with open(os.path.join(root, *path)) as f:
+            return f.read()
+
+    try:
+        if os.path.exists(os.path.join(root, 'cpu.max')):
+            # cgroup v2: "max 100000" (no limit) or "<quota> <period>"
+            quota, period = read('cpu.max').split()
+            if quota == 'max':
+                return None
+        else:
+            # cgroup v1: a quota of -1 is no limit
+            quota, period = read('cpu', 'cpu.cfs_quota_us'), read('cpu', 'cpu.cfs_period_us')
+        quota, period = int(quota), int(period)
+        if quota <= 0 or period <= 0:
+            return None
+        return -(-quota // period)
+    except Exception:
+        return None
+
+
+def _usable_cores() -> int:
+    """Count the cores inference may use in this process.
+
+    Returns:
+        The fewest of the physical cores, the CPUs this process may run on and its container's
+        CPU quota, among those that can be read; at least 1.
+    """
+    known: List[Optional[int]] = []
+    try:
+        import psutil
+
+        known.append(psutil.cpu_count(logical=False))
+    except Exception:
+        pass
+    try:
+        known.append(len(os.sched_getaffinity(0)) if hasattr(os, 'sched_getaffinity') else os.cpu_count())
+    except Exception:
+        pass
+    known.append(_cgroup_cpus())
+    counts = [n for n in known if n]
+    return max(1, min(counts)) if counts else 1
+
+
+def cpu_slots() -> int:
+    """Number of calls the CPU admits at once in this process; see the module docstring.
+
+    Returns:
+        ``RR_CPU_INFERENCE_SLOTS`` when it is set to a whole number from 1 to ``CPU_SLOTS_LIMIT``;
+        otherwise one per ``CPU_CORES_PER_CALL`` usable cores, from 1 to ``MAX_CPU_SLOTS``. A value
+        set but outside that range is logged and ignored.
+    """
+    value = os.environ.get(CPU_SLOTS_ENV, '').strip()
+    if value:
+        try:
+            slots = int(value)
+        except ValueError:
+            slots = 0
+        if 1 <= slots <= CPU_SLOTS_LIMIT:
+            return slots
+        logger.warning(
+            '%s=%r is not a whole number from 1 to %d; computing the CPU slots', CPU_SLOTS_ENV, value, CPU_SLOTS_LIMIT
+        )
+    return max(1, min(MAX_CPU_SLOTS, _usable_cores() // CPU_CORES_PER_CALL))
+
+
+class _Ticket:
+    """One call waiting for its place in a guard, or holding it."""
+
+    __slots__ = ('cost_mb', 'model', 'key', 'calls')
+
+    def __init__(self, cost_mb: Optional[float], model: Any, calls: int):
+        """Describe the call.
+
+        Args:
+            cost_mb: The memory the call needs in MB, or ``None``.
+            model: The model copy it runs on, held so that its id stays its own; ``None`` when it names none.
+            calls: How many calls of that model may be inside at once on a device other than a GPU.
+        """
+        self.cost_mb = cost_mb
+        self.model = model
+        self.key = None if model is None else id(model)
+        self.calls = max(1, calls)
+
+
 class DeviceBudget:
     """Admission guard of one device; see the module docstring."""
 
@@ -333,6 +445,8 @@ class DeviceBudget:
         neighbours: Optional[Neighbours] = None,
         release: Optional[Release] = None,
         warm: Optional[Warm] = None,
+        *,
+        slots: Optional[int] = None,
     ):
         """Guard one device.
 
@@ -342,9 +456,15 @@ class DeviceBudget:
             neighbours: Tells whether another engine process busy on the device may hold it; NVML by default on a GPU.
             release: Hands this process's unused cache back; ``torch.cuda.empty_cache`` by default on a GPU.
             warm: Creates the calling thread's cuBLAS workspace in a pool of its own; by default on a GPU.
+            slots: How many calls a device other than a GPU admits in total; a model's first call enters
+                beyond it. By default ``cpu_slots()`` on ``'cpu'`` and 1 on any other. Tests set it.
         """
         self.device = device
         self._gpu = device.startswith('cuda')
+        if slots is None and device == 'cpu':
+            slots = cpu_slots()
+            logger.info('cpu: %d inference slots (%d usable cores)', slots, _usable_cores())
+        self._slots = 1 if slots is None else slots
         self._probe = probe if probe or not self._gpu else _cuda_probe(device)
         self._neighbours = neighbours if neighbours or not self._gpu else _nvml_neighbours(device)
         self._release = release if release or not self._gpu else _cuda_release()
@@ -352,6 +472,8 @@ class DeviceBudget:
         self._cond = threading.Condition()
         self._queue: collections.deque = collections.deque()
         self._inside: List[Optional[float]] = []
+        # calls inside per model, keyed as _Ticket.key
+        self._by_model: Dict[Optional[int], int] = {}
         self._idle_allocated = 0.0
         self._loads = 0
         self._shared = False
@@ -366,25 +488,29 @@ class DeviceBudget:
         self._warm_warned = False
 
     @contextlib.contextmanager
-    def reserve(self, cost_mb: Optional[float]) -> Iterator[None]:
+    def reserve(self, cost_mb: Optional[float], model: Any = None, calls: int = 1) -> Iterator[None]:
         """Run the block as one call on the device, once the guard admits it.
 
         Args:
-            cost_mb: The memory the call needs in MB; ``None`` (not known) runs it alone on the device.
+            cost_mb: The memory the call needs in MB; ``None`` (not known) runs it alone on a GPU.
+            model: The model copy the call runs on, told apart by identity; ``None`` joins the calls that
+                name none. Ignored on a GPU.
+            calls: How many calls of ``model`` may be inside at once (below 1 counts as 1). Ignored on a GPU.
 
         Yields:
             None, while the call holds its place.
         """
-        ticket = object()
+        ticket = _Ticket(cost_mb, model, calls)
         with self._cond:
             self._queue.append(ticket)
             try:
-                while not (self._queue[0] is ticket and self._admits(cost_mb)):
+                while not self._turn(ticket):
                     self._cond.wait(RECHECK_S)
             finally:
                 self._queue.remove(ticket)
                 self._cond.notify_all()
             self._inside.append(cost_mb)
+            self._by_model[ticket.key] = self._by_model.get(ticket.key, 0) + 1
             # a call ends the idle spell; only the next drain starts another
             self._release_due = False
         try:
@@ -394,6 +520,9 @@ class DeviceBudget:
         finally:
             with self._cond:
                 self._inside.remove(cost_mb)
+                self._by_model[ticket.key] -= 1
+                if not self._by_model[ticket.key]:
+                    del self._by_model[ticket.key]
                 if self._gpu and not self._inside and not self._queue:
                     self._release_when_idle()
                 self._cond.notify_all()
@@ -498,8 +627,40 @@ class DeviceBudget:
             self._shared = shared
         return self._shared
 
+    def _turn(self, ticket: _Ticket) -> bool:
+        """Whether a waiting call may enter now; the caller holds the lock.
+
+        Args:
+            ticket: The call.
+
+        Returns:
+            True if it may enter, by the rule of its device in the module docstring.
+        """
+        if self._gpu:
+            # only the head of the queue reads the device
+            return self._queue[0] is ticket and self._admits(ticket.cost_mb)
+        ahead = 0  # earlier waiting calls that take a free slot before this one
+        waiting: Dict[Optional[int], int] = {}  # per model, earlier waiting calls its own limit lets in
+        for other in self._queue:
+            if other is ticket:
+                break
+            if other.key == ticket.key:
+                # an earlier call of the same model goes first
+                return False
+            n = waiting.get(other.key, 0)
+            if self._by_model.get(other.key, 0) + n < other.calls:
+                waiting[other.key] = n + 1
+                ahead += 1
+        mine = self._by_model.get(ticket.key, 0)
+        if not mine:
+            # the model's own slot
+            return True
+        if mine >= ticket.calls:
+            return False
+        return len(self._inside) + ahead < self._slots
+
     def _admits(self, cost_mb: Optional[float]) -> bool:
-        """Whether the call at the head of the queue may enter now; the caller holds the lock.
+        """Whether the call at the head of the queue may enter a GPU now; the caller holds the lock.
 
         Args:
             cost_mb: The call's memory in MB, or ``None`` when not known.
@@ -507,12 +668,6 @@ class DeviceBudget:
         Returns:
             True if it may enter.
         """
-        if not self._gpu:
-            if not self._inside:
-                return True
-            if cost_mb is None or None in self._inside:
-                return False
-            return len(self._inside) < CPU_SLOTS
         shared = self._sharing()
         if not self._inside:
             if shared:
@@ -538,11 +693,13 @@ class DeviceBudget:
 class _NoBudget:
     """The guard with ``--modelserver``: admits every call at once."""
 
-    def reserve(self, cost_mb: Optional[float]) -> contextlib.AbstractContextManager:
+    def reserve(self, cost_mb: Optional[float], model: Any = None, calls: int = 1) -> contextlib.AbstractContextManager:
         """Admit the call at once.
 
         Args:
             cost_mb: Ignored.
+            model: Ignored.
+            calls: Ignored.
 
         Returns:
             A context manager that does nothing.
