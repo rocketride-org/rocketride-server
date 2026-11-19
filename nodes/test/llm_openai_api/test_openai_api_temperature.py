@@ -1,0 +1,589 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+"""The OpenAI-compatible node recovers when an endpoint rejects its temperature.
+
+The node sent `temperature: 0` with every request and had no setting for it. Models
+that only run at their own default (Claude Opus 4.7 and 4.8, the Claude 5 models,
+OpenAI's reasoning models) answer that with HTTP 400, and so does a gateway in front of one, where the
+node only sees a deployment name. Every call then failed (#3363).
+
+The node now sends a request refused that way once more without a temperature, and
+drops the value for the rest of the run only if that second request goes through.
+
+These tests run the real node driver and the real langchain-openai client against a
+local HTTP server that records each request body and answers the way those endpoints
+do, so they check what goes on the wire. No key or network is used. The three provider
+error bodies are the ones the endpoints returned.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import inspect
+import json
+import os
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+import pytest
+
+pytest.importorskip('langchain_openai')
+openai = pytest.importorskip('openai')
+
+from ai.common.config import Config  # noqa: E402
+from ai.common.llm_tools import model_origin  # noqa: E402
+
+_MOD_PATH = os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), '..', '..', 'src', 'nodes', 'llm_openai_api', 'openai_client.py'
+)
+
+# What each endpoint answered a request carrying `temperature: 0` (status, body).
+OPENAI = (
+    400,
+    {
+        'error': {
+            'message': "Unsupported value: 'temperature' does not support 0 with this model. "
+            'Only the default (1) value is supported.',
+            'type': 'invalid_request_error',
+            'param': 'temperature',
+            'code': 'unsupported_value',
+        }
+    },
+)
+ANTHROPIC = (
+    400,
+    {
+        'error': {
+            'code': 'invalid_request_error',
+            'message': '`temperature` is deprecated for this model.',
+            'type': 'invalid_request_error',
+            'param': None,
+        }
+    },
+)
+LITELLM = (
+    400,
+    {
+        'error': {
+            'message': 'litellm.UnsupportedParamsError: claude-opus-5-5 does not support temperature=0.0. '
+            'Only temperature=1 is supported. To drop unsupported params, set `litellm.drop_params = True`.'
+            "\n\nLiteLLM: model group 'rr-gw-deploy-a' failed with the error above. No fallback was attempted.",
+            'type': 'invalid_request_error',
+            'param': None,
+            'code': '400',
+        }
+    },
+)
+# The shape a FastAPI-based server gives a request-validation failure (not from a captured run).
+FASTAPI = (
+    422,
+    {
+        'detail': [
+            {
+                'type': 'extra_forbidden',
+                'loc': ['body', 'temperature'],
+                'msg': 'Extra inputs are not permitted',
+                'input': 0,
+            }
+        ]
+    },
+)
+# More ways a refusal can name the temperature (shapes, not captured runs): a gateway that
+# wraps the provider's error in its own, a message that names it only as a key of the
+# parameters it does not support, a FastAPI check on the whole request, and a message that
+# states the parameter and then copies the request.
+WRAPPED = (
+    400,
+    {
+        'error': {
+            'message': 'Provider returned error',
+            'code': 400,
+            'metadata': {
+                'raw': '{"type":"error","error":{"type":"invalid_request_error",'
+                '"message":"`temperature` is deprecated for this model."}}',
+                'provider_name': 'Anthropic',
+            },
+        }
+    },
+)
+NAMED_AS_A_KEY = (
+    400,
+    {
+        'error': {
+            'message': "UnsupportedParamsError: this deployment does not support parameters: {'temperature': 0.0}.",
+            'type': 'invalid_request_error',
+            'param': None,
+            'code': '400',
+        }
+    },
+)
+FASTAPI_WHOLE_REQUEST = (
+    422,
+    {
+        'detail': [
+            {
+                'type': 'value_error',
+                'loc': ['body'],
+                'msg': 'Value error, this model only runs at its default temperature',
+                'input': {'model': 'any-model', 'messages': []},
+            }
+        ]
+    },
+)
+STATED_BESIDE_A_COPY = (
+    400,
+    {
+        'error': {
+            'message': "Unsupported parameters: {'temperature': 0}. "
+            "Request: {'model': 'deployment', 'messages': [], 'temperature': 0}",
+            'type': 'invalid_request_error',
+            'param': None,
+            'code': '400',
+        }
+    },
+)
+TEMPERATURE_REJECTIONS = [
+    pytest.param(OPENAI, id='openai'),
+    pytest.param(ANTHROPIC, id='anthropic'),
+    pytest.param(LITELLM, id='litellm'),
+    pytest.param(FASTAPI, id='fastapi-422'),
+    pytest.param(WRAPPED, id='wrapped-provider-error'),
+    pytest.param(NAMED_AS_A_KEY, id='named-only-as-a-key'),
+    pytest.param(FASTAPI_WHOLE_REQUEST, id='fastapi-422-whole-request'),
+    pytest.param(STATED_BESIDE_A_COPY, id='stated-beside-a-copy-of-the-request'),
+]
+
+# Refusals that are not about the temperature, whatever the message mentions.
+OTHER_REJECTIONS = [
+    pytest.param(
+        (
+            400,
+            {
+                'error': {
+                    'message': "Unsupported parameter: 'max_tokens' is not supported with this model.",
+                    'type': 'invalid_request_error',
+                    'param': 'max_tokens',
+                    'code': 'unsupported_parameter',
+                }
+            },
+        ),
+        id='another-parameter',
+    ),
+    pytest.param(
+        (
+            400,
+            {
+                'error': {
+                    'message': "Invalid 'stop': not supported at this temperature setting.",
+                    'type': 'invalid_request_error',
+                    'param': 'stop',
+                    'code': 'unsupported_parameter',
+                }
+            },
+        ),
+        id='another-parameter-whose-message-mentions-temperature',
+    ),
+    pytest.param(
+        (
+            400,
+            {
+                'error': {
+                    'message': 'This model has a maximum context length of 8192 tokens.',
+                    'type': 'invalid_request_error',
+                    'param': None,
+                    'code': 'context_length_exceeded',
+                }
+            },
+        ),
+        id='no-parameter-named',
+    ),
+    pytest.param(
+        (401, {'error': {'message': 'Bad key for the temperature service.', 'type': 'authentication_error'}}),
+        id='not-a-rejected-request',
+    ),
+    # A FastAPI-based server copies the request into `input`, which always carries a
+    # temperature and says nothing about why the request was refused. (A shape, not a captured run.)
+    pytest.param(
+        (
+            422,
+            {
+                'detail': [
+                    {
+                        'type': 'missing',
+                        'loc': ['body', 'user'],
+                        'msg': 'Field required',
+                        'input': {'model': 'any-model', 'messages': [], 'temperature': 0},
+                    }
+                ]
+            },
+        ),
+        id='validation-detail-that-copies-the-request',
+    ),
+]
+
+# A server that copies the request into its message names the temperature in every refusal,
+# whatever the refusal is about. (A shape, not a captured run.)
+MESSAGE_COPY = (
+    400,
+    {
+        'object': 'error',
+        'message': '1 validation error for ChatCompletionRequest\n  Value error, When using `tool_choice`, '
+        "`tools` must be set. [type=value_error, input_value={'model': 'any-model', "
+        "'temperature': 0.0, 'tool_choice': 'auto'}, input_type=dict]",
+        'type': 'BadRequestError',
+        'param': None,
+        'code': 400,
+    },
+)
+
+# What a strict proxy answers a request that asks for streaming usage.
+USAGE_REJECTION = (
+    400,
+    {
+        'error': {
+            'message': "Unknown parameter: 'stream_options'.",
+            'type': 'invalid_request_error',
+            'param': 'stream_options',
+            'code': 'unknown_parameter',
+        }
+    },
+)
+
+
+def _completion(body: dict) -> bytes:
+    """Answer `ok`, as one JSON completion or as a stream, the way the request asks."""
+    base = {'id': 'chatcmpl-1', 'created': 0, 'model': body.get('model')}
+    usage = {'prompt_tokens': 3, 'completion_tokens': 1, 'total_tokens': 4}
+    if not body.get('stream'):
+        message = {'role': 'assistant', 'content': 'ok'}
+        choice = {'index': 0, 'message': message, 'finish_reason': 'stop'}
+        return json.dumps({**base, 'object': 'chat.completion', 'choices': [choice], 'usage': usage}).encode()
+    base['object'] = 'chat.completion.chunk'
+    events = [
+        {**base, 'choices': [{'index': 0, 'delta': {'role': 'assistant', 'content': 'ok'}, 'finish_reason': None}]},
+        {**base, 'choices': [{'index': 0, 'delta': {}, 'finish_reason': 'stop'}]},
+    ]
+    if (body.get('stream_options') or {}).get('include_usage'):
+        events.append({**base, 'choices': [], 'usage': usage})
+    return ''.join(f'data: {json.dumps(e)}\n\n' for e in events).encode() + b'data: [DONE]\n\n'
+
+
+class _Endpoint(BaseHTTPRequestHandler):
+    """An OpenAI-compatible endpoint that can refuse requests the way the real ones do."""
+
+    bodies: list = []
+    # (status, body) sent instead of an answer, or None to answer every request.
+    rejection = None
+    # False: refuse only requests that carry a temperature. True: refuse every request.
+    reject_always = False
+    # When set, requests that carry a temperature wait here for each other before they are refused.
+    barrier = None
+    # (status, body) for a request that carries `stream_options` and was not refused above, or None.
+    usage_rejection = None
+
+    def log_message(self, *args):
+        pass
+
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get('content-length') or 0)))
+        _Endpoint.bodies.append(body)
+        refuse = _Endpoint.rejection is not None and (_Endpoint.reject_always or 'temperature' in body)
+        if refuse and _Endpoint.barrier is not None and 'temperature' in body:
+            _Endpoint.barrier.wait(timeout=20)
+        if refuse:
+            status, payload = _Endpoint.rejection
+            data, content_type = json.dumps(payload).encode(), 'application/json'
+        elif _Endpoint.usage_rejection is not None and 'stream_options' in body:
+            status, payload = _Endpoint.usage_rejection
+            data, content_type = json.dumps(payload).encode(), 'application/json'
+        else:
+            status, data = 200, _completion(body)
+            content_type = 'text/event-stream' if body.get('stream') else 'application/json'
+        self.send_response(status)
+        self.send_header('content-type', content_type)
+        self.send_header('content-length', str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+@pytest.fixture
+def endpoint():
+    """Start the local endpoint; yields its base URL and the request bodies it received."""
+    _Endpoint.bodies = []
+    _Endpoint.rejection = None
+    _Endpoint.reject_always = False
+    _Endpoint.barrier = None
+    _Endpoint.usage_rejection = None
+    httpd = ThreadingHTTPServer(('127.0.0.1', 0), _Endpoint)
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+    yield f'http://127.0.0.1:{httpd.server_address[1]}/v1', _Endpoint.bodies
+    httpd.shutdown()
+    httpd.server_close()
+
+
+@pytest.fixture
+def node(monkeypatch, endpoint):
+    """Return a function that builds the node's Chat over a config, plus the warnings it raised."""
+    base_url, _bodies = endpoint
+    warnings: list = []
+
+    def build(model: str = 'any-model', **extra):
+        config = {
+            'model': model,
+            'base_url': base_url,
+            'apikey': 'sk-test',
+            'modelTotalTokens': 200000,
+            'modelOutputTokens': 4096,
+            **extra,
+        }
+        # Both the node and ChatBase read their config through this one call.
+        monkeypatch.setattr(Config, 'getNodeConfig', staticmethod(lambda *a, **k: dict(config)))
+        spec = importlib.util.spec_from_file_location('_llm_openai_api_temperature_test', _MOD_PATH)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        monkeypatch.setattr(module, 'warning', warnings.append, raising=False)
+        chat = module.Chat('llm_openai_api', {}, {})
+        # Counting real tokens would download a tokenizer; the tests do not depend on the count.
+        monkeypatch.setattr(chat, 'getTokens', lambda value: len(value) // 4)
+        return chat
+
+    return build, warnings
+
+
+def _ask(chat, call: str) -> str:
+    """Send one question straight through the LangChain client, by `invoke` or by `stream`."""
+    if call == 'invoke':
+        return chat._llm.invoke('hi').content
+    return ''.join(chunk.content for chunk in chat._llm.stream('hi'))
+
+
+# --- what is sent ---
+
+
+def test_zero_is_sent_when_the_node_sets_nothing(node, endpoint):
+    build, _warnings = node
+    _url, bodies = endpoint
+
+    assert _ask(build(), 'invoke') == 'ok'
+
+    assert [b['temperature'] for b in bodies] == [0]
+
+
+def test_the_configured_value_is_sent(node, endpoint):
+    build, _warnings = node
+    _url, bodies = endpoint
+
+    _ask(build(temperature=0.7), 'invoke')
+
+    assert [b['temperature'] for b in bodies] == [0.7]
+
+
+def test_an_explicit_zero_is_sent_as_zero(node, endpoint):
+    """Pins the `'temperature' in config` check: a falsy check would treat 0 as absent."""
+    build, _warnings = node
+    _url, bodies = endpoint
+
+    _ask(build(temperature=0), 'invoke')
+
+    assert [b['temperature'] for b in bodies] == [0]
+
+
+# --- the endpoint rejects the temperature ---
+
+
+@pytest.mark.parametrize('call', ['invoke', 'stream'])
+@pytest.mark.parametrize('rejection', TEMPERATURE_REJECTIONS)
+def test_a_rejected_temperature_is_dropped_and_the_request_is_sent_again(node, endpoint, rejection, call):
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = rejection
+    chat = build()
+
+    assert _ask(chat, call) == 'ok'
+
+    assert len(bodies) == 2
+    assert bodies[0]['temperature'] == 0
+    assert 'temperature' not in bodies[1]
+    # Everything else about the request is unchanged.
+    assert {k: v for k, v in bodies[0].items() if k != 'temperature'} == bodies[1]
+    assert len(warnings) == 1 and 'temperature=0' in warnings[0]
+
+
+@pytest.mark.parametrize('call', ['invoke', 'stream'])
+def test_later_requests_in_the_run_leave_the_temperature_out(node, endpoint, call):
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = ANTHROPIC
+    chat = build()
+
+    _ask(chat, call)
+    assert _ask(chat, call) == 'ok'
+
+    assert len(bodies) == 3
+    assert 'temperature' not in bodies[2]
+    assert len(warnings) == 1
+
+
+def test_a_value_the_node_set_is_dropped_the_same_way(node, endpoint):
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = OPENAI
+
+    assert _ask(build(temperature=0.7), 'invoke') == 'ok'
+
+    assert bodies[0]['temperature'] == 0.7 and 'temperature' not in bodies[1]
+    assert 'temperature=0.7' in warnings[0]
+
+
+def test_a_model_with_tools_bound_recovers_too(node, endpoint):
+    """A turn with tools runs on a binding of the same client."""
+    build, _warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = LITELLM
+    tool = {'type': 'function', 'function': {'name': 'lookup', 'description': 'Look up.', 'parameters': {}}}
+
+    assert build()._llm.bind_tools([tool]).invoke('hi').content == 'ok'
+
+    assert len(bodies) == 2
+    assert 'temperature' not in bodies[1] and bodies[1]['tools'] == bodies[0]['tools']
+
+
+def test_two_requests_refused_at_once_both_recover_and_one_warns(node, endpoint):
+    """One client serves every pipeline thread of a run."""
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = ANTHROPIC
+    _Endpoint.barrier = threading.Barrier(2)
+    chat = build()
+    answers: list = []
+
+    threads = [threading.Thread(target=lambda: answers.append(_ask(chat, 'invoke'))) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert answers == ['ok', 'ok']
+    assert sum('temperature' in b for b in bodies) == 2 and len(bodies) == 4
+    assert len(warnings) == 1
+
+
+# --- the endpoint refuses the request for another reason ---
+
+
+@pytest.mark.parametrize('call', ['invoke', 'stream'])
+@pytest.mark.parametrize('rejection', OTHER_REJECTIONS)
+def test_another_refusal_is_raised_without_a_second_request(node, endpoint, rejection, call):
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = rejection
+    _Endpoint.reject_always = True
+    chat = build()
+
+    with pytest.raises(openai.APIStatusError) as raised:
+        _ask(chat, call)
+
+    assert raised.value.status_code == rejection[0]
+    assert len(bodies) == 1
+    assert chat._llm.temperature == 0
+    assert warnings == []
+
+
+@pytest.mark.parametrize('call', ['invoke', 'stream'])
+@pytest.mark.parametrize(
+    'rejection',
+    [pytest.param(ANTHROPIC, id='names-the-temperature'), pytest.param(MESSAGE_COPY, id='copies-the-request')],
+)
+def test_a_refusal_repeated_without_the_temperature_is_raised_and_changes_nothing(node, endpoint, rejection, call):
+    """The temperature was not the reason, so the client keeps it and says nothing about it."""
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = rejection
+    _Endpoint.reject_always = True
+    chat = build()
+
+    with pytest.raises(openai.BadRequestError):
+        _ask(chat, call)
+
+    assert len(bodies) == 2 and 'temperature' not in bodies[1]
+    assert chat._llm.temperature == 0
+    assert warnings == []
+
+
+@pytest.mark.parametrize('call', ['invoke', 'stream'])
+def test_once_the_temperature_is_gone_a_refusal_that_names_it_is_not_retried(node, endpoint, call):
+    """Only a request that carried a temperature is sent again."""
+    build, warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = ANTHROPIC
+    chat = build()
+    _ask(chat, call)
+    assert chat._llm.temperature is None and len(bodies) == 2
+
+    _Endpoint.reject_always = True
+    with pytest.raises(openai.BadRequestError):
+        _ask(chat, call)
+
+    assert len(bodies) == 3
+    assert len(warnings) == 1
+
+
+# --- through the shared chat layer ---
+
+
+def test_a_streamed_chat_answers_and_is_still_metered(node, endpoint):
+    """The shared layer never sees the refusal, so it neither gives up usage reporting nor falls back."""
+    build, _warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = ANTHROPIC
+    chunks: list = []
+
+    assert build().chat_string('hi', on_chunk=chunks.append) == 'ok'
+
+    assert ''.join(chunks) == 'ok'
+    assert len(bodies) == 2
+    assert all(b['stream'] is True and b['stream_options'] == {'include_usage': True} for b in bodies)
+    assert 'temperature' not in bodies[1]
+
+
+def test_a_proxy_that_also_refuses_streaming_usage_still_answers(node, endpoint):
+    """The node's retry and the shared layer's own retry without usage each handle their part."""
+    build, _warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = OPENAI
+    _Endpoint.usage_rejection = USAGE_REJECTION
+    chat = build()
+
+    assert chat.chat_string('hi', on_chunk=lambda text: None) == 'ok'
+
+    sent = [sorted(k for k in ('stream_options', 'temperature') if k in b) for b in bodies]
+    assert sent == [['stream_options', 'temperature'], ['stream_options'], ['temperature'], []]
+    assert chat._llm.temperature is None
+
+
+def test_a_chat_that_does_not_stream_answers(node, endpoint):
+    build, _warnings = node
+    _url, bodies = endpoint
+    _Endpoint.rejection = OPENAI
+
+    assert build().chat_string('hi') == 'ok'
+
+    assert len(bodies) == 2 and 'temperature' not in bodies[1]
+
+
+def test_generate_still_takes_the_run_manager(node):
+    """langchain-core passes `run_manager` to `_generate` only when its signature names it."""
+    build, _warnings = node
+
+    assert 'run_manager' in inspect.signature(build()._llm._generate).parameters
+
+
+def test_the_client_keeps_the_class_name_turns_are_tagged_with(node):
+    """Reasoning state is replayed only to the model class name that wrote it (llm_tools.model_origin)."""
+    build, _warnings = node
+
+    assert model_origin(build()._llm) == 'ChatOpenAI'
