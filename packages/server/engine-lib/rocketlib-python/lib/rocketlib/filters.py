@@ -313,8 +313,12 @@ class IGlobalBase:
     open, and ends it after the control has been idle for a while. Everything
     a control needs across its requests - clients, pools, sessions, handles -
     is built here in ``beginGlobal`` from ``self.config`` and closed in
-    ``endGlobal``; an instance reaches only its own control's IGlobal, so
-    nothing on it needs guarding.
+    ``endGlobal``. An instance reaches only its own control's IGlobal, so no
+    other control's data is ever on it; but the bindings of ONE control run
+    concurrently on the same IGlobal. The engine's slot lock serializes the
+    build, the end and the claim of a binding, not the node's own methods:
+    mutable state read across I/O that releases the GIL, and a client that
+    is not thread-safe, still need their own lock here.
 
     These calls may all be overridden in derived
     classes. The engine will call these functions.

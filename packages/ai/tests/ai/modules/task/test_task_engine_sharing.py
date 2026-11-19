@@ -77,19 +77,22 @@ from ai.modules.task.trace_owner import TraceOwners
 #: ``nodes.``), so it can never run on a cross-user engine.
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     'webhook': {'type': 'webhook', 'mode': 'Source', 'hideForm': True},
-    'prompt': {'instructions': ['Answer the question.']},
+    'prompt': {'instructions': ['Answer the question.'], 'maxTokens': 1024, 'stream': False, 'label': ''},
     'local_tool': {'depth': 1},
 }
 PATHS = {'webhook': 'nodes.webhook', 'prompt': 'nodes.prompt', 'local_tool': 'local_nodes.local_tool'}
 #: The keys each provider flags ``param`` (what a pipeline may expose per call).
 PARAMS = {'prompt': ('instructions',)}
+#: The declared type of each leaf, as a leaf descriptor would say it.
+TYPES = {bool: 'boolean', int: 'integer', float: 'number', str: 'string', list: 'array'}
 
 
 class _View:
-    """The slice of a resolved ConfigView the server reads: values, param keys, paths, overlay."""
+    """The slice of a resolved ConfigView the server reads: values, param keys, paths, descriptors, overlay."""
 
     def __init__(self, provider, config):
-        self._values = {**DEFAULTS[provider], **(config or {})}
+        self._defaults = DEFAULTS[provider]
+        self._values = {**self._defaults, **(config or {})}
         self.param_keys = frozenset(PARAMS.get(provider, ()))
 
     def to_dict(self):
@@ -103,6 +106,9 @@ class _View:
 
     def path_of(self, key):
         return key
+
+    def descriptor_of(self, key):
+        return {'type': TYPES.get(type(self._defaults.get(key)), 'string')}
 
     def overlay(self, params):
         for key, value in params.items():
@@ -1397,6 +1403,138 @@ async def test_a_restart_refuses_a_foreign_control_id(catalog, engines):
     with pytest.raises(PermissionError):
         await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': _pipeline()}}, conn=conn)
     assert ts._task_control[dev.key] is dev and engines == []
+
+
+@pytest.mark.asyncio
+async def test_a_restart_carries_the_predecessors_deployment_epoch(catalog, engines):
+    """A deployment revoked since the predecessor registered refuses the successor; the predecessor is not restored."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    run = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    old_engine = run.task
+    resolve_env = ts._resolve_control_env
+
+    async def revoked_during_setup(control):
+        # The kill switch lands while the successor is set up: the predecessor
+        # has already left the registry, so the release pass never saw it
+        await asyncio.sleep(0.05)  # a monotonic tick is 15 ms on Windows
+        ts._deployment_revoked[deployment] = time.monotonic()
+        return await resolve_env(control)
+
+    ts._resolve_control_env = revoked_during_setup
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TaskError) as err:
+        await ts.restart_task(
+            {'arguments': {'token': run.control_id, 'pipeline': _pipeline(instructions='second draft')}}, conn=conn
+        )
+
+    assert (err.value.code, err.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'unpublished')
+    assert ts._task_control == {}, 'neither a successor nor the revoked predecessor is registered'
+    assert engines == [(old_engine, 'unpublished')], 'the predecessor was the last hold'
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restart_keeps_the_predecessors_request_trees(catalog, engines, monkeypatch):
+    """The predecessor's open pipes keep their trace routing through a rollback; a commit forgets them."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    ts.trace_owners.claim('trace-1', dev.key, 7)
+    rewired = _pipeline()
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
+    with pytest.raises(TaskError):
+        await ts.restart_task(
+            {'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn, wait_for_running=True
+        )
+    assert ts._task_control[dev.key] is dev
+    assert ts.trace_owners.owner('trace-1').control_key == dev.key
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock())
+    await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn)
+    assert dev.key not in ts._task_control and ts.trace_owners.owner('trace-1') is None
+
+
+@pytest.mark.asyncio
+async def test_a_control_whose_engine_is_stopping_is_replaced_not_reused(catalog, engines):
+    """An engine in teardown takes no new hold: a matching spec call creates the replacement on a new engine."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    stopping = a.task
+    stopping.state = EngineState.STOPPING
+
+    again = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+
+    assert again is not a and again.task is not stopping
+    assert a.key not in ts._task_control and list(ts._task_control) == [again.key]
+    assert again.task.is_live and again.task.holds == {again.key}
+
+
+@pytest.mark.asyncio
+async def test_the_same_configuration_rewired_is_another_control_on_another_engine(catalog, engines):
+    """Reuse means the same configuration ON THE ENGINE OF THIS SHAPE: a wiring change is never served by the old control."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    rewired = _pipeline(instructions=['Be brief.'])
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+
+    b = await _start(ts, rewired, user='user-a')
+
+    assert b is not a and b.config_hash == a.config_hash and b.task is not a.task
+    assert len(ts._task_control) == 2 and len(ts._engines) == 2
+    # useExisting stays the explicit path onto the running spec, whatever it runs
+    request = {'command': 'execute', 'arguments': {'pipeline': rewired, 'useExisting': True}}
+    result = await ts.start_task(
+        request,
+        MagicMock(),
+        client_id='user-a',
+        user_id='user-a',
+        team_id='team-1',
+        org_id='org-1',
+        developer_id='acme',
+    )
+    assert result['reused'] is True and result['token'] in (a.control_id, b.control_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_identical_launches_share_one_control(catalog, monkeypatch):
+    """Two identical launches that pass the lookup together are one control: the gate rechecks before registering."""
+
+    async def slow_start(self):
+        await asyncio.sleep(0.01)
+        self.state = EngineState.STARTING
+        self._confirm_running()
+
+    monkeypatch.setattr(TaskEngine, 'start_task', slow_start)
+    ts = _server()
+
+    controls = await asyncio.gather(*(_start(ts, _pipeline(), user='user-a') for _ in range(3)))
+
+    assert len({id(c) for c in controls}) == 1 and len(ts._task_control) == 1
+    assert controls[0].task.holds == {controls[0].key}
+
+
+@pytest.mark.asyncio
+async def test_the_hosted_policy_holds_for_a_control_attaching_to_a_warm_engine(catalog, engines, monkeypatch):
+    """A config the hosted policy refuses never holds an engine, warm or cold: the engine's own start is not the gate."""
+    monkeypatch.setattr(task_engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(
+        task_engine,
+        'saas_pipeline_violation',
+        lambda pipeline, *args, **kwargs: (
+            'stdio' if pipeline['components'][1]['config'].get('instructions') == ['stdio'] else None
+        ),
+    )
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+
+    with pytest.raises(ValueError, match='stdio'):
+        await _start(ts, _pipeline(instructions=['stdio']), user='user-a')
+    assert list(ts._task_control) == [a.key] and a.task.holds == {a.key}
 
 
 @pytest.mark.asyncio

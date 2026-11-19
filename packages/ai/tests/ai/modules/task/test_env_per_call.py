@@ -166,6 +166,88 @@ async def test_an_account_that_cannot_answer_leaves_the_control_without_env(cata
 
 
 # =============================================================================
+# TYPED PLACEHOLDERS: A WHOLE-PLACEHOLDER LEAF TAKES ITS DECLARED TYPE
+# =============================================================================
+
+
+def _typed_pipeline(**leaves):
+    """The webhook -> prompt pipeline with ``leaves`` set on the prompt's config."""
+    pipeline = _pipeline()
+    pipeline['components'][1]['config'].update(leaves)
+    return pipeline
+
+
+async def _open_config(ts, pipeline, env, account, monkeypatch):
+    """Start a control whose ``account`` answers ``env``; the prompt's config as its open carries it (stack index 0)."""
+    monkeypatch.setattr(account, 'get_merged_env', AsyncMock(return_value=env))
+    control = await _start(ts, pipeline)
+    stamp = caller_stamp.mint(sharing._caller(), control, correlation_id='r', subcommand='open')
+    return control, stamp['config'][0]
+
+
+@pytest.mark.asyncio
+async def test_an_integer_leaf_set_to_a_placeholder_reaches_the_engine_as_an_int(
+    catalog, engines, deployments, monkeypatch
+):
+    """${ROCKETRIDE_EDGE} on an integer leaf: the stored value keeps the placeholder, the open carries 1024."""
+    ts = _server()
+    control, config = await _open_config(
+        ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'), {'ROCKETRIDE_EDGE': '1024'}, deployments, monkeypatch
+    )
+    assert config['maxTokens'] == 1024 and isinstance(config['maxTokens'], int)
+    assert control.config[0]['maxTokens'] == '${ROCKETRIDE_EDGE}'
+
+
+@pytest.mark.asyncio
+async def test_a_boolean_leaf_set_to_a_placeholder_reaches_the_engine_as_a_bool(
+    catalog, engines, deployments, monkeypatch
+):
+    ts = _server()
+    _, config = await _open_config(
+        ts, _typed_pipeline(stream='${ROCKETRIDE_STREAM}'), {'ROCKETRIDE_STREAM': 'true'}, deployments, monkeypatch
+    )
+    assert config['stream'] is True
+
+
+@pytest.mark.asyncio
+async def test_a_placeholder_inside_a_longer_string_stays_a_string(catalog, engines, deployments, monkeypatch):
+    """Only a leaf that IS one placeholder is typed; text around it is text, whatever the env value looks like."""
+    ts = _server()
+    _, config = await _open_config(
+        ts,
+        _typed_pipeline(label='edge ${ROCKETRIDE_EDGE}', instructions=['Tone: ${ROCKETRIDE_EDGE}']),
+        {'ROCKETRIDE_EDGE': '1024'},
+        deployments,
+        monkeypatch,
+    )
+    assert config['label'] == 'edge 1024' and config['instructions'] == ['Tone: 1024']
+
+
+@pytest.mark.asyncio
+async def test_an_unfilled_placeholder_on_a_typed_leaf_is_left_to_the_engine(
+    catalog, engines, deployments, monkeypatch
+):
+    """No env value: the placeholder rides as written (the engine's resolver passes a placeholder untyped)."""
+    ts = _server()
+    _, config = await _open_config(ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'), {}, deployments, monkeypatch)
+    assert config['maxTokens'] == '${ROCKETRIDE_EDGE}'
+
+
+@pytest.mark.asyncio
+async def test_a_value_that_does_not_fit_its_typed_leaf_is_refused_at_the_door(
+    catalog, engines, deployments, monkeypatch
+):
+    """A non-numeric env value on an integer leaf is invalid_argument naming the leaf; nothing starts."""
+    monkeypatch.setattr(deployments, 'get_merged_env', AsyncMock(return_value={'ROCKETRIDE_EDGE': 'lots'}))
+    ts = _server()
+    with pytest.raises(TaskError) as err:
+        await _start(ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'))
+    assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'maxTokens')
+    assert '"maxTokens" expects integer, got str' in str(err.value)
+    assert ts._task_control == {} and ts._engines == {}
+
+
+# =============================================================================
 # THE ENGINE'S DEFAULT ENV AND THE TASK FILE
 # =============================================================================
 

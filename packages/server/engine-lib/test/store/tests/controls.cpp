@@ -43,6 +43,10 @@ namespace {
 constexpr const char *kNodeType = "ctl_node";
 constexpr const char *kNodePackage = "ctltest";
 
+// The label the task file configures the node with: what the default slot
+// (a binding without a caller) must read, as distinct from no config at all
+constexpr const char *kTaskLabel = "task-cfg";
+
 // The test node. Run again for every section: fresh records each time
 constexpr const char *kNodeSource = R"PY(
 import importlib.machinery
@@ -275,7 +279,16 @@ TEST_CASE("store::controls") {
                                                           factoryInstance);
                            }};
 
-    IFilterTest test({"pipe", kNodeType, "bottom"});
+    // The node rides the task file with a configuration of its own: the
+    // default slot runs on it, a control's slot on the config its open carries
+    json::Value node = json::objectValue;
+    node["id"] = kNodeType;
+    node["provider"] = kNodeType;
+    node["config"]["label"] = kTaskLabel;
+    json::Value taskConfig = json::objectValue;
+    taskConfig["config"]["service"]["filters"].append(node);
+
+    IFilterTest test({"pipe", "bottom"}, taskConfig);
     REQUIRE_NO_ERROR(test.connect());
 
     // Nothing per control is built with the endpoint
@@ -375,8 +388,7 @@ TEST_CASE("store::controls") {
         REQUIRE_NO_ERROR(openUnder(test, endpoint, none, "", nullptr));
         auto begins = entries("begin");
         REQUIRE(begins.size() == 1);
-        REQUIRE(std::get<1>(begins[0]).empty());
-        REQUIRE(std::get<2>(begins[0]).empty());
+        REQUIRE(begins[0] == Record{"begin", "", kTaskLabel});
         REQUIRE_NO_ERROR(closeUnder(endpoint, none));
     }
 

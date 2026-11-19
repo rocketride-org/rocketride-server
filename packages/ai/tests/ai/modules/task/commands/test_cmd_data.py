@@ -441,7 +441,12 @@ async def test_params_are_admitted_by_name_and_by_descriptor_and_ride_the_stamp(
 
 @pytest.mark.asyncio
 async def test_the_node_schema_is_resolved_once_per_control(catalog, engines, engine_log, monkeypatch):
-    """The resolved view is cached on the control for the pipeline's life and dropped with it."""
+    """The resolved view is cached on the control for the pipeline's life and dropped with it.
+
+    The start builds the open's config once (the typed-placeholder pass) and
+    caches every component's view; the params of each open read that view,
+    so no open resolves a schema again.
+    """
     from ai.common import node_config
 
     calls = []
@@ -450,11 +455,12 @@ async def test_the_node_schema_is_resolved_once_per_control(catalog, engines, en
     ts = _server()
     control = await _start(ts, _pipeline(parameters=EXPOSED))
     conn = _data_conn(ts, control)
+    assert set(control.param_views) == {'prompt_1', 'webhook_1'}
     before = len(calls)
 
     for value in ('a', 'b', 'c'):
         await _opened(ts, conn, params={'tone': value})
-    assert calls[before:] == ['prompt']
+    assert calls[before:] == []
 
     control.setup_declared_parameters()
     assert control.param_views == {}

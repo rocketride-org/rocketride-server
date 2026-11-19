@@ -428,6 +428,29 @@ def saas_pipeline_violation(
     return None
 
 
+def hosted_refusal(pipeline: Dict[str, Any]) -> Optional[str]:
+    """
+    Why a hosted engine must refuse ``pipeline``, or None when it may run.
+
+    The server asks on EVERY control before it holds an engine, warm or cold
+    (``TaskServer.start_task``): the stdio MCP transport is a per-config
+    question, so an engine's own start cannot answer it for the controls
+    that attach later. A hosted engine's task always shares its host
+    (``TaskEngine._shares_host``).
+
+    Args:
+        pipeline: The control's spec, its placeholders expanded.
+
+    Returns:
+        The refusal, or None.
+    """
+    if not _is_saas_engine():
+        return None
+    from rocketlib import getServiceDefinition
+
+    return saas_pipeline_violation(pipeline, getServiceDefinition, resolve_node_config, shared_host=True)
+
+
 def _is_saas_engine() -> bool:
     """True when this engine is the hosted (SaaS) one.
 
@@ -1232,15 +1255,6 @@ class TaskEngine(DAPBase):
 
         if source_component is None:
             raise ValueError(f'Pipeline source component "{self.source}" not found in components list')
-
-        if _is_saas_engine():
-            from rocketlib import getServiceDefinition
-
-            problem = saas_pipeline_violation(
-                pipeline, getServiceDefinition, resolve_node_config, shared_host=self._shares_host()
-            )
-            if problem:
-                raise ValueError(problem)
 
         if 'config' not in source_component:
             source_component['config'] = {}

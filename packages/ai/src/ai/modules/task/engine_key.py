@@ -298,8 +298,10 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
     Compute the identity of a pipeline spec: its shape and its resolved config.
 
     The config of every component is resolved through ``facts`` (defaults
-    applied) in the spec's component order, which is the stack index the
-    task file carries (C.22). A component ``facts`` cannot resolve (an
+    applied) in ``stack_order`` (component id order, NOT the order the spec
+    lists them), the stack index the task file carries (C.22):
+    ``config_by_index`` and ``stored_by_index`` follow that order, never the
+    submitted component list. A component ``facts`` cannot resolve (an
     unknown node, a config that does not fit its schema) is an ERROR, raised
     as ``facts`` raised it: a spec that cannot be keyed is never run
     (audit 2026-11-12). ``shareable`` records what the catalog certifies

@@ -56,12 +56,111 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
 from rocketride.types.task import TASK_METRICS, TASK_TOKENS
+from rocketlib.config import ConfigError, _coerce, _type_error
 
+from ai.common import node_config
 from ai.common.parameters import resolve_call_params
 from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
+from .engine_key import stack_order
 from .pipeline import resolve_pipeline_env
 from .types import EngineState, LAUNCH_TYPE, TaskError
+
+# A config value that IS one ``${ROCKETRIDE_*}`` placeholder and nothing else:
+# the one shape whose expansion takes the leaf's declared type (plan 6.2). A
+# placeholder inside a longer string stays text.
+WHOLE_PLACEHOLDER = re.compile(r'^\$\{ROCKETRIDE_[A-Za-z0-9_]+\}$')
+TYPED_LEAVES = ('integer', 'number', 'boolean')
+
+
+class CallerConfigError(ConfigError):
+    """
+    A control's env value does not fit the typed leaf its placeholder sits on.
+
+    The resolver's error class, so the engine and the server door refuse the
+    same way; ``path`` names the leaf for the door's ``field``.
+    """
+
+    def __init__(self, path: str, message: str) -> None:
+        """Keep the leaf path beside the message."""
+        super().__init__(message)
+        self.path = path
+
+
+def _leaf_at(tree: Any, path: str) -> Any:
+    """
+    The value at a dotted schema ``path`` of a stored config tree, or None.
+
+    A declared child name may itself carry a dot (a branch block such as
+    ``gpt-5.2``), so at every level the whole remaining path is tried as one
+    key before its first segment.
+    """
+    remaining = path
+    node = tree
+    while remaining:
+        if not isinstance(node, dict):
+            return None
+        if remaining in node:
+            return node[remaining]
+        head, _, rest = remaining.partition('.')
+        if head not in node or not rest:
+            return None
+        node, remaining = node[head], rest
+    return node
+
+
+def _set_leaf(tree: Dict[str, Any], path: str, value: Any) -> None:
+    """Set the value at a dotted schema ``path`` an ``_leaf_at`` walk reaches."""
+    remaining = path
+    node = tree
+    while remaining not in node:
+        head, _, rest = remaining.partition('.')
+        node, remaining = node[head], rest
+    node[remaining] = value
+
+
+def typed_caller_config(stored: Dict[str, Any], expanded: Dict[str, Any], view: Any) -> Dict[str, Any]:
+    """
+    Give an expanded whole-placeholder leaf the type its schema declares.
+
+    ``resolve_pipeline_env`` expands textually, so ``${ROCKETRIDE_EDGE}`` on
+    an integer leaf arrives as the string ``"1024"``, which the node's
+    resolver refuses by contract (a string on an integer leaf is a
+    ``ConfigError``; coercing engine-side would accept wrong-type literals).
+    Here the schema and the pre-expansion value are both in hand: a leaf
+    whose STORED value is exactly one placeholder is parsed to its declared
+    integer/number/boolean; an unfilled placeholder, an embedded one and
+    every other type stay as expanded.
+
+    Args:
+        stored: The component's config as the spec stores it (placeholders in place).
+        expanded: The same config after ``resolve_pipeline_env`` (modified in place).
+        view: The resolved ``ConfigView`` of the component (keys, ``path_of``, ``descriptor_of``).
+
+    Returns:
+        ``expanded``.
+
+    Raises:
+        CallerConfigError: The env value does not parse as the leaf's type.
+    """
+    for key in view:
+        path = view.path_of(key)
+        raw = _leaf_at(stored, path)
+        if not isinstance(raw, str) or not WHOLE_PLACEHOLDER.match(raw):
+            continue
+        value = _leaf_at(expanded, path)
+        if not isinstance(value, str) or value == raw:
+            continue
+        descriptor = view.descriptor_of(key)
+        kind = descriptor.get('type')
+        if kind not in TYPED_LEAVES:
+            continue
+        coerced = _coerce(value, descriptor)
+        mismatch = _type_error(kind, coerced)
+        if mismatch:
+            raise CallerConfigError(path, f'"{path}" {mismatch} (from {raw})')
+        _set_leaf(expanded, path, coerced)
+    return expanded
 
 
 # ==== Status notes ============================================================
@@ -520,14 +619,34 @@ class TaskControl:
         The config a binding's first frame carries to the engine: ``config`` by stack index, expanded for THIS control (plan 5.3).
 
         The ``${ROCKETRIDE_*}`` placeholders are filled from the control's own
-        env (resolved once from its team context, least privilege); the
-        engine builds this control's IGlobal set from it and keeps nothing it
-        cannot rebuild from the next open.
+        env (resolved once from its team context, least privilege), and a
+        leaf that was one whole placeholder takes its declared scalar type
+        (``typed_caller_config``); the engine builds this control's IGlobal
+        set from it and keeps nothing it cannot rebuild from the next open.
 
         Returns:
             A new list, one config per component in stack order.
+
+        Raises:
+            CallerConfigError: An env value does not fit its typed leaf.
         """
-        return list(resolve_pipeline_env({'config': self.config}, self.env)['config'])
+        expanded = list(resolve_pipeline_env({'config': self.config}, self.env)['config'])
+        components = stack_order((self.pipeline or {}).get('components', []) or [])
+        for index, (component, stored) in enumerate(zip(components, self.config)):
+            if index >= len(expanded) or not isinstance(stored, dict):
+                continue
+            # The component's resolved view, from the same per-control cache
+            # the parameters map reads: the schema is resolved once per
+            # component for the control's life
+            component_id = str(component.get('id') or '')
+            if component_id not in self.param_views:
+                self.param_views[component_id] = node_config.resolve_node_config(
+                    str(component.get('provider') or ''), stored
+                )
+            view = self.param_views[component_id]
+            if view is not None:
+                typed_caller_config(stored, expanded[index], view)
+        return expanded
 
     @property
     def billing(self) -> BillingAttribution:

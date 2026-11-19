@@ -302,12 +302,9 @@ describe('Deploy API Integration Tests', () => {
 			try {
 				await client.deploy.add({ pipeline: makePipeline(project), deployTo: TEAM });
 				const result = await client.deploy.run(project, 'webhook_1', TEAM);
-				// The token slot carries the control id (32 hex, transient); the
-				// address rides beside it when the door returns one.
+				// The control id in the token slot, the address beside it: both required.
 				expect(result.token).toMatch(/^[0-9a-f]{32}$/);
-				if (result.address !== undefined) {
-					expect(result.address).toBe(`${registryIdOf(project, developerId)}.webhook_1`);
-				}
+				expect(result.address).toBe(`${registryIdOf(project, developerId)}.webhook_1`);
 				// The UI's stop path: resolve the live control and terminate it.
 				// The lookup is TEAM-scoped — without teamId it would address
 				// the caller's own dev run of this pipeline (and find none).

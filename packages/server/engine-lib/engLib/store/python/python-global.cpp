@@ -30,6 +30,7 @@ namespace engine::store::pythonBase {
 ///		the one sweep thread
 //-------------------------------------------------------------------------
 std::mutex IPythonGlobalBase::s_registryLock;
+std::condition_variable IPythonGlobalBase::s_registryIdle;
 std::set<IPythonGlobalBase *> IPythonGlobalBase::s_registry;
 Opt<async::Thread> IPythonGlobalBase::s_sweeper;
 
@@ -192,11 +193,18 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
 
         s_registry.insert(this);
 
-        // The first live global starts the one sweep thread
+        // The first live global starts the one sweep thread. A thread
+        // that did not start is not kept: the next global tries again,
+        // and the ops stream hears why (>ERR)
         if (!s_sweeper) {
             s_sweeper.emplace(_location, "IGlobalSweep",
                               &IPythonGlobalBase::sweepProcess);
-            s_sweeper->start();
+            if (auto ccode = s_sweeper->start()) {
+                s_sweeper.reset();
+                if (::engine::config::monitor())
+                    ::engine::config::monitor()->error(APERR(
+                        ccode, "The IGlobal sweep thread did not start"));
+            }
         }
     }
 }
@@ -210,11 +218,14 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
 ///		calling into the node
 //-------------------------------------------------------------------------
 IPythonGlobalBase::~IPythonGlobalBase() noexcept {
-    // Leave the registry; take the thread with us when we were the last
+    // Leave the registry once no sweep holds us (a sweep that snapshotted
+    // us may still be in our sweepIdle); take the thread with us when we
+    // were the last
     Opt<async::Thread> retire;
     _block() {
-        std::lock_guard<std::mutex> guard(s_registryLock);
+        std::unique_lock<std::mutex> guard(s_registryLock);
 
+        s_registryIdle.wait(guard, [this] { return m_sweepHold == 0; });
         s_registry.erase(this);
         if (s_registry.empty()) {
             retire = _mv(s_sweeper);
@@ -241,10 +252,15 @@ IPythonGlobalBase::~IPythonGlobalBase() noexcept {
 //-------------------------------------------------------------------------
 /// @details
 ///		This node's index in the task file's component list - the index
-///		the open's `config` list is addressed by. A stack built without a
-///		pipeline (a filter stack named by type) uses the stack position
+///		the open's `config` list is addressed by (plan 5.3; the component
+///		order _build_task wrote). A node the component list does not
+///		name (a filter a node inserted while it began) has no index: the
+///		open's list carries nothing for it, so it runs on its own
+///		connConfig rather than on another component's by position. A
+///		stack built without a pipeline (a filter stack named by type)
+///		uses the stack position
 //-------------------------------------------------------------------------
-size_t IPythonGlobalBase::stackIndex() noexcept {
+Opt<size_t> IPythonGlobalBase::stackIndex() noexcept {
     // Step 1: the pipeline's component order, when there is one
     auto &components = endpoint->config.pipeline.components();
     if (components.isArray()) {
@@ -252,13 +268,14 @@ size_t IPythonGlobalBase::stackIndex() noexcept {
             if (components[i].isObject() &&
                 components[i].lookup<Text>("id", "") == pipeType.id)
                 return i;
+        return {};
     }
 
     // Step 2: otherwise the position in the endpoint's stack
     for (size_t i = 0; i < endpoint->pipeStack.size(); ++i)
         if (endpoint->pipeStack[i].id == pipeType.id) return i;
 
-    return 0;
+    return {};
 }
 
 //-------------------------------------------------------------------------
@@ -439,12 +456,13 @@ ErrorOr<IPythonGlobalBase::SlotPtr> IPythonGlobalBase::acquireSlot(
         if (dict.contains("controlId") && !dict["controlId"].is_none())
             controlId = py::cast<std::string>(dict["controlId"]);
 
-        if (dict.contains("config") && py::isinstance<py::list>(dict["config"])) {
+        if (m_stackIndex && dict.contains("config") &&
+            py::isinstance<py::list>(dict["config"])) {
             const py::list list = dict["config"];
-            if (m_stackIndex < list.size() &&
-                py::isinstance<py::dict>(list[m_stackIndex]))
+            if (*m_stackIndex < list.size() &&
+                py::isinstance<py::dict>(list[*m_stackIndex]))
                 config = engine::python::pyjson::dictToJson(
-                    list[m_stackIndex].cast<py::dict>());
+                    list[*m_stackIndex].cast<py::dict>());
         }
         return {};
     };
@@ -476,15 +494,16 @@ ErrorOr<IPythonGlobalBase::SlotPtr> IPythonGlobalBase::acquireSlot(
         // Step 3: the first touch builds it
         if (!slot->built) {
             // A control's configuration comes with its open; the default
-            // slot (no caller) runs on the task file's
+            // slot (no caller) and a node the open's list does not address
+            // (no stack index) run on the node's own connConfig
             json::Value connConfig;
             if (config)
                 connConfig = _mv(*config);
-            else if (controlId.empty())
+            else if (controlId.empty() || !m_stackIndex)
                 connConfig = pipeType.connConfig;
 
             Error ccode;
-            if (!config && !controlId.empty())
+            if (!config && !controlId.empty() && m_stackIndex)
                 ccode = APERR(Ec::InvalidCommand, "No configuration for control",
                               controlId, "on node", pipeType.id,
                               "- the control's open did not reach this engine");
@@ -530,18 +549,21 @@ std::vector<Text> IPythonGlobalBase::controlIds() noexcept {
 
     std::lock_guard<std::mutex> guard(m_slotsLock);
     for (auto &[controlId, slot] : m_slots)
-        if (slot->built) ids.push_back(controlId);
+        if (slot->built.load()) ids.push_back(controlId);
     return ids;
 }
 
 //-------------------------------------------------------------------------
 /// @details
 ///		End and erase every slot of this node idle since `before` with no
-///		open binding. The candidates are picked under the map lock, then
-///		each is re-checked under its own lock: a binding that claimed it
-///		meanwhile keeps it. The slot leaves the map BEFORE endGlobal runs,
-///		so a binding arriving during a slow endGlobal builds a fresh one
-///		instead of waiting
+///		open binding. The candidates are picked under the map lock (the
+///		atomics only), then each is re-checked under its own lock: a
+///		binding that claimed it meanwhile keeps it. The slot stays in the
+///		map, retired, until its endGlobal has RUN: a binding arriving
+///		meanwhile waits on the slot lock (GIL released), wakes on the
+///		retired slot and builds a fresh one only after the old global
+///		released what it held, so two IGlobals of one control never
+///		overlap on an exclusive resource
 //-------------------------------------------------------------------------
 void IPythonGlobalBase::sweepIdle(Clock::time_point before) noexcept {
     // Step 1: the idle candidates
@@ -549,8 +571,8 @@ void IPythonGlobalBase::sweepIdle(Clock::time_point before) noexcept {
     _block() {
         std::lock_guard<std::mutex> guard(m_slotsLock);
         for (auto &[controlId, slot] : m_slots)
-            if (slot->built && slot->bindings.load() == 0 &&
-                slot->lastTouch < before)
+            if (slot->built.load() && slot->bindings.load() == 0 &&
+                slot->lastTouch.load() < before)
                 candidates.emplace_back(controlId, slot);
     }
 
@@ -558,22 +580,25 @@ void IPythonGlobalBase::sweepIdle(Clock::time_point before) noexcept {
     for (auto &[controlId, slot] : candidates) {
         std::lock_guard<std::mutex> guard(slot->lock);
 
-        if (slot->retired || !slot->built || slot->bindings.load() != 0 ||
-            slot->lastTouch >= before)
+        if (slot->retired || !slot->built.load() ||
+            slot->bindings.load() != 0 || slot->lastTouch.load() >= before)
             continue;
 
+        // Retired first: a waiter that wakes on it goes back to the map
         slot->retired = true;
+
+        // An endGlobal that fails is the ops stream's to know (>ERR); the
+        // slot is gone either way
+        if (auto ccode = endSlot(*slot); ccode && ::engine::config::monitor())
+            ::engine::config::monitor()->error(_mv(ccode));
+
+        // Out of the map only now, with the old global ended
         _block() {
             std::lock_guard<std::mutex> mapGuard(m_slotsLock);
             if (auto it = m_slots.find(controlId);
                 it != m_slots.end() && it->second == slot)
                 m_slots.erase(it);
         }
-
-        // An endGlobal that fails is the ops stream's to know (>ERR); the
-        // slot is gone either way
-        if (auto ccode = endSlot(*slot); ccode && ::engine::config::monitor())
-            ::engine::config::monitor()->error(_mv(ccode));
 
         LOG(Python, "Ended the idle IGlobal of control", controlId, "on",
             pipeType.id);
@@ -582,13 +607,37 @@ void IPythonGlobalBase::sweepIdle(Clock::time_point before) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		The engine-wide sweep over every live node global
+///		The engine-wide sweep over every live node global. The registry
+///		lock covers the snapshot only: each global is pinned (m_sweepHold)
+///		while its sweepIdle runs, so its destructor waits for the sweep
+///		instead of the sweep holding a lock across a node's endGlobal -
+///		which may itself construct or destroy a global (validatePipeline
+///		from Python) and would block on the same, non-recursive, lock
 //-------------------------------------------------------------------------
 void IPythonGlobalBase::sweepIdleGlobals(std::chrono::seconds idle) noexcept {
     const auto before = Clock::now() - idle;
 
-    std::lock_guard<std::mutex> guard(s_registryLock);
-    for (auto *global : s_registry) global->sweepIdle(before);
+    // Step 1: pin every live global
+    std::vector<IPythonGlobalBase *> globals;
+    _block() {
+        std::lock_guard<std::mutex> guard(s_registryLock);
+        globals.reserve(s_registry.size());
+        for (auto *global : s_registry) {
+            ++global->m_sweepHold;
+            globals.push_back(global);
+        }
+    }
+
+    // Step 2: sweep each outside the registry lock, then let it go
+    for (auto *global : globals) {
+        global->sweepIdle(before);
+
+        _block() {
+            std::lock_guard<std::mutex> guard(s_registryLock);
+            --global->m_sweepHold;
+        }
+        s_registryIdle.notify_all();
+    }
 }
 
 //-------------------------------------------------------------------------

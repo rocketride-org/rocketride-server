@@ -1276,15 +1276,18 @@ def _seed_running_task(ts):
     from ai.modules.task.task_control import config_hash
     from ai.modules.task.task_engine import component_facts
 
+    content = engine_content(_launch_pipeline(), 'src', component_facts)
     task = MagicMock()
     task.is_task_complete.return_value = False
     task.dormant_reason = None
+    # The engine of the run's own shape: reuse compares the key
+    task.engine_key = content.key(rung='spec', owner_id='user-1')
     control = SimpleNamespace(
         id=LAUNCH_ADDRESS,
         key=LAUNCH_ID,
         control_id=LAUNCH_ID,
         index_key=LAUNCH_INDEX,
-        config_hash=config_hash(engine_content(_launch_pipeline(), 'src', component_facts).config_by_index),
+        config_hash=config_hash(content.config_by_index),
         address=LAUNCH_ADDRESS,
         deployment=None,
         registered_at=0.0,

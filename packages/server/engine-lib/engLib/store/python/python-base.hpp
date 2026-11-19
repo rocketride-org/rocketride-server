@@ -216,14 +216,18 @@ public:
         std::mutex lock;
 
         //---------------------------------------------------------
-        /// When a binding last bound or released this slot
+        /// When a binding last bound or released this slot. Atomic:
+        /// releaseSlot writes it with no lock held and the sweep's
+        /// candidate scan reads it under the map lock
         //---------------------------------------------------------
-        Clock::time_point lastTouch = Clock::now();
+        std::atomic<Clock::time_point> lastTouch{Clock::now()};
 
         //---------------------------------------------------------
-        /// beginGlobal() has run
+        /// beginGlobal() has run. Atomic: written under the slot
+        /// lock, read under the map lock by controlIds() and the
+        /// sweep's candidate scan
         //---------------------------------------------------------
-        bool built = false;
+        std::atomic<bool> built{false};
 
         //---------------------------------------------------------
         /// Ended by the sweep or the endpoint: no longer in the
@@ -302,7 +306,7 @@ private:
                     json::Value connConfig) noexcept;
     Error endSlot(GlobalSlot &slot) noexcept;
     void sweepIdle(Clock::time_point before) noexcept;
-    size_t stackIndex() noexcept;
+    Opt<size_t> stackIndex() noexcept;
     static void sweepProcess() noexcept;
 
     //-------------------------------------------------------------
@@ -354,9 +358,12 @@ private:
     //-------------------------------------------------------------
     /// @details
     ///		This node's position in the task file's component list -
-    ///		the index `caller['config']` is addressed by
+    ///		the index `caller['config']` is addressed by. None for a
+    ///		node the open's config list does not address (a filter the
+    ///		pipeline did not declare): such a node runs on its own
+    ///		connConfig and never takes another component's by position
     //-------------------------------------------------------------
-    size_t m_stackIndex = 0;
+    Opt<size_t> m_stackIndex;
 
     //-------------------------------------------------------------
     /// @details
@@ -366,11 +373,23 @@ private:
 
     //-------------------------------------------------------------
     /// @details
+    ///		How many sweeps hold this global right now. Guarded by
+    ///		s_registryLock: the sweep pins every global it snapshots
+    ///		before it lets the registry lock go, and the destructor
+    ///		waits on s_registryIdle until no sweep holds it
+    //-------------------------------------------------------------
+    int m_sweepHold = 0;
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Every live node global, for the engine-wide sweep, and the
     ///		one sweep thread: started with the first global, stopped
-    ///		with the last
+    ///		with the last. The sweep never calls into Python with the
+    ///		registry lock held (a node's endGlobal may construct or
+    ///		destroy a global of its own); it pins the globals instead
     //-------------------------------------------------------------
     static std::mutex s_registryLock;
+    static std::condition_variable s_registryIdle;
     static std::set<IPythonGlobalBase *> s_registry;
     static Opt<async::Thread> s_sweeper;
 };

@@ -101,7 +101,7 @@ from ai.constants import (
     CONST_MAX_UNAUTHED_IPS,
 )
 from ai.common.parameters import validate_parameters
-from .pipeline import references_env, substituted_env, validate_placeholders
+from .pipeline import references_env, resolve_pipeline_env, substituted_env, validate_placeholders
 from .task_convert import ConvertResult, convert_pipeline
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
@@ -115,6 +115,7 @@ from .task_conn import TaskConn
 from .trace_owner import TraceOwners
 from .task_control import (
     RUNGS,
+    CallerConfigError,
     DeploymentRef,
     TaskControl,
     TeamContext,
@@ -126,8 +127,8 @@ from .task_control import (
 )
 from .engine_key import EngineContent, engine_content
 from .node_id import node_id
-from .task_engine import TaskEngine, component_facts, resolve_parameter_tokens
-from .types import LAUNCH_TYPE, TaskError
+from .task_engine import TaskEngine, component_facts, hosted_refusal, resolve_parameter_tokens
+from .types import LAUNCH_TYPE, EngineState, TaskError
 from .pipeline import MultipleSourcesError, resolve_implied_source
 from .commands.cmd_monitor import owner_key
 from .address import (
@@ -1610,8 +1611,7 @@ class TaskServer(DAPBase):
             # A deployment revoked after this control was registered (or after
             # its state was read by the dispatch that started it) is the kill
             # switch catching a control the release pass did not reach
-            revoked = self._deployment_revoked.get(control.deployment) if control.deployment is not None else None
-            if revoked is None or revoked <= control.registered_at:
+            if not self._revoked_after(control.deployment, control.registered_at):
                 return control
             told = (control.task.engine_key if control.task is not None else '', 'unpublished')
         engine_key_value, reason = told
@@ -2048,17 +2048,20 @@ class TaskServer(DAPBase):
         """True when another control also holds the engine ``control`` holds."""
         return control.task is not None and any(key != control.key for key in control.task.holds)
 
-    def _unregister_control(self, control: TaskControl, *, keep_hold: bool = False) -> None:
+    def _unregister_control(self, control: TaskControl, *, keep_hold: bool = False, keep_traces: bool = False) -> None:
         """
         Take a control out of the registry; its subscriptions stay.
 
         The control's hold goes with it unless ``keep_hold`` is set, for a
         caller that releases it through ``release_hold`` (the rule that stops
-        the engine when the last hold drops).
+        the engine when the last hold drops). Its request trees go with it
+        unless ``keep_traces`` is set, for a caller that may put the control
+        back (a restart's predecessor) and forgets them itself on commit.
 
         Args:
             control: The control to unregister.
             keep_hold: Leave the hold to the caller.
+            keep_traces: Leave the trace ownership records to the caller.
         """
         # Out of the registry, unless a replacement already took the key
         if self._task_control.get(control.key) is control:
@@ -2066,7 +2069,8 @@ class TaskServer(DAPBase):
             self._engine_unavailable.pop(control.key, None)
             self._forget_launch_owner(control)
             # Its request trees go with it (their records did)
-            self.trace_owners.forget_control(control.key)
+            if not keep_traces:
+                self.trace_owners.forget_control(control.key)
 
         # The control's one hold
         if not keep_hold and control.task is not None:
@@ -2389,6 +2393,22 @@ class TaskServer(DAPBase):
             if not keys:
                 self._launched.pop(id(owner), None)
 
+    def _revoked_after(self, deployment: Optional[DeploymentRef], epoch: float) -> bool:
+        """
+        Whether ``deployment`` was disabled or removed after ``epoch``.
+
+        Args:
+            deployment: The deployment a control resolved through, or None (never revoked).
+            epoch: Monotonic time its state was last known good.
+
+        Returns:
+            True when the kill switch landed after ``epoch``.
+        """
+        if deployment is None:
+            return False
+        revoked = self._deployment_revoked.get(deployment)
+        return revoked is not None and revoked > epoch
+
     def _refuse_if_revoked(self, control: TaskControl, state_epoch: float) -> None:
         """
         Refuse to register a control through a deployment revoked since ``state_epoch``.
@@ -2400,10 +2420,7 @@ class TaskServer(DAPBase):
         Raises:
             TaskError: TASK_ENGINE_UNAVAILABLE with ``reason='unpublished'``.
         """
-        if control.deployment is None:
-            return
-        revoked = self._deployment_revoked.get(control.deployment)
-        if revoked is None or revoked <= state_epoch:
+        if not self._revoked_after(control.deployment, state_epoch):
             return
         raise TaskError(
             TaskError.ENGINE_UNAVAILABLE,
@@ -2766,21 +2783,44 @@ class TaskServer(DAPBase):
         control.config = [dict(entry) for entry in content.stored_by_index]
         control.config_hash = config_hash(content.config_by_index)
 
+        # The config the open will carry is built once here: an env value that
+        # does not fit the typed leaf its placeholder sits on is refused at the
+        # door, naming the leaf, never first by the engine
+        try:
+            control.caller_config()
+        except CallerConfigError as exc:
+            raise TaskError(TaskError.INVALID_ARGUMENT, f'The pipeline cannot start: {exc}', field=exc.path) from exc
+
+        # The hosted policy (nosaas nodes, the stdio MCP transport) holds for
+        # EVERY control before it holds an engine, a warm one included: an
+        # engine's own start checked the config of its first control only
+        refusal = hosted_refusal(resolve_pipeline_env(control.pipeline, control.env))
+        if refusal:
+            raise ValueError(refusal)
+
+        def _same_spec(existing: TaskControl) -> bool:
+            """Whether ``existing`` runs this call's spec: its configuration on the engine of this shape."""
+            return existing.config_hash == control.config_hash and existing.task.engine_key == key
+
         # The caller's controls under the same index key (rung, owner,
-        # address): on @spec the one with the same configuration is REUSED
-        # (plan 3.4); a finished one is replaced; a different configuration
-        # is left alone, another control on the same engine. A deployment
-        # run is one per index key: the pin path attaches before it starts
+        # address): on @spec the one with the same configuration ON THE
+        # ENGINE OF THIS SHAPE is REUSED (plan 3.4); a finished or stopping
+        # one is replaced; a different configuration, or the same configs
+        # rewired (another engine), is left alone, another control. A
+        # deployment run is one per index key: the pin path attaches before
+        # it starts
         for existing_control in self._task_control.lookup(control.index_key):
-            if existing_control.task.is_task_complete() and not existing_control.dormant:
-                # Its engine is done. Its subscriptions stay: they are the
-                # replacement's too
+            engine = existing_control.task
+            if (engine.is_task_complete() or engine.state is EngineState.STOPPING) and not existing_control.dormant:
+                # Its engine is done, or stopping (it takes no new hold, and a
+                # reused control would hand out an id its teardown is about to
+                # retire). Its subscriptions stay: they are the replacement's too
                 self._unregister_control(existing_control)
-                self.debug_message(f'Replaced completed task "{control.id}"...')
+                self.debug_message(f'Replaced finished task "{control.id}"...')
                 continue
             if control.rung != 'spec':
                 raise ValueError(f'Pipeline is already running (task {existing_control.id}); stop it and run again.')
-            if not use_existing and existing_control.config_hash != control.config_hash:
+            if not use_existing and not _same_spec(existing_control):
                 continue
             # The same identity, or useExisting on the caller's live control
             # of this project_id: a dormant control's engine starts again
@@ -2788,7 +2828,7 @@ class TaskServer(DAPBase):
             # The submitted pipeline is not applied to a running control: say
             # so when it differs, so an edit-and-rerun loop never silently
             # measures the old configuration (restart applies it)
-            if existing_control.config_hash != control.config_hash:
+            if not _same_spec(existing_control):
                 self.debug_message(
                     f'Task "{existing_control.id}" is already running: reusing it (useExisting) and ignoring the '
                     'submitted pipeline, which differs from the running one. Restart the task to apply it.'
@@ -2801,8 +2841,20 @@ class TaskServer(DAPBase):
         # The moment the deployment's state is known good: the dispatch's read,
         # or now for a run that resolved no deployment
         state_epoch = time.monotonic() if deployment_epoch is None else float(deployment_epoch)
+        reused: Optional[TaskControl] = None
 
         def _register(engine: TaskEngine) -> None:
+            nonlocal reused
+            # A twin registered while this call waited in the gate (two
+            # identical launches passed the lookup above together): the
+            # caller gets that control and takes no hold of its own. A
+            # deployment run reads as already running, as above
+            for twin in self._task_control.lookup(control.index_key):
+                if twin.task is engine and twin.live and (use_existing or _same_spec(twin)):
+                    if control.rung != 'spec':
+                        raise ValueError(f'Pipeline is already running (task {twin.id}); stop it and run again.')
+                    reused = twin
+                    return
             # A deployment disabled or removed while the artifact loaded or the
             # engine started never gets a registered control (plan 7.2)
             self._refuse_if_revoked(control, state_epoch)
@@ -2835,6 +2887,12 @@ class TaskServer(DAPBase):
                 ),
                 _register,
             )
+
+            # The gate answered with a twin: the caller's control already runs
+            if reused is not None:
+                if wait_for_running:
+                    await reused.task.wait_for_running()
+                return _return_results(reused, reused=True)
 
             self._debug_task_started(control, trigger, control.ttl)
 
@@ -3176,7 +3234,7 @@ class TaskServer(DAPBase):
             # so the successor's resolution never answers with it and the
             # engine it holds survives until the successor holds its own
             old_engine = control.task
-            self._unregister_control(control, keep_hold=True)
+            self._unregister_control(control, keep_hold=True, keep_traces=True)
             successor = {
                 'command': control.launch_type.value,
                 'arguments': {
@@ -3207,10 +3265,21 @@ class TaskServer(DAPBase):
                     rung='' if control.rung == 'spec' else control.rung,
                     version=control.version,
                     team_context=control.team_context,
+                    # The predecessor's state epoch carries over: a deployment
+                    # revoked since it registered refuses the successor too
+                    deployment_epoch=control.registered_at,
                 )
             except Exception:
-                # Step 3b: the predecessor is back as it was: its hold was never
-                # released, its subscriptions never touched
+                # Step 3b: a predecessor whose deployment was revoked meanwhile
+                # is not restored: it goes the way the kill switch takes every
+                # hold (the predecessor had already left the deployment index)
+                if self._revoked_after(control.deployment, control.registered_at):
+                    self.trace_owners.forget_control(control.key)
+                    await self.release_hold(old_engine, control.key, 'unpublished')
+                    raise
+                # Otherwise it is back as it was: its hold was never released,
+                # its request trees never forgotten, its subscriptions never
+                # touched
                 self._task_control[control.key] = control
                 self._schedule_control(control)
                 if control.launch_type == LAUNCH_TYPE.LAUNCH:
@@ -3218,7 +3287,9 @@ class TaskServer(DAPBase):
                 raise
 
             # Step 4: the predecessor's hold goes through the hold rule: the
-            # engine stops only when that was its last hold
+            # engine stops only when that was its last hold; its request trees
+            # go with it now that the successor is committed
+            self.trace_owners.forget_control(control.key)
             await self.release_hold(old_engine, control.key, 'restart')
             new_control = self.control_by_key(result['token'])
             converged = 'none' if new_control.task is old_engine else 'started'

@@ -49,6 +49,7 @@ from ai.modules.task.task_engine import TaskEngine, component_facts
 from ai.modules.task.task_control import TaskControl, config_hash, mint_control_id
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.trace_owner import TraceOwners
+from ai.modules.task.types import EngineState
 
 ADDRESS = 'acme.proj-tk.src'
 
@@ -138,12 +139,15 @@ def _live_run(user_id='user-1', complete=False):
     control.address = ADDRESS
     control.id = ADDRESS
     control.control_id = control.key = mint_control_id()
-    control.config = engine_content(control.pipeline, 'src', component_facts).config_by_index
+    content = engine_content(control.pipeline, 'src', component_facts)
+    control.config = content.config_by_index
     control.config_hash = config_hash(control.config)
     control.task = SimpleNamespace(
         is_task_complete=lambda: complete,
+        state=EngineState.STOPPED if complete else EngineState.RUNNING,
         dormant_reason=None,
-        engine_key='hash-1:user-a',
+        # The engine of the run's own shape: reuse compares the key
+        engine_key=content.key(rung='spec', owner_id=user_id),
         wait_for_running=AsyncMock(),
         stop_task=AsyncMock(),
     )

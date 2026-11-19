@@ -582,6 +582,13 @@ async def _start(ts: TaskServer, request: dict, *, user_id='user-a', developer_i
         task.is_live = True
         task.release.return_value = 0
         task.dormant_reason = None
+
+        def construct(*args, **kwargs):
+            # The stub carries the key it was built under: reuse compares it
+            task.engine_key = kwargs.get('engine_key', '')
+            return task
+
+        task_cls.side_effect = construct
         return await ts.start_task(
             request,
             conn=MagicMock(),
