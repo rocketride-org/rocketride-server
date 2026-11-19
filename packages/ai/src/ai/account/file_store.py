@@ -82,7 +82,10 @@ def _configured_signing_key() -> str:
     try:
         return raw.decode('utf-8')
     except UnicodeDecodeError:
-        raise ValueError('RR_SIGNING_KEY must be valid UTF-8') from None
+        pass
+    # Raised outside the handler: the decode error holds the raw key bytes,
+    # and an exception raised inside would keep it as __context__.
+    raise ValueError('RR_SIGNING_KEY must be valid UTF-8')
 
 
 def fetch_signing_key() -> str:
