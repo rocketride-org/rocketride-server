@@ -41,7 +41,8 @@
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, commonStyles, MarkdownRenderer } from 'shell';
+import { Button, commonStyles, InputField, MarkdownRenderer, TabControl } from 'shell';
+import type { ViewMenu } from 'shell';
 import type { IAssetsHost, IReadmeReference } from './assetsModel';
 import { downscaleImage } from './assetsDownscale';
 import { admitIcon, ASSETS_DIR, assetMarkdown, dataUriByteLength, extensionForMediaType, formatBytes, iconPathFor, inlineImageReferences, insertAtCaret, lineCount, pastedImageName, posixBasename, posixDirname, posixJoin, README_WRITE_DEBOUNCE_MS, readmeReferences, referenceWidth, removeReference, safeAssetName, setReferenceWidth, uniqueAssetName } from './assetsModel';
@@ -105,6 +106,9 @@ interface IReferenceTile extends IReadmeReference {
 /** The README path a pane without a declared one writes. */
 const DEFAULT_README_PATH = './README.md';
 
+/** The README strip: Preview first, the tab a README opens on. */
+const README_TABS: ViewMenu = { entries: [{ id: 'preview', label: 'Preview' }, { id: 'edit', label: 'Edit' }] };
+
 /** The wording that differs by kind. */
 const KIND_WORDS: Record<AssetsKind, { noun: string; glyph: string; packedNote: (referenced: number, missing: number) => string }> = {
 	pipeline: {
@@ -147,14 +151,6 @@ const styles = {
 	mono: {
 		...commonStyles.fontMono,
 		color: 'var(--rr-text-primary)',
-	} as CSSProperties,
-	link: {
-		color: 'var(--rr-text-link)',
-		cursor: 'pointer',
-		background: 'none',
-		border: 'none',
-		padding: 0,
-		font: 'inherit',
 	} as CSSProperties,
 	// ── Icon tile ─────────────────────────────────────────────────────────
 	iconRow: {
@@ -217,31 +213,9 @@ const styles = {
 		borderRadius: 4,
 		overflow: 'hidden',
 	} as CSSProperties,
-	editorTabs: {
+	tools: {
 		display: 'flex',
 		alignItems: 'center',
-		borderBottom: '1px solid var(--rr-border)',
-		background: 'var(--rr-bg-surface-alt)',
-	} as CSSProperties,
-	tab: {
-		padding: '9px 14px',
-		fontSize: 13,
-		color: 'var(--rr-text-secondary)',
-		cursor: 'pointer',
-		background: 'none',
-		border: 'none',
-		borderBottom: '2px solid transparent',
-		marginBottom: -1,
-		font: 'inherit',
-	} as CSSProperties,
-	tabOn: {
-		color: 'var(--rr-text-primary)',
-		borderBottomColor: 'var(--rr-brand)',
-		fontWeight: 600,
-	} as CSSProperties,
-	tools: {
-		marginLeft: 'auto',
-		display: 'flex',
 		gap: 6,
 		paddingRight: 8,
 	} as CSSProperties,
@@ -363,16 +337,6 @@ const styles = {
 	thumbPath: {
 		...commonStyles.textEllipsis,
 		minWidth: 0,
-	} as CSSProperties,
-	thumbRemove: {
-		...commonStyles.fontMono,
-		color: 'var(--rr-text-secondary)',
-		cursor: 'pointer',
-		background: 'none',
-		border: 'none',
-		padding: 0,
-		fontSize: 12,
-		flexShrink: 0,
 	} as CSSProperties,
 	thumbWidth: {
 		display: 'flex',
@@ -898,9 +862,9 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			{!readonly && (
 				<>
 					{' '}
-					<button type="button" style={styles.link} onClick={() => void pickIcon()}>Change</button>
+					<Button variant="ghost" small onClick={() => void pickIcon()}>Change</Button>
 					{' · '}
-					<button type="button" style={styles.link} onClick={removeIcon}>Remove</button>
+					<Button variant="ghost" small onClick={removeIcon}>Remove</Button>
 				</>
 			)}
 		</div>
@@ -909,7 +873,7 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			<span style={styles.mono}>{posixBasename(iconPath)}</span> is declared but missing beside the {words.noun}: the store card shows {words.glyph}.
 			{!readonly && (
 				<>
-					{' '}Click the tile or drop an SVG or PNG on it. <button type="button" style={styles.link} onClick={removeIcon}>Remove</button>
+					{' '}Click the tile or drop an SVG or PNG on it. <Button variant="ghost" small onClick={removeIcon}>Remove</Button>
 				</>
 			)}
 		</div>
@@ -948,16 +912,20 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 			</div>
 		) : (
 			<div style={styles.editor}>
-				<div style={styles.editorTabs} role="tablist">
-					<button type="button" role="tab" aria-selected={tab === 'preview'} style={{ ...styles.tab, ...(tab === 'preview' ? styles.tabOn : {}) }} onClick={() => setTab('preview')}>Preview</button>
-					<button type="button" role="tab" aria-selected={tab === 'edit'} style={{ ...styles.tab, ...(tab === 'edit' ? styles.tabOn : {}) }} onClick={() => setTab('edit')}>Edit</button>
-					<div style={styles.tools}>
-						{!readonly && <Button variant="secondary" small onClick={() => void insertImage()}>Insert image</Button>}
-						{host.openFile && <Button variant="ghost" small onClick={openInEditor}>Open in editor</Button>}
-					</div>
-				</div>
+				<TabControl
+					menu={README_TABS}
+					activeId={tab}
+					onSelect={(id) => setTab(id === 'edit' ? 'edit' : 'preview')}
+					trailing={
+						<div style={styles.tools}>
+							{!readonly && <Button variant="secondary" small onClick={() => void insertImage()}>Insert image</Button>}
+							{host.openFile && <Button variant="ghost" small onClick={openInEditor}>Open in editor</Button>}
+						</div>
+					}
+				/>
 				{tab === 'edit' ? (
 					<div style={styles.sourceWrap}>
+						{/* Raw element: the shell has no textarea control (rule: shell controls first). */}
 						<textarea
 							ref={textareaRef}
 							style={{ ...styles.textarea, ...(textDrop ? styles.textareaDrop : {}) }}
@@ -984,9 +952,7 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 				<div style={styles.foot}>
 					{dirty ? <span style={styles.footDirty}>● Unsaved</span> : <span>Saved</span>}
 					{saveFailed && !readonly && (
-						<button type="button" style={styles.link} onClick={retrySave}>
-							Retry
-						</button>
+						<Button variant="ghost" small onClick={retrySave}>Retry</Button>
 					)}
 					<span>·</span>
 					<span>
@@ -1047,13 +1013,15 @@ export const AssetsPane: React.FC<IAssetsPaneProps> = ({ kind, host, docStem, pa
 									<div style={{ ...styles.thumbName, ...(tile.missing ? styles.thumbNameMissing : {}) }}>
 										<span style={styles.thumbPath} title={tile.relPath}>{tile.relPath}</span>
 										{!readonly && (
-											<button type="button" style={styles.thumbRemove} title="Remove the reference from the README (the file stays)" aria-label={`Remove the reference to ${tile.relPath}`} onClick={() => dropReference(tile)}>✕</button>
+											<Button variant="ghost" small title={`Remove the reference to ${tile.relPath} from the README (the file stays)`} ariaLabel={`Remove the reference to ${tile.relPath} from the README`} onClick={() => dropReference(tile)}>
+												✕
+											</Button>
 										)}
 									</div>
 									{tile.isImage && (
 										<label style={styles.thumbWidth}>
 											<span>Width</span>
-											<input
+											<InputField
 												type="number"
 												min={1}
 												step={1}

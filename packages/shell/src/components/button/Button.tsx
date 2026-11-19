@@ -53,6 +53,12 @@ export interface IButtonProps {
 	 * `aria-expanded` so assistive tech knows the popup's open state.
 	 */
 	ariaExpanded?: boolean;
+	/**
+	 * Accessible name for an icon-only button (rendered as `aria-label`): a
+	 * glyph such as a close mark is not a name. Omit when the children are the
+	 * label; `title` is a tooltip, not a name.
+	 */
+	ariaLabel?: string;
 }
 
 // =============================================================================
@@ -153,7 +159,7 @@ const VARIANT_STYLES: Record<ButtonVariant, CSSProperties> = {
  * @param props - {@link IButtonProps}.
  * @returns The button element.
  */
-export function Button({ variant = 'primary', small, mini, disabled, onClick, children, title, pressed, ariaExpanded }: IButtonProps): React.ReactElement {
+export function Button({ variant = 'primary', small, mini, disabled, onClick, children, title, pressed, ariaExpanded, ariaLabel }: IButtonProps): React.ReactElement {
 	// Compose base + variant colour + optional size (mini wins over small) +
 	// the quiet ghost-small weight + optional disabled modifier.
 	const style: CSSProperties = {
@@ -166,7 +172,7 @@ export function Button({ variant = 'primary', small, mini, disabled, onClick, ch
 	};
 
 	return (
-		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title} aria-pressed={pressed} aria-expanded={ariaExpanded}>
+		<button type="button" style={style} onClick={onClick} disabled={disabled} title={title} aria-pressed={pressed} aria-expanded={ariaExpanded} aria-label={ariaLabel}>
 			{children}
 		</button>
 	);

@@ -888,6 +888,22 @@ const badge: CSSProperties = {
 // EXPORT
 // =============================================================================
 
+// Visually hidden: text assistive technology reads that the layout does not
+// show (an icon-only control's name, a status line for screen readers).
+// The standard clip rectangle; never `display: none`, which hides it from
+// readers too.
+const srOnly: CSSProperties = {
+	position: 'absolute',
+	width: 1,
+	height: 1,
+	padding: 0,
+	margin: -1,
+	overflow: 'hidden',
+	clip: 'rect(0 0 0 0)',
+	whiteSpace: 'nowrap',
+	border: 0,
+};
+
 export const commonStyles = {
 	// Cards — use together: card → cardHeader + cardBody, or cardFlat standalone
 	card,
@@ -971,4 +987,7 @@ export const commonStyles = {
 	indicatorWarning,
 	indicatorError,
 	indicatorMuted,
+
+	// Accessibility — text for assistive technology only
+	srOnly,
 };
