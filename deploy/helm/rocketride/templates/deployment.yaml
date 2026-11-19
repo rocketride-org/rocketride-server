@@ -43,7 +43,8 @@ spec:
         - name: nodes
           image: {{ include "rocketride.engine.image" . }}
           imagePullPolicy: {{ .Values.engine.image.pullPolicy }}
-          command: ['cp', '-a', '/opt/rocketride/nodes/.', '/nodes/']
+          # Entries, not nodes/.: cp -a cannot set the times of the emptyDir root, which root owns
+          command: ['sh', '-c', 'cp -a /opt/rocketride/nodes/* /nodes/']
           securityContext:
             {{- toYaml .Values.engine.securityContext | nindent 12 }}
           volumeMounts:
