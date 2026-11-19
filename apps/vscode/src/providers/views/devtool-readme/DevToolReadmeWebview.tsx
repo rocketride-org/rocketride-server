@@ -16,7 +16,7 @@
  * engine URLs; the page CSP admits the engine origin.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { ConnectionManager } from 'shell';
 import { ToolDetailsView } from 'shared/tools/core/chrome/ToolDetailsView';
@@ -77,14 +77,24 @@ const DevToolReadmeWebview: React.FC = () => {
 
 	const row = connected ? catalog?.find((a) => a?.id === appId) : undefined;
 
+	// The README text through the extension host (null = no README; a
+	// rejection is the view's error line). Stable: the view re-loads when
+	// this changes identity.
+	const loadReadme = useCallback(
+		(url: string): Promise<string | null> => (cm.request('host.devtools.readmeText', { url }) as Promise<{ markdown: string | null }>).then((r) => r.markdown),
+		// eslint-disable-next-line react-hooks/exhaustive-deps -- cm is a singleton
+		[]
+	);
+
 	if (installedIds === null || (connected && catalog === null) || !row) {
 		return <div style={statusStyle}>{installedIds === null || (connected && catalog === null) ? 'Loading…' : connected ? 'This tool is no longer available on the server.' : 'Connect to a RocketRide server to view this tool.'}</div>;
 	}
 
-	// Engine-served icons are root-relative in the catalog; the page CSP
-	// admits the engine origin.
+	// Engine-served icons and READMEs are root-relative in the catalog
+	// (`/apps/<id>/v<N>/<path>`); the page CSP admits the engine origin.
 	const base = (cm.getHttpUrl() || '').replace(/\/$/, '');
 	const iconUrl = row.icon ? (row.icon.startsWith('/') && base ? `${base}${row.icon}` : row.icon) : undefined;
+	const readmeUrl = row.readme ? (row.readme.startsWith('/') && base ? `${base}${row.readme}` : row.readme) : undefined;
 
 	return (
 		<ToolDetailsView
@@ -95,12 +105,14 @@ const DevToolReadmeWebview: React.FC = () => {
 				...(row.version !== undefined ? { version: row.version } : {}),
 				...(row.description !== undefined ? { description: row.description } : {}),
 				...(iconUrl !== undefined ? { iconUrl } : {}),
-				// README from the manifest; the description is the fallback so
-				// the page is never an empty sheet.
-				readme: row.readme || row.description || '',
+				// The README's URL; ToolDetailsView fetches it (no README = no sheet).
+				...(readmeUrl !== undefined ? { readme: readmeUrl } : {}),
 			}}
 			installed={installedIds.includes(appId)}
 			connected={connected}
+			// This webview's origin cannot fetch the engine (CORS, no artifact
+			// cookie): the extension fetches the README text for it.
+			loadReadme={loadReadme}
 			onInstall={() => cm.emitOp('host.devtools.install', { appId })}
 			onRemove={() => cm.emitOp('host.devtools.remove', { appId })}
 		/>

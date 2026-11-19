@@ -66,6 +66,7 @@ org/user 'local') and SaaS alike — no marketplace dependency.
 import hashlib
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from rocketlib import debug
 
@@ -1226,25 +1227,42 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     }
 
 
-def _icon_url_of(app_id: str, version: int, icon_path: str) -> str:
-    """One snapshot's icon resolved to the URL the desktop can load.
+#: The URL prefix each artifact kind serves under (the shell module registers both).
+SERVING_PREFIX = {'app': '/apps', 'pipe': '/pipelines'}
 
-    Snapshots store appManifest.icon verbatim. Seeded entries carry an
-    absolute static path ('/apps/<id>/icon.svg') — served as-is. A deployed
-    app declares its icon APP-RELATIVE ('./icon.svg'); the build harvest
-    copies it into the version's dist/ tree, so it serves at the constructed
-    versioned URL (the same scheme as remoteEntry.js). Empty or unsafe
-    (traversal) paths resolve to '' — the shell falls back to its monogram.
+#: The dir under a version's content dir that the versioned URL maps to, per kind:
+#: an app serves its build output, a pipe the files its store block shipped.
+SERVING_DIR = {'app': 'dist', 'pipe': 'store'}
+
+
+def artifact_file_url(kind: str, artifact_id: str, version: int, path: Any) -> Optional[str]:
+    """One manifest file path resolved to its immutable versioned URL, for either kind.
+
+    ``/apps/<id>/v<N>/<path>`` for an app, ``/pipelines/<id>/v<N>/<path>``
+    for a pipe: the ONE builder every catalog row (icon, readme) goes
+    through. Manifests name the file relative to the artifact
+    (``./icon.svg``, ``docs/README.md``); a seeded app manifest names it by
+    its served path under the id (``/apps/<id>/icon.svg``, the seeder copies
+    that tree into the version's dist/), so that prefix is the id's and the
+    version slots in behind it. Empty or unsafe (traversal, another id's
+    absolute path) resolves to None: the shell falls back to its monogram.
+    Every segment is percent-encoded as file-name data (``#``, ``?``, a
+    space), ``/`` alone staying the separator, so the browser asks for the
+    declared file and nothing less.
     """
-    rel = str(icon_path or '').strip().replace('\\', '/')
+    prefix = SERVING_PREFIX[kind]
+    rel = str(path or '').strip().replace('\\', '/')
     if not rel:
-        return ''
+        return None
     if rel.startswith('/'):
-        return rel
+        own = f'{prefix}/{artifact_id}/'
+        if not rel.startswith(own):
+            return None
+        rel = rel[len(own) :]
     parts = [p for p in rel.split('/') if p not in ('', '.')]
     if not parts or '..' in parts:
-        return ''
-    return f'/apps/{app_id}/v{version}/' + '/'.join(parts)
+        return None
+    return f'{prefix}/{artifact_id}/v{version}/' + '/'.join(quote(p, safe='') for p in parts)
 
 
 def _audience_handle(conn: Any, audience: Dict[str, str]) -> str:
@@ -1496,8 +1514,6 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'name': snapshot.get('name') or artifact.get('name') or app_id,
             'publisher': namespace_of(app_id),
             'description': snapshot.get('description') or '',
-            'icon': _icon_url_of(app_id, version, snapshot.get('iconPath')),
-            'readme': snapshot.get('readmePath') or '',
             'categories': snapshot.get('categories') or [],
             # NO entry URL — the wire carries the version NUMBER and clients
             # construct /apps/<appId>/v<N>/remoteEntry.js themselves. The dev
@@ -1518,7 +1534,13 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
             'onDesktop': audience_type != 'public',
         }
         # Omitted (not None) when absent — a present None fails the client
-        # AppManifestEntry dict validation.
+        # AppManifestEntry dict validation. The icon and readme are the
+        # version's immutable URLs (the shell loads both; the readme was a
+        # raw path it rendered as text).
+        for key, path_key in (('icon', 'iconPath'), ('readme', 'readmePath')):
+            url = artifact_file_url('app', app_id, version, snapshot.get(path_key))
+            if url:
+                entry[key] = url
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
         resolved[app_id] = entry
@@ -1526,17 +1548,30 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
 
 
 # =============================================================================
-# VERSIONED SERVING — the /apps/<appId>/v<N>/ route's entitlement resolvers
+# VERSIONED SERVING — the /apps/<id>/v<N>/ and /pipelines/<id>/v<N>/ routes'
+# entitlement resolvers, one per edition, both kinds
 # =============================================================================
 
 
-def _dist_dir_of(artifact_path: str) -> str:
-    """The servable dist tree of one registry entry (the build's output)."""
-    return f'{artifact_content_dir(artifact_path)}/dist'
+def serving_dir_of(kind: str, artifact_path: str) -> str:
+    """The servable tree of one registry entry: ``dist/`` for an app (the build's output),
+    ``store/`` for a pipe (the files its store block shipped). The ONE kind-specific lookup
+    of the serving route.
+    """
+    return f'{artifact_content_dir(artifact_path)}/{SERVING_DIR[kind]}'
 
 
-async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, str]:
-    """Registry version -> store ``dist/`` dir the caller may FETCH (SaaS).
+def _version_serves(kind: str, state: str, build: str) -> bool:
+    """Whether one registry version of ``kind`` has servable bytes: an app once its build is
+    ok, a pipe unless its content write failed (pipes never build).
+    """
+    if kind == 'app':
+        return build == 'ok'
+    return state != 'failed'
+
+
+async def entitled_version_dirs(info: Optional[Any], artifact_id: str, kind: str = 'app') -> Dict[int, str]:
+    """Registry version -> store serving dir the caller may FETCH (SaaS), for either kind.
 
     The versioned serving route's request-time gate (cached by the shell
     with a HARD expiry). The rules mirror ``_caller_entitled_to_version``,
@@ -1544,14 +1579,15 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
 
     - An ENABLED caller-visible binding entitles its version — the
       caller's own user row, rows of teams they belong to, and public
-      rows (public only when the deployment is 'ready' on a review-ladder
-      server; without the ladder every public row entitles).
-    - The caller ORG's own rail entitles its built versions (the developer
-      flow — the version picker lists the rail published or not, and any
-      org member who can browse the DEPLOY rail can fetch its bytes; rail
-      rows only ever exist inside the owning developer namespace).
-    - The BUILT gate applies everywhere: an unbuilt version has no
-      servable bytes.
+      rows (public only when the deployment is 'ready': on a review-ladder
+      server for an app, unconditionally for a pipe, plan 10.1).
+    - The caller ORG's own rail entitles its servable versions (the
+      developer flow — the version picker lists the rail published or not,
+      and any org member who can browse the DEPLOY rail can fetch its
+      bytes; rail rows only ever exist inside the owning developer
+      namespace).
+    - The SERVABLE gate applies everywhere: an unbuilt app version, or a
+      pipe version whose content write failed, has no bytes.
 
     - A binding whose manifest declares ``requiredPermissions`` entitles
       only a caller who holds ALL of them, or ``sys.admin``. This is the
@@ -1582,12 +1618,13 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
 
     dirs: Dict[int, str] = {}
     try:
-        rows = await account.publish_list(org_id, 'app', audiences)
+        rows = await account.publish_list(org_id, kind, audiences)
     except Exception as exc:
         debug(f'[app_deploy] entitled_version_dirs publish_list failed: {exc}')
         rows = []
+    public_needs_ready = account.review_ladder or kind == 'pipe'
     for row in rows:
-        if row.get('appId') != app_id or row.get('state') != 'enabled':
+        if row.get('appId') != artifact_id or row.get('state') != 'enabled':
             continue
         # Same rule the catalog applies: ALL declared permissions, and
         # sys.admin as the platform superuser passes. Anonymous holds none,
@@ -1595,59 +1632,59 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
         if not _holds_required_permissions(row, sys_perms):
             continue
         if (
-            account.review_ladder
+            public_needs_ready
             and (row.get('audience') or {}).get('type') == 'public'
             and row.get('artifactState') != 'ready'
         ):
             continue
-        if row.get('artifactBuild') != 'ok':
+        if not _version_serves(kind, str(row.get('artifactState') or ''), str(row.get('artifactBuild') or '')):
             continue
         version = row.get('version')
         artifact_path = str(row.get('artifactPath') or '')
         if isinstance(version, int) and artifact_path:
-            dirs[version] = _dist_dir_of(artifact_path)
+            dirs[version] = serving_dir_of(kind, artifact_path)
 
     # Developer-org entitlement: the caller org's OWN rail (rail rows exist
-    # only inside the owning developer namespace), built versions only —
+    # only inside the owning developer namespace), servable versions only —
     # published or not. Org-scoped, not deployer-scoped: the DEPLOY view
     # already shows every org member the whole rail, so serving parity
     # follows visibility parity.
     if user_id and org_id:
         try:
-            entries = await account.deployments_versions(org_id, app_id)
+            entries = await account.deployments_versions(org_id, artifact_id)
         except Exception:
             entries = []
         for entry in entries:
-            if _build_status_of_entry(entry) != 'ok':
+            if not _version_serves(kind, str(entry.get('state') or ''), _build_status_of_entry(entry)):
                 continue
             version = int(entry.get('version', 0))
             artifact_path = str(entry.get('artifactPath') or '')
             if version and artifact_path:
-                dirs[version] = _dist_dir_of(artifact_path)
+                dirs[version] = serving_dir_of(kind, artifact_path)
     return dirs
 
 
-async def open_version_dirs(app_id: str) -> Dict[int, str]:
-    """Registry version -> ``dist/`` dir, EVERY built version (OSS).
+async def open_version_dirs(artifact_id: str, kind: str = 'app') -> Dict[int, str]:
+    """Registry version -> serving dir, EVERY servable version (OSS), for either kind.
 
     OSS serving is OPEN (a localhost single-tenant server gains nothing
     from the gate — Rod's call), so the resolver is just "what exists and
-    is built" on the single implicit 'local' org.
+    serves" on the single implicit 'local' org.
     """
     from ai.account import account
 
     dirs: Dict[int, str] = {}
     try:
-        entries = await account.deployments_versions('local', app_id)
+        entries = await account.deployments_versions('local', artifact_id)
     except Exception:
         entries = []
     for entry in entries:
-        if _build_status_of_entry(entry) != 'ok':
+        if not _version_serves(kind, str(entry.get('state') or ''), _build_status_of_entry(entry)):
             continue
         version = int(entry.get('version', 0))
         artifact_path = str(entry.get('artifactPath') or '')
         if version and artifact_path:
-            dirs[version] = _dist_dir_of(artifact_path)
+            dirs[version] = serving_dir_of(kind, artifact_path)
     return dirs
 
 

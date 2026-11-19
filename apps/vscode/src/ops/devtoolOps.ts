@@ -17,13 +17,37 @@
 import * as vscode from 'vscode';
 // Deep imports on purpose — ext-host-safe .ts leaves (see busHost.ts).
 import { registerOpHandlers } from 'shell/src/ops/busOps';
-import type { IOpBus, OpImplTable } from 'shell/src/ops/busOps';
+import type { IOpBus, OpImplTable, ShellOpMap, ShellOpSpec } from 'shell/src/ops/busOps';
 import type { HostOpMap } from 'shared/ops/hostOps';
 import type { DevToolStore } from '../providers/DevToolStore';
+
+/** How long one README fetch may take before it is given up on. */
+const README_FETCH_TIMEOUT_MS = 10_000;
+
+/** The cookie the artifact door reads; its value is the bearer credential
+ *  itself (shell.py artifacts_session mints exactly that). */
+const APP_COOKIE = 'rr_apps_token';
+
+/**
+ * The README text op: the details page's README, fetched by the EXTENSION
+ * — the webview's origin can neither pass CORS at the engine nor carry the
+ * artifact cookie (the icon works because toolRows inlines it the same
+ * way). Declared here, beside its implementation; the shared HostOpMap's
+ * `host.devtools.readme` is the page-opening emitOp.
+ */
+interface DevToolReadmeOpMap extends ShellOpMap {
+	'host.devtools.readmeText': ShellOpSpec<{ url: string }, { markdown: string | null }>;
+}
 
 /** What the registrations need from the host. */
 interface IDevToolOpsDeps {
 	context: vscode.ExtensionContext;
+	/** The engine's HTTP base ('' when unknown) — the only origin the
+	 *  README fetch may reach. */
+	engineBase: () => string;
+	/** The connection's bearer credential (the artifact cookie's value), or
+	 *  undefined when none is available — the fetch then goes anonymous. */
+	authCredential: () => Promise<string | undefined>;
 	/** The pinned-tools store Install/Remove acts on. */
 	devTools: DevToolStore;
 	/** Closes a tool's open frame panel (the Remove flow retires it). */
@@ -40,7 +64,34 @@ interface IDevToolOpsDeps {
  * context.subscriptions).
  */
 export function registerVscodeDevToolOps(bus: IOpBus, deps: IDevToolOpsDeps): void {
-	const { context, devTools, closeToolPanel, refreshTools, broadcast } = deps;
+	const { context, devTools, closeToolPanel, refreshTools, broadcast, engineBase, authCredential } = deps;
+
+	/**
+	 * Fetches a README behind its engine URL: null for 404 (no README), the
+	 * markdown otherwise; any other status or a network failure rejects.
+	 * The artifact cookie rides along when a credential exists, as the
+	 * browser shell's own fetch carries it.
+	 */
+	const fetchReadme = async (url: string): Promise<string | null> => {
+		const base = engineBase();
+		// step: the credential is sent to the engine only — never to a URL
+		// a page handed over
+		if (!base || !url.startsWith(`${base}/`)) throw new Error('The README URL is not on the connected engine.');
+		const credential = await authCredential();
+		const abort = new AbortController();
+		const timer = setTimeout(() => abort.abort(), README_FETCH_TIMEOUT_MS);
+		try {
+			const res = await fetch(url, { signal: abort.signal, ...(credential ? { headers: { Cookie: `${APP_COOKIE}=${credential}` } } : {}) });
+			if (res.status === 404) return null;
+			if (!res.ok) throw new Error(`HTTP ${res.status} from the engine.`);
+			return await res.text();
+		} finally {
+			clearTimeout(timer);
+		}
+	};
+	registerOpHandlers<DevToolReadmeOpMap>(bus, {
+		'host.devtools.readmeText': async (p) => ({ markdown: await fetchReadme(p.url) }),
+	});
 
 	const impls: OpImplTable<HostOpMap> = {
 		'host.devtools.installed': () => ({ ids: devTools.getAll() }),

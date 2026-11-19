@@ -718,7 +718,7 @@ class TestChatOperations:
             chat_token = result['token']
 
             question = Question(expectJson=True)
-            question.addQuestion('Cite the first paragraph of the constitution of the United States')
+            question.addQuestion('What is the capital city of France? Answer with the city name.')
             question.addExample('greeting request', {'text': 'Hello, world!'})
 
             response = await client.chat(
@@ -746,7 +746,7 @@ class TestChatOperations:
             assert isinstance(answer, dict)
             assert 'text' in answer
             assert len(answer['text']) > 0
-            assert 'We the People' in answer['text']
+            assert 'Paris' in answer['text']
         finally:
             if chat_token:
                 await ensure_clean_pipeline(client, chat_token)

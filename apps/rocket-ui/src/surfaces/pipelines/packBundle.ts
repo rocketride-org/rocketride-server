@@ -21,22 +21,27 @@
 // SOFTWARE.
 
 // =============================================================================
-// PACK BUNDLE — the browser packer of a pipeline bundle (plan §9, B7)
+// PACK PIPE — the browser packer of one pipeline (plan §9)
 // =============================================================================
 //
-// The browser twin of the SDK's Node-only `packPipeBundle`: reads the bundle
-// folder of an open pipeline from the workspace store (the pipelines mount is
-// `.projects/<folder>` in the user's or team's tree) and builds the deploy
-// zip the DEPLOY card sends beside the pipeline dict — the pipe, its .rrpipe
-// manifest, readme.md, the icon and assets/, nothing else. The server reads
-// and guards the zip again; this only serves bytes, like the app packer.
+// The browser twin of the SDK's Node-only `packPipe`: packs ONE pipeline from
+// the workspace store (the pipelines mount is `.projects/` in the user's or
+// team's tree) into the deploy zip the DEPLOY card sends beside the pipeline
+// dict. Packing is PER PIPE, BY REFERENCE: the pipe file at the zip root
+// under its basename, the readme and icon its `store` block declares, and
+// every file the README references (markdown images and links, HTML
+// `<img src>`), laid out relative to the PIPE's directory. Nothing else in
+// the folder is packed; two pipes in one folder are two pipes. A pipe without
+// a `store` block packs alone and deploys unlisted. The server reads and
+// guards the zip again; this only serves bytes, like the app packer.
 // =============================================================================
 
 import { zipSync } from 'fflate';
+import type { Zippable } from 'fflate';
 import type { RocketRideClient } from 'shell';
-import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
-import { pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
-import { getWorkspaceVfs, toScopedStorePath } from '../workspace/vfs/workspace';
+import { normalizePosixPath, pipeStoreFiles, validateStoreBlock } from 'rocketride';
+import type { PipeStoreBlock } from 'rocketride';
+import { getStagedWorkspace, toScopedStorePath } from '../workspace/vfs/workspace';
 
 // =============================================================================
 // CONSTANTS
@@ -48,22 +53,86 @@ const PROJECTS_DIR = '.projects';
 /** The server's receipt cap on zipped bytes (mirrors _ZIP_MAX_ZIPPED). */
 const MAX_ZIP_BYTES = 50 * 1024 * 1024;
 
-/** The icon file names a bundle may carry, in preference order. */
-const ICON_NAMES = ['icon.svg', 'icon.png'];
+/** The readme cap (a store page, not a book) — the Node packer's. */
+const MAX_README_BYTES = 1024 * 1024;
 
-/** The folder of images the readme references. */
-const PIPE_ASSETS_DIR = 'assets';
+/** The icon cap — the Node packer's. */
+const MAX_ICON_BYTES = 256 * 1024;
+
+/** The cap on each file the README references — the Node packer's. */
+const MAX_REFERENCED_BYTES = 10 * 1024 * 1024;
+
+/** Fixed entry timestamp: two packs of one pipe hash the same. */
+const ZIP_EPOCH = new Date(1980, 0, 1, 0, 0, 0);
 
 // =============================================================================
 // TYPES
 // =============================================================================
 
-/** The packed bundle: the pipe dict and the zip. */
-export interface PackedBundle {
-	/** The pipe's JSON with its display name filled. */
+/** The packed pipeline: the pipe dict, its listing and the zip. */
+export interface PackedPipe {
+	/** The pipe's JSON (WITH its `store` block) and its display name filled. */
 	pipeline: Record<string, unknown> & { name: string };
-	/** The zip bytes for `client.deploy.add({ kind: 'pipe', pipeline, data })`. */
+	/** The validated store block, null when the pipe carries none (unlisted). */
+	store: PipeStoreBlock | null;
+	/** Zip entry paths in zip order: the pipe first, then code-point order. */
+	files: string[];
+	/** The zip bytes for `client.deploy.add({ pipeline, data })`. */
 	data: Uint8Array;
+}
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/**
+ * Reads ONE store file raw (binaries included). The listing carries no sizes
+ * and one fsReadMany call is capped at 32 MiB in total while a referenced
+ * file may be 10 MiB, so every file goes in a call of its own.
+ *
+ * The pack operates on COMMITTED files only (the app packer's commit-first
+ * gate): in manual commit mode a save stages the change in the workspace
+ * layer while the store keeps the committed text, so a file with a pending
+ * change is refused by name instead of packed stale.
+ *
+ * @param client - The connected client.
+ * @param pipeDir - The pipe's directory under the pipelines mount ('' at the root).
+ * @param rel - The file's path relative to the pipe's directory.
+ * @returns The bytes.
+ * @throws Error naming the file when it carries an uncommitted change or cannot be read.
+ */
+async function readOne(client: RocketRideClient, pipeDir: string, rel: string): Promise<Uint8Array> {
+	const full = pipeDir ? `${pipeDir}/${rel}` : rel;
+	if (getStagedWorkspace().changedPaths().has(`pipelines/${full}`)) {
+		throw new Error(`${rel} has an uncommitted change — commit it first (status bar: Commit all), then deploy.`);
+	}
+	const [entry] = await client.fsReadMany([toScopedStorePath(`${PROJECTS_DIR}/${full}`)]);
+	if (!entry?.ok || !entry.data) throw new Error(`The pipeline's store listing names ${rel}, but there is no such file beside the pipe (${entry?.error ?? 'unreadable'}).`);
+	return entry.data;
+}
+
+/**
+ * Checks a listing path stays inside the pipe's directory tree. The store VFS
+ * has no realpath, so containment is judged on the normalised path alone: a
+ * leading `..` after normalisation is an escape.
+ *
+ * @param rel - The normalised path relative to the pipe's directory.
+ * @throws Error naming the file when it leaves the directory.
+ */
+function requireContained(rel: string): void {
+	if (rel === '' || rel.split('/')[0] === '..') throw new Error(`${rel || '.'} resolves outside the pipeline's directory; every listed file must sit beside the pipe or below it.`);
+}
+
+/**
+ * Checks one file against its cap.
+ *
+ * @param rel - The file's path, for the error.
+ * @param bytes - The bytes read.
+ * @param cap - The cap in bytes.
+ * @throws Error naming the file when it is over the cap.
+ */
+function requireUnderCap(rel: string, bytes: Uint8Array, cap: number): void {
+	if (bytes.byteLength > cap) throw new Error(`${rel} is ${(bytes.byteLength / 1024).toFixed(0)} KB, over the ${(cap / 1024).toFixed(0)} KB cap.`);
 }
 
 // =============================================================================
@@ -71,85 +140,66 @@ export interface PackedBundle {
 // =============================================================================
 
 /**
- * Packs the bundle folder of an open pipeline document.
+ * Packs one open pipeline document for deploy.
  *
  * @param client - The connected client (raw store reads).
- * @param pipePath - The document's path under the pipelines mount (`<folder>/<stem>.pipe`).
- * @returns The pipe dict and the zip.
- * @throws Error when the folder is not a bundle (no pipe, another pipe beside it) or a read fails.
+ * @param pipePath - The document's path under the pipelines mount (`<dir>/<name>.pipe`).
+ * @returns The pipe dict, its store block and the zip.
+ * @throws Error when the pipe is not valid JSON, its `store` block is malformed,
+ *   a packed file carries an uncommitted change (manual commit mode), a listed
+ *   file is missing, escapes the pipe's directory or breaches its cap, or the
+ *   zip is over the deploy cap.
  */
-export async function packPipeBundle(client: RocketRideClient, pipePath: string): Promise<PackedBundle> {
-	// Step 1: the folder, and the one pipe in it
+export async function packPipe(client: RocketRideClient, pipePath: string): Promise<PackedPipe> {
+	// Step 1: the pipe, parsed (the artifact the server snapshots)
 	const slash = pipePath.lastIndexOf('/');
-	const folder = slash >= 0 ? pipePath.slice(0, slash) : '';
-	const stem = pipeStemOf(pipePath);
-	if (!folder || !stem) {
-		throw new Error('This pipeline is not in a bundle folder. Move it to pipelines/<id>/<id>.pipe (beside its readme, icon and assets) to deploy it.');
+	const pipeDir = slash >= 0 ? pipePath.slice(0, slash) : '';
+	const pipeName = pipePath.slice(slash + 1);
+	const stem = pipeName.endsWith('.pipe') ? pipeName.slice(0, -'.pipe'.length) : pipeName;
+	const pipeBytes = await readOne(client, pipeDir, pipeName);
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(new TextDecoder().decode(pipeBytes));
+	} catch (err) {
+		throw new Error(`${pipeName} is not valid JSON: ${err instanceof Error ? err.message : String(err)}`);
 	}
-	if (pipePath.endsWith('.pipe.json')) {
-		throw new Error(`A pipeline bundle takes <id>.pipe; rename ${pipePath.slice(slash + 1)} to ${stem}.pipe to deploy it.`);
+	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${pipeName} must hold a JSON object`);
+	const pipe = parsed as Record<string, unknown>;
+	const pipeline = { ...pipe, name: String(pipe.name || stem) } as Record<string, unknown> & { name: string };
+
+	// Step 2: the store block; absent = unlisted, the pipe packs alone
+	const store = pipe.store === undefined ? null : validateStoreBlock(pipe.store);
+
+	// Step 3: the README (one read) and the files it and the block name
+	const readmeRel = store?.readme ? normalizePosixPath(store.readme) : null;
+	const bytes = new Map<string, Uint8Array>();
+	let readmeText: string | null = null;
+	if (readmeRel !== null) {
+		requireContained(readmeRel);
+		const readme = await readOne(client, pipeDir, readmeRel);
+		requireUnderCap(readmeRel, readme, MAX_README_BYTES);
+		bytes.set(readmeRel, readme);
+		readmeText = new TextDecoder().decode(readme);
 	}
-	const view = scopedFileSystem(getWorkspaceVfs(), 'pipelines');
-	const entries = await view.list(folder);
-	const pipes = entries.filter((e) => e.type !== 'dir' && e.name.endsWith('.pipe')).map((e) => e.name);
-	if (pipes.length !== 1 || pipes[0] !== `${stem}.pipe`) {
-		throw new Error(`${folder}/ holds ${pipes.length} .pipe files; a pipeline bundle is one folder with one .pipe. Move this pipeline to its own folder to deploy it.`);
+	const { declared, referenced } = pipeStoreFiles(store, readmeText, readmeRel);
+	const iconRel = store?.icon ? normalizePosixPath(store.icon) : null;
+	for (const rel of [...declared, ...referenced]) {
+		if (rel === pipeName || bytes.has(rel)) continue;
+		requireContained(rel);
+		const data = await readOne(client, pipeDir, rel);
+		requireUnderCap(rel, data, rel === iconRel ? MAX_ICON_BYTES : MAX_REFERENCED_BYTES);
+		bytes.set(rel, data);
 	}
 
-	// Step 2: the files the bundle carries, nothing else. The manifest is
-	// read first: its `icon` names the icon file (the server requires that
-	// exact entry); the default names apply only without one.
-	const names = new Set(entries.filter((e) => e.type !== 'dir').map((e) => e.name));
-	const picked: string[] = [`${stem}.pipe`];
-	let manifestName = '';
-	let manifestIcon = '';
-	if (names.has(`${stem}.rrpipe`)) {
-		picked.push(`${stem}.rrpipe`);
-		const manifest = JSON.parse(String(await view.read(`${folder}/${stem}.rrpipe`))) as Record<string, unknown>;
-		manifestName = typeof manifest.name === 'string' ? manifest.name : '';
-		manifestIcon = typeof manifest.icon === 'string' ? manifest.icon.replace(/\\/g, '/') : '';
-	}
-	if (names.has('readme.md')) picked.push('readme.md');
-	const icon = manifestIcon || ICON_NAMES.find((n) => names.has(n));
-	if (icon) {
-		if (manifestIcon && !names.has(manifestIcon) && !manifestIcon.startsWith('assets/')) {
-			throw new Error(`The manifest names icon "${manifestIcon}" but the bundle has no such file.`);
-		}
-		if (!manifestIcon || !manifestIcon.startsWith('assets/')) picked.push(icon);
-	}
-	if (entries.some((e) => e.type === 'dir' && e.name === PIPE_ASSETS_DIR)) {
-		const walk = async (rel: string): Promise<void> => {
-			for (const entry of await view.list(`${folder}/${rel}`)) {
-				const childRel = `${rel}/${entry.name}`;
-				if (entry.type === 'dir') await walk(childRel);
-				else if (entry.name !== '.dirmarker') picked.push(childRel);
-			}
-		};
-		await walk(PIPE_ASSETS_DIR);
-	}
-
-	// Step 3: the bytes, read raw from the store (binaries included). The
-	// listing carries no sizes and one fsReadMany call is capped at 32 MiB
-	// in total, so the root files (each under its own small cap) go in one
-	// call and every asset (up to 10 MiB each) in a call of its own.
-	const tree: Record<string, Uint8Array> = {};
-	const readAll = async (rels: string[]): Promise<void> => {
-		const results = await client.fsReadMany(rels.map((rel) => toScopedStorePath(`${PROJECTS_DIR}/${folder}/${rel}`)));
-		results.forEach((entry, idx) => {
-			if (entry.ok && entry.data) tree[rels[idx]] = entry.data;
-			else throw new Error(`Cannot read ${folder}/${rels[idx]}: ${entry.error ?? 'unreadable'}.`);
-		});
-	};
-	const rootFiles = picked.filter((rel) => !rel.startsWith(`${PIPE_ASSETS_DIR}/`));
-	await readAll(rootFiles);
-	for (const rel of picked.filter((rel) => rel.startsWith(`${PIPE_ASSETS_DIR}/`))) await readAll([rel]);
-	const pipe = JSON.parse(new TextDecoder().decode(tree[`${stem}.pipe`])) as Record<string, unknown>;
-	const pipeline = { ...pipe, name: String(pipe.name || manifestName || stem) } as Record<string, unknown> & { name: string };
-
-	// Step 4: zip + the transport cap BEFORE any upload
+	// Step 4: zip — the pipe first, then code-point order (the Python packer's
+	// `sorted()`): two packs of one pipe hash the same in both languages
+	const files = [pipeName, ...[...bytes.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))];
+	const tree: Zippable = {};
+	tree[pipeName] = [pipeBytes, { mtime: ZIP_EPOCH }];
+	for (const rel of files.slice(1)) tree[rel] = [bytes.get(rel) as Uint8Array, { mtime: ZIP_EPOCH }];
 	const data = zipSync(tree, { level: 6 });
 	if (data.byteLength > MAX_ZIP_BYTES) {
-		throw new Error(`The bundle is ${(data.byteLength / (1024 * 1024)).toFixed(1)} MB zipped — over the 50 MB deploy cap.`);
+		throw new Error(`The pipeline packs to ${(data.byteLength / (1024 * 1024)).toFixed(1)} MB zipped — over the 50 MB deploy cap.`);
 	}
-	return { pipeline, data };
+	return { pipeline, store, files, data };
 }

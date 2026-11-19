@@ -131,8 +131,13 @@ export default defineConfig(({ command }) => {
 					'/task': { target: 'http://localhost:5565', ws: true },
 					'/auth': { target: 'http://localhost:5565' },
 					'/api': { target: 'http://localhost:5565', ws: true },
-					// App remotes (/apps/<appId>/v<N>/remoteEntry.js) are engine-served.
+					// App remotes (/apps/<appId>/v<N>/remoteEntry.js) and the store's
+					// pipeline files (/pipelines/<id>/v<N>/README.md, icons) are
+					// engine-served; the artifact cookie that gates them is minted
+					// by the engine's POST /artifacts/session (connection.ts primes it).
 					'/apps/': { target: 'http://localhost:5565' },
+					'/pipelines/': { target: 'http://localhost:5565' },
+					'/artifacts/session': { target: 'http://localhost:5565' },
 					'/marketplace': { target: 'http://localhost:5565' },
 					// Endpoint UIs and URLs that running pipelines publish as {host}/... links.
 					'/dropper': { target: 'http://localhost:5565' },

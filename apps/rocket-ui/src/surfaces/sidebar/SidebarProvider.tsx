@@ -46,7 +46,7 @@ import { registerBuiltinTools } from 'shared/tools/builtins';
 import { appdevFrames } from '../preview/session/appdevFrames';
 import { BxExport, useSidebarCollapsed, useSidebarActiveView } from 'shell';
 import type { ProjectEntry } from 'shared/tools/pipelines/sidebar/types';
-import { bundlePathsFor, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
+import { defaultStoreBlock } from 'rocketride';
 import type { SidebarMode, ToolTabsSidebar } from 'shared/tools/core/chrome/types';
 import type { AppListItem } from 'shared/tools/appdev/sidebarTypes';
 import { useDevToolPins } from '../devtools/devToolPins';
@@ -55,6 +55,7 @@ import DevToolMount from '../devtools/DevToolMount';
 import { isPipelineFile, pipelineExtension } from '../workspace/projectStore';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { getWorkspaceVfs, storePathToVirtual } from '../workspace/vfs/workspace';
+import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { downloadJson } from '../../utils/downloadFile';
 import { scanApps } from '../preview/session/appStore';
 import { INTRO_PAGES } from 'shared/tools/introCatalog';
@@ -324,22 +325,20 @@ const SidebarProvider: React.FC = () => {
 						await projectVfs.mkdir(path);
 						break;
 					case 'createFile': {
-						// The Explorer's inline create: a new pipeline is born as a BUNDLE
-						// (plan §9, B7), the pipe in a folder of the typed FILE name. The
-						// name is not the id: the identity lives inside the file, minted
-						// fresh here and chosen on PACKAGE › Identity (the New Pipeline
-						// form is the path that asks the id up front).
-						const stem = pipeStemOf(path) ?? path.slice(path.lastIndexOf('/') + 1);
-						const dir = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '';
-						const bundle = bundlePathsFor(dir, stem);
-						// The Explorer checked the typed path; the bundle's pipe is another
-						// path, and an existing pipeline there is never truncated.
-						const existing = await projectVfs.list(bundle.folder).catch(() => []);
-						if (existing.some((e) => e.type !== 'dir' && e.name === `${stem}.pipe`)) {
-							throw new Error(`"${bundle.file}" already exists; choose another name.`);
+						// The Explorer's inline create: ONE `.pipe` at the typed path (plan
+						// §9: no folder rule), carrying a freshly minted id and the default
+						// store block, nothing else. The name is not the id: the identity
+						// lives inside the file and is chosen on PACKAGE › Identity (the
+						// New Pipeline form is the path that asks the id up front).
+						const file = path.endsWith('.pipe') ? path : `${path}.pipe`;
+						// An existing entry at that path is never truncated: the
+						// view's stat answers null for a missing path (a missing
+						// parent folder included) and rejects on any other failure,
+						// so no error is mistaken for an empty folder.
+						if ((await scopedFileSystem(getWorkspaceVfs(), 'pipelines').stat(file)) !== null) {
+							throw new Error(`"${file}" already exists; choose another name.`);
 						}
-						await projectVfs.mkdir(bundle.folder);
-						await projectVfs.write(bundle.file, { project_id: crypto.randomUUID(), components: [] });
+						await projectVfs.write(file, { project_id: crypto.randomUUID(), store: defaultStoreBlock(), components: [] });
 						break;
 					}
 				}

@@ -349,7 +349,7 @@ export function formatAt(epochSeconds: number): string {
  *
  * @param props - See {@link IReviewViewProps}.
  */
-export const ReviewView: React.FC<IReviewViewProps> = ({ host, app, readOnly }) => {
+export const ReviewView: React.FC<IReviewViewProps> = ({ host, readOnly }) => {
 	// ── Data — loaded through the host adapter ───────────────────────────
 	// null = first load in flight; [] = loaded and empty.
 	const [history, setHistory] = useState<AppHistoryEntry[] | null>(null);

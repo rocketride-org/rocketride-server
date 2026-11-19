@@ -100,13 +100,17 @@ future). Learn it once:
   changes nothing a user sees. For apps the server also *builds* the deployed
   source; a failed build leaves the version unservable, with a build log to
   read. The registry version is not your semver — your package's display
-  version rides along as metadata. A **pipeline deploys as a bundle folder**,
-  `pipelines/<id>/`: its one `.pipe` (what runs) beside `<id>.rrpipe` (the
-  store manifest: name, tagline, description, category, tags, icon, links,
-  mode, plans), `readme.md`, an icon and `assets/` (the readme's images).
-  A bare `.pipe` still runs in development and may be sent as a dict through
-  the SDK, but the DEPLOY card and `rocketride deploy add` publish the folder,
-  and the store lists only what a bundle carries. A short id is one thing per
+  version rides along as metadata. A **pipeline deploys per `.pipe`**: the
+  file itself (what runs) plus what its root `store` block names — the store
+  listing (`tagline`, `categories`, `tags`, `icon`, `readme`, `links`,
+  `mode`, `billing`; `project_id`, `name` and `description` stay at the
+  pipe's root). `icon` and `readme` are paths relative to the pipe file, and
+  the pack carries them with every file the README references, laid out as
+  they sit beside the pipe; two pipes in one folder are two pipes and may
+  share files. The block present = the pipeline is **listable**; without it
+  the pipe still runs and deploys as an unlisted artifact (`rocketride pipe
+  new` writes the block, `rocketride deploy add <pipe>` and the DEPLOY card
+  publish the pipe). A short id is one thing per
   developer id across apps, pipes and nodes: the first deploy fixes the
   kind, and version numbers are never reused.
 - **Publish** — bind one deployed version to one **audience rung**. The same

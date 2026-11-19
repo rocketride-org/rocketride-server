@@ -48,7 +48,8 @@ exported in your shell takes precedence over the same one in `.env`.
 | See what is running, stop it | `rocketride list`, `rocketride stop --token TOKEN` |
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store` with `dir`, `type`, `write`, `rm`, `mkdir`, or `stat` |
-| Deploy, publish, schedule | `rocketride deploy …` (deployment target) |
+| Start a new pipeline | `rocketride pipe new <id> [--name <text>]` — `pipelines/<id>/<id>.pipe` with its `store` block, `icon.svg`, `README.md` and `assets/` (no connection) |
+| Deploy, publish, schedule | `rocketride deploy …` (deployment target); a pipeline deploys from its `.pipe`: `rocketride deploy add pipelines/<id>/<id>.pipe` |
 | Apps | `rocketride app` with `create`, `dev`, `verify`, `deploy`, `publish`, `versions`, `where`, and more (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
 | Review what changed in a pipeline | `rocketride diff old.pipe new.pipe` (Python package only) |
 | Find what is slow | `rocketride profile run --token TOKEN --duration 30`, then `rocketride profile tree --token TOKEN` |
@@ -135,6 +136,37 @@ rocketride store stat <path>                      # file/directory metadata
 
 All store subcommands take the common `--uri`/`--apikey` options.
 
+## Pipeline commands (`rocketride pipe ...`)
+
+Workspace operations on pipelines; deploying and publishing them is
+`rocketride deploy`. Both packages ship the command.
+
+- `rocketride pipe new <id> [--name <text>] [--dir <dir>] [--workspace <dir>]`
+  — scaffold a new pipeline under `./pipelines/<id>/` (or `--dir`): the
+  `<id>.pipe` carrying `components: []`, `project_id: <id>`, `name`,
+  `description` and the default `store` block (`tagline: ""`,
+  `categories: ["pipeline"]`, `tags: []`, `icon: "./icon.svg"`,
+  `readme: "./README.md"`, `links: {}`, `mode: "free"`,
+  `billing: { plans: [] }`), the placeholder `icon.svg` the app scaffold
+  ships, a `README.md` stub, and an empty `assets/` directory. `<id>` is
+  one dot-free segment of letters, digits, `_` or `-`; the organization
+  that deploys the pipeline attaches its developer id. Needs no connection.
+  Refuses an existing `<id>.pipe`.
+
+```bash
+rocketride pipe new ingest --name "Document ingest"
+rocketride deploy add pipelines/ingest/ingest.pipe --deploy-to @me
+```
+
+The `store` block is the pipeline's store listing: present = listable,
+absent = the pipe deploys as an unlisted artifact. `icon` and `readme` are
+paths relative to the pipe file; the pack carries the pipe, those two
+files, and every file the README references (markdown images and links,
+HTML `<img src>`), laid out as they sit beside the pipe. A declared or
+referenced file that is missing, or that resolves outside the pipe's
+directory, fails the deploy by name (ROCKETRIDE_PIPELINES.md, "The
+`store` block").
+
 ## App commands (`rocketride app ...`)
 
 The terminal twin of the App Builder. Every lifecycle verb (`deploy`,
@@ -159,18 +191,15 @@ package, `app verify` and `app deploy` take only an app folder, and it is
 required.
 
 - `rocketride app create <slug> [--template Blank|Dashboard] [--name <text>]
-  [--developer <id>] [--sidebar] [--no-status-footer] [--doc-tabs]
-  [--workspace <dir>] [--no-install]` — scaffold a new app under
-  `./apps/<slug>-ui` with the same scaffold as the App Builder wizard (one
-  SDK implementation serves both), vendoring the platform packages from
-  the development server. The app id is `<developerId>.<slug>`: without
-  `--developer`, the developer id comes from the account the development
-  credentials sign in as (run `rocketride login` or `rocketride init`
-  first); with no credentials, no reachable server, or an org that has
-  not registered one, it falls back to `local` and prints a warning to
-  stderr. SDK equivalent: `client.deploy.createApp(slug, options)` /
-  `client.deploy.create_app` (same developer-id default). Scaffolding
-  only — nothing deploys.
+  [--sidebar] [--no-status-footer] [--doc-tabs] [--workspace <dir>]
+  [--no-install]` — scaffold a new app under `./apps/<slug>-ui` with the
+  same scaffold as the App Builder wizard (one SDK implementation serves
+  both), vendoring the platform packages from the development server. The
+  files carry the slug only; the organization that deploys the app
+  attaches its developer id, so the registry name becomes
+  `<developerId>.<slug>` at deploy. SDK equivalent:
+  `client.deploy.createApp(slug, options)` / `client.deploy.create_app`.
+  Scaffolding only — nothing deploys.
 - `rocketride app dev [app] [--open] [--no-auth] [--port <port>]
   [--no-install] [--workspace <dir>]` — live preview from the terminal, the App Builder's
   dev loop: runs `rsbuild dev` for the app as the preview's front door
@@ -251,7 +280,7 @@ names teams instead of printing raw ids (`--json` keeps `teamId` and adds
 `teamName`). An unnamed pipeline deploys under its file name.
 
 ```bash
-rocketride deploy add pipelines/ingest --comment "v2 parse" [--deploy-to <teamId>]        # next registry version from the pipeline BUNDLE folder (its one .pipe + <id>.rrpipe, readme.md, icon, assets/); a bare .pipe beside other pipes is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)
+rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version from ONE .pipe: the pipe plus the readme, icon and README-referenced files its store block names; a folder argument is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)
 rocketride deploy publish <projectId> 3 --team <teamId>             # point the team at version 3
 rocketride deploy list                                              # deployments overview
 rocketride deploy get <projectId> --team <teamId>                   # one deployment's state + schedules

@@ -24,16 +24,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId } from '../shared/util/pipeFileDecision';
+import { defaultStoreBlock } from 'rocketride';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, withStoreBlock } from '../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../shared/util/pipeFileDecision';
 
 const FILE = '/ws/pipelines/a.pipe';
 const ID_A = '11111111-1111-4111-8111-111111111111';
 const ID_B = '22222222-2222-4222-8222-222222222222';
 
-/** A minimal pipeline file, with or without a project_id. */
+/** A minimal pipeline file, with or without a project_id (an id-bearing one carries the store block a saved pipe has). */
 function pipe(projectId?: string): string {
-	return JSON.stringify(projectId === undefined ? { components: [] } : { components: [], project_id: projectId }, null, 2);
+	return JSON.stringify(projectId === undefined ? { components: [] } : { components: [], project_id: projectId, store: defaultStoreBlock() }, null, 2);
 }
 
 function decide(text: string, event: PipeFileEvent = 'created', settled = false) {
@@ -78,9 +79,23 @@ test('a pipeline with no usable project_id still gets one', () => {
 });
 
 test('the wrapped { pipeline: ... } shape is handled like the bare one', () => {
-	const wrapped = JSON.stringify({ pipeline: { components: [], project_id: ID_A } });
+	const wrapped = JSON.stringify({ pipeline: { components: [], project_id: ID_A, store: defaultStoreBlock() } });
 	assert.deepEqual(decide(wrapped), { kind: 'leave', reason: 'id-ok' });
 	assert.deepEqual(decide(JSON.stringify({ pipeline: { components: [] } })), { kind: 'assign-id' });
+});
+
+// --- missing store block -------------------------------------------------------
+
+test('a pipeline with an id but no store block gets the default one', () => {
+	const bare = JSON.stringify({ components: [], project_id: ID_A });
+	assert.deepEqual(decide(bare, 'changed'), { kind: 'assign-store' });
+	assert.deepEqual(decide(JSON.stringify({ pipeline: { components: [], project_id: ID_A } })), { kind: 'assign-store' });
+	const stamped = withStoreBlock(bare + '\n');
+	assert.ok(stamped?.endsWith('\n'));
+	assert.deepEqual(JSON.parse(stamped ?? '').store, defaultStoreBlock());
+	// idempotent: a file with a block is returned as it is
+	assert.equal(withStoreBlock(stamped ?? ''), stamped);
+	assert.equal(withStoreBlock('[]'), undefined);
 });
 
 // --- not a pipeline ------------------------------------------------------------
@@ -158,8 +173,8 @@ test('withProjectId refuses text that is not a pipeline', () => {
 	assert.equal(withProjectId('{"name":"x"}', ID_B), undefined);
 });
 
-test('the skeleton is a valid empty pipeline carrying the id', () => {
-	assert.deepEqual(JSON.parse(emptyPipelineSkeleton(ID_A)), { project_id: ID_A, components: [] });
+test('the skeleton is a valid empty pipeline carrying the id and the default store block', () => {
+	assert.deepEqual(JSON.parse(emptyPipelineSkeleton(ID_A)), { project_id: ID_A, store: defaultStoreBlock(), components: [] });
 });
 
 // --- Short ids: the file's name is the id; a dotted id is refused (plan §2.1, B5) ---
@@ -171,7 +186,7 @@ test('a dotted project_id is an address, not a short id: refused, never rewritte
 
 test('a GUID id and a short id both pass the grammar', () => {
 	for (const id of ['00000000-0000-0000-0000-000000000000', 'docBrain', 'doc-brain_2']) {
-		const decision = decidePipeFile({ event: 'changed', filePath: '/w/a.pipe', text: `{"project_id":"${id}","components":[]}` });
+		const decision = decidePipeFile({ event: 'changed', filePath: '/w/a.pipe', text: pipe(id) });
 		assert.deepEqual(decision, { kind: 'leave', reason: 'id-ok' }, id);
 	}
 });

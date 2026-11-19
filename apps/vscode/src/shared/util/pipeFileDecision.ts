@@ -20,6 +20,7 @@
  * file on the way. Every write the watcher makes now goes through here first.
  */
 
+import { defaultStoreBlock } from 'rocketride';
 
 /** Which watcher event the text was read for. */
 export type PipeFileEvent = 'created' | 'changed';
@@ -51,7 +52,9 @@ export type PipeFileDecision =
 	/** A pipeline with no usable project_id: write one. */
 	| { kind: 'assign-id' }
 	/** The id carries a dot (an address, not a short id): tell the user, write nothing (B5). */
-	| { kind: 'refuse-dotted'; projectId: string };
+	| { kind: 'refuse-dotted'; projectId: string }
+	/** A pipeline with an id but no store block (plan §9): write the default one. */
+	| { kind: 'assign-store' };
 
 /**
  * A pipeline's SHORT id: one dot-free address segment (plan §2.1, B5), the
@@ -90,6 +93,10 @@ export function decidePipeFile(input: PipeFileDecisionInput): PipeFileDecision {
 	// Two files carrying one id are the publisher's own pipeline (Rod,
 	// 2026-11-16): the id is chosen by the author now, so the duplicate prompt
 	// that guarded minted GUIDs is gone; the server resolves by address.
+	// A saved pipe without a store block gets the default one (plan §9): the
+	// block is implicit, every saved pipe is listable, the author fills it in
+	// on PACKAGE.
+	if (!isPlainObject(parsed.target.store)) return { kind: 'assign-store' };
 	return { kind: 'leave', reason: 'id-ok' };
 }
 
@@ -138,9 +145,26 @@ export function withProjectId(text: string, projectId: string): string | undefin
 	return JSON.stringify(parsed.root, null, 2) + (text.endsWith('\n') ? '\n' : '');
 }
 
-/** The starter content a genuinely new, empty file receives. */
+/**
+ * The text with the default store block added, re-serialised (the block is a
+ * whole object, so there is no in-place swap to keep). Undefined when the text
+ * is not a pipeline; unchanged when it already carries a block.
+ */
+export function withStoreBlock(text: string): string | undefined {
+	const parsed = pipeTarget(text);
+	if (typeof parsed === 'string') return undefined;
+	if (isPlainObject(parsed.target.store)) return text;
+	parsed.target.store = defaultStoreBlock();
+	return JSON.stringify(parsed.root, null, 2) + (text.endsWith('\n') ? '\n' : '');
+}
+
+/**
+ * The starter content a genuinely new, empty file receives: the minted id,
+ * the default store block (plan §9: the block present = listable) and no
+ * components.
+ */
 export function emptyPipelineSkeleton(projectId: string): string {
-	return JSON.stringify({ project_id: projectId, components: [] }, null, 2);
+	return JSON.stringify({ project_id: projectId, store: defaultStoreBlock(), components: [] }, null, 2);
 }
 
 // --- internals ---------------------------------------------------------------

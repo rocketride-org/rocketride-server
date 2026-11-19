@@ -43,7 +43,9 @@ import { ConnectionManager } from 'shell';
 import type { RocketRideClient, PrefsStore } from 'shell';
 import { createBusAppBuilderHost, projectListing, applyListing, probePackage, runListingPreflight } from 'shared/tools/appdev';
 import type { IAppBuilderHost } from 'shared/tools/appdev';
-import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppPackage } from './appStore';
+import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppFile, writeAppPackage } from './appStore';
+import { openWorkspaceFile } from '../../workspace/vfs/openWorkspaceFile';
+import { pickLocalFile } from '../../../utils/pickLocalFile';
 import { packAppSource } from './pack';
 import type { WebDevSession } from './devSession';
 
@@ -74,6 +76,39 @@ export interface WebHostOptions {
 	/** Toggle session inheritance for the preview (the Inherit Auth
 	 *  checkbox) — the provider owns the session answer. */
 	onSetInheritAuth: (inherit: boolean) => void;
+}
+
+// =============================================================================
+// LISTING WRITE QUEUE
+// =============================================================================
+
+/**
+ * The pending listing write per app folder. Each read-patch-write of
+ * package.json starts after the previous one for the same folder settles, so
+ * an Identity save and an Assets save that overlap never read the same
+ * manifest and drop each other's patch. The tail lives at module level, not
+ * on the host: the provider rebuilds the host whenever the preview URL or the
+ * dev session changes, and a save on the new host must still wait for the
+ * old host's in-flight write. Folders queue independently of each other.
+ */
+const listingWrites = new Map<string, Promise<void>>();
+
+/**
+ * Runs one listing write after the folder's pending one.
+ *
+ * @param folder - The app's folder under .appdev.
+ * @param work - The read-patch-write.
+ * @returns The write's own settlement; a failure is the caller's to report, the queue goes on.
+ */
+function enqueueListingWrite(folder: string, work: () => Promise<void>): Promise<void> {
+	const write = (listingWrites.get(folder) ?? Promise.resolve()).then(work);
+	const tail = write.catch(() => undefined);
+	listingWrites.set(folder, tail);
+	// Step: the entry goes once it is the settled tail, so the map only ever holds in-flight folders
+	void tail.then(() => {
+		if (listingWrites.get(folder) === tail) listingWrites.delete(folder);
+	});
+	return write;
 }
 
 // =============================================================================
@@ -143,11 +178,12 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 				return null;
 			}
 		},
-		saveListing: async (draft) => {
-			const pkg = await readAppPackage(folder);
-			applyListing(pkg, draft);
-			await writeAppPackage(folder, pkg);
-		},
+		saveListing: (draft) =>
+			enqueueListingWrite(folder, async () => {
+				const pkg = await readAppPackage(folder);
+				applyListing(pkg, draft);
+				await writeAppPackage(folder, pkg);
+			}),
 		runPreflight: async () => {
 			// The SHARED tiered bar (one implementation for every host), fed
 			// with this host's IO: store-VFS file existence + the live
@@ -164,9 +200,15 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 				probeDependency: (name, range) => probePackage({ name, version: range }),
 			});
 		},
-		// Manifest-asset previews ride the store VFS. The native pickers stay
-		// unimplemented — a store-backed file picker is Phase 2 UI.
+		// PACKAGE › Assets rides the store VFS: text through the view, images
+		// and dropped bytes through the byte escape hatch, the picker is the
+		// browser's own dialog, and "Open in editor" is the workspace file tab.
 		readAppTextFile: async (relPath) => await readAppText(folder, relPath),
-		readAppImageDataUri: async (relPath) => await readAppImageDataUri(client, folder, relPath),
+		readAppImageDataUri: async (relPath) => await readAppImageDataUri(folder, relPath),
+		writeAppFile: async (relPath, data) => await writeAppFile(folder, relPath, data),
+		pickAssetFile: pickLocalFile,
+		openAppFile: async (relPath) => {
+			if (!(await openWorkspaceFile(`apps/${folder}/${relPath.replace(/^\.\//, '')}`))) throw new Error(`No editor opens ${relPath} in this workspace.`);
+		},
 	};
 }

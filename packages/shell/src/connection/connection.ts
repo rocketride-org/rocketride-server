@@ -1667,12 +1667,14 @@ export class ConnectionManager implements IConnectionManager {
 	}
 
 	/**
-	 * Stow the user token in the ``/apps``-scoped cookie so the browser
-	 * attaches it to MF bundle fetches — SaaS gates each bundle by per-app
-	 * permission (see the server's ``/apps/session`` + ``apps_static``).
+	 * Stow the user token in the artifact cookie (path ``/``) so the browser
+	 * attaches it to MF bundle fetches and to ``/apps/<id>/v<N>/*`` and
+	 * ``/pipelines/<id>/v<N>/*`` asset fetches (store icons, READMEs) — SaaS
+	 * gates each artifact by per-entitlement permission (see the server's
+	 * ``/artifacts/session`` + ``apps_static``).
 	 *
 	 * Same-origin relative POST (the shell is served from the app origin, so
-	 * the cookie lands on the right host), fire-and-forget: the bundle route
+	 * the cookie lands on the right host), fire-and-forget: the artifact route
 	 * re-validates on every serve, so a lost prime is self-correcting. Harmless
 	 * in OSS — the endpoint mints a cookie the OSS serve path ignores.
 	 *
@@ -1681,7 +1683,7 @@ export class ConnectionManager implements IConnectionManager {
 	private primeAppsCookie(token: string): void {
 		if (!token) return;
 		try {
-			void fetch('/apps/session', {
+			void fetch('/artifacts/session', {
 				method: 'POST',
 				headers: { Authorization: `Bearer ${token}` },
 				credentials: 'same-origin',

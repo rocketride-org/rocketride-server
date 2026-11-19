@@ -91,6 +91,7 @@ refuse to run when no deployment target is set.
 | `store`  | File-store operations: `dir`, `type`, `write`, `rm`, `mkdir`, `stat`.     |
 | `profile` | Find where the server or a running pipeline spends its time.             |
 | `app`    | Create, preview, check, deploy, and publish apps. The Python CLI has only `create`, `verify`, and `deploy`. |
+| `pipe`   | Scaffold a new pipeline with its store listing (`pipe new`). Needs no connection. |
 | `deploy` | Version pipelines in the server's registry, point teams at a version, and schedule runs. `source-config` is TypeScript CLI only. |
 
 ### init and login
@@ -679,13 +680,32 @@ Sub-commands:
 | `reply [app] [version] -m <text>` | Post on the store review thread. |
 | `developer status`, `developer register <id>` | Show or register your organization's developer id. |
 
+### pipe
+
+Use `pipe new` to start a pipeline that the store can list: it writes
+`pipelines/<id>/<id>.pipe` with its `store` block (tagline, categories, tags,
+icon, readme, links, mode, billing), the placeholder `icon.svg`, a `README.md`
+stub, and an empty `assets/` directory. It needs no connection. Deploy the
+result with `deploy add`.
+
+```bash
+rocketride pipe new ingest --name "Document ingest"   # scaffold ./pipelines/ingest/
+rocketride deploy add pipelines/ingest/ingest.pipe    # deploy it
+```
+
+Sub-commands:
+
+| Sub-command | Description |
+| --- | --- |
+| `new <id>` | Scaffold a new pipeline under `./pipelines/<id>/`. `--name <text>` sets the display name; `--dir <dir>` picks another pipelines directory. |
+
 ### deploy
 
 Use `deploy` to version pipelines in the server's registry, point teams at a
 version, and schedule runs. `--team` takes `@me`, a team name, or a team id.
 
 ```bash
-rocketride deploy add pipelines/ingest.pipe --comment "v2 parse"   # next registry version
+rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse"   # next registry version
 rocketride deploy publish <projectId> 3 --team @me                  # point a team at version 3
 rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team @me
 rocketride deploy list
@@ -695,7 +715,7 @@ Sub-commands:
 
 | Sub-command | Description |
 | --- | --- |
-| `add <file>` | Deploy a `.pipe` file as the next registry version. `--deploy-to <team>` also points that team at it. |
+| `add <file>` | Deploy a `.pipe` file as the next registry version, packing the readme, icon and README-referenced files its `store` block names. A folder is refused. `--deploy-to <team>` also points that team at it. |
 | `list` | List deployments. |
 | `get <project>` | Show one deployment's state and schedules. |
 | `versions <project>` | List registry versions. |

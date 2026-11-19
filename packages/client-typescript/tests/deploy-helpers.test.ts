@@ -116,9 +116,9 @@ describe('teams', () => {
 });
 
 describe('pipelineNameFromPath', () => {
-	it('strips .pipe and .pipe.json from the basename on either separator', () => {
+	it('strips .pipe from the basename on either separator', () => {
 		expect(pipelineNameFromPath('pipelines/ingest.pipe')).toBe('ingest');
-		expect(pipelineNameFromPath('C:\\work\\chat.pipe.json')).toBe('chat');
+		expect(pipelineNameFromPath('C:\\work\\chat.pipe')).toBe('chat');
 		expect(pipelineNameFromPath('plain.json')).toBe('plain.json');
 	});
 });

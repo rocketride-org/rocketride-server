@@ -21,7 +21,7 @@
 # SOFTWARE.
 
 """
-Shell module — serves the web shell SPA and built-in app bundles.
+Shell module — serves the web shell SPA and the files of deployed artifacts.
 
 Registers public HTTP routes so the shell can be loaded by browsers
 without authentication. The shell itself handles auth in the browser
@@ -33,21 +33,19 @@ Static files:
   - ``static/shell/static/css/*.css``     — CSS bundles
   - ``static/shell/themes/*.json``        — theme token files
   - ``static/shell/favicon.svg``          — favicon
-  - ``static/apps/<app>/...``             — app ASSETS (icons/readmes); MF
-                                            bundles serve store-backed and
-                                            versioned, never from this tree
 
 Routes registered:
     GET  /                          — shell SPA entry point (index.html)
     GET  /pricing, /store, ...      — shell SPA deep links (see PUBLIC_ROUTES)
     GET  /shell/{file_path:path}    — shell assets (JS, CSS, themes)
-    POST /apps/session              — mint the /apps auth cookie
-    GET  /apps/{file_path:path}     — app serving, three shapes:
-        <appId>/v<N>/<file>         — versioned MF bundle (store-backed)
-        <appId>                     — resolution info: what a bundle fetch
-                                      would serve THIS caller (the deploy
+    POST /artifacts/session         — mint the artifact-serving cookie
+    GET  /apps/{file_path:path}     — app files, ONE handler with /pipelines/:
+    GET  /pipelines/{file_path:path}
+        <id>/v<N>/<file>            — versioned, immutable, store-backed
+        <id>/<file>                 — 302 to the caller's current version
+        <id>                        — resolution info: what a fetch would
+                                      serve THIS caller (the deploy
                                       smoke-test / ops probe)
-        anything else               — the static assets tree
     GET  /sitemap.xml               — sitemap from PUBLIC_ROUTES (404 unless RR_APP_URL is set)
     GET  /robots.txt                — robots policy (Disallow-all unless RR_APP_URL is set)
     GET  /llms.txt                  — llmstxt.org index (404 unless RR_APP_URL is set)
@@ -56,7 +54,7 @@ Routes registered:
 from typing import Any, Dict
 
 from ai.web import WebServer
-from .shell import PUBLIC_ROUTES, shell_static, apps_static, apps_session, sitemap_xml, robots_txt, llms_txt
+from .shell import PUBLIC_ROUTES, shell_static, artifact_static, artifacts_session, sitemap_xml, robots_txt, llms_txt
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -94,27 +92,30 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         public=True,
     )
 
-    # ── App-session cookie (SaaS) ───────────────────────────────────────
-    # POST /apps/session stows the caller's token into an /apps-scoped cookie
-    # so the browser attaches it to bundle fetches (the shell calls this after
-    # a successful connect). Registered BEFORE the catch-all so it isn't
-    # swallowed by the bundle server. Trust-free — apps_static does the real
-    # per-app permission check on every serve (SaaS only).
+    # ── Artifact-serving cookie (SaaS) ──────────────────────────────────
+    # POST /artifacts/session stows the caller's token into a cookie with
+    # path '/' so the browser attaches it to every /apps/* and /pipelines/*
+    # fetch (the shell calls this after a successful connect). Trust-free —
+    # artifact_static resolves the caller's entitled versions on every serve
+    # (SaaS only).
     server.add_route(
-        path='/apps/session',
-        routeHandler=apps_session,
+        path='/artifacts/session',
+        routeHandler=artifacts_session,
         methods=['POST'],
         public=True,
     )
 
-    # ── MF remote app bundles ───────────────────────────────────────────
-    # Serves app bundles from dist/server/static/apps/.
-    server.add_route(
-        path='/apps/{file_path:path}',
-        routeHandler=apps_static,
-        methods=['GET'],
-        public=True,
-    )
+    # ── Deployed artifact files: one handler, two prefixes ──────────────
+    # The prefix names the kind; the registry row's kind picks the serving
+    # dir (an app's dist/, a pipe's store/). Everything serves from the
+    # file store, versioned and immutable.
+    for prefix in ('apps', 'pipelines'):
+        server.add_route(
+            path=f'/{prefix}/{{file_path:path}}',
+            routeHandler=artifact_static,
+            methods=['GET'],
+            public=True,
+        )
 
     # ── SEO files ───────────────────────────────────────────────────────
     # Root-level crawler files. These must be server routes (not static

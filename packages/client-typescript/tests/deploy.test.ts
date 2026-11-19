@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-import { RocketRideClient } from '../src/client';
+import { RocketRideClient, registryIdOf } from '../src/client';
 import { describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { withTimeoutGuard } from './timeoutGuard';
 
@@ -168,10 +168,15 @@ function makeAppZip(appId: string): Uint8Array {
  */
 describe('Deploy API Integration Tests', () => {
 	let client: RocketRideClient;
+	let developerId: string;
 
 	beforeEach(async () => {
 		client = new RocketRideClient({ auth: TEST_CONFIG.auth, uri: TEST_CONFIG.uri });
-		await client.connect();
+		const connected = await client.connect();
+		// The server composes every registry name from the organization's
+		// developer id and refuses a deploy without one: there is no fallback
+		developerId = connected.organization?.developerId ?? '';
+		if (!developerId) throw new Error('the test organization has no developer id; claim one before running the deploy suite');
 	});
 
 	afterEach(async () => {
@@ -218,7 +223,7 @@ describe('Deploy API Integration Tests', () => {
 			try {
 				const result = await client.deploy.add({ pipeline: makePipeline(project), deployTo: TEAM });
 				expect(result.deployment?.teamId).toBe(TEAM);
-				expect(result.deployment?.projectId).toBe(project);
+				expect(result.deployment?.projectId).toBe(registryIdOf(project, developerId));
 				expect(result.deployment?.version).toBe(1);
 				expect(result.deployment?.state).toBe('enabled');
 			} finally {
@@ -232,17 +237,22 @@ describe('Deploy API Integration Tests', () => {
 		'add routes kind:"app" through the app branch',
 		async () => {
 			// Guards kind routing: kind:'app' must reach the server's app
-			// handler (zip transport), NOT the pipe path. The OSS test org owns
-			// no developer namespace, so an app deploy can never mint an
-			// artifact here — but the namespace rejection fires only AFTER the
-			// server has parsed the zip and read its appManifest, which proves
-			// the call landed on the app branch. A routing regression (kind:'app'
-			// mis-sent as a pipe, or `data` dropped) errors elsewhere and never
-			// mentions the developer namespace, so this assertion fails on it.
-			const data = makeAppZip('sdk.app');
-			await expect(
-				client.deploy.add({ kind: 'app', data, metadata: { projectId: freshProject() } })
-			).rejects.toThrow(/developer/i);
+			// handler (zip transport), NOT the pipe path. The deploying
+			// organization names the namespace (registry names are
+			// developerId.slug), so the add answers an APP artifact: one carrying
+			// the manifest's appVersion and a build status, which a pipe artifact
+			// never has. A routing regression (kind:'app' mis-sent as a pipe, or
+			// `data` dropped) errors or answers a pipe-shaped artifact.
+			const project = freshProject();
+			try {
+				const data = makeAppZip(project);
+				const result = await client.deploy.add({ kind: 'app', data, metadata: { projectId: project } });
+				const artifact = result.artifact as Record<string, unknown>;
+				expect(artifact.appVersion).toBe('1.0.0');
+				expect(typeof artifact.buildStatus).toBe('string');
+			} finally {
+				await cleanup(project);
+			}
 		},
 		TEST_CONFIG.timeout
 	);
@@ -320,7 +330,7 @@ describe('Deploy API Integration Tests', () => {
 
 				const body = await client.deploy.list();
 				expect(Object.keys(body).sort()).toEqual(['page', 'pageSize', 'rows', 'total']);
-				expect(body.rows.some((d) => d.projectId === project)).toBe(true);
+				expect(body.rows.some((d) => d.projectId === registryIdOf(project, developerId))).toBe(true);
 
 				const page = await client.deploy.list({ teamId: TEAM, pageSize: 1 });
 				expect(page.pageSize).toBe(1);
@@ -339,7 +349,7 @@ describe('Deploy API Integration Tests', () => {
 			try {
 				await client.deploy.add({ pipeline: makePipeline(project), deployTo: TEAM });
 				const dep = await client.deploy.get(project, TEAM);
-				expect(dep.projectId).toBe(project);
+				expect(dep.projectId).toBe(registryIdOf(project, developerId));
 				expect(dep.sha256).toBeTruthy();
 				expect(dep.schedules).toEqual({});
 			} finally {
@@ -376,7 +386,7 @@ describe('Deploy API Integration Tests', () => {
 			expect(dep.state).toBe('removed');
 
 			const body = await client.deploy.list();
-			expect(body.rows.some((d) => d.projectId === project)).toBe(false);
+			expect(body.rows.some((d) => d.projectId === registryIdOf(project, developerId))).toBe(false);
 
 			const history = await client.deploy.history(project);
 			expect(history.rows.map((h) => h.action)).toContain('remove');

@@ -271,9 +271,9 @@ export function resolveTeamArg(input: string, teams: DeployTeamRef[]): string {
  * names live in FILENAMES, and every deploy surface renders pipelineName.
  *
  * @param filePath - The pipeline file path (either separator).
- * @returns The basename without its `.pipe` / `.pipe.json` extension.
+ * @returns The basename without its `.pipe` extension.
  */
 export function pipelineNameFromPath(filePath: string): string {
 	const base = filePath.split(/[\\/]/).pop() || filePath;
-	return base.replace(/\.pipe(?:\.json)?$/, '') || base;
+	return base.replace(/\.pipe$/, '') || base;
 }

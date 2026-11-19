@@ -41,7 +41,7 @@
  * canvas picks the new map up through its project reload path.
  */
 
-import React, { CSSProperties, KeyboardEvent, ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CSSProperties, KeyboardEvent, ReactElement, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ServiceParamDescriptor } from 'rocketride';
 
 import { AnchoredPopup, Button, commonStyles, InputField, ToggleGroup } from 'shell';

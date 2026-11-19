@@ -107,6 +107,23 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	'host.pipeline.create': ShellOpSpec<{ doc: string; name: string; displayName: string; project: unknown }, void>;
 	/** Closes the untitled document without creating anything (the form's Cancel). */
 	'host.pipeline.cancelNew': ShellOpSpec<{ doc: string }, void>;
+	/** Reads a UTF-8 text file BESIDE the document's .pipe (`relPath`
+	 *  '/'-separated, relative to the pipe's folder); `text` is null when the
+	 *  file does not exist or the path leaves the folder (PACKAGE › Assets). */
+	'host.pipeline.readFile': ShellOpSpec<{ doc: string; relPath: string }, { text: string | null }>;
+	/** Reads an image BESIDE the document's .pipe as a `data:` URI; null when
+	 *  missing, not an image, over the host's cap, or outside the folder. */
+	'host.pipeline.readImageDataUri': ShellOpSpec<{ doc: string; relPath: string }, { dataUri: string | null }>;
+	/** Writes a file BESIDE the document's .pipe, folders created as needed:
+	 *  `text` for UTF-8 content, `dataB64` for bytes (the bridge carries
+	 *  strings). Rejects for an untitled document or a path outside the folder. */
+	'host.pipeline.writeFile': ShellOpSpec<{ doc: string; relPath: string; text?: string; dataB64?: string }, void>;
+	/** The native file picker for PACKAGE › Assets: an image or a markdown
+	 *  file; answers the file's name and bytes (base64), null on cancel. */
+	'host.pipeline.pickFile': ShellOpSpec<{ doc: string; accept: 'image' | 'markdown' }, { name: string; dataB64: string } | null>;
+	/** Opens a file BESIDE the document's .pipe in a text editor next to the
+	 *  pipeline (PACKAGE › Assets "Open in editor"). */
+	'host.pipeline.openAsset': ShellOpSpec<{ doc: string; relPath: string }, void>;
 
 	// ── File-keyed verbs (the sidebar's pipeline rows — no document open) ────
 	/** Opens a .pipe file in the pipeline editor (emitOp). */

@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 // =============================================================================
-// PACKAGE PANEL — the pipeline described: Identity, API Params, and the Step 6 tabs
+// PACKAGE PANEL — the pipeline described: Identity, API Params, Assets, Store
 // =============================================================================
 
 /**
@@ -32,19 +32,33 @@
  * - Identity edits the pipeline's own fields through the document: the short
  *   id (`project_id`, dot-free — the publisher namespace is DERIVED at
  *   publish, never typed), display name, description and the default source
- *   (the `.pipe` root `source`). Every change writes the document like the
- *   params page does (a `docRevision` bump), so the canvas, Save and the
+ *   (the `.pipe` root `source`), plus the listing words of the `store` block
+ *   (tagline, categories, tags, links). Every change writes the document like
+ *   the params page does (a `docRevision` bump), so the canvas, Save and the
  *   dirty state are the editor's as usual; the page itself holds no draft.
  * - API Params hosts the {@link ParamsPanel} map editor (plan §5.5).
- * - Assets, Store, Requirements and Review need the pipeline bundle, the
- *   store and the review ladder (plan Step 6, C.17); until then each is an
- *   empty state that says so, so the tab list is complete from day one.
+ * - Store edits the `store` block's commerce posture (mode, plans) — the same
+ *   card an app's Store tab shows, written through the document.
+ * - Assets is the shared {@link AssetsPane}: the icon tile, the README
+ *   edited in place with a store preview, the files the README references;
+ *   the pane writes the files beside the pipe through the host and the
+ *   block's icon/readme paths through the document.
+ * - Requirements and Review need the review ladder (plan Step 6); until then
+ *   each is an empty state that says so, so the tab list is complete.
+ *
+ * The `store` block (plan §9, C.17b) is what makes a pipeline LISTABLE: with
+ * it absent the panes show the default block, and the first write (or a save)
+ * Store each offer the one button that stamps the SDK's default block.
  */
 
-import React, { CSSProperties, useMemo, useState } from 'react';
+import React, { CSSProperties, useCallback, useMemo, useRef, useState } from 'react';
 import type { ViewMenu } from 'shell';
-import { Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
-import type { ServiceParamDescriptor } from 'rocketride';
+import { Button, Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
+import type { BillingPlan, PipeStoreBlock, StoreMode, ServiceParamDescriptor } from 'rocketride';
+import { defaultStoreBlock, pipeReadmeStub, STORE_MODES } from 'rocketride';
+import { AssetsPane } from '../../../../components/assets';
+import type { IAssetPaths, IAssetsHost } from '../../../../components/assets';
+import { PlanPanel } from '../../../appdev/views/builder/panels/store/PlanPanel';
 import { ParamsPanel } from '../params';
 import type { IParamsProject } from '../params';
 
@@ -55,7 +69,7 @@ import type { IParamsProject } from '../params';
 /** The PACKAGE side tabs, in order. */
 export type PackageSection = 'identity' | 'api-params' | 'assets' | 'store' | 'requirements' | 'review';
 
-/** The pipeline document fields the Identity page reads and writes. */
+/** The pipeline document fields the PACKAGE page reads and writes. */
 export interface IPackageProject extends IParamsProject {
 	/** Display name (the `.pipe` root `name`). */
 	name?: string;
@@ -63,6 +77,8 @@ export interface IPackageProject extends IParamsProject {
 	description?: string;
 	/** Default source component id (the `.pipe` root `source`, plan §9). */
 	source?: string;
+	/** The store manifest (the `.pipe` root `store`, plan §9): present = listable. */
+	store?: PipeStoreBlock;
 }
 
 /** One source component the default-source select offers. */
@@ -89,6 +105,12 @@ export interface IPackagePanelProps {
 	serverHost?: string;
 	/** Which side tab opens first. */
 	initialSection?: PackageSection;
+	/**
+	 * The files beside the pipeline (`./README.md`, `./icon.svg`, `assets/`):
+	 * read, written, picked and opened through the host. Absent on a host
+	 * that cannot reach the pipe's folder: Assets then says so.
+	 */
+	assetsHost?: IAssetsHost;
 }
 
 // =============================================================================
@@ -111,12 +133,21 @@ const SECTION_MENU: ViewMenu = {
 const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 /** What the Step 6 tabs will hold, told as an empty state until they land. */
-const PENDING_SECTIONS: Record<'assets' | 'store' | 'requirements' | 'review', { title: string; description: string }> = {
-	assets: { title: 'Assets land with publishing', description: 'The icon, the readme, and the readme\'s images under ./assets/ as thumbnails — once the pipeline bundle (plan Step 6) exists.' },
-	store: { title: 'Store lands with publishing', description: 'Mode (Free, Subscription, Paywall), plans and the required permission — the same card an app has — once pipelines publish to the store (plan Step 6).' },
+const PENDING_SECTIONS: Record<'requirements' | 'review', { title: string; description: string }> = {
 	requirements: { title: 'Requirements land with publishing', description: 'The one checklist: what deploying needs, what callers need, the public parameters, the store ladder (plan Step 6).' },
 	review: { title: 'Review lands with publishing', description: 'The conversation with the store review team, by version (plan Step 6).' },
 };
+
+/** The one empty state every store-bound pane shows for a pipeline without a block. */
+/** The store modes as the select shows them (the SDK owns the values). */
+const MODE_LABELS: Record<StoreMode, string> = { free: 'Free', subscription: 'Subscription', paywall: 'Paywall' };
+
+/** Interval groups in display order; unknown intervals append after these. */
+const PLAN_GROUPS: Array<{ key: string; label: string }> = [
+	{ key: 'month', label: 'Monthly Plans' },
+	{ key: 'year', label: 'Annual Plans' },
+	{ key: 'one_time', label: 'One-time' },
+];
 
 // =============================================================================
 // STYLES
@@ -182,27 +213,131 @@ const styles = {
 		fontSize: 12,
 		color: 'var(--rr-color-error)',
 	} as CSSProperties,
+	// ── Links editor: one row per link, label beside URL ──────────────────
+	linkRow: {
+		display: 'flex',
+		gap: 8,
+		alignItems: 'center',
+	} as CSSProperties,
+	linkLabel: {
+		flex: '0 0 160px',
+	} as CSSProperties,
+	linkUrl: {
+		flex: 1,
+		minWidth: 0,
+	} as CSSProperties,
+	// ── Pricing list — interval group headers with stock list rows ────────
+	planGroup: {
+		...commonStyles.labelUppercase,
+		color: 'var(--rr-text-secondary)',
+		marginTop: 10,
+		marginBottom: 2,
+	} as CSSProperties,
+	planRow: {
+		...commonStyles.listRow(false),
+		padding: '3px 8px 3px 16px',
+	} as CSSProperties,
+	// An editable row is a native button (focusable, Enter/Space open it) drawn as the row.
+	planRowButton: {
+		width: '100%',
+		border: 'none',
+		background: 'transparent',
+		font: 'inherit',
+		textAlign: 'left',
+	} as CSSProperties,
+	planRowStatic: {
+		cursor: 'default',
+	} as CSSProperties,
+	planName: {
+		...commonStyles.textEllipsis,
+		flex: 1,
+	} as CSSProperties,
+	planPrice: {
+		...commonStyles.fontMono,
+		fontSize: 12,
+		color: 'var(--rr-text-primary)',
+		whiteSpace: 'nowrap',
+	} as CSSProperties,
+	planActions: {
+		marginTop: 10,
+	} as CSSProperties,
 };
+
+// =============================================================================
+// HELPERS
+// =============================================================================
+
+/** A comma-separated list as the input shows it. */
+function joinList(values: string[] | undefined): string {
+	return (values ?? []).join(', ');
+}
+
+/** The list a comma-separated input stands for (trimmed, empties dropped). */
+function splitList(text: string): string[] {
+	return text.split(',').map((v) => v.trim()).filter(Boolean);
+}
+
+/** The storefront price label — metadata.displayAmount wins; always USD. */
+function priceLabel(plan: BillingPlan): string {
+	const display = (plan.metadata as { displayAmount?: unknown } | undefined)?.displayAmount;
+	if (typeof display === 'string' && display) return display;
+	return (plan.amountCents / 100).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+}
+
+/** Sort key inside a group — metadata.order first, unordered plans last. */
+function planOrder(plan: BillingPlan): number {
+	const order = (plan.metadata as { order?: unknown } | undefined)?.order;
+	return typeof order === 'number' ? order : Number.MAX_SAFE_INTEGER;
+}
+
+/** The first `Link n` label no row carries — a count-based label would reuse one after a removal and overwrite its URL. */
+function freeLinkLabel(rows: Array<[string, string]>): string {
+	const taken = new Set(rows.map(([label]) => label.trim()));
+	for (let n = 1; ; n++) if (!taken.has(`Link ${n}`)) return `Link ${n}`;
+}
+
+/**
+ * The one document-write path every pane uses: the patch lands on the root
+ * with a `docRevision` bump, like the params page. Root-only writes never
+ * touch `components`, so the canvas takes the revision without a reload.
+ */
+function documentWriter({ project, onContentChanged }: IPackagePanelProps): { readonly: boolean; write: (patch: Partial<IPackageProject>) => void; writeStore: (patch: Partial<PipeStoreBlock>) => void } {
+	const write = (patch: Partial<IPackageProject>): void => {
+		onContentChanged?.({ ...project, ...patch, docRevision: (project.docRevision ?? 0) + 1 });
+	};
+	const writeStore = (patch: Partial<PipeStoreBlock>): void => {
+		write({ store: { ...(project.store ?? defaultStoreBlock()), ...patch } });
+	};
+	return { readonly: !onContentChanged, write, writeStore };
+}
 
 // =============================================================================
 // IDENTITY
 // =============================================================================
 
 /**
- * The Identity page: the pipeline's own fields, written through the document.
+ * The Identity page: the pipeline's own fields, written through the document,
+ * plus the store block's listing words when the block exists.
  *
  * @param props - The panel props.
  * @returns The Identity pane.
  */
-function IdentitySection({ project, sources, developerId, onContentChanged }: IPackagePanelProps): React.ReactElement {
-	const readonly = !onContentChanged;
+function IdentitySection(props: IPackagePanelProps): React.ReactElement {
+	const { project, sources, developerId } = props;
+	const { readonly, write, writeStore } = documentWriter(props);
 	const shortId = project.project_id ?? '';
 	const idProblem = shortId && !SHORT_ID_PATTERN.test(shortId) ? 'A pipeline id is one dot-free segment: letters, digits, _ and - only (B5).' : null;
 	const publishedAs = `${developerId || '{developerId}'}.${shortId || '{pipeId}'}`;
+	const store = project.store ?? defaultStoreBlock();
+	// The links editor keeps insertion order; an entry being renamed keeps its
+	// position because the map is rebuilt from the row list, not re-keyed.
+	const linkRows = useMemo(() => Object.entries(store?.links ?? {}), [store?.links]);
 
-	/** Writes one root field through the document (a revision bump, like the params page). */
-	const write = (patch: Partial<IPackageProject>): void => {
-		onContentChanged?.({ ...project, ...patch, docRevision: (project.docRevision ?? 0) + 1 });
+	/** Writes the link rows back as the block's map (empty labels dropped). */
+	const writeLinks = (rows: Array<[string, string]>): void => {
+		const links: Record<string, string> = {};
+		for (const [label, url] of rows) if (label.trim()) links[label.trim()] = url;
+		writeStore({ links });
 	};
 
 	// Every caption is a <label htmlFor> of its control, so assistive
@@ -223,9 +358,22 @@ function IdentitySection({ project, sources, developerId, onContentChanged }: IP
 				<InputField id="rr-package-name" type="text" value={project.name ?? ''} disabled={readonly} placeholder="Doc brain" onChange={(event) => write({ name: event.target.value })} />
 			</div>
 			<div style={styles.formRow}>
+				<label htmlFor="rr-package-tagline" style={styles.formLabel}>Tagline</label>
+				<InputField id="rr-package-tagline" type="text" value={store.tagline ?? ''} disabled={readonly} placeholder="Answers from your documents" onChange={(event) => writeStore({ tagline: event.target.value })} />
+			</div>
+			<div style={styles.formRow}>
 				<label htmlFor="rr-package-description" style={styles.formLabel}>Description</label>
 				<textarea id="rr-package-description" style={styles.formArea} value={project.description ?? ''} disabled={readonly} onChange={(event) => write({ description: event.target.value })} />
 			</div>
+				<div style={styles.formRow}>
+					<label htmlFor="rr-package-categories" style={styles.formLabel}>Categories</label>
+					<InputField id="rr-package-categories" type="text" defaultValue={joinList(store.categories)} key={`cat:${joinList(store.categories)}`} disabled={readonly} placeholder="pipeline, productivity" onBlur={(event) => writeStore({ categories: splitList(event.target.value) })} />
+					<div style={styles.help}>Comma-separated; the store groups listings by category.</div>
+				</div>
+				<div style={styles.formRow}>
+					<label htmlFor="rr-package-tags" style={styles.formLabel}>Tags</label>
+					<InputField id="rr-package-tags" type="text" defaultValue={joinList(store.tags)} key={`tag:${joinList(store.tags)}`} disabled={readonly} placeholder="documents, rag, chat" onBlur={(event) => writeStore({ tags: splitList(event.target.value) })} />
+				</div>
 			<div style={styles.formRow}>
 				<label htmlFor="rr-package-source" style={styles.formLabel}>Default source</label>
 				<select id="rr-package-source" style={styles.select} value={project.source ?? ''} disabled={readonly || sources.length === 0} onChange={(event) => write({ source: event.target.value || undefined })}>
@@ -240,7 +388,171 @@ function IdentitySection({ project, sources, developerId, onContentChanged }: IP
 					The entry a two-segment address or a <span style={styles.mono}>submit()</span> without <span style={styles.mono}>source</span> uses. With several sources and no default, callers get <span style={styles.mono}>source_required</span>.
 				</div>
 			</div>
-			<div style={styles.help}>Tagline, category, tags and links are part of the store manifest and arrive with publishing (plan Step 6).</div>
+			<div style={styles.formRow}>
+				<div style={styles.formLabel}>Links</div>
+				{linkRows.map(([label, url], index) => (
+					<div key={index} style={styles.linkRow}>
+						<InputField type="text" style={styles.linkLabel} aria-label={`Link ${index + 1} label`} defaultValue={label} key={`label:${index}:${label}`} disabled={readonly} placeholder="Docs" onBlur={(event) => writeLinks(linkRows.map((row, i) => (i === index ? [event.target.value, row[1]] : row)))} />
+						<InputField type="url" style={styles.linkUrl} aria-label={`Link ${index + 1} URL`} value={url} disabled={readonly} placeholder="https://" onChange={(event) => writeLinks(linkRows.map((row, i) => (i === index ? [row[0], event.target.value] : row)))} />
+						{!readonly && (
+							<Button variant="ghost" small aria-label={`Remove link ${index + 1}`} onClick={() => writeLinks(linkRows.filter((_, i) => i !== index))}>
+								Remove
+							</Button>
+						)}
+					</div>
+				))}
+				{!readonly && (
+					<div>
+						<Button variant="secondary" small onClick={() => writeLinks([...linkRows, [freeLinkLabel(linkRows), '']])}>
+							Add link
+						</Button>
+					</div>
+				)}
+				<div style={styles.help}>Shown on the store page: documentation, support, source.</div>
+			</div>
+		</Card>
+	);
+}
+
+// =============================================================================
+// STORE
+// =============================================================================
+
+/**
+ * The Store pane: the block's commerce posture — mode and, when not Free, the
+ * pricing plans (the same card and record panel an app's Store tab uses),
+ * written through the document.
+ *
+ * @param props - The panel props.
+ * @returns The Store pane.
+ */
+function StoreSection(props: IPackagePanelProps): React.ReactElement {
+	const { project } = props;
+	const { readonly, writeStore } = documentWriter(props);
+	// Plan record panel — a row click opens the record; "Add plan" opens the
+	// same panel empty. idx null = Create mode.
+	const [planPanel, setPlanPanel] = useState<{ idx: number | null } | null>(null);
+	const store = project.store ?? defaultStoreBlock();
+
+	const mode: StoreMode = store.mode ?? 'free';
+	const plans = store.billing?.plans ?? [];
+	/** Writes a new plan list into the block (the PlanPanel's onSave/onRemove contract is async). */
+	const writePlans = async (next: BillingPlan[]): Promise<void> => {
+		writeStore({ billing: { ...store.billing, plans: next } });
+	};
+
+	// Bucket plans by interval, keeping their index for the record panel;
+	// unknown intervals get their own trailing group rather than mislabeling.
+	const groups = [...PLAN_GROUPS];
+	for (const p of plans) if (!groups.some((g) => g.key === p.interval)) groups.push({ key: p.interval, label: p.interval });
+
+	return (
+		<>
+			<Card header="Store listing">
+				<div style={styles.formRow}>
+					<label htmlFor="rr-package-mode" style={styles.formLabel}>Mode</label>
+					<select id="rr-package-mode" style={styles.select} value={mode} disabled={readonly} onChange={(event) => writeStore({ mode: event.target.value as StoreMode })}>
+						{STORE_MODES.map((mode) => (
+							<option key={mode} value={mode}>
+								{MODE_LABELS[mode]}
+							</option>
+						))}
+					</select>
+					<div style={styles.help}>Free lists the pipeline at no charge; Subscription and Paywall need at least one plan. The pricing is a proposal that goes live on approval.</div>
+				</div>
+				{mode !== 'free' && (
+					<div style={styles.formRow}>
+						<div style={styles.formLabel}>Pricing (proposal, live on approval)</div>
+						{groups.map(({ key, label }) => {
+							const rows = plans
+								.map((plan, idx) => ({ plan, idx }))
+								.filter(({ plan }) => plan.interval === key)
+								.sort((a, b) => planOrder(a.plan) - planOrder(b.plan) || a.plan.nickname.localeCompare(b.plan.nickname));
+							if (rows.length === 0) return null;
+							return (
+								<div key={key}>
+									<div style={styles.planGroup}>{label}</div>
+									{rows.map(({ plan, idx }) =>
+										readonly ? (
+											<div key={idx} style={{ ...styles.planRow, ...styles.planRowStatic }}>
+												<span style={styles.planName}>{plan.nickname}</span>
+												<span style={styles.planPrice}>{priceLabel(plan)}</span>
+											</div>
+										) : (
+											<button key={idx} type="button" style={{ ...styles.planRow, ...styles.planRowButton }} aria-label={`Edit plan ${plan.nickname}`} onClick={() => setPlanPanel({ idx })}>
+												<span style={styles.planName}>{plan.nickname}</span>
+												<span style={styles.planPrice}>{priceLabel(plan)}</span>
+											</button>
+										)
+									)}
+								</div>
+							);
+						})}
+						{plans.length === 0 && <div style={styles.problem}>Mode "{MODE_LABELS[mode]}" needs at least one plan.</div>}
+						{!readonly && (
+							<div style={styles.planActions}>
+								<Button variant="secondary" small onClick={() => setPlanPanel({ idx: null })}>
+									Add plan
+								</Button>
+							</div>
+						)}
+					</div>
+				)}
+			</Card>
+			{/* Plan record panel (stock DetailPanel): its Save writes the block through the document. */}
+			{planPanel && <PlanPanel open plan={planPanel.idx === null ? null : (plans[planPanel.idx] ?? null)} appName={project.name || project.project_id || 'this pipeline'} onSave={(p) => writePlans(planPanel.idx === null ? [...plans, p] : plans.map((x, i) => (i === planPanel.idx ? p : x)))} onRemove={planPanel.idx === null ? undefined : () => writePlans(plans.filter((_, i) => i !== planPanel.idx))} onClose={() => setPlanPanel(null)} />}
+		</>
+	);
+}
+
+// =============================================================================
+// ASSETS
+// =============================================================================
+
+/**
+ * The Assets pane: the shared {@link AssetsPane} over the block's icon and
+ * readme paths. The pane writes the files beside the pipe through the host;
+ * the paths it declares land in the `store` block through the document
+ * (the default block applies when the document has none yet).
+ *
+ * @param props - The panel props.
+ * @returns The Assets pane.
+ */
+function AssetsSection(props: IPackagePanelProps): React.ReactElement {
+	const { project, assetsHost } = props;
+	const { readonly } = documentWriter(props);
+	const store = project.store ?? defaultStoreBlock();
+	const displayName = project.name || project.project_id || 'this pipeline';
+
+	// The props as they are NOW: a path change lands after an awaited file
+	// write, and the patch must go onto the document as it is THEN (a component
+	// added on the canvas meanwhile stays), not as it was when the drop began.
+	const latest = useRef(props);
+	latest.current = props;
+
+	// A '' in the patch clears the key: the block then declares no such file
+	// (validateStoreBlock refuses an empty path, so the key goes, not its value).
+	const onPathsChange = useCallback((patch: IAssetPaths): void => {
+		const current = latest.current;
+		const next: PipeStoreBlock = { ...(current.project.store ?? defaultStoreBlock()) };
+		for (const key of ['icon', 'readme'] as const) {
+			const value = patch[key];
+			if (value === undefined) continue;
+			if (value === '') delete next[key];
+			else next[key] = value;
+		}
+		documentWriter(current).write({ store: next });
+	}, []);
+
+	const readmeStub = useMemo(() => pipeReadmeStub(displayName), [displayName]);
+
+	return (
+		<Card header="Assets">
+			{assetsHost ? (
+				<AssetsPane kind="pipeline" host={assetsHost} docStem={project.project_id || 'pipeline'} paths={{ icon: store.icon ?? '', readme: store.readme ?? '' }} onPathsChange={onPathsChange} readmeStub={readmeStub} readonly={readonly} />
+			) : (
+				<EmptyState title="No files on this host" description="This host cannot reach the files beside the pipeline, so the icon and README cannot be shown or edited here." />
+			)}
 		</Card>
 	);
 }
@@ -268,6 +580,12 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 			break;
 		case 'api-params':
 			pane = <ParamsPanel project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema} onContentChanged={onContentChanged} address={address} serverHost={serverHost} />;
+			break;
+		case 'assets':
+			pane = <AssetsSection {...props} />;
+			break;
+		case 'store':
+			pane = <StoreSection {...props} />;
 			break;
 		default: {
 			const pending = PENDING_SECTIONS[section];

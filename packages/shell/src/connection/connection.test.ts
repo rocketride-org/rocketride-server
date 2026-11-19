@@ -974,7 +974,7 @@ test('saveToken primes the /apps cookie in a CROSS-origin embedded preview', () 
 		manager.saveToken = ConnectionManager.prototype.saveToken;
 		manager.saveToken('rr_proxy-token');
 		assert.equal(manager.loadToken(), 'rr_proxy-token');
-		assert.deepEqual(fetchCalls, ['/apps/session']);
+		assert.deepEqual(fetchCalls, ['/artifacts/session']);
 	} finally {
 		resetDevGateForTests();
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
@@ -1010,7 +1010,7 @@ test('saveToken primes the /apps cookie for real tabs', () => {
 		manager.saveToken = ConnectionManager.prototype.saveToken;
 		manager.saveToken('rr_tab-token');
 		assert.equal(stored.get(LS_TOKEN), 'rr_tab-token');
-		assert.deepEqual(fetchCalls, ['/apps/session']);
+		assert.deepEqual(fetchCalls, ['/artifacts/session']);
 	} finally {
 		if (originalLocalStorage) Object.defineProperty(globalThis, 'localStorage', originalLocalStorage);
 		else delete (globalThis as { localStorage?: Storage }).localStorage;

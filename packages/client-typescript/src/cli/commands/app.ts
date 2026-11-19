@@ -32,7 +32,7 @@
  * verify` needs no connection. Every other verb is a DEPLOYMENT-TARGET verb
  * (ROCKETRIDE_DEPLOY_* pair, hard stop when absent).
  *
- * `[app]` arguments take an app folder, an app id (`personal.clock`), its
+ * `[app]` arguments take an app folder, an app id (`clock`), its
  * name part (`clock`), its folder name (`clock-ui`), or nothing (the
  * current directory is the app). A lone number is read as the version, so
  * `rocketride app publish 3` works from inside an app folder.
@@ -41,7 +41,7 @@
 import { Command } from 'commander';
 import type { RocketRideClient } from '../../client/client';
 import { parseRegistryVersion, pickPublishVersion } from '../../client/deploy-helpers';
-import { addConnectionOptions, addDeployConnectionOptions, connectClient, connectDeploy, disconnectAll, formatWhen, onInterrupt, runCliCommand } from '../common';
+import { addConnectionOptions, addDeployConnectionOptions, connectClient, connectDeploy, formatWhen, onInterrupt, runCliCommand } from '../common';
 import { openBrowser } from './auth';
 import type { ConnectionOptions } from '../common';
 import type { Output } from '../output';
@@ -569,7 +569,7 @@ export function registerAppCommands(program: Command): void {
 		.addHelpText(
 			'after',
 			`
-[app] is an app folder (apps/clock-ui), an app id (personal.clock), its name
+[app] is an app folder (apps/clock-ui), an app id (clock), its name
 (clock), its folder name (clock-ui), or nothing (the current folder). A lone
 number is read as the version: 'rocketride app publish 3'.
 

@@ -106,36 +106,14 @@ export async function savePipelineDocument(document: vscode.TextDocument): Promi
 		return undefined;
 	}
 
-	// step: a new pipeline is born as a BUNDLE (plan §9, B7): `<dir>/<name>/
-	// <name>.pipe`, the folder that later holds its readme, icon and assets
-	// and is the publish unit. The name is the FILE's; the pipeline's id lives
-	// inside the file and is not derived from it.
-	const targetBase = target.path.slice(target.path.lastIndexOf('/') + 1);
-	const stem = targetBase.replace(/\.pipe(?:\.json)?$/i, '') || targetBase;
-	const parent = vscode.Uri.joinPath(target, '..');
-	const bundleDir = vscode.Uri.joinPath(parent, stem);
-	const bundleFile = vscode.Uri.joinPath(bundleDir, `${stem}.pipe`);
-	// The Save dialog confirmed the typed path; the bundle's pipe is another
-	// path, so an existing bundle of that name is replaced only when asked.
-	let exists = false;
-	try {
-		await vscode.workspace.fs.stat(bundleFile);
-		exists = true;
-	} catch {
-		exists = false;
-	}
-	if (exists) {
-		const replace = 'Replace';
-		const choice = await vscode.window.showWarningMessage(`A pipeline named "${stem}" already exists (${vscode.workspace.asRelativePath(bundleFile)}). Replace it?`, { modal: true }, replace);
-		if (choice !== replace) return undefined;
-	}
-	await vscode.workspace.fs.createDirectory(bundleDir);
-	// step: write the content as it is (the id inside it stands), drop the
-	// untitled buffer without a discard prompt (its content is on disk now),
-	// then reopen the saved file in the grid editor via the *.pipe
-	// custom-editor association.
-	await vscode.workspace.fs.writeFile(bundleFile, Buffer.from(document.getText(), 'utf8'));
+	// step: the pipe lands at the typed path (plan §9: no folder rule; the OS
+	// dialog ran its own overwrite confirm). The name is the FILE's; the
+	// pipeline's id lives inside the file and is not derived from it. Write
+	// the content as it is (the id inside it stands), drop the untitled buffer
+	// without a discard prompt (its content is on disk now), then reopen the
+	// saved file in the grid editor via the *.pipe custom-editor association.
+	await vscode.workspace.fs.writeFile(target, Buffer.from(document.getText(), 'utf8'));
 	await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
-	await vscode.commands.executeCommand('vscode.openWith', bundleFile, 'rocketride.page.project');
-	return bundleFile;
+	await vscode.commands.executeCommand('vscode.openWith', target, 'rocketride.page.project');
+	return target;
 }

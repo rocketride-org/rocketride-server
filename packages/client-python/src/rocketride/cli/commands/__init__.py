@@ -32,6 +32,7 @@ Modules:
     tasks: ``start``, ``stop``, ``upload``, ``list``
     store: ``store`` subcommands
     app: ``app`` subcommands
+    pipe: ``pipe`` subcommands (``pipe new``, the pipeline scaffold)
     deploy: ``deploy`` subcommands
     validate: ``validate`` (pipeline files, CI-friendly exit codes)
     otel: ``otel`` (OpenTelemetry bridge: pipeline traces + metrics over OTLP)
@@ -44,6 +45,7 @@ from .auth import run_init, run_login
 from .deploy import run_deploy
 from .diff import run_diff
 from .otel import run_otel
+from .pipe import run_pipe
 from .profile import run_profile
 from .store import run_store
 from .tasks import run_list, run_start, run_stop, run_upload
@@ -57,6 +59,7 @@ __all__ = [
     'run_list',
     'run_login',
     'run_otel',
+    'run_pipe',
     'run_profile',
     'run_start',
     'run_stop',

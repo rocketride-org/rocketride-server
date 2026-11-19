@@ -28,7 +28,8 @@
 # interface (OSS: files; SaaS: DB — this layer never knows):
 #
 #   add           deploy any kind of object as an immutable org-registry
-#                 version vN (kind='pipe' default: pipeline dict;
+#                 version vN (kind='pipe' default: pipeline dict, optionally
+#                 with its folder zip as ``data`` (the store block's files);
 #                 kind='app': built-bundle zip, routed to app_deploy)
 #   versions      the registry entries for a project (the version strip)
 #   artifact      one immutable artifact's JSON, sha256-verified on load
@@ -59,7 +60,7 @@ from rocketlib import debug
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required
 from ai.account.models import resolve_team_permissions
-from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, write_pipe_content
+from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, validate_store_block, write_pipe_content
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -387,12 +388,11 @@ class DeployCommands(_DeployBase):
         if not self._teams_with('task.control'):
             raise PermissionError("Permission 'task.control' denied")
 
-        # The BUNDLE (plan 9, B7): the binary ``data`` frame is the zip of the
-        # pipeline folder — the pipe, its .rrpipe manifest, readme, icon and
-        # assets. The pipe inside it IS the artifact; a ``pipeline`` dict sent
-        # beside it must be the same pipe. Without a bundle the dict is the
-        # artifact alone (the SDK and CI door): nothing to list in the store
-        # until a bundle is deployed.
+        # The BUNDLE (plan 9, C.17b): the binary ``data`` frame is the zip of
+        # the pipeline folder — the pipe at its root plus the files its store
+        # block declares and the readme references. The pipe inside it IS the
+        # artifact; a ``pipeline`` dict sent beside it must be the same pipe.
+        # Without a zip the dict is the artifact alone (the SDK and CI door).
         bundle = None
         data = args.get('data')
         if data is not None:
@@ -401,11 +401,11 @@ class DeployCommands(_DeployBase):
             bundle = read_pipe_bundle(bytes(data))
         pipeline = args.get('pipeline')
         if bundle is not None:
-            # The packers fill a missing display name (pipe, then manifest,
-            # then stem) with plain truthiness; the server fills the same way
-            # BEFORE the comparison so both sides change together
+            # The packers fill a missing display name (pipe, then stem) with
+            # plain truthiness; the server fills the same way BEFORE the
+            # comparison so both sides change together
             if not bundle.pipeline.get('name'):
-                bundle.pipeline['name'] = str(bundle.manifest.get('name') or bundle.stem)
+                bundle.pipeline['name'] = bundle.stem
             if pipeline is None:
                 pipeline = bundle.pipeline
             elif json.dumps(_canonical_json(pipeline), sort_keys=True) != json.dumps(
@@ -440,15 +440,24 @@ class DeployCommands(_DeployBase):
         # row below is keyed by the full name; the artifact keeps the short id.
         validate_segment(project_id, 'project_id')
         validate_component_ids(pipeline)
+        # The store block (plan 9): present = the pipe is publishable and
+        # listed; absent = an unlisted artifact. Checked before any registry
+        # write so an unknown key or a bad mode refuses the deploy by name.
+        store_block = validate_store_block(pipeline)
         full_name = self._registry_id(project_id)
         project_id = full_name
 
         org_id = self._org_id()
         caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
-        # The listing manifest the publish row snapshots (plan 9): what the
-        # author wrote in the .rrpipe plus the pipe's own facts; never a
-        # publisher or author (derived, plan S7)
-        metadata = {**caller_meta, 'manifest': pipe_manifest(pipeline, bundle)}
+        # The listing manifest the publish row snapshots (plan 9): the store
+        # block plus the pipe's own root keys, only when a block exists;
+        # never a publisher or author (derived, plan S7). An unlisted deploy
+        # carries no manifest (the backends synthesize the display name), so
+        # a caller-supplied one is dropped: the block is the ONE source of a
+        # listing, and `is_listed` reads the manifest's `mode`.
+        metadata = {key: value for key, value in caller_meta.items() if key != 'manifest'}
+        if store_block is not None:
+            metadata['manifest'] = pipe_manifest(pipeline, store_block)
         # Born state (plan S8): every version is born 'private' (team and
         # personal rungs serve it; @public needs 'ready' after review). On a
         # server WITHOUT a review ladder the developer IS the admin, so the
@@ -463,14 +472,15 @@ class DeployCommands(_DeployBase):
             comment=str(args.get('comment') or ''),
             metadata=metadata,
         )
-        if bundle is not None and bundle.content_entries:
-            # The content beside the artifact (readme, icon, assets, the
-            # manifest file). The registry row was allocated first because
-            # the version names the content paths; a failed write flips the
-            # row 'failed' (the rail refuses to serve that state) and
-            # surfaces the cause, as the app door does.
+        if store_block is not None:
+            # The content beside the artifact: the files the block declares
+            # and the readme references, in their layout. The registry row
+            # was allocated first because the version names the content
+            # paths; a declared file the zip lacks, or a failed write, flips
+            # the row 'failed' (the rail refuses to serve that state) and
+            # surfaces the cause by name, as the app door does.
             try:
-                await write_pipe_content(org_id, self._account_info.userId, entry, bundle)
+                await write_pipe_content(org_id, self._account_info.userId, entry, bundle, store_block)
             except Exception as exc:
                 try:
                     await account.set_artifact_state(org_id, project_id, entry['version'], 'failed', self._actor())

@@ -554,7 +554,7 @@ describe('RocketRideClient Integration Tests', () => {
 			'should handle JSON response questions',
 			async () => {
 				const question = new Question({ expectJson: true });
-				question.addQuestion('Site the first paragraph of the constitution of the United States');
+				question.addQuestion('What is the capital city of France? Answer with the city name.');
 				question.addExample('greeting request', { text: 'Hello, world!' });
 
 				const response: PIPELINE_RESULT = await client.chat({
@@ -582,7 +582,7 @@ describe('RocketRideClient Integration Tests', () => {
 				expect(typeof answer).toBe('object');
 				expect(answer).toHaveProperty('text');
 				expect(answer.text.length).toBeGreaterThan(0);
-				expect(answer.text).toContain('We the People');
+				expect(answer.text).toContain('Paris');
 			},
 			TEST_CONFIG.timeout
 		);

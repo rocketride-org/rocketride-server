@@ -20,232 +20,566 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""The pipeline bundle packer — the publish unit of a pipeline (plan 9, B7).
+"""The pipeline store block and the per-pipe packer (plan 9).
 
-A pipeline publishes as a FOLDER: ``pipelines/<pipeId>/`` holding exactly one
-``.pipe`` (what runs), beside the store manifest ``<stem>.rrpipe`` (display
-only: name, tagline, description, category, tags, icon, links, mode, plans;
-never publisher or author, which the server derives), ``readme.md`` (the
-store page), an icon, and ``assets/`` (the images the readme references).
-:func:`pack_pipe_bundle` reads that folder and builds the zip the deploy door
-takes as ``data`` beside the pipeline dict (pipe-at-root layout, deterministic
-entries). The TypeScript twin is ``rocketride/app-pack``'s ``packPipeBundle``.
+A pipeline's store listing is a ROOT block ``store`` inside the ``.pipe``
+JSON, beside ``project_id``, ``name``, ``description`` and ``source`` (never
+duplicated in the block): tagline, categories, tags, icon, readme, links,
+mode and billing, mirroring an app's ``appManifest`` listing fields. The
+block present = the pipeline is listable; without it a pipe still runs and
+deploys as an unlisted artifact.
+
+A pipeline publishes PER PIPE, BY REFERENCE: :func:`pack_pipe` takes the
+path of one ``.pipe`` and builds the zip the deploy door takes as ``data``
+beside the pipeline dict — the pipe at the root under its own basename, the
+declared readme and icon, and every file the README references (markdown
+images and links, HTML ``<img src>``), laid out relative to the pipe file's
+directory. There is no folder rule: two pipes in one folder are two pipes and
+may share files. The TypeScript twins are ``client/pipe-store.ts`` (the pure
+rules) and ``app-pack/pipe-bundle.ts`` (the Node packer).
 """
+
+from __future__ import annotations
 
 import io
 import json
 import os
+import re
 import zipfile
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
+
+from ._app_scaffold import PLACEHOLDER_ICON_SVG
+from .types.pipeline import BillingPlan, PipeStoreBlock
 
 # ==== Limits ==================================================================
 
 #: Fixed timestamp stamped on every zip entry (the app packer's value): two
-#: packs of one folder hash the same. Restated here rather than imported so
-#: the bundle packer never pulls the app packer's gitignore dependency.
+#: packs of one pipe hash the same. Restated here rather than imported so the
+#: packer never pulls the app packer's gitignore dependency.
 ZIP_ENTRY_DATE_TIME = (1980, 1, 1, 0, 0, 0)
 
 #: The icon cap (mirrors the app packer's MAX_ICON_BYTES).
 MAX_ICON_BYTES = 256 * 1024
 
-#: The cap on one readme image (mirrors the app packer's MAX_README_IMAGE_BYTES).
+#: The cap on one README-referenced file (mirrors MAX_README_IMAGE_BYTES).
 MAX_README_IMAGE_BYTES = 10 * 1024 * 1024
 
 #: The readme cap (a store page, not a book).
 MAX_PIPE_README_BYTES = 1024 * 1024
 
-#: The manifest cap.
-MAX_PIPE_MANIFEST_BYTES = 64 * 1024
+# ==== Store block =============================================================
 
-#: The readme file name the store page reads.
-PIPE_README_NAME = 'readme.md'
+#: The eight keys a ``store`` block may carry, in the scaffold's order.
+STORE_KEYS = ('tagline', 'categories', 'tags', 'icon', 'readme', 'links', 'mode', 'billing')
 
-#: The folder of images the readme references.
-PIPE_ASSETS_DIR = 'assets'
+#: The monetization modes, the app model.
+STORE_MODES = ('free', 'subscription', 'paywall')
 
-#: The icon file names a bundle may carry, in preference order.
-PIPE_ICON_NAMES = ('icon.svg', 'icon.png')
+#: The placeholder icon every scaffolded pipeline ships — the app scaffold's.
+PIPE_ICON_SVG = PLACEHOLDER_ICON_SVG
 
-#: Manifest keys the server accepts; anything else is refused at pack time.
-_MANIFEST_KEYS = frozenset({'name', 'tagline', 'description', 'category', 'tags', 'icon', 'links', 'mode', 'plans'})
+#: Pipe id grammar: one dot-free address segment (the developer id is attached at deploy).
+_PIPE_ID_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
-_MODES = ('free', 'subscription', 'paywall')
+#: A markdown image or link: ``![alt](path)`` / ``[text](path)``, optional
+#: title. The destination is angle-delimited (``<a b.png>``, spaces allowed;
+#: group 1) or bare (group 2), where it may hold one level of balanced
+#: parentheses (``plot(1).png``), as CommonMark allows.
+_MARKDOWN_REF_RE = re.compile(
+    r'!?\[[^\]]*\]\(\s*(?:<([^<>\n]*)>|((?:[^\s()<>]|\([^\s()]*\))+))(?:\s+["\'][^"\']*["\'])?\s*\)'
+)
+
+#: A markdown reference definition: ``[label]: path`` at the start of a line,
+#: the destination of a reference-style image or link (``![alt][label]``);
+#: angle-delimited (group 1, spaces allowed) or bare (group 2).
+_MARKDOWN_DEF_RE = re.compile(r'^[ \t]{0,3}\[[^\]]+\]:[ \t]*(?:<([^<>\n]*)>|([^\s<>]+))', re.MULTILINE)
+
+#: An HTML ``<img>`` tag (the tag name case-insensitive); group 1 = its attribute text.
+_HTML_IMG_RE = re.compile(r'<img\b([^>]*)>', re.IGNORECASE)
+
+#: One attribute token in a tag's attribute text: the name, then optionally
+#: ``=`` and a double-quoted, single-quoted or bare value (the Assets pane's
+#: rule, mirrored: a ``src=`` inside another attribute's VALUE is never a
+#: token of its own).
+_ATTRIBUTE_RE = re.compile(r'([^\s"\'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'=<>`]+)))?')
+
+#: Fenced code blocks (backtick or tilde fences) and inline code spans — never references.
+_CODE_RE = re.compile(r'(```|~~~).*?\1|`[^`\n]*`', re.DOTALL)
+
+#: A URL scheme prefix (``http:``, ``data:``, ``mailto:`` ...).
+_SCHEME_RE = re.compile(r'^[A-Za-z][A-Za-z0-9+.-]*:')
+
+
+def default_store_block() -> PipeStoreBlock:
+    """The block a new pipeline is stamped with — a fresh dict each call.
+
+    Returns:
+        The scaffold's default store block.
+    """
+    return {
+        'tagline': '',
+        'categories': ['pipeline'],
+        'tags': [],
+        'icon': './icon.svg',
+        'readme': './README.md',
+        'links': {},
+        'mode': 'free',
+        'billing': {'plans': []},
+    }
+
+
+def pipe_readme_stub(display_name: str) -> str:
+    """The scaffolded starter README of a pipeline — the app scaffold's twin.
+
+    Args:
+        display_name: The pipeline's display name.
+
+    Returns:
+        The README.md file content.
+    """
+    return (
+        f'# {display_name}\n\n'
+        f'{display_name} — a RocketRide pipeline.\n\n'
+        '## What it does\n\n'
+        'Describe your pipeline here — this README ships with the pipeline and appears on its store listing.\n'
+    )
+
+
+# ==== Paths (posix, pure) =====================================================
+
+
+def normalize_posix_path(rel: str) -> str:
+    """Normalise a posix path: separators unified, ``.`` dropped, ``..`` folded.
+
+    A ``..`` with nothing to fold stays, so the caller can see an escape
+    (``../x`` stays ``../x``).
+
+    Args:
+        rel: The path, either separator.
+
+    Returns:
+        The normalised posix path ('' for an empty one).
+    """
+    out: List[str] = []
+    for segment in rel.replace('\\', '/').split('/'):
+        if segment in ('', '.'):
+            continue
+        if segment == '..' and out and out[-1] != '..':
+            out.pop()
+        else:
+            out.append(segment)
+    return '/'.join(out)
+
+
+def _posix_dirname(rel: str) -> str:
+    """The posix directory of a path ('' for a bare file name)."""
+    normalised = rel.replace('\\', '/')
+    slash = normalised.rfind('/')
+    return '' if slash < 0 else normalised[:slash]
+
+
+def _check_relative_path(key: str, value: Any) -> str:
+    """Check a declared icon/readme path by SPELLING, the server door's rule.
+
+    Relative, and no ``..`` segment at all — not even one that would fold
+    inside the tree (``a/../icon.svg``): the server refuses the declaration
+    as written, so the client refuses it first. Containment on the real
+    file system is the packer's check.
+
+    Args:
+        key: The block key, for the error.
+        value: The declared value.
+
+    Returns:
+        The value, surrounding whitespace stripped (as the server reads it).
+
+    Raises:
+        ValueError: The path is not relative-and-inside, naming the key.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(f'store.{key} must be a non-empty relative path')
+    value = value.strip()
+    posix = value.replace('\\', '/')
+    if posix.startswith('/') or re.match(r'^[A-Za-z]:', posix):
+        raise ValueError(f'store.{key} must be a path relative to the pipe file, not "{value}"')
+    if '..' in posix.split('/'):
+        raise ValueError(f'store.{key} must stay inside the pipe file\'s directory, not "{value}"')
+    return value
+
+
+# ==== Billing =================================================================
+
+
+def _normalize_amount_cents(value: Any) -> int | float:
+    """Coerce a plan price to cents; missing = 0, anything non-numeric is an error."""
+    if value is None:
+        return 0
+    if isinstance(value, bool):
+        raise ValueError(f'Invalid billing plan amountCents: {json.dumps(value)}')
+    if isinstance(value, (int, float)):
+        cents: int | float = value
+    elif isinstance(value, str) and value.strip():
+        try:
+            cents = float(value)
+        except ValueError:
+            cents = float('nan')
+    else:
+        cents = float('nan')
+    if cents != cents or cents in (float('inf'), float('-inf')):
+        raise ValueError(f'Invalid billing plan amountCents: {json.dumps(value)}')
+    return int(cents) if float(cents).is_integer() else cents
+
+
+def normalize_billing_plan(raw: Any) -> BillingPlan:
+    """Project one raw plan into the typed shape, every other key carried verbatim.
+
+    Args:
+        raw: One entry of ``billing.plans``, straight from JSON.
+
+    Returns:
+        The typed plan.
+
+    Raises:
+        ValueError: A price that is not a number.
+    """
+    source = raw if isinstance(raw, dict) else {}
+    # step: metadata never rides the verbatim spread — a non-dict value would
+    # violate the plan shape; it re-enters only validated
+    rest = {key: value for key, value in source.items() if key != 'metadata'}
+    plan: Dict[str, Any] = {
+        **rest,
+        'nickname': source['nickname'] if isinstance(source.get('nickname'), str) else '',
+        'amountCents': _normalize_amount_cents(source.get('amountCents')),
+        'currency': source['currency'] if isinstance(source.get('currency'), str) else 'usd',
+        'interval': source['interval'] if isinstance(source.get('interval'), str) else 'month',
+    }
+    if isinstance(source.get('metadata'), dict):
+        plan['metadata'] = source['metadata']
+    return plan  # type: ignore[return-value]
+
+
+# ==== Validation ==============================================================
+
+
+def validate_store_block(store: Any) -> PipeStoreBlock:
+    """Check a ``store`` block and return it typed, plans normalised.
+
+    Args:
+        store: The block as read from the ``.pipe`` JSON.
+
+    Returns:
+        The validated block.
+
+    Raises:
+        ValueError: Naming the offending key or value: not an object, an
+            unknown key, a non-string tagline, a non-string-list
+            categories/tags, a bad icon/readme path, non-string links, an
+            unknown mode, or malformed billing.
+    """
+    if not isinstance(store, dict):
+        raise ValueError('store must be a JSON object')
+    # step: the key set is closed — a typo never rides silently
+    for key in store:
+        if key not in STORE_KEYS:
+            raise ValueError(f'store: unknown key "{key}" (allowed: {", ".join(STORE_KEYS)})')
+    out: Dict[str, Any] = {}
+    if 'tagline' in store:
+        if not isinstance(store['tagline'], str):
+            raise ValueError('store.tagline must be a string')
+        out['tagline'] = store['tagline']
+    for key in ('categories', 'tags'):
+        if key not in store:
+            continue
+        items = store[key]
+        if not isinstance(items, list) or any(not isinstance(item, str) for item in items):
+            raise ValueError(f'store.{key} must be a list of strings')
+        out[key] = list(items)
+    if 'icon' in store:
+        out['icon'] = _check_relative_path('icon', store['icon'])
+    if 'readme' in store:
+        out['readme'] = _check_relative_path('readme', store['readme'])
+    if 'links' in store:
+        links = store['links']
+        if not isinstance(links, dict) or any(not isinstance(url, str) for url in links.values()):
+            raise ValueError('store.links must map labels to URL strings')
+        out['links'] = dict(links)
+    if 'mode' in store:
+        if store['mode'] not in STORE_MODES:
+            raise ValueError(f'store.mode must be {", ".join(STORE_MODES)}, not {json.dumps(store["mode"])}')
+        out['mode'] = store['mode']
+    if 'billing' in store:
+        billing = store['billing']
+        if not isinstance(billing, dict) or not isinstance(billing.get('plans'), list):
+            raise ValueError('store.billing must be { plans: [...] }')
+        # step: the raw shape is the server door's — an extra billing key or
+        # a plan that is not an object is refused here, never normalised away
+        unknown = [key for key in billing if key != 'plans']
+        if unknown:
+            raise ValueError(f'store.billing: unknown key "{unknown[0]}" (allowed: plans)')
+        if any(not isinstance(plan, dict) for plan in billing['plans']):
+            raise ValueError('store.billing.plans must be a list of plan objects')
+        out['billing'] = {'plans': [normalize_billing_plan(plan) for plan in billing['plans']]}
+    return out  # type: ignore[return-value]
+
+
+# ==== README references =======================================================
+
+
+def _is_local_reference(ref: str) -> bool:
+    """Whether a reference names a local file: no scheme, not protocol-relative, not an anchor."""
+    if ref == '' or ref.startswith('#') or ref.startswith('//'):
+        return False
+    return _SCHEME_RE.match(ref) is None
+
+
+# A character reference in an attribute value: numeric, or one of the five
+# names every reader of this scanner decodes (the TS SDK and the editor pane
+# carry the same table). Terminated by ';' only: HTML5's legacy no-semicolon
+# names (``&notes`` -> ``\u00acotes``) are not applied, so a filename keeps its
+# ampersand unless it is written as a reference.
+_CHARACTER_REFERENCE_RE = re.compile(r'&(#x([0-9a-f]+)|#(\d+)|([a-z]+));', re.IGNORECASE)
+_NAMED_CHARACTER_REFERENCES = {'amp': '&', 'quot': '"', 'lt': '<', 'gt': '>', 'apos': "'"}
+
+
+def _decode_attribute(value: str) -> str:
+    """Decode the character references in an HTML attribute value with the
+    one table the TS SDK and the editor pane use, so every reader names the
+    same file. An unknown or unterminated reference stays as written.
+
+    Args:
+        value: The value as written between the quotes.
+
+    Returns:
+        The decoded value.
+    """
+
+    def _one(match: 're.Match[str]') -> str:
+        name = match.group(4)
+        if name is not None:
+            return _NAMED_CHARACTER_REFERENCES.get(name.lower(), match.group(0))
+        code = int(match.group(2), 16) if match.group(2) is not None else int(match.group(3))
+        return chr(code) if 0 < code <= 0x10FFFF else match.group(0)
+
+    return _CHARACTER_REFERENCE_RE.sub(_one, value)
+
+
+def _img_src_of(attrs: str) -> str:
+    """The ``src`` an ``<img>`` tag names: its first ``src`` attribute (the one
+    the browser keeps when it repeats), read by tokenizing the attributes in order,
+    its character references decoded (``a&amp;b.png`` names ``a&b.png``). Markdown
+    destinations are not decoded; only HTML attributes carry character references here.
+
+    Args:
+        attrs: The tag's attribute text.
+
+    Returns:
+        The source as the browser reads it, or '' when the tag has none.
+    """
+    for match in _ATTRIBUTE_RE.finditer(attrs):
+        if match.group(1).lower() == 'src':
+            return _decode_attribute(match.group(2) or match.group(3) or match.group(4) or '')
+    return ''
+
+
+def scan_readme_references(markdown: str) -> List[str]:
+    """The relative files a README references.
+
+    Markdown images and links (inline, and the ``[label]: path`` definitions
+    of reference-style ones) and HTML ``<img src>``, in order of
+    appearance, de-duplicated, percent-decoded, with any query string or
+    fragment stripped. URLs (``http(s)://``, ``data:``, ``mailto:`` and
+    every other scheme), protocol-relative refs and ``#anchors`` are
+    skipped, as is anything inside code.
+
+    Args:
+        markdown: The README text.
+
+    Returns:
+        The references, relative to the README.
+    """
+    text = _CODE_RE.sub('', markdown)
+    found = [(match.start(), match.group(1) or match.group(2) or '') for match in _MARKDOWN_REF_RE.finditer(text)]
+    found += [(match.start(), match.group(1) or match.group(2) or '') for match in _MARKDOWN_DEF_RE.finditer(text)]
+    found += [(match.start(), _img_src_of(match.group(1))) for match in _HTML_IMG_RE.finditer(text)]
+    found.sort(key=lambda item: item[0])
+    refs: List[str] = []
+    for _, raw in found:
+        if not _is_local_reference(raw):
+            continue
+        # step: a fragment or query never names a file
+        ref = unquote(raw.split('#')[0].split('?')[0])
+        if ref and ref not in refs:
+            refs.append(ref)
+    return refs
+
+
+def pipe_store_files(
+    store: Optional[PipeStoreBlock], readme_text: Optional[str], readme_path: Optional[str]
+) -> Dict[str, List[str]]:
+    """The files a pipeline's store listing names, relative to the PIPE's directory.
+
+    ``declared`` is the readme and icon that are set; ``referenced`` is every
+    README reference resolved against the README's own directory. Paths are
+    normalised posix; a reference that escapes upward keeps its leading
+    ``..`` so the packer can refuse it by name.
+
+    Args:
+        store: The validated block (None = no listing).
+        readme_text: The README content (None = none read).
+        readme_path: The README path relative to the pipe's directory.
+
+    Returns:
+        ``{'declared': [...], 'referenced': [...]}``.
+    """
+    declared: List[str] = []
+    if store and store.get('readme'):
+        declared.append(normalize_posix_path(store['readme']))
+    if store and store.get('icon'):
+        declared.append(normalize_posix_path(store['icon']))
+    referenced: List[str] = []
+    if readme_text is not None and readme_path is not None:
+        base = _posix_dirname(normalize_posix_path(readme_path))
+        for ref in scan_readme_references(readme_text):
+            resolved = normalize_posix_path(f'{base}/{ref}' if base else ref)
+            if resolved and resolved not in referenced:
+                referenced.append(resolved)
+    return {'declared': declared, 'referenced': referenced}
 
 
 # ==== Types ===================================================================
 
 
 @dataclass
-class PackedPipeBundle:
-    """The result of :func:`pack_pipe_bundle`."""
+class PackedPipe:
+    """The result of :func:`pack_pipe`."""
 
     pipeline: Dict[str, Any]
     """The pipeline dict (the ``.pipe`` JSON, display ``name`` filled)."""
-    manifest: Dict[str, Any]
-    """The manifest as read (empty when the folder has none)."""
-    data: bytes
-    """The zip bytes to pass as ``deploy.add(pipeline, kind='pipe', data=...)``."""
+    store: Optional[PipeStoreBlock]
+    """The validated store block, or None when the pipe carries none (unlisted)."""
     files: List[str] = field(default_factory=list)
-    """Bundle-relative paths packed, in zip order."""
+    """Paths packed, relative to the pipe file's directory, in zip order."""
+    data: bytes = b''
+    """The zip bytes to pass as ``deploy.add(pipeline, kind='pipe', data=...)``."""
+    warnings: List[str] = field(default_factory=list)
+    """Advisory notes (an undeclared icon or readme)."""
 
 
 # ==== Reads ===================================================================
 
 
-def _read_inside(folder: str, rel: str) -> bytes:
-    """Read a bundle file, refusing any path whose real location leaves the folder.
+def _read_contained(pipe_dir: str, rel: str, cap: int) -> bytes:
+    """Read one file of the pipe's tree, refusing a real location outside it.
 
-    ``open()`` follows symlinks: a link inside the bundle pointing at a file
-    outside it (``assets/key.png -> ~/.ssh/id_rsa``) would pack that file,
-    and a drive path in the manifest's ``icon`` would replace the folder in
-    ``os.path.join``. Every read resolves the real path and requires it under
-    the real bundle folder.
+    ``open()`` follows symlinks: a link inside the tree pointing at a file
+    outside it would pack that file, and a ``..`` reference would read a
+    sibling's. Every read resolves the real path and requires it under the
+    real directory of the pipe. The size is checked BEFORE the read, so an
+    oversized file is reported, never loaded.
 
     Args:
-        folder: The bundle folder.
-        rel: The bundle-relative path.
+        pipe_dir: The pipe file's directory.
+        rel: The path relative to it (posix).
+        cap: The role's byte cap (readme, icon, or any referenced file).
 
     Returns:
         The bytes.
 
     Raises:
-        ValueError: The real path leaves the folder.
+        ValueError: Naming the path when it is missing, not a file, outside,
+            or over its cap.
     """
-    root = os.path.realpath(folder)
-    real = os.path.realpath(os.path.join(root, rel))
+    if rel.split('/')[0] == '..':
+        raise ValueError(f"{rel} resolves outside the pipe file's directory")
+    root = os.path.realpath(pipe_dir)
+    abs_path = os.path.join(pipe_dir, *rel.split('/'))
+    if not os.path.exists(abs_path):
+        raise ValueError(f'{rel} does not exist beside the pipe')
+    real = os.path.realpath(abs_path)
     if os.path.commonpath([root, real]) != root or real == root:
-        raise ValueError(f'{rel} resolves outside the bundle folder')
+        raise ValueError(f"{rel} resolves outside the pipe file's directory")
+    if not os.path.isfile(real):
+        raise ValueError(f'{rel} is not a file')
+    if os.path.getsize(real) > cap:
+        raise ValueError(f'{rel} exceeds {cap} bytes')
     with open(real, 'rb') as handle:
         return handle.read()
-
-
-# ==== Folder ==================================================================
-
-
-def pipe_bundle_folder_of(target: str) -> Optional[str]:
-    """The bundle folder of a path, or None when the path is not a bundle.
-
-    The folder itself, or the folder of a ``.pipe`` that is the only pipe in
-    it. A bare pipe beside other pipes, or no pipe at all, is not a bundle
-    (the B7 refusal).
-
-    Args:
-        target: A folder or a ``.pipe`` file.
-
-    Returns:
-        The bundle folder, or None.
-    """
-    if not os.path.exists(target):
-        return None
-    folder = target if os.path.isdir(target) else os.path.dirname(target) or '.'
-    pipes = [name for name in os.listdir(folder) if name.endswith('.pipe')]
-    if len(pipes) != 1:
-        return None
-    if not os.path.isdir(target) and os.path.basename(target) != pipes[0]:
-        return None
-    return folder
-
-
-def pipe_of_bundle(folder: str) -> tuple[str, str]:
-    """The one ``.pipe`` of a bundle folder and its stem.
-
-    Args:
-        folder: The bundle folder.
-
-    Returns:
-        ``(file, stem)``.
-
-    Raises:
-        ValueError: The folder holds no pipe or more than one.
-    """
-    pipes = sorted(name for name in os.listdir(folder) if name.endswith('.pipe'))
-    if not pipes:
-        raise ValueError(f'{folder} holds no .pipe file - a pipeline bundle is one folder with one .pipe')
-    if len(pipes) > 1:
-        raise ValueError(f'{folder} holds {len(pipes)} .pipe files - a pipeline bundle is one folder with one .pipe')
-    return os.path.join(folder, pipes[0]), pipes[0][: -len('.pipe')]
-
-
-# ==== Manifest ================================================================
-
-
-def read_pipe_manifest(folder: str, stem: str) -> Dict[str, Any]:
-    """Read and check the bundle's ``<stem>.rrpipe``.
-
-    Args:
-        folder: The bundle folder.
-        stem: The pipe's stem.
-
-    Returns:
-        The manifest, or an empty dict when the file is absent.
-
-    Raises:
-        ValueError: Unparseable JSON, an unknown key, a bad mode, or an icon path outside the folder.
-    """
-    path = os.path.join(folder, f'{stem}.rrpipe')
-    if not os.path.exists(path):
-        return {}
-    raw = _read_inside(folder, f'{stem}.rrpipe')
-    if len(raw) > MAX_PIPE_MANIFEST_BYTES:
-        raise ValueError(f'{stem}.rrpipe exceeds {MAX_PIPE_MANIFEST_BYTES} bytes')
-    try:
-        parsed = json.loads(raw.decode('utf-8'))
-    except (ValueError, UnicodeDecodeError) as exc:
-        raise ValueError(f'{stem}.rrpipe is not valid JSON: {exc}') from exc
-    if not isinstance(parsed, dict):
-        raise ValueError(f'{stem}.rrpipe must hold a JSON object')
-    unknown = [key for key in parsed if key not in _MANIFEST_KEYS]
-    if unknown:
-        raise ValueError(f'{stem}.rrpipe: unknown key "{unknown[0]}" (allowed: {", ".join(sorted(_MANIFEST_KEYS))})')
-    if 'mode' in parsed and parsed['mode'] not in _MODES:
-        raise ValueError(f'{stem}.rrpipe: mode must be free, subscription or paywall')
-    tags = parsed.get('tags')
-    if tags is not None and (not isinstance(tags, list) or any(not isinstance(t, str) for t in tags)):
-        raise ValueError(f'{stem}.rrpipe: tags must be a list of strings')
-    icon = parsed.get('icon')
-    if icon is not None:
-        rel = str(icon).replace('\\', '/')
-        if rel.startswith('/') or '..' in rel.split('/'):
-            raise ValueError(f'{stem}.rrpipe: icon must be a path inside the bundle')
-    return parsed
 
 
 # ==== Pack ====================================================================
 
 
-def pack_pipe_bundle(folder: str) -> PackedPipeBundle:
-    """Pack a pipeline bundle folder into the deploy zip.
+def pack_pipe(pipe_path: str) -> PackedPipe:
+    """Pack one pipeline into the deploy zip.
 
-    Entries: the ``.pipe``, the ``.rrpipe`` when present, ``readme.md`` when
-    present, the icon (the manifest's, else the first of
-    :data:`PIPE_ICON_NAMES` found), and every file under ``assets/``.
-    Nothing else in the folder is packed.
+    Entries: the ``.pipe`` at the root under its own basename, then — in
+    code-point order — the declared readme and icon and every file the
+    README references, each at its path relative to the pipe file's
+    directory.
 
     Args:
-        folder: The bundle folder (``pipelines/<pipeId>/``).
+        pipe_path: The ``.pipe`` file.
 
     Returns:
-        The pipeline dict, the manifest and the zip.
+        The pipeline dict, the store block, the zip, and any warnings.
 
     Raises:
-        ValueError: A malformed folder, an unparseable pipe or manifest, or a breached cap.
+        ValueError: The path is not a ``.pipe``, the JSON is invalid, the
+            store block is invalid, a declared or referenced file is missing
+            or resolves outside the pipe's directory, or a cap is breached.
     """
-    # Step 1: the one pipe, parsed (the artifact the server snapshots)
-    pipe_file, stem = pipe_of_bundle(folder)
-    pipe_bytes = _read_inside(folder, os.path.basename(pipe_file))
+    # Step 1: the pipe, parsed (the artifact the server snapshots)
+    base = os.path.basename(pipe_path)
+    if not base.endswith('.pipe'):
+        raise ValueError(f'{pipe_path} is not a .pipe file')
+    if not os.path.isfile(pipe_path):
+        raise ValueError(f'{pipe_path} does not exist')
+    pipe_dir = os.path.dirname(pipe_path) or '.'
+    with open(pipe_path, 'rb') as handle:
+        pipe_bytes = handle.read()
     try:
         pipe = json.loads(pipe_bytes.decode('utf-8'))
     except (ValueError, UnicodeDecodeError) as exc:
-        raise ValueError(f'{os.path.basename(pipe_file)} is not valid JSON: {exc}') from exc
+        raise ValueError(f'{base} is not valid JSON: {exc}') from exc
     if not isinstance(pipe, dict):
-        raise ValueError(f'{os.path.basename(pipe_file)} must hold a JSON object')
+        raise ValueError(f'{base} must hold a JSON object')
+    stem = base[: -len('.pipe')]
+    pipeline = {**pipe, 'name': str(pipe.get('name') or stem)}
 
-    # Step 2: the manifest; the display name falls back pipe -> manifest -> stem
-    manifest = read_pipe_manifest(folder, stem)
-    pipeline = {**pipe, 'name': str(pipe.get('name') or manifest.get('name') or stem)}
+    # Step 2: the store block — present = listable, absent = unlisted
+    store = validate_store_block(pipe['store']) if 'store' in pipe else None
+    warnings: List[str] = []
+    if store is not None and not store.get('icon'):
+        warnings.append('store.icon is not declared, so tiles show a generic glyph')
+    if store is not None and not store.get('readme'):
+        warnings.append('store.readme is not declared, so the listing has no page')
 
-    # Step 3: the content files, each under its cap
+    # Step 3: the declared files, each under its cap (checked before the read)
+    entries: Dict[str, bytes] = {}
+    readme_rel = normalize_posix_path(store['readme']) if store and store.get('readme') else None
+    readme_text: Optional[str] = None
+    if readme_rel:
+        readme = _read_contained(pipe_dir, readme_rel, MAX_PIPE_README_BYTES)
+        entries[readme_rel] = readme
+        readme_text = readme.decode('utf-8', errors='replace')
+    if store and store.get('icon'):
+        icon_rel = normalize_posix_path(store['icon'])
+        entries[icon_rel] = _read_contained(pipe_dir, icon_rel, MAX_ICON_BYTES)
+
+    # Step 4: the README's references, resolved against the README and laid
+    # out relative to the pipe; an upward escape is refused by name, and so
+    # is another .pipe at the root (the door takes exactly one)
+    for rel in pipe_store_files(store, readme_text, readme_rel)['referenced']:
+        if rel in entries or rel == base:
+            continue
+        if rel.endswith('.pipe') and '/' not in rel:
+            raise ValueError(f'{rel} is another pipeline at the root: a README may not reference a sibling .pipe')
+        entries[rel] = _read_contained(pipe_dir, rel, MAX_README_IMAGE_BYTES)
+
+    # Step 5: the zip — pipe first, then code-point order, fixed timestamps:
+    # identical bytes on every pack
     buffer = io.BytesIO()
     files: List[str] = []
     with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_DEFLATED) as zf:
@@ -258,36 +592,76 @@ def pack_pipe_bundle(folder: str) -> PackedPipeBundle:
             zf.writestr(info, data)
             files.append(rel)
 
-        add(os.path.basename(pipe_file), pipe_bytes)
-        manifest_path = os.path.join(folder, f'{stem}.rrpipe')
-        if os.path.exists(manifest_path):
-            add(f'{stem}.rrpipe', _read_inside(folder, f'{stem}.rrpipe'))
-        readme_path = os.path.join(folder, PIPE_README_NAME)
-        if os.path.exists(readme_path):
-            readme = _read_inside(folder, PIPE_README_NAME)
-            if len(readme) > MAX_PIPE_README_BYTES:
-                raise ValueError(f'{PIPE_README_NAME} exceeds {MAX_PIPE_README_BYTES} bytes')
-            add(PIPE_README_NAME, readme)
-        icon_rel = str(manifest['icon']).replace('\\', '/') if manifest.get('icon') else None
-        if icon_rel is None:
-            icon_rel = next((name for name in PIPE_ICON_NAMES if os.path.exists(os.path.join(folder, name))), None)
-        if icon_rel:
-            icon_path = os.path.join(folder, icon_rel)
-            if not os.path.exists(icon_path):
-                raise ValueError(f'the manifest names icon "{icon_rel}" but the bundle has no such file')
-            icon = _read_inside(folder, icon_rel)
-            if len(icon) > MAX_ICON_BYTES:
-                raise ValueError(f'{icon_rel} exceeds {MAX_ICON_BYTES} bytes')
-            add(icon_rel, icon)
-        assets_dir = os.path.join(folder, PIPE_ASSETS_DIR)
-        if os.path.isdir(assets_dir):
-            for root, dirs, names in os.walk(assets_dir):
-                dirs.sort()
-                for name in sorted(names):
-                    abs_path = os.path.join(root, name)
-                    rel = os.path.relpath(abs_path, folder).replace(os.sep, '/')
-                    data = _read_inside(folder, rel)
-                    if len(data) > MAX_README_IMAGE_BYTES:
-                        raise ValueError(f'{rel} exceeds {MAX_README_IMAGE_BYTES} bytes')
-                    add(rel, data)
-    return PackedPipeBundle(pipeline=pipeline, manifest=manifest, data=buffer.getvalue(), files=files)
+        add(base, pipe_bytes)
+        for rel in sorted(entries):
+            add(rel, entries[rel])
+    return PackedPipe(pipeline=pipeline, store=store, files=files, data=buffer.getvalue(), warnings=warnings)
+
+
+# ==== Scaffold ================================================================
+
+
+def scaffold_pipe(workspace_root: str, pipe_id: str, *, name: Optional[str] = None, dir: str = 'pipelines') -> dict:
+    """Scaffold a new pipeline — the ONE scaffold behind ``rocketride pipe new``
+    and ``client.deploy.create_pipe()``.
+
+    Writes ``<dir>/<pipe_id>/<pipe_id>.pipe`` with the default ``store``
+    block, the placeholder ``icon.svg`` the app scaffold ships, a
+    ``README.md`` stub, and an empty ``assets/`` directory.
+
+    Args:
+        workspace_root: The workspace folder that owns ``<dir>``.
+        pipe_id: The pipeline id: one dot-free segment of letters, digits,
+            ``_`` or ``-`` (the deploying organization's developer id is
+            attached at deploy, never written into the file).
+        name: Display name (default: the id).
+        dir: The pipelines directory, relative to the workspace.
+
+    Returns:
+        The created pipeline with the TypeScript ``CreatedPipe`` keys:
+        ``folder``, ``pipePath`` and ``files`` (workspace-relative POSIX
+        paths).
+
+    Raises:
+        ValueError: An invalid id, a ``dir`` that resolves outside the
+            workspace, or an output file that already exists.
+    """
+    # step: identity — validate before touching disk
+    if not _PIPE_ID_RE.match(pipe_id):
+        raise ValueError(f'Pipeline id "{pipe_id}" is invalid — one dot-free segment of letters, digits, _ or -.')
+    folder_rel = f'{normalize_posix_path(dir) or "pipelines"}/{pipe_id}'
+    folder_abs = os.path.join(os.path.abspath(workspace_root), *folder_rel.split('/'))
+    # step: containment — `dir` is workspace-relative by contract; a `..`
+    # or a symlink that leaves the workspace is refused before any write
+    root_real = os.path.realpath(workspace_root)
+    folder_real = os.path.realpath(folder_abs)
+    if os.path.commonpath([root_real, folder_real]) != root_real or folder_real == root_real:
+        raise ValueError(f'"{folder_rel}" must resolve to a folder inside the workspace.')
+    pipe_rel = f'{folder_rel}/{pipe_id}.pipe'
+
+    # step: the files — components first (the layout the editor expects),
+    # identity and the listing block after
+    display_name = name or pipe_id
+    pipe = {
+        'components': [],
+        'project_id': pipe_id,
+        'name': display_name,
+        'description': '',
+        'store': default_store_block(),
+    }
+    files = [
+        (f'{pipe_id}.pipe', json.dumps(pipe, indent=2) + '\n'),
+        ('icon.svg', PIPE_ICON_SVG),
+        ('README.md', pipe_readme_stub(display_name)),
+    ]
+    # step: every output is checked before the first write, and each is
+    # created exclusively — an existing README or icon is never replaced
+    # (two pipes may share a folder; a fresh scaffold in an empty one is fine)
+    for rel, _ in files:
+        if os.path.exists(os.path.join(folder_abs, rel)):
+            raise ValueError(f'"{folder_rel}/{rel}" already exists — pick another id or remove the file.')
+    os.makedirs(os.path.join(folder_abs, 'assets'), exist_ok=True)
+    for rel, content in files:
+        with open(os.path.join(folder_abs, rel), 'x', encoding='utf-8', newline='\n') as handle:
+            handle.write(content)
+    return {'folder': folder_rel, 'pipePath': pipe_rel, 'files': [f'{folder_rel}/{rel}' for rel, _ in files]}

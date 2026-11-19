@@ -32,6 +32,7 @@ import type { NewPipelineIdentity } from './components/NewPipelineForm';
 import type { IProject } from 'shell';
 import { createMirroredPrefsStore, ConnectionManager, PrefsProvider, useAuthUser } from 'shell';
 import ProjectView from './ProjectView';
+import type { IAssetsHost } from '../../components/assets';
 import { parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from './hostEvents';
 import { registerServiceIcons } from './panels/design/canvas';
 import { foldProjectDeployRuns } from './sidebar/taskFold';
@@ -43,7 +44,7 @@ import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from './panels/deplo
 import type { DeploySnapshot } from './panels/deploy';
 import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions, toWireTeamId } from './deploy/deployOps';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from './deploy/deployTypes';
-import { registryIdOf } from 'rocketride';
+import { defaultStoreBlock, registryIdOf } from 'rocketride';
 
 // =============================================================================
 // CONSTANTS
@@ -128,6 +129,23 @@ export interface IPipelineEditorHost {
 	createPipeline?(name: string, displayName: string, project: unknown): Promise<void>;
 	/** Closes the untitled document without creating anything. */
 	cancelNew?(): void;
+	/**
+	 * Reads a UTF-8 text file BESIDE the open pipeline file (`./README.md`,
+	 * `./icon.svg`, a README-referenced asset; '/'-separated, relative to the
+	 * pipe's folder), resolving null when it does not exist or the path
+	 * leaves the folder, and rejecting on any other failure. With the three
+	 * ops below it forms the PACKAGE › Assets host ({@link IAssetsHost}); a
+	 * host that cannot reach the pipe's folder omits them and the pane says so.
+	 */
+	readFile?(relPath: string): Promise<string | null>;
+	/** An image beside the pipeline file as a `data:` URI; null when missing, not an image, or outside the folder. */
+	readImageDataUri?(relPath: string): Promise<string | null>;
+	/** Writes a file beside the pipeline file (folders created as needed); rejects outside the folder. */
+	writeFile?(relPath: string, data: Uint8Array | string): Promise<void>;
+	/** The host's native file picker (an image, or a markdown file); null on cancel. */
+	pickFile?(accept: 'image' | 'markdown'): Promise<{ name: string; data: Uint8Array } | null>;
+	/** Opens a file beside the pipeline file in the host's text editor. */
+	openFile?(relPath: string): Promise<void>;
 	/** Exports the pipeline as a download (hosts with a browser context). */
 	exportDocument?(): void;
 	/** Opens the host's RocketRide Cloud setup flow. */
@@ -637,15 +655,30 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 			setCreateError(null);
 			setCreating(true);
 			// The document's content rides along: an untitled pipeline that
-			// already has components keeps them under its new id. Resolution means
-			// the host created the bundle and moved the document over (this editor
+			// already has components keeps them under its new id, and a new
+			// pipeline is born LISTABLE: the default store block is stamped here
+			// (plan §9) unless the document already carries one. Resolution means
+			// the host created the files and moved the document over (this editor
 			// goes away); a rejection re-enables the form.
-			host.createPipeline(name, displayName, project).catch((err: unknown) => {
+			const base = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
+			const seeded = { ...base, store: base.store ?? defaultStoreBlock() };
+			host.createPipeline(name, displayName, seeded).catch((err: unknown) => {
 				setCreateError(err instanceof Error ? err.message : String(err));
 				setCreating(false);
 			});
 		},
 		[host, project]
+	);
+
+	// PACKAGE › Assets needs the four file ops together; a host with only
+	// some of them (or none) gets no pane, never a half-working one.
+	const { readFile, readImageDataUri, writeFile, pickFile, openFile } = host;
+	const assetsHost = useMemo<IAssetsHost | undefined>(
+		() =>
+			readFile && readImageDataUri && writeFile && pickFile
+				? { readFile, readImageDataUri, writeFile, pickFile, ...(openFile ? { openFile } : {}) }
+				: undefined,
+		[readFile, readImageDataUri, writeFile, pickFile, openFile]
 	);
 
 	// --- Render ----------------------------------------------------------------
@@ -698,6 +731,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				{...(host.clearPendingOAuthTokens ? { clearPendingOAuthTokens: host.clearPendingOAuthTokens } : {})}
 				onSave={host.save}
 				{...(host.exportDocument ? { onExport: host.exportDocument } : {})}
+				{...(assetsHost ? { assetsHost } : {})}
 				envKeys={envKeys}
 				{...(host.onMissingEnvVars ? { onMissingEnvVars: host.onMissingEnvVars } : {})}
 				openEventStream={isConnected ? openEventStream : undefined}

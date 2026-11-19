@@ -77,9 +77,9 @@ def _setup(monkeypatch, maps):
     clock = _Clock()
     calls: list = []
 
-    async def fake_open_version_dirs(app_id: str) -> dict:
+    async def fake_open_version_dirs(artifact_id: str, kind: str = 'app') -> dict:
         """Log the walk and hand out the next canned map."""
-        calls.append(app_id)
+        calls.append(artifact_id)
         return maps[min(len(calls) - 1, len(maps) - 1)]
 
     monkeypatch.setattr(shell_mod, 'time', clock)
@@ -89,9 +89,9 @@ def _setup(monkeypatch, maps):
     return clock, calls
 
 
-def _dirs(want=None):
+def _dirs(want=None, kind='app', artifact_id='app.x'):
     """One resolution as the serving route performs it."""
-    return asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=want))
+    return asyncio.run(shell_mod._version_dirs_for('tok', kind, artifact_id, want=want))
 
 
 # =============================================================================
@@ -240,36 +240,36 @@ def test_invalidation_ends_a_poisoned_floor_at_once(monkeypatch):
     assert len(calls) == 4
 
 
-def test_invalidation_is_scoped_to_one_app(monkeypatch):
-    """Dropping one app's verdicts leaves every other app's warm entries —
-    in both the versioned-serving and the static-asset caches.
+def test_invalidation_is_scoped_to_one_artifact(monkeypatch):
+    """Dropping one artifact's verdicts leaves every other artifact's warm
+    entries; the ONE cache is keyed by registry id, so a pipe's verdicts
+    drop by the same call.
     """
-    clock, _ = _setup(monkeypatch, [{1: 'a'}])
-    monkeypatch.setattr(shell_mod, '_app_auth_cache', {})
-    asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=1))
-    asyncio.run(shell_mod._version_dirs_for('tok', 'app.y', want=1))
-    shell_mod._app_auth_cache['k-x'] = {'auth': False, 'expiry': clock.now + 300, 'appId': 'app.x'}
-    shell_mod._app_auth_cache['k-y'] = {'auth': False, 'expiry': clock.now + 300, 'appId': 'app.y'}
+    _setup(monkeypatch, [{1: 'a'}])
+    _dirs(want=1, artifact_id='app.x')
+    _dirs(want=1, artifact_id='app.y')
+    _dirs(want=1, kind='pipe', artifact_id='acme.docBrain')
 
     shell_mod.invalidate_app_serving('app.x')
+    assert {entry['appId'] for entry in shell_mod._version_dir_cache.values()} == {'app.y', 'acme.docBrain'}
 
+    shell_mod.invalidate_app_serving('acme.docBrain')
     assert {entry['appId'] for entry in shell_mod._version_dir_cache.values()} == {'app.y'}
-    assert set(shell_mod._app_auth_cache) == {'k-y'}
 
 
-def test_static_asset_verdicts_record_their_app(monkeypatch):
-    """The static-asset permission cache stamps the app id it decided, so
-    the deploy-change invalidation can find its entries.
-    """
-    monkeypatch.setattr(shell_mod, '_app_auth_cache', {})
+def test_the_kind_rides_the_resolver_call(monkeypatch):
+    """The serving route names the kind; the resolver receives it (the serving dir differs per kind)."""
+    seen = []
 
-    async def allow(token, app_id):
-        return True
+    async def fake_open_version_dirs(artifact_id: str, kind: str = 'app') -> dict:
+        seen.append((artifact_id, kind))
+        return {1: f'{artifact_id}/v1/store'}
 
-    monkeypatch.setattr(shell_mod, '_resolve_app_access', allow)
-    assert asyncio.run(shell_mod._authorize_app('tok', 'app.x')) is True
+    _setup(monkeypatch, [{}])
+    monkeypatch.setattr(app_deploy_mod, 'open_version_dirs', fake_open_version_dirs)
 
-    assert [entry['appId'] for entry in shell_mod._app_auth_cache.values()] == ['app.x']
+    assert _dirs(want=1, kind='pipe', artifact_id='acme.docBrain') == {1: 'acme.docBrain/v1/store'}
+    assert seen == [('acme.docBrain', 'pipe')]
 
 
 def test_broadcast_app_changed_invalidates_and_survives_failure(monkeypatch):
@@ -295,10 +295,10 @@ def test_broadcast_app_changed_invalidates_and_survives_failure(monkeypatch):
     assert sent == [('app.x', 'publish')]
 
 
-def test_pipeline_deploy_change_leaves_app_caches_alone(monkeypatch):
-    """A PIPELINE's project id is user-chosen: any org could name a scheduled
-    pipe after another tenant's app id. Pipeline deploy events must never
-    drop an app's shared serving verdicts — only app producers do.
+def test_pipeline_deploy_change_invalidates_the_pipes_serving_verdicts(monkeypatch):
+    """A pipe's registry name is ``developerId.pipeId`` and a name is fixed in
+    kind, so a pipe deploy event drops exactly that artifact's verdicts
+    through the one cache, the way an app event does.
     """
     seen = []
     monkeypatch.setattr(shell_mod, 'invalidate_app_serving', seen.append)
@@ -307,6 +307,6 @@ def test_pipeline_deploy_change_leaves_app_caches_alone(monkeypatch):
         pass
 
     server = SimpleNamespace(broadcast_server_event=broadcast_server_event)
-    asyncio.run(deploy_events.broadcast_deploy_changed(server, 'org9', 'team9', 'rocketride.chat', 'run'))
+    asyncio.run(deploy_events.broadcast_deploy_changed(server, 'org9', 'team9', 'acme.docBrain', 'run'))
 
-    assert seen == []
+    assert seen == ['acme.docBrain']

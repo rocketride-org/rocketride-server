@@ -26,6 +26,11 @@
  * The `rocketride app` publish ladder and `deploy source-config`, against a
  * stubbed deployment client — plus app resolution (findApp) on a temp
  * workspace.
+ *
+ * App files carry the SLUG only (`clock`): the CLI sends the slug on every
+ * SDK call and the server composes `<developerId>.<slug>` from the deploying
+ * organization. A qualified id typed with no working copy passes through as
+ * written for the server door to check.
  */
 
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
@@ -61,12 +66,16 @@ afterEach(() => {
 	fs.rmSync(ws, { recursive: true, force: true });
 });
 
-/** Writes an app working copy at apps/<folder> with its marker. */
-function writeApp(folder: string, appId: string): string {
+/**
+ * Writes an app working copy at apps/<folder> with its marker. `manifestId`
+ * is written verbatim as appManifest.id (a slug, or a legacy prefixed id);
+ * the trigger is always named after the slug.
+ */
+function writeApp(folder: string, manifestId: string): string {
 	const dir = path.join(ws, 'apps', folder);
 	fs.mkdirSync(dir, { recursive: true });
-	fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: folder, appManifest: { id: appId, name: folder } }));
-	fs.writeFileSync(path.join(dir, `${appId.split('.').pop()}.rrapp`), '{}');
+	fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: folder, appManifest: { id: manifestId, name: folder } }));
+	fs.writeFileSync(path.join(dir, `${manifestId.split('.').pop()}.rrapp`), '{}');
 	return dir;
 }
 
@@ -118,37 +127,67 @@ describe('argument helpers', () => {
 });
 
 describe('findApp', () => {
-	it('resolves the current directory, a folder, an id, its name part, and its folder name', async () => {
+	it('resolves the current directory, a folder, the slug, and the folder name to the slug', async () => {
+		const dir = writeApp('clock-ui', 'clock');
+
+		expect(await findApp(ws, undefined, dir)).toEqual({ appId: 'clock', app: expect.objectContaining({ id: 'clock', folder: dir }) });
+		expect((await findApp(ws, 'apps/clock-ui')).app?.folder).toBe(dir);
+		expect(await findApp(ws, 'clock')).toEqual({ appId: 'clock', app: expect.objectContaining({ folder: dir }) });
+		expect((await findApp(ws, 'clock-ui')).appId).toBe('clock');
+	});
+
+	it('reads a prefixed id as its slug, in the manifest and in the reference', async () => {
+		// a manifest written before the slug rule still carries a prefix: ignored
 		const dir = writeApp('clock-ui', 'personal.clock');
 
-		expect((await findApp(ws, undefined, dir)).appId).toBe('personal.clock');
-		expect((await findApp(ws, 'apps/clock-ui')).app?.folder).toBe(dir);
+		expect(await findApp(ws, undefined, dir)).toEqual({ appId: 'clock', app: expect.objectContaining({ id: 'clock' }) });
+		// any namespace typed in front of a local slug names the same working copy
 		expect((await findApp(ws, 'personal.clock')).app?.folder).toBe(dir);
-		expect((await findApp(ws, 'clock')).appId).toBe('personal.clock');
-		expect((await findApp(ws, 'clock-ui')).appId).toBe('personal.clock');
+		expect((await findApp(ws, 'acme.clock')).app?.folder).toBe(dir);
+		expect((await findApp(ws, 'clock')).appId).toBe('clock');
 	});
 
-	it('returns a full id with no working copy for server-only verbs', async () => {
+	it('returns a reference with no working copy as written, for server-only verbs', async () => {
+		// a qualified id keeps its namespace (the door checks it); a bare slug
+		// is composed there
 		expect(await findApp(ws, 'acme.remote')).toEqual({ appId: 'acme.remote' });
+		expect(await findApp(ws, 'remote')).toEqual({ appId: 'remote' });
 	});
 
-	it('refuses an ambiguous name and names the local apps when nothing matches', async () => {
-		writeApp('clock-ui', 'personal.clock');
-		writeApp('clock2-ui', 'acme.clock');
+	it('prefers the slug over a folder name, refuses two same-named folders, and names the local apps when nothing matches', async () => {
+		const bySlug = writeApp('clock-ui', 'clock');
+		writeApp('clock', 'timer');
+		writeApp(path.join('nested', 'clock'), 'alarm');
 
-		await expect(findApp(ws, 'clock')).rejects.toThrow(/several apps.*personal\.clock/);
-		await expect(findApp(ws, 'nope')).rejects.toThrow(/No app "nope" found.*personal\.clock/);
+		// an exact slug match wins before folder names are considered
+		expect(await findApp(ws, 'clock')).toEqual({ appId: 'clock', app: expect.objectContaining({ folder: bySlug }) });
+		// with no app of that slug, two folders of that name are ambiguous
+		fs.rmSync(bySlug, { recursive: true, force: true });
+		await expect(findApp(ws, 'clock')).rejects.toThrow(/matches several apps.*use the full id: timer, alarm/);
+		// a well-formed slug with no copy goes to the server; only a reference
+		// outside the slug grammar is refused, naming the local apps
+		expect(await findApp(ws, 'nope')).toEqual({ appId: 'nope' });
+		await expect(findApp(ws, '9nope')).rejects.toThrow(/No app "9nope" found.*timer, alarm/);
 		await expect(findApp(ws, undefined, ws)).rejects.toThrow(/not an app folder/);
 	});
 
+	it('binds one working copy per slug: the shallowest folder wins, the other stays reachable by path', async () => {
+		const shallow = writeApp('clock-ui', 'clock');
+		const nested = writeApp(path.join('nested', 'clock-copy'), 'clock');
+
+		expect((await findApp(ws, 'clock')).app?.folder).toBe(shallow);
+		expect((await findApp(ws, 'apps/nested/clock-copy')).app?.folder).toBe(nested);
+	});
+
 	it('skips node_modules when walking', async () => {
-		writeApp('clock-ui', 'personal.clock');
-		const hidden = path.join(ws, 'node_modules', 'pkg');
+		const dir = writeApp('clock-ui', 'clock');
+		// shallower than apps/clock-ui: it would win the slug binding if walked
+		const hidden = path.join(ws, 'node_modules');
 		fs.mkdirSync(hidden, { recursive: true });
-		fs.writeFileSync(path.join(hidden, 'package.json'), JSON.stringify({ appManifest: { id: 'other.clock' } }));
+		fs.writeFileSync(path.join(hidden, 'package.json'), JSON.stringify({ appManifest: { id: 'clock' } }));
 		fs.writeFileSync(path.join(hidden, 'clock.rrapp'), '{}');
 
-		expect((await findApp(ws, 'clock')).appId).toBe('personal.clock');
+		expect((await findApp(ws, 'clock')).app?.folder).toBe(dir);
 	});
 });
 
@@ -162,6 +201,15 @@ describe('executeAppPublish', () => {
 		expect(client.waitForAppBuild).toHaveBeenCalledWith('acme.clock', 2, expect.any(Object));
 		expect(client.publishApp).toHaveBeenCalledWith('acme.clock', 2, '@me');
 		expect(logs.join('\n')).toContain('Published acme.clock v2 to @me.');
+	});
+
+	it('sends the slug when the app is a local working copy', async () => {
+		writeApp('clock-ui', 'clock');
+		const client = stubClient();
+
+		await executeAppPublish('clock-ui', '1', { ...target, workspace: ws }, new Output(undefined));
+
+		expect(client.publishApp).toHaveBeenCalledWith('clock', 1, '@me');
 	});
 
 	it('takes an explicit version and target', async () => {
@@ -189,26 +237,29 @@ describe('executeAppPublish', () => {
 
 describe('executeAppDeploy', () => {
 	it('deploys the working copy and, with --publish, publishes the new version once built', async () => {
-		const dir = writeApp('clock-ui', 'personal.clock');
+		const dir = writeApp('clock-ui', 'clock');
 		const client = stubClient();
 
 		const code = await executeAppDeploy('clock', { ...target, workspace: ws, publish: 'me' }, new Output(undefined));
 
 		expect(code).toBe(0);
 		expect(client.deploy.addApp).toHaveBeenCalledWith(dir, expect.objectContaining({ workspaceRoot: ws }));
-		expect(client.waitForAppBuild).toHaveBeenCalledWith('personal.clock', 5, expect.any(Object));
-		expect(client.publishApp).toHaveBeenCalledWith('personal.clock', 5, '@me');
-		expect(logs.join('\n')).toContain('Deployed personal.clock v5 (app 0.1.0)');
+		// the slug goes on the wire; the server composes the registry name
+		expect(client.waitForAppBuild).toHaveBeenCalledWith('clock', 5, expect.any(Object));
+		expect(client.publishApp).toHaveBeenCalledWith('clock', 5, '@me');
+		expect(logs.join('\n')).toContain('Deployed clock v5 (app 0.1.0)');
 	});
 
 	it('prints the publish command instead when --publish is absent', async () => {
-		writeApp('clock-ui', 'personal.clock');
+		writeApp('clock-ui', 'clock');
 		const client = stubClient();
 
 		await executeAppDeploy('clock', { ...target, workspace: ws }, new Output(undefined));
 
 		expect(client.publishApp).not.toHaveBeenCalled();
-		expect(logs.join('\n')).toContain('rocketride app publish personal.clock 5 --to @me');
+		// the printed command names the slug: `app publish clock` resolves the
+		// same working copy and sends the same slug
+		expect(logs.join('\n')).toContain('rocketride app publish clock 5 --to @me');
 	});
 
 	it('refuses an app with no local working copy', async () => {

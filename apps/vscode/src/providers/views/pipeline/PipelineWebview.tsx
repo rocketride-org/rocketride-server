@@ -34,6 +34,7 @@ import type { CheckoutPlan, PlanAction } from 'shell';
 import { createMirroredPrefsStore, useGridConfigAnswering, ConnectionManager } from 'shell';
 import { SHELL_PARTITION } from 'shell/src/workspace/workspaceStore';
 import { isAppSubscribed } from 'shared/utils/subscriptionGate';
+import { base64ToBytes, bytesToBase64 } from 'shared/components/assets/assetsModel';
 import { PIPE_BUILDER_APP_ID } from '../../../shared/types';
 import { useMessaging } from '../hooks/useMessaging';
 import { useStripeKey } from '../hooks/useStripeKey';
@@ -204,6 +205,22 @@ const PipelineWebview: React.FC = () => {
 		[getState, setState]
 	);
 
+	// PACKAGE › Assets: the extension reads, writes, picks and opens beside
+	// the document's .pipe; bytes cross the bridge as base64 strings. These
+	// depend on nothing reactive (docRef is a ref), so they live in their own
+	// memo: the pane re-reads the README whenever its host changes identity,
+	// and a dirty-state flip must not do that.
+	const assetOps = useMemo<Pick<IPipelineEditorHost, 'readFile' | 'readImageDataUri' | 'writeFile' | 'pickFile' | 'openFile'>>(
+		() => ({
+			readFile: (relPath) => (ConnectionManager.getInstance().request('host.pipeline.readFile', { doc: docRef.current, relPath } as never) as Promise<{ text: string | null }>).then((r) => r.text),
+			readImageDataUri: (relPath) => (ConnectionManager.getInstance().request('host.pipeline.readImageDataUri', { doc: docRef.current, relPath } as never) as Promise<{ dataUri: string | null }>).then((r) => r.dataUri),
+			writeFile: (relPath, data) => ConnectionManager.getInstance().request('host.pipeline.writeFile', { doc: docRef.current, relPath, ...(typeof data === 'string' ? { text: data } : { dataB64: bytesToBase64(data) }) } as never).then(() => undefined),
+			pickFile: (accept) => (ConnectionManager.getInstance().request('host.pipeline.pickFile', { doc: docRef.current, accept } as never) as Promise<{ name: string; dataB64: string } | null>).then((picked) => (picked ? { name: picked.name, data: base64ToBytes(picked.dataB64) } : null)),
+			openFile: (relPath) => ConnectionManager.getInstance().request('host.pipeline.openAsset', { doc: docRef.current, relPath } as never).then(() => undefined),
+		}),
+		[]
+	);
+
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
 			isDirty,
@@ -245,6 +262,7 @@ const PipelineWebview: React.FC = () => {
 			newPipelineIdentity: () => ConnectionManager.getInstance().request('host.pipeline.newIdentity', {} as never) as Promise<NewPipelineIdentity>,
 			createPipeline: (name, displayName, project) => ConnectionManager.getInstance().request('host.pipeline.create', { doc: docRef.current, name, displayName, project } as never).then(() => undefined),
 			cancelNew: () => ConnectionManager.getInstance().emitOp('host.pipeline.cancelNew', { doc: docRef.current }),
+			...assetOps,
 			registerDeveloper: (developerId) => (ConnectionManager.getInstance().request('host.pipeline.registerDeveloper', { developerId } as never) as Promise<{ developerId: string }>).then((r) => r.developerId),
 			openCloudSetup: () => {
 				// Focus the Development tab only — the prompt must not stage a
@@ -264,7 +282,7 @@ const PipelineWebview: React.FC = () => {
 				};
 			},
 		}),
-		[isDirty, isNew, isReadonly, viewState, subscribed, cloudConnectionConfigured, oauthReturnUrl, pendingOAuthTokens, handleContentChanged, handleViewStateChange]
+		[isDirty, isNew, isReadonly, viewState, subscribed, cloudConnectionConfigured, oauthReturnUrl, pendingOAuthTokens, handleContentChanged, handleViewStateChange, assetOps]
 	);
 
 	// --- Checkout callbacks — the realm client's billing surface --------------

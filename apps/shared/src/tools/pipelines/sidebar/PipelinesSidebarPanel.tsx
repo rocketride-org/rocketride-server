@@ -47,8 +47,8 @@ import type { IntroMode } from '../../introCatalog';
 /** Default configuration for the pipeline Explorer panel. */
 const PIPELINE_CONFIG: ExplorerConfig = {
 	title: 'My Pipelines',
-	extensions: ['.pipe', '.pipe.json'],
-	displayName: (name: string) => name.replace(/\.pipe(?:\.json)?$/, '') || name,
+	extensions: ['.pipe'],
+	displayName: (name: string) => name.replace(/\.pipe$/, '') || name,
 	createPlaceholder: 'pipeline name',
 	emptyMessage: 'No pipeline files',
 };
@@ -100,9 +100,9 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 		entries: [...(onShowIntro ? [{ id: 'intro', label: 'Introduction to Pipelines', icon: <BxNote size={16} /> }] : []), { id: 'new', label: 'New pipeline', icon: <BxPlus size={16} /> }],
 	};
 
-	// A pipeline bundle (`dir/name/name.pipe`, plan §9) is ONE entry at its
-	// folder's path; what the Explorer hands back for it is mapped to the
-	// `.pipe` inside before any host callback sees it.
+	// A folder holding exactly one `.pipe` (plan §9) is ONE entry at its
+	// folder's path — a cosmetic collapse only; what the Explorer hands back
+	// for it is mapped to the `.pipe` inside before any host callback sees it.
 	const shown = useMemo(() => collapseBundles(entries), [entries]);
 	const explorerEntries: ExplorerEntry[] = shown.map((e) => ({
 		path: e.path,
@@ -120,8 +120,8 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 		[onSourceAction, shown],
 	);
 
-	/** File management on a bundle acts on the folder; a rename renames the
-	 *  pipe inside first so the folder stays a bundle (same name, plan §9). */
+	/** File management on a collapsed folder acts on the folder; a rename
+	 *  renames the pipe inside first so the folder keeps collapsing (same name). */
 	const handleFileManage = useCallback(
 		async (action: 'rename' | 'delete' | 'createFolder' | 'createFile', path: string, newName?: string): Promise<void> => {
 			if (!onFileManage) return;
@@ -136,7 +136,7 @@ export const PipelinesSidebarPanel: React.FC<IPipelinesSidebarPanelProps> = ({ i
 		[onFileManage, shown],
 	);
 
-	/** Host file actions (Export, …) receive the FILE a bundle entry stands for. */
+	/** Host file actions (Export, …) receive the FILE a collapsed entry stands for. */
 	const mappedFileActions = useMemo(() => {
 		const map = (actions: ExplorerFileAction[]): ExplorerFileAction[] =>
 			actions.map((a) => ({

@@ -37,9 +37,9 @@
 
 import { PROJECT_DIR } from 'rocketride';
 import { appSlugOf } from 'rocketride';
-import type { RocketRideClient } from 'shell';
-import { getStagedWorkspace, getWorkspaceVfs, toScopedStorePath } from '../../workspace/vfs/workspace';
-import { renderTemplate } from 'shared/tools/appdev';
+import { imageDataUri, isImageName } from 'shared/components/assets/assetsModel';
+import { ensureWorkspaceParents, getStagedWorkspace, getWorkspaceVfs, readWorkspaceBytes, toScopedStorePath, writeWorkspaceBytes } from '../../workspace/vfs/workspace';
+import { MAX_README_IMAGE_BYTES, renderTemplate } from 'shared/tools/appdev';
 import type { FrameOptions, PackageJsonLike, TemplateName } from 'shared/tools/appdev';
 
 // =============================================================================
@@ -58,7 +58,7 @@ const MAX_PREVIEW_BYTES = 512 * 1024;
  * ESCAPE-HATCH ONLY: consumers speak VIRTUAL paths ('apps/<folder>/...')
  * through the workspace view; this physical mapping exists solely for the
  * raw binary reads the text-only view contract cannot serve yet
- * (readAppImageDataUri, pack's fsReadMany batch).
+ * (the pack's fsReadMany batch).
  *
  * @param folder - The app's folder name under .appdev (e.g. 'brandy-ui').
  * @param rel - App-folder-relative POSIX path ('' = the folder itself).
@@ -205,55 +205,53 @@ export async function writeAppPackage(folder: string, pkg: PackageJsonLike, orig
  * Traversal-guarded; size-capped after the read (the store has no cheap
  * stat, and preview files are small by convention).
  *
+ * Null ONLY when the file does not exist (the view's stat, as
+ * {@link appFileExists} asks it); anything else — the size refusal, a
+ * failed read — rejects.
+ *
  * @param folder - The app's folder name under .appdev.
  * @param relPath - App-folder-relative path from the manifest.
- * @returns The file text.
+ * @returns The file text, or null when the file is absent.
  */
-export async function readAppText(folder: string, relPath: string): Promise<string> {
-	const text = String(await getWorkspaceVfs().read(`apps/${folder}/${safeRel(relPath)}`));
+export async function readAppText(folder: string, relPath: string): Promise<string | null> {
+	const virtual = `apps/${folder}/${safeRel(relPath)}`;
+	// step: absent is an answer, not a failure
+	if ((await getWorkspaceVfs().stat(virtual)) === null) return null;
+	const text = String(await getWorkspaceVfs().read(virtual));
 	if (text.length > MAX_PREVIEW_BYTES) throw new Error('File is over the 512KB preview limit.');
 	return text;
 }
 
-/** Media types the image reader inlines, by extension. */
-const IMAGE_MEDIA_TYPES: Record<string, string> = {
-	svg: 'image/svg+xml',
-	png: 'image/png',
-	jpg: 'image/jpeg',
-	jpeg: 'image/jpeg',
-	gif: 'image/gif',
-	webp: 'image/webp',
-};
-
 /**
  * Reads one app-folder-relative IMAGE as a data: URI (README images are
- * binary — a text read would corrupt them). Uses the batch read op for the
- * one-shot binary fetch.
+ * binary — a text read would corrupt them) through the workspace's byte
+ * escape hatch (the view contract is text-only, see vfsTypes).
  *
- * RAW BY DESIGN: this is the documented binary escape hatch — the view
- * contract is text-only (see vfsTypes), so binary assets read the store
- * directly until view binary reads land.
- *
- * @param client - The connected RocketRide client.
  * @param folder - The app's folder name under .appdev.
  * @param relPath - App-folder-relative path from the manifest.
  * @returns The data: URI, or null for unreadable/unsupported/oversized files.
  */
-export async function readAppImageDataUri(client: RocketRideClient, folder: string, relPath: string): Promise<string | null> {
+export async function readAppImageDataUri(folder: string, relPath: string): Promise<string | null> {
 	const rel = safeRel(relPath);
-	const ext = rel.split('.').pop()?.toLowerCase() ?? '';
-	const mime = IMAGE_MEDIA_TYPES[ext];
-	if (!mime) return null;
-	const [entry] = await client.fsReadMany([appPath(folder, rel)]);
-	if (!entry?.ok || !entry.data || entry.data.byteLength > MAX_PREVIEW_BYTES) return null;
-	// step: base64-encode in chunks — String.fromCharCode(...whole) overflows
-	// the argument limit on large files.
-	let binary = '';
-	const CHUNK = 0x8000;
-	for (let i = 0; i < entry.data.byteLength; i += CHUNK) {
-		binary += String.fromCharCode(...entry.data.subarray(i, i + CHUNK));
-	}
-	return `data:${mime};base64,${btoa(binary)}`;
+	if (!isImageName(rel)) return null;
+	const bytes = await readWorkspaceBytes(`apps/${folder}/${rel}`, MAX_README_IMAGE_BYTES);
+	return bytes ? imageDataUri(rel, bytes) : null;
+}
+
+/**
+ * Writes one app-folder-relative file (PACKAGE › Assets: the icon, the
+ * README, a dropped image), creating the folder chain as needed: text
+ * through the workspace view, bytes through its byte escape hatch.
+ *
+ * @param folder - The app's folder name under .appdev.
+ * @param relPath - App-folder-relative path.
+ * @param data - The content.
+ */
+export async function writeAppFile(folder: string, relPath: string, data: Uint8Array | string): Promise<void> {
+	const virtual = `apps/${folder}/${safeRel(relPath)}`;
+	await ensureWorkspaceParents(virtual);
+	if (typeof data === 'string') await getWorkspaceVfs().write(virtual, data);
+	else await writeWorkspaceBytes(virtual, data);
 }
 
 /**

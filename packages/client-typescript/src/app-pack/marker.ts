@@ -42,6 +42,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import { normalizeBillingPlan } from '../client/pipe-store.js';
+import type { BillingPlan } from '../client/pipe-store.js';
 
 // =============================================================================
 // TRIGGER FILE
@@ -191,28 +193,6 @@ export function ensureProjectId(folder: string): string {
 // =============================================================================
 
 /** The listing projection of an appManifest (the App Builder webview contract). */
-/**
- * One billing plan of the manifest's `appManifest.billing.plans` — the
- * Stripe-shaped pricing proposal that rides every deploy (the packed
- * package.json is the listing truth) and goes live on store approval.
- */
-export interface BillingPlan {
-	/** Plan display name ("Starter", "Pro"). */
-	nickname: string;
-	/** Price in cents. */
-	amountCents: number;
-	/** ISO currency code. */
-	currency: string;
-	/** Billing interval ("month", "year", "one_time"). */
-	interval: string;
-	/**
-	 * Opaque plan metadata (credits, seats, features, ordering, display
-	 * overrides) — preserved verbatim on the save round-trip, never edited
-	 * by the listing form.
-	 */
-	metadata?: Record<string, unknown>;
-}
-
 export interface AppListing {
 	appId: string;
 	mode: 'free' | 'subscription' | 'paywall';
@@ -244,52 +224,6 @@ export type AppListingPatch = Partial<Omit<AppListing, 'appId'>>;
  * @param folder - The app's bound folder (absolute path).
  * @returns The listing projection (mode defaults to 'free').
  */
-/** Narrows an unknown JSON value to a plain object. */
-function isRecord(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/**
- * Projects one raw manifest plan into the typed shape — the Stripe fields
- * coerced to their contracted types, every OTHER key carried verbatim so the
- * load→save round trip never sheds manifest content it does not understand.
- *
- * @param raw - One entry of appManifest.billing.plans, straight from JSON.
- * @returns The typed plan.
- */
-/**
- * Coerces a manifest plan price to cents. A missing value means "no price
- * declared" (0); a finite number or numeric string is accepted; anything
- * else is an error — a price must never be silently replaced with zero,
- * because the load→save round trip would persist it.
- *
- * @param value - The raw amountCents entry, straight from JSON.
- * @returns The price in cents.
- */
-function normalizeAmountCents(value: unknown): number {
-	if (value === undefined || value === null) return 0;
-	const cents = typeof value === 'number' ? value : typeof value === 'string' && value.trim() !== '' ? Number(value) : NaN;
-	if (!Number.isFinite(cents)) {
-		throw new Error(`Invalid appManifest billing plan amountCents: ${JSON.stringify(value)}`);
-	}
-	return cents;
-}
-
-function normalizeBillingPlan(raw: unknown): BillingPlan {
-	const source = isRecord(raw) ? raw : {};
-	// step: metadata never rides the verbatim spread — a non-record value
-	// (string, array) would violate BillingPlan; it re-enters only validated
-	const { metadata, ...rest } = source;
-	return {
-		...rest,
-		nickname: typeof source.nickname === 'string' ? source.nickname : '',
-		amountCents: normalizeAmountCents(source.amountCents),
-		currency: typeof source.currency === 'string' ? source.currency : 'usd',
-		interval: typeof source.interval === 'string' ? source.interval : 'month',
-		...(isRecord(metadata) ? { metadata } : {}),
-	};
-}
-
 export function readAppListing(folder: string): AppListing {
 	const { pkg } = readPkg(folder);
 	const m = pkg.appManifest as AppManifestJson;

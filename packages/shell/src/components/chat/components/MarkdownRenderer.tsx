@@ -84,24 +84,153 @@ const SANITIZE_SCHEMA = {
 		img: [...(defaultSchema.attributes?.img ?? []), 'width', 'height'],
 	},
 };
+// =============================================================================
+// URL RESOLUTION AND ADMISSION
+// =============================================================================
+
+/** The slice of a hast node the base resolver touches (structural; no `hast` type dependency). */
+interface HastNodeLike {
+	type: string;
+	tagName?: string;
+	properties?: Record<string, unknown>;
+	children?: HastNodeLike[];
+}
+
+/** A URL that names a scheme (`https:`, `data:`, `javascript:`, ...). */
+const HAS_SCHEME = /^[a-z][a-z0-9+.-]*:/i;
+
+/**
+ * The same-origin paths the renderer admits beyond http(s) and data:image —
+ * the server's versioned artifact routes, where a store README's icon and
+ * images live (`/apps/<id>/v<N>/...`, `/pipelines/<id>/v<N>/...`). The
+ * entitlement cookie the shell primes rides those fetches.
+ */
+const ARTIFACT_PATH_PREFIXES = ['/apps/', '/pipelines/'];
+
+/** The page origin, when there is one (tests and SSR have none). */
+function pageOrigin(): string | undefined {
+	const origin = typeof window !== 'undefined' ? window.location?.origin : undefined;
+	return origin && origin !== 'null' ? origin : undefined;
+}
+
+/**
+ * Tells whether a URL is an artifact path on THIS origin: path-only under
+ * one of the artifact prefixes, or absolute on the page origin under one.
+ *
+ * @param url - The (already resolved) URL.
+ * @returns True when the artifact rule admits it.
+ */
+function isArtifactUrl(url: string): boolean {
+	// Step 1: a path-only URL under an artifact prefix
+	if (ARTIFACT_PATH_PREFIXES.some((prefix) => url.startsWith(prefix))) return true;
+	// Step 2: an absolute URL on the page origin under an artifact prefix
+	const origin = pageOrigin();
+	if (!origin || !url.startsWith(origin)) return false;
+	const path = url.slice(origin.length);
+	return ARTIFACT_PATH_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
+
+/**
+ * Resolves a relative URL against the renderer's base URL with `new URL(rel,
+ * base)` semantics. A path-only base keeps the result path-only (the page
+ * origin stays implicit, so the same-origin admit rule still sees a path);
+ * an absolute base gives an absolute result. Scheme-bearing, fragment-only
+ * and empty URLs are returned untouched; without a base nothing changes.
+ *
+ * @param url - The URL as written in the markdown.
+ * @param baseUrl - The document the markdown came from (its directory is the base).
+ * @returns The resolved URL.
+ */
+function resolveAgainstBase(url: string, baseUrl?: string): string {
+	if (!baseUrl || !url || url.startsWith('#') || HAS_SCHEME.test(url)) return url;
+	try {
+		// Step 1: anchor a path-only base on the page origin (any origin does
+		// for a path-only result; the placeholder never leaks into it)
+		const baseIsAbsolute = HAS_SCHEME.test(baseUrl);
+		const anchor = new URL(baseIsAbsolute ? baseUrl : new URL(baseUrl, pageOrigin() ?? 'http://localhost').href);
+		const resolved = new URL(url, anchor);
+		// Step 2: a result on another origin (a scheme-relative `//cdn/...`
+		// carries an authority) keeps its host: absolute with an absolute base,
+		// scheme-relative with a path-only one so the placeholder scheme never leaks
+		if (resolved.origin !== anchor.origin) return baseIsAbsolute ? resolved.href : `//${resolved.host}${resolved.pathname}${resolved.search}${resolved.hash}`;
+		// Step 3: a same-origin result takes the shape the base had
+		return baseIsAbsolute ? resolved.href : `${resolved.pathname}${resolved.search}${resolved.hash}`;
+	} catch {
+		return url;
+	}
+}
+
+/**
+ * A rehype plugin (unified attacher: `[rehypeResolveBase, baseUrl]`) that
+ * resolves every relative `img src` and `a href` against the base URL BEFORE
+ * the sanitizer runs, so the sanitizer judges the URL that will actually be
+ * fetched.
+ *
+ * @param baseUrl - The base; without one the plugin is a no-op.
+ * @returns The transformer.
+ */
+function rehypeResolveBase(baseUrl?: string): (tree: HastNodeLike) => void {
+	return (tree: HastNodeLike): void => {
+		if (!baseUrl) return;
+		const walk = (node: HastNodeLike): void => {
+			const props = node.properties;
+			if (node.type === 'element' && props) {
+				if (node.tagName === 'img' && typeof props.src === 'string') props.src = resolveAgainstBase(props.src, baseUrl);
+				if (node.tagName === 'a' && typeof props.href === 'string') props.href = resolveAgainstBase(props.href, baseUrl);
+			}
+			for (const child of node.children ?? []) walk(child);
+		};
+		walk(tree);
+	};
+}
+
 /**
  * react-markdown's OWN url sanitizer runs independently of rehype-sanitize
  * and empties every src/href outside http(s)/irc/mailto/xmpp — including
  * the data: URIs the README preview inlines, so the widened sanitize schema
- * alone never sees them. Pass data:image/* through untouched; every other
- * scheme keeps the stock transform, so scriptable URLs stay blocked.
+ * alone never sees them. Pass data:image/* and same-origin artifact paths
+ * through untouched; every other scheme keeps the stock transform, so
+ * scriptable URLs stay blocked.
  */
-const urlTransform = (url: string): string => (url.startsWith('data:image/') ? url : (defaultUrlTransform(url) ?? ''));
+const urlTransform = (url: string): string => (url.startsWith('data:image/') || isArtifactUrl(url) ? url : (defaultUrlTransform(url) ?? ''));
+
+/** The link schemes the anchor renderer follows; artifact paths are admitted beside them. */
+const SAFE_LINK_SCHEME = /^(https?|mailto|tel):/i;
+
+/**
+ * The href the anchor renderer follows, or undefined for a link it keeps as
+ * text: a safe scheme, a same-origin artifact path, or a scheme-relative
+ * `//host/...` (a network-path reference can only ever resolve to http(s))
+ * given the page's scheme — https where the page is not http(s) itself (a
+ * VS Code webview), so the host stays reachable.
+ *
+ * @param href - The href as resolved.
+ * @returns The href to follow, or undefined.
+ */
+function followableHref(href: string | undefined): string | undefined {
+	if (!href) return undefined;
+	if (SAFE_LINK_SCHEME.test(href) || isArtifactUrl(href)) return href;
+	if (href.startsWith('//')) {
+		const pageScheme = typeof window !== 'undefined' ? window.location?.protocol : undefined;
+		return `${pageScheme && /^https?:$/.test(pageScheme) ? pageScheme : 'https:'}${href}`;
+	}
+	return undefined;
+}
 
 export interface MarkdownRendererProps {
 	content: string;
+	/**
+	 * The URL of the document the markdown came from (a served README);
+	 * relative image sources and links resolve against its directory.
+	 */
+	baseUrl?: string;
 }
 
-export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) => (
+export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, baseUrl }) => (
 	<div style={S.wrapper}>
 		<ReactMarkdown
 			remarkPlugins={[remarkGfm]}
-			rehypePlugins={[rehypeRaw, [rehypeSanitize, SANITIZE_SCHEMA]]}
+			rehypePlugins={[rehypeRaw, [rehypeResolveBase, baseUrl], [rehypeSanitize, SANITIZE_SCHEMA]]}
 			urlTransform={urlTransform}
 			components={{
 				pre: ({ children, ...rest }: any) => {
@@ -146,8 +275,9 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content }) =
 				th: ({ children }: any) => <th style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', textAlign: 'left', fontWeight: 600, fontSize: 12, color: 'var(--rr-text-secondary)' }}>{children}</th>,
 				td: ({ children }: any) => <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--rr-border)', fontSize: 12 }}>{children}</td>,
 				a: ({ href, children }: any) => {
-					// Only allow safe URL schemes — reject javascript:, data:, vbscript: etc.
-					const safeHref = /^(https?|mailto|tel):/i.test(href ?? '') ? href : undefined;
+					// Only safe URL schemes, same-origin artifact paths and
+					// scheme-relative hosts — never javascript:, data:, vbscript: etc.
+					const safeHref = followableHref(href);
 					return (
 						<a href={safeHref} target="_blank" rel="noopener noreferrer" style={S.link} onMouseEnter={(e) => (e.currentTarget.style.textDecoration = 'underline')} onMouseLeave={(e) => (e.currentTarget.style.textDecoration = 'none')}>
 							{children}

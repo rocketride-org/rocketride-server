@@ -79,16 +79,23 @@ export interface PreviewHostOpMap extends ShellOpMap {
 	'host.preview.saveListing': ShellOpSpec<{ app: string; draft: ListingPatch }, void>;
 	/** Runs the listing pre-flight checks against the on-disk build. */
 	'host.preview.preflight': ShellOpSpec<{ app: string }, PreflightCheck[]>;
-	/** OS picker for a manifest asset; answers the app-folder-relative './'
-	 *  POSIX path (containment enforced host-side), null on cancel. */
-	'host.preview.pickAppFile': ShellOpSpec<{ app: string; kind: 'icon' | 'readme' }, string | null>;
+	/** OS picker for PACKAGE › Assets (an image or a markdown file); answers
+	 *  the file's name and bytes (base64), null on cancel. */
+	'host.preview.pickAssetFile': ShellOpSpec<{ app: string; accept: 'image' | 'markdown' }, { name: string; dataB64: string } | null>;
 	/** OS picker for an include FOLDER or FILE; answers the workspace-relative
 	 *  POSIX path (no './' — include entries are workspace-relative), null on
 	 *  cancel. */
 	'host.preview.pickIncludePath': ShellOpSpec<{ app: string }, string | null>;
 	/** One app-folder-relative text file (traversal-guarded, size-capped). */
-	'host.preview.readTextFile': ShellOpSpec<{ app: string; relPath: string }, string>;
+	'host.preview.readTextFile': ShellOpSpec<{ app: string; relPath: string }, string | null>;
 	/** One app-folder-relative image as a data: URI (null = unreadable,
 	 *  unsupported, or over the cap). */
 	'host.preview.readImage': ShellOpSpec<{ app: string; relPath: string }, string | null>;
+	/** Writes one app-folder-relative file, folders created as needed: `text`
+	 *  for UTF-8 content, `dataB64` for bytes (the bridge carries strings).
+	 *  Traversal-guarded like the reads. */
+	'host.preview.writeFile': ShellOpSpec<{ app: string; relPath: string; text?: string; dataB64?: string }, void>;
+	/** Opens one app-folder-relative file in a text editor beside the App
+	 *  Builder (PACKAGE › Assets "Open in editor"). */
+	'host.preview.openFile': ShellOpSpec<{ app: string; relPath: string }, void>;
 }

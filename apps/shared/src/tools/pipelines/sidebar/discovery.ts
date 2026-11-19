@@ -41,7 +41,7 @@ import type { WorkspaceFs } from 'shell';
 import type { ProjectEntry } from './types';
 
 /** The globs that are pipeline files. */
-export const PIPELINE_FILE_GLOBS = ['**/*.pipe', '**/*.pipe.json'];
+export const PIPELINE_FILE_GLOBS = ['**/*.pipe'];
 /** node_modules never holds a user pipeline. */
 export const PIPELINE_SCAN_EXCLUDE = '**/node_modules/**';
 /** Debounce for file-event rescans (saves touch create+change in bursts). */

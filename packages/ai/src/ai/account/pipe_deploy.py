@@ -397,3 +397,103 @@ async def resolve_pins(
             pins.append(pin)
 
     return Pins(address=parsed, pins=tuple(pins))
+
+
+async def resolve_pipe_version(account_info: Optional['AccountInfo'], pipe_name: str) -> Optional[Pin]:
+    """
+    The publication a store-file fetch of ``pipe_name`` serves the caller, or None.
+
+    The serving route's resolver (``/pipelines/<id>`` and the unversioned
+    redirect): an authenticated caller gets the first pin of
+    :func:`resolve_pins`; an anonymous caller the publisher's ``@public``
+    row alone. Never raises for a malformed or unknown name: the route
+    answers 404, not an error, so it is no existence oracle.
+
+    Args:
+        account_info: The caller, or None for anonymous.
+        pipe_name: The registry name ``developerId.pipeId``.
+
+    Returns:
+        The serving pin, or None when nothing serves the caller.
+
+    Raises:
+        Exception: A failing store, propagated: a name is never reported
+            'not found' because the database was down (``publish_rows``).
+    """
+    from ai.account import account
+    from ai.modules.task.address import build_address, parse_address
+    from ai.modules.task.types import TaskError
+
+    try:
+        parsed = parse_address(pipe_name)
+    except Exception:
+        return None
+    if parsed.source is not None:
+        return None
+    if account_info is not None:
+        # Only the caller's own faults are a miss (the grammar, the key's
+        # scope, a team that is not theirs); a storage failure reaches the
+        # route's error handler as the error it is
+        try:
+            return (await resolve_pins('pipe', account_info, pipe_name)).first
+        except (TaskError, PermissionError):
+            return None
+    publisher_org = await account.get_org_of_developer_id(parsed.developer_id)
+    if not publisher_org:
+        return None
+    pipe_name = build_address(parsed.developer_id, parsed.pipe_id)
+    rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE_KEY])
+    return _serving_pin(rows, 'pipe', 'public', PUBLIC_AUDIENCE_KEY)
+
+
+# ==== The catalog row ==========================================================
+
+
+def pipe_catalog_row(pipe_name: str, entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    One pipe version as the store catalog lists it, or None when the version is unlisted.
+
+    A pipe is listed when its ``metadata.manifest`` was shaped from a store
+    block (``pipe_bundle.is_listed``): a dict deploy without the block is an
+    artifact the registry holds and the catalog never shows. The row carries
+    the same field names an app's catalog row exposes (``resolve_app_pins``):
+    pricing surfaces as ``mode`` alone, as it does for an app (the plans
+    stay on ``metadata.manifest.billing`` for the approve path); ``icon``
+    and ``readme`` are the version's immutable URLs built by the one builder
+    every kind uses (``app_deploy.artifact_file_url``), absent when
+    undeclared.
+
+    Args:
+        pipe_name: The registry name ``developerId.pipeId``.
+        entry: The registry entry (``version``, ``metadata``).
+
+    Returns:
+        The row, or None for an unlisted version.
+    """
+    from ai.account.app_deploy import artifact_file_url, namespace_of
+    from ai.account.pipe_bundle import is_listed
+
+    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+    manifest = metadata.get('manifest')
+    version = entry.get('version')
+    if not is_listed(manifest) or not isinstance(version, int):
+        return None
+    row: Dict[str, Any] = {
+        'id': pipe_name,
+        'name': str(manifest.get('name') or pipe_name),
+        'publisher': namespace_of(pipe_name),
+        'description': str(manifest.get('description') or ''),
+        'defaultSource': str(manifest.get('defaultSource') or ''),
+        'tagline': str(manifest.get('tagline') or ''),
+        'categories': list(manifest.get('categories') or []),
+        'tags': list(manifest.get('tags') or []),
+        'links': dict(manifest.get('links') or {}),
+        'mode': str(manifest.get('mode') or 'free'),
+        'version': version,
+    }
+    # Omitted (not None) when undeclared, as an app row omits them
+    for key in ('icon', 'readme'):
+        url = artifact_file_url('pipe', pipe_name, version, manifest.get(key))
+        if url:
+            row[key] = url
+    return row

@@ -450,6 +450,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 				registerVscodeDevToolOps(busHost.rootBus, {
 					context,
 					devTools,
+					// The README fetch for the details page: engine origin + the
+					// connection's credential (undefined when none resolves).
+					engineBase: () => (connectionManager?.getHttpUrl() || '').replace(/\/$/, ''),
+					authCredential: () => (connectionManager ? connectionManager.resolveAuthCredential().catch(() => undefined) : Promise.resolve(undefined)),
 					closeToolPanel: (appId) => devToolPanels.close(appId),
 					// The RESET is owned by the sidebar provider (it reboots the
 					// sidebar's own page last) — resolved lazily: the sidebar is

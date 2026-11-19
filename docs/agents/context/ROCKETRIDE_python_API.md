@@ -325,7 +325,7 @@ Start a RocketRide pipeline for processing data.
 - `args` (List[str], optional): Extra command-line flags appended to the run's engine process (see the note below); not a data channel
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)
 - `pipelineTraceLevel` (str, optional): Trace level: `'none'`, `'metadata'`, `'summary'`, or `'full'`. When set, captures every lane write and invoke call in the response under `_trace`.
-- `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`/`.pipe.json`) is used.
+- `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`) is used.
 - `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` values for placeholder substitution, merged over the client's `.env` values for this run.
 - `on_change` (str, optional): A spec call's answer to your live `@dev` run already running OTHER content: `'error'` (server default) fails with `spec_changed`, `'keep'` delivers to the running engine, `'auto'` repoints the run to the new content. The IDEs pass their restart-behavior setting.
 
@@ -840,12 +840,21 @@ List-shaped reads (`list`, `versions`, `history`) return the standard envelope `
 
 Deploy an object to the server as the next immutable registry version — the ONE generic rail door for every kind. `kind='pipe'` (default): pass `pipeline`, the full definition dict; its `name` is REQUIRED (server-enforced — artifacts are immutable and the name renders on every deploy surface forever). `kind='app'`: pass `data`, one zip of the app's SOURCE (see [Apps](#10-apps)). `metadata` is an optional blob (e.g. provenance, `appRoot` for app zips); `comment` is a "what changed" note kept in the registry; `deploy_to` optionally points a team at the new version immediately (one-step add+deploy; pipes only). Returns `{'artifact': ...}` plus `'deployment'` when `deploy_to` was given.
 
-#### `async deploy.add_pipe(bundle_dir: str, *, comment=None, deploy_to=None) -> PublishResult`
+#### `async deploy.add_pipe(pipe_path: str, *, comment=None, deploy_to=None) -> PublishResult`
 
-Pack a pipeline BUNDLE folder and deploy it as the next registry version (the call behind the DEPLOY card and `rocketride deploy add <folder>`). A pipeline publishes as a folder, `pipelines/<id>/`: exactly one `.pipe` (what runs), beside the store manifest `<id>.rrpipe` (display only: `name`, `tagline`, `description`, `category`, `tags`, `icon`, `links`, `mode`, `plans`; never a publisher or author, the server derives those), `readme.md` (the store page), an icon (`icon.svg` or `icon.png`) and `assets/` (the images the readme references). The pipe rides as the artifact, the rest as the content the server stores beside it. `bundle_dir` may also be the `.pipe` itself when it is its folder's only pipe; a bare pipe beside other pipes is refused with the way out. `deploy.add(pipeline)` stays the raw door for a pipeline dict with no bundle (nothing for the store to show until a bundle is deployed).
+Pack one pipeline and deploy it as the next registry version (the call behind the DEPLOY card and `rocketride deploy add <pipe>`). The pipe rides as the artifact; the zip beside it carries the pipe at its root plus what the pipe's root `store` block names — the declared `readme` and `icon` (paths relative to the pipe file) and every file the README references (markdown images and links, HTML `<img src>`), laid out as they sit relative to the pipe. The block present = the pipeline is listable; a pipe without one deploys as an UNLISTED artifact (the zip is the pipe alone). A declared or referenced file that is missing, or that resolves outside the pipe's directory, raises `ValueError` naming it before any call; a folder is not accepted. `deploy.add(pipeline)` stays the raw door for a pipeline dict. The block's keys and the pack rules: ROCKETRIDE_PIPELINES.md, "The `store` block".
 
 ```python
-await client.deploy.add_pipe('./pipelines/docBrain', comment='v2: faster OCR')
+await client.deploy.add_pipe('./pipelines/docBrain/docBrain.pipe', comment='v2: faster OCR')
+```
+
+#### `async deploy.create_pipe(pipe_id: str, *, workspace_root=None, name=None, dir='pipelines') -> dict`
+
+Scaffold a new pipeline — the programmatic twin of `rocketride pipe new` (mirrors the TypeScript `deploy.createPipe`). Writes `<dir>/<pipe_id>/<pipe_id>.pipe` carrying `components: []`, `project_id`, `name`, `description: ''` and the default `store` block, plus the placeholder `icon.svg` the app scaffold ships, a `README.md` stub and an empty `assets/` directory. `pipe_id` is one dot-free segment of letters, digits, `_` or `-`; the deploying organization attaches its developer id. Scaffolding only — `add_pipe` deploys it. Returns `{'folder', 'pipePath', 'files'}` (workspace-relative POSIX paths); raises `ValueError` on an invalid id, a `dir` outside the workspace, or an existing output file (the pipe, the icon, the README are never replaced).
+
+```python
+created = await client.deploy.create_pipe('ingest', name='Document ingest')
+await client.deploy.add_pipe(created['pipePath'])
 ```
 
 #### `async deploy.deploy(project_id: str, version: int, team_id: str) -> Deployment`
@@ -967,7 +976,7 @@ The zip contains the app's SOURCE (the server owns the build and never trusts cl
 - `async disable_app_publish(app_id: str, target: str) -> Dict[str, Any]` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it. Returns the `publish` binding row.
 - `async where_app(app_id: str) -> List[Dict[str, Any]]` — the reverse index: which audiences serve which version. Returns pin rows (`{'rung', 'handle', 'version', 'appVersion', 'state', 'deployedAt'}`).
 - `async wait_for_app_build(app_id: str, registry_version: int, *, timeout=600.0, interval=3.0, on_status=None) -> Dict[str, Any]` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Raises on a failed build, an unknown version, or the timeout
-- Pure helpers exported from `rocketride` (twins of the TypeScript `deploy-helpers`): `parse_registry_version(value)` (positive int; accepts `3`, `'3'`, `'v3'`), `pick_publish_version(rail)` (newest non-failed version), `resolve_deploy_teams(client, deployments)`, `team_name_of(teams, team_id, own_user_id)`, `wire_team_id_of(team_id, own_user_id)`, `resolve_team_arg(value, teams)` ('@me' / name / id → wire id), `pipeline_name_from_path(path)`
+- Pure helpers exported from `rocketride` (twins of the TypeScript `deploy-helpers`): `parse_registry_version(value)` (positive int; accepts `3`, `'3'`, `'v3'`), `pick_publish_version(rail)` (newest non-failed version), `resolve_deploy_teams(client, deployments)`, `team_name_of(teams, team_id, own_user_id)`, `wire_team_id_of(team_id, own_user_id)`, `resolve_team_arg(value, teams)` ('@me' / name / id → wire id), `pipeline_name_from_path(path)`, `registry_id_of(slug, developer_id)` (the `<developerId>.<slug>` row name; `LOCAL_DEVELOPER_ID` when the org has none)
 - `async developer_status() -> Dict[str, Any]` — the caller org's developer namespace (the `<developerId>` half of its app ids): `{'developerId', 'stripeAccountId', 'stripeAccountStatus'}`, `developerId` None until an org admin registers one
 - `async register_developer(developer_id: str) -> Dict[str, Any]` — claim the org's developer id slug (org.admin, SaaS only)
 - `async submit_app(app_id: str, registry_version: int) -> Dict[str, Any]` — submit a deployed version for store review: flips the deployment `'private'` to `'submit'` (it enters the review queue). Developer-org and developer-namespace gated. Returns the refreshed `artifact` rail entry.

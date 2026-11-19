@@ -10,7 +10,7 @@
 // The extension host's three remaining pipeline-file jobs (discovery and the
 // entry list belong to the webview's PIPELINES CONTROLLER now):
 //
-//   - the project-id STAMPING INVARIANT: every .pipe/.pipe.json carries a
+//   - the project-id STAMPING INVARIANT: every .pipe carries a
 //     unique project_id — created/changed files get one stamped on watch,
 //     duplicates (file copies) are reported, never rewritten unasked
 //     (issue #2466),
@@ -38,7 +38,7 @@ import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import type { ParsedPipelineFile, ServiceClassInfo } from 'shared/tools/pipelines/utils/parse';
 import { checkMissingEnvVars } from '../../shared/util/envVarCheck';
 import { getLogger } from '../../shared/util/output';
-import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, EMPTY_FILE_SETTLE_MS } from '../../shared/util/pipeFileDecision';
+import { decidePipeFile, emptyPipelineSkeleton, readPipeProjectId, withProjectId, withStoreBlock, EMPTY_FILE_SETTLE_MS } from '../../shared/util/pipeFileDecision';
 import type { PipeFileEvent } from '../../shared/util/pipeFileDecision';
 import { SerialQueue } from '../../shared/util/serialQueue';
 import { ReloadingCache, isUnderNodeModules } from '../../shared/util/reloadingCache';
@@ -86,7 +86,7 @@ export class PipelineFiles {
 	// =========================================================================
 
 	/**
-	 * Watches .pipe / .pipe.json create/delete/change events in the workspace
+	 * Watches .pipe create/delete/change events in the workspace
 	 * and returns the watcher disposables (the owner pushes them into its
 	 * list). Also enqueues the initial workspace scan as the created-file
 	 * queue's FIRST job: no created file is judged against a cache the
@@ -118,7 +118,6 @@ export class PipelineFiles {
 		this.connectionManager.on('shell:servicesUpdated', servicesUpdatedHandler);
 
 		const watcherPipe = vscode.workspace.createFileSystemWatcher('**/*.pipe');
-		const watcherPipeJson = vscode.workspace.createFileSystemWatcher('**/*.pipe.json');
 		const outsideNodeModules =
 			(handle: (uri: vscode.Uri) => void) =>
 			(uri: vscode.Uri): void => {
@@ -131,10 +130,6 @@ export class PipelineFiles {
 			watcherPipe.onDidCreate(outsideNodeModules((uri) => this.enqueueCreatedFile(uri))),
 			watcherPipe.onDidDelete(outsideNodeModules((uri) => this.handleFileDeleted(uri))),
 			watcherPipe.onDidChange(outsideNodeModules((uri) => this.handleFileChanged(uri))),
-			watcherPipeJson,
-			watcherPipeJson.onDidCreate(outsideNodeModules((uri) => this.enqueueCreatedFile(uri))),
-			watcherPipeJson.onDidDelete(outsideNodeModules((uri) => this.handleFileDeleted(uri))),
-			watcherPipeJson.onDidChange(outsideNodeModules((uri) => this.handleFileChanged(uri))),
 			{
 				dispose: () => {
 					this.disposed = true;
@@ -220,7 +215,7 @@ export class PipelineFiles {
 	}
 
 	/**
-	 * Scans the workspace for .pipe / .pipe.json files and parses them into
+	 * Scans the workspace for .pipe files and parses them into
 	 * the cache. The cache is replaced in one assignment once every file is
 	 * parsed: a services update reloads outside the created-file queue, and a
 	 * handler deciding during such a reload must see the previous cache
@@ -246,7 +241,7 @@ export class PipelineFiles {
 		const seq = this.cache.beginReload();
 		let parsed: Map<string, ParsedPipelineFile>;
 		try {
-			const files = await vscode.workspace.findFiles('{**/*.pipe,**/*.pipe.json}', '**/node_modules/**');
+			const files = await vscode.workspace.findFiles('**/*.pipe', '**/node_modules/**');
 			parsed = new Map<string, ParsedPipelineFile>();
 			for (const uri of files) {
 				const text = await this.readFileText(uri);
@@ -313,6 +308,11 @@ export class PipelineFiles {
 				// re-reads the file and writes only while that is still so.
 				await this.assignProjectId(uri, null, 'had no project_id, assigned one');
 				return;
+			case 'assign-store':
+				// A saved pipe without a store block (plan §9): the default block is
+				// written the way a missing id is, re-read first.
+				await this.assignStoreBlock(uri);
+				return;
 			case 'refuse-dotted':
 				// Never rewritten: the user typed an address where a short id goes
 				// (B5); the namespace is derived from the publisher, not typed.
@@ -338,6 +338,18 @@ export class PipelineFiles {
 	}
 
 
+
+	/**
+	 * Writes the default store block into a pipeline that has none. The file is
+	 * read again first and left alone if a block arrived meanwhile.
+	 */
+	private async assignStoreBlock(uri: vscode.Uri): Promise<void> {
+		const text = await this.readFileText(uri);
+		if (text === null) return;
+		const next = withStoreBlock(text);
+		if (next === undefined || next === text) return;
+		await this.writePipeText(uri, next, 'had no store block, wrote the default one');
+	}
 
 	/** Reads a file as UTF-8, or null when unreadable (not there yet, or gone). */
 	private async readFileText(uri: vscode.Uri): Promise<string | null> {
@@ -397,7 +409,7 @@ export class PipelineFiles {
 			const missing = await checkMissingEnvVars(client, pipelineJson);
 			if (missing.length > 0) return;
 
-			const pipeName = path.basename(fsPath).replace(/\.pipe(?:\.json)?$/, '');
+			const pipeName = path.basename(fsPath).replace(/\.pipe$/, '');
 			// Same per-task settings as editor launches (PipelineProvider.runPipeline)
 			// — a pipeline must run identically regardless of where it is started.
 			const cfg = ConfigManager.getInstance().getConfig();

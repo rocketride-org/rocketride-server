@@ -689,23 +689,20 @@ const SERIES = [42, 55, 38, 64, 71, 52, 60, 78, 66, 83, 74, 90];
 # =============================================================================
 
 
-def _placeholder_icon() -> str:
-    """The scaffolded placeholder icon — a neutral rounded tile with an abstract
-    rocket mark. Deliberately generic: it exists so the PACKAGE tab's icon
-    readiness starts green and tiles never render the bare fallback glyph;
-    replacing it is the developer's first branding act.
-
-    Returns:
-        The icon.svg file content.
-    """
-    return (
-        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">\n'
-        '\t<rect width="64" height="64" rx="14" fill="#4F46E5"/>\n'
-        '\t<path d="M32 12c8 6 12 14 12 24l-6 8H26l-6-8c0-10 4-18 12-24z" fill="#FFFFFF"/>\n'
-        '\t<circle cx="32" cy="30" r="5" fill="#4F46E5"/>\n'
-        '\t<path d="M24 46l-4 8 8-4zM40 46l4 8-8-4z" fill="#C7D2FE"/>\n'
-        '</svg>\n'
-    )
+#: The scaffolded placeholder icon — a neutral rounded tile with an abstract
+#: rocket mark. Deliberately generic: it exists so the PACKAGE tab's icon
+#: readiness starts green and tiles never render the bare fallback glyph;
+#: replacing it is the developer's first branding act. Apps and pipelines
+#: (``_pipe_bundle.PIPE_ICON_SVG``) scaffold the same bytes; the TypeScript
+#: scaffold (app-scaffold/index.ts, PLACEHOLDER_ICON_SVG) mirrors it.
+PLACEHOLDER_ICON_SVG = (
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">\n'
+    '\t<rect width="64" height="64" rx="14" fill="#4F46E5"/>\n'
+    '\t<path d="M32 12c8 6 12 14 12 24l-6 8H26l-6-8c0-10 4-18 12-24z" fill="#FFFFFF"/>\n'
+    '\t<circle cx="32" cy="30" r="5" fill="#4F46E5"/>\n'
+    '\t<path d="M24 46l-4 8 8-4zM40 46l4 8-8-4z" fill="#C7D2FE"/>\n'
+    '</svg>\n'
+)
 
 
 def _readme_md(v: TemplateVars) -> str:
@@ -763,7 +760,7 @@ def render_template(name: str, v: TemplateVars, frame: Optional[FrameOptions] = 
         ('.gitignore', 'node_modules/\ndist/\n'),
         # The manifest's icon/readme point at these — scaffolded so every new
         # app starts PACKAGE-ready instead of accumulating warnings.
-        ('icon.svg', _placeholder_icon()),
+        ('icon.svg', PLACEHOLDER_ICON_SVG),
         ('README.md', _readme_md(v)),
         ('src/index.ts', _async_boundary()),
         ('src/global.d.ts', _global_dts()),
