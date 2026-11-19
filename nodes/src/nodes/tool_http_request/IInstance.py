@@ -94,6 +94,41 @@ def _take_exact_host(source, position):
     return ''.join(literal), position
 
 
+def _take_exact_host_or_group(source, position):
+    """Parse a single exact host or an alternation group of exact hosts.
+
+    Returns a tuple of (host_list, end_position), or None if the syntax is invalid.
+    """
+    if source.startswith('(', position):
+        is_non_capturing = source.startswith('(?:', position)
+        branch_pos = position + (3 if is_non_capturing else 1)
+        hosts = []
+
+        while True:
+            host_result = _take_exact_host(source, branch_pos)
+            if host_result is None:
+                return None
+            branch_host, next_pos = host_result
+            hosts.append(branch_host)
+
+            branch_pos = next_pos
+            if branch_pos < len(source) and source[branch_pos] == '|':
+                branch_pos += 1
+                continue
+            if branch_pos < len(source) and source[branch_pos] == ')':
+                branch_pos += 1
+                break
+            return None
+
+        return hosts, branch_pos
+
+    host_result = _take_exact_host(source, position)
+    if host_result is None:
+        return None
+    source_host, next_pos = host_result
+    return [source_host], next_pos
+
+
 def _take_positive_numeric_quantifier(source, position):
     """Return a quantifier endpoint and its inclusive length bounds."""
     if position < len(source) and source[position] == '+':
@@ -297,12 +332,12 @@ def _recognizes_authority_policy(pattern, canonical_url):
         if authority_length < minimum or maximum is not None and authority_length > maximum:
             return False
     else:
-        host_result = _take_exact_host(source, position)
-        if host_result is None:
+        host_group_result = _take_exact_host_or_group(source, position)
+        if host_group_result is None:
             return False
-        source_host, position = host_result
+        source_hosts, position = host_group_result
         actual_host = f'[{parsed.hostname}]' if parsed.netloc.startswith('[') else parsed.hostname
-        if source_host.lower() != actual_host.lower():
+        if not any(h.lower() == actual_host.lower() for h in source_hosts):
             return False
         port_result = _take_port_policy(source, position)
         if port_result is None:
