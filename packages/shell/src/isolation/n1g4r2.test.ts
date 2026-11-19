@@ -30,7 +30,6 @@
 
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import type { DAPMessage } from 'rocketride';
 import { createMatcher, matcherShape } from './match';
@@ -39,23 +38,15 @@ import type { ITestRoot } from './__test__/fixtures';
 import { call, expectDenied, expectOk, lastRun } from './__test__/n1';
 import { settle } from './__test__/realm';
 import type { IOpenedRealm } from './__test__/realm';
-import { startRun } from './__test__/util';
+import { assertCost, bestPair, startRun } from './__test__/util';
 
 const SRC = 'chat_1';
 const keyA = refAppKey(ENTRY_A.id);
 const keyB = refAppKey(ENTRY_B.id);
 const status = (realm: IOpenedRealm, token: string): ReturnType<typeof call> => call(realm, 'rrext_get_task_status', { token });
 
-/** The best of `n` timed runs, in ms. */
-async function best(n: number, run: () => Promise<void>): Promise<number> {
-	let min = Infinity;
-	for (let i = 0; i < n; i++) {
-		const start = performance.now();
-		await run();
-		min = Math.min(min, performance.now() - start);
-	}
-	return min;
-}
+/** How far over its no-ids control a run may go on a loaded host (see assertCost). */
+const COST_RATIO = 10;
 
 /** 4096 minted ids of one app, all sharing `rrapp.<key>.`, put into the root's foreign set through unowned events (as late events of terminated runs would). */
 async function fillMinted(t: ITestRoot, key: string): Promise<string[]> {
@@ -75,49 +66,76 @@ test('T126 shared-prefix needles cost nothing extra: lookup is per distinct leng
 
 	await tt.test('(a) inbound: a 256 KiB pipeline string of rrapp.<2 chars> repeated, with 4096 shared-prefix ids held, is gated in under 50 ms', async () => {
 		const t = makeRoot();
-		tt.after(() => t.cleanup());
+		const c = makeRoot();
+		tt.after(() => {
+			t.cleanup();
+			c.cleanup();
+		});
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const C = c.open(ENTRY_A, { grant: GRANT_A });
 		await fillMinted(t, keyA);
 		const text = flood.repeat(Math.floor((250 * 1024) / flood.length));
-		const ms = await best(3, async () => {
-			const result = await call(A, 'execute', { pipeline: { components: [], source: SRC, config: { text } }, args: [], ttl: 60 });
+		const round = (realm: IOpenedRealm) => async (): Promise<void> => {
+			const result = await call(realm, 'execute', { pipeline: { components: [], source: SRC, config: { text } }, args: [], ttl: 60 });
 			const body = expectOk(result, 'execute with a shared-prefix flood string');
-			await call(A, 'terminate', { token: String(body.token) });
-		});
-		tt.diagnostic(`T126(a) inbound 256 KiB shared-prefix: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 50, `inbound took ${ms.toFixed(1)} ms`);
+			await call(realm, 'terminate', { token: String(body.token) });
+		};
+		const ms = await bestPair(3, round(C), round(A));
+		tt.diagnostic(`T126(a) inbound 256 KiB shared-prefix: ${ms.measured.toFixed(1)} ms, ${ms.control.toFixed(1)} ms with no ids held`);
+		assertCost('inbound', ms, 50, COST_RATIO);
 	});
 
 	await tt.test('(a) outbound: the same text as an fs_get_json value is delivered in under 50 ms', async () => {
 		const t = makeRoot();
-		tt.after(() => t.cleanup());
+		const c = makeRoot();
+		tt.after(() => {
+			t.cleanup();
+			c.cleanup();
+		});
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const C = c.open(ENTRY_A, { grant: GRANT_A });
 		await startRun(A);
+		await startRun(C);
 		await fillMinted(t, keyA);
 		const text = flood.repeat(Math.floor((250 * 1024) / flood.length));
 		t.cm.engine.setFsJson({ text });
-		const ms = await best(3, async () => {
-			const body = expectOk(await call(A, 'rrext_store', { subcommand: 'fs_get_json', path: `apps/${keyA}/f.json` }), 'fs_get_json');
+		c.cm.engine.setFsJson({ text });
+		const round = (realm: IOpenedRealm) => async (): Promise<void> => {
+			const body = expectOk(await call(realm, 'rrext_store', { subcommand: 'fs_get_json', path: `apps/${keyA}/f.json` }), 'fs_get_json');
 			assert.equal((body.value as { text: string }).text, text);
-		});
-		tt.diagnostic(`T126(a) outbound fs_get_json 256 KiB shared-prefix: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 50, `outbound took ${ms.toFixed(1)} ms`);
+		};
+		const ms = await bestPair(3, round(C), round(A));
+		tt.diagnostic(`T126(a) outbound fs_get_json 256 KiB shared-prefix: ${ms.measured.toFixed(1)} ms, ${ms.control.toFixed(1)} ms with no ids held`);
+		assertCost('outbound', ms, 50, COST_RATIO);
 	});
 
 	await tt.test('(b) outbound: an 8 MiB status of the flood text with shared-prefix needles held is delivered in under 1000 ms', async () => {
 		const t = makeRoot();
-		tt.after(() => t.cleanup());
+		const c = makeRoot();
+		tt.after(() => {
+			t.cleanup();
+			c.cleanup();
+		});
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const C = c.open(ENTRY_A, { grant: GRANT_A });
 		const run = await startRun(A);
+		const runC = await startRun(C);
 		await fillMinted(t, keyA);
 		const chunk = flood.repeat(500);
 		t.cm.engine.setStatus({ big: Array.from({ length: 2000 }, () => chunk) });
-		const ms = await best(3, async () => {
-			expectOk(await status(A, run.token), '8 MiB shared-prefix status');
-		});
-		tt.diagnostic(`T126(b) outbound 8 MiB shared-prefix: ${ms.toFixed(1)} ms`);
+		c.cm.engine.setStatus({ big: Array.from({ length: 2000 }, () => chunk) });
+		const ms = await bestPair(
+			3,
+			async () => {
+				expectOk(await status(C, runC.token), '8 MiB shared-prefix status, no ids held');
+			},
+			async () => {
+				expectOk(await status(A, run.token), '8 MiB shared-prefix status');
+			}
+		);
+		tt.diagnostic(`T126(b) outbound 8 MiB shared-prefix: ${ms.measured.toFixed(1)} ms, ${ms.control.toFixed(1)} ms with no ids held`);
 		// Widened 5x for loaded CI hosts (margin was under 3x: up to 137 ms seen).
-		assert.ok(ms < 1000, `outbound took ${ms.toFixed(1)} ms`);
+		assertCost('outbound', ms, 1000, COST_RATIO);
 	});
 
 	await tt.test('(c) structural: 4096 needles sharing a 32-char prefix leave no group with more than one entry per length', () => {
