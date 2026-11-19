@@ -99,7 +99,7 @@ public:
     using Parent = IServiceFilterInstance;
 
     IFilterInstance(const FactoryArgs &args);
-    ~IFilterInstance() { LOGT("Destroying parser instance"); }
+    ~IFilterInstance();
 
     //-----------------------------------------------------------------
     ///	@details
@@ -148,6 +148,7 @@ private:
     Error onDocumentComplete() noexcept;
     uint32_t tikaFlags(uint32_t entryFlags) noexcept;
     void completeObject() noexcept;
+    Error stopTika() noexcept;
     Error tikaThreadProc() noexcept;
     Error pumpTikaCallbacks() noexcept;
 
@@ -182,18 +183,20 @@ private:
     /// 	The instance thread signals to the tika thread to process
     /// 	the current entry. The tika thread signals to the instance
     /// 	thread when the current entry is processed.
-    /// 	endFilterInstance() also sets the begin event, to stop the
-    /// 	thread; on that stop the thread sets the end event.
+    /// 	stopTika() also sets the begin event, to stop the thread,
+    /// 	and sets the end event once the thread is gone.
     //-----------------------------------------------------------------
     async::Event m_tikaBeginObjectEvent;
     async::Event m_tikaEndObjectEvent;
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Set by endFilterInstance() before it wakes the tika thread.
-    ///		The thread then leaves its loop even when an object is still
-    ///		open: a request can outlive the pipeline, so the object it
-    ///		opened may never be closed.
+    ///		Set by stopTika() before it completes the buffer and wakes
+    ///		the tika thread. Never cleared.
+    ///		A request can outlive the pipeline, so an object may still
+    ///		be open, and never be closed, when the flag is set. Readers:
+    ///		the tika thread leaves its loop; open() fails a new object;
+    ///		processObjectStreamData() fails a write that returns after it.
     //-----------------------------------------------------------------
     std::atomic<bool> m_tikaStop{false};
 
@@ -287,6 +290,14 @@ private:
     ///     received, will set this once we are set up
     //-----------------------------------------------------------------
     bool m_parsing = false;
+
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Did the end cut this object's data short? Set where that
+    ///		fails a write, reset in open(). closing() then drops what
+    ///		tika parsed from the part it got.
+    //-----------------------------------------------------------------
+    bool m_cutShort = false;
 
     //-----------------------------------------------------------------
     /// @details

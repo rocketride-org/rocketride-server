@@ -34,6 +34,22 @@ IFilterInstance::IFilterInstance(const FactoryArgs &args)
 
 //-------------------------------------------------------------------------
 /// @details
+///		Stops the tika thread when endFilterInstance() did not: the base
+///		destructor calls only the base endFilterInstance(), and the events,
+///		the queue and the lock the thread uses are declared after
+///		m_tikaThread, so they are destroyed before ~Thread joins it.
+///		After endFilterInstance() the thread is already joined, and this
+///		does not wait
+//-------------------------------------------------------------------------
+IFilterInstance::~IFilterInstance() {
+    LOGT("Destroying parser instance");
+
+    if (auto ccode = stopTika())
+        LOG(Error, ccode);
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Begins the filter operation
 ///	@returns
 ///		Error
@@ -43,9 +59,6 @@ Error IFilterInstance::beginFilterInstance() noexcept {
 
     // Call the parent
     if (auto ccode = Parent::beginFilterInstance()) return ccode;
-
-    // Start tika thread
-    if (auto ccode = m_tikaThread.start()) return ccode;
 
     // Get an ICU normalizer instance. Note the use of NFC here - for parsing,
     // we will use NFC, and for classification, the classificaton filter
@@ -64,7 +77,9 @@ Error IFilterInstance::beginFilterInstance() noexcept {
 
     // Save it
     m_normalizer.emplace(_mv(*normalizer));
-    return {};
+
+    // Start the tika thread last, so a failed begin leaves no thread behind
+    return m_tikaThread.start();
 }
 
 //-------------------------------------------------------------------------
@@ -76,14 +91,29 @@ Error IFilterInstance::beginFilterInstance() noexcept {
 Error IFilterInstance::endFilterInstance() noexcept {
     LOGPIPE();
 
-    // Stop the tika thread before the base class releases the links: the
-    // thread reads them while it works. The flag is stored before the event
-    // is set, so the wake-up this end causes always sees it.
+    // Stop the tika thread before the base class resets this filter's
+    // pointers: the thread reads endpoint, at its start and in each
+    // binder.hasListener() call
+    Error ccode = stopTika();
+
+    return Parent::endFilterInstance() || ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Stops the tika thread and releases a closing() that waits for the
+///		object. Safe to call again, and when the thread never started:
+///		the join then returns at once
+///	@returns
+///		Error
+//-------------------------------------------------------------------------
+Error IFilterInstance::stopTika() noexcept {
+    // The flag is stored before the buffer is completed and the event is
+    // set, so every thread these wake sees it
     m_tikaStop = true;
 
-    // An object may still be open, with its data incomplete: a request can
-    // outlive the pipeline. Complete the buffer, so a parse that waits for
-    // more data returns.
+    // An object may still be open with its data incomplete: complete the
+    // buffer, so a parse that waits for more data returns.
     Error ccode = m_buffer.setComplete();
 
     // Wake the tika thread: it sees the flag and leaves its loop
@@ -92,7 +122,11 @@ Error IFilterInstance::endFilterInstance() noexcept {
     // And wait for tika thread completed
     ccode = ccode || m_tikaThread.join();
 
-    return Parent::endFilterInstance() || ccode;
+    // Release a closing() that waits for the object, whichever way the tika
+    // thread left
+    completeObject();
+
+    return ccode;
 }
 
 //-------------------------------------------------------------------------
@@ -306,7 +340,8 @@ void IFilterInstance::completeObject() noexcept {
 //-------------------------------------------------------------------------
 /// @details
 ///		Tika thread procedure. Starts tika, sends incoming enties to tika,
-/// 	ends tika when endFilterInstance() sets m_tikaStop.
+/// 	and leaves when it sees m_tikaStop, set by stopTika(), or
+/// 	when tika does not start or a wait for the begin event fails.
 //-------------------------------------------------------------------------
 Error IFilterInstance::tikaThreadProc() noexcept {
     // Start tika
@@ -316,8 +351,8 @@ Error IFilterInstance::tikaThreadProc() noexcept {
         LOGT("TIKA waiting for the object to process ...");
         if (auto ccode = m_tikaBeginObjectEvent.wait()) return ccode;
 
-        // The filter is ending. An object may still be open: leave anyway,
-        // and release an instance thread that waits, or will wait, for it.
+        // The filter is ending: leave even with an object open, and release
+        // the instance thread (see completeObject())
         if (m_tikaStop) {
             completeObject();
 
@@ -356,8 +391,9 @@ Error IFilterInstance::tikaThreadProc() noexcept {
 
             LOGT("TIKA process object:", filename, ": done");
         } else {
-            LOGT("TIKA ended");
-            break;
+            // Woken with no object open, for example by a spurious wake-up
+            // of the event: nothing to parse, so wait again
+            continue;
         }
     }
 
@@ -376,10 +412,18 @@ Error IFilterInstance::tikaThreadProc() noexcept {
 Error IFilterInstance::pumpTikaCallbacks() noexcept {
     auto ccode = Error{};
 
-    auto guard = m_tikaCallbackLock.acquire();
+    // Take the queued callbacks and call the lanes outside the lock: the
+    // tika thread takes it for every callback, so a slow node further down
+    // would hold up that thread and the end that joins it. Only this thread
+    // takes callbacks, so they keep their order.
+    std::queue<TikaCallback> callbacks;
+    {
+        auto guard = m_tikaCallbackLock.acquire();
+        std::swap(callbacks, m_tikaCallbackQueue);
+    }
 
-    while (!m_tikaCallbackQueue.empty()) {
-        auto &callback = m_tikaCallbackQueue.front();
+    while (!callbacks.empty()) {
+        auto &callback = callbacks.front();
 
         ccode =
             ccode ||
@@ -541,7 +585,7 @@ Error IFilterInstance::pumpTikaCallbacks() noexcept {
                     }},
                 callback);
 
-        m_tikaCallbackQueue.pop();
+        callbacks.pop();
     }
 
     return ccode;
@@ -585,12 +629,15 @@ Error IFilterInstance::processObjectStreamData(
     // Write it to the tika buffer
     if (ccode = m_buffer.writeData(data)) return ccode;
 
-    // The end sets the flag before it completes the buffer, so a write the
-    // end cut short sees the flag here: fail the object instead of passing
-    // part of its text on as the whole document
-    if (m_tikaStop)
+    // The end sets the flag before it completes the buffer, so every write
+    // that returns after the end, cut short or skipped, sees the flag here:
+    // fail the object instead of passing part of its text on as the whole
+    // document
+    if (m_tikaStop) {
+        m_cutShort = true;
         return APERR(Ec::Cancelled, "The parse filter ended before",
-                     currentEntry->fileName(), "was complete");
+                     m_buffer.name(), "was complete");
+    }
 
     // Process text returned by tika
     if (ccode = pumpTikaCallbacks()) return ccode;
@@ -669,13 +716,29 @@ Error IFilterInstance::open(Entry &object) noexcept {
     // Clear the buffer
     m_buffer.clear();
 
+    // Once the filter is ending, nothing parses this object: fail it. The
+    // flag is read after the clear, so an end that comes later completes
+    // the buffer itself. The clear reset an earlier completion: set it
+    // again, for a tika thread that still reads an object never closed.
+    if (m_tikaStop) {
+        m_canParse = false;
+        m_parsing = false;
+        return m_buffer.setComplete() ||
+               APERR(Ec::Cancelled, "The parse filter ended before",
+                     object.fileName(), "was opened");
+    }
+
     // Something went wrong if tika callback queue is not empty
-    if (!m_tikaCallbackQueue.empty())
-        return APERR(Ec::Unexpected, "Empty Tika callbacks queue expected");
+    {
+        auto guard = m_tikaCallbackLock.acquire();
+        if (!m_tikaCallbackQueue.empty())
+            return APERR(Ec::Unexpected, "Empty Tika callbacks queue expected");
+    }
 
     // Default to not parsing this file
     m_canParse = false;
     m_parsing = false;
+    m_cutShort = false;
 
     // We were incuded in the chain, so do it - don't be too clever in trying to
     // figure out whether we are needed or not
@@ -693,12 +756,6 @@ Error IFilterInstance::open(Entry &object) noexcept {
         // We can parse it - it is enabled, the size is ok and no error
         m_canParse = true;
     }
-
-    // Once the filter has ended, its tika thread is gone and nothing parses
-    // this object. The flag is read after the buffer was cleared above, so
-    // an end that comes later completes the buffer after that clear.
-    if (m_tikaStop)
-        m_canParse = false;
 
     // Call the parent
     if (auto ccode = Parent::open(object)) return ccode;
@@ -724,10 +781,23 @@ Error IFilterInstance::closing() noexcept {
         ccode = m_buffer.setComplete() || ccode;
 
         // Wait for tika to complete parsing
-        ccode = m_tikaEndObjectEvent.wait();
+        ccode = ccode || m_tikaEndObjectEvent.wait();
 
-        // Process final tika callbacks
-        ccode = pumpTikaCallbacks() || ccode;
+        if (m_cutShort) {
+            // A write already failed this object: drop the text tika made
+            // from the part of its data it got, instead of passing it on
+            std::queue<TikaCallback> dropped;
+            {
+                auto guard = m_tikaCallbackLock.acquire();
+                std::swap(dropped, m_tikaCallbackQueue);
+            }
+            ccode =
+                ccode || APERR(Ec::Cancelled, "The parse filter ended before",
+                               m_buffer.name(), "was complete");
+        } else {
+            // Process final tika callbacks
+            ccode = pumpTikaCallbacks() || ccode;
+        }
     }
 
     // Call the parent

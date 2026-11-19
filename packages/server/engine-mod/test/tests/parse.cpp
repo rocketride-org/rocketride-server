@@ -226,7 +226,8 @@ TEST_CASE("store::parse") {
 
     //-----------------------------------------------------------------
     // Ends the filters while an object is still open and its data is
-    // incomplete: the end stops the tika thread and returns
+    // incomplete: the end stops the tika thread and returns. If it does
+    // not, this section hangs in disconnect(): these tests have no watchdog
     //-----------------------------------------------------------------
     SECTION("end with an object open") {
         ParseFilterTest filter;
@@ -246,6 +247,74 @@ TEST_CASE("store::parse") {
             filter.writeTagData(*pipe, strlen(pText), (void *)pText));
 
         // The end returns although the object was never closed
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
+
+    //-----------------------------------------------------------------
+    // Data that reaches parse after its end fails with Cancelled instead
+    // of being dropped: the end completed the buffer, so nothing parses it
+    //-----------------------------------------------------------------
+    SECTION("write after the end") {
+        ParseFilterTest filter;
+        REQUIRE_NO_ERROR(filter.connect());
+
+        auto pipe = filter.openObject("test.txt"_tv, Entry::FLAGS::INDEX);
+        REQUIRE_NO_ERROR(pipe);
+
+        // Write part of the data, then end the filters
+        const char *pText = "Part of the data";
+        REQUIRE_NO_ERROR(filter.writeTagBeginStream(*pipe));
+        REQUIRE_NO_ERROR(
+            filter.writeTagData(*pipe, strlen(pText), (void *)pText));
+        REQUIRE_NO_ERROR(filter.endFilters(*pipe));
+
+        REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
+                      Ec::Cancelled);
+
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
+
+    //-----------------------------------------------------------------
+    // Opening an object on a pipe whose parse has ended fails with
+    // Cancelled
+    //-----------------------------------------------------------------
+    SECTION("open after the end") {
+        ParseFilterTest filter;
+        REQUIRE_NO_ERROR(filter.connect());
+
+        // Take a pipe and an entry, then end the filters
+        auto pipe = filter.getPipe();
+        REQUIRE_NO_ERROR(pipe);
+        auto entry = filter.getDummyEntry("test.txt"_tv);
+        REQUIRE_NO_ERROR(filter.endFilters(*pipe));
+
+        REQUIRE_ERROR(pipe->open(entry), Ec::Cancelled);
+
+        REQUIRE_NO_ERROR(filter.disconnect());
+    }
+
+    //-----------------------------------------------------------------
+    // A data tag after the object was closed, once parse has ended, fails
+    // with Cancelled although parse has no current object
+    //-----------------------------------------------------------------
+    SECTION("data after close at the end") {
+        ParseFilterTest filter;
+        REQUIRE_NO_ERROR(filter.connect());
+
+        auto pipe = filter.openObject("test.txt"_tv, Entry::FLAGS::INDEX);
+        REQUIRE_NO_ERROR(pipe);
+
+        // Parse the object to its close, then end the filters
+        const char *pText = "This object is closed";
+        REQUIRE_NO_ERROR(filter.writeTagBeginStream(*pipe));
+        REQUIRE_NO_ERROR(
+            filter.writeTagData(*pipe, strlen(pText), (void *)pText));
+        REQUIRE_NO_ERROR(filter.closeObject(*pipe));
+        REQUIRE_NO_ERROR(filter.endFilters(*pipe));
+
+        REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
+                      Ec::Cancelled);
+
         REQUIRE_NO_ERROR(filter.disconnect());
     }
 }
