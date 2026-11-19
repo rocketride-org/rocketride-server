@@ -26,6 +26,18 @@
 namespace engine::store::filter::pipe {
 //-------------------------------------------------------------------------
 /// @details
+///     Drops the metrics module under the GIL: it is a Python reference, and
+///     the thread that frees the global may not hold the GIL
+//-------------------------------------------------------------------------
+IFilterGlobal::~IFilterGlobal() noexcept {
+    if (m_metrics) {
+        engine::python::LockPython lock;
+        m_metrics = {};
+    }
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///     In the PIPELINE mode, Loads the Python module 'ai.web.metrics',
 ///     stores it in the member variable `m_metrics`. If the module is
 ///     available, it calls the `taskMetricsBegin` function to indicate

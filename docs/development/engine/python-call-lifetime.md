@@ -416,6 +416,26 @@ still enter the node. Once the flag is set, `boundInstance()` throws
 error travels back up the chain to the Python call that started it and is
 raised there, the same way a gate refusal is.
 
+## An object left open
+
+`open` keeps a reference to the Python entry on the filter it was called on
+(`pyCurrentEntry`), so Python does not free the entry while the object is
+open. The node's `close` drops that reference under the GIL, and the next
+`open` on the same filter replaces it. The filter can still hold the reference
+when it is freed: a `close` after the end is refused, like every engine
+callback (see [The handle](#the-handle)); a node can end without closing; an
+`open` that failed keeps the reference; and `putPipe()` closes an object that
+is still open on the pipe without dropping the reference.
+
+The filter's destructor drops the reference then, under the GIL. The filter
+may hold the last reference, and then the entry is freed right there, on the
+thread that frees the filter. That thread may or may not hold the GIL: the
+thread of the last Python call to leave the stack holds it
+([At the deadline](#at-the-deadline)); the thread that ends the endpoint, a
+`getPipe()` whose new stack is not published
+([New pipes during teardown](#new-pipes-during-teardown)), and C++ code that
+lets go of a pipe may not.
+
 ## Constants and log lines
 
 | Name | Value | Where | Notes |
@@ -499,7 +519,8 @@ The rules for node code are in
 | A Python endpoint's `endEndpoint` hook, then the drain | `engLib/store/python/python-endpoint.cpp` |
 | The bottom filter's `endFilterInstance()`, which calls its parent (the rule in [The call gate](#the-call-gate)) | `engLib/store/filters/bottom/bottom.hpp` |
 | `invoke` and `sendSSE` on the node handle | `rocketlib-python/lib/rocketlib/filters.py` (`_patch_classes()`) |
-| Tests | `test/store/tests/invoke_teardown.cpp` (`store::invokeTeardown`, `store::invokeTeardownDataChain`, `store::invokeTeardownPython`); their fixture and fake filters are in `test/store/tests/invoke_teardown_fixture.hpp` |
+| The entry of an open object (`pyCurrentEntry`): kept by `cb_open`, dropped by `cb_close` and by the filter's destructor | `engLib/store/headers/filter.hpp`, `engLib/store/core/filter/filter.callbacks.target.cpp`, `engLib/store/core/filter/filter.cpp` |
+| Tests | `test/store/tests/invoke_teardown.cpp` (`store::invokeTeardown`, `store::invokeTeardownDataChain`, `store::invokeTeardownPython`, `store::invokeTeardownOpenEntry`, `store::invokeTeardownOpenEntryLateCall`); their fixture and fake filters are in `test/store/tests/invoke_teardown_fixture.hpp` |
 
 The error code `Ec::PipelineEnded` itself is in
 `packages/server/engine-core/apLib/error/Ec.h`.

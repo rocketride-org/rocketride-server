@@ -984,3 +984,142 @@ TEST_CASE("store::invokeTeardownPython") {
         REQUIRE(raising.entries() == 0);
     }
 }
+
+//-----------------------------------------------------------------------------
+// Node code can open an object on a pipe and leave it open: open() keeps a
+// reference to the Python entry on the filter, and close() drops it. When
+// the pipeline ends with the object still open, the filter's destructor drops
+// that reference. When it is the last one, the entry is freed right there, on
+// the thread that frees the filter.
+//
+// The pipeline is [pipe, response_json]. Through the response node's endpoint
+// the test borrows a pipe in Python, as node code does, and opens a new entry
+// on it.
+//-----------------------------------------------------------------------------
+TEST_CASE("store::invokeTeardownOpenEntry") {
+    // Declared before the filter, so it outlives the pipeline
+    invoke_teardown::OpenedEntry entry;
+    IFilterTest filter({"response_json"});
+
+    REQUIRE_NO_ERROR(filter.connect());
+
+    //-----------------------------------------------------------------
+    // The thread that ends the endpoint frees the filters, and it does
+    // not hold the GIL: here it is this test thread, outside any Python
+    // call. The end frees the borrowed pipe's filter, which holds the last
+    // reference to the entry, so the entry is freed on this thread during
+    // the end.
+    //-----------------------------------------------------------------
+    SECTION(
+        "an object left open is freed safely by an end that does not hold "
+        "the GIL") {
+        ServiceInstanceWeak opener;
+        bool onlyFilter = false;
+        {
+            auto got = filter.getPipe();
+            REQUIRE_NO_ERROR(got);
+            ServicePipe first = *got;
+            auto *pyNode =
+                _dynCast<pythonBase::IPythonInstanceBase *>(first->pDown.get());
+            REQUIRE(pyNode);
+
+            auto dummy = filter.getDummyEntry("x.txt"_tv);
+            dummy.flags(Entry::FLAGS::INDEX);
+
+            // The first pipe is busy, so the node's endpoint lends the pipe
+            // of a stack of its own; the entry is opened on it and left open
+            const auto openEntry = localfcn()->Error {
+                py::object endpoint = pyNode->getPythonInstance()
+                                          .attr("IEndpoint")
+                                          .attr("endpoint");
+                py::object borrowed = endpoint.attr("getPipe")();
+                entry.open(borrowed, _mv(dummy));
+
+                ServiceInstance pipeFilter =
+                    py::cast<pythonBase::PipeHandle &>(borrowed).lock();
+                opener = pipeFilter->instance;
+                onlyFilter = entry.onlyHeldBy(*pipeFilter);
+                return {};
+            };
+            REQUIRE_NO_ERROR(callPython(openEntry));
+            REQUIRE_NO_ERROR(filter.putPipe(first));
+        }
+        REQUIRE(onlyFilter);
+        REQUIRE(entry.freedOn() == 0);
+
+        // The id Python gives this thread, to compare with the freeing one
+        const auto here = PyThread_get_thread_ident();
+
+        // The end runs on this thread, which does not hold the GIL
+        REQUIRE_FALSE(PyGILState_Check());
+        REQUIRE_NO_ERROR(filter.disconnect());
+        REQUIRE(opener.expired());
+
+        // The end freed the entry, on this thread
+        const auto freedOn = entry.freedOn();
+        REQUIRE(freedOn != 0);
+        REQUIRE(freedOn == here);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// Besides the thread that ends the endpoint, the thread of the last Python call
+// to leave an ended stack frees the stack, and that thread holds the GIL. An
+// object that node code opened on a filter of that stack and left open is
+// freed with the filter on that thread.
+//
+// The pipeline is [pipe, rr_test_caller, rr_test_target, rr_test_build, null,
+// bottom], as in store::invokeTeardown. Through a node handle to the caller,
+// as node code calls self.instance.open(entry), the test opens a new entry
+// below the caller and leaves it open: the caller filter keeps the entry.
+//-----------------------------------------------------------------------------
+TEST_CASE("store::invokeTeardownOpenEntryLateCall") {
+    // Declared before the fixture, so it outlives the pipeline
+    invoke_teardown::OpenedEntry entry;
+    invoke_teardown::Fixture fx;
+    fx.setup();
+
+    //-----------------------------------------------------------------
+    // The end gives up at the deadline with a control held in the target.
+    // When the control returns, the worker's thread frees the stack, the
+    // caller filter last. The filter's destructor takes the GIL that this
+    // thread already holds, and frees the entry there.
+    //-----------------------------------------------------------------
+    SECTION("an object left open on a stack that the late call frees") {
+        bool onlyFilter = false;
+        const auto openEntry = localfcn()->Error {
+            // The handle class is registered by importing engLib
+            py::module_::import("engLib");
+            py::object node = py::cast(
+                std::make_shared<pythonBase::NodeHandle>(fx.caller->instance));
+            entry.open(node, fx.filter.getDummyEntry("y.txt"_tv));
+            onlyFilter = entry.onlyHeldBy(*fx.caller);
+            return {};
+        };
+        REQUIRE_NO_ERROR(callPython(openEntry));
+        REQUIRE(onlyFilter);
+        const auto here = PyThread_get_thread_ident();
+
+        // The control held in the target outlives the end, and so does the
+        // entry
+        fx.startControl();
+        REQUIRE(fx.state->entered.wait());
+        fx.deadline.set(invoke_teardown::kDeadline);
+        fx.endPipeline();
+        REQUIRE_FALSE(fx.state->targetReturned.load());
+        REQUIRE(entry.freedOn() == 0);
+
+        // The late call is the last holder of the stack: the worker's thread
+        // frees the caller filter, and with it the entry
+        const auto stack = fx.dropStack();
+        fx.state->release.set();
+        fx.finishWorker();
+        REQUIRE_NO_ERROR(fx.state->error());
+        REQUIRE(stack.freed());
+        REQUIRE(fx.state->callerFree().on == fx.state->workerId);
+
+        const auto freedOn = entry.freedOn();
+        REQUIRE(freedOn != 0);
+        REQUIRE(freedOn != here);
+    }
+}

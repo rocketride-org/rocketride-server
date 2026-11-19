@@ -724,7 +724,7 @@ void IServiceFilterInstance::cb_close() noexcept(false) {
         // Once object closed, release a python reference
         _block() {
             engine::python::LockPython lock;
-            pyCurrentEntry = py::none();
+            pyCurrentEntry = py::object();
         }
 
         if (ccode) throw ccode;

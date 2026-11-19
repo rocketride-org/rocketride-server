@@ -1063,4 +1063,76 @@ private:
     py::object m_scope;
 };
 
+//-------------------------------------------------------------------------
+/// @details
+///     An object that node code opens on a filter and leaves open: the
+///     filter keeps the only reference to its Python entry. A weak
+///     reference watches the entry and records the thread that frees it.
+///     The Python objects are released under the GIL when the watcher goes
+///     away
+//-------------------------------------------------------------------------
+class OpenedEntry {
+public:
+    OpenedEntry() = default;
+    OpenedEntry(const OpenedEntry &) = delete;
+    OpenedEntry &operator=(const OpenedEntry &) = delete;
+
+    ~OpenedEntry() {
+        const auto release = localfcn()->Error {
+            m_scope = py::object();
+            return {};
+        };
+        [[maybe_unused]] const auto ignored = callPython(release);
+    }
+
+    /// Moves the entry into a new Python object and opens it with
+    /// handle.open(entry), as node code does. Afterwards only the filter
+    /// behind the handle holds the Python entry. Call under the GIL
+    void open(const py::object &handle, Entry entry) {
+        // The engine's Python classes are registered by importing engLib
+        py::module_::import("engLib");
+
+        py::dict scope;
+        scope["__builtins__"] = py::module_::import("builtins");
+        scope["handle"] = handle;
+        scope["entry"] = py::cast(_mv(entry));
+        py::exec(
+            "import threading, weakref\n"
+            "freedOn = []\n"
+            "ref = weakref.ref(\n"
+            "    entry, lambda _: freedOn.append(threading.get_ident()))\n"
+            "handle.open(entry)\n"
+            "del entry, handle\n",
+            scope);
+        m_scope = scope;
+    }
+
+    /// True when the filter's reference to the entry is the only one. Call
+    /// under the GIL
+    bool onlyHeldBy(const IServiceFilterInstance &filter) {
+        if (!filter.pyCurrentEntry.is(m_scope["ref"]()))
+            return false;
+        return filter.pyCurrentEntry.ref_count() == 1;
+    }
+
+    /// The Python id of the thread that freed the entry, as
+    /// threading.get_ident() gives it; 0 while the entry is alive
+    unsigned long freedOn() {
+        unsigned long on = 0;
+        const auto readFreed = localfcn()->Error {
+            if (!m_scope)
+                return {};
+            const auto freed = m_scope["freedOn"].cast<py::list>();
+            if (!freed.empty())
+                on = freed[0].cast<unsigned long>();
+            return {};
+        };
+        [[maybe_unused]] const auto ignored = callPython(readFreed);
+        return on;
+    }
+
+private:
+    py::object m_scope;
+};
+
 }  // namespace invoke_teardown

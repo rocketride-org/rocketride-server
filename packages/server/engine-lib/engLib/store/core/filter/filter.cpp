@@ -208,6 +208,14 @@ IServiceFilterInstance::~IServiceFilterInstance() {
     // skipped or failed
     m_retainLinks.store(false, std::memory_order_release);
     endFilterInstance();
+
+    // The entry that Python opened is dropped after the links, as the
+    // filters below point at it, and under the GIL: the filter may hold the
+    // last reference, and the thread that frees a filter may not hold the GIL
+    if (pyCurrentEntry) {
+        engine::python::LockPython lock;
+        pyCurrentEntry = {};
+    }
 }
 
 //-------------------------------------------------------------------------

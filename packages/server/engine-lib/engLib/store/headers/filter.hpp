@@ -441,8 +441,10 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		The currently opened entry from Python code to keep
-    ///		a python reference and avoid it being garbage collected
+    ///		The entry Python opened on this filter (cb_open), kept so
+    ///		Python does not free it while the object is open. A Python
+    ///		reference: cb_close, the next cb_open and the destructor
+    ///		release it under the GIL
     //-----------------------------------------------------------------
     py::object pyCurrentEntry;
 
