@@ -44,12 +44,15 @@ export interface TextResult {
 	key: string;
 }
 
+export const NO_RESPONSE_MESSAGE =
+	'No response came back. Add a **Return Answers** node after your LLM to send answers to the chat.';
+
 export const extractTextFromResult = (result: PIPELINE_RESULT): TextResult[] => {
 	const textResponses: TextResult[] = [];
 
 	// If we didn't get any result types, make sure they were returned
 	if (!result.result_types) {
-		textResponses.push({ text: '### I don\'t see any answers in there...\nAre you sure you returned them in your pipeline?', key: '' });
+		textResponses.push({ text: NO_RESPONSE_MESSAGE, key: '' });
 		return textResponses;
 	}
 
