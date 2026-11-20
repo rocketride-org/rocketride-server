@@ -771,6 +771,22 @@ class TestFetchSigningKeyStaysInTheEngine:
         assert key not in str(error.value)
         assert not started
 
+    @pytest.mark.parametrize('store_url', ['s3://bucket/prefix', 'azureblob://container'])
+    def test_cloud_backend_ignores_short_key(self, monkeypatch, store_url):
+        from ai.modules import task
+
+        monkeypatch.setenv('RR_SIGNING_KEY', 'short-legacy-key')
+        monkeypatch.setenv('RR_STORE_URL', store_url)
+        task.warn_if_signing_key_is_ephemeral()
+
+    def test_filesystem_backend_still_rejects_short_key(self, monkeypatch):
+        from ai.modules import task
+
+        monkeypatch.setenv('RR_SIGNING_KEY', 'short-legacy-key')
+        monkeypatch.setenv('RR_STORE_URL', 'filesystem://store')
+        with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32'):
+            task.warn_if_signing_key_is_ephemeral()
+
     @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
     def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
         _require_env_can_hold(key)

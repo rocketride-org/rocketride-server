@@ -45,16 +45,20 @@ def warn_if_signing_key_is_ephemeral() -> None:
     """Validate the signing key and warn when fetch URLs will not survive a restart.
 
     Only the filesystem store backend signs /task/fetch URLs; S3 and Azure
-    presign. With RR_SIGNING_KEY unset the key is random per process, so a URL
+    presign, so the key is not validated for them. With RR_SIGNING_KEY unset the key is random per process, so a URL
     stops verifying when the engine restarts, and on every other replica.
-    A configured weak key refuses task-module initialization before any
+    On the filesystem backend a configured weak key refuses task-module initialization before any
     worker or public route is registered.
     """
     from ai.account.file_store import fetch_signing_key
 
-    fetch_signing_key()
     store_url = (os.environ.get('RR_STORE_URL') or '').lower()
-    if os.environ.get('RR_SIGNING_KEY') or (store_url and not store_url.startswith('filesystem://')):
+    cloud_store = bool(store_url) and not store_url.startswith('filesystem://')
+    if cloud_store:
+        # S3/Azure presign and never sign with RR_SIGNING_KEY, so its length is irrelevant there.
+        return
+    fetch_signing_key()
+    if os.environ.get('RR_SIGNING_KEY'):
         return
     warning(
         'RR_SIGNING_KEY is not set: file download URLs stop working when the engine restarts, and on '

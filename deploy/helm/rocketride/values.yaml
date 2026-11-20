@@ -158,9 +158,12 @@ engine:
     #
     # Signing secret for /task/fetch download URLs. Only read on the
     # filesystem backend — cloud backends presign natively and ignore it.
-    # Set it explicitly there (at least 32 UTF-8 bytes): with it unset the engine mints an ephemeral
+    # Set it explicitly there: with it unset the engine mints an ephemeral
     # per-process key, so every previously issued download URL stops
     # verifying the moment the pod restarts.
+    # A value set on the filesystem backend must be at least 32 UTF-8 bytes, or
+    # task-module startup refuses it; remove or replace a shorter legacy value
+    # before upgrading. Cloud backends (s3:// / azureblob://) do not check it.
     # Generate with: python -c "import secrets; print(secrets.token_urlsafe(32))"
     # RR_SIGNING_KEY: ""
     #
