@@ -420,6 +420,53 @@ def test_identity_taint_through_a_loop_reaches_a_fixed_point_and_handlers_see_th
     ]
 
 
+def test_identity_taint_breaks_skip_the_loop_else_and_finally_sees_handler_states(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def broke(self, items):
+                        for _ in items:
+                            owner = self.caller.userId
+                            break
+                        else:
+                            owner = 'shared'
+                        self.store.put(owner, 1)
+
+                    def exhausted(self, items):
+                        owner = self.caller.userId
+                        for _ in items:
+                            pass
+                        else:
+                            owner = 'shared'
+                        self.store.put(owner, 2)
+
+                    def handled(self, risky):
+                        owner = 'shared'
+                        try:
+                            risky()
+                        except ValueError:
+                            owner = self.caller.userId
+                            risky()
+                            owner = 'shared'
+                        finally:
+                            self.store.put(owner, 3)
+                        self.store.put(owner, 4)
+            """
+        },
+    )
+    lines = (node / 'IInstance.py').read_text(encoding='utf-8').splitlines()
+    found = [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+    # The break leaves with the identity past the else; an exhausted loop runs
+    # its else; the finally can run partway through the handler, the code
+    # after the try only after the handler completed
+    assert found == [
+        ('identity-persist', 'self.store.put(owner, 1)'),
+        ('identity-persist', 'self.store.put(owner, 3)'),
+    ]
+
+
 def test_logging_and_the_doors_are_not_identity_sinks(tmp_path):
     node = write_node(
         tmp_path,

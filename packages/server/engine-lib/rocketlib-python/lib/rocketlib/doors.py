@@ -276,13 +276,19 @@ class NodeState:
             time.sleep(pause)
             pause = min(pause * 2, longest)
         held = self._held()
+        prior = held.get(key)
         held[key] = token
         try:
             yield
         finally:
-            # Only this block's own token leaves; the release names it too
+            # Only this block's own token leaves, and an enclosing block of this
+            # thread on the same key gets its own back (still fenced by it);
+            # the release names this block's token
             if held.get(key) == token:
-                del held[key]
+                if prior is None:
+                    del held[key]
+                else:
+                    held[key] = prior
             _send('state.unlock', self._args(key, token=token))
 
 

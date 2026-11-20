@@ -518,14 +518,17 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
     An assignment from an identity taints the names it binds and any other
     assignment to a name clears it, so a name reused for something else is
     clean again. A branch keeps a name tainted when either way taints it, a
-    loop body is followed until the taint at its head stops growing, and an
-    exception handler sees every state its try body passed through.
+    loop body is followed until the taint at its head stops growing (a
+    ``break`` skips the loop's ``else``), an exception handler sees every state
+    its try body passed through, and a ``finally`` also every state an
+    ``else`` or a handler passed through.
 
     Returns:
         The taint in effect BEFORE each node of the function's own statements
         runs, by ``id(node)``.
     """
     taint_of: Dict[int, FrozenSet[str]] = {}
+    loops: List[Dict[str, Set[str]]] = []
 
     def mark(nodes: Iterable[Optional[ast.AST]], tainted: Set[str]) -> None:
         frozen = frozenset(tainted)
@@ -545,6 +548,14 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
             tainted = statement(stmt, tainted)
         return tainted
 
+    def passed_through(statements: List[ast.stmt], start: Set[str], end: Set[str]) -> Set[str]:
+        """Every state ``statements`` passed through: their start, the state before each node, their end."""
+        states = set(start) | end
+        for inner in statements:
+            for sub in _own_walk(inner):
+                states |= taint_of.get(id(sub), frozenset())
+        return states
+
     def statement(stmt: ast.stmt, tainted: Set[str]) -> Set[str]:
         # Step 1: a nested definition is its own scope; it rebinds its name
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -556,21 +567,30 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
             mark([stmt.test], tainted)
             return block(stmt.body, set(tainted)) | block(stmt.orelse, set(tainted))
         if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
-            # The loop head joins the entry with every pass's end until that
-            # stops growing: a value carried round the loop any number of
-            # times is seen (the set of names is finite, so this ends)
+            # The loop head joins the entry with every pass's end (and every
+            # continue) until that stops growing: a value carried round the
+            # loop any number of times is seen (the set of names is finite, so
+            # this ends). The else runs only when the loop is exhausted; a
+            # break leaves past it and joins after it
             names = _bound_names(stmt.target) if isinstance(stmt, (ast.For, ast.AsyncFor)) else set()
             head = set(tainted)
-            while True:
-                if isinstance(stmt, ast.While):
-                    mark([stmt.test], head)
-                    end = block(stmt.body, set(head))
-                else:
-                    mark([stmt.iter, stmt.target], head)
-                    end = block(stmt.body, bind(names, stmt.iter, set(head)))
-                if end <= head:
-                    return block(stmt.orelse, head)
-                head |= end
+            frame: Dict[str, Set[str]] = {'break': set(), 'continue': set()}
+            loops.append(frame)
+            try:
+                while True:
+                    if isinstance(stmt, ast.While):
+                        mark([stmt.test], head)
+                        end = block(stmt.body, set(head))
+                    else:
+                        mark([stmt.iter, stmt.target], head)
+                        end = block(stmt.body, bind(names, stmt.iter, set(head)))
+                    end |= frame['continue']
+                    if end <= head:
+                        break
+                    head |= end
+            finally:
+                loops.pop()
+            return block(stmt.orelse, head) | frame['break']
         if isinstance(stmt, (ast.With, ast.AsyncWith)):
             for item in stmt.items:
                 mark([item.context_expr, item.optional_vars], tainted)
@@ -579,18 +599,22 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
         if isinstance(stmt, ast.Try) or type(stmt).__name__ == 'TryStar':
             body = block(stmt.body, set(tainted))
             # An exception can leave the body before any of its nodes: a
-            # handler (and a finally on that path) sees every state the body
-            # passed through, not just its entry and its end
-            raised = set(tainted) | body
-            for inner in stmt.body:
-                for sub in _own_walk(inner):
-                    raised |= taint_of.get(id(sub), frozenset())
-            merged = block(stmt.orelse, set(body))
+            # handler sees every state the body passed through, not just its
+            # entry and its end
+            raised = passed_through(stmt.body, tainted, body)
+            orelse = block(stmt.orelse, set(body))
+            merged = set(orelse)
+            # A finally on an exception's path sees, besides those, every state
+            # the else and each handler passed through (one can raise partway)
+            exceptional = raised | passed_through(stmt.orelse, body, orelse)
             for handler in stmt.handlers:
                 mark([handler.type], raised)
-                merged |= block(handler.body, raised - ({handler.name} if handler.name else set()))
+                start = raised - ({handler.name} if handler.name else set())
+                end = block(handler.body, set(start))
+                merged |= end
+                exceptional |= passed_through(handler.body, start, end)
             if stmt.finalbody:
-                block(stmt.finalbody, raised | merged)
+                block(stmt.finalbody, exceptional | merged)
             return block(stmt.finalbody, merged)
         if isinstance(stmt, ast.Match):
             mark([stmt.subject], tainted)
@@ -600,8 +624,12 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
                 merged |= block(case.body, set(tainted))
             return merged
 
-        # Step 3: a simple statement runs with the taint before it, then binds
+        # Step 3: a simple statement runs with the taint before it, then binds;
+        # a break or continue hands its state to its loop and ends the block
         mark([stmt], tainted)
+        if isinstance(stmt, (ast.Break, ast.Continue)) and loops:
+            loops[-1]['break' if isinstance(stmt, ast.Break) else 'continue'] |= tainted
+            return set()
         if isinstance(stmt, ast.AugAssign):
             return bind(_bound_names(stmt.target), stmt.value, tainted, keep=True)
         if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.Delete)):

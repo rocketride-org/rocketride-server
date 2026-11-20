@@ -130,6 +130,34 @@ def test_writes_to_a_held_key_are_fenced_by_its_lease(channel):
     assert ('state.put', 'other', None) in sent and ('state.put', 'k', None) in sent
 
 
+def test_a_nested_lock_on_the_same_key_gives_the_outer_block_its_token_back(channel):
+    # The outer lease lapsed, so the inner block got the key; after the inner
+    # block the outer block's writes are fenced by the outer token again
+    recorder = channel(
+        ({'acquired': True, 'token': 't-outer'}, None),
+        ({'acquired': True, 'token': 't-inner'}, None),
+        ({}, None),
+        ({'released': True}, None),
+        ({}, None),
+        ({'released': True}, None),
+        ({}, None),
+    )
+    state = NodeState('cid')
+    with state.lock('k'):
+        with state.lock('k'):
+            state.put('k', 1)
+        state.put('k', 2)
+    state.put('k', 3)
+    sent = [(r[0], r[1].get('value'), r[1].get('token')) for r in recorder.requests if r[0] != 'state.lock']
+    assert sent == [
+        ('state.put', 1, 't-inner'),
+        ('state.unlock', None, 't-inner'),
+        ('state.put', 2, 't-outer'),
+        ('state.unlock', None, 't-outer'),
+        ('state.put', 3, None),
+    ]
+
+
 def test_two_threads_sharing_a_door_never_mix_lease_tokens():
     # A takes the key, stalls past its lease, B takes it; A then writes and
     # leaves while B still holds it. A's write names A's token (the server
