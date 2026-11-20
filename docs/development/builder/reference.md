@@ -163,6 +163,75 @@ only.
 ./builder my-package:test --list-deps
 ```
 
+### C++ build type: `--cmake-config`
+
+`--cmake-config=<type>` sets the CMake build type (`CMAKE_BUILD_TYPE`) of the
+engine, its test programs (`aptest`, `engtest`, `nodetest`) and the C++ nodes.
+
+| Value | What it builds |
+| ----- | -------------- |
+| `Release` | Default. Optimized, with symbols |
+| `RelWithDebInfo` | For C++ debugging on Windows: unoptimized, full PDBs |
+| `Sanitize` | **Linux only.** ASan and UBSan in one build; builder rejects it on other platforms |
+
+- builder does not remember the type between calls. Every call that builds or
+  tests C++ code repeats it — the build call **and** the test call. A call
+  without it asks for `Release`: it stops at the engine check below, or
+  rebuilds parts of the tree as `Release`.
+- The engine's "already built" check compares the sources **and** the type.
+  When `dist/server` holds an engine built from the same sources as another
+  type, builder stops and names both ways out: pass that type with
+  `--cmake-config` to use the engine, or rerun with `--force` to rebuild it as
+  the requested type. After a source change the build call rebuilds the engine
+  as the requested type by itself.
+- Only a `Release` build looks up and downloads the published engines: they
+  are all `Release`, so any other type compiles. CI passes `--nodownload` as
+  well, so the job makes no network lookup even without this rule.
+- `server:package` packs only a `Release` engine and stops on any other type,
+  so a `Sanitize` engine is never packaged.
+
+#### Sanitizer build (`Sanitize`)
+
+A `Sanitize` engine is for tests only: never deploy it, and never run untrusted
+pipelines on it.
+
+A `Sanitize` build needs these variables in **every** call, the build call too
+(the build already runs the new engine, for example to set up pip). The report
+directory must exist and its path must be absolute:
+
+```bash
+mkdir -p "$PWD/sanitizer-reports"
+export ASAN_OPTIONS="halt_on_error=0:detect_leaks=0:log_path=$PWD/sanitizer-reports/report"
+export UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$PWD/sanitizer-reports/report"
+export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
+export RR_SUBPROCESS_ENV="ASAN_* UBSAN_*"
+
+./builder server:build --cmake-config=Sanitize --nodownload
+./builder server:test --cmake-config=Sanitize --nodownload
+./builder nodes:test --cmake-config=Sanitize --nodownload
+
+node scripts/ci/sanitizer-report.mjs "$PWD/sanitizer-reports"
+```
+
+- `halt_on_error=0`: a program keeps running after a report, so one run shows
+  every error.
+- `log_path`: ASan and UBSan share one runtime, so both options name the same
+  prefix, and each process that reports writes all its reports to
+  `<log_path>.<pid>`.
+- `ASAN_SYMBOLIZER_PATH`: the path to `llvm-symbolizer`, which adds file and
+  line to the reports. The apt `llvm-18` package puts no unversioned
+  `llvm-symbolizer` on `PATH`.
+- `RR_SUBPROCESS_ENV`: the engine runs each task in its own engine process and
+  passes it only an allowlist of variables. A trailing `*` passes every variable
+  with that prefix, so these processes keep the sanitizer options.
+- The exit code stays `0` after a report under `halt_on_error=0`.
+  `node scripts/ci/sanitizer-report.mjs <dir>` counts and groups the reports in
+  the directory and exits `1` when there is any.
+
+CI runs this build and these tests in a separate job, on pull requests that
+change C++ files and carry the `ci:sanitize` label (add the label, then push),
+and on manual runs. The job is not part of `CI OK` yet.
+
 ---
 
 ## Compiler toolchain (C++ engine)
