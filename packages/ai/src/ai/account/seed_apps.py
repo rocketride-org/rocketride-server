@@ -378,15 +378,19 @@ def is_seed_row(entry: Dict[str, Any]) -> bool:
     """
     Whether a rail row was written by the seeder (the platform's own version, #1022).
 
-    ``metadata.platform`` decides where the key exists: the seeder writes True,
-    every deploy door writes False, and no caller can set it. Rows seeded
-    before the flag existed carry only the seeder's build stamp, so a row
-    WITHOUT the key falls back to ``metadata.build.seeded is True``. Never
-    the row's comment, which a deploy's caller chooses.
+    The seeder stamps BOTH ``metadata.platform = True`` and
+    ``metadata.build.seeded = True``; a row is a seed row only when the build
+    stamp says so and ``metadata.platform`` is not an explicit non-True value.
+    Rows deployed before ``platform`` was server-owned stored caller metadata
+    verbatim, so a stored ``platform: true`` alone proves nothing: the deploy
+    door replaced ``metadata.build`` wholesale with its own queued stamp, which
+    is why the seeder's ``seeded`` stamp is the trusted half. Rows seeded
+    before the ``platform`` flag existed have no key and rest on the build
+    stamp alone. Never the row's comment, which a deploy's caller chooses.
     """
     metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
-    if 'platform' in metadata:
-        return metadata['platform'] is True
+    if 'platform' in metadata and metadata['platform'] is not True:
+        return False
     build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
     return build.get('seeded') is True
 

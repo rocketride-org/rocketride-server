@@ -433,3 +433,14 @@ def test_public_serves_user_deploy_reads_metadata_not_comment():
     assert public_serves_user_deploy([spoof], {'version': 2}) is True
     renamed = _seed_row(version=3, comment='renamed by an operator', seed=True)
     assert public_serves_user_deploy([renamed], {'version': 3}) is False
+
+
+def test_is_seed_row_ignores_a_caller_written_platform_flag_without_the_build_stamp():
+    """A pre-upgrade row whose caller stored ``platform: true`` is not a seed row."""
+    from ai.account.seed_apps import is_seed_row
+
+    assert is_seed_row({'metadata': {'platform': True, 'build': {'status': 'ok', 'seeded': True}}}) is True
+    assert is_seed_row({'metadata': {'platform': True, 'build': {'status': 'ok'}}}) is False
+    assert is_seed_row({'metadata': {'platform': True}}) is False
+    assert is_seed_row({'metadata': {'platform': False, 'build': {'seeded': True}}}) is False
+    assert is_seed_row({'metadata': {'build': {'seeded': True}}}) is True  # legacy seeded row, no key
