@@ -614,3 +614,31 @@ class TestIterEnabled:
         # scheduler feed — iter_enabled swallows the StorageError and yields
         # nothing instead of raising.
         assert [d async for d in backend.iter_enabled()] == []
+
+
+# ============================================================================
+# Approved capabilities — the grant and its audit row are one write
+# ============================================================================
+
+
+class TestApprovedCapabilitiesAudit:
+    @pytest.mark.asyncio
+    async def test_grant_and_audit_row_commit_together(self, backend):
+        app_artifact = {'kind': 'app', 'appId': 'acme.brandy', 'name': 'Brandy', 'appVersion': '1.0.0'}
+        await backend.publish('org-1', 'acme.brandy', app_artifact, ACTOR)
+        entry = await backend.set_approved_capabilities('org-1', 'acme.brandy', 1, ['core', 'fs.app'], actor=OTHER)
+        assert entry['metadata']['approvedCapabilities'] == ['core', 'fs.app']
+        trail = await backend.history('org-1', 'acme.brandy')
+        rows = [r for r in trail['rows'] if r['action'] == 'capabilities']
+        assert len(rows) == 1
+        assert rows[0]['version'] == 1 and rows[0]['data'] == {'capabilities': ['core', 'fs.app']}
+        assert rows[0]['actor']['userId'] == OTHER['userId']
+
+    @pytest.mark.asyncio
+    async def test_unknown_version_changes_neither_the_grant_nor_the_trail(self, backend):
+        app_artifact = {'kind': 'app', 'appId': 'acme.brandy', 'name': 'Brandy', 'appVersion': '1.0.0'}
+        await backend.publish('org-1', 'acme.brandy', app_artifact, ACTOR)
+        before = (await backend.history('org-1', 'acme.brandy'))['total']
+        with pytest.raises(StorageError):
+            await backend.set_approved_capabilities('org-1', 'acme.brandy', 9, ['core'], actor=OTHER)
+        assert (await backend.history('org-1', 'acme.brandy'))['total'] == before

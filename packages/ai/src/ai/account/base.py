@@ -1037,7 +1037,7 @@ class AccountBase(ABC):
         """Record the capabilities an admin granted one app version (``metadata.approvedCapabilities``).
 
         Names must come from ``capabilities.json``. The grant is audited on
-        the app's history stream.
+        the app's history stream in the same write as the grant.
 
         Returns:
             The refreshed rail entry.
@@ -1052,11 +1052,11 @@ class AccountBase(ABC):
             raise ValueError('capabilities.json is not available on this server')
         if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
             raise ValueError(f'capabilities must be a list of {sorted(known)}')
-        entry = await self._deployment_backend().set_approved_capabilities(org_id, app_id, version, list(caps))
-        await self.deployments_history_append(
-            org_id, app_id, 'capabilities', actor, version=version, data={'capabilities': list(caps)}
+        # The audit row rides the grant's own metadata update: one commit, so a
+        # failed write leaves neither and a success leaves both.
+        return await self._deployment_backend().set_approved_capabilities(
+            org_id, app_id, version, list(caps), actor=actor
         )
-        return entry
 
     async def approved_capabilities(self, org_id: str, app_id: str, version: int) -> list:
         """The capabilities granted to one app version; ``['core']`` when none (or nothing valid) is stored."""
