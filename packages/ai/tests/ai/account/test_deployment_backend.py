@@ -1034,6 +1034,38 @@ class TestNameRow:
             await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
 
     @pytest.mark.asyncio
+    async def test_a_listing_failure_propagates_instead_of_reading_as_no_projects(self, store):
+        """Only a MISSING deployments tree is 'no projects'; a listing that fails raises through every walk."""
+
+        class _DownListing(type(store)):
+            """The throwaway store with its directory listing broken."""
+
+            async def list_entries(self, *args, **kwargs):
+                raise StorageError('listing unavailable')
+
+        backend = FileDeploymentBackend(_DownListing(f'filesystem://{store._root_path}'))
+        with pytest.raises(StorageError, match='listing unavailable'):
+            await backend.publish_list('org-1', 'pipe', [AUD_PUBLIC])
+        with pytest.raises(StorageError, match='listing unavailable'):
+            await backend.list_team('org-1', None)
+
+    @pytest.mark.asyncio
+    async def test_a_missing_deployments_tree_is_no_projects(self, store, backend):
+        """A fresh store (no tree at all, or a store that reports the prefix missing) lists nothing."""
+        assert await backend.publish_list('org-1', 'pipe', [AUD_PUBLIC]) == []
+        assert await backend.list_team('org-1', None) == []
+
+        class _NoTree(type(store)):
+            """A store that reports the deployments prefix as not found."""
+
+            async def list_entries(self, *args, **kwargs):
+                raise StorageNotFoundError('no such prefix')
+
+        fresh = FileDeploymentBackend(_NoTree(f'filesystem://{store._root_path}'))
+        assert await fresh.publish_list('org-1', 'pipe', [AUD_PUBLIC]) == []
+        assert await fresh.list_team('org-1', None) == []
+
+    @pytest.mark.asyncio
     async def test_concurrent_first_publishes_cannot_both_take_the_name(self, backend):
         """Two first publishes of one name race: one fixes the kind and takes v1, the other kind is refused."""
         import asyncio

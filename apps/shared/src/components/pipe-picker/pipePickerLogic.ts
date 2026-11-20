@@ -180,6 +180,49 @@ export async function searchStorePipes(call: PipeCatalogCall, term: string, offs
 }
 
 // =============================================================================
+// THE STORE SEARCH STATE
+// =============================================================================
+
+/** The store search's state, stamped with the search generation it belongs to. */
+export interface IStoreSearchState {
+	/** The search generation these results answer. */
+	generation: number;
+	/** The term searched. */
+	term: string;
+	/** The pages received so far, in order. */
+	value: IPipeEntry[];
+	/** The server's total for the term. */
+	total: number;
+	/** A page is in flight. */
+	loading: boolean;
+	/** The last failure, if any. */
+	error: string | null;
+}
+
+/**
+ * Apply one "More results" page, but only while its search is still current.
+ *
+ * The generation advances whenever a store search starts or the client
+ * changes; a page fetched under an earlier generation (search A, More,
+ * switch to B and back to A) is dropped, so two pages for the same offset
+ * can never both append. A page that is current but repeats a pipe already
+ * shown adds only the new ones.
+ *
+ * @param prev - The current state.
+ * @param generation - The generation the page was requested under.
+ * @param current - The generation now.
+ * @param page - The page, or the failure message.
+ * @returns `prev` itself when the page is stale, else the next state.
+ */
+export function applyStorePage(prev: IStoreSearchState, generation: number, current: number, page: { entries: IPipeEntry[]; total: number } | { error: string }): IStoreSearchState {
+	if (generation !== current || prev.generation !== generation) return prev;
+	if ('error' in page) return { ...prev, loading: false, error: page.error };
+	const shown = new Set(prev.value.map((entry) => entry.pipe));
+	const added = page.entries.filter((entry) => !shown.has(entry.pipe));
+	return { ...prev, value: [...prev.value, ...added], total: page.total, loading: false, error: null };
+}
+
+// =============================================================================
 // THE INTERFACE
 // =============================================================================
 

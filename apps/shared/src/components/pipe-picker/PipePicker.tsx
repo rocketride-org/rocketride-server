@@ -27,11 +27,11 @@
 // right) so the app catalog and the pipe picker read as one product.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button, EmptyState, InputField, Section, useShellConnection } from 'shell';
-import type { RocketRideClient } from 'shell';
-import { STORE_PAGE_LIMIT, fetchOwnPipes, interfaceNodes, looksLikeAddress, matchesTerm, rungLabel, searchStorePipes, writePipeLinkToLocation } from './pipePickerLogic';
-import type { IInterfaceNode, IInterfacesAnswer, IPipeChoice, IPipeEntry, IPipePage } from './pipePickerLogic';
+import type { RocketRideClient } from 'rocketride';
+import { STORE_PAGE_LIMIT, applyStorePage, fetchOwnPipes, interfaceNodes, looksLikeAddress, matchesTerm, rungLabel, searchStorePipes, writePipeLinkToLocation } from './pipePickerLogic';
+import type { IInterfaceNode, IInterfacesAnswer, IPipeChoice, IPipeEntry, IPipePage, IStoreSearchState } from './pipePickerLogic';
 
 // =============================================================================
 // CONSTANTS
@@ -83,12 +83,6 @@ interface ILoad<T> {
 	error: string | null;
 }
 
-/** The store search's state: the term it answers, its pages so far, the total. */
-interface IStoreState extends ILoad<IPipeEntry[]> {
-	term: string;
-	total: number;
-}
-
 /** The pipe being described in step 2. */
 interface IPicked {
 	pipe: string;
@@ -134,6 +128,11 @@ const S = {
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
 
+	/** The header's text column: may shrink below its content's width. */
+	headerText: {
+		minWidth: 0,
+	} as CSSProperties,
+
 	/** The search field's width on the header row. */
 	search: {
 		width: 260,
@@ -159,6 +158,18 @@ const S = {
 		borderWidth: 1,
 		borderStyle: 'solid',
 		transition: REDUCE_MOTION ? 'none' : 'background-color 0.12s ease',
+	} as CSSProperties,
+
+	/** A tile's state colours: the current choice, hovered, or at rest. */
+	cardState: (selected: boolean, hover: boolean): CSSProperties => ({
+		backgroundColor: selected ? 'var(--rr-bg-list-active)' : hover ? 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))' : 'var(--rr-bg-paper)',
+		borderColor: selected ? 'var(--rr-brand)' : 'var(--rr-border)',
+	}),
+
+	/** The tile's name/line column beside the chip. */
+	cardText: {
+		flex: 1,
+		minWidth: 0,
 	} as CSSProperties,
 
 	cardTop: {
@@ -275,12 +286,12 @@ interface ITileProps {
  */
 const Tile: React.FC<ITileProps> = ({ name, line, description, action, actionTitle, selected, onAction }) => {
 	const [hover, setHover] = useState(false);
-	const surface = selected ? 'var(--rr-bg-list-active)' : hover ? 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))' : 'var(--rr-bg-paper)';
+	const cardStyle: CSSProperties = { ...S.card, ...S.cardState(Boolean(selected), hover) };
 	return (
-		<div data-pipe-tile-selected={selected ? 'true' : undefined} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={{ ...S.card, backgroundColor: surface, borderColor: selected ? 'var(--rr-brand)' : 'var(--rr-border)' }}>
+		<div data-pipe-tile-selected={selected ? 'true' : undefined} onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)} style={cardStyle}>
 			<div style={S.cardTop}>
 				<div style={S.iconChip}>{(name[0] ?? '?').toUpperCase()}</div>
-				<div style={{ flex: 1, minWidth: 0 }}>
+				<div style={S.cardText}>
 					<div style={S.name} title={name}>
 						{name}
 					</div>
@@ -316,7 +327,10 @@ export const PipePicker: React.FC<IPipePickerProps> = ({ interfaceType, interfac
 	const [own, setOwn] = useState<ILoad<IPipeEntry[]>>({ value: [], loading: true, error: null });
 	const [ownSeq, setOwnSeq] = useState(0);
 	const [term, setTerm] = useState('');
-	const [store, setStore] = useState<IStoreState>({ value: [], loading: false, error: null, term: '', total: 0 });
+	const [store, setStore] = useState<IStoreSearchState>({ generation: 0, value: [], loading: false, error: null, term: '', total: 0 });
+	// The store search generation: advanced whenever a search starts or the
+	// client changes, so a "More results" page of an earlier search is dropped.
+	const storeGeneration = useRef(0);
 	const [picked, setPicked] = useState<IPicked | null>(null);
 	const [nodes, setNodes] = useState<ILoad<IInterfaceNode[]>>({ value: [], loading: false, error: null });
 	const [nodesSeq, setNodesSeq] = useState(0);
@@ -354,21 +368,23 @@ export const PipePicker: React.FC<IPipePickerProps> = ({ interfaceType, interfac
 	}, [client, call, ownSeq]);
 
 	// -- Step 1: the store search, debounced; a new term starts a new list ----
+	// Runs on every term and client change, so the generation advances on both.
 	useEffect(() => {
 		const needle = term.trim();
+		const generation = ++storeGeneration.current;
 		if (!needle || !client) {
-			setStore({ value: [], loading: false, error: null, term: '', total: 0 });
+			setStore({ generation, value: [], loading: false, error: null, term: '', total: 0 });
 			return;
 		}
 		let alive = true;
 		const timer = setTimeout(() => {
-			setStore({ value: [], loading: true, error: null, term: needle, total: 0 });
+			setStore({ generation, value: [], loading: true, error: null, term: needle, total: 0 });
 			searchStorePipes(call, needle, 0, STORE_PAGE_LIMIT)
 				.then(({ entries, total }) => {
-					if (alive) setStore({ value: entries, loading: false, error: null, term: needle, total });
+					if (alive) setStore({ generation, value: entries, loading: false, error: null, term: needle, total });
 				})
 				.catch((err: unknown) => {
-					if (alive) setStore({ value: [], loading: false, error: err instanceof Error ? err.message : String(err), term: needle, total: 0 });
+					if (alive) setStore({ generation, value: [], loading: false, error: err instanceof Error ? err.message : String(err), term: needle, total: 0 });
 				});
 		}, SEARCH_DEBOUNCE_MS);
 		return () => {
@@ -377,14 +393,15 @@ export const PipePicker: React.FC<IPipePickerProps> = ({ interfaceType, interfac
 		};
 	}, [term, client, call]);
 
-	/** The next page of the current store search. */
+	/** The next page of the current store search, applied only while that search is current. */
 	const loadMore = useCallback(() => {
+		const generation = storeGeneration.current;
 		const searched = store.term;
 		const offset = store.value.length;
-		setStore((prev) => ({ ...prev, loading: true, error: null }));
+		setStore((prev) => (prev.generation === generation ? { ...prev, loading: true, error: null } : prev));
 		searchStorePipes(call, searched, offset, STORE_PAGE_LIMIT)
-			.then(({ entries, total }) => setStore((prev) => (prev.term === searched ? { ...prev, value: [...prev.value, ...entries], loading: false, total } : prev)))
-			.catch((err: unknown) => setStore((prev) => (prev.term === searched ? { ...prev, loading: false, error: err instanceof Error ? err.message : String(err) } : prev)));
+			.then((page) => setStore((prev) => applyStorePage(prev, generation, storeGeneration.current, page)))
+			.catch((err: unknown) => setStore((prev) => applyStorePage(prev, generation, storeGeneration.current, { error: err instanceof Error ? err.message : String(err) })));
 	}, [call, store.term, store.value.length]);
 
 	// -- Step 2: the picked pipe's interface ----------------------------------
@@ -426,13 +443,14 @@ export const PipePicker: React.FC<IPipePickerProps> = ({ interfaceType, interfac
 	);
 
 	const ownVisible = useMemo(() => own.value.filter((entry) => matchesTerm(entry, term)), [own.value, term]);
+	const rootStyle = useMemo<CSSProperties>(() => ({ ...S.root, ...style }), [style]);
 
 	// -- Render: step 2 ---------------------------------------------------------
 	if (picked) {
 		return (
-			<div style={{ ...S.root, ...style }}>
+			<div style={rootStyle}>
 				<div style={S.headerRow}>
-					<div style={{ minWidth: 0 }}>
+					<div style={S.headerText}>
 						<h2 style={S.title}>{picked.name}</h2>
 						<p style={S.subtitle}>{picked.pipe}</p>
 					</div>
@@ -460,10 +478,10 @@ export const PipePicker: React.FC<IPipePickerProps> = ({ interfaceType, interfac
 	// -- Render: step 1 ---------------------------------------------------------
 	const searching = term.trim().length > 0;
 	return (
-		<div style={{ ...S.root, ...style }}>
+		<div style={rootStyle}>
 			{/* Header row: title + subtitle, the one search box */}
 			<div style={S.headerRow}>
-				<div style={{ minWidth: 0 }}>
+				<div style={S.headerText}>
 					{title && <h2 style={S.title}>{title}</h2>}
 					{title && subtitle && <p style={S.subtitle}>{subtitle}</p>}
 				</div>

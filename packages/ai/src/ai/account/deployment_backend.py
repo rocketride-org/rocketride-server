@@ -1610,12 +1610,18 @@ class FileDeploymentBackend:
         return f'orgs/{org_id}/files/.deployments/'
 
     async def _project_ids(self, org_id: str) -> List[str]:
-        """Project directories present in an org's deployments tree."""
+        """Project directories present in an org's deployments tree.
+
+        Only a MISSING deployments tree is 'no projects' (a fresh store, an
+        org that never deployed); any other storage failure propagates, so a
+        listing is never reported empty because the store was down, the same
+        rule ``_read_meta`` keeps for one project.
+        """
         try:
             dirs = await self._store.list_entries(
                 self._deployments_prefix(org_id), recursive=False, include_files=False
             )
-        except StorageError:
+        except StorageNotFoundError:
             return []
         return [d.rstrip('/').rsplit('/', 1)[-1] for d in dirs]
 

@@ -10,8 +10,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { PIPE_PAGE_LIMIT, fetchOwnPipes, hrefWithPipeLink, interfaceNodes, looksLikeAddress, matchesTerm, pipeLinkFromSearch, rungLabel, searchStorePipes } from './pipePickerLogic';
-import type { IPipeEntry, IPipePage } from './pipePickerLogic';
+import { PIPE_PAGE_LIMIT, applyStorePage, fetchOwnPipes, hrefWithPipeLink, interfaceNodes, looksLikeAddress, matchesTerm, pipeLinkFromSearch, rungLabel, searchStorePipes } from './pipePickerLogic';
+import type { IPipeEntry, IPipePage, IStoreSearchState } from './pipePickerLogic';
 
 // ==== Helpers ================================================================
 
@@ -69,6 +69,54 @@ test('a total that disagrees with the pages cannot loop, and rows that are not p
 	);
 	assert.equal(sent.length, 1);
 	assert.deepEqual(await fetchOwnPipes(fakeCall([null]).call), []);
+});
+
+// ==== applyStorePage =========================================================
+
+/** A store search state of one generation holding the given pipes. */
+function storeState(generation: number, pipes: string[], over: Partial<IStoreSearchState> = {}): IStoreSearchState {
+	return { generation, term: 'doc', value: pipes.map((p) => entry(p, 'public')), total: 40, loading: true, error: null, ...over };
+}
+
+test('a More page of the current search appends', () => {
+	const next = applyStorePage(storeState(3, ['zeta.a']), 3, 3, { entries: [entry('zeta.b', 'public')], total: 41 });
+	assert.deepEqual(
+		next.value.map((e) => e.pipe),
+		['zeta.a', 'zeta.b']
+	);
+	assert.equal(next.total, 41);
+	assert.equal(next.loading, false);
+});
+
+test('a More page of an earlier search generation is dropped: search A, More, B, back to A, More', () => {
+	// The first More of A was requested under generation 1; the search moved
+	// to B (2) and back to A (3), and A's second More is the current one.
+	const backToA = storeState(3, ['zeta.a']);
+	const late = applyStorePage(backToA, 1, 3, { entries: [entry('zeta.b', 'public')], total: 40 });
+	assert.equal(late, backToA);
+	const current = applyStorePage(late, 3, 3, { entries: [entry('zeta.b', 'public')], total: 40 });
+	assert.deepEqual(
+		current.value.map((e) => e.pipe),
+		['zeta.a', 'zeta.b']
+	);
+});
+
+test('a page whose generation was superseded after the request, or whose state moved on, is dropped', () => {
+	const state = storeState(4, ['zeta.a']);
+	assert.equal(applyStorePage(state, 4, 5, { entries: [entry('zeta.b', 'public')], total: 40 }), state);
+	assert.equal(applyStorePage(state, 3, 3, { error: 'down' }), state);
+});
+
+test('a current page never shows a pipe twice, and a current failure is kept', () => {
+	const next = applyStorePage(storeState(2, ['zeta.a']), 2, 2, { entries: [entry('zeta.a', 'public'), entry('zeta.c', 'public')], total: 40 });
+	assert.deepEqual(
+		next.value.map((e) => e.pipe),
+		['zeta.a', 'zeta.c']
+	);
+	const failed = applyStorePage(storeState(2, ['zeta.a']), 2, 2, { error: 'store down' });
+	assert.equal(failed.error, 'store down');
+	assert.equal(failed.loading, false);
+	assert.equal(failed.value.length, 1);
 });
 
 // ==== searchStorePipes =======================================================
