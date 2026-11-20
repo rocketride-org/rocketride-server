@@ -62,6 +62,7 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     from ai.modules.task.task_conn import TaskConn
 
     conn.resolve_org_for_team = MethodType(TaskConn.resolve_org_for_team, conn)
+    conn.refuse_if_waitlisted = MethodType(TaskConn.refuse_if_waitlisted, conn)
     # Identity context builder (TaskConn.request_context) — the file store is
     # mocked in these tests, so a stub ctx suffices.
     conn.request_context = MagicMock(return_value=SimpleNamespace(account_info=account_info))
@@ -134,7 +135,10 @@ async def test_on_execute_starts_task_with_resolved_org_id():
 
 def _assert_says_how_to_set_a_dev_team(message: str) -> None:
     """Keep the UI message short and point at the real profile control."""
-    assert message == 'No development team selected. Open Account > Profile and choose your development team.'
+    assert (
+        message
+        == 'No development team is selected, and every pipeline you run needs one. In RocketRide, open Account > Profile and choose your development team. If no team is listed, ask a workspace admin to add you to one.'
+    )
 
 
 @pytest.mark.asyncio
@@ -151,6 +155,38 @@ async def test_on_execute_refuses_without_a_dev_team():
 
     _assert_says_how_to_set_a_dev_team(str(excinfo.value))
     conn.verify_team_permission.assert_not_called()
+    server.start_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('dev_team', ['', 'team-1'])
+@pytest.mark.parametrize(
+    ('handler', 'request_'),
+    [
+        (TaskCommands.on_execute, {'arguments': {'pipeline': {'components': []}}}),
+        (TaskCommands.on_launch, {'arguments': {}}),
+    ],
+)
+async def test_a_waitlisted_account_is_refused_before_the_team_check(handler, request_, dev_team):
+    """Both run commands name the real cause (the hosted backend gives a
+    waitlisted account no team on purpose), before any permission check,
+    plan check or task start.
+    """
+    server = MagicMock()
+    server.start_task = AsyncMock()
+    account = _account_info(dev_team=dev_team)
+    account.waitlisted = True
+    conn = _make_conn(account_info=account, server=server)
+
+    with pytest.raises(PermissionError) as excinfo:
+        await handler(conn, request_)
+
+    assert str(excinfo.value) == (
+        "This account isn't active, so it can't run pipelines. If you just signed up, you'll get an email when "
+        "it's activated."
+    )
+    conn.verify_team_permission.assert_not_called()
+    conn.verify_plans.assert_not_called()
     server.start_task.assert_not_awaited()
 
 

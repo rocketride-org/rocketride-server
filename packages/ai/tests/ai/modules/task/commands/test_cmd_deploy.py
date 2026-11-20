@@ -39,6 +39,8 @@ import ai.modules.task.commands.cmd_pipe as pipe_mod
 from ai.modules.task.commands.cmd_deploy import DeployCommands
 from ai.modules.task.commands.cmd_pipe import DeployPipeCommands
 from ai.account.models import resolve_team_permissions
+from ai.constants import CONST_ACCOUNT_WAITLISTED, CONST_NO_DEV_TEAM
+from ai.modules.task.task_conn import TaskConn
 
 
 # ============================================================================
@@ -89,6 +91,7 @@ def _make_conn(account_info, scheduler=None):
             raise PermissionError(f"Permission '{perm}' denied")
 
     conn.verify_team_permission = MethodType(verify_team_permission, conn)
+    conn.refuse_if_waitlisted = MethodType(TaskConn.refuse_if_waitlisted, conn)
 
     # The _scheduler property walks self._server._server.app.state.scheduler —
     # satisfy the chain on the stub server instead of mutating the class.
@@ -415,6 +418,38 @@ class TestReads:
         conn._account_info.organization = None
         with pytest.raises(PermissionError, match='organisation membership'):
             await conn._deploy_versions({}, {'projectId': 'proj-1'})
+
+    @pytest.mark.asyncio
+    async def test_account_refusals_use_the_typed_texts(self, account_stub):
+        # A waitlisted account has no org: deployments and the account commands
+        # give the one plain message, which the MCP layer types.
+        waitlisted = _account_info()
+        waitlisted.waitlisted = True
+        waitlisted.organization = None
+        conn = _make_conn(waitlisted)
+        with pytest.raises(PermissionError) as refused:
+            await conn._deploy_versions({}, {'projectId': 'proj-1'})
+        assert str(refused.value) == CONST_ACCOUNT_WAITLISTED
+        # Through both doors, before any handler's own team check.
+        for door, args in (
+            (
+                conn.on_rrext_deploy,
+                {'subcommand': 'add', 'pipeline': {'name': 'p', 'components': []}, 'deployTo': 'team-1'},
+            ),
+            (conn.on_rrext_deploy_pipe, {'subcommand': 'deploy', 'projectId': 'proj-1', 'teamId': 'team-1'}),
+        ):
+            with pytest.raises(PermissionError) as refused:
+                await door({'arguments': args})
+            assert str(refused.value) == CONST_ACCOUNT_WAITLISTED
+        conn._authenticated = True
+        with pytest.raises(PermissionError) as refused:
+            TaskConn.require_zitadel_auth(conn)
+        assert str(refused.value) == CONST_ACCOUNT_WAITLISTED
+        # A personal (@me) publish with no development team gives the no-team text.
+        no_team = _make_conn(_account_info(dev_team=''))
+        with pytest.raises(PermissionError) as refused:
+            no_team._billing_team_of('user~user-1')
+        assert str(refused.value) == CONST_NO_DEV_TEAM
 
     @pytest.mark.asyncio
     async def test_publish_requires_a_pipeline_name(self, account_stub):

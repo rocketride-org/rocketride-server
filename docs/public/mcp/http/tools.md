@@ -1,12 +1,12 @@
 ---
 title: Tools
 sidebar_position: 2
-description: The RocketRide MCP server exposes 33 tools, 32 on a deployed engine where send_files is not offered. This page is the full tool reference.
+description: The RocketRide MCP server exposes 34 tools, 33 on a deployed engine where send_files is not offered. This page is the full tool reference.
 ---
 
 # Tools
 
-The server exposes **33 tools** — 32 on a deployed engine, where `send_files`
+The server exposes **34 tools** — 33 on a deployed engine, where `send_files`
 is not offered (see its entry). This page is the full reference; the
 [overview](/connect/mcp/http/) has the one-table summary.
 
@@ -21,7 +21,13 @@ is not offered (see its entry). This page is the full reference; the
   `BadRequest` (bad or missing arguments), `Timeout` (one engine call ran past
   its budget — the hint says how to recover), `NotFound`/`TraceExpired` (log
   tools), `Unavailable` (a local-engine-only tool called on a deployed engine),
-  `UnknownTool`. Hard failures (lost engine connection, auth) surface
+  `UnknownTool`, and `AccountWaitlisted` or `NoDevelopmentTeam` when a run, a
+  deployment or an account command is refused for an account reason.
+  `AccountWaitlisted` means the account isn't active: a new sign-up still on
+  the waitlist, an account that was turned off, or a revoked key. Retrying
+  does not help those two: for an inactive account the hint says to relay the
+  message, and for a missing team it says to call
+  [`account_status`](#account_status). Hard failures (lost engine connection, auth) surface
   as MCP protocol errors with the original message preserved.
 - **Timeouts.** Read-side engine calls are budgeted at 30 seconds; the
   execution tools (`run_pipeline`, `run_dropper_pipe`, `send_data`,
@@ -32,7 +38,7 @@ is not offered (see its entry). This page is the full reference; the
   JSON itself (a `{"pipeline": {...}}` wrapper is auto-unwrapped). File paths
   are rejected — the client reads its own `.pipe` file and sends the contents.
 - **Every tool carries annotations.** `readOnlyHint`, `destructiveHint` and
-  `openWorldHint` are explicit on all 33 tools (32 on a deployed engine,
+  `openWorldHint` are explicit on all 34 tools (33 on a deployed engine,
   where `send_files` is not offered); the table under
   [Annotations](#annotations) gives each value and its reason. Five tools are
   open-world: the four execution tools, because a pipeline's nodes run whatever
@@ -99,6 +105,56 @@ node on the connected engine are listed.
 - **Notable:** only environment-variable **names** are read and reported —
   values never transit MCP. Wiring values are emitted as `${VAR}` placeholder
   strings for use in a pipeline config.
+
+## Check the account
+
+### account_status
+
+Say whether the caller's account can run pipelines right now and, if it can't,
+what is missing and what the user should do. Use it when the user asks whether
+their account can run pipelines, or whether it is active, or about its
+development team, compute credits or saved model keys; before their first run
+in a conversation; and when `run_pipeline` or `run_dropper_pipe` is refused with
+`NoDevelopmentTeam`, with "Out of credits" or with a denied `task.control`
+permission. After a refusal with `AccountWaitlisted`, relay that message
+instead. It already says everything that can be known.
+
+- **Parameters:** none.
+- **Returns:** `{ok, ready, edition, summary, checks}`. `edition` is `cloud` or
+  `self-hosted`. `checks` holds four rows in this order, `access` (whether
+  the account is active), `team` (the development team runs are billed to), `credits`
+  (compute credits, cloud only) and `model_key` (saved AI model keys),
+  each `{id, ok, detail, next_step?}`. `ok` is `null` when a check could not
+  run because a read failed, and then the row says to ask again. For an
+  inactive account, the `access` row is `ok: false` and the other three rows
+  are `ok: null`. A cloud account that isn't part of a workspace has a
+  `credits` row with `ok: null` and no retry step. `credits` adds `tokens`, the
+  raw balance, when it is above zero; the detail rounds it for display. A
+  refusal from the spend check next to a positive balance is reported as
+  `ok: null`, since the spend check can answer from a cache a few seconds old. `ready` is true when `access`, `team`
+  and `credits` are all `true`. `model_key` is advice and carries
+  `blocking: false`, because a pipeline without a model node needs no key.
+  A provider counts as saved when any variable name the catalog suggests
+  for it is set. A variable under a custom name that only mentions a provider
+  is never reported as saved; when no provider has a saved key, the row is
+  uncertain (`ok: null`), and when another provider has one, the row is
+  `ok: true` and the candidate is not named. The result adds a `hint` for the
+  agent that points to `list_integrations` only when the row is `ok: false`
+  (no key saved) or uncertain because of a candidate; a row that is `ok: true`
+  has no hint, even if it hides a candidate. When the account can use RocketRide-hosted OpenAI
+  models (`hosted-models:openai`), `model_key` is `ok: true` with no hint even
+  if no key is saved, and its detail says so. `summary` names everything that
+  stops a run, or says the account is ready.
+- **Notable:** it answers only for the account behind the credential and takes
+  no arguments, and it answers an inactive account too. It reads variable
+  names to find saved model keys, and its result holds no variable name, key
+  value or id. `summary`, `detail` and `next_step` are written for the user
+  and can be relayed as they are. The tool's description asks the agent to
+  relay the summary and every next step, to add a check's `detail` when the
+  user asked about that check (a credits question is answered by the
+  `credits` detail), and, when the account is not ready, to leave out the
+  `model_key` advice unless the pipeline uses a model or the user asked about
+  model keys.
 
 ## Author pipelines
 
@@ -512,4 +568,5 @@ does.
 | `log_traces` | true | false | false | Reads trace summaries from the persisted run log. |
 | `log_trace` | true | false | false | Reads one trace's events from the persisted run log. |
 | `scaffold_node` | true | false | false | Renders node file contents for the caller to write; the server writes nothing. |
+| `account_status` | true | false | false | Reads the caller's own account readiness. Returns no secrets and changes nothing. |
 | `list_integrations` | true | false | false | Reports credential setup status by variable name; values never transit MCP; nothing is stored. |

@@ -57,6 +57,7 @@ from ai.account import account
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
+from ai.constants import CONST_NO_DEV_TEAM
 
 from ..deploy_events import broadcast_deploy_changed
 
@@ -89,7 +90,12 @@ class _DeployBase(DAPConn):
         return self._server._server.app.state.scheduler
 
     def _org_id(self) -> str:
-        """The caller's organisation id — every deployment call is org-scoped."""
+        """The caller's organisation id — every deployment call is org-scoped.
+
+        A waitlisted account has no organisation; it gets the plain account
+        message (``TaskConn.refuse_if_waitlisted``) instead of the one below.
+        """
+        self.refuse_if_waitlisted()
         org = getattr(self._account_info, 'organization', None)
         org_id = (org or {}).get('id') if isinstance(org, dict) else getattr(org, 'id', None)
         if not org_id:
@@ -177,9 +183,7 @@ class _DeployBase(DAPConn):
             return team_id
         dev_team = getattr(self._account_info, 'devTeam', '') or ''
         if not dev_team or dev_team not in self._member_team_ids():
-            raise PermissionError(
-                'Publishing to @me needs your development team set in this organization — pick one in your profile'
-            )
+            raise PermissionError(CONST_NO_DEV_TEAM)
         return dev_team
 
     def _visible_team_ref(self, args: Dict[str, Any]) -> str:
@@ -225,9 +229,11 @@ class _DeployBase(DAPConn):
 
         Shared by ``on_rrext_deploy`` and ``on_rrext_deploy_pipe``. Permission
         checks live in each handler because they differ per subcommand and per
-        addressed team.
+        addressed team. An inactive account is refused here first, so it gets
+        the plain account message whichever check a handler would hit.
         """
         try:
+            self.refuse_if_waitlisted()
             args = request.get('arguments') or {}
             subcommand = args.get('subcommand')
             if not subcommand:
