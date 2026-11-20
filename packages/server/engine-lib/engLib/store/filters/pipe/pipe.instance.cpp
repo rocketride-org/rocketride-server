@@ -73,11 +73,22 @@ void IFilterInstance::emitTrace(TextView kind, TextView componentId,
 
 //-------------------------------------------------------------------------
 /// @details
-///		Emit a trace line for a filter instance, named by its component id
+///		Emit a trace line for a filter instance, named by its STACK INDEX
+///		(plan 7.2): the engine never speaks the author's component ids,
+///		which differ between holders of one shape; the server translates
+///		the index back to each control's own id. A filter the pipeline
+///		does not name (the pipe head, an endpoint's own filters) has no
+///		index and is named by its type, which is never all digits
 //-------------------------------------------------------------------------
-void IFilterInstance::emitTrace(TextView kind, IServiceFilterInstance *pInstance,
+void IFilterInstance::emitTrace(TextView kind,
+                                IServiceFilterInstance *pInstance,
                                 const json::Value &trace) noexcept {
-    emitTrace(kind, pInstance->pipeType.id, trace);
+    if (pInstance->pipeType.stackIndex < 0) {
+        emitTrace(kind, pInstance->pipeType.id, trace);
+        return;
+    }
+    auto index = std::to_string(pInstance->pipeType.stackIndex);
+    emitTrace(kind, TextView{index}, trace);
 }
 
 //-------------------------------------------------------------------------

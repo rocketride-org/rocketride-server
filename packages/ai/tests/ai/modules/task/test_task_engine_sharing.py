@@ -61,7 +61,7 @@ from ai.modules.task import deploy_events, task_control, task_engine, task_serve
 from ai.modules.task.commands.cmd_data import DataCommands
 from ai.modules.task.commands.cmd_task import TaskCommands
 from ai.modules.task.task_control import DeploymentRef, TaskControl, TeamContext
-from ai.modules.task.engine_key import engine_content, qualified_key
+from ai.modules.task.engine_key import engine_content, pipeline_stack, qualified_key, stack_order
 from ai.modules.task.task_engine import MULTITENANT_BIT, TaskEngine, component_facts
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import EngineState, TaskError
@@ -309,11 +309,12 @@ def test_one_config_value_apart_is_the_same_shape_and_another_configuration(cata
     assert a.content_hash == b.content_hash
     assert a.config_by_index != b.config_by_index
     assert task_control.config_hash(a.config_by_index) != task_control.config_hash(b.config_by_index)
-    # By stack index: the component order of the spec, the configs resolved
-    assert a.config_by_index[0]['instructions'] == ['Be brief.']
-    assert a.config_by_index[1] == DEFAULTS['webhook']
+    # By stack index (the engine's walk, or the id order without it), the configs resolved
+    prompt, webhook = a.index_map.to_index('prompt_1'), a.index_map.to_index('webhook_1')
+    assert a.config_by_index[prompt]['instructions'] == ['Be brief.']
+    assert a.config_by_index[webhook] == DEFAULTS['webhook']
     # The open carries the STORED form (the engine resolves it); the identity hashes the resolved one
-    assert a.stored_by_index == [{'instructions': ['Be brief.']}, {}]
+    assert (a.stored_by_index[prompt], a.stored_by_index[webhook]) == ({'instructions': ['Be brief.']}, {})
     spelled = engine_content(_pipeline(instructions=['Answer the question.']), 'webhook_1', component_facts)
     assert task_control.config_hash(spelled.config_by_index) == task_control.config_hash(
         engine_content(_pipeline(), 'webhook_1', component_facts).config_by_index
@@ -1800,17 +1801,20 @@ async def test_the_open_config_follows_the_task_files_component_order(catalog, e
     control = await _start(ts, reversed_spec, user='user-a')
     written = control.task._build_task(control.pipeline)['config']['pipeline']['components']
 
-    assert [c['id'] for c in written] == ['prompt_1', 'webhook_1']
+    # The stack order is the engine's canonical walk where the engine has the
+    # binding (C.23), the id order otherwise; never the order the spec lists
+    order = [c['id'] for c in stack_order(reversed_spec['components'], pipeline_stack(reversed_spec, 'webhook_1'))]
+    assert [c['id'] for c in written] == order
     assert all(c['config'] == {} for c in written)
     config = control.caller_config()
     assert config == control.config and len(config) == len(written)
-    # Index 0 is prompt_1 in both: its stored config carries the instructions, the webhook's is empty
-    assert config == [{'instructions': ['dry']}, {}]
+    # Index i is the same component in both: the prompt's stored config carries the instructions, the webhook's is empty
+    assert dict(zip(order, config)) == {'prompt_1': {'instructions': ['dry']}, 'webhook_1': {}}
     # Another control of the same owner listing the components the other way round shares the engine and
     # indexes its config the same way
     other = await _start(ts, _pipeline(project_id='docBrainCopy', instructions=['wet']), user='user-a')
     assert other.task is control.task
-    assert other.caller_config() == [{'instructions': ['wet']}, {}]
+    assert dict(zip(order, other.caller_config())) == {'prompt_1': {'instructions': ['wet']}, 'webhook_1': {}}
 
 
 def test_the_task_file_carries_no_trace_epoch(monkeypatch, tmp_path):

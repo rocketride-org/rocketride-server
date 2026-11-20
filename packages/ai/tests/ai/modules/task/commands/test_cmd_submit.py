@@ -386,7 +386,8 @@ async def test_five_submits_of_three_configs_are_one_engine_and_three_controls(
     # Each open carried ITS control's config: three IGlobal sets for the engine to build (plan 5.3)
     opens = [arguments for _engine, sub, arguments in data_path if sub == 'open']
     assert [o['_caller']['controlId'] for o in opens] == [tokens[0], tokens[1], tokens[0], tokens[1], tokens[4]]
-    assert [o['_caller']['config'][0]['instructions'] for o in opens] == [['p1'], ['p2'], ['p1'], ['p2'], ['p3']]
+    prompt = controls[0].index_map.to_index('prompt_1')
+    assert [o['_caller']['config'][prompt]['instructions'] for o in opens] == [['p1'], ['p2'], ['p1'], ['p2'], ['p3']]
     # Three run-log continua, named by the stable identity, never by the control id (plan 15 item 20)
     continua = [stream_name(c.project_id, c.source, c.run_kind) for c in controls]
     assert continua == ['database1.webhook_1.dev', 'database2.webhook_1.dev', 'database3.webhook_1.dev']

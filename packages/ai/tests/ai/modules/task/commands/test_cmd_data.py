@@ -177,8 +177,11 @@ async def test_the_open_carries_the_controls_config_by_stack_index_and_the_other
 
     opened, written, closed = engine_log
     assert opened['_caller']['config'] == control.config
-    # As the spec stores it (the engine resolves it): the prompt's instructions, the webhook's empty config
-    assert opened['_caller']['config'] == [{'instructions': ['dry']}, {}]
+    # As the spec stores it (the engine resolves it), by stack index: the prompt's instructions, the
+    # webhook's empty config
+    names = control.index_map
+    assert opened['_caller']['config'][names.to_index('prompt_1')] == {'instructions': ['dry']}
+    assert opened['_caller']['config'][names.to_index('webhook_1')] == {}
     assert 'config' not in written['_caller'] and 'config' not in closed['_caller']
     assert {f['_caller']['controlId'] for f in engine_log} == {control.control_id}
 

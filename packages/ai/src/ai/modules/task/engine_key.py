@@ -43,10 +43,21 @@ spec and is the control's configuration identity, never hashed into the
 engine key. In this PR every rung qualifies the key by its owner,
 ``hash:ownerId`` (plan 13 Step 3c PR 1); C.25 leaves the published rungs
 bare.
+
+The STACK ORDER (C.23) is the engine's own canonical walk, read through the
+engine binding ``engLib.pipelineStack`` when the process has the engine
+loaded (the server always does): the order the task file writes, the index
+every control's config and every trace speaks, and the SHAPE hash
+(``EngineContent.shape_hash``), which ignores component ids. The module never
+imports the engine: it looks the binding up in ``sys.modules`` and, in a
+bare interpreter or on an engine without the binding, falls back to the
+component id order. The engine key itself is still ``content_hash`` until
+C.25 switches it to the shape hash.
 """
 
 import hashlib
 import json
+import sys
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 # ==== Policy constants =========================================================
@@ -72,26 +83,183 @@ ComponentFacts = Callable[[str, Dict[str, Any]], Tuple[Dict[str, Any], bool]]
 
 # ==== The stack order ============================================================
 
+#: The engine module whose ``pipelineStack`` binding is the canonical walk.
+CONST_ENGINE_MODULE = 'engLib'
 
-def stack_order(components: List[Any]) -> List[Any]:
+#: The longest stack index a trace can carry, in decimal digits.
+CONST_MAX_INDEX_DIGITS = 9
+
+
+def _component_id(component: Any) -> str:
+    """A component entry's id as a string ('' for a malformed entry)."""
+    return str((component or {}).get('id') if isinstance(component, dict) else '')
+
+
+def pipeline_stack(pipeline: Mapping[str, Any], source: Optional[str]) -> Optional[Dict[str, Any]]:
     """
-    The components of a spec in STACK ORDER: the one order the task file writes and the open's config follows (C.22).
+    The engine's canonical stack of a spec (plan 7.2), or None where the engine binding is absent.
+
+    One walk, the engine's own (``stack.cpp`` ``computePipelineStack``):
+    index 0 is the source, then every component the engine builds, in an
+    order that depends on the shape alone. The server never reimplements it.
+    The binding is looked up in ``sys.modules``, never imported, so this
+    module stays importable in a bare interpreter, where the answer is None.
+
+    Args:
+        pipeline: The spec (``components``, optional ``avoidMocks``).
+        source: The entry component id.
+
+    Returns:
+        ``{'components': [{index, id, provider, inputs: [{from, lane}],
+        controls: [{from, classType}]}], 'hash': str}`` with ``from`` a stack
+        index, or None when the process has no engine with the binding.
+
+    Raises:
+        Exception: The engine refused the spec (two components with one id, a
+            member without a provider), as the engine itself would at start.
+    """
+    engine = sys.modules.get(CONST_ENGINE_MODULE)
+    binding = getattr(engine, 'pipelineStack', None) if engine is not None else None
+    if binding is None:
+        return None
+    return binding(dict(pipeline), str(source or ''))
+
+
+def stack_order(components: List[Any], stack: Optional[Mapping[str, Any]] = None) -> List[Any]:
+    """
+    The components of a spec in STACK ORDER: the one order the task file writes and the open's config follows.
 
     The engine indexes ``_caller.config`` by a component's position in the
-    task file's ``pipeline.components``; the server must therefore write the
-    task file and build every control's config from ONE rule that does not
-    depend on how a spec happens to list its components (two controls of one
-    shape may list them differently). Until C.23 brings the canonical walk,
-    the rule is the component id order.
+    task file's ``pipeline.components`` and names a component in a trace by
+    its canonical stack index; the server writes the task file and builds
+    every control's config from this ONE rule, so position and index agree
+    and two controls of one shape that list (or name) their components
+    differently index them alike. With the engine's canonical stack (C.23)
+    the stack members come first in stack order, then the components the
+    engine never builds (another source's branch, an orphan) by id; without
+    it, the component id order (C.22).
 
     Args:
         components: The spec's ``components`` entries.
+        stack: ``pipeline_stack`` of the spec, or None.
 
     Returns:
-        The same entries, ordered by component id.
+        The same entries, in stack order.
     """
-    return sorted(
-        components, key=lambda component: str((component or {}).get('id') if isinstance(component, dict) else '')
+    if not stack:
+        return sorted(components, key=_component_id)
+    rank = {str(entry.get('id')): int(entry.get('index')) for entry in stack.get('components') or []}
+    stacked = sorted((c for c in components if _component_id(c) in rank), key=lambda c: rank[_component_id(c)])
+    rest = sorted((c for c in components if _component_id(c) not in rank), key=_component_id)
+    return stacked + rest
+
+
+class IndexMap:
+    """
+    Author component id <-> stack index for one spec (C.23): the server's translation table.
+
+    The engine speaks stack indexes (traces, the open's config); a control
+    shows its user the ids THEY wrote. The position of a component in
+    ``stack_order`` is its index, so the table is that order.
+
+    Attributes:
+        ids: The component ids in stack order.
+        stacked: How many of them the engine builds (the canonical stack's
+            length); the rest are never built and never traced.
+        engine_indexes: True when the order came from the engine's canonical
+            stack, so the engine names components by index; False on an
+            engine without the binding, which names them by id.
+        shape_hash: The canonical stack's shape hash, or None.
+    """
+
+    __slots__ = ('ids', 'stacked', 'engine_indexes', 'shape_hash', '_index')
+
+    def __init__(self, ids: List[str], stacked: int, engine_indexes: bool, shape_hash: Optional[str] = None) -> None:
+        """Hold the order and index it."""
+        self.ids = list(ids)
+        self.stacked = stacked
+        self.engine_indexes = engine_indexes
+        self.shape_hash = shape_hash
+        self._index = {component_id: index for index, component_id in enumerate(self.ids)}
+
+    def to_index(self, component_id: Any) -> Optional[int]:
+        """The stack index of an author id, or None for an id the spec does not have."""
+        return self._index.get(str(component_id))
+
+    def to_id(self, index: Any) -> Optional[str]:
+        """The author id at a stack index, or None for an index outside the spec."""
+        if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < len(self.ids):
+            return None
+        return self.ids[index]
+
+    def author(self, component: Any) -> Any:
+        """
+        The author's id for a component the engine named in a trace.
+
+        The engine writes a stack member's index in ASCII decimal; anything
+        else (a filter the pipeline does not name, a tool call's own label, a
+        label of non-ASCII digits such as '²') passes through, as does
+        every value on an engine that names by id.
+
+        Args:
+            component: The trace's component field.
+
+        Returns:
+            The author id, or the value unchanged.
+        """
+        if not self.engine_indexes or not isinstance(component, str):
+            return component
+        # Only the engine's own spelling is an index: ASCII digits, no longer
+        # than any stack could need (str.isdigit alone accepts '²', which
+        # int() refuses)
+        if not (0 < len(component) <= CONST_MAX_INDEX_DIGITS and component.isascii() and component.isdigit()):
+            return component
+        index = int(component)
+        return self.ids[index] if index < min(self.stacked, len(self.ids)) else component
+
+    def order(self, components: List[Any]) -> List[Any]:
+        """The spec's component entries in this stack order (entries this map does not know go last, by id)."""
+        known = [c for c in components if _component_id(c) in self._index]
+        known.sort(key=lambda c: self._index[_component_id(c)])
+        return known + sorted((c for c in components if _component_id(c) not in self._index), key=_component_id)
+
+
+def index_map_of(
+    pipeline: Mapping[str, Any], source: Optional[str], stack: Optional[Mapping[str, Any]] = None
+) -> IndexMap:
+    """
+    The id <-> index table of a spec, from the engine's canonical stack when the process has it.
+
+    Position i of ``ids`` is the engine's stack index i, row for row, never
+    compacted: a stack row the spec has no component entry for (a source
+    named by ``source`` but missing from ``components``) keeps its slot under
+    the id the stack gives it, so every later component keeps the index the
+    engine traces it by. The components the engine never builds follow, by id.
+
+    Args:
+        pipeline: The spec.
+        source: The entry component id.
+        stack: ``pipeline_stack`` already computed for this spec, or None to
+            compute it here.
+
+    Returns:
+        The spec's ``IndexMap``.
+    """
+    if stack is None:
+        stack = pipeline_stack(pipeline, source)
+    components = list(pipeline.get('components') or [])
+    if stack is None:
+        return IndexMap([_component_id(c) for c in stack_order(components)], 0, engine_indexes=False)
+    # The stack's rows by index, then everything the engine never builds
+    rows = sorted(stack.get('components') or [], key=lambda row: int(row.get('index')))
+    ids = [str(row.get('id')) for row in rows]
+    stacked = set(ids)
+    ids += [_component_id(c) for c in sorted(components, key=_component_id) if _component_id(c) not in stacked]
+    return IndexMap(
+        ids,
+        len(rows),
+        engine_indexes=True,
+        shape_hash=str(stack.get('hash')),
     )
 
 
@@ -226,10 +394,11 @@ class EngineContent:
         resolved_config: Component id -> resolved config (defaults applied,
             placeholders unexpanded). Never hashed into the engine key.
         config_by_index: The same RESOLVED configs as a list by STACK INDEX
-            (``stack_order``, the component order the task file carries,
-            plan C.22; C.23 replaces it with the canonical walk): the
-            control's configuration identity (a spelled-out default and an
-            omitted one are one control).
+            (``stack_order``: the engine's canonical walk when the process
+            has the binding, the component id order otherwise; the component
+            order the task file carries): the control's configuration
+            identity (a spelled-out default and an omitted one are one
+            control).
         stored_by_index: The configs AS THE SPEC STORES THEM, by the same
             index: what the control's open delivers to the engine, which
             resolves them against the node schemas itself (a resolved,
@@ -237,7 +406,13 @@ class EngineContent:
         types: Component id -> provider.
         connections: Component id -> stable-order wiring.
         source: The entry component id.
-        content_hash: sha256 over the sort-keyed JSON of the shape.
+        content_hash: sha256 over the sort-keyed JSON of the shape, ids
+            included: the engine key until C.25.
+        shape_hash: The engine's SHAPE hash (C.23): the canonical stack's
+            providers and wiring by stack index plus ``avoidMocks``, ids and
+            configuration outside it; None where the process has no engine
+            binding. Logged beside the content hash; not yet the key.
+        index_map: Author id <-> stack index for this spec.
         shareable: What the catalog certifies (a request/response source and
             every component ``multitenant`` from the catalog). Not consulted
             for the key in this PR (every rung is owner-qualified); C.25
@@ -253,6 +428,8 @@ class EngineContent:
         'connections',
         'source',
         'content_hash',
+        'shape_hash',
+        'index_map',
         'shareable',
         'avoid_mocks',
     )
@@ -267,8 +444,9 @@ class EngineContent:
         source: str,
         shareable: bool,
         avoid_mocks: bool = False,
+        index_map: Optional[IndexMap] = None,
     ) -> None:
-        """Hold the resolved parts and derive the shape hash."""
+        """Hold the resolved parts and derive the content hash."""
         self.resolved_config = resolved_config
         self.config_by_index = config_by_index
         self.stored_by_index = stored_by_index
@@ -277,6 +455,8 @@ class EngineContent:
         self.source = source
         self.shareable = shareable
         self.avoid_mocks = avoid_mocks
+        self.index_map = index_map if index_map is not None else IndexMap(sorted(types), 0, engine_indexes=False)
+        self.shape_hash = self.index_map.shape_hash
         self.content_hash = content_hash(types, connections, source, avoid_mocks=avoid_mocks)
 
     def key(self, *, rung: str, owner_id: str) -> str:
@@ -298,15 +478,17 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
     Compute the identity of a pipeline spec: its shape and its resolved config.
 
     The config of every component is resolved through ``facts`` (defaults
-    applied) in ``stack_order`` (component id order, NOT the order the spec
-    lists them), the stack index the task file carries (C.22):
+    applied) in ``stack_order`` (the engine's canonical walk through the
+    ``pipelineStack`` binding, or the component id order without it; NOT
+    the order the spec lists them), the stack index the task file carries:
     ``config_by_index`` and ``stored_by_index`` follow that order, never the
     submitted component list. A component ``facts`` cannot resolve (an
     unknown node, a config that does not fit its schema) is an ERROR, raised
-    as ``facts`` raised it: a spec that cannot be keyed is never run
-    (audit 2026-11-12). ``shareable`` records what the catalog certifies
-    (a request/response source and every component ``multitenant`` from the
-    catalog); nothing reads it for the key in this PR.
+    as ``facts`` raised it, and so is a spec the engine's walk refuses: a
+    spec that cannot be keyed is never run (audit 2026-11-12).
+    ``shareable`` records what the catalog certifies (a request/response
+    source and every component ``multitenant`` from the catalog); nothing
+    reads it for the key in this PR.
 
     Args:
         pipeline: The spec as submitted (placeholders unexpanded).
@@ -314,7 +496,7 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
         facts: The caller's catalog: ``facts(provider, stored) -> (resolved, shareable)``.
 
     Returns:
-        EngineContent: the resolved parts, the shape hash and the certification.
+        EngineContent: the resolved parts, the content and shape hashes and the certification.
     """
     resolved: Dict[str, Dict[str, Any]] = {}
     by_index: List[Dict[str, Any]] = []
@@ -322,7 +504,9 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
     types: Dict[str, str] = {}
     wiring: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
     shareable = True
-    for component in stack_order(pipeline.get('components', []) or []):
+    # The one stack order: the engine's walk when the process has it
+    index_map = index_map_of(pipeline, source)
+    for component in index_map.order(list(pipeline.get('components', []) or [])):
         component_id = str(component.get('id'))
         provider = str(component.get('provider') or '')
         stored = component.get('config') or {}
@@ -344,4 +528,5 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
         source,
         shareable,
         avoid_mocks=bool(pipeline.get('avoidMocks')),
+        index_map=index_map,
     )

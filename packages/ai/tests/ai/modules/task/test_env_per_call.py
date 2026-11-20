@@ -150,9 +150,10 @@ async def test_two_controls_on_one_engine_carry_their_own_values(catalog, engine
     assert a.task is b.task
     assert (a.env, b.env) == ({'ROCKETRIDE_TONE': 'tone-of-team-1'}, {'ROCKETRIDE_TONE': 'tone-of-team-2'})
     # The identity keeps the placeholder; the open carries each control's expansion (plan 5.3)
-    assert a.config_hash == b.config_hash and a.config[0]['instructions'] == ['${ROCKETRIDE_TONE}']
+    prompt = a.index_map.to_index('prompt_1')
+    assert a.config_hash == b.config_hash and a.config[prompt]['instructions'] == ['${ROCKETRIDE_TONE}']
     stamps = [caller_stamp.mint(sharing._caller(), c, correlation_id='r', subcommand='open') for c in (a, b)]
-    assert [s['config'][0]['instructions'] for s in stamps] == [['tone-of-team-1'], ['tone-of-team-2']]
+    assert [s['config'][prompt]['instructions'] for s in stamps] == [['tone-of-team-1'], ['tone-of-team-2']]
     assert all(s['controlId'] == c.control_id for s, c in zip(stamps, (a, b)))
     assert 'config' not in caller_stamp.mint(sharing._caller(), a, correlation_id='r', subcommand='write')
 
@@ -178,11 +179,11 @@ def _typed_pipeline(**leaves):
 
 
 async def _open_config(ts, pipeline, env, account, monkeypatch):
-    """Start a control whose ``account`` answers ``env``; the prompt's config as its open carries it (stack index 0)."""
+    """Start a control whose ``account`` answers ``env``; the prompt's config as its open carries it (at its stack index)."""
     monkeypatch.setattr(account, 'get_merged_env', AsyncMock(return_value=env))
     control = await _start(ts, pipeline)
     stamp = caller_stamp.mint(sharing._caller(), control, correlation_id='r', subcommand='open')
-    return control, stamp['config'][0]
+    return control, stamp['config'][control.index_map.to_index('prompt_1')]
 
 
 @pytest.mark.asyncio
@@ -195,7 +196,7 @@ async def test_an_integer_leaf_set_to_a_placeholder_reaches_the_engine_as_an_int
         ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'), {'ROCKETRIDE_EDGE': '1024'}, deployments, monkeypatch
     )
     assert config['maxTokens'] == 1024 and isinstance(config['maxTokens'], int)
-    assert control.config[0]['maxTokens'] == '${ROCKETRIDE_EDGE}'
+    assert control.config[control.index_map.to_index('prompt_1')]['maxTokens'] == '${ROCKETRIDE_EDGE}'
 
 
 @pytest.mark.asyncio

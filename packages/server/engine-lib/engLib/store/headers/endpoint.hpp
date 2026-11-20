@@ -133,6 +133,81 @@ ErrorOr<LifecycleRegions> computeLifecycleRegions(
 
 //-------------------------------------------------------------------------
 /// @details
+///		One component of a pipeline's canonical stack (plan 7.2): its
+///		stack index, the author's id (never part of the shape), its
+///		provider and its wiring by stack index. `inputs` holds
+///		(from index, lane) and `controls` (from index, classType), each
+///		sorted and free of duplicates; an edge from a component outside
+///		the stack is not wiring the engine builds, so it is not here.
+//-------------------------------------------------------------------------
+struct PipelineStackEntry {
+    int index = -1;
+    std::string id;
+    std::string provider;
+    std::vector<std::pair<int, std::string>> inputs;
+    std::vector<std::pair<int, std::string>> controls;
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///		The canonical stack of a pipeline: its components in stack order
+///		(index 0 is the source, then every component the engine walks to
+///		from it) and the SHAPE hash over that order.
+//-------------------------------------------------------------------------
+struct PipelineStack {
+    std::vector<PipelineStackEntry> components;
+    std::string hash;
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///		Compute the canonical stack of a pipeline (plan 7.2). The members
+///		are the ones generatePipelineStack has always walked: the source,
+///		every component reachable from it over input edges, then every
+///		component invoked (control edge) from a member, with its own data
+///		consumers, until nothing more joins. The ORDER does not depend on
+///		component ids or on the order the file lists components or edges:
+///		a component's data consumers are walked by lane name, then
+///		provider, then canonical form; the invoked components join by
+///		classType, then provider, then canonical form. The canonical form
+///		is the component's colour after refining provider labels over the
+///		labelled data and control edges in both directions until the
+///		partition is stable; the id breaks a tie that remains.
+///
+///		LIMIT: equal colours do not prove two components interchangeable.
+///		Refinement cannot split some regular structures (for example four
+///		identical branches off the source whose sinks are shared by
+///		neighbouring pairs in a ring): there the id tie-break decides which
+///		branch is walked first, and renaming ids can change the order and
+///		so the hash. Two specs that differ only in ids get one hash
+///		whenever refinement separates every component that is not
+///		interchangeable with another, which covers chains, trees, forks,
+///		symmetric branches and agents with their tools; for the rest the
+///		cost is a second engine for one shape, never a wrong one.
+///
+///		Edges INTO the source (index 0) are not wiring the engine builds
+///		(the source is the endpoint, never a stack filter), so they are
+///		left out of the stack and the hash; edges out of it are kept.
+///
+///		The SHAPE hash is sha256 over the ordered list of (provider, input
+///		edges by stack index and lane, control edges by stack index and
+///		classType) plus the pipeline's `avoidMocks` flag. Ids, names,
+///		positions, file order, UI data and every configuration value are
+///		outside it.
+///	@param[in]	pipeline
+///		The pipeline object: `components` (each with `id`, `provider`,
+///		`input`, `control`) and an optional `avoidMocks`
+///	@param[in]	sourceId
+///		The id of the component the stack is walked from
+///	@returns
+///		The canonical stack, or Ec::InvalidParam when two components share
+///		an id or a stack member names no provider
+//-------------------------------------------------------------------------
+ErrorOr<PipelineStack> computePipelineStack(
+    const json::Value &pipeline, const std::string &sourceId) noexcept;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Define the pipe stack we build
 //-------------------------------------------------------------------------
 struct IPipeType {
@@ -141,6 +216,11 @@ struct IPipeType {
     Text physicalType;
     uint32_t capabilities = 0;
     json::Value connConfig = json::Value();
+
+    // The component's index in the pipeline's canonical stack
+    // (computePipelineStack), what traces name it by; -1 for a filter the
+    // pipeline does not name (the pipe head, an endpoint's own filters)
+    int stackIndex = -1;
 
     // Default constructor
     IPipeType() {}

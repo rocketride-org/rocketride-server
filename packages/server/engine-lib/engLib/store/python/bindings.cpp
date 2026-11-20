@@ -724,6 +724,56 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             return pyjson::jsonToDict(config.root()["pipeline"]);
         });
 
+    ///-------------------------------------------------------------
+    /// @details
+    ///		Defines the pipelineStack function: the canonical stack
+    ///		the engine walks for a pipeline from a source (plan 7.2),
+    ///		so the server orders configs, translates ids and keys
+    ///		engines by the engine's own walk and never reimplements
+    ///		it. Returns {components: [{index, id, provider, inputs:
+    ///		[{from, lane}], controls: [{from, classType}]}], hash},
+    ///		`from` being a stack index; index 0 is the source.
+    ///-------------------------------------------------------------
+    engLib.PYBIND_FUNCTION(
+        pipelineStack,
+        [](py::dict pipeline, std::string source) -> py::dict {
+            // Step 1: the walk over the pipeline as JSON
+            auto result = store::computePipelineStack(
+                pyjson::dictToJson(pipeline), source);
+            if (!result) throw result.ccode();
+
+            // Step 2: the stack as JSON, one entry per component
+            json::Value components(json::arrayValue);
+            for (const auto &entry : result->components) {
+                json::Value item(json::objectValue);
+                item["index"] = entry.index;
+                item["id"] = entry.id.c_str();
+                item["provider"] = entry.provider.c_str();
+                item["inputs"] = json::Value(json::arrayValue);
+                for (const auto &edge : entry.inputs) {
+                    json::Value input(json::objectValue);
+                    input["from"] = edge.first;
+                    input["lane"] = edge.second.c_str();
+                    item["inputs"].append(input);
+                }
+                item["controls"] = json::Value(json::arrayValue);
+                for (const auto &edge : entry.controls) {
+                    json::Value control(json::objectValue);
+                    control["from"] = edge.first;
+                    control["classType"] = edge.second.c_str();
+                    item["controls"].append(control);
+                }
+                components.append(item);
+            }
+
+            // Step 3: with the shape hash
+            json::Value stack(json::objectValue);
+            stack["components"] = components;
+            stack["hash"] = result->hash.c_str();
+            return pyjson::jsonToDict(stack);
+        },
+        py::arg("pipeline"), py::arg("source"));
+
     //-------------------------------------------------------------
     /// @details
     ///		Declare the Entry class. This is used to set virtual
