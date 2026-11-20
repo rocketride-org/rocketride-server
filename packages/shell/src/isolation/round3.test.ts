@@ -326,14 +326,53 @@ test('R-unreceived an execute answer the realm cannot receive leaves no run held
 	assert.equal((await clientRequest(A, execMsg())).ok, true, 'no run quota is held for the refused answers');
 });
 
-test('R-monitor a failed monitor removal still lowers the ledger count, as it lowers the SDK count', async (tt) => {
+test('R-unreceived a restart answer the realm cannot receive drops the run and ends the restarted token', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const run = await startRun(A);
+	engine.extendBody('restart', { big: 'x'.repeat(9 * 1024 * 1024) });
+	const restarted = await clientRequest(A, dap('restart', { token: run.token, projectId: run.projectId, source: run.source, pipeline: { components: [], source: run.source } }));
+	assertDenied(restarted, ['too_large', 'credential'], 'the restart answer that is too large');
+	await settle();
+	assert.ok(terminatedTokens(t).length >= 1, 'the restarted token is terminated');
+	assert.equal((await clientRequest(A, dap('rrext_get_task_status', { token: run.token }))).ok, false, 'the run is gone from the ledger, not held with a dead token');
+});
+
+test('R-unreceived a file handle whose close fails is closed again on the retry schedule', async (tt) => {
+	const { t, advance } = rootWithTimers();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const client = engine.client as { request: (m: DAPMessage, timeout?: number) => Promise<DAPMessage> };
+	const original = client.request;
+	let closes = 0;
+	client.request = async (m, timeout) => {
+		if ((m.arguments as { subcommand?: string } | undefined)?.subcommand === 'fs_close' && ++closes === 1) throw new Error('engine unreachable');
+		return original(m, timeout);
+	};
+	tt.after(() => {
+		client.request = original;
+	});
+	const key = refAppKey(ENTRY_A.id);
+	engine.extendBody('rrext_store', { big: 'x'.repeat(9 * 1024 * 1024) });
+	assertDenied(await clientRequest(A, dap('rrext_store', { subcommand: 'fs_open', path: `apps/${key}/f`, mode: 'w' })), ['too_large', 'credential'], 'the fs_open answer that is too large');
+	await settle();
+	assert.equal(closes, 1, 'the first close was sent (and failed)');
+	await advance(30_000);
+	assert.equal(closes, 2, 'the failed close is tried again');
+});
+
+test('R-monitor a failed monitor removal changes nothing, so a retry removes exactly one reference', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());
 	const A = t.open(ENTRY_A);
 	const run = await startRun(A);
 	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
 	await A.request('client.addMonitor', { key: { token: run.token }, types });
-	await assertDeniedOp(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }), 'quota', 'a 17th monitor key');
+	// The realm holds two references on t0.
+	await A.request('client.addMonitor', { key: { token: run.token }, types: ['t0'] });
 	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void> };
 	const original = client.removeMonitor;
 	client.removeMonitor = async () => {
@@ -342,7 +381,35 @@ test('R-monitor a failed monitor removal still lowers the ledger count, as it lo
 	const failed = await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }));
 	assert.equal(failed.ok, false, 'the realm sees the removal fail');
 	client.removeMonitor = original;
-	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }))).ok, true, 'the slot of the removed type is free');
+	const removeCalls = (): number => t.cm.engine.monitorCalls.filter((c) => c.kind === 'remove').length;
+	const before = removeCalls();
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }))).ok, true, 'the retry succeeds');
+	assert.equal(removeCalls() - before, 1, 'the retry removes one reference');
+	// One reference on t0 is left: the type is still subscribed and still holds its slot.
+	await assertDeniedOp(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }), 'quota', 'the type still holds its slot');
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }))).ok, true, 'the last reference is removed');
+	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }))).ok, true, 'the slot is free once the last reference is gone');
+});
+
+test('R-monitor when the reference cannot be put back, the ledger follows the lowered SDK count', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: run.token }, types });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void>; addMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const { removeMonitor, addMonitor } = client;
+	client.removeMonitor = async () => {
+		throw new Error('engine unreachable');
+	};
+	client.addMonitor = async () => {
+		throw new Error('engine unreachable');
+	};
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }))).ok, false, 'the realm sees the removal fail');
+	client.removeMonitor = removeMonitor;
+	client.addMonitor = addMonitor;
+	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }))).ok, true, 'the slot is free: that removal counts as done');
 });
 
 test('R-gate a request waiting on the API key is not sent once its realm detached or its run went', async (tt) => {

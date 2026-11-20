@@ -16,12 +16,12 @@ credential store, and no key that grants access to more than one provider.
 
 ```json
 {
-	"id": "llm_1",
-	"provider": "llm_openai",
-	"config": {
-		"profile": "openai-4o",
-		"openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
-	}
+  "id": "llm_1",
+  "provider": "llm_openai",
+  "config": {
+    "profile": "openai-4o",
+    "openai-4o": { "apikey": "${ROCKETRIDE_OPENAI_KEY}" }
+  }
 }
 ```
 
