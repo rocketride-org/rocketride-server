@@ -331,11 +331,16 @@ jobs:
       # The hook makes `platform` take its non-WMI path in every engine Python
       # process of the test run. Remove this step, the removal step before
       # Package and scripts/ci/*rr_ci_skip_wmi* once the engine runs Python 3.13
-      # or later.
+      # or later. On 3.13+ the step only prints that reminder as a warning and
+      # installs nothing; it never fails the job for it.
       - name: Skip WMI queries in the engine's Python / Windows
         if: inputs.codeql == false && inputs.test && matrix.platform == 'windows'
         shell: bash
         run: |
+          if [ "$(dist/server/engine.exe -c "import sys; print('new' if sys.version_info >= (3, 13) else 'old')")" = new ]; then
+            echo "::warning title=WMI hook no longer needed::The engine runs Python 3.13 or later, which has the _wmi fix (python/cpython#134313). Remove this step, the removal step before Package and scripts/ci/*rr_ci_skip_wmi*."
+            exit 0
+          fi
           cp scripts/ci/rr_ci_skip_wmi.py scripts/ci/rr_ci_skip_wmi.pth dist/server/Lib/site-packages/
           dist/server/engine.exe -c "import _wmi, sys; sys.exit(0 if getattr(_wmi.exec_query, '_rr_ci_skip_wmi', False) else 'the WMI hook is not active in a new engine process')"
           dist/server/engine.exe -m pytest scripts/ci/test_rr_ci_skip_wmi.py -q -p no:cacheprovider
