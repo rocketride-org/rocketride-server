@@ -27,10 +27,12 @@ Jira tool node instance.
 
 Exposes Jira Cloud reads (connection check, JQL search, issue read, project
 list) and writes (create an issue, add a comment) as @tool_function methods.
-Writes are refused in read-only mode (the default), and every call stays inside
+Writes are refused in read-only mode (the default), and calls are checked against
 the node's project allowlist: searches are wrapped in it, and key-based calls
 check the issue's own project, since an issue moved between projects still
-resolves under its old key. See jira_client.py for the verified API surface.
+resolves under its old key. That check is a separate request from the read or
+write after it (Jira has no conditional write), so the account's Jira
+permissions are the hard limit. See jira_client.py for the verified API surface.
 """
 
 from __future__ import annotations
