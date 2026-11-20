@@ -31,8 +31,9 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
-import { createMatcher, matcherShape, scan } from './match';
+import { GROUP_LENGTHS, createMatcher, matcherShape, scan } from './match';
 import type { IMatch } from './match';
+import { assertWithin } from './__test__/util';
 
 const hex = (chars: number): string =>
 	randomBytes(Math.ceil(chars / 2))
@@ -63,7 +64,25 @@ test('T131 a scan inside another scan callback leaves both scans complete', () =
 	for (const nested of foundInner) assert.deepEqual(nested, innerNeedles, 'every nested scan finds every needle');
 });
 
-test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded number of lengths, 8 MiB scans in under 200 ms, every needle found', async (tt) => {
+test('T132 the length bound holds at the trie boundary: eight lengths fill one node and a ninth goes one block deeper', () => {
+	const prefix = 'shared-prefix-16';
+	assert.equal(prefix.length, 16);
+	// Lengths 16..23 are the most one node holds (prefix length .. prefix length + 7); 24 sits in the child.
+	const needles = Array.from({ length: GROUP_LENGTHS + 1 }, (_, i) => `${prefix}${'a'.repeat(i)}`);
+	assert.deepEqual(needles.map((n) => n.length), [16, 17, 18, 19, 20, 21, 22, 23, 24]);
+	const m = createMatcher(needles.map((n) => [n, n] as const));
+	const shape = matcherShape(m);
+	assert.equal(shape.needles, needles.length);
+	assert.equal(shape.maxLengthsPerGroup, GROUP_LENGTHS, `the node holds exactly the documented ${GROUP_LENGTHS} lengths, got ${JSON.stringify(shape)}`);
+	const found: string[] = [];
+	const text = needles.map((n) => ` ${n} `).join('|');
+	scan(text, [m], (x: IMatch<string>) => {
+		found.push(x.value);
+	});
+	assert.deepEqual(found, needles, 'the ninth length, one block deeper, is found like the rest');
+});
+
+test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded number of lengths, 8 MiB scans within 200 ms under RR_SHELL_PERF=1, every needle found', async (tt) => {
 	const prefix = 'shared-prefix-16';
 	assert.equal(prefix.length, 16);
 	const needles = Array.from({ length: 200 }, (_, i) => `${prefix}${hex(8 + i)}`);
@@ -71,7 +90,7 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 	const shape = matcherShape(m);
 	tt.diagnostic(`T132 shape: ${JSON.stringify(shape)}`);
 	assert.equal(shape.needles, 200);
-	assert.ok(shape.maxLengthsPerGroup <= 16, `a group holds ${shape.maxLengthsPerGroup} lengths`);
+	assert.ok(shape.maxLengthsPerGroup <= GROUP_LENGTHS, `a group holds ${shape.maxLengthsPerGroup} lengths (bound ${GROUP_LENGTHS})`);
 
 	// Completeness: every needle is found, in place.
 	const text = needles.map((n) => ` ${n} `).join('|');
@@ -90,5 +109,5 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 		best = Math.min(best, performance.now() - start);
 	}
 	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms`);
-	assert.ok(best < 200, `the scan took ${best.toFixed(1)} ms`);
+	assertWithin(best, 200, 'the scan');
 });

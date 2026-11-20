@@ -39,7 +39,7 @@ import type { ITestRoot } from './__test__/fixtures';
 import { assertNoReal, call, clientEvents, engineErrorText, expectDenied, expectOk, lastRun, transcript } from './__test__/n1';
 import { settle } from './__test__/realm';
 import type { IOpenedRealm } from './__test__/realm';
-import { assertNotForwarded, brief, outcome, startRun } from './__test__/util';
+import { assertNotForwarded, assertWithin, brief, outcome, startRun } from './__test__/util';
 
 const SRC = 'chat_1';
 const USER = 'u-1234567890abcdef';
@@ -234,7 +234,7 @@ async function best(n: number, run: () => Promise<void>): Promise<number> {
 }
 
 test('T118 scrub cost is linear in the message, not in the needle sets (sets full)', async (tt) => {
-	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 50 ms', async () => {
+	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated (budget 50 ms under RR_SHELL_PERF=1)', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A, caps: ['core', 'pipelines.run', 'fs.app'] });
@@ -246,10 +246,10 @@ test('T118 scrub cost is linear in the message, not in the needle sets (sets ful
 			await call(A, 'terminate', { token: String((result as { body: Record<string, unknown> }).body.token) });
 		});
 		tt.diagnostic(`inbound 60,000 strings: ${ms.toFixed(1)} ms (round trip incl. terminate)`);
-		assert.ok(ms < 50, `inbound gate took ${ms.toFixed(1)} ms`);
+		assertWithin(ms, 50, 'inbound gate');
 	});
 
-	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 200 ms', async () => {
+	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered (budget 200 ms under RR_SHELL_PERF=1)', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
@@ -262,10 +262,10 @@ test('T118 scrub cost is linear in the message, not in the needle sets (sets ful
 			expectOk(await status(A, run.token), '8 MiB status');
 		});
 		tt.diagnostic(`outbound 8 MiB: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 200, `outbound scrub took ${ms.toFixed(1)} ms`);
+		assertWithin(ms, 200, 'outbound scrub');
 	});
 
-	await tt.test('events: 1000 owned events of 50 strings each are delivered in under 500 ms', async () => {
+	await tt.test('events: 1000 owned events of 50 strings each are delivered (budget 500 ms under RR_SHELL_PERF=1)', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
@@ -281,7 +281,7 @@ test('T118 scrub cost is linear in the message, not in the needle sets (sets ful
 		const ms = performance.now() - start;
 		tt.diagnostic(`1000 events x 50 strings: ${ms.toFixed(1)} ms`);
 		assert.equal(clientEvents(A).length - before, 1000, 'every event is delivered');
-		assert.ok(ms < 500, `1000 events took ${ms.toFixed(1)} ms`);
+		assertWithin(ms, 500, '1000 events');
 	});
 });
 

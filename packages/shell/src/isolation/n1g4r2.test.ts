@@ -33,13 +33,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
 import type { DAPMessage } from 'rocketride';
-import { createMatcher, matcherShape } from './match';
+import { createMatcher, matcherShape, scan } from './match';
 import { ENTRY_A, ENTRY_B, GRANT_A, GRANT_B, frameFor, makeRoot, refAppKey } from './__test__/fixtures';
 import type { ITestRoot } from './__test__/fixtures';
 import { call, expectDenied, expectOk, lastRun } from './__test__/n1';
 import { settle } from './__test__/realm';
 import type { IOpenedRealm } from './__test__/realm';
-import { startRun } from './__test__/util';
+import { assertWithin, startRun } from './__test__/util';
 
 const SRC = 'chat_1';
 const keyA = refAppKey(ENTRY_A.id);
@@ -71,9 +71,14 @@ async function fillMinted(t: ITestRoot, key: string): Promise<string[]> {
 // ─────────────────────────────────────────────────────────────────────────────
 
 test('T126 shared-prefix needles cost nothing extra: lookup is per distinct length, never per needle', async (tt) => {
-	const flood = `rrapp.${keyA.slice(0, 2)}`;
+	// The 32 characters every held id shares (`rrapp.<key>.`: four whole 8-char blocks, so a candidate
+	// confirms the 16-char root prefix AND walks two nodes deeper), then a block no held id has, so
+	// each candidate ends in a miss instead of a hit.
+	const sharedPrefix = `rrapp.${keyA}.`;
+	assert.equal(sharedPrefix.length, 32);
+	const flood = `${sharedPrefix}zzzzzzzz`;
 
-	await tt.test('(a) inbound: a 256 KiB pipeline string of rrapp.<2 chars> repeated, with 4096 shared-prefix ids held, is gated in under 50 ms', async () => {
+	await tt.test('(a) inbound: a 256 KiB pipeline string of the shared id prefix repeated, with 4096 shared-prefix ids held, is gated (budget 50 ms under RR_SHELL_PERF=1)', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
@@ -85,10 +90,10 @@ test('T126 shared-prefix needles cost nothing extra: lookup is per distinct leng
 			await call(A, 'terminate', { token: String(body.token) });
 		});
 		tt.diagnostic(`T126(a) inbound 256 KiB shared-prefix: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 50, `inbound took ${ms.toFixed(1)} ms`);
+		assertWithin(ms, 50, 'inbound');
 	});
 
-	await tt.test('(a) outbound: the same text as an fs_get_json value is delivered in under 50 ms', async () => {
+	await tt.test('(a) outbound: the same text as an fs_get_json value is delivered (budget 50 ms under RR_SHELL_PERF=1)', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
@@ -101,22 +106,34 @@ test('T126 shared-prefix needles cost nothing extra: lookup is per distinct leng
 			assert.equal((body.value as { text: string }).text, text);
 		});
 		tt.diagnostic(`T126(a) outbound fs_get_json 256 KiB shared-prefix: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 50, `outbound took ${ms.toFixed(1)} ms`);
+		assertWithin(ms, 50, 'outbound');
 	});
 
-	await tt.test('(b) outbound: an 8 MiB status of the flood text with shared-prefix needles held is delivered in under 200 ms', async () => {
+	await tt.test('(b) outbound: an 8 MiB status of the flood text with shared-prefix needles held is delivered (budget 200 ms under RR_SHELL_PERF=1)', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
 		const run = await startRun(A);
 		await fillMinted(t, keyA);
-		const chunk = flood.repeat(500);
+		const chunk = flood.repeat(Math.floor(4000 / flood.length)); // 8 MB over 2000 strings, as before
 		t.cm.engine.setStatus({ big: Array.from({ length: 2000 }, () => chunk) });
 		const ms = await best(3, async () => {
 			expectOk(await status(A, run.token), '8 MiB shared-prefix status');
 		});
 		tt.diagnostic(`T126(b) outbound 8 MiB shared-prefix: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 200, `outbound took ${ms.toFixed(1)} ms`);
+		assertWithin(ms, 200, 'outbound');
+	});
+
+	await tt.test('(b2) the flood reaches the trie: every held id starts with the flood prefix and a trailing real id is found through it', () => {
+		const ids = Array.from({ length: 4096 }, () => `rrapp.${keyA}.${randomUUID()}`);
+		assert.ok(ids.every((id) => id.startsWith(sharedPrefix)), 'every held id shares the flood prefix');
+		const matcher = createMatcher(ids.map((id) => [id, 1] as const));
+		const text = `${flood.repeat(64)}${ids[7]}${flood}`;
+		const found: string[] = [];
+		scan(text, [matcher], (m) => {
+			found.push(m.needle);
+		});
+		assert.deepEqual(found, [ids[7]], 'the walk confirms the shared prefix, descends, and still finds the one real id');
 	});
 
 	await tt.test('(c) structural: 4096 needles sharing a 32-char prefix leave no group with more than one entry per length', () => {
