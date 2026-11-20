@@ -94,6 +94,58 @@ def _dirs(want=None):
     return asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=want))
 
 
+def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
+    """A previously allowed asset must stop serving as soon as its seat is revoked."""
+    from ai.account import account
+
+    _, calls = _setup(monkeypatch, [{1: 'app.x/v1/dist'}])
+    allowed = True
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        return allowed
+
+    async def entitled_version_dirs(info, app_id):
+        calls.append(app_id)
+        return {1: 'app.x/v1/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs(want=1) == {1: 'app.x/v1/dist'}
+    allowed = False
+    assert _dirs(want=1) == {}
+    assert calls == ['app.x']  # denial happened before using the warm map
+
+
+def test_warm_full_map_filters_every_concrete_version(monkeypatch):
+    from ai.account import account
+
+    _setup(monkeypatch, [])
+    allowed = {1, 2}
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        return version in allowed
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'free/dist', 2: 'paid/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs() == {1: 'free/dist', 2: 'paid/dist'}
+    allowed.remove(2)
+    assert _dirs() == {1: 'free/dist'}
+    assert _dirs(want=2) == {}
+
+
 # =============================================================================
 # TESTS
 # =============================================================================
