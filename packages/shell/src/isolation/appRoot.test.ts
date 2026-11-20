@@ -148,6 +148,27 @@ test('T31 prefs ops are confined to the app partition and bounded', async (tt) =
 	assert.equal(emitted().length, count, 'the 257th key is dropped');
 });
 
+test('T32 a confirmed openExternal does not open a window once the realm is detached meanwhile', async (tt) => {
+	for (const detach of [false, true]) {
+		let answer!: (value: boolean) => void;
+		const t = makeRoot({
+			ui: {
+				strip: () => undefined,
+				confirmOpen: () => new Promise<boolean>((resolve) => (answer = resolve)),
+			},
+		});
+		tt.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const pending = outcome(A.request('shell.openExternal', { url: 'https://example.com/docs' }));
+		await settle();
+		if (detach) A.detach();
+		answer(true); // the user confirms after the detach
+		await pending;
+		await settle();
+		assert.equal(t.opened.length, detach ? 0 : 1, detach ? 'no window opens for a realm that is gone' : 'control: a still-attached realm opens it');
+	}
+});
+
 test('T32 shell.openExternal is https only, never the shell or the app suffix, confirmed by the user', async (tt) => {
 	const t = makeRoot({ shellOrigins: ['https://shell.example.com'], originTemplate: 'https://{label}.apps.example.com' });
 	tt.after(() => t.cleanup());

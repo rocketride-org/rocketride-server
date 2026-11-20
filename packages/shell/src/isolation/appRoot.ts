@@ -734,7 +734,10 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		requestOp('shell.openExternal', async (params) => {
 			const url = checkOpenUrl(params.url as string);
 			if (url === null) return rejectWith(deny('schema', 'shell.openExternal'), 'shell.openExternal');
-			if ((await opts.ui.confirmOpen(st.info.realmId, url)) === true) opts.openWindow(url, '_blank', 'noopener,noreferrer');
+			const startedIn = epoch;
+			const confirmed = (await opts.ui.confirmOpen(st.info.realmId, url)) === true;
+			// The user may take a while: a realm detached, a teardown or a logout meanwhile must not open the window.
+			if (confirmed && !st.detached && closing === 0 && epoch === startedIn) opts.openWindow(url, '_blank', 'noopener,noreferrer');
 		});
 
 		emitOp('shell.prefs.attach', (params) => {
