@@ -39,6 +39,7 @@
 import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
 import { monthPeriod } from '../modules/billing/components/publicationUsage';
+import { createLoadGenerations, settlePublicationUsage } from '../modules/billing/components/billingLoad';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
 import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, PublicationUsage, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';
@@ -124,6 +125,8 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
 	const [usageByPublication, setUsageByPublication] = useState<PublicationUsage[]>([]);
 	const [publicationPeriod, setPublicationPeriod] = useState<string | undefined>(undefined);
+	// Why the served-by-publication read failed; null when it answered, rows or none.
+	const [publicationError, setPublicationError] = useState<string | null>(null);
 	const [dashboardLoading, setDashboardLoading] = useState(false);
 
 	// ── Section load error ──────────────────────────────────────────────────
@@ -131,6 +134,9 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	// Only the most recent profile request may update state (see loadProfile).
 	const profileRequestSeq = useRef(0);
+	// Only the most recent billing load may commit (see loadBilling): billing
+	// events start loads without an org change, so two may overlap.
+	const billingLoads = useRef(createLoadGenerations());
 
 	// Keep profile in sync with server-pushed account updates and bump the
 	// reload counter to re-fetch the active section. A push is newer than any
@@ -249,6 +255,8 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 
 	/** Fetches all billing data in one shot: subscriptions, balance, plans, transactions, usage. */
 	const loadBilling = useCallback(async () => {
+		// Every load, even one with nothing to fetch, retires the loads before it.
+		const generation = billingLoads.current.begin();
 		if (!client || !orgId) {
 			setBillingLoading(false);
 			return;
@@ -257,29 +265,39 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 		// Served by publication reports the current UTC month (mockup 4.3).
 		const period = monthPeriod(new Date());
 		try {
-			const [subs, balance, plans, tx, byUser, byTeam, byPublication] = await Promise.all([
-				client.billing.getDetails(orgId).catch((err: any) => {
-					setBillingError(err.message ?? 'Failed to load subscriptions');
-					return [] as BillingDetail[];
-				}),
+			const [details, balance, plans, tx, byUser, byTeam, byPublication] = await Promise.all([
+				// The subscriptions error is held, not set, until this load is known to be current.
+				client.billing.getDetails(orgId).then(
+					(subs) => ({ subs, error: null as string | null }),
+					(err: unknown) => ({ subs: [] as BillingDetail[], error: (err instanceof Error && err.message ? err.message : 'Failed to load subscriptions') as string | null })
+				),
 				client.billing.getCreditBalance(orgId).catch(() => null),
 				client.billing.getProductPrices('rocketride.pipeBuilder').catch(() => [] as any[]),
 				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
 				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
 				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
-				client.billing.getUsageByPublication(orgId, { since: period.since, until: period.until }).catch(() => [] as PublicationUsage[]),
+				// A failed read is an error, never an empty month (billingLoad.settlePublicationUsage).
+				settlePublicationUsage(client.billing.getUsageByPublication(orgId, { since: period.since, until: period.until })),
 			]);
-			setSubscriptions(subs);
+			// A newer load began meanwhile: its results win, these are dropped.
+			if (!billingLoads.current.isCurrent(generation)) return;
+			if (details.error) setBillingError(details.error);
+			setSubscriptions(details.subs);
 			setCreditBalance(balance);
 			setAllPlans(plans);
 			setTransactions(tx);
 			setUsageByUser(byUser);
 			setUsageByTeam(byTeam);
-			setUsageByPublication(byPublication);
+			setUsageByPublication(byPublication.usage);
+			setPublicationError(byPublication.error);
 			setPublicationPeriod(period.label);
 		} finally {
-			setBillingLoading(false);
-			setDashboardLoading(false);
+			// Only the newest load clears the loading flags; an older one finishing
+			// first must not end the spinner of the load still in flight.
+			if (billingLoads.current.isCurrent(generation)) {
+				setBillingLoading(false);
+				setDashboardLoading(false);
+			}
 		}
 	}, [client, orgId]);
 
@@ -778,6 +796,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				usageByTeam={usageByTeam}
 				usageByPublication={usageByPublication}
 				publicationPeriod={publicationPeriod}
+				publicationError={publicationError}
 				activeTasks={[]}
 				topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
 				allPlans={allPlans}

@@ -339,6 +339,8 @@ export interface BillingPanelProps {
 	usageByPublication?: PublicationUsage[];
 	/** Label of the period the publication breakdown covers (e.g. "November 2026"). */
 	publicationPeriod?: string;
+	/** Why the served-by-publication read failed, or null when it answered (rows or none). */
+	publicationError?: string | null;
 	/** Currently running tasks with live token data. */
 	activeTasks?: ActiveTask[];
 	/** Whether dashboard data is still loading. */
@@ -372,7 +374,7 @@ export interface BillingPanelProps {
  * panel (view / change plan / cancel), and the admin dashboard. The cancel
  * confirmation and its error handling live HERE, not in AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, usageByPublication, publicationPeriod, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, usageByPublication, publicationPeriod, publicationError, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
@@ -674,6 +676,7 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					usageByTeam={usageByTeam ?? []}
 					usageByPublication={usageByPublication}
 					publicationPeriod={publicationPeriod}
+					publicationError={publicationError}
 					activeTasks={activeTasks ?? []}
 					topupPlans={topupPlans ?? []}
 					loading={dashboardLoading ?? false}

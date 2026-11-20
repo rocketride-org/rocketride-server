@@ -40,6 +40,7 @@ import { Section, LabelValue } from '../../../components/section/Section';
 import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
+import { Banner } from '../../../components/banner/Banner';
 import { formatDateValue } from '../../../components/data-grid/defaults';
 import type { CreditBalance, LedgerTransaction, PublicationUsage, TransactionsResult, UsageRollup } from '../types';
 import { publicationRows } from './publicationUsage';
@@ -205,6 +206,11 @@ const styles = {
 		fontSize: 12,
 		color: 'var(--rr-text-disabled)',
 	} as CSSProperties,
+
+	/** Inset for the failed-read Banner inside the edge-to-edge leaderboard card. */
+	publicationError: {
+		padding: '12px 16px 0',
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -297,6 +303,8 @@ export interface BillingDashboardProps {
 	usageByPublication?: PublicationUsage[];
 	/** Label of the period the publication breakdown covers (e.g. "November 2026"). */
 	publicationPeriod?: string;
+	/** Why the served-by-publication read failed, or null when it answered (rows or none). */
+	publicationError?: string | null;
 	/** Currently running tasks with live token data. */
 	activeTasks: ActiveTask[];
 	/** Available top-up packs for purchase. */
@@ -464,11 +472,12 @@ type LeaderMode = 'user' | 'team' | 'publication';
  * Usage leaderboard -- top consumers by user or team, and the org's own
  * usage by the publication that served it (plan 8.3, mockup 4.3).
  */
-const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[]; usageByPublication: PublicationUsage[]; publicationPeriod?: string }> = ({
+const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[]; usageByPublication: PublicationUsage[]; publicationPeriod?: string; publicationError: string | null }> = ({
 	usageByUser,
 	usageByTeam,
 	usageByPublication,
 	publicationPeriod,
+	publicationError,
 }) => {
 	const [mode, setMode] = useState<LeaderMode>('user');
 	const data = mode === 'team' ? usageByTeam : usageByUser;
@@ -540,7 +549,8 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 		[]
 	);
 
-	if (!usageByUser.length && !usageByTeam.length && !usageByPublication.length) return null;
+	// A failed publication read still draws the card, so its error is seen.
+	if (!usageByUser.length && !usageByTeam.length && !usageByPublication.length && !publicationError) return null;
 
 	// The group-by toggle rides the grid header as `actions` in every mode.
 	const toggle = (
@@ -560,19 +570,28 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 	// group-by toggle (`actions`); the headerless Card is only the bordered
 	// shell. noSearch: a short leaderboard needs no search box (the tool row
 	// collapses to a plain card header); Export still covers the set. The
-	// publication view is its own grid (its own row shape), keyed apart.
+	// publication view is its own grid (its own row shape), keyed apart; a
+	// failed read shows the stock error Banner above it and an empty grid that
+	// says it could not load, never "no usage".
 	return (
 		<Card noBodyPadding>
 			{mode === 'publication' ? (
-				<CardDataGrid<PublicationRow>
-					key="publication"
-					title={publicationPeriod ? `Served by Publication, ${publicationPeriod}` : 'Served by Publication'}
-					actions={toggle}
-					columns={publicationColumns}
-					data={publicationData}
-					noSearch
-					emptyTitle="No publication usage in this period"
-				/>
+				<>
+					{publicationError && (
+						<div style={styles.publicationError}>
+							<Banner variant="error">{publicationError}</Banner>
+						</div>
+					)}
+					<CardDataGrid<PublicationRow>
+						key="publication"
+						title={publicationPeriod ? `Served by Publication, ${publicationPeriod}` : 'Served by Publication'}
+						actions={toggle}
+						columns={publicationColumns}
+						data={publicationData}
+						noSearch
+						emptyTitle={publicationError ? 'Publication usage could not be loaded' : 'No publication usage in this period'}
+					/>
+				</>
 			) : (
 				<CardDataGrid<LeaderRow>
 					key="payer"
@@ -1045,6 +1064,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 	usageByTeam,
 	usageByPublication,
 	publicationPeriod,
+	publicationError,
 	activeTasks,
 	loading,
 	onTransactionPage,
@@ -1060,7 +1080,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 		<div style={styles.stack}>
 			<BalanceBreakdown balance={balance} transactions={transactions} />
 			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
-			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} usageByPublication={usageByPublication ?? NO_PUBLICATION_USAGE} publicationPeriod={publicationPeriod} />
+			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} usageByPublication={usageByPublication ?? NO_PUBLICATION_USAGE} publicationPeriod={publicationPeriod} publicationError={publicationError ?? null} />
 			<ActiveTasksView activeTasks={activeTasks} />
 			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} />
 		</div>
