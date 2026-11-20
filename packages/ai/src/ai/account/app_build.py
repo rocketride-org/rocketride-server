@@ -910,6 +910,17 @@ def _remove_pnpm_configs(ws_dir: str) -> List[str]:
     return sorted(removed)
 
 
+# The files rsbuild's env loader reads from the app root: `.env`, `.env.local`,
+# `.env.<mode>` and `.env.<mode>.local` (a build runs in production mode; the
+# other two stock modes are covered so a mode change cannot expose one).
+# Anything else that merely starts with `.env` (a `.environment.json` asset) is
+# not an env file and is left alone.
+_BUILD_ENV_FILES = frozenset(
+    ['.env', '.env.local']
+    + [f'.env.{mode}{suffix}' for mode in ('development', 'production', 'test') for suffix in ('', '.local')]
+)
+
+
 def _filter_env_files(app_dir: str) -> None:
     """Reduce the app dir's .env files to their PUBLIC_ lines.
 
@@ -925,7 +936,7 @@ def _filter_env_files(app_dir: str) -> None:
         return
     for name in names:
         path = os.path.join(app_dir, name)
-        if not name.startswith('.env') or not os.path.isfile(path):
+        if name not in _BUILD_ENV_FILES or not os.path.isfile(path):
             continue
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
             kept = []

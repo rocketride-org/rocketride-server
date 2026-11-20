@@ -1131,6 +1131,20 @@ async def test_env_files_keep_only_public_lines(monkeypatch, build_store, toolch
     assert seen['.env.production'].splitlines() == ['PUBLIC_X=1']
 
 
+def test_only_the_env_files_the_build_loads_are_filtered(tmp_path):
+    """A root-level `.environment.json` asset shares the `.env` prefix but is not an env file."""
+    app = tmp_path / 'app'
+    app.mkdir()
+    asset = '{"endpoint": "https://example.invalid", "SECRET": "kept"}'
+    (app / '.environment.json').write_text(asset, encoding='utf-8')
+    (app / '.envrc.txt').write_text('keep=me\n', encoding='utf-8')
+    (app / '.env.production.local').write_text('SECRET=x\nPUBLIC_OK=1\n', encoding='utf-8')
+    app_build._filter_env_files(str(app))
+    assert (app / '.environment.json').read_text(encoding='utf-8') == asset
+    assert (app / '.envrc.txt').read_text(encoding='utf-8') == 'keep=me\n'
+    assert (app / '.env.production.local').read_text(encoding='utf-8') == 'PUBLIC_OK=1\n'
+
+
 def _guard_cases(job, env):
     """(request, allowed) pairs shared by the Python helper and the JS twin.
 
