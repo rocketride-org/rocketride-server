@@ -42,7 +42,7 @@ Quick Start:
     client = RocketRideClient()
     result = await client.connect('your_api_key')  # returns ConnectResult
     try:
-        token = await client.use(filepath='pipeline.json')
+        token = (await client.use(filepath='pipeline.json'))['token']
         response = await client.send(token, 'your data')
 
         question = Question()
