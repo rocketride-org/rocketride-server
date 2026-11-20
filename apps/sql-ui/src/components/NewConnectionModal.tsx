@@ -24,8 +24,11 @@
 // NEW CONNECTION MODAL — add or edit a saved connection, two paths
 // =============================================================================
 //
-// "From pipeline": pick a database node DISCOVERED in the user's running
-// pipelines (the old landing page's discovery, now scoped to this modal).
+// "From pipeline": the shared pipe picker (plan 3.6): the pipelines
+// published to the caller and their teams, a store search, or a typed
+// address, then the picked pipe's `database` nodes from `interfaces()`.
+// Never the running tasks. The choice binds the saved connection, so the
+// picker writes nothing into the URL here.
 //
 // "Direct": pick a database node type from the services catalog, then
 // configure it with the shared NodeConfigForm — the pipeline editor's own
@@ -42,10 +45,12 @@ import type { IFormData, IService } from 'shell';
 import NodeConfigForm, { hasConfigurableSchema, validationProblemFromResponse } from 'shared/components/node-config';
 import type { INodeConfigFormHandle } from 'shared/components/node-config';
 import { PIPELINE_SCHEMA_VERSION } from 'shared/components/node-config';
+import { PipePicker } from 'shared/components/pipe-picker';
+import type { IPipeChoice } from 'shared/components/pipe-picker';
 import {
 	DATABASE_CLASS_TYPE,
+	endpointFromChoice,
 	newConnectionId, upsertSavedConnection,
-	refreshEndpoints, useSqlEndpoints,
 } from '../connect';
 import { useSqlEnv } from '../sqlEnv';
 import type { SqlEndpoint, SavedSqlConnection } from '../connect';
@@ -166,6 +171,16 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
 
+	/** The pipeline path's current binding, above the picker. */
+	chosenLine: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+		fontSize: 13,
+		color: 'var(--rr-text-primary)',
+		marginBottom: 8,
+	} as CSSProperties,
+
 	/** Muted state line inside the list box. */
 	listEmpty: {
 		padding: 14,
@@ -237,7 +252,7 @@ export interface NewConnectionModalProps {
 // =============================================================================
 
 /**
- * The add/edit connection modal: the pipeline-discovery path and the direct
+ * The add/edit connection modal: the pipe-picker path and the direct
  * node-config path behind one path switch.
  *
  * @param props - {@link NewConnectionModalProps}.
@@ -251,50 +266,15 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	const [error, setError] = useState('');
 	const [saving, setSaving] = useState(false);
 
-	// ── Pipeline path: discovery ─────────────────────────────────────────────
-	const { status, endpoints, error: discoveryError } = useSqlEndpoints();
-	const [selectedKey, setSelectedKey] = useState<string | null>(
-		editing?.mode === 'pipeline' ? `${editing.address}:${editing.nodeId}` : null,
-	);
-	// Nodes found by address — typed into the address field (a pipe nobody has
-	// used recently, or one a link named); merged ahead of the discovered list.
-	const [described, setDescribed] = useState<SqlEndpoint[]>([]);
-	const [addressDraft, setAddressDraft] = useState('');
-	const [addressError, setAddressError] = useState('');
-	const [describing, setDescribing] = useState(false);
-	// The lookup in flight: a later submission supersedes an earlier one, so
-	// an answer that arrives for a superseded address changes nothing.
-	const describeSeq = useRef(0);
-	const canDescribe = env.ready && !describing && addressDraft.trim().length > 0;
-	const describeAddress = useCallback(async () => {
-		if (!env.ready) return;
-		const address = addressDraft.trim();
-		if (!/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?$/.test(address)) {
-			setAddressError('An address is developerId.pipelineId or developerId.pipelineId.source');
-			return;
-		}
-		const seq = ++describeSeq.current;
-		setDescribing(true);
-		setAddressError('');
-		try {
-			const found = await env.describeAddress(address);
-			if (seq !== describeSeq.current) return;
-			if (found.length === 0) {
-				setAddressError(`${address} has no database node.`);
-				return;
-			}
-			setDescribed((prev) => [...found, ...prev.filter((e) => !found.some((f) => f.key === e.key))]);
-			setSelectedKey(found[0]!.key);
-		} catch (err) {
-			if (seq !== describeSeq.current) return;
-			setAddressError(err instanceof Error ? err.message : String(err));
-		} finally {
-			if (seq === describeSeq.current) setDescribing(false);
-		}
-	}, [addressDraft, env]);
-	useEffect(() => {
-		if (env.ready) void refreshEndpoints(() => env.discoverEndpoints());
-	}, [env]);
+	// ── Pipeline path: the pipe picker's choice ──────────────────────────────
+	// The node chosen in the picker; an edited connection keeps its saved
+	// binding until another node is chosen.
+	const [chosen, setChosen] = useState<SqlEndpoint | null>(null);
+	const savedBinding = editing?.mode === 'pipeline' ? { address: editing.address, nodeId: editing.nodeId } : null;
+	const handleChoose = useCallback((choice: IPipeChoice) => {
+		setError('');
+		setChosen(endpointFromChoice(choice));
+	}, []);
 
 	// ── Direct path: provider pick + schema fetch ────────────────────────────
 	const [provider, setProvider] = useState<string | null>(editing?.mode === 'direct' ? editing.provider : null);
@@ -342,36 +322,33 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 
 	// ── Save paths ───────────────────────────────────────────────────────────
 
-	/** Persists the pipeline-bound record from the selected endpoint. */
+	/** Persists the pipeline-bound record from the chosen node. */
 	const savePipeline = useCallback(() => {
-		const endpoint = [...described, ...endpoints].find((e: SqlEndpoint) => e.key === selectedKey);
-		if (!endpoint) {
-			// The saved node is not in either list (nothing of its pipe is in
-			// the caller's task list right now): keep the existing binding
-			// and apply the new name.
-			if (editing?.mode === 'pipeline' && selectedKey === `${editing.address}:${editing.nodeId}`) {
+		if (!chosen) {
+			// Nothing new chosen: an edited connection keeps its binding and
+			// takes the new name.
+			if (editing?.mode === 'pipeline') {
 				const kept: SavedSqlConnection = { ...editing, name: name.trim() || editing.name };
 				commit(kept);
 				onSaved?.(kept);
 				onClose();
 				return;
 			}
-			setError('Select a database node.');
+			setError('Choose a database node.');
 			return;
 		}
 		const record: SavedSqlConnection = {
 			id: editing?.id ?? newConnectionId(),
 			mode: 'pipeline' as const,
-			name: name.trim() || endpoint.nodeName,
-			address: endpoint.address,
-			pipelineName: endpoint.pipelineName,
-			nodeId: endpoint.nodeId,
-			...(endpoint.provider ? { provider: endpoint.provider } : {}),
+			name: name.trim() || chosen.nodeName,
+			address: chosen.address,
+			pipelineName: chosen.pipelineName,
+			nodeId: chosen.nodeId,
 		};
 		commit(record);
 		onSaved?.(record);
 		onClose();
-	}, [described, endpoints, selectedKey, name, editing, commit, onClose, onSaved]);
+	}, [chosen, name, editing, commit, onClose, onSaved]);
 
 	/** Validates the configured component server-side, then persists. */
 	const saveDirect = useCallback(async (formData: IFormData) => {
@@ -424,10 +401,9 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 	// No list-readiness gate here: commits run in (or are queued for) the
 	// OWNER realm's loaded store, so a save can never land on a half-loaded
 	// list whatever this document's own read state is.
-	const saveReady = path === 'pipeline' ? selectedKey !== null : provider !== null && service !== null;
+	const saveReady = path === 'pipeline' ? chosen !== null || savedBinding !== null : provider !== null && service !== null;
 
-	// Database providers, stable order (the discovery set is the source of truth).
-	// Direct connections configure a node of their own: every catalog node
+	// Database providers, stable order. Direct connections configure a node of their own: every catalog node
 	// carrying the `database` classType is offered — the catalog is the word
 	// for what a node is, never a list kept here (plan 3.6).
 	// Read now and again whenever the catalog is (re)delivered: the modal can
@@ -479,48 +455,24 @@ const NewConnectionModal: React.FC<NewConnectionModalProps> = ({ editing, onClos
 
 			{path === 'pipeline' ? (
 				<div style={styles.field}>
-					<span style={styles.fieldLabel}>Database nodes in pipelines you can reach</span>
-					<div style={styles.list}>
-						{discoveryError && <div style={styles.listEmpty}>{discoveryError}</div>}
-						{!discoveryError && described.length === 0 && endpoints.length === 0 && (
-							<div style={styles.listEmpty}>
-								{status === 'loading' || status === 'idle'
-									? 'Looking at your current pipelines…'
-									: 'No database node in your current pipelines. Enter a pipe address below — a published pipe does not have to be running.'}
-							</div>
-						)}
-						{[...described, ...endpoints.filter((e) => !described.some((d) => d.key === e.key))].map((endpoint: SqlEndpoint) => (
-							<div
-								key={endpoint.key}
-								role="button"
-								tabIndex={0}
-								style={styles.row(selectedKey === endpoint.key)}
-								onClick={() => setSelectedKey(endpoint.key)}
-								onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedKey(endpoint.key); }}
-							>
-								<span style={styles.rowGlyph}><DatabaseIcon /></span>
-								<span>{endpoint.nodeName}</span>
-								<span style={styles.rowDetail}>
-									{endpoint.pipelineName} · {endpoint.provider ? providerTitle(endpoint.provider) : endpoint.address}
-								</span>
-							</div>
-						))}
-					</div>
-					{/* By address: a pipe nobody has used recently, or one a link named. */}
-					<div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 8 }}>
-						<input
-							style={{ ...styles.input, flex: 1 }}
-							value={addressDraft}
-							placeholder="Pipe address, e.g. acme.docBrain"
-							spellCheck={false}
-							onChange={(e) => setAddressDraft(e.target.value)}
-							onKeyDown={(e) => { if (e.key === 'Enter' && canDescribe) void describeAddress(); }}
-						/>
-						<Button variant="secondary" small onClick={() => { void describeAddress(); }} disabled={!canDescribe}>
-							{describing ? 'Looking…' : 'Find nodes'}
-						</Button>
-					</div>
-					{addressError && <div style={styles.bannerWrap}><Banner variant="error">{addressError}</Banner></div>}
+					<span style={styles.fieldLabel}>Database node</span>
+					{(chosen || savedBinding) && (
+						<div style={styles.chosenLine}>
+							<span style={styles.rowGlyph}><DatabaseIcon /></span>
+							{chosen
+								? <span>{chosen.nodeName} · {chosen.pipelineName} ({chosen.address})</span>
+								: <span>Currently {savedBinding!.nodeId} on {savedBinding!.address}; choose another node below to rebind.</span>}
+						</div>
+					)}
+					<PipePicker
+						interfaceType={DATABASE_CLASS_TYPE}
+						interfaceLabel="database"
+						title=""
+						chooseLabel="Use"
+						writeLink={false}
+						selected={chosen ? { address: chosen.address, nodeId: chosen.nodeId } : savedBinding}
+						onChoose={handleChoose}
+					/>
 				</div>
 			) : (
 				<>

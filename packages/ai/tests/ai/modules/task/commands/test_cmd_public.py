@@ -256,3 +256,85 @@ def test_public_commands_init_is_noop():
     """The mixin's __init__ accepts the standard arguments without setting state."""
     instance = PublicCommands.__new__(PublicCommands)
     PublicCommands.__init__(instance, connection_id=1, server=None, transport=None)
+
+
+# ---------------------------------------------------------------------------
+# on_rrext_public_catalog — kind 'pipe' (the pipe picker's feed, plan 3.6)
+# ---------------------------------------------------------------------------
+
+
+def _catalog_conn(account_info=None):
+    """A PublicCommands instance with a caller and both response builders seeded."""
+    conn = _make_conn()
+    conn._account_info = account_info
+    conn.build_error = MagicMock(side_effect=lambda req, message: {'type': 'error', 'message': message})
+    return conn
+
+
+def _catalog_request(**arguments):
+    """One rrext_public_catalog request."""
+    return {'command': 'rrext_public_catalog', 'arguments': arguments}
+
+
+@pytest.mark.asyncio
+async def test_catalog_without_a_kind_is_the_app_catalog(monkeypatch):
+    """No kind (and kind 'app') delegates to the account layer unchanged."""
+    handle_public = AsyncMock(return_value={'type': 'response', 'body': {'apps': []}})
+    monkeypatch.setattr(cmd_public.account, 'handle_public', handle_public, raising=False)
+    conn = _catalog_conn()
+
+    await PublicCommands.on_rrext_public_catalog(conn, _catalog_request())
+    await PublicCommands.on_rrext_public_catalog(conn, _catalog_request(kind='app'))
+
+    assert handle_public.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_catalog_refuses_an_unknown_kind():
+    """A kind the verb does not browse is refused by name."""
+    result = await PublicCommands.on_rrext_public_catalog(_catalog_conn(), _catalog_request(kind='node'))
+    assert result['type'] == 'error' and "'node'" in result['message']
+
+
+@pytest.mark.asyncio
+async def test_pipe_catalog_needs_a_signed_in_caller(monkeypatch):
+    """An anonymous connection lists no pipes and searches no store."""
+    own = AsyncMock()
+    monkeypatch.setattr('ai.account.pipe_deploy.own_pipe_publications', own)
+    for args in ({'kind': 'pipe'}, {'kind': 'pipe', 'search': 'doc'}):
+        result = await PublicCommands.on_rrext_public_catalog(_catalog_conn(), _catalog_request(**args))
+        assert result == {'type': 'error', 'message': 'Sign in to list pipelines'}
+    own.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pipe_catalog_lists_own_publications_without_a_term_and_searches_the_store_with_one(monkeypatch):
+    """Blank search = the caller's own rungs; a term = the store search; the page is sliced here."""
+    caller = SimpleNamespace(userId='u-1')
+    own_rows = [{'id': f'acme.p{i}', 'rung': 'team'} for i in range(5)]
+    own = AsyncMock(return_value=own_rows)
+    search = AsyncMock(return_value=[{'id': 'zeta.docBrain', 'rung': 'public'}])
+    monkeypatch.setattr('ai.account.pipe_deploy.own_pipe_publications', own)
+    monkeypatch.setattr('ai.account.pipe_deploy.search_public_pipes', search)
+    conn = _catalog_conn(caller)
+
+    page = await PublicCommands.on_rrext_public_catalog(
+        conn, _catalog_request(kind='pipe', search='  ', offset=1, limit=2)
+    )
+    assert page['body'] == {'apps': own_rows[1:3], 'total': 5, 'offset': 1, 'limit': 2}
+    own.assert_awaited_once_with(cmd_public.account, caller)
+    search.assert_not_awaited()
+
+    found = await PublicCommands.on_rrext_public_catalog(conn, _catalog_request(kind='pipe', search='doc'))
+    assert found['body'] == {'apps': [{'id': 'zeta.docBrain', 'rung': 'public'}], 'total': 1, 'offset': 0, 'limit': 20}
+    search.assert_awaited_once_with(cmd_public.account, caller, 'doc')
+
+
+@pytest.mark.asyncio
+async def test_pipe_catalog_refuses_malformed_arguments():
+    """A non-string term and non-integer paging are refused by name."""
+    conn = _catalog_conn(SimpleNamespace(userId='u-1'))
+    bad_search = await PublicCommands.on_rrext_public_catalog(conn, _catalog_request(kind='pipe', search=['doc']))
+    assert bad_search['message'] == 'search must be a string'
+    bad_page = await PublicCommands.on_rrext_public_catalog(conn, _catalog_request(kind='pipe', limit='many'))
+    assert bad_page['message'] == 'offset and limit must be integers'

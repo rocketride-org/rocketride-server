@@ -13,7 +13,7 @@ No credential ever rides a URL. The old `/chat?auth=pk_…` pages and the embedd
 
 - Sends each message through the pipe's chat source with the SDK's `chat()`; the address is the token slot, so the server resolves and, when the engine is dormant, starts the publication that serves you.
 - Keeps the transcript, recent history, SSE status lines and answer extraction in the shell's `ChatView` / `useChatMessages`; the app carries no model and no conversation logic.
-- With no `pipe=` in the URL, shows how to reach a chat and takes an address by hand. The publication picker (your `@me` and `@team` rows, store search) follows the merged publication table.
+- With no `pipe=` in the URL, shows the pipe picker: the pipelines published to you and your teams (`@me`, then `@team` in your team order), a store search, and an address field; picking a pipe lists its chat sources, and choosing one writes `pipe=` into the URL.
 
 ## Addresses
 

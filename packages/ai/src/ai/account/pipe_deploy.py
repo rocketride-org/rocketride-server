@@ -497,3 +497,190 @@ def pipe_catalog_row(pipe_name: str, entry: Dict[str, Any]) -> Optional[Dict[str
         if url:
             row[key] = url
     return row
+
+
+# ==== The picker's walk (plan 3.6, C.16c) ======================================
+
+#: The snapshot fields a store search matches, beside the registry name.
+_SEARCHED_SNAPSHOT_KEYS = ('name', 'description', 'tagline')
+
+
+def _name_of(row: Dict[str, Any]) -> str:
+    """A publish row's registry name ``developerId.pipeId`` (both spellings ride the row)."""
+    return str(row.get('projectId') or row.get('appId') or '')
+
+
+def _picker_entry(row: Dict[str, Any], rung: str, team_name: str = '') -> Dict[str, Any]:
+    """
+    One publish row as the pipe picker lists it.
+
+    The catalog's entry shape (``id``, ``name``, ``publisher``,
+    ``description``) with ``kind: 'pipe'``, the address in ``pipe`` and the
+    rung that answers the caller for it; ``teamId``/``teamName`` on a
+    ``@team`` entry. The display facts come from the row's snapshot; a row
+    without a name shows its registry name.
+
+    Args:
+        row: The publish row (``publish_list`` shape).
+        rung: ``'me'``, ``'team'`` or ``'public'``.
+        team_name: The answering team's display name (``@team`` only).
+
+    Returns:
+        The entry.
+    """
+    from ai.account.app_deploy import namespace_of
+
+    pipe_name = _name_of(row)
+    snapshot = row.get('snapshot') if isinstance(row.get('snapshot'), dict) else {}
+    entry: Dict[str, Any] = {
+        'kind': 'pipe',
+        'id': pipe_name,
+        'pipe': pipe_name,
+        'name': str(snapshot.get('name') or pipe_name),
+        'publisher': namespace_of(pipe_name),
+        'description': str(snapshot.get('description') or snapshot.get('tagline') or ''),
+        'rung': rung,
+        'version': row.get('version'),
+    }
+    if rung == 'team':
+        team_id = str((row.get('audience') or {}).get('id') or '')
+        entry['teamId'] = team_id
+        entry['teamName'] = team_name or team_id
+    return entry
+
+
+def _in_scope(endpoints: Optional[List[str]], pipe_name: str) -> bool:
+    """Whether a key's ``endpoints`` scope admits SOME source of ``pipe_name`` (unscoped: always)."""
+    from ai.modules.task.address import check_endpoint_scope
+    from ai.modules.task.types import TaskError
+
+    try:
+        check_endpoint_scope(endpoints, pipe_name)
+    except (PermissionError, TaskError):
+        # Out of scope, or a registry name the address grammar refuses:
+        # neither is the caller's to list
+        return False
+    return True
+
+
+def _serves(row: Dict[str, Any], public: bool) -> bool:
+    """Whether one publish row serves: an int version past the pipe serving gate."""
+    state = str(row.get('state') or '')
+    artifact_state = str(row.get('artifactState') or DEFAULT_REVIEW_STATE)
+    return isinstance(row.get('version'), int) and not pipe_serving_block_of(state, artifact_state, public)
+
+
+async def own_pipe_publications(account: Any, account_info: 'AccountInfo') -> List[Dict[str, Any]]:
+    """
+    The pipe publications the caller reaches in their OWN org, as the picker lists them.
+
+    The ``@me`` rows first, then the ``@team`` rows in the caller's team
+    order (``teams_to_probe``: a scoped key probes its frozen team only).
+    Each pipe appears ONCE, at the rung that answers the caller for it (the
+    ladder's order, plan 3.2), so the list never shows a publication the
+    resolver would pass over. Only serving rows are listed; rows of another
+    org never are (user and team keys are global ids on the DB edition); a
+    key's ``endpoints`` scope drops the pipes it may not call. ``@public`` is
+    NOT walked here: the store is a search (:func:`search_public_pipes`),
+    never a listing (plan 3.6). One read of the publish table.
+
+    Args:
+        account: The account singleton.
+        account_info: The request's account.
+
+    Returns:
+        Picker entries: ``@me`` first, then team by team in team order, each
+        group by display name.
+
+    Raises:
+        PermissionError: Unauthenticated.
+        Exception: A failing store, propagated (never read as "no pipes").
+    """
+    if account_info is None:
+        raise PermissionError('Not authenticated')
+    org_id, _ = _org_of(account_info)
+    if not org_id:
+        return []
+    user_id = str(getattr(account_info, 'userId', '') or '')
+    probe = teams_to_probe(account_info)
+    endpoints = getattr(account_info, 'endpoints', None)
+    org = getattr(account_info, 'organization', None) or {}
+    team_names = {str(t.get('id')): str(t.get('name') or '') for t in org.get('teams') or [] if t.get('id')}
+
+    # Step 1: the caller's own slots, in the ladder's order, read once
+    slots: List[Tuple[str, str]] = ([('me', f'user~{user_id}')] if user_id else []) + [('team', t) for t in probe]
+    if not slots:
+        return []
+    rows = await account.publish_list(org_id, 'pipe', [_audience_of(slot) for _, slot in slots])
+
+    # Step 2: the serving rows of this org, by slot
+    by_slot: Dict[str, List[Dict[str, Any]]] = {}
+    for row in rows:
+        if str(row.get('orgId') or org_id) != org_id or not _serves(row, public=False):
+            continue
+        by_slot.setdefault(_slot_of(row), []).append(row)
+
+    # Step 3: each pipe at the first rung that holds it
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for rung, slot in slots:
+        group: List[Dict[str, Any]] = []
+        for row in by_slot.get(slot, []):
+            pipe_name = _name_of(row)
+            if not pipe_name or pipe_name in seen or not _in_scope(endpoints, pipe_name):
+                continue
+            seen.add(pipe_name)
+            group.append(_picker_entry(row, rung, team_names.get(slot, '')))
+        out.extend(sorted(group, key=lambda e: (e['name'].lower(), e['id'])))
+    return out
+
+
+async def search_public_pipes(account: Any, account_info: 'AccountInfo', search: str) -> List[Dict[str, Any]]:
+    """
+    The store's pipes whose registry name, name, description or tagline contains ``search``.
+
+    A SEARCH, never a listing (plan 3.6): a blank term is refused, so no
+    request answers the whole public rung. Only serving public rows match
+    (enabled, deployment ``ready``); a key's ``endpoints`` scope drops the
+    pipes it may not call; the match is a case-insensitive substring. The
+    publish table answers every org's public rows on the DB edition (the
+    store is global) and the local org's on the file edition.
+
+    Args:
+        account: The account singleton.
+        account_info: The request's account.
+        search: The search term.
+
+    Returns:
+        Picker entries on the ``public`` rung, by display name.
+
+    Raises:
+        PermissionError: Unauthenticated.
+        ValueError: A blank search term.
+        Exception: A failing store, propagated.
+    """
+    if account_info is None:
+        raise PermissionError('Not authenticated')
+    needle = (search or '').strip().lower()
+    if not needle:
+        raise ValueError('The store is searched, never listed: give a search term')
+    org_id, _ = _org_of(account_info)
+    endpoints = getattr(account_info, 'endpoints', None)
+
+    # Step 1: the store's public pipe rows
+    rows = await account.publish_list(org_id, 'pipe', [_audience_of(PUBLIC_AUDIENCE_KEY)])
+
+    # Step 2: the serving rows that match, once per pipe
+    out: List[Dict[str, Any]] = []
+    seen: set = set()
+    for row in rows:
+        pipe_name = _name_of(row)
+        if not pipe_name or pipe_name in seen or not _serves(row, public=True):
+            continue
+        snapshot = row.get('snapshot') if isinstance(row.get('snapshot'), dict) else {}
+        haystack = [pipe_name] + [str(snapshot.get(key) or '') for key in _SEARCHED_SNAPSHOT_KEYS]
+        if not any(needle in text.lower() for text in haystack) or not _in_scope(endpoints, pipe_name):
+            continue
+        seen.add(pipe_name)
+        out.append(_picker_entry(row, 'public'))
+    return sorted(out, key=lambda e: (e['name'].lower(), e['id']))

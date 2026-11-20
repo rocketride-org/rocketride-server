@@ -496,10 +496,10 @@ statements ran either way; only the app's picture of the schema is behind.
 - **A pipeline-bound connection does not need its pipeline running.** It is
   bound to an address and a node; the server resolves the publication (or
   your own Play'd run) that answers the address and starts a dormant engine
-  on the first statement. The connection dialog lists the database nodes of
-  the pipelines in your current task list and finds any other pipe by its
-  address. A direct connection owns its temporary pipeline, which the app
-  starts and stops.
+  on the first statement. The connection dialog picks the pipe from the
+  pipelines published to you and your teams, a store search, or an address,
+  and lists that pipe's database nodes. A direct connection owns its
+  temporary pipeline, which the app starts and stops.
 - **Direct connections store their configuration as typed** in your per-user
   server file. Use `${ROCKETRIDE_*}` references for secrets.
 - **The limit moves in front of a locking clause.** MySQL requires the

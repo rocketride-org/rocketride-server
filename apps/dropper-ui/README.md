@@ -13,7 +13,7 @@ No credential ever rides a URL. The old `/dropper?auth=pk_…` pages are gone; t
 
 - Sends each dropped file through the pipe's dropper source with the SDK's `sendFiles()`; the address is the token slot, so the server resolves and, when the engine is dormant, starts the publication that serves you.
 - Lists every upload with its outcome and the result the pipeline returned for it.
-- With no `pipe=` in the URL, shows how to reach a dropper and takes an address by hand. The publication picker (your `@me` and `@team` rows, store search) follows the merged publication table.
+- With no `pipe=` in the URL, shows the pipe picker: the pipelines published to you and your teams (`@me`, then `@team` in your team order), a store search, and an address field; picking a pipe lists its dropper sources, and choosing one writes `pipe=` into the URL.
 
 ## Addresses
 
