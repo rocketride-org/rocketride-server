@@ -596,23 +596,32 @@ function makeRunDbPytestAction(options = {}) {
 					const suites = pass.suites.map((suite) => path.join(TEST_DIR, suite));
 					const report = path.join(reportDir, pass.report);
 					await fs.promises.rm(report, { force: true });
-					await runPytest({
-						engine: ENGINE,
-						testsDir: suites[0],
-						extraArgs: [
-							...suites.slice(1),
-							'-v',
-							'-rs',
-							'--rootdir',
-							PACKAGE_DIR,
-							'-p',
-							'no:xdist',
-							`--junitxml=${report}`,
-							...withoutXdistArgs(pytestTokens),
-							...selectors,
-						],
-						execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
-					});
+					try {
+						await runPytest({
+							engine: ENGINE,
+							testsDir: suites[0],
+							extraArgs: [
+								...suites.slice(1),
+								'-v',
+								'-rs',
+								'--rootdir',
+								PACKAGE_DIR,
+								'-p',
+								'no:xdist',
+								`--junitxml=${report}`,
+								...withoutXdistArgs(pytestTokens),
+								...selectors,
+							],
+							execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
+						});
+					} catch (err) {
+						// A selector that matches nothing in these suites (the usual
+						// case: a mocked-only test) makes pytest exit 5. That is not a
+						// failure of a selected run; any other failure still is.
+						if (selectors.length === 0 || !(await selectedNothing(report))) throw err;
+						notes.push(`No test in ${pass.report}'s suites matches the selection: pass skipped`);
+						continue;
+					}
 					if (checkResults) {
 						const xml = await fs.promises.readFile(report, 'utf8');
 						checkRequiredDbResults(xml, pass.suites, pass.report);
@@ -627,6 +636,22 @@ function makeRunDbPytestAction(options = {}) {
 			}
 		},
 	};
+}
+
+/**
+ * True when pytest wrote a junit report that records no test at all: the
+ * selection (-k / -m) matched nothing. A missing or unreadable report (pytest
+ * died before writing it) is not an empty selection.
+ */
+async function selectedNothing(report) {
+	let xml;
+	try {
+		xml = await fs.promises.readFile(report, 'utf8');
+	} catch {
+		return false;
+	}
+	const counts = [...xml.matchAll(/<testsuite\b[^>]*?\btests="(\d+)"/g)].map((m) => Number(m[1]));
+	return counts.length > 0 && counts.every((n) => n === 0);
 }
 
 /**
