@@ -40,9 +40,6 @@ def client(node, monkeypatch):
         'domain': 'tenant.us.auth0.com',
         'clientId': 'read',
         'clientSecret': 'read-secret',
-        'allowWrite': True,
-        'writeClientId': 'write',
-        'writeClientSecret': 'write-secret',
     }
     return module, module.Auth0Client(cfg), requests, cfg
 
@@ -75,23 +72,20 @@ def test_rejects_unsafe_domains(client, domain):
     requests.post.assert_not_called()
 
 
-def test_independent_tokens_reuse_and_concurrency(client):
+def test_token_reuse_and_concurrency(client):
     _, auth, requests, _ = client
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda _: auth.request('get_user', identifier='auth0|1'), range(30)))
-    auth.request('unblock_user', identifier='auth0|1')
     auth.request('get_user', identifier='auth0|1')
-    assert requests.post.call_count == 2
+    assert requests.post.call_count == 1
     assert requests.post.call_args_list[0].kwargs['json']['client_id'] == 'read'
-    assert requests.post.call_args_list[1].kwargs['json']['client_id'] == 'write'
-    assert requests.request.call_args_list[-2].kwargs['headers']['Authorization'] == 'Bearer write-token'
     assert requests.request.call_args.kwargs['headers']['Authorization'] == 'Bearer read-token'
     assert all(
         call.kwargs['allow_redirects'] is False
         for call in requests.post.call_args_list + requests.request.call_args_list
     )
     auth.close()
-    assert auth._tokens == {'read': None, 'write': None} and auth._config == {}
+    assert auth._tokens == {'read': None} and auth._config == {}
 
 
 def test_expiry_and_401_refresh(client, monkeypatch):
@@ -109,15 +103,6 @@ def test_expiry_and_401_refresh(client, monkeypatch):
     with pytest.raises(module.Auth0Error) as error:
         auth.request('get_user', identifier='1')
     assert error.value.code == 'AUTHENTICATION_FAILED'
-
-
-@pytest.mark.parametrize('status', [401, 429, 500])
-def test_writes_never_replayed(client, status):
-    module, auth, requests, _ = client
-    requests.request.return_value = response(status)
-    with pytest.raises(module.Auth0Error):
-        auth.request('unblock_user', identifier='1')
-    assert requests.request.call_count == 1
 
 
 def test_retry_budget_and_error_sanitization(client):
@@ -139,23 +124,18 @@ def test_retry_budget_and_error_sanitization(client):
     assert error.value.code == 'MISSING_SCOPE'
 
 
-def test_disabled_writes_and_route_restrictions(client):
+def test_route_restrictions(client):
     module, _, requests, cfg = client
-    cfg['allowWrite'] = False
     auth = module.Auth0Client(cfg)
-    for operation, identifier in [('unblock_user', '1'), ('https://evil.test', None), ('get_user', '..')]:
+    for operation, identifier in [
+        ('unblock' + '_user', '1'),
+        ('delete_user', '1'),
+        ('https://evil.test', None),
+        ('get_user', '..'),
+    ]:
         with pytest.raises(module.Auth0Error):
             auth.request(operation, identifier=identifier)
     requests.post.assert_not_called()
-
-
-def test_write_connection_failure_is_not_replayed(client):
-    module, auth, requests, _ = client
-    requests.request.side_effect = Exception('sensitive details')
-    with pytest.raises(module.Auth0Error) as error:
-        auth.request('unblock_user', identifier='1')
-    assert requests.request.call_count == 1
-    assert error.value.retryable is False and 'sensitive' not in str(error.value)
 
 
 def test_large_retry_after_is_not_shortened(client):
@@ -239,7 +219,7 @@ def test_non_json_and_empty_responses(client):
     assert auth.request('get_user', identifier='1') == {}
 
 
-@pytest.mark.parametrize('operation', ['get_user', 'unblock_user'])
+@pytest.mark.parametrize('operation', ['get_user'])
 def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
     module, auth, requests, _ = client
     requests.request.side_effect = Exception('credential=read-secret token=private-token')
@@ -272,7 +252,6 @@ def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
         'get_user_permissions',
         'list_organizations',
         'get_organization_members',
-        'unblock_user',
     ],
 )
 @pytest.mark.parametrize('status,code', [(403, 'MISSING_SCOPE'), (404, None)])
@@ -281,10 +260,7 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
     instance = node[0].IInstance()
     instance.IGlobal = types.SimpleNamespace(client=auth)
     failed = response(status, {'error': 'Forbidden', 'errorCode': 'insufficient_scope', 'message': 'private-token'})
-    if operation == 'unblock_user':
-        requests.request.side_effect = [response(200, {'blocked_for': [{'identifier': 'x'}]}), failed]
-    else:
-        requests.request.return_value = failed
+    requests.request.return_value = failed
     args = {'email': 'a@example.com'} if operation == 'search_users' else {}
     if operation not in (
         'search_users',
@@ -305,10 +281,6 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
         }.get(operation, 'user_id')
         args[key] = 'id'
     result = getattr(instance, operation)(args)
-    if operation == 'unblock_user':
-        assert result['error_code'] == 'WRITE_AUTHORIZATION_REQUIRED'
-        requests.request.assert_not_called()
-        return
     expected = code or (
         'RESOURCE_NOT_FOUND'
         if operation
@@ -392,20 +364,6 @@ def test_connection_clients_route_passes_cursor_once(client, node):
     assert call.kwargs['headers']['Authorization'] == 'Bearer read-token'
 
 
-def test_client_uses_separate_read_and_write_tokens(client):
-    _, auth, requests, _ = client
-    requests.request.side_effect = [response(200, {'blocked_for': [{'identifier': 'x'}]}), response(204)]
-    auth.request('get_user_blocks', identifier='auth0|1', params={'consider_brute_force_enablement': 'true'})
-    auth.request('unblock_user', identifier='auth0|1')
-    read_call, write_call = requests.request.call_args_list
-    assert read_call.args == ('GET', 'https://tenant.us.auth0.com/api/v2/user-blocks/auth0%7C1')
-    assert read_call.kwargs['params'] == {'consider_brute_force_enablement': 'true'}
-    assert read_call.kwargs['headers']['Authorization'] == 'Bearer read-token'
-    assert write_call.args == ('DELETE', 'https://tenant.us.auth0.com/api/v2/user-blocks/auth0%7C1')
-    assert write_call.kwargs['headers']['Authorization'] == 'Bearer write-token'
-    assert [call.kwargs['json']['client_id'] for call in requests.post.call_args_list] == ['read', 'write']
-
-
 def test_api_redirect_is_not_followed(client):
     module, auth, requests, _ = client
     requests.request.return_value = response(302, headers={'Location': 'https://evil.example/collect'})
@@ -414,29 +372,6 @@ def test_api_redirect_is_not_followed(client):
     assert error.value.code == 'API_ERROR'
     assert requests.request.call_count == 1
     assert requests.request.call_args.kwargs['allow_redirects'] is False
-
-
-def test_write_token_failure_does_not_use_read_credentials(client):
-    module, auth, requests, _ = client
-    requests.post.side_effect = [response(200, {'access_token': 'read-token', 'expires_in': 3600}), response(403)]
-    auth.request('get_user', identifier='1')
-    with pytest.raises(module.Auth0Error) as error:
-        auth.request('unblock_user', identifier='1')
-    assert error.value.code == 'AUTHENTICATION_FAILED'
-    assert [call.kwargs['json']['client_id'] for call in requests.post.call_args_list] == ['read', 'write']
-    assert requests.request.call_count == 1
-
-
-def test_unauthorized_write_invalidates_only_its_token(client):
-    module, auth, requests, _ = client
-    auth.request('get_user', identifier='1')
-    requests.request.return_value = response(401)
-    with pytest.raises(module.Auth0Error):
-        auth.request('unblock_user', identifier='1')
-    requests.request.return_value = response(200)
-    auth.request('get_user', identifier='1')
-    assert [call.kwargs['json']['client_id'] for call in requests.post.call_args_list] == ['read', 'write']
-    assert requests.request.call_args.kwargs['headers']['Authorization'] == 'Bearer read-token'
 
 
 def test_close_during_token_refresh_waits_and_clears_credentials(client):
@@ -458,7 +393,7 @@ def test_close_during_token_refresh_waits_and_clears_credentials(client):
         release.set()
         pending.result(timeout=5)
         closed.result(timeout=5)
-    assert auth._config == {} and auth._tokens == {'read': None, 'write': None}
+    assert auth._config == {} and auth._tokens == {'read': None}
     with pytest.raises(module.Auth0Error) as error:
         auth.request('get_user', identifier='u')
     assert error.value.code == 'CLIENT_CLOSED'

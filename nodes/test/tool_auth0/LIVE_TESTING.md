@@ -13,8 +13,7 @@ with this node installed and the test tenant configuration is required.
 
 ## Read-only checks
 
-1. Configure the node with the authorized read-only M2M application and leave
-   writes disabled. Confirm the tenant and test user are the designated test
+1. Configure the node with the authorized read-only M2M application and confirm it has only the required read permissions. Confirm the tenant and test user are the designated test
    resources. Do not put credentials in command lines or chat.
 2. Call `search_users` for the test user's known email, then repeat with a
    different letter case. Confirm the intended account appears in both results.
@@ -42,8 +41,7 @@ with this node installed and the test tenant configuration is required.
 
 ## Live write: unavailable
 
-The node does not expose `unblock_user` and denies unblock requests even when
-write credentials are configured. It cannot perform a live write until an
+The node does not expose account changes. It cannot perform a live write until an
 independent human authorization mechanism is supported. Do not make a DELETE
 as part of these read-only checks.
 

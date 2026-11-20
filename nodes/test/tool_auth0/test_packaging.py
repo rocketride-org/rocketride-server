@@ -48,15 +48,13 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
     for name, kind in (('llm_openai_api_1', 'llm'), ('memory_internal_1', 'memory'), ('tool_auth0_1', 'tool')):
         assert components[name]['control'] == [{'classType': kind, 'from': 'agent_rocketride_1'}]
     config = components['tool_auth0_1']['config']
-    assert config['allowWrite'] is False
     assert config['domain'] == '${ROCKETRIDE_AUTH0_DOMAIN}'
     assert config['clientId'] == '${ROCKETRIDE_AUTH0_CLIENT_ID}'
     assert config['clientSecret'] == '${ROCKETRIDE_AUTH0_CLIENT_SECRET}'
-    assert not config.get('writeClientSecret') and not config.get('writeClientId')
     llm = components['llm_openai_api_1']['config']['custom']
     assert llm['apikey'] == '${ROCKETRIDE_OPENROUTER_API_KEY}'
     assert llm['base_url'] == 'https://openrouter.ai/api/v1' and llm['model'] == 'openrouter/free'
-    assert 'Never call unblock_user' in ' '.join(agent['config']['instructions'])
+    assert 'Never make account changes' in ' '.join(agent['config']['instructions'])
 
 
 def test_example_edges_match_actual_service_definitions():

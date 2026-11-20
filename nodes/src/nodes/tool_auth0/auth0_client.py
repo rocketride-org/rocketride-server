@@ -91,49 +91,30 @@ def validate_config(cfg: dict) -> None:
         if not isinstance(cfg.get(key), str) or not cfg[key].strip():
             raise ValueError(f'Auth0: {key} is required')
     validate_domain(cfg['domain'])
-    allow_write = cfg.get('allowWrite', False)
-    if not isinstance(allow_write, bool):
-        raise ValueError('Auth0: allowWrite must be a boolean')
-    if allow_write:
-        for key in ('writeClientId', 'writeClientSecret'):
-            if not isinstance(cfg.get(key), str) or not cfg[key].strip():
-                raise ValueError(f'Auth0: {key} is required when writes are enabled')
-        if cfg['writeClientId'].strip() == cfg['clientId'].strip():
-            raise ValueError('Auth0: read and write client IDs must belong to separate applications')
     keys = ('clientId', 'clientSecret')
-    if allow_write:
-        keys += ('writeClientId', 'writeClientSecret')
     for key in keys:
         if re.search(r'\$\{[^}]*\}|<REDACTED>', cfg[key]):
             raise ValueError(f'Auth0: {key} contains an unresolved credential reference')
 
 
 class Auth0Client:
-    """Own credentials, independent token caches, and fixed Management API routes."""
+    """Own read credentials, a token cache, and fixed Management API routes."""
 
     def __init__(self, cfg: dict) -> None:
-        """Validate credentials and initialize independent token caches."""
+        """Validate credentials and initialize the token cache."""
         validate_config(cfg)
-        keys = ['domain', 'clientId', 'clientSecret', 'allowWrite']
-        if cfg.get('allowWrite', False):
-            keys.extend(('writeClientId', 'writeClientSecret'))
-        self._config = {key: cfg.get(key) for key in keys}
+        self._config = {key: cfg[key] for key in ('domain', 'clientId', 'clientSecret')}
         self._base = 'https://' + validate_domain(cfg['domain'])
-        self._tokens = {'read': None, 'write': None}
-        self._locks = {'read': threading.Lock(), 'write': threading.Lock()}
+        self._tokens = {'read': None}
+        self._locks = {'read': threading.Lock()}
         self._closed = False
 
     def close(self) -> None:
         """Release credential references."""
-        with self._locks['read'], self._locks['write']:
+        with self._locks['read']:
             self._closed = True
             self._config.clear()
-            self._tokens = {'read': None, 'write': None}
-
-    @property
-    def writes_enabled(self):
-        """Report whether a separate write application is configured."""
-        return self._config.get('allowWrite') is True
+            self._tokens = {'read': None}
 
     def _token(self, kind):
         """Get or refresh the cached token for the credential kind."""
@@ -145,14 +126,13 @@ class Auth0Client:
             cached = self._tokens[kind]
             if cached and time.monotonic() < cached[1]:
                 return cached[0]
-            prefix = 'writeClient' if kind == 'write' else 'client'
             try:
                 response = requests.post(
                     self._base + '/oauth/token',
                     json={
                         'grant_type': 'client_credentials',
-                        'client_id': self._config[prefix + 'Id'],
-                        'client_secret': self._config[prefix + 'Secret'],
+                        'client_id': self._config['clientId'],
+                        'client_secret': self._config['clientSecret'],
                         'audience': self._base + '/api/v2/',
                     },
                     timeout=(5, 15),
@@ -195,7 +175,7 @@ class Auth0Client:
                 self._tokens[kind] = None
 
     def request(self, operation, *, identifier=None, params=None):
-        """Call an approved route. Writes are never automatically replayed."""
+        """Call an approved read-only route."""
         import requests
 
         routes = {
@@ -217,7 +197,6 @@ class Auth0Client:
             'get_user_permissions': ('GET', '/users/{id}/permissions'),
             'list_organizations': ('GET', '/organizations'),
             'get_organization_members': ('GET', '/organizations/{id}/members'),
-            'unblock_user': ('DELETE', '/user-blocks/{id}'),
         }
         if operation not in routes:
             raise Auth0Error('INVALID_INPUT', 'Unsupported Auth0 operation.')
@@ -226,11 +205,9 @@ class Auth0Client:
             if not isinstance(identifier, str) or not 1 <= len(identifier) <= 300 or identifier in ('.', '..'):
                 raise Auth0Error('INVALID_INPUT', 'A valid identifier is required.')
             path = path.replace('{id}', quote(identifier, safe=''))
-        kind = 'write' if method == 'DELETE' else 'read'
+        kind = 'read'
         if self._closed:
             raise Auth0Error('CLIENT_CLOSED', 'Auth0 client is closed.')
-        if kind == 'write' and not self._config.get('allowWrite'):
-            raise Auth0Error('WRITE_DISABLED', 'Auth0 writes are disabled.')
         auth_retry = False
         retries = 0
         waited = 0.0
@@ -284,7 +261,6 @@ class Auth0Client:
                         'get_user_blocks',
                         'get_user_roles',
                         'get_user_permissions',
-                        'unblock_user',
                     )
                     else 'RESOURCE_NOT_FOUND',
                     'The requested Auth0 resource was not found.',

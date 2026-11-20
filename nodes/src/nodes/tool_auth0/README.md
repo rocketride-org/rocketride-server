@@ -59,15 +59,11 @@ Descriptions and diagnostics never copy raw Auth0 log descriptions. The allowlis
 
 ## Configuration
 
-Connect the Auth0 tool node to an agent. The default profile provides empty credentials and leaves writes disabled. Create an Auth0 machine-to-machine application, authorize it for the Management API with the permissions needed by the chosen tools, and set `auth0.domain` and `auth0.clientId` in the node settings. Store the client secret in RocketRide's secure environment settings and enter its variable reference in `auth0.clientSecret`. The read-only mode does not require a write application.
+Connect the Auth0 tool node to an agent. The default profile provides empty credentials. Create an Auth0 machine-to-machine application, authorize it for the Management API with the permissions needed by the chosen tools, and set `auth0.domain` and `auth0.clientId` in the node settings. Store the client secret in RocketRide's secure environment settings and enter its variable reference in `auth0.clientSecret`.
 
 ### Domain
 
 Enter an Auth0-managed hostname such as `example.us.auth0.com`. An HTTPS prefix, trailing slash, surrounding whitespace, and uppercase letters are accepted. Ports, paths, and custom domains are rejected. The node validates DNS labels and the `.auth0.com` suffix before connecting.
-
-### Enable writes and write credentials
-
-`auth0.allowWrite` defaults to `false`. The reserved write configuration requires `auth0.writeClientId` and a secure environment variable reference for `auth0.writeClientSecret` for a separate write application. The form requires both fields when writes are enabled; the node checks them again at startup and rejects matching read and write client IDs. Enabling writes does not authorize an unblock: the tool remains unavailable until independent authorization is implemented. A future implementation must also check block records immediately before the write.
 
 ### Secret references
 
@@ -75,7 +71,7 @@ Store client secrets in RocketRide's secure environment settings and use referen
 
 ## Authentication
 
-Authorize a read-only machine-to-machine application for the Auth0 Management API with `read:users`, `read:logs_users`, `read:logs`, `read:connections`, `read:clients`, `read:attack_protection`, `read:roles`, `read:organizations`, and `read:organization_members` as needed for the tools above. In a development tenant, `get_user_logs` succeeded with `read:logs_users` as the only permission selected for a separate application. That application also unexpectedly succeeded at `search_logs`; the reason has not been established, and token claims were not independently inspected. Write credentials are reserved for a future authorized recovery flow and are not needed for the available tools. The node obtains client-credentials tokens for the Management API audience and caches read and write tokens independently.
+Authorize a read-only machine-to-machine application for the Auth0 Management API with `read:users`, `read:logs_users`, `read:logs`, `read:connections`, `read:clients`, `read:attack_protection`, `read:roles`, `read:organizations`, and `read:organization_members` as needed for the tools above. In a development tenant, `get_user_logs` succeeded with `read:logs_users` as the only permission selected for a separate application. That application also unexpectedly succeeded at `search_logs`; the reason has not been established, and token claims were not independently inspected. The node obtains and caches a client-credentials token for the Management API audience.
 
 ## Notes
 
@@ -83,15 +79,15 @@ Authorize a read-only machine-to-machine application for the Auth0 Management AP
 
 An agent investigating a sign-in failure can search for an exact email, get the matching profile, inspect recent logs and an individual event, then check brute-force blocks. It should distinguish an administrative block from a brute-force record and avoid claiming that a block was removed without an approved recovery action.
 
-The co-located `example.pipe` demonstrates this flow with a chat source, RocketRide Wave agent, OpenRouter free-model LLM, internal memory, Auth0 tool, and answer response. Configure `ROCKETRIDE_AUTH0_DOMAIN`, `ROCKETRIDE_AUTH0_CLIENT_ID`, `ROCKETRIDE_AUTH0_CLIENT_SECRET`, and `ROCKETRIDE_OPENROUTER_API_KEY` in RocketRide's environment settings. It leaves writes disabled and instructs the agent not to unblock users. It requires an engine that has this node; OpenRouter availability and rate limits apply.
+The co-located `example.pipe` demonstrates this flow with a chat source, RocketRide Wave agent, OpenRouter free-model LLM, internal memory, Auth0 tool, and answer response. Configure `ROCKETRIDE_AUTH0_DOMAIN`, `ROCKETRIDE_AUTH0_CLIENT_ID`, `ROCKETRIDE_AUTH0_CLIENT_SECRET`, and `ROCKETRIDE_OPENROUTER_API_KEY` in RocketRide's environment settings. It instructs the agent not to make account changes. It requires an engine that has this node; OpenRouter availability and rate limits apply.
 
 ### Errors and retries
 
-Errors use the flat keys `success`, `error`, `error_code`, `retryable`, and `retry_after_seconds`. Tool errors include `INVALID_INPUT`, `AUTHENTICATION_FAILED`, `MISSING_SCOPE`, `USER_NOT_FOUND`, `RESOURCE_NOT_FOUND`, `RATE_LIMITED`, `AUTH0_UNAVAILABLE`, `WRITE_DISABLED`, `WRITE_AUTHORIZATION_REQUIRED`, `CLIENT_CLOSED`, and `API_ERROR`. An invalid domain fails node configuration with `INVALID_DOMAIN`. A 403 is classified as missing scope only when Auth0 identifies it as such.
+Errors use the flat keys `success`, `error`, `error_code`, `retryable`, and `retry_after_seconds`. Tool errors include `INVALID_INPUT`, `AUTHENTICATION_FAILED`, `MISSING_SCOPE`, `USER_NOT_FOUND`, `RESOURCE_NOT_FOUND`, `RATE_LIMITED`, `AUTH0_UNAVAILABLE`, `CLIENT_CLOSED`, and `API_ERROR`. An invalid domain fails node configuration with `INVALID_DOMAIN`. A 403 is classified as missing scope only when Auth0 identifies it as such.
 
-The client does not follow redirects. Management API reads refresh an invalid token once on a 401 and retry HTTP 429 or 5xx responses at most twice, with a total retry wait of at most ten seconds. Network exceptions and token-acquisition failures are returned without those request retries. Writes are never automatically replayed, including after authentication failure or an ambiguous connection failure.
+The client does not follow redirects. Management API reads refresh an invalid token once on a 401 and retry HTTP 429 or 5xx responses at most twice, with a total retry wait of at most ten seconds. Network exceptions and token-acquisition failures are returned without those request retries.
 
-For authentication errors, check the tenant hostname, application credentials, Management API audience, and authorization. For `MISSING_SCOPE`, check the appropriate application's permissions. For an empty search, consider search-v3 indexing delay and email spelling; a `WRITE_DISABLED` or `WRITE_AUTHORIZATION_REQUIRED` response means the unblock tool cannot currently be used. For a rate limit, wait for the reported retry interval if provided; the client uses Auth0's reset header when `Retry-After` is absent.
+For authentication errors, check the tenant hostname, application credentials, Management API audience, and authorization. For `MISSING_SCOPE`, check the appropriate application's permissions. For an empty search, consider search-v3 indexing delay and email spelling. For a rate limit, wait for the reported retry interval if provided; the client uses Auth0's reset header when `Retry-After` is absent.
 
 ### Security and limitations
 
@@ -114,18 +110,13 @@ The tools return only selected profile, event, connection, application, and prot
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `auth0.allowWrite` | `boolean` | **Enable writes**<br/>Reserve separate write credentials; unblocking remains unavailable pending independent human authorization. | `false` |
 | `auth0.clientId` | `string` | **Read client ID**<br/>Read-only M2M application client ID. | `""` |
 | `auth0.clientSecret` | `string` | **Read client secret**<br/>RocketRide environment variable reference for the read-only M2M client secret, for example ${ROCKETRIDE_AUTH0_CLIENT_SECRET}. | `""` |
 | `auth0.domain` | `string` | **Domain**<br/>Auth0-managed tenant hostname. | `""` |
-| `auth0.writeClientId` | `string` | **Write client ID**<br/>M2M client ID required when writes are enabled. | `""` |
-| `auth0.writeClientSecret` | `string` | **Write client secret**<br/>RocketRide environment variable reference for the write M2M client secret, required when writes are enabled. | `""` |
 
 ## Dependencies
 
-- `requests` `>=2.34.2`
-- `certifi` `>=2026.10.19`
-- `idna` `>=3.15`
+- `requests`
 
 ## Source
 

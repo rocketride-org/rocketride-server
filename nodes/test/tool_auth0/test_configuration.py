@@ -80,18 +80,10 @@ def test_service_configuration():
     assert service['path'] == 'nodes.tool_auth0'
     assert service['classType'] == ['tool'] and service['lanes'] == {}
     assert 'nosaas' not in service['capabilities']
-    assert service['preconfig']['profiles']['default']['allowWrite'] is False
-    assert 'unavailable' in service['fields']['auth0.allowWrite']['description']
     assert 'Unblocking is unavailable' in ' '.join(service['description'])
-    for name in ('clientSecret', 'writeClientSecret'):
-        field = service['fields'][f'auth0.{name}']
-        assert field['secure'] is True and field['ui']['ui:widget'] == 'ApiKeyWidget'
-    assert service['fields']['auth0.writeClientId']['optional'] is True
-    assert service['fields']['auth0.writeClientSecret']['optional'] is True
-    assert all(
-        f'auth0.{name}' in service['shape'][0]['properties']
-        for name in ('domain', 'clientId', 'clientSecret', 'allowWrite', 'writeClientId', 'writeClientSecret')
-    )
+    field = service['fields']['auth0.clientSecret']
+    assert field['secure'] is True and field['ui']['ui:widget'] == 'ApiKeyWidget'
+    assert all(f'auth0.{name}' in service['shape'][0]['properties'] for name in ('domain', 'clientId', 'clientSecret'))
 
 
 def test_lifecycle_and_safe_validation(node):
@@ -115,8 +107,6 @@ def test_lifecycle_and_safe_validation(node):
 
     for overrides in (
         {'clientSecret': ''},
-        {'allowWrite': True},
-        {'allowWrite': 'true'},
         {'clientSecret': '${ROCKETRIDE_AUTH0_CLIENT_SECRET}'},
         {'clientSecret': '<REDACTED>'},
     ):
@@ -130,40 +120,7 @@ def test_lifecycle_and_safe_validation(node):
         warning.assert_called_once()
 
 
-def test_separate_write_credentials(node):
-    package, get_config, _, _ = node
-    instance = package.IGlobal()
-    instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='run'))
-    instance.glb = types.SimpleNamespace(logicalType='tool_auth0', connConfig={})
-    get_config.return_value = {
-        'domain': 'tenant.auth0.com',
-        'clientId': 'read',
-        'clientSecret': 'read-secret',
-        'allowWrite': True,
-        'writeClientId': 'write',
-        'writeClientSecret': 'write-secret',
-    }
-    instance.beginGlobal()
-    assert instance.client._config['clientId'] == 'read'
-    assert instance.client._config['writeClientId'] == 'write'
-    instance.endGlobal()
-
-
-def test_write_application_must_differ_from_read_application(node):
-    package, _, _, _ = node
-    cfg = {
-        'domain': 'tenant.auth0.com',
-        'clientId': 'read-client',
-        'clientSecret': 'read-secret',
-        'allowWrite': True,
-        'writeClientId': 'read-client',
-        'writeClientSecret': 'write-secret',
-    }
-    with pytest.raises(ValueError, match='separate applications'):
-        package.auth0_client.validate_config(cfg)
-
-
-@pytest.mark.parametrize('field', ['domain', 'clientId', 'clientSecret', 'writeClientId', 'writeClientSecret'])
+@pytest.mark.parametrize('field', ['domain', 'clientId', 'clientSecret'])
 def test_each_missing_credential_fails_safely(node, field):
     package, get_config, depends, _ = node
     instance = package.IGlobal()
@@ -173,15 +130,12 @@ def test_each_missing_credential_fails_safely(node, field):
         'domain': 'tenant.auth0.com',
         'clientId': 'read-id',
         'clientSecret': 'read-private',
-        'allowWrite': True,
-        'writeClientId': 'write-id',
-        'writeClientSecret': 'write-private',
     }
     config.pop(field)
     get_config.return_value = config
     with pytest.raises(ValueError) as error:
         instance.beginGlobal()
-    assert 'read-private' not in str(error.value) and 'write-private' not in str(error.value)
+    assert 'read-private' not in str(error.value)
     depends.assert_not_called()
 
 
@@ -221,7 +175,7 @@ def test_example_plain_environment_references_configure_auth0(node, pipeline):
     assert instance.client is None
 
 
-@pytest.mark.parametrize('field', ['clientSecret', 'writeClientSecret'])
+@pytest.mark.parametrize('field', ['clientSecret'])
 def test_reference_inside_secure_token_is_not_expanded_by_plain_env_pass(node, pipeline, field):
     """A reference restored after the environment pass is rejected as unresolved."""
     package, _, _, _ = node
@@ -229,9 +183,6 @@ def test_reference_inside_secure_token_is_not_expanded_by_plain_env_pass(node, p
         'domain': 'tenant.auth0.com',
         'clientId': 'read-id',
         'clientSecret': 'read-private',
-        'allowWrite': True,
-        'writeClientId': 'write-id',
-        'writeClientSecret': 'write-private',
     }
     reference = '${ROCKETRIDE_AUTH0_SECRET}'
     token_pipeline = {'components': [{'config': {'parameters': {'secureParameters': {'token': 'opaque'}}}}]}
@@ -242,19 +193,3 @@ def test_reference_inside_secure_token_is_not_expanded_by_plain_env_pass(node, p
     with pytest.raises(ValueError, match='unresolved credential reference') as error:
         package.auth0_client.validate_config(config)
     assert 'resolved-private' not in str(error.value)
-
-
-def test_plain_write_environment_reference_is_expanded_before_validation(node, pipeline):
-    """Resolve a visible write reference even though the node does not expose writes."""
-    package, _, _, _ = node
-    config = {
-        'domain': 'tenant.auth0.com',
-        'clientId': 'read-id',
-        'clientSecret': 'read-private',
-        'allowWrite': True,
-        'writeClientId': 'write-id',
-        'writeClientSecret': '${ROCKETRIDE_AUTH0_WRITE_SECRET}',
-    }
-    resolved = pipeline.resolve_pipeline_env(config, {'ROCKETRIDE_AUTH0_WRITE_SECRET': 'write-private'})
-    package.auth0_client.validate_config(resolved)
-    assert resolved['writeClientSecret'] == 'write-private'

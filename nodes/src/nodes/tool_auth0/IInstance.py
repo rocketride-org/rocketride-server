@@ -113,11 +113,7 @@ def _input(args, name):
         value = normalize_tool_input(args, tool_name=name)
     except Exception:
         raise Auth0Error('INVALID_INPUT', 'Tool input must be an object.') from None
-    schema = (
-        getattr(IInstance, name).__tool_meta__['input_schema']
-        if name != 'unblock_user'
-        else _schema(['user_id'], {'user_id': _ID})
-    )
+    schema = getattr(IInstance, name).__tool_meta__['input_schema']
     if set(value) - set(schema['properties']):
         raise Auth0Error('INVALID_INPUT', 'Tool input contains unsupported properties.')
     return value
@@ -985,21 +981,5 @@ class IInstance(IInstanceBase):
             user_id = _identifier(_input(args, 'get_user_blocks'), 'user_id')
             blocks = _blocks(self._client(), user_id)
             return {'has_blocks': bool(blocks), 'block_count': len(blocks), 'blocks': blocks}
-
-        return _run(op)
-
-    def unblock_user(self, args):
-        """Deny unblock requests until independent authorization is available."""
-
-        def op():
-            """Validate and reject an unauthorized unblock request."""
-            _identifier(_input(args, 'unblock_user'), 'user_id')
-            client = self._client()
-            if not client.writes_enabled:
-                raise Auth0Error('WRITE_DISABLED', 'Auth0 writes are disabled.')
-            raise Auth0Error(
-                'WRITE_AUTHORIZATION_REQUIRED',
-                'Unblocking requires independent authorization; agent writes are unavailable.',
-            )
 
         return _run(op)
