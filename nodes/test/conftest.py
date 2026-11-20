@@ -180,6 +180,11 @@ def pytest_configure(config):
     config.addinivalue_line(
         'markers', 'hardware_unmet(reason, strict): requiresHardware invalid, or not met in strict mode'
     )
+    # pytest-xdist registers xdist_group only while it is loaded. The live
+    # database pass runs with `-p no:xdist`, and --strict-markers would then
+    # reject the suites that pin themselves to one worker at collection.
+    if not config.pluginmanager.hasplugin('xdist'):
+        config.addinivalue_line('markers', 'xdist_group(name): run every test of this group on one xdist worker')
 
     workerinput = getattr(config, 'workerinput', None)
     if workerinput and gate.WORKER_KEY in workerinput:

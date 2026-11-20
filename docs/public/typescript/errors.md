@@ -15,7 +15,8 @@ What the SDK throws, when, and how to catch it.
 | Transport loss and connection failures (including during login) | `ConnectionException` |
 | Data-pipe errors (open / write / close) | `PipeException` |
 | A login superseded, logged out, or detached mid-flight | `LoginAttemptCancelledError` |
-| Most argument and server-rejection errors (`use()`, `getService()`, DAP failures) | plain `Error` |
+| A command the server rejects, through `call()`: `tool()`, `use()`, `getService()`, `getTasks()`, `getTaskToken()`, `getTaskPipeline()`, `terminate()`, `restart()`, `getTaskStatus()` and the other typed methods; `validate()`, `ping()` and the deprecated `setEvents()` prefix the message (`Ping failed: ...`) but keep the class and `code` | `DAPException` (an `Error`; `code` set when the server sent one) |
+| Argument errors (such as `getService('')`), `fsRead()` / `fsReadMany()` failures (they bypass `call()`), and `use()` when the server returns no task token | plain `Error` (no `code`) |
 | `sendFiles` with a non-positive `maxConcurrent` | `RangeError` |
 | `Answer.getJson()` on non-JSON content | throws |
 
@@ -92,8 +93,27 @@ try {
 }
 ```
 
-In practice most failures outside the connection/pipe paths surface as plain
-`Error` with a descriptive message — write handlers that catch the specific
+A rejected `call()` keeps the server's message as `message` and its code as
+`code`, so a tool caller can tell a task that stopped before the call reached it
+(`TASK_STOPPED`) from a failure inside the tool or a call no node handled (no
+code):
+
+```typescript
+import { DAPException } from 'rocketride';
+
+try {
+	const rows = await client.tool({ token, tool: 'read_query', nodeId, input });
+} catch (err) {
+	if (err instanceof DAPException && err.code === 'TASK_STOPPED') {
+		// the task stopped (or is restarting) before the call reached the node
+	}
+	throw err;
+}
+```
+
+Failures that do not come from the server (argument checks, `fsRead()`, a
+non-DAP transport error inside a method that re-words its message) surface as
+plain `Error` with a descriptive message — write handlers that catch the specific
 classes above first and fall back to `Error`. `ExecutionException` and
 `ValidationException` exist and are exported but the SDK does not currently throw
 them; don't write handlers that rely on them.
