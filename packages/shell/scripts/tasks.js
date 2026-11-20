@@ -137,8 +137,9 @@ function makeBundleAction() {
 			const { changed, hash } = await hasBuildInputChanged(
 				BUILD_HASH_KEY,
 				[SRC_DIR, SDK_SRC_DIR, CLIENT_COMMON_SRC_DIR],
-				[PKG_JSON, RSBUILD_CONFIG, SDK_PKG_JSON]
+				[PKG_JSON, RSBUILD_CONFIG, SDK_PKG_JSON, CAPABILITIES_JSON]
 			);
+			// The capability table is copied beside the shell below, so an edit to it alone must rebuild.
 			// The cache skip must also verify the CANONICAL artifact: on a
 			// fresh clone the invoking root's .rocketride/shell/shell.tgz is
 			// the pre-install stub (marked by the shell.tgz.stub file the

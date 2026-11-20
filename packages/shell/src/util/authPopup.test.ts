@@ -35,7 +35,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { AUTH_POPUP_KEY, forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from './authPopup';
+import { AUTH_POPUP_KEY, forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup, shouldStartPopupOAuth } from './authPopup';
 
 /** A minimal in-memory Storage. */
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { data: Map<string, string> } {
@@ -131,6 +131,14 @@ test('unavailable storage never throws and falls back to name and marker', () =>
 	assert.equal(isAuthPopupWindow('', RETURN, top(brokenStorage)), false);
 	assert.equal(isAuthPopupWindow('rrauth', new URLSearchParams(''), top(brokenStorage)), true);
 	assert.equal(isAuthPopupWindow('', RETURN, top(null)), false);
+});
+
+test('a popup starts the OAuth redirect only when fresh: not on a code, an error or with a token', () => {
+	assert.equal(shouldStartPopupOAuth(true, new URLSearchParams('rrauth=1'), false), true, 'fresh popup');
+	assert.equal(shouldStartPopupOAuth(true, new URLSearchParams('code=abc&state=x'), false), false, 'return leg with a code');
+	assert.equal(shouldStartPopupOAuth(true, new URLSearchParams('error=access_denied&state=x'), false), false, 'return leg with an error');
+	assert.equal(shouldStartPopupOAuth(true, new URLSearchParams('rrauth=1'), true), false, 'already signed in');
+	assert.equal(shouldStartPopupOAuth(false, new URLSearchParams(''), false), false, 'not a popup');
 });
 
 test('Shell.tsx remembers the role before startOAuth and forgets it on completion', () => {

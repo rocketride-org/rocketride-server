@@ -40,7 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { withoutCredentials } from '../../util/identity';
-import { forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from '../../util/authPopup';
+import { forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup, shouldStartPopupOAuth } from '../../util/authPopup';
 import { ConnectionManager } from '../../connection/connection';
 import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
@@ -447,7 +447,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// role is remembered in sessionStorage across the round trip.
 			const bootParams = new URLSearchParams(window.location.search);
 			const isAuthPopup = isAuthPopupWindow(window.name, bootParams);
-			if (isAuthPopup && !bootParams.get('code') && !cm.loadToken()) {
+			if (shouldStartPopupOAuth(isAuthPopup, bootParams, !!cm.loadToken())) {
 				// Fresh popup: head straight to the IdP (top-level — allowed)
 				rememberAuthPopup();
 				void cm.startOAuth();

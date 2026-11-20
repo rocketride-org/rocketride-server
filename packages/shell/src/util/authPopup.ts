@@ -128,6 +128,22 @@ export function isAuthPopupWindow(windowName: string, params: URLSearchParams, e
 }
 
 /**
+ * Whether a fresh auth popup should head straight to the identity provider.
+ *
+ * Not on the return leg (`code`), and not when the provider returned an
+ * `error` (a denied or failed sign-in): that would restart the redirect and
+ * loop the user back into the same failure instead of reporting it.
+ *
+ * @param isAuthPopup - Whether this window is the auth popup.
+ * @param params - The page's query parameters.
+ * @param hasToken - Whether a session token is already held.
+ * @returns True when the popup should start the OAuth redirect.
+ */
+export function shouldStartPopupOAuth(isAuthPopup: boolean, params: URLSearchParams, hasToken: boolean): boolean {
+	return isAuthPopup && !params.get('code') && !params.get('error') && !hasToken;
+}
+
+/**
  * Remember the popup role for the rest of this tab's OAuth round trip.
  *
  * Does nothing in a framed window.
