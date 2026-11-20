@@ -98,8 +98,9 @@ _catalogue: Dict[tuple, tuple] = {}
 
 
 def rail_enabled() -> bool:
-    """RR_NODE_RAIL_ENABLED=0 turns published nodes off: only the release's nodes serve."""
-    return os.environ.get('RR_NODE_RAIL_ENABLED', '1') != '0'
+    """Published nodes serve only with RR_NODE_RAIL_ENABLED=1; otherwise only the release's nodes do."""
+    # Off unless asked for: without a container per run, a published node runs on the EaaS host
+    return os.environ.get('RR_NODE_RAIL_ENABLED') == '1'
 
 
 # =============================================================================
