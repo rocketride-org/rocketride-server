@@ -322,8 +322,19 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
-# token key would let pipeline code mint any run's private token.
-CONST_SUBPROCESS_ENV_NEVER = frozenset({CONST_TASK_TOKEN_KEY_ENV})
+# token key would let pipeline code mint any run's private token. The datacore
+# grant key would let it mint a grant for any tenant's database, and the broker
+# token is the provisioner's bearer under the name production sets today
+# (ROCKETRIDE_DB_BROKER_TOKEN, also popped in _build_subprocess_env) and the
+# operator-only name it is moving to (RR_DB_BROKER_TOKEN). rocketride-saas #975.
+CONST_SUBPROCESS_ENV_NEVER = frozenset(
+    {
+        CONST_TASK_TOKEN_KEY_ENV,
+        'RR_DATACORE_GRANT_KEY',
+        'RR_DB_BROKER_TOKEN',
+        'ROCKETRIDE_DB_BROKER_TOKEN',
+    }
+)
 
 
 def filter_subprocess_env(environ: Mapping[str, str]) -> Dict[str, str]:
@@ -2509,9 +2520,10 @@ class Task(DAPBase):
             exit_code = body.get('exitCode', 1)
             exit_message = body.get('message', 'Task exited unexpectedly')
 
-            # Save it
-            self._status.exitCode = exit_code
-            self._status.exitMessage = exit_message
+            # Save it; a requested stop keeps its existing exit code, as without >EXIT
+            if not self._stop_requested:
+                self._status.exitCode = exit_code
+                self._status.exitMessage = exit_message
             self._exit_event_seen = True
 
             # The engine's handlers caught a crash: its >EXIT code is Crash
@@ -2880,7 +2892,7 @@ class Task(DAPBase):
         self._status.rateSize = 0
         self._status.rateCount = 0
         self._status.serviceUp = False
-        self._status.exitCode = None
+        self._status.exitCode = 0  # as a new task starts; a stop by the server keeps it
         self._status.exitMessage = ''
         self._status.endTime = 0.0
         self._status.pipeflow = TASK_STATUS_FLOW()

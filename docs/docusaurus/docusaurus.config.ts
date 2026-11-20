@@ -27,7 +27,7 @@ function isPartial(filePath: unknown): boolean {
 
 const config: Config = {
 	title: 'RocketRide Documentation',
-	tagline: 'Build, run, and ship data + AI pipelines',
+	tagline: 'Build, test and publish durable agents that scale in production.',
 	favicon: 'img/rocketride-favicon.jpg',
 
 	future: {
