@@ -311,6 +311,55 @@ function mergeRanges(ranges: Array<[number, number]>): Array<[number, number]> {
 }
 
 /**
+ * Grows the redaction ranges until no replacement partly overlaps one (the deny wins).
+ *
+ * One sweep: `ranges` are merged and sorted, `reps` come from a non-overlapping scan so they are
+ * sorted and disjoint too. A range absorbs the following ranges it touches and every replacement
+ * that sticks out of it; a replacement that has only ever been inside, or outside, is left alone.
+ * Work is linear in ranges plus replacements, not their product.
+ */
+export function growRanges(ranges: Array<[number, number]>, reps: ReadonlyArray<{ index: number; needle: string }>): Array<[number, number]> {
+	const out: Array<[number, number]> = [];
+	let from = 0;
+	for (let g = 0; g < ranges.length; g++) {
+		let lo = ranges[g][0];
+		let hi = ranges[g][1];
+		for (let grew = true; grew; ) {
+			grew = false;
+			while (g + 1 < ranges.length && ranges[g + 1][0] <= hi) hi = Math.max(hi, ranges[++g][1]);
+			while (from < reps.length && reps[from].index + reps[from].needle.length <= lo) from++;
+			for (let k = from; k < reps.length && reps[k].index < hi; k++) {
+				const a = reps[k].index;
+				const b = a + reps[k].needle.length;
+				if (b > lo && (a < lo || b > hi)) {
+					lo = Math.min(lo, a);
+					hi = Math.max(hi, b);
+					grew = true;
+				}
+			}
+		}
+		const last = out[out.length - 1];
+		if (last && lo <= last[1]) last[1] = Math.max(last[1], hi);
+		else out.push([lo, hi]);
+	}
+	return out;
+}
+
+/** The replacements that do not overlap any (sorted, disjoint) range: one pass, no replacement-by-range product. */
+export function repsOutside<T extends { index: number; needle: string }>(reps: ReadonlyArray<T>, ranges: ReadonlyArray<[number, number]>): T[] {
+	const out: T[] = [];
+	let g = 0;
+	for (const r of reps) {
+		const a = r.index;
+		const b = a + r.needle.length;
+		while (g < ranges.length && ranges[g][1] <= a) g++;
+		if (g < ranges.length && ranges[g][0] < b) continue;
+		out.push(r);
+	}
+	return out;
+}
+
+/**
  * Error text with must-deny values: each is redacted, and so is any
  * replacement that overlaps one (the deny wins, DA R2 LOW); the other
  * replacements apply.
@@ -326,22 +375,9 @@ function redactWithin(s: string, deny: Array<[number, number]>, pass: IPass, rep
 		false,
 		windows
 	);
-	let ranges = mergeRanges(deny);
-	for (let grown = true; grown; ) {
-		grown = false;
-		for (const r of reps) {
-			const a = r.index;
-			const b = a + r.needle.length;
-			for (const g of ranges)
-				if (a < g[1] && b > g[0] && (a < g[0] || b > g[1])) {
-					g[0] = Math.min(g[0], a);
-					g[1] = Math.max(g[1], b);
-					grown = true;
-				}
-		}
-		if (grown) ranges = mergeRanges(ranges);
-	}
-	const items = [...ranges.map((g) => ({ a: g[0], b: g[1], text: REDACTED })), ...reps.filter((r) => !ranges.some((g) => r.index < g[1] && r.index + r.needle.length > g[0])).map((r) => ({ a: r.index, b: r.index + r.needle.length, text: replacement(r) }))].sort((x, y) => x.a - y.a);
+	const ranges = growRanges(mergeRanges(deny), reps);
+	const kept = repsOutside(reps, ranges);
+	const items = [...ranges.map((g) => ({ a: g[0], b: g[1], text: REDACTED })), ...kept.map((r) => ({ a: r.index, b: r.index + r.needle.length, text: replacement(r) }))].sort((x, y) => x.a - y.a);
 	let out = '';
 	let pos = 0;
 	for (const it of items) {
