@@ -394,3 +394,34 @@ async def test_r972_1a_overlapping_pushes_narrowed_rebuild_still_revokes(monkeyp
     assert conn._revoked is True
     assert conn._authenticated is False
     assert conn._account_info.sysPermissions == []
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_deauth_then_disconnect_scopes_removal_to_the_added_user(monkeypatch):
+    """connection_removed reaches the dashboards that saw connection_added, after a deauth."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN), monitors=WILDCARD_ALL)
+    conn._dashboard_user_id = 'admin'
+
+    await conn.on_deauth(_request('deauth'))
+    assert conn._account_info.userId == ''
+    server.broadcast_server_event = AsyncMock()
+    await server._dapbase_on_disconnected(conn)
+
+    removed = server.broadcast_server_event.call_args
+    assert removed.args[1]['body']['action'] == 'connection_removed'
+    assert removed.kwargs['user_id'] == 'admin'
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_reauth_refreshes_the_saved_dashboard_user(monkeypatch):
+    """A re-auth as another user moves the saved dashboard user with it."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN), monitors=WILDCARD_ALL)
+    conn._dashboard_user_id = 'admin'
+    await conn.on_deauth(_request('deauth'))
+
+    server._server.authenticate_credential = AsyncMock(return_value=identity('other'))
+    await conn.on_auth(_request('auth', auth='rr_session'))
+
+    assert conn._dashboard_user_id == 'other'
