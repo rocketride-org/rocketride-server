@@ -29,7 +29,7 @@
 
 import { createHash, randomBytes } from 'node:crypto';
 import { createAppRoot } from '../appRoot';
-import type { FrameOk, IAppRoot, IAppRootOptions, IsolatedEntry, StripItem } from '../types';
+import type { FrameOk, IAppRoot, IAppRootOptions, IRealmGrant, IsolatedEntry, StripItem } from '../types';
 import { createFakeCm } from './fakeCm';
 import type { IFakeCm } from './fakeCm';
 import { openRealm } from './realm';
@@ -73,6 +73,30 @@ export function refAppKey(appId: string): string {
 	if (bits > 0) out += BASE32[(value << (5 - bits)) & 31];
 	return `a${out.slice(0, 24)}`;
 }
+
+/** A `ru_`/`ro_`-style alias: the prefix plus 22 base64url characters derived from `seed` (stable per test run). */
+function aliasOf(prefix: string, seed: string): string {
+	return `${prefix}${createHash('sha256').update(seed).digest('base64url').slice(0, 22)}`;
+}
+
+/** A frame grant for `entry` whose identity holds the given (already aliased) ids; `null` = anonymous. */
+export function frameFor(entry: IsolatedEntry, identity: FrameOk['identity'], token = `frametoken-${entry.id}`): FrameOk {
+	return {
+		v: 1,
+		origin: `http://${refAppKey(entry.id)}.apps.localhost:5565`,
+		entryPrefix: `/_t/${token}/v1/`,
+		expiresAt: 1_700_000_900_000,
+		capabilities: ['core', 'pipelines.run', 'fs.app'],
+		network: [],
+		state: 'ready',
+		frame: '/_rr/frame.html?c=ticket',
+		identity,
+	};
+}
+
+/** Realm grants carrying the per-app identity aliases the server minted (shell side of `RR_APP_ALIAS_KEY`, T115). */
+export const GRANT_A: IRealmGrant = { frame: frameFor(ENTRY_A, { userId: aliasOf('ru_', 'user-a'), organizations: [{ id: aliasOf('ro_', 'org-a'), name: 'Acme' }] }) };
+export const GRANT_B: IRealmGrant = { frame: frameFor(ENTRY_B, { userId: aliasOf('ru_', 'user-b'), organizations: [{ id: aliasOf('ro_', 'org-b'), name: 'Acme' }] }) };
 
 /** A hand-advanced clock (the tests' only notion of time). */
 export interface IFakeClock {
