@@ -101,22 +101,27 @@ reaches the engine.
 
 ## Endpoint authentication
 
-When a Webhook, Chat, or Dropper source node starts, the engine generates two
-credentials and writes them to the Project Log:
+A Webhook, Chat, or Dropper source node generates no credential of its own.
+When the pipeline starts, the node's Endpoint Info shows its address,
+`developerId.pipelineId.source`, and its URL, `<server>/webhook/<address>`.
+Every request carries an account API key (`rr_...`) in the
+`Authorization: Bearer <key>` header, and the server checks on every call that
+the key's account may send to that address. Whose key is on the request is who
+pays. A URL never carries a credential: `?auth=` is not accepted.
 
-- **Public authorization key** - presented by external callers in the
-  `Authorization: Bearer <key>` header. Safe to share with trusted API clients.
-- **Private token** - the internal credential for the endpoint. Used by the SDK
-  to connect to a running task via `--token`. Do not share this publicly.
+- **Endpoint-scoped key** - minted from the Endpoint Info panel: permission
+  `task.data` on that one address, frozen to your home team. Hand this one to
+  external systems that can set a request header (n8n, scripts, partners); it
+  reaches nothing else. A native provider webhook that cannot add a header,
+  such as GitHub's or Stripe's (they sign the request with their own secret),
+  needs an HTTPS relay that verifies the provider's signature, then adds the
+  key and forwards the request: the server does not check provider signatures.
+- **Account key** - your whole account, for first-party callers and your own
+  automation. Do not share it.
 
-The Project Log is local to the operator who started the pipeline (it is not a
-shared or exportable log), so the private token is only visible to that
-operator. Retrieve it from your own Project Log when you need to connect a client
-with `--token`.
-
-Both are generated fresh each time the pipeline starts. There is no persistent
-credential to rotate — stopping and restarting the pipeline issues new
-credentials automatically.
+Keys persist until they expire or you revoke them in your API keys, so revoke
+an endpoint key when the system holding it no longer needs it. Stopping or
+restarting a pipeline does not change its address or its keys.
 
 ## MCP authentication
 

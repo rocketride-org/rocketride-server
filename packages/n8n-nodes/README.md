@@ -27,7 +27,7 @@ The RocketRide node invokes deployed RocketRide pipelines. Those pipelines perfo
 
 ### RocketRide (action) — n8n → RocketRide
 
-Calls a deployed RocketRide pipeline and returns its result.
+Calls a deployed RocketRide pipeline and returns its result. Set **Pipeline Address** to the pipeline's address, `developerId.pipelineId.source` (shown in the pipeline's endpoint info in RocketRide); leave it empty only when the credential's key is scoped to exactly one pipeline endpoint.
 
 | Operation | What it sends |
 | --- | --- |
@@ -49,14 +49,16 @@ Starts a workflow when a RocketRide pipeline calls in — a branded replacement 
 | Field | Notes |
 | --- | --- |
 | **Base URL** | Your RocketRide HTTP gateway, e.g. `http://localhost:5567`. |
-| **API Key** | The pipeline's public authorization key (`pk_…`), shown in the RocketRide IDE while the pipeline is running. Sent as a Bearer token. |
+| **API Key** | Your RocketRide API key (`rr_…`): an account key, which reaches every pipeline your account may call, or a key scoped to one pipeline endpoint, minted from that pipeline's endpoint info. Sent as a Bearer token. Runs are billed to the key's account. |
 | **Ignore SSL Issues** | Only for a self-signed local HTTPS gateway. |
 
-> The credential test checks connectivity (`GET /version`). The key itself is exercised when a node runs against a live pipeline — a `pk_` key only resolves while its pipeline is running, so it can't be validated at config time.
+> The credential test calls the authenticated `GET /status`, so it checks the Base URL and the key together.
+
+> **Upgrading from 0.x:** the per-pipeline keys 0.x used are no longer accepted. Re-enter the credential with an `rr_` key, and set **Pipeline Address** on each RocketRide node.
 
 ## How the two directions connect
 
-- **n8n → RocketRide:** the **RocketRide** action node calls a deployed pipeline's webhook (`POST {baseUrl}/webhook`).
+- **n8n → RocketRide:** the **RocketRide** action node calls a deployed pipeline's webhook (`POST {baseUrl}/webhook/{address}`, or `POST {baseUrl}/webhook` with a key scoped to one endpoint).
 - **RocketRide → n8n:** the **RocketRide Trigger** receives the call RocketRide's `tool_n8n` node makes.
 - **Round-trips:** chain them — an n8n workflow can call RocketRide, and a RocketRide pipeline can call back into a *second* n8n workflow that starts with a RocketRide Trigger.
 
@@ -72,7 +74,7 @@ Requires n8n **1.94.0+**.
 
 ## Example
 
-Import [`examples/run-pipeline.workflow.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/n8n-nodes/examples/run-pipeline.workflow.json) into n8n. To have something to call, deploy a webhook-source pipeline in RocketRide (see [`examples/rocketride-webhook.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/n8n-nodes/examples/rocketride-webhook.pipe)) and copy its interface URL + `pk_` key into the RocketRide API credential.
+Import [`examples/run-pipeline.workflow.json`](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/n8n-nodes/examples/run-pipeline.workflow.json) into n8n. To have something to call, deploy a webhook-source pipeline in RocketRide (see [`examples/rocketride-webhook.pipe`](https://github.com/rocketride-org/rocketride-server/blob/develop/packages/n8n-nodes/examples/rocketride-webhook.pipe)) put your gateway URL and an `rr_` API key in the RocketRide API credential, and set the node's **Pipeline Address** to the pipeline's address (`developerId.pipelineId.webhook_1` for that example).
 
 ## License
 

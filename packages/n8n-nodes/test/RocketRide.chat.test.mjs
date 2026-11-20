@@ -44,7 +44,7 @@ describe('RocketRide.execute — Chat', () => {
 	it('posts the question envelope with the chat content type', async () => {
 		const ctx = makeContext({
 			params: { operation: 'chat', question: 'hello?', expectJson: false, role: '' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			httpMock: () => ({ status: 'OK', data: { objects: { chat: { answers: ['hi'] } } } }),
 		});
 

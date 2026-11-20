@@ -1,0 +1,99 @@
+{
+	"definition": {
+		"title": "Azure",
+		"protocol": "azure://",
+		"node": "cpp",
+		"path": "azure",
+		"classType": [],
+		"capabilities": [
+			"internal",
+			"network"
+		],
+		"actions": [
+			"export",
+			"delete",
+			"download"
+		],
+		"prefix": "Microsoft Azure",
+		"description": [
+			"A source component that reads data from Azure blobs. It enables ",
+			"ingestion of files and documents stored in Azure for further processing within ",
+			"the pipeline. Configurable with Azure credentials and blob settings, the ",
+			"component supports secure and scalable access to cloud-hosted data across ",
+			"various formats."
+		],
+		"icon": "azure-blob.svg",
+		"documentation": "https://bit.ly/4hG9ux1",
+		"lanes": {
+			"_source": [
+				"tags"
+			]
+		},
+		"input": [
+			{
+				"lane": "_source",
+				"output": [
+					{
+						"lane": "tags",
+						"description": "Outputs documents to be processed."
+					}
+				]
+			}
+		],
+		"propertyDefinitions": {
+			"azure.accountName": {
+				"type": "string",
+				"title": "Account name",
+				"description": "The Azure storage account name."
+			},
+			"azure.accountKey": {
+				"type": "string",
+				"title": "Account key",
+				"description": "The Azure storage account key.",
+				"secret": true
+			},
+			"azure.endpointSuffix": {
+				"type": "string",
+				"title": "Endpoint suffix",
+				"description": "Host suffix the account name is prefixed to.",
+				"default": "blob.core.windows.net"
+			},
+			"Pipe.include": {
+				"description": "Example path: container/path/to/your/blobs/*"
+			},
+			"Pipe.exclude": {
+				"description": "Example path: container/path/to/your/blobs/*"
+			}
+		},
+		"properties": [
+			"type",
+			"actions",
+			"source.mode",
+			{
+				"name": "parameters",
+				"properties": [
+					"azure.accountName",
+					"azure.accountKey",
+					"azure.endpointSuffix"
+				]
+			},
+			"Pipe.include",
+			"Pipe.exclude"
+		],
+		"legacy": {
+			"profiles": {},
+			"dropped": [
+				"exclude.path",
+				"include.path"
+			]
+		}
+	},
+	"warnings": [
+		"the \"Source\" section has no counterpart and was dropped",
+		"the \"Target\" section has no counterpart and was dropped",
+		"the \"Export\" section has no counterpart and was dropped",
+		"not reached from the node's section, so not carried over: include, include.path, exclude, exclude.path, azure.source.parameters, azure.target.parameters",
+		"kept as references to shared definitions (check each exists in the current catalog): type, actions, source.mode"
+	],
+	"legacy": true
+}

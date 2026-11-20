@@ -1,0 +1,40 @@
+{
+	"definition": {
+		"propertyDefinitions": {
+			"gcp.serviceAccountKey": {
+				"type": "upload",
+				"title": "Service Account Key JSON",
+				"description": "Upload the JSON key file for your Google Cloud service account.",
+				"secret": true,
+				"options": {
+					"accept": ".json"
+				}
+			},
+			"gcp.authType": {
+				"title": "Authentication Type",
+				"description": "Choose how to authenticate to Google Cloud Platform.",
+				"type": "string",
+				"default": "adc",
+				"enum": {
+					"adc": {
+						"title": "Application Default Credentials",
+						"properties": []
+					},
+					"service_account": {
+						"title": "Service Account JSON",
+						"properties": [
+							"gcp.serviceAccountKey"
+						]
+					}
+				}
+			},
+			"gcp.projectId": {
+				"type": "string",
+				"title": "Project ID",
+				"description": "Optional: Specify the Google Cloud Project ID explicitly. Leave blank to infer from credentials."
+			}
+		}
+	},
+	"warnings": [],
+	"legacy": false
+}

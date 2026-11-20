@@ -51,7 +51,7 @@ to a running pipeline in five steps; this page is the command reference.
 
 ## Connecting
 
-Every command _except_ [`diff`](#diff) and [`app verify`](#app) — which run
+Every command _except_ [`diff`](#diff), [`node convert`](#node) and [`app verify`](#app) — which run
 entirely locally and never contact an engine — accepts connection options,
 which also read from the environment so you can set them once:
 
@@ -92,6 +92,7 @@ refuse to run when no deployment target is set.
 | `profile` | Find where the server or a running pipeline spends its time.             |
 | `app`    | Create, preview, check, deploy, and publish apps. The Python CLI has only `create`, `verify`, and `deploy`. |
 | `pipe`   | Scaffold a new pipeline with its store listing (`pipe new`). Needs no connection. |
+| `node`   | Convert a custom node's `services.json` from the old format to the current one (`node convert`). Needs no connection. |
 | `deploy` | Version pipelines in the server's registry, point teams at a version, and schedule runs. `source-config` is TypeScript CLI only. |
 
 ### init and login
@@ -698,6 +699,35 @@ Sub-commands:
 | Sub-command | Description |
 | --- | --- |
 | `new <id>` | Scaffold a new pipeline under `./pipelines/<id>/`. `--name <text>` sets the display name; `--dir <dir>` picks another pipelines directory. |
+
+### node
+
+Use `node convert` once on a custom node written before the `services.json`
+format changed. The engine loads only the current format
+(`propertyDefinitions` and `properties`); a definition that still declares
+`preconfig`, `fields` or `shape` is refused when the node loads. The command
+rewrites each file in place and adds the node's `legacy` block, which lets the
+server convert pipelines saved against the old definition. It needs no
+connection.
+
+```bash
+rocketride node convert nodes/my_node/services.json            # convert in place
+rocketride node convert nodes/my_node/services.json --dry-run  # print the result, write nothing
+```
+
+The profile field becomes a `profile` selector with one branch per profile,
+profile values become the defaults of their branch, and old widget hints map
+to the current flags (`secret`, `hidden`, `format`, `upload`, `oauth2`).
+Anything the converter cannot carry over (an extra `shape` section, a `combo`
+field, an unknown widget, a conditional on a boolean) is printed as a warning.
+Read the warnings and validate a pipeline that uses the node before you deploy
+it. The Python and TypeScript CLIs apply the same rules.
+
+Sub-commands:
+
+| Sub-command | Description |
+| --- | --- |
+| `convert <files...>` | Convert old-format definitions in place. `--out <file>` writes one file elsewhere; `--dry-run` prints the result and writes nothing. A file already in the current format is reported and left alone (exit 1). |
 
 ### deploy
 

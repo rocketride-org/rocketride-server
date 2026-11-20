@@ -65,9 +65,9 @@ boundary:
 | **OAuth access token** | Claude, ChatGPT, and other OAuth-only clients | Automatic: the client discovers the login flow from the endpoint itself (below) |
 | **RocketRide API key** (`rr_...`) | Cursor, scripts, CLIs — anything that can set a header | `Authorization: Bearer rr_...` |
 
-Task-scoped keys (`tk_`/`pk_`) and PKCE exchange codes (`cd_`) are refused
-outright — they scope a single task, not an account, and never grant access to
-`/mcp`.
+PKCE exchange codes (`cd_`) are refused outright: one is minted for a single
+OAuth exchange and consumed by it, so it identifies no caller and never grants
+access to `/mcp`.
 
 ### How the OAuth flow bootstraps
 

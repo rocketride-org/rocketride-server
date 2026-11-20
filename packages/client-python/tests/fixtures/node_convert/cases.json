@@ -1,0 +1,14 @@
+{
+	"about": "rocketride node convert fixtures, checked by client-python tests/test_node_convert.py and client-typescript tests/node-convert.test.ts. <case>.old.json is the input (the develop originals copied verbatim, plus one synthetic file); <case>.expected.json is {definition, warnings, legacy}. node names the in-repo definition the Python suite also checks the legacy block against (null: synthetic, a library file, or a hand-verified node of tools/legacy_blocks.py).",
+	"cases": [
+		{ "case": "store_qdrant", "node": "store_qdrant/services.json" },
+		{ "case": "tool_gcs", "node": "tool_gcs/services.json" },
+		{ "case": "face_detection", "node": "face_detection/services.json" },
+		{ "case": "llamaparse", "node": null },
+		{ "case": "tool_github", "node": "tool_github/services.json" },
+		{ "case": "azure", "node": "azure/services.json" },
+		{ "case": "common_gcp", "node": null },
+		{ "case": "synthetic", "node": null },
+		{ "case": "review_rules", "node": null }
+	]
+}

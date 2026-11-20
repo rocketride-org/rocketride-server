@@ -70,9 +70,11 @@ n8n dispatcher: [Webhook] → [Execute Sub-Workflow → target] → [Respond to 
 ## n8n → RocketRide
 
 Any RocketRide pipeline that starts with a **webhook**, **chat**, or **dropper** source node is
-HTTP-callable. When such a pipeline starts, the source node publishes its connection details
-(shown in the IDE): the **interface URL** (e.g. `http://localhost:5567/webhook`), a **public
-authorization key**, and a **private token**.
+HTTP-callable. The source node's Endpoint Info (shown in the IDE) gives its **address**,
+`developerId.pipelineId.source`, and its **interface URL**,
+`<server>/webhook/<address>` (e.g. `http://localhost:5567/webhook/acme.docBrain.webhook_1`).
+Every call carries a RocketRide API key (`rr_...`) as a Bearer token: an account key, or a key
+scoped to that one endpoint, minted from the same Endpoint Info.
 
 ### The RocketRide community node (preferred)
 
@@ -90,10 +92,13 @@ nodes:
   secret on the `Authorization` header and a configurable respond mode.
 
 Only the **RocketRide** action node uses a credential — a single **RocketRide API**
-credential holding the gateway **Base URL** (e.g. `http://localhost:5567`) and the
-pipeline's public `pk_…` **API Key**, sent as a Bearer token. **RocketRide Trigger** takes
-no credential: RocketRide calls *it*, so its only authentication is the optional shared
-secret above.
+credential holding the gateway **Base URL** (e.g. `http://localhost:5567`) and your
+`rr_…` **API Key**, sent as a Bearer token; runs are billed to the key's account. Each
+RocketRide node names the pipeline it calls in its **Pipeline Address** field; leave it
+empty only with a key scoped to exactly one endpoint. **RocketRide Trigger** takes no
+credential: RocketRide calls *it*, so its only authentication is the optional shared
+secret above. Version 1.0.0 of the package moved to `rr_` keys: re-enter the credential
+after upgrading from 0.x.
 
 Once the package is published to npm, self-hosted instance owners install it from
 **Settings → Community Nodes → Install** by entering `n8n-nodes-rocketride`; on n8n Cloud it appears
@@ -110,8 +115,8 @@ If you cannot install community packages, add an **HTTP Request** node:
 | Setting | Value |
 | ------- | ----- |
 | Method  | `POST` |
-| URL     | the pipeline's interface URL, e.g. `http://localhost:5567/webhook` |
-| Header  | `Authorization: <public auth key>` |
+| URL     | the pipeline's interface URL, e.g. `http://localhost:5567/webhook/acme.docBrain.webhook_1` |
+| Header  | `Authorization: Bearer rr_...` |
 | Body    | JSON payload for the pipeline |
 
 The pipeline's `response_*` node determines what comes back to n8n. Import

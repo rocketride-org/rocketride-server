@@ -22,11 +22,47 @@ function makeContext({ params, credentials, httpMock, continueOnFail = false, it
 	};
 }
 
+describe('RocketRide.execute — pipeline address', () => {
+	const ok = () => ({ status: 'OK', data: { ok: true } });
+
+	it('POSTs to {baseUrl}/webhook/{address} when the address is set', async () => {
+		const ctx = makeContext({
+			params: { operation: 'run', payloadMode: 'text', text: 'x', address: ' acme.docBrain.webhook_1 ' },
+			credentials: { baseUrl: 'http://localhost:5567/', apiKey: 'rr_x', ignoreSslIssues: false },
+			httpMock: ok,
+		});
+		await RocketRide.prototype.execute.call(ctx);
+		expect(ctx.calls[0].url).toBe('http://localhost:5567/webhook/acme.docBrain.webhook_1');
+	});
+
+	it('accepts the two-segment address (the pipeline default source)', async () => {
+		const ctx = makeContext({
+			params: { operation: 'chat', question: 'q', address: 'acme.docBrain' },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_x', ignoreSslIssues: false },
+			httpMock: ok,
+		});
+		await RocketRide.prototype.execute.call(ctx);
+		expect(ctx.calls[0].url).toBe('http://localhost:5567/webhook/acme.docBrain');
+	});
+
+	it('refuses a value that is not an address before sending anything', async () => {
+		const ctx = makeContext({
+			params: { operation: 'run', payloadMode: 'text', text: 'x', address: 'acme/docBrain' },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_x', ignoreSslIssues: false },
+			httpMock: ok,
+			continueOnFail: true,
+		});
+		const result = await RocketRide.prototype.execute.call(ctx);
+		expect(ctx.calls).toHaveLength(0);
+		expect(result[0][0].json.error).toContain('is not a pipeline address');
+	});
+});
+
 describe('RocketRide.execute — Run Pipeline', () => {
 	it('POSTs text/plain to {baseUrl}/webhook and returns the unwrapped data', async () => {
 		const ctx = makeContext({
 			params: { operation: 'run', payloadMode: 'text', text: 'hello rocketride' },
-			credentials: { baseUrl: 'http://localhost:5567/', apiKey: 'pk_x', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567/', apiKey: 'rr_x', ignoreSslIssues: false },
 			httpMock: () => ({
 				status: 'OK',
 				data: { objectsRequested: 1, objectsCompleted: 1, resultTypes: {}, objects: { body: { status: 'OK', text: 'HELLO' } } },
@@ -53,7 +89,7 @@ describe('RocketRide.execute — Run Pipeline', () => {
 				text: 'question',
 				'documents.document': [{ content: 'doc one', metadata: '{"src":"a.txt"}' }],
 			},
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			httpMock: () => ({ status: 'OK', data: { ok: true } }),
 		});
 
@@ -70,7 +106,7 @@ describe('RocketRide.execute — Run Pipeline', () => {
 	it('forwards the SSL toggle from credentials', async () => {
 		const ctx = makeContext({
 			params: { operation: 'run', payloadMode: 'text', text: 'x' },
-			credentials: { baseUrl: 'https://rr.example.com', apiKey: 'pk', ignoreSslIssues: true },
+			credentials: { baseUrl: 'https://rr.example.com', apiKey: 'rr_test', ignoreSslIssues: true },
 			httpMock: () => ({ status: 'OK', data: {} }),
 		});
 		await RocketRide.prototype.execute.call(ctx);
@@ -80,7 +116,7 @@ describe('RocketRide.execute — Run Pipeline', () => {
 	it('captures errors as item output when continueOnFail is enabled', async () => {
 		const ctx = makeContext({
 			params: { operation: 'run', payloadMode: 'text', text: 'x' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			httpMock: () => {
 				throw new Error('boom');
 			},

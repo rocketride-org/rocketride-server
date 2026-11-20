@@ -1,0 +1,208 @@
+{
+	"definition": {
+		"title": "Qdrant",
+		"protocol": "qdrant://",
+		"classType": [
+			"store",
+			"tool"
+		],
+		"capabilities": [
+			"invoke"
+		],
+		"register": "filter",
+		"node": "python",
+		"path": "nodes.store_qdrant",
+		"prefix": "Qdrant Vector Store",
+		"description": [
+			"A vector database component for Qdrant, enabling efficient storage and ",
+			"retrieval of vector embeddings. It supports similarity search, filtering, ",
+			"and management of vector data with high performance and advanced matching capabilities."
+		],
+		"icon": "qdrant.svg",
+		"documentation": "https://docs.rocketride.org/nodes/store_qdrant",
+		"tile": [
+			"Host/Port: ${parameters.qdrant.${profile}.host}:${parameters.qdrant.${profile}.port}",
+			"Collection: ${parameters.qdrant.${profile}.collection}"
+		],
+		"lanes": {
+			"documents": [],
+			"questions": [
+				"documents",
+				"answers",
+				"questions"
+			]
+		},
+		"test": {
+			"profiles": [
+				"local"
+			],
+			"cases": [
+				{
+					"name": "Add document to store",
+					"documents": [
+						{
+							"page_content": "The capital of France is Paris.",
+							"metadata": {
+								"objectId": "test-doc-1",
+								"nodeId": "test-node",
+								"parent": "/test",
+								"chunkId": 0,
+								"isDeleted": false
+							},
+							"embedding": [
+								0.1,
+								0.2,
+								0.3,
+								0.4,
+								0.5
+							],
+							"embedding_model": "test-model"
+						}
+					],
+					"expect": {
+						"documents": {
+							"notEmpty": true,
+							"contains": "capital of France"
+						}
+					}
+				},
+				{
+					"name": "Search with question",
+					"questions": {
+						"type": "semantic",
+						"questions": [
+							{
+								"text": "What is the capital of France?",
+								"embedding": [
+									0.1,
+									0.2,
+									0.3,
+									0.4,
+									0.5
+								],
+								"embedding_model": "test-model"
+							}
+						]
+					},
+					"expect": {
+						"documents": {
+							"notEmpty": true,
+							"contains": "Paris",
+							"property": [
+								{
+									"path": "[0].score",
+									"greaterThan": 0.5
+								},
+								{
+									"path": "[0].metadata.objectId",
+									"equals": "test-doc-1"
+								}
+							]
+						}
+					}
+				}
+			]
+		},
+		"propertyDefinitions": {
+			"vector.local.host": {
+				"default": "localhost"
+			},
+			"vector.local.port": {
+				"default": 6333
+			},
+			"qdrant.serverName": {
+				"type": "string",
+				"title": "Tool Server Name",
+				"description": "Label for this store in tool-response messages (for example, a refused write names qdrant.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
+				"default": "qdrant",
+				"minLength": 1
+			},
+			"vector.cloud.host": {
+				"description": "Enter the server IP address e.g. <your-instance-name>.<region>.qdrant.io"
+			},
+			"vector.cloud.port": {
+				"default": 6333
+			}
+		},
+		"properties": [
+			{
+				"name": "profile",
+				"title": "Type of Qdrant host",
+				"description": "Connect to...",
+				"type": "string",
+				"default": "cloud",
+				"enum": {
+					"local": {
+						"title": "Your own Qdrant server",
+						"properties": [
+							"vector.local.host",
+							"vector.local.port",
+							"vector.score",
+							{
+								"base": "vector.collection",
+								"default": "ROCKETRIDE"
+							},
+							"qdrant.serverName",
+							{
+								"name": "mode",
+								"type": "constant",
+								"default": "local"
+							}
+						]
+					},
+					"cloud": {
+						"title": "Qdrant cloud server",
+						"properties": [
+							"vector.cloud.host",
+							"vector.cloud.port",
+							"vector.apikey",
+							"vector.score",
+							{
+								"base": "vector.collection",
+								"default": "ROCKETRIDE"
+							},
+							"qdrant.serverName",
+							{
+								"name": "mode",
+								"type": "constant",
+								"default": "cloud"
+							}
+						]
+					}
+				}
+			}
+		],
+		"legacy": {
+			"selector": "profile",
+			"default": "cloud",
+			"profiles": {
+				"local": {
+					"mode": "local",
+					"title": "Your own Qdrant server",
+					"host": "localhost",
+					"port": 6333,
+					"collection": "ROCKETRIDE",
+					"serverName": "qdrant"
+				},
+				"cloud": {
+					"mode": "cloud",
+					"title": "Qdrant cloud server",
+					"host": "",
+					"port": 6333,
+					"apikey": "",
+					"collection": "ROCKETRIDE",
+					"serverName": "qdrant"
+				}
+			},
+			"dropped": [
+				"provider"
+			]
+		}
+	},
+	"warnings": [
+		"the \"Transform\" section has no counterpart and was dropped",
+		"not reached from the node's section, so not carried over: qdrant.provider, qdrant.qdrant, qdrant.store, qdrant.target.autopipe, qdrant.target.parameters",
+		"kept as references to shared definitions (check each exists in the current catalog): vector.score, vector.collection, vector.apikey"
+	],
+	"legacy": true
+}

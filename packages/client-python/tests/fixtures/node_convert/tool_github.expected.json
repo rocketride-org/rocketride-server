@@ -1,0 +1,414 @@
+{
+	"definition": {
+		"title": "GitHub",
+		"protocol": "tool_github://",
+		"classType": [
+			"tool"
+		],
+		"capabilities": [
+			"invoke"
+		],
+		"register": "filter",
+		"node": "python",
+		"path": "nodes.tool_github",
+		"prefix": "github",
+		"icon": "github.svg",
+		"documentation": "https://docs.rocketride.org/nodes/tool_github",
+		"description": [
+			"Exposes GitHub repository operations as agent tools.",
+			"Covers files, issues, pull requests, reviews, releases, workflows, orgs, users,",
+			"code search, and commit history."
+		],
+		"tile": [
+			"GitHub${parameters.github.defaultRepo ? ': ' + parameters.github.defaultRepo : ''}"
+		],
+		"lanes": {},
+		"propertyDefinitions": {
+			"github.token": {
+				"type": "string",
+				"title": "Personal Access Token",
+				"description": "GitHub PAT with repo, issues, pull_requests, and workflows scopes. Use a fine-grained token scoped to only the repos you need.",
+				"default": "",
+				"secret": true
+			},
+			"github.appId": {
+				"type": "string",
+				"title": "App ID",
+				"description": "The numeric App ID from your GitHub App's settings page.",
+				"default": ""
+			},
+			"github.privateKey": {
+				"type": "upload",
+				"title": "App Private Key (.pem)",
+				"description": "Upload the PEM private key generated for your GitHub App. Used to sign short-lived JWTs; never sent to GitHub directly.",
+				"default": "",
+				"secret": true,
+				"options": {
+					"accept": ".pem"
+				}
+			},
+			"github.installationId": {
+				"type": "string",
+				"title": "Installation ID",
+				"description": "The installation ID for the org/account where the App is installed (found in the installation's settings URL). Leave empty to find the installation per repository (GET /repos/{owner}/{repo}/installation), so one pipeline can reach repositories in every organization where the App is installed.",
+				"default": ""
+			},
+			"github.credentialRepository": {
+				"type": "string",
+				"title": "Repository or owner",
+				"description": "owner/repo for one repository, owner/* for every repository of that owner, or * for the default used when no other row matches. Not case sensitive.",
+				"default": ""
+			},
+			"github.credentialValue": {
+				"type": "string",
+				"title": "Credential",
+				"description": "A personal access token, a ${ROCKETRIDE_...} placeholder for one, or the JSON text of a GitHub App credential: {\"appId\": ..., \"privateKey\": ..., \"installationId\": optional}.",
+				"default": "",
+				"secret": true
+			},
+			"github.credentialMap": {
+				"title": "Credential map",
+				"description": "Optional. One row per repository or organization that needs its own credential. Repository or owner: owner/repo, owner/* for all of an owner's repositories, or * for the default. Credential: a personal access token, a ${ROCKETRIDE_...} placeholder, or a GitHub App credential as JSON. A call uses the most specific row for its repository; repositories no row matches use the node's own token, and a * row replaces that token (the node may not have both). Rows are checked when the pipeline starts.",
+				"type": "array",
+				"minItems": 0,
+				"default": [],
+				"secret": true,
+				"item": {
+					"name": "entry",
+					"properties": [
+						"github.credentialRepository",
+						{
+							"base": "github.credentialValue",
+							"secret": false
+						}
+					]
+				}
+			},
+			"github.defaultRepo": {
+				"type": "string",
+				"title": "Default Repository",
+				"description": "Default repo in owner/repo format (e.g. acme/myapp). Tool calls that omit the repo parameter will use this value.",
+				"default": ""
+			},
+			"github.readOnly": {
+				"type": "boolean",
+				"title": "Read-only mode",
+				"description": "When enabled, all write operations (file create/edit/delete, issue create, PR create, etc.) are blocked. Safe for agents that should only read.",
+				"default": false,
+				"enum": [
+					[
+						true,
+						"Yes: read only"
+					],
+					[
+						false,
+						"No: allow writes"
+					]
+				]
+			},
+			"github.tools": {
+				"type": "array",
+				"title": "Tools",
+				"description": "Which tools this node publishes to the agent and accepts calls for: pick them from the list, one checkbox per tool, in the order of the README's tool tables. With none picked every tool is published. Fewer tools keep the agent's prompt small. Read-only mode still blocks the write tools whatever is picked.",
+				"uniqueItems": true,
+				"default": [],
+				"item": {
+					"name": "entry",
+					"type": "string",
+					"enum": [
+						[
+							"file_get",
+							"Files: file_get"
+						],
+						[
+							"file_list",
+							"Files: file_list"
+						],
+						[
+							"file_create",
+							"Files: file_create (write)"
+						],
+						[
+							"file_edit",
+							"Files: file_edit (write)"
+						],
+						[
+							"file_delete",
+							"Files: file_delete (write)"
+						],
+						[
+							"issue_get",
+							"Issues: issue_get"
+						],
+						[
+							"issue_list",
+							"Issues: issue_list"
+						],
+						[
+							"issue_create",
+							"Issues: issue_create (write)"
+						],
+						[
+							"issue_comment",
+							"Issues: issue_comment (write)"
+						],
+						[
+							"issue_edit",
+							"Issues: issue_edit (write)"
+						],
+						[
+							"issue_add_labels",
+							"Issues: issue_add_labels (write)"
+						],
+						[
+							"issue_lock",
+							"Issues: issue_lock (write)"
+						],
+						[
+							"pr_get",
+							"Pull requests: pr_get"
+						],
+						[
+							"pr_list",
+							"Pull requests: pr_list"
+						],
+						[
+							"pr_create",
+							"Pull requests: pr_create (write)"
+						],
+						[
+							"pr_request_reviewers",
+							"Pull requests: pr_request_reviewers (write)"
+						],
+						[
+							"pr_remove_requested_reviewers",
+							"Pull requests: pr_remove_requested_reviewers (write)"
+						],
+						[
+							"review_create",
+							"Reviews: review_create (write)"
+						],
+						[
+							"review_list",
+							"Reviews: review_list"
+						],
+						[
+							"review_get",
+							"Reviews: review_get"
+						],
+						[
+							"review_update",
+							"Reviews: review_update (write)"
+						],
+						[
+							"repo_get",
+							"Repository: repo_get"
+						],
+						[
+							"repo_tree",
+							"Repository: repo_tree"
+						],
+						[
+							"repo_contributors",
+							"Repository: repo_contributors"
+						],
+						[
+							"repo_languages",
+							"Repository: repo_languages"
+						],
+						[
+							"label_list",
+							"Repository: label_list"
+						],
+						[
+							"graphql",
+							"GraphQL: graphql (queries; mutations need their switch)"
+						],
+						[
+							"release_list",
+							"Releases: release_list"
+						],
+						[
+							"release_get",
+							"Releases: release_get"
+						],
+						[
+							"release_create",
+							"Releases: release_create (write)"
+						],
+						[
+							"release_update",
+							"Releases: release_update (write)"
+						],
+						[
+							"release_delete",
+							"Releases: release_delete (write)"
+						],
+						[
+							"workflow_list",
+							"Workflows: workflow_list"
+						],
+						[
+							"workflow_get",
+							"Workflows: workflow_get"
+						],
+						[
+							"workflow_dispatch",
+							"Workflows: workflow_dispatch (write)"
+						],
+						[
+							"workflow_enable",
+							"Workflows: workflow_enable (write)"
+						],
+						[
+							"workflow_disable",
+							"Workflows: workflow_disable (write)"
+						],
+						[
+							"workflow_get_usage",
+							"Workflows: workflow_get_usage"
+						],
+						[
+							"org_list_repos",
+							"Organization & users: org_list_repos"
+						],
+						[
+							"user_get_repos",
+							"Organization & users: user_get_repos"
+						],
+						[
+							"installation_repos",
+							"Organization & users: installation_repos"
+						],
+						[
+							"user_get",
+							"Organization & users: user_get"
+						],
+						[
+							"user_invite",
+							"Organization & users: user_invite (write)"
+						],
+						[
+							"search_code",
+							"Search & commits: search_code"
+						],
+						[
+							"search_issues",
+							"Search & commits: search_issues"
+						],
+						[
+							"commit_list",
+							"Search & commits: commit_list"
+						],
+						[
+							"commit_get",
+							"Search & commits: commit_get"
+						]
+					]
+				}
+			},
+			"github.graphqlAllowMutations": {
+				"type": "boolean",
+				"title": "GraphQL mutations",
+				"description": "With read-only mode off, lets graphql run a document that contains a mutation operation. Off by default: a mutation can do anything the credential allows, such as merging a pull request, deleting a branch or changing branch protection, far more than the write tools. Read-only mode refuses mutations whatever this says.",
+				"default": false,
+				"enum": [
+					[
+						true,
+						"Yes: run mutations"
+					],
+					[
+						false,
+						"No: queries only"
+					]
+				]
+			},
+			"github.graphqlMaxResponseBytes": {
+				"type": "integer",
+				"title": "GraphQL response cap (bytes)",
+				"description": "Largest graphql response body the node reads, in bytes after decompression. A larger response returns an error naming this cap instead of the data. Default 4194304 (4 MiB).",
+				"default": 4194304,
+				"minimum": 1024,
+				"maximum": 104857600
+			},
+			"github.rateLimitBudgetSeconds": {
+				"type": "integer",
+				"title": "Rate-limit wait budget (seconds)",
+				"description": "Total time one call of graphql, a repository read (repo_tree, repo_contributors, repo_languages, label_list, user_get, installation_repos) or an envelope write (pr_request_reviewers, pr_remove_requested_reviewers, issue_add_labels) may spend waiting out GitHub rate limits, across every request it makes: a repo_tree walk shares it among its subtree reads. A wait that does not fit is not started, and the call returns the rate-limit error with retry_after. When GitHub names no wait the waits are 60, 120, then 240 seconds, so the default allows one such retry; raise it to allow more. 0 never retries after a rate limit. The call blocks for the whole wait, so the maximum is 600 (ten minutes).",
+				"default": 60,
+				"minimum": 0,
+				"maximum": 600
+			},
+			"github.rateLimitMaxRetries": {
+				"type": "integer",
+				"title": "Rate-limit retries",
+				"description": "Retries of each request after its first attempt when GitHub answers it with a rate limit, within the call's wait budget: 3 retries means up to 4 attempts. 0 never retries. A write is retried only after a rate-limit answer, which GitHub sends instead of processing the request, never after a timeout or any other failure.",
+				"default": 3,
+				"minimum": 0,
+				"maximum": 10
+			}
+		},
+		"properties": [
+			"type",
+			{
+				"name": "authType",
+				"title": "Authentication method",
+				"description": "Personal Access Token is simplest for individual/dev use. GitHub App auth mints short-lived, auto-rotating installation tokens — recommended for unattended pipelines against an org's repos.",
+				"type": "string",
+				"default": "pat",
+				"enum": {
+					"pat": {
+						"title": "Personal Access Token",
+						"properties": [
+							"github.token"
+						]
+					},
+					"app": {
+						"title": "GitHub App (installation token)",
+						"properties": [
+							"github.appId",
+							"github.privateKey",
+							"github.installationId"
+						]
+					}
+				}
+			},
+			"github.credentialMap",
+			"github.defaultRepo",
+			"github.readOnly",
+			"github.tools",
+			"github.graphqlAllowMutations",
+			"github.graphqlMaxResponseBytes",
+			"github.rateLimitBudgetSeconds",
+			"github.rateLimitMaxRetries"
+		],
+		"legacy": {
+			"selector": "profile",
+			"default": "default",
+			"profiles": {
+				"default": {
+					"title": "GitHub",
+					"authType": "pat",
+					"token": "",
+					"appId": "",
+					"privateKey": "",
+					"installationId": "",
+					"credentialMap": [],
+					"defaultRepo": "",
+					"readOnly": false,
+					"tools": [],
+					"graphqlAllowMutations": false,
+					"graphqlMaxResponseBytes": 4194304,
+					"rateLimitBudgetSeconds": 60,
+					"rateLimitMaxRetries": 3
+				}
+			},
+			"dropped": []
+		}
+	},
+	"warnings": [
+		"github.credentialMap: \"secret\" moved from the array item's members to the array",
+		"kept as references to shared definitions (check each exists in the current catalog): type"
+	],
+	"legacy": true
+}

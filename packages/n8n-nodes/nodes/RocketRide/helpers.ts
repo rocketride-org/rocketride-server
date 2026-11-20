@@ -36,6 +36,33 @@ export function coerceJsonObject(value: unknown): IDataObject {
 	return {};
 }
 
+/**
+ * A pipeline address: `developerId.pipelineId` or
+ * `developerId.pipelineId.source`, each segment letters, digits, `_` or `-`.
+ */
+const ADDRESS_PATTERN = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?$/;
+
+/**
+ * The webhook URL that reaches a pipeline. The address rides the path
+ * (`{baseUrl}/webhook/{address}`); an empty address gives the bare
+ * `{baseUrl}/webhook`, which the server serves only for an API key scoped to
+ * exactly one pipeline endpoint (the key names the pipeline itself).
+ *
+ * Throws when `address` is set but is not an address.
+ */
+export function webhookUrl(baseUrl: string, address: string): string {
+	const trimmed = address.trim();
+	if (trimmed === '') {
+		return `${baseUrl}/webhook`;
+	}
+	if (!ADDRESS_PATTERN.test(trimmed)) {
+		throw new Error(
+			`"${trimmed}" is not a pipeline address: use developerId.pipelineId.source (letters, digits, _ and - in each part)`,
+		);
+	}
+	return `${baseUrl}/webhook/${trimmed}`;
+}
+
 /** Max bytes accepted for a single multipart upload — matches n8n's default payload cap. */
 export const MAX_UPLOAD_BYTES = 16 * 1024 * 1024;
 

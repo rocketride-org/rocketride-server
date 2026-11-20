@@ -27,7 +27,7 @@ describe('RocketRide.execute — Upload Files', () => {
 	it('builds multipart form-data with the binary file and optional text', async () => {
 		const ctx = makeContext({
 			params: { operation: 'uploadFiles', inputDataFieldName: 'data', uploadText: 'summarize this' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			binaries: {
 				data: { meta: { fileName: 'doc.pdf', mimeType: 'application/pdf' }, buffer: Buffer.from('hello pdf') },
 			},
@@ -51,7 +51,7 @@ describe('RocketRide.execute — Upload Files', () => {
 	it('supports multiple comma-separated binary fields', async () => {
 		const ctx = makeContext({
 			params: { operation: 'uploadFiles', inputDataFieldName: 'data, second' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			binaries: {
 				data: { meta: { fileName: 'a.txt', mimeType: 'text/plain' }, buffer: Buffer.from('a') },
 				second: { meta: { fileName: 'b.txt', mimeType: 'text/plain' }, buffer: Buffer.from('b') },
@@ -69,7 +69,7 @@ describe('RocketRide.execute — Upload Files', () => {
 		const big = Buffer.alloc(17 * 1024 * 1024);
 		const ctx = makeContext({
 			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			binaries: {
 				data: { meta: { fileName: 'big.bin', mimeType: 'application/octet-stream' }, buffer: big },
 			},
@@ -86,7 +86,7 @@ describe('RocketRide.execute — Upload Files', () => {
 		let buffered = false;
 		const ctx = makeContext({
 			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			binaries: {
 				data: {
 					meta: { fileName: 'big.bin', mimeType: 'application/octet-stream', bytes: 17 * 1024 * 1024 },
@@ -111,7 +111,7 @@ describe('RocketRide.execute — Upload Files', () => {
 		let buffered = false;
 		const ctx = makeContext({
 			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			binaries: {
 				data: {
 					meta: { fileName: 'big.bin', mimeType: 'application/octet-stream', id: 'bin-1' },
@@ -136,7 +136,7 @@ describe('RocketRide.execute — Upload Files', () => {
 	it('uploads normally when the declared size is under the limit', async () => {
 		const ctx = makeContext({
 			params: { operation: 'uploadFiles', inputDataFieldName: 'data' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			binaries: {
 				data: {
 					meta: { fileName: 'ok.txt', mimeType: 'text/plain', bytes: 5 },

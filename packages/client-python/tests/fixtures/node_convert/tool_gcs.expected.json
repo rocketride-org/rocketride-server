@@ -1,0 +1,78 @@
+{
+	"definition": {
+		"title": "Google Cloud Storage",
+		"protocol": "tool_gcs://",
+		"classType": [
+			"tool"
+		],
+		"capabilities": [
+			"noremote",
+			"invoke"
+		],
+		"register": "filter",
+		"node": "python",
+		"path": "nodes.tool_gcs",
+		"prefix": "gcs",
+		"description": [
+			"A tool component that interacts with Google Cloud Storage buckets."
+		],
+		"icon": "tool_gcs.svg",
+		"documentation": "https://docs.rocketride.org/nodes/tool_gcs",
+		"invoke": {},
+		"lanes": {},
+		"propertyDefinitions": {
+			"gcs.bucketName": {
+				"type": "string",
+				"title": "Bucket Name",
+				"description": "The Google Cloud Storage bucket name."
+			},
+			"gcs.prefix": {
+				"type": "string",
+				"title": "Path Prefix",
+				"description": "Optional path prefix inside the bucket."
+			},
+			"gcs.maxDownloadBytes": {
+				"type": "integer",
+				"title": "Max Download Bytes",
+				"default": 52428800,
+				"minimum": 1,
+				"description": "Reject downloads larger than this many bytes (default 50 MiB). Protects server disk from oversized objects."
+			}
+		},
+		"properties": [
+			{
+				"name": "profile",
+				"type": "string",
+				"default": "default",
+				"hidden": true,
+				"enum": {
+					"default": {
+						"title": "Default",
+						"properties": [
+							"gcp.authType",
+							"gcp.serviceAccountKey",
+							"gcp.projectId",
+							"gcs.bucketName",
+							"gcs.prefix",
+							"gcs.maxDownloadBytes"
+						]
+					}
+				}
+			}
+		],
+		"legacy": {
+			"selector": "profile",
+			"default": "default",
+			"profiles": {
+				"default": {
+					"maxDownloadBytes": 52428800
+				}
+			},
+			"dropped": []
+		}
+	},
+	"warnings": [
+		"kept as references to shared definitions (check each exists in the current catalog): gcp.authType, gcp.serviceAccountKey, gcp.projectId"
+	],
+	"legacy": true
+}

@@ -4,6 +4,7 @@ import {
 	coerceJsonObject,
 	declaredBinaryBytes,
 	parseRocketRideResponse,
+	webhookUrl,
 } from '../nodes/RocketRide/helpers.ts';
 
 describe('buildRunBody', () => {
@@ -91,5 +92,23 @@ describe('declaredBinaryBytes', () => {
 				throw new Error('gone');
 			}),
 		).toBeUndefined();
+	});
+});
+
+describe('webhookUrl', () => {
+	it('puts the address in the path', () => {
+		expect(webhookUrl('http://h:5567', 'acme.docBrain.chat')).toBe('http://h:5567/webhook/acme.docBrain.chat');
+		expect(webhookUrl('http://h:5567', 'acme.docBrain')).toBe('http://h:5567/webhook/acme.docBrain');
+	});
+
+	it('gives the bare /webhook for an empty address (a key scoped to one endpoint)', () => {
+		expect(webhookUrl('http://h:5567', '')).toBe('http://h:5567/webhook');
+		expect(webhookUrl('http://h:5567', '   ')).toBe('http://h:5567/webhook');
+	});
+
+	it('refuses anything that is not two or three dot-free segments', () => {
+		for (const bad of ['docBrain', 'a.b.c.d', 'acme/docBrain', 'acme..chat', 'acme.doc brain']) {
+			expect(() => webhookUrl('http://h:5567', bad)).toThrow('is not a pipeline address');
+		}
 	});
 });

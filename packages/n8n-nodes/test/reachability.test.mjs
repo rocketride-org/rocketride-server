@@ -39,7 +39,7 @@ describe('RocketRide.execute — reachability', () => {
 	it('surfaces the Docker hint for a local connection failure', async () => {
 		const ctx = makeCtx({
 			params: { operation: 'run', payloadMode: 'text', text: 'x' },
-			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'pk', ignoreSslIssues: false },
+			credentials: { baseUrl: 'http://localhost:5567', apiKey: 'rr_test', ignoreSslIssues: false },
 			httpMock: () => {
 				throw new Error('connect ECONNREFUSED 127.0.0.1:5567');
 			},
