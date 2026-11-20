@@ -623,53 +623,70 @@ class Store(DocumentStoreBase):
         # have fit), or past it when the page held copies of that one chunkId
         # only. The cursor moves forward on every full page, so any number of
         # copies is passed, and re-reading a copy only replaces it in place.
-        groupSize = max(1, self.renderChunkSize)
-        pageSize = max(1, self.renderPageSize)
+        groupSize = self.renderChunkSize
+        pageSize = self.renderPageSize
         groupStart = 0
         pieces: Dict[int, str] = {}
 
         cursor = 0
         while True:
-            points = self.collectionObj.query.fetch_objects(
-                filters=(
-                    Filter.by_property('objectId').equal(objectId)
-                    & Filter.by_property('chunkId').greater_or_equal(cursor)
-                ),
-                sort=Sort.by_property('chunkId', ascending=True),
-                limit=pageSize,
-            )
+            objects = self._fetchRenderPage(objectId, cursor, pageSize)
 
             lastChunk = cursor
-            for point in points.objects:
+            for point in objects:
                 chunk = point.properties.get('chunkId')
+
+                # chunkId is an INT property and the greater_or_equal filter only
+                # matches objects that have one, so this skips only a malformed
+                # object that has no place in the document's order
                 if not isinstance(chunk, int) or chunk < cursor:
                     continue
                 lastChunk = max(lastChunk, chunk)
 
                 # Chunks arrive in order, so a chunk past the current group completes it
                 if chunk >= groupStart + groupSize:
-                    self._handOverRenderGroup(pieces, callback)
+                    self._emitRenderGroup(pieces, callback)
                     pieces = {}
                     groupStart = chunk - chunk % groupSize
 
                 # Of several copies of one chunk number, the last one read is kept
                 pieces[chunk] = point.properties.get('content') or ''
 
-            if len(points.objects) < pageSize:
+            if len(objects) < pageSize:
                 break
+            cursor = self._nextRenderCursor(cursor, lastChunk)
 
-            # Every full page moves the cursor forward, so render always ends
-            if lastChunk > cursor:
-                # Start at the page's last chunkId: its copies may not all have fit
-                cursor = lastChunk
-            else:
-                # A full page of copies of one chunkId: step past it
-                cursor += 1
+        self._emitRenderGroup(pieces, callback)
 
-        self._handOverRenderGroup(pieces, callback)
+    def _fetchRenderPage(self, objectId: str, cursor: int, pageSize: int) -> List[Any]:
+        """
+        Return up to pageSize objects of one document from chunkId cursor on, in chunkId order.
+        """
+        points = self.collectionObj.query.fetch_objects(
+            filters=(
+                Filter.by_property('objectId').equal(objectId) & Filter.by_property('chunkId').greater_or_equal(cursor)
+            ),
+            sort=Sort.by_property('chunkId', ascending=True),
+            limit=pageSize,
+        )
+        return points.objects
 
     @staticmethod
-    def _handOverRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
+    def _nextRenderCursor(cursor: int, lastChunk: int) -> int:
+        """
+        Return where the page after a full page starts.
+
+        Every full page moves the cursor forward, so render always ends.
+        """
+        if lastChunk > cursor:
+            # Start at the page's last chunkId: its copies may not all have fit
+            return lastChunk
+
+        # A full page of copies of one chunkId: step past it
+        return cursor + 1
+
+    @staticmethod
+    def _emitRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
         """
         Send one render group's text to the callback, joined in chunkId order.
 
