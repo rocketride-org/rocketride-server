@@ -176,6 +176,8 @@ class _FakeIInstanceBase:
 
     IGlobal = None
     instance = None
+    # A binding without a caller, as rocketlib's NO_CALLER reads (plan 4.1 rule 7)
+    caller = types.SimpleNamespace(controlId='', userId='', teamId='', orgId='', address='', rung='')
 
     def __init__(self):
         """Take no arguments, like the real base."""
@@ -336,7 +338,22 @@ def _build(pkg, iglobal, listeners=None):
 
 
 class _StubDetector:
-    """Annotates text and scores documents the way AnomalyDetector does."""
+    """Annotates text and scores documents in AnomalyDetector's per-call shape.
+
+    The node builds one per call from the call's settings and the series' stored
+    window (plan 5.7), and writes the window back when ``changed`` says so.
+    """
+
+    changed = False
+
+    def __init__(self, settings=None, stored=None):
+        """Take the call's settings and the series' stored window, like the real detector."""
+
+    @staticmethod
+    def text_value(text):
+        """The number in ``text``, or None when it has none."""
+        match = re.search(r'-?\d+(?:\.\d+)?', text)
+        return float(match.group()) if match else None
 
     def evaluate_text(self, text):
         """Annotate the text so a duplicate delivery is distinguishable."""
@@ -346,15 +363,45 @@ class _StubDetector:
         """Return a fixed anomaly result."""
         return {'score': 1.0, 'severity': 'high', 'is_anomalous': True, 'details': 'stub'}
 
+    def to_state(self):
+        """The window to write back (nothing changed)."""
+        return {}
 
-def _anomaly(detector, listeners=None):
-    """Build an anomaly_detector instance with the given detector."""
-    return _build('anomaly_detector', types.SimpleNamespace(detector=detector), listeners)
+
+class _FakeState:
+    """Stand-in for ``self.state``: one dict, and a lock that only scopes the read-modify-write."""
+
+    def __init__(self):
+        """Start empty."""
+        self.rows = {}
+
+    def get(self, key):
+        """The value under ``key``, or None."""
+        return self.rows.get(key)
+
+    def put(self, key, value, ttl=None):
+        """Store ``value`` under ``key``."""
+        self.rows[key] = value
+
+    @contextlib.contextmanager
+    def lock(self, key):
+        """Hold the key for the block (one caller here)."""
+        yield
+
+
+def _anomaly(listeners=None):
+    """Build an anomaly_detector instance on the call's settings, a state store and a stub detector."""
+    inst, fake = _build('anomaly_detector', types.SimpleNamespace(), listeners)
+    inst.settings = types.SimpleNamespace(seriesField='', series='default', node=types.SimpleNamespace(id='anomaly_1'))
+    inst.state = _FakeState()
+    # The node builds its detector per call from the module's AnomalyDetector
+    type(inst).writeText.__globals__['AnomalyDetector'] = _StubDetector
+    return inst, fake
 
 
 def test_anomaly_detector_text_delivered_once():
     """The annotated result is delivered, and the unannotated original is not."""
-    inst, fake = _anomaly(_StubDetector())
+    inst, fake = _anomaly()
 
     delivered = []
     _simulate_engine_dispatch(lambda: inst.writeText('cpu 900'), lambda: delivered.append('cpu 900'))
@@ -366,20 +413,20 @@ def test_anomaly_detector_text_delivered_once():
     )
 
 
-def test_anomaly_detector_text_delivered_once_without_detector():
-    """The detector-is-None branch forwards too, so it needs its own suppression."""
-    inst, fake = _anomaly(None)
+def test_anomaly_detector_text_without_a_number_is_delivered_once():
+    """Text with no number passes through untouched, and that branch suppresses the default too."""
+    inst, fake = _anomaly()
 
     delivered = []
-    _simulate_engine_dispatch(lambda: inst.writeText('cpu 900'), lambda: delivered.append('cpu 900'))
+    _simulate_engine_dispatch(lambda: inst.writeText('cpu idle'), lambda: delivered.append('cpu idle'))
     delivered.extend(fake.delivered.get('text', []))
 
-    assert delivered == ['cpu 900']
+    assert delivered == ['cpu idle']
 
 
 def test_anomaly_detector_documents_delivered_once():
     """Only the enriched copy arrives, never the un-enriched original."""
-    inst, fake = _anomaly(_StubDetector())
+    inst, fake = _anomaly()
     docs = [FakeDoc(page_content='a', metadata=FakeMetadata())]
 
     delivered = []
@@ -391,16 +438,18 @@ def test_anomaly_detector_documents_delivered_once():
     assert delivered[0].metadata.anomaly_severity == 'high'
 
 
-def test_anomaly_detector_documents_delivered_once_without_detector():
-    """The detector-is-None branch forwards documents too, so it needs its own suppression."""
-    inst, fake = _anomaly(None)
+def test_anomaly_detector_documents_without_metadata_are_delivered_once():
+    """A document with no metadata is never scored, and its copy still arrives exactly once."""
+    inst, fake = _anomaly()
     docs = [FakeDoc(page_content='a')]
 
     delivered = []
     _simulate_engine_dispatch(lambda: inst.writeDocuments(docs), lambda: delivered.extend(docs))
     delivered.extend(fake.delivered.get('documents', []))
 
-    assert delivered == docs
+    assert len(delivered) == 1, f'documents lane delivered {len(delivered)} docs for an input of 1'
+    assert delivered[0].page_content == 'a'
+    assert inst.state.rows == {}, 'a document with no metadata touched the series'
 
 
 # ============================================================================
