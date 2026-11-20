@@ -300,7 +300,7 @@ class RocketRideClient(
             The ``body`` field of a successful DAP response.
 
         Raises:
-            CommandException: If the server signals failure; ``code`` says why.
+            CommandException: If the server signals failure; ``code`` says why, when the server sends one.
         """
         # Build the raw DAP request
         message = self.build_request(command=command, token=token, arguments=kwargs)

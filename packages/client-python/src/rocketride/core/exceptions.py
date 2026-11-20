@@ -100,6 +100,10 @@ class DAPException(Exception):
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
 
+    def __reduce__(self):
+        # Rebuilt from the DAP result its constructor takes, so it crosses a process boundary
+        return (self.__class__, (self.dap_result,), self.__dict__)
+
     @property
     def code(self) -> Optional[str]:
         """

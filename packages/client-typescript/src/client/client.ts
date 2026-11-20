@@ -1358,7 +1358,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.source - Optional override for the source component ID
 	 * @returns Promise resolving to validation result with errors, warnings,
 	 *          and resolved component
-	 * @throws Error if the server returns a validation error
+	 * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+	 *         a pipeline that fails validation resolves, with its problems in `errors`
 	 *
 	 * @example
 	 * ```typescript
@@ -3540,7 +3541,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param args    - Key/value arguments forwarded in the request.
 	 * @param options - Optional token (for task-scoped calls) and timeout in ms.
 	 * @returns The `body` field of a successful DAP response.
-	 * @throws CommandException if the server signals failure; `code` says why.
+	 * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
 	 */
 	async call<T = any>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T> {
 		// Build the raw DAP request

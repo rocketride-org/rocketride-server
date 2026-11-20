@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV14 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-18T22:21:37.688Z
-// Source commit: d44d410bc79e63315657e1cd1f5c6f714aacf443
+// Generated:     2026-11-20T20:33:45.873Z
+// Source commit: 02ff0b3e799fb3d84357f57dea62b2b53995a205
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -4582,11 +4582,9 @@ declare class DeployApi {
      *   may serve it; the developer submits it for review to reach the public
      *   store).
      *
-     * - `kind: 'node'` — pass `data` (the node's `.rrnode`). It is added as a
-     *   new private version; `rrext_deploy_node` publishes it.
-     * @param options.kind - 'pipe' (default) | 'app' | 'node'.
+     * @param options.kind - 'pipe' (default) | 'app'.
      * @param options.pipeline - The pipeline definition (kind 'pipe').
-     * @param options.data - The source zip bytes (kind 'app'), or the .rrnode (kind 'node').
+     * @param options.data - The source zip bytes (kind 'app').
      * @param options.metadata - Optional metadata blob (e.g. projectId
      *   provenance, appRoot for workspace-relative app zips).
      * @param options.comment - "What changed" note kept in the registry.
@@ -5408,7 +5406,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.source - Optional override for the source component ID
      * @returns Promise resolving to validation result with errors, warnings,
      *          and resolved component
-     * @throws Error if the server returns a validation error
+     * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+     *         a pipeline that fails validation resolves, with its problems in `errors`
      *
      * @example
      * ```typescript
@@ -6393,7 +6392,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param args    - Key/value arguments forwarded in the request.
      * @param options - Optional token (for task-scoped calls) and timeout in ms.
      * @returns The `body` field of a successful DAP response.
-     * @throws CommandException if the server signals failure; `code` says why.
+     * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
      */
     call<T = any>(command: string, args?: Record<string, unknown>, options?: {
         token?: string;

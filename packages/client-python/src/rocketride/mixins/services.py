@@ -164,7 +164,9 @@ class ServicesMixin(DAPClient):
             absent.
 
         Raises:
-            RuntimeError: If the server returns a validation error.
+            CommandException: If the server refuses the command (``code`` says why, when it
+                sends one); a pipeline that fails validation returns, with its problems in
+                ``errors``.
 
         Example:
             result = await client.validate(

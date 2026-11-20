@@ -127,8 +127,10 @@ def _refusing_client(code='NODE_NOT_ENTITLED', message='acme.echo is not publish
     from rocketride import RocketRideClient
 
     client = RocketRideClient(uri='http://localhost:1', auth='key')
+    client.sent = []
 
     async def request(message_, timeout=None):
+        client.sent.append(message_)
         return {'success': False, 'message': message, 'code': code}
 
     client.request = request
@@ -141,7 +143,8 @@ async def test_a_refused_validation_keeps_the_code():
     try:
         await _refusing_client().validate({'components': []})
     except CommandException as e:
-        assert e.code == 'NODE_NOT_ENTITLED' and str(e).startswith('Pipeline validation failed: ')
+        assert e.code == 'NODE_NOT_ENTITLED'
+        assert str(e) == 'Pipeline validation failed: acme.echo is not published to you'
     else:
         raise AssertionError('validate() did not raise')
 
@@ -149,9 +152,24 @@ async def test_a_refused_validation_keeps_the_code():
 async def test_a_refused_restart_keeps_the_code():
     from rocketride.core.exceptions import CommandException
 
+    client = _refusing_client()
     try:
-        await _refusing_client().restart(token='tk', project_id='p', source='s', pipeline={})
+        await client.restart(token='tk', project_id='p', source='s', pipeline={})
     except CommandException as e:
         assert e.code == 'NODE_NOT_ENTITLED' and isinstance(e, RuntimeError)
     else:
         raise AssertionError('restart() did not raise')
+    assert [m['command'] for m in client.sent] == ['restart']
+
+
+def test_a_refusal_crosses_a_process_boundary():
+    import pickle
+
+    from rocketride.core.exceptions import CommandException
+
+    e = pickle.loads(
+        pickle.dumps(CommandException({'message': 'acme.echo is not published to you', 'code': 'NODE_NOT_ENTITLED'}))
+    )
+    assert (
+        type(e) is CommandException and e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
+    )
