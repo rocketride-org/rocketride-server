@@ -16,6 +16,15 @@ from unittest.mock import Mock
 import pytest
 
 NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'
+SHARED_UTILS_DIR = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils'
+
+
+def load_shared_util(name: str):
+    """Load one real ``ai.common.utils`` submodule standalone (``url_policy`` and ``pinned_http`` have no engine imports)."""
+    spec = importlib.util.spec_from_file_location(f'_tool_http_request_test_{name}', SHARED_UTILS_DIR / f'{name}.py')
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 @pytest.fixture
@@ -44,6 +53,14 @@ def node_modules(monkeypatch: pytest.MonkeyPatch):
     config_module.Config = Mock()
     utils_module = types.ModuleType('ai.common.utils')
     utils_module.config_int = Mock(side_effect=lambda _cfg, _key, default, **_kwargs: default)
+    url_policy = load_shared_util('url_policy')
+    utils_module.url_matches_pattern = url_policy.url_matches_pattern
+    utils_module.canonicalize_url = url_policy.canonicalize_url
+    utils_module.url_has_dot_segments = url_policy.url_has_dot_segments
+    pinned_http = load_shared_util('pinned_http')
+    utils_module.HostResolutionError = pinned_http.HostResolutionError
+    utils_module.pinned_session = pinned_http.pinned_session
+    utils_module.resolve_public_addresses = pinned_http.resolve_public_addresses
     monkeypatch.setitem(sys.modules, 'ai', types.ModuleType('ai'))
     monkeypatch.setitem(sys.modules, 'ai.common', types.ModuleType('ai.common'))
     monkeypatch.setitem(sys.modules, 'ai.common.config', config_module)
