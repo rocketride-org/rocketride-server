@@ -154,8 +154,10 @@ export function utf8Length(s: string): number {
  */
 export function isWireBinary(v: unknown): v is { __rrbin: true; b64: string } {
 	if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
-	const keys = Object.keys(v);
-	return keys.length === 2 && (v as Record<string, unknown>).__rrbin === true && typeof (v as Record<string, unknown>).b64 === 'string';
+	const o = v as Record<string, unknown>;
+	const own = (key: string): boolean => Object.prototype.hasOwnProperty.call(o, key);
+	// OWN members only: a prototype that supplies `__rrbin` and `b64` to an object with two other keys is not a binary member.
+	return Object.keys(o).length === 2 && own('__rrbin') && own('b64') && o.__rrbin === true && typeof o.b64 === 'string';
 }
 
 const B64 = /^[A-Za-z0-9+/]*={0,2}$/;
