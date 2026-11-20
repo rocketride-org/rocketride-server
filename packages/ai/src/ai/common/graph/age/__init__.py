@@ -30,7 +30,7 @@ description, verified AGE mechanics, and vendored-code provenance.
 
 from .analysis import CypherFacts, analyze
 from .capabilities import AGE_1_5_0, AGE_1_6_0, CAPABILITY_TABLES, Capability, CellStatus, DEFAULT_AGE_VERSION
-from .decode import decode_agtype
+from .decode import decode_agtype, parse_agtype
 from .emit import TranslatedQuery
 from .errors import AgeFirewallRejected, AgeTranslationError, AgeUnsupportedFeature
 from .firewall import FirewallConfig
@@ -53,5 +53,6 @@ __all__ = [
     'analyze',
     'decode_agtype',
     'decode_row',
+    'parse_agtype',
     'translate',
 ]

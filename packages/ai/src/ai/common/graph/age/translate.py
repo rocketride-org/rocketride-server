@@ -82,7 +82,7 @@ def translate(
     # instead of after seconds of ANTLR work.
     check_pre_parse(cypher, config)
 
-    facts = analyze(cypher)
+    facts = analyze(cypher, age_version)
 
     # Firewall: resource caps guard BOTH paths; only semantics are mode-gated.
     check_resource_caps(facts, config)

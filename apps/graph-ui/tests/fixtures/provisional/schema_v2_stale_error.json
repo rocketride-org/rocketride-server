@@ -1,0 +1,149 @@
+{
+  "labels": [
+    "Company",
+    "Person"
+  ],
+  "nodes": {
+    "Company": [
+      {
+        "property": "name",
+        "type": "STRING"
+      }
+    ],
+    "Person": [
+      {
+        "property": "age",
+        "type": "INTEGER"
+      },
+      {
+        "property": "name",
+        "type": "STRING"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "Person"
+    },
+    {
+      "type": "WORKS_AT",
+      "start": "Person",
+      "end": "Company"
+    }
+  ],
+  "schema": {
+    "version": 2,
+    "labels": [
+      {
+        "name": "Company",
+        "properties": [
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          }
+        ],
+        "count": 1,
+        "count_estimated": true
+      },
+      {
+        "name": "Person",
+        "properties": [
+          {
+            "name": "age",
+            "types": [
+              "integer"
+            ]
+          },
+          {
+            "name": "born",
+            "types": [
+              "temporal"
+            ]
+          },
+          {
+            "name": "name",
+            "types": [
+              "string"
+            ]
+          },
+          {
+            "name": "score",
+            "types": [
+              "float",
+              "integer"
+            ]
+          }
+        ],
+        "count": 2,
+        "count_estimated": true
+      }
+    ],
+    "relationship_types": [
+      {
+        "type": "KNOWS",
+        "endpoints": [
+          {
+            "start": "Person",
+            "end": "Person",
+            "observed": true
+          }
+        ],
+        "properties": [
+          {
+            "name": "since",
+            "types": [
+              "integer"
+            ]
+          }
+        ],
+        "count": 3,
+        "count_estimated": true
+      },
+      {
+        "type": "LIKES",
+        "endpoints": [
+          {
+            "start": "Person",
+            "end": "Person",
+            "observed": true
+          }
+        ],
+        "properties": []
+      },
+      {
+        "type": "WORKS_AT",
+        "endpoints": [
+          {
+            "start": "Person",
+            "end": "Company",
+            "observed": true
+          },
+          {
+            "start": "Employee",
+            "end": "Company",
+            "observed": false
+          }
+        ],
+        "properties": [
+          {
+            "name": "role",
+            "types": [
+              "string"
+            ]
+          }
+        ]
+      }
+    ],
+    "sampled": true,
+    "truncated": false,
+    "refreshed_at": "2026-10-04T15:00:00Z",
+    "source": "refresh",
+    "stale": true,
+    "error": "Query timed out after 30000 ms\nDatabase said: Query timed out",
+    "capable": true
+  }
+}

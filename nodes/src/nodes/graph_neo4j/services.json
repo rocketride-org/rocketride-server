@@ -172,7 +172,7 @@
 			"title": "Max validation attempts",
 			"default": 5,
 			"minimum": 1,
-			"maximum": 20,
+			"maximum": 10,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
 		},
 		"graph_neo4j.allow_execute": {

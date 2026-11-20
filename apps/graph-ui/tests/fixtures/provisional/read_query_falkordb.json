@@ -1,0 +1,933 @@
+{
+  "columns": [
+    "a",
+    "r",
+    "m",
+    "friends",
+    "p",
+    "name"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "node",
+        "id": "0",
+        "labels": [
+          "Employee",
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "double-escaped",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          },
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T10:30:15+00:00"
+          },
+          "wake": {
+            "@kind": "temporal",
+            "type": "localtime",
+            "value": "07:15:00"
+          },
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P40DT2H"
+          },
+          "home": {
+            "latitude": 52.52,
+            "longitude": 13.405
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "0",
+        "type": "KNOWS",
+        "start": "0",
+        "end": "1",
+        "properties": {
+          "since": 2019
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "1",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "1",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "1",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "0",
+            "labels": [
+              "Employee",
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "double-escaped",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              },
+              "born": {
+                "@kind": "temporal",
+                "type": "date",
+                "value": "1989-02-28"
+              },
+              "seen": {
+                "@kind": "temporal",
+                "type": "datetime",
+                "value": "2026-10-04T10:30:15+00:00"
+              },
+              "wake": {
+                "@kind": "temporal",
+                "type": "localtime",
+                "value": "07:15:00"
+              },
+              "tenure": {
+                "@kind": "temporal",
+                "type": "duration",
+                "value": "P40DT2H"
+              },
+              "home": {
+                "latitude": 52.52,
+                "longitude": 13.405
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "2",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "0",
+            "type": "KNOWS",
+            "start": "0",
+            "end": "1",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "4",
+            "type": "WORKS_AT",
+            "start": "0",
+            "end": "2",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "0",
+        "labels": [
+          "Employee",
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "double-escaped",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          },
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T10:30:15+00:00"
+          },
+          "wake": {
+            "@kind": "temporal",
+            "type": "localtime",
+            "value": "07:15:00"
+          },
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P40DT2H"
+          },
+          "home": {
+            "latitude": 52.52,
+            "longitude": 13.405
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "1",
+        "type": "KNOWS",
+        "start": "0",
+        "end": "1",
+        "properties": {
+          "since": 2021
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "1",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "1",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "1",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "0",
+            "labels": [
+              "Employee",
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "double-escaped",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              },
+              "born": {
+                "@kind": "temporal",
+                "type": "date",
+                "value": "1989-02-28"
+              },
+              "seen": {
+                "@kind": "temporal",
+                "type": "datetime",
+                "value": "2026-10-04T10:30:15+00:00"
+              },
+              "wake": {
+                "@kind": "temporal",
+                "type": "localtime",
+                "value": "07:15:00"
+              },
+              "tenure": {
+                "@kind": "temporal",
+                "type": "duration",
+                "value": "P40DT2H"
+              },
+              "home": {
+                "latitude": 52.52,
+                "longitude": 13.405
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "2",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "0",
+            "type": "KNOWS",
+            "start": "0",
+            "end": "1",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "4",
+            "type": "WORKS_AT",
+            "start": "0",
+            "end": "2",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "0",
+        "labels": [
+          "Employee",
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "double-escaped",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          },
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T10:30:15+00:00"
+          },
+          "wake": {
+            "@kind": "temporal",
+            "type": "localtime",
+            "value": "07:15:00"
+          },
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P40DT2H"
+          },
+          "home": {
+            "latitude": 52.52,
+            "longitude": 13.405
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "3",
+        "type": "LIKES",
+        "start": "0",
+        "end": "0",
+        "properties": {}
+      },
+      {
+        "@kind": "node",
+        "id": "0",
+        "labels": [
+          "Employee",
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "double-escaped",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          },
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T10:30:15+00:00"
+          },
+          "wake": {
+            "@kind": "temporal",
+            "type": "localtime",
+            "value": "07:15:00"
+          },
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P40DT2H"
+          },
+          "home": {
+            "latitude": 52.52,
+            "longitude": 13.405
+          }
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "1",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "1",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "0",
+            "labels": [
+              "Employee",
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "double-escaped",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              },
+              "born": {
+                "@kind": "temporal",
+                "type": "date",
+                "value": "1989-02-28"
+              },
+              "seen": {
+                "@kind": "temporal",
+                "type": "datetime",
+                "value": "2026-10-04T10:30:15+00:00"
+              },
+              "wake": {
+                "@kind": "temporal",
+                "type": "localtime",
+                "value": "07:15:00"
+              },
+              "tenure": {
+                "@kind": "temporal",
+                "type": "duration",
+                "value": "P40DT2H"
+              },
+              "home": {
+                "latitude": 52.52,
+                "longitude": 13.405
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "2",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "0",
+            "type": "KNOWS",
+            "start": "0",
+            "end": "1",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "4",
+            "type": "WORKS_AT",
+            "start": "0",
+            "end": "2",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "0",
+        "labels": [
+          "Employee",
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "double-escaped",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          },
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T10:30:15+00:00"
+          },
+          "wake": {
+            "@kind": "temporal",
+            "type": "localtime",
+            "value": "07:15:00"
+          },
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P40DT2H"
+          },
+          "home": {
+            "latitude": 52.52,
+            "longitude": 13.405
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "4",
+        "type": "WORKS_AT",
+        "start": "0",
+        "end": "2",
+        "properties": {
+          "role": "eng"
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "2",
+        "labels": [
+          "Company"
+        ],
+        "properties": {
+          "name": "Acme"
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "1",
+          "labels": [
+            "Person"
+          ],
+          "properties": {
+            "name": "Bob",
+            "age": 41
+          }
+        }
+      ],
+      {
+        "@kind": "path",
+        "nodes": [
+          {
+            "@kind": "node",
+            "id": "1",
+            "labels": [
+              "Person"
+            ],
+            "properties": {
+              "name": "Bob",
+              "age": 41
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "0",
+            "labels": [
+              "Employee",
+              "Person"
+            ],
+            "properties": {
+              "name": "Alice",
+              "age": 37,
+              "score": 0.5,
+              "big": {
+                "@kind": "number",
+                "value": "9007199254740993"
+              },
+              "meta": {
+                "@@kind": "node",
+                "@@@kind": "double-escaped",
+                "_labels": [
+                  "not",
+                  "metadata"
+                ],
+                "_type": "user value",
+                "": "empty key"
+              },
+              "born": {
+                "@kind": "temporal",
+                "type": "date",
+                "value": "1989-02-28"
+              },
+              "seen": {
+                "@kind": "temporal",
+                "type": "datetime",
+                "value": "2026-10-04T10:30:15+00:00"
+              },
+              "wake": {
+                "@kind": "temporal",
+                "type": "localtime",
+                "value": "07:15:00"
+              },
+              "tenure": {
+                "@kind": "temporal",
+                "type": "duration",
+                "value": "P40DT2H"
+              },
+              "home": {
+                "latitude": 52.52,
+                "longitude": 13.405
+              }
+            }
+          },
+          {
+            "@kind": "node",
+            "id": "2",
+            "labels": [
+              "Company"
+            ],
+            "properties": {
+              "name": "Acme"
+            }
+          }
+        ],
+        "relationships": [
+          {
+            "@kind": "relationship",
+            "id": "0",
+            "type": "KNOWS",
+            "start": "0",
+            "end": "1",
+            "properties": {
+              "since": 2019
+            }
+          },
+          {
+            "@kind": "relationship",
+            "id": "4",
+            "type": "WORKS_AT",
+            "start": "0",
+            "end": "2",
+            "properties": {
+              "role": "eng"
+            }
+          }
+        ]
+      },
+      "Alice"
+    ],
+    [
+      {
+        "@kind": "node",
+        "id": "1",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "name": "Bob",
+          "age": 41
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "2",
+        "type": "KNOWS",
+        "start": "1",
+        "end": "0",
+        "properties": {
+          "since": 2020
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "0",
+        "labels": [
+          "Employee",
+          "Person"
+        ],
+        "properties": {
+          "name": "Alice",
+          "age": 37,
+          "score": 0.5,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "meta": {
+            "@@kind": "node",
+            "@@@kind": "double-escaped",
+            "_labels": [
+              "not",
+              "metadata"
+            ],
+            "_type": "user value",
+            "": "empty key"
+          },
+          "born": {
+            "@kind": "temporal",
+            "type": "date",
+            "value": "1989-02-28"
+          },
+          "seen": {
+            "@kind": "temporal",
+            "type": "datetime",
+            "value": "2026-10-04T10:30:15+00:00"
+          },
+          "wake": {
+            "@kind": "temporal",
+            "type": "localtime",
+            "value": "07:15:00"
+          },
+          "tenure": {
+            "@kind": "temporal",
+            "type": "duration",
+            "value": "P40DT2H"
+          },
+          "home": {
+            "latitude": 52.52,
+            "longitude": 13.405
+          }
+        }
+      },
+      [
+        {
+          "@kind": "node",
+          "id": "0",
+          "labels": [
+            "Employee",
+            "Person"
+          ],
+          "properties": {
+            "name": "Alice",
+            "age": 37,
+            "score": 0.5,
+            "big": {
+              "@kind": "number",
+              "value": "9007199254740993"
+            },
+            "meta": {
+              "@@kind": "node",
+              "@@@kind": "double-escaped",
+              "_labels": [
+                "not",
+                "metadata"
+              ],
+              "_type": "user value",
+              "": "empty key"
+            },
+            "born": {
+              "@kind": "temporal",
+              "type": "date",
+              "value": "1989-02-28"
+            },
+            "seen": {
+              "@kind": "temporal",
+              "type": "datetime",
+              "value": "2026-10-04T10:30:15+00:00"
+            },
+            "wake": {
+              "@kind": "temporal",
+              "type": "localtime",
+              "value": "07:15:00"
+            },
+            "tenure": {
+              "@kind": "temporal",
+              "type": "duration",
+              "value": "P40DT2H"
+            },
+            "home": {
+              "latitude": 52.52,
+              "longitude": 13.405
+            }
+          }
+        }
+      ],
+      null,
+      "Bob"
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 40,
+  "value_limit": 500000,
+  "values": 343
+}

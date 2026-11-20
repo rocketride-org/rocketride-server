@@ -1,0 +1,62 @@
+{
+  "columns": [
+    "a",
+    "r",
+    "b",
+    "a.name",
+    "a.name"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "node",
+        "id": "844424930131969",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "age": 30,
+          "big": {
+            "@kind": "number",
+            "value": "9007199254740993"
+          },
+          "name": "alice",
+          "precise": {
+            "@kind": "number",
+            "value": "1.5"
+          }
+        }
+      },
+      {
+        "@kind": "relationship",
+        "id": "1125899906842625",
+        "type": "KNOWS",
+        "start": "844424930131969",
+        "end": "844424930131970",
+        "properties": {
+          "since": 2019
+        }
+      },
+      {
+        "@kind": "node",
+        "id": "844424930131970",
+        "labels": [
+          "Person"
+        ],
+        "properties": {
+          "age": 25,
+          "name": "bob"
+        }
+      },
+      "alice",
+      "alice"
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 3,
+  "value_limit": 500000,
+  "values": 15
+}

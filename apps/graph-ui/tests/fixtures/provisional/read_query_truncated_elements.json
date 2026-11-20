@@ -1,0 +1,50 @@
+{
+  "columns": [
+    "c"
+  ],
+  "rows": [
+    [
+      [
+        {
+          "@kind": "node",
+          "id": "0",
+          "labels": [
+            "N"
+          ],
+          "properties": {}
+        },
+        {
+          "@kind": "node",
+          "id": "1",
+          "labels": [
+            "N"
+          ],
+          "properties": {}
+        },
+        {
+          "@kind": "node",
+          "id": "2",
+          "labels": [
+            "N"
+          ],
+          "properties": {}
+        },
+        {
+          "@kind": "node",
+          "id": "3",
+          "labels": [
+            "N"
+          ],
+          "properties": {}
+        }
+      ]
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": true,
+  "truncated_by": "elements",
+  "element_limit": 10000,
+  "elements": 4,
+  "value_limit": 500000,
+  "values": 5
+}

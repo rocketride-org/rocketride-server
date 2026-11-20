@@ -201,7 +201,7 @@
 			"default": 250,
 			"minimum": 1,
 			"maximum": 25000,
-			"description": "Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated."
+			"description": "Upper cap on rows returned by get_data, the questions lane, query and read_query. Results beyond it are cut; get_data, query and read_query flag them as truncated (the questions lane does not report it). It is kept one row below the server's RESULTSET_SIZE."
 		},
 		"graph_falkordb.max_execute_rows": {
 			"type": "integer",
@@ -209,7 +209,7 @@
 			"default": 25000,
 			"minimum": 1,
 			"maximum": 25000,
-			"description": "Upper cap on rows returned by the execute tool. A read over the cap fails. A write over the cap is already saved, so it returns the first rows flagged as truncated."
+			"description": "Upper cap on rows returned by the execute tool, kept one row below the server's RESULTSET_SIZE. In the default shape a read over the cap fails, and a write over it is already saved, so it returns the first rows flagged as truncated. With shape \"graph\" the result is cut at the cap and reported as truncated."
 		},
 		"graph_falkordb.query_timeout_ms": {
 			"type": "integer",
@@ -217,7 +217,7 @@
 			"default": 30000,
 			"minimum": 100,
 			"maximum": 600000,
-			"description": "Server-side timeout for a single query."
+			"description": "Server-side timeout for every query the node sends, clamped to the server's TIMEOUT_MAX."
 		},
 		//
 		// The two connection profiles. Everything the driver reads must be listed

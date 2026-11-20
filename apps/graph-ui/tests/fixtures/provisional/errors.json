@@ -1,0 +1,11 @@
+{
+  "refused_write": "Refused: read_query is read-only; this statement writes (CREATE)\nUse the write console (execute) on a node with allow_execute enabled.",
+  "refused_call": "Refused: CALL apoc.periodic.iterate is not on the read-only procedure allowlist\nAllowed: db.labels, db.relationshipTypes, db.propertyKeys, db.schema.nodeTypeProperties, db.schema.relTypeProperties, db.schema.visualization",
+  "age_hint": "Not supported on Apache AGE 1.5.0: date()\nAGE 1.5.0 has no date() function; store dates as ISO-8601 strings and compare them as strings.",
+  "timeout": "Query timed out after 30000 ms\nDatabase said: canceling statement due to statement timeout",
+  "invalid_input": "Invalid read_query input: \"limit\" must be an integer >= 1 (got true)",
+  "db_error": "Query failed\nDatabase said: Variable `x` not defined (line 1, column 8 (offset: 7))",
+  "too_many_elements_first_row": "Refused: the first row holds more than 10,000 graph elements\nNarrow the query (for example LIMIT inside collect()).",
+  "execute_disabled_legacy": "execute tool is disabled for this node (set allow_execute=true)",
+  "unknown_tool_engine": "No handler found for tool read_query (UNVERIFIED exact text; treat any \"No handler found for tool\" as upgrade)"
+}

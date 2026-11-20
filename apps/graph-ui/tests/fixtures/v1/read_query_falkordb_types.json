@@ -1,0 +1,54 @@
+{
+  "columns": [
+    "date",
+    "datetime",
+    "localtime",
+    "duration",
+    "point_as_map",
+    "vectorf32",
+    "big"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "temporal",
+        "type": "date",
+        "value": "2024-02-29"
+      },
+      {
+        "@kind": "temporal",
+        "type": "datetime",
+        "value": "2024-01-02T03:04:05+00:00"
+      },
+      {
+        "@kind": "temporal",
+        "type": "localtime",
+        "value": "12:30:15"
+      },
+      {
+        "@kind": "temporal",
+        "type": "duration",
+        "value": "P40DT2H"
+      },
+      {
+        "latitude": 52.52,
+        "longitude": 13.405
+      },
+      [
+        1.0,
+        2.5
+      ],
+      {
+        "@kind": "number",
+        "value": "9007199254740993"
+      }
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 0,
+  "value_limit": 500000,
+  "values": 11
+}

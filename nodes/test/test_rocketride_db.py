@@ -825,13 +825,29 @@ _GRAPH_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_graph'
 
 
 class _GraphCursor(_FakeCursor):
+    # Every read the node's connect path makes returns one row.
+    description = (('v',),)
+
     def fetchone(self):
         return ('1.5.0',)
 
+    def fetchall(self):
+        return [('1.5.0',)]
+
 
 class _GraphClient(_FakeClient):
+    # What the node's connection pool reads and calls on a connection.
+    closed = 0
+    autocommit = False
+
     def cursor(self):
         return _GraphCursor(self.executed, self.fetch_batches)
+
+    def rollback(self):
+        pass
+
+    def get_transaction_status(self):
+        return 0  # psycopg2.extensions.TRANSACTION_STATUS_IDLE
 
 
 def _graph_iglobal(monkeypatch):
@@ -851,8 +867,14 @@ def _graph_iglobal(monkeypatch):
 
     psycopg2_mod.connect = connect
     psycopg2_mod.sql = types.ModuleType('psycopg2.sql')
+    psycopg2_mod.errors = types.ModuleType('psycopg2.errors')
+    for name in ('QueryCanceled', 'ReadOnlySqlTransaction'):
+        setattr(psycopg2_mod.errors, name, type(name, (Exception,), {}))
+    psycopg2_mod.extensions = types.ModuleType('psycopg2.extensions')
+    psycopg2_mod.extensions.TRANSACTION_STATUS_IDLE = 0
     monkeypatch.setitem(sys.modules, 'psycopg2', psycopg2_mod)
-    monkeypatch.setitem(sys.modules, 'psycopg2.sql', psycopg2_mod.sql)
+    for name in ('sql', 'errors', 'extensions'):
+        monkeypatch.setitem(sys.modules, f'psycopg2.{name}', getattr(psycopg2_mod, name))
 
     ai_pkg = types.ModuleType('ai')
     ai_pkg.__path__ = []
@@ -864,20 +886,29 @@ def _graph_iglobal(monkeypatch):
         'GraphGlobalBase', (), {'_config_int': staticmethod(lambda cfg, key, default: default)}
     )
     age = types.ModuleType('ai.common.graph.age')
-    for name in ('AgeTranslationError', 'FirewallConfig', 'TranslatedQuery'):
+    for name in ('FirewallConfig', 'TranslatedQuery'):
         setattr(age, name, type(name, (), {}))
+    for name in ('AgeTranslationError', 'AgeFirewallRejected', 'AgeUnsupportedFeature'):
+        setattr(age, name, type(name, (Exception,), {}))
     age.TranslateMode = types.SimpleNamespace(SAFE='safe')
     age.CAPABILITY_TABLES = {'1.5.0': {}, '1.6.0': {}}
     age.DEFAULT_AGE_VERSION = '1.5.0'
-    for name in ('decode_agtype', 'decode_row', 'translate'):
+    for name in ('decode_agtype', 'decode_row', 'parse_agtype', 'translate'):
         setattr(age, name, lambda *a, **kw: None)
+    adapters = types.ModuleType('ai.common.graph.adapters')
+    adapters.age_adapter = types.ModuleType('ai.common.graph.adapters.age_adapter')
     for name, mod in (
         ('ai', ai_pkg),
         ('ai.common', common_pkg),
         ('ai.common.graph', graph_pkg),
         ('ai.common.graph.age', age),
+        ('ai.common.graph.adapters', adapters),
     ):
         monkeypatch.setitem(sys.modules, name, mod)
+    # The connection pool and the schema limits are plain Python: load the real ones.
+    for name in ('connection_pool', 'schema'):
+        module = _load_from_path(f'ai.common.graph.{name}', _AI_SRC / 'ai' / 'common' / 'graph' / f'{name}.py')
+        monkeypatch.setitem(sys.modules, f'ai.common.graph.{name}', module)
 
     rrdb_mod = _load_from_path('ai.common.rocketride_db', _RRDB_PATH)
     monkeypatch.setitem(sys.modules, 'ai.common.rocketride_db', rrdb_mod)
