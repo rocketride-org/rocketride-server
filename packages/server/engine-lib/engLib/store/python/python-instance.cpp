@@ -128,6 +128,7 @@ IPythonInstanceBase::~IPythonInstanceBase() {
 
         m_pyInstance = {};
         m_pyInstanceClass = {};
+        m_global.releaseSlot(m_slot);
     }
 }
 
@@ -157,7 +158,9 @@ py::object &IPythonInstanceBase::boundInstance() {
 ///		IInstance and sets up the following on it
 ///
 ///			IEndpoint		contains an object of the users IEndpoint class
-///			IGlobal			contains an object of the users IGlobal class
+///			IGlobal			the users IGlobal object of the binding's
+///							CONTROL (pipe->caller['controlId']), built
+///							by the global on the first touch
 ///			instance		this IPythonInstanceBase class which allows
 ///							access to instance functions
 ///			_caller			the binding's caller context from the pipe,
@@ -174,15 +177,21 @@ Error IPythonInstanceBase::beginBinding() noexcept {
     if (m_boundError) return m_boundError;
 
     const auto python = localfcn()->Error {
+        // The IGlobal of this binding's CONTROL (plan 4.1 rule 1): built by
+        // the global on the control's first touch of the node, from the
+        // config the open carried, and held until endBinding
+        auto slot = m_global.acquireSlot(pipe ? pipe->caller : py::object{});
+        if (!slot) return slot.ccode();
+        m_slot = _mv(*slot);
+
         // Create a new instance
         m_pyInstance = m_pyInstanceClass();
 
         // Save the python part of the endpoint
         m_pyInstance.attr("IEndpoint") = m_global.m_pyEndpoint;
 
-        // We may not have an IGlobal
-        if (m_global.m_pyGlobal)
-            m_pyInstance.attr("IGlobal") = m_global.m_pyGlobal;
+        // The control's own global - never another control's
+        m_pyInstance.attr("IGlobal") = m_slot->global;
 
         // Save the ptr to our functions
         m_pyInstance.attr("instance") = this;
@@ -204,11 +213,13 @@ Error IPythonInstanceBase::beginBinding() noexcept {
     auto ccode = callPython(python);
 
     // A constructor that failed half way leaves no instance: the binding
-    // stays recorded (putPipe ends it), the node is simply not there
+    // stays recorded (putPipe ends it), the node is simply not there, and
+    // the control's global is not held
     if (ccode) {
         engine::python::LockPython lock;
 
         m_pyInstance = {};
+        m_global.releaseSlot(m_slot);
     }
 
     return ccode;
@@ -235,7 +246,17 @@ Error IPythonInstanceBase::endBinding() noexcept {
         return {};
     };
 
-    return callPython(python);
+    auto ccode = callPython(python);
+
+    // The hold on the control's global ends with the binding, whatever
+    // endInstance did: it touches the slot, so the idle clock starts now
+    _block() {
+        engine::python::LockPython lock;
+
+        m_global.releaseSlot(m_slot);
+    }
+
+    return ccode;
 }
 
 //-------------------------------------------------------------------------

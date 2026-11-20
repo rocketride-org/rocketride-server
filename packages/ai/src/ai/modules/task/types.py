@@ -143,8 +143,6 @@ class TaskError(RuntimeError):
       whitespace or ``~``, or a client trying to name the registry key
     - TASK_SOURCE_REQUIRED: a two-segment address names a pipe with several
       live sources and no default; ``sources`` lists them
-    - TASK_SPEC_CHANGED: a spec call with ``onChange='error'`` met a live
-      presence running other content; ``currentHash`` and ``newHash``
     - TASK_CANCELLED: the caller cancelled the request (``pipe.cancel()``);
       the write or tool call it interrupted fails with it at the next node
       boundary, and the pipe's close still runs
@@ -170,7 +168,6 @@ class TaskError(RuntimeError):
     INVALID_ARGUMENT = 'TASK_INVALID_ARGUMENT'
     SOURCE_REQUIRED = 'TASK_SOURCE_REQUIRED'
     ENGINE_UNAVAILABLE = 'TASK_ENGINE_UNAVAILABLE'
-    SPEC_CHANGED = 'TASK_SPEC_CHANGED'
     CANCELLED = CONST_TASK_CANCELLED_CODE
     PAYLOAD_TOO_LARGE = 'TASK_PAYLOAD_TOO_LARGE'
     ENGINE_START_FAILED = 'TASK_ENGINE_START_FAILED'

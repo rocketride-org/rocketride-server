@@ -139,32 +139,33 @@ export interface PipelineConfig {
  * The close body's own fields (`result_types`, `objects` ...) ride beside these.
  */
 export interface SUBMIT_RESULT {
-	/** The address that answered: `developerId.pipelineId.source` */
+	/**
+	 * The control id that answered: an opaque transient handle, valid for the
+	 * life of the control, that every data and control verb takes. Never
+	 * persist it: it dies with the control and a restart mints a new one.
+	 */
 	token: string;
 
+	/** The address that answered: `developerId.pipelineId.source` (the stable identity, beside the id) */
+	address?: string;
+
 	/** The rung that answered */
-	resolved: '@dev' | '@me' | '@team' | '@public';
+	resolved: '@spec' | '@me' | '@team' | '@public';
 
 	/** On `@team`: the answering team */
 	team?: string;
 
-	/** The artifact version (absent on `@dev`) */
+	/** The artifact version (absent on `@spec`) */
 	version?: number;
 
-	/** The engine the request ran on (content hash, owner-qualified when private) */
+	/** The engine the request ran on (shape key, owner-qualified) */
 	engineKey: string;
 
-	/** False when `onChange: 'keep'` delivered to an engine running another spec */
-	specMatch: boolean;
-
-	/** What resolution did to reach an engine */
-	converged: 'none' | 'started' | 'repointed';
+	/** `'none'` when an existing control answered, `'started'` when this call created one */
+	converged: 'none' | 'started';
 
 	/** Server-controlled arguments a name call passed (threads/args/env/ttl) */
 	ignored: string[];
-
-	/** `address_collision` / `repoint_storm` warnings, when any */
-	warnings?: Array<Record<string, unknown>>;
 
 	/** The close body's fields */
 	[key: string]: unknown;
@@ -196,9 +197,9 @@ export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]
 export interface PipeInterfaces {
 	/** The pipe address (`developerId.pipelineId`). */
 	address: string;
-	/** The rung that answers you: `dev` (your own run, no publication), `me`, `team` or `public`. */
-	rung: 'dev' | 'me' | 'team' | 'public';
-	/** The registry version that publication points at; null when your own `dev` run answered (it has none). */
+	/** The rung that answers you: `spec` (your own live control, no publication), `me`, `team` or `public`. */
+	rung: 'spec' | 'me' | 'team' | 'public';
+	/** The registry version that publication points at; null when your own `spec` control answered (it has none). */
 	version: number | null;
 	/** The answering team on the `team` rung. */
 	teamId?: string;

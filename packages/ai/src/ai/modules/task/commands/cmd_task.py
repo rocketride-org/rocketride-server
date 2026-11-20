@@ -248,9 +248,6 @@ class TaskCommands(DAPConn):
                 rung=rung,
                 version=version,
                 team_context=team_context,
-                # A spec call's answer to a live presence running other
-                # content (plan 3.4); absent keeps the useExisting rule
-                on_change=args.get('onChange'),
             )
 
             # Confirm successful task execution startup
@@ -340,7 +337,7 @@ class TaskCommands(DAPConn):
         disconnect.
 
         Args:
-            request (Dict[str, Any]): Terminate request carrying the task address
+            request (Dict[str, Any]): Terminate request carrying the control id
 
         Returns:
             Dict[str, Any]: Acknowledgment of successful termination
@@ -349,14 +346,14 @@ class TaskCommands(DAPConn):
             Exception: If task termination or cleanup fails
         """
         # Bound before the try so the failure log below can reference it even
-        # when get_task_address itself raises — otherwise the UnboundLocalError
+        # when get_token_slot itself raises — otherwise the UnboundLocalError
         # would replace the real error.
-        address = '<unresolved>'
+        control_id = '<unresolved>'
 
         try:
-            address = self.get_task_address(request)
+            control_id = self.get_token_slot(request)
 
-            # Resolve under the caller's account with task.control
+            # The control by its id, re-checked against the caller with task.control
             control = self.get_control(request, 'task.control')
 
             # Log the termination request
@@ -370,7 +367,7 @@ class TaskCommands(DAPConn):
 
         except Exception as e:
             # Log termination failure with task context
-            self.debug_message(f'Failed to terminate task "{address}": {str(e)}')
+            self.debug_message(f'Failed to terminate task "{control_id}": {str(e)}')
             raise
 
     async def on_restart(self, request: Dict[str, Any]) -> Dict[str, Any]:
@@ -391,11 +388,10 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # Authorize against the TASK'S team, not the dev team: get_task
-            # resolves the address to its control entry and requires
-            # task.control on that run (sys.admin bypasses). A dev-team
-            # check alone let any task.control holder restart other teams'
-            # tasks.
+            # Authorize against the TASK'S team, not the dev team: get_control
+            # finds the control by its id and requires task.control on that
+            # run (sys.admin bypasses). A dev-team check alone let any
+            # task.control holder restart other teams' tasks.
             control = self.get_control(request, 'task.control')
 
             # A restart decrypts the team's CURRENT secrets again (the task loads
@@ -429,11 +425,11 @@ class TaskCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - apikey (str): API key for authentication
-                - token (str): Task token to query status for
+                - token (str): The control id to query status for
 
         Returns:
             Dict[str, Any]: DAP response with task status in body:
+                - controlId (str): The control's id; address (str): its address
                 - name (str): Task name
                 - state (int): Current execution state
                 - status (str): Human-readable status description
@@ -465,6 +461,10 @@ class TaskCommands(DAPConn):
             # same value as engine.availability, kept for the task-list shape
             response['engineState'] = control.engine_state
 
+            # The control the body describes: its handle and its address
+            response['controlId'] = control.control_id
+            response['address'] = control.address
+
             # Return successful response with status data
             return self.build_response(request, body=response)
 
@@ -479,9 +479,13 @@ class TaskCommands(DAPConn):
         """
         Handle DAP 'rrext_engine_stop': stop an engine outright, whoever holds it.
 
-        The operator's stop (plan 7.2): ``sys.admin`` or ``internal`` only. The
-        engine stops regardless of holds, and every holder's control is told
-        ``TASK_ENGINE_UNAVAILABLE`` on its next request.
+        The operator's stop (plan 7.2), and the OWNER's (plan 7.1: the verb
+        that frees a GPU). ``sys.admin`` and ``internal`` may stop any engine;
+        anyone else may stop an engine whose key carries their owner id (every
+        rung in this PR): their own user id, or a team they hold
+        ``task.control`` on. The engine stops regardless of holds, and every
+        holder's control is told ``TASK_ENGINE_UNAVAILABLE`` on its next
+        request.
 
         Args:
             request (Dict[str, Any]): DAP request whose arguments carry
@@ -491,23 +495,29 @@ class TaskCommands(DAPConn):
             Dict[str, Any]: Acknowledgment.
 
         Raises:
-            PermissionError: The caller is neither sys.admin nor internal.
+            PermissionError: The caller is neither an operator nor the owner
+                the key names.
             ValueError: ``engineKey`` is missing.
             TaskError: No engine has that key.
         """
         try:
-            # Step 1: operators only
+            # Step 1: the engine key
             if not self._account_info:
                 raise PermissionError('Not authenticated')
-            sys_perms = self._account_info.sysPermissions or []
-            if 'sys.admin' not in sys_perms and 'internal' not in sys_perms:
-                raise PermissionError('Stopping an engine requires sys.admin')
-
-            # Step 2: the engine, by key
             args = request.get('arguments') or {}
             engine_key = args.get('engineKey')
             if not engine_key or not isinstance(engine_key, str):
                 raise ValueError('engineKey is required')
+
+            # Step 2: an operator, or the owner the key names. A key without
+            # an owner (none exist before C.25) is an operator's only
+            sys_perms = self._account_info.sysPermissions or []
+            if 'sys.admin' not in sys_perms and 'internal' not in sys_perms:
+                _, qualified, owner = engine_key.rpartition(':')
+                if not qualified or not owner:
+                    raise PermissionError('Stopping a shared engine requires sys.admin')
+                if owner != self._account_info.userId:
+                    self.verify_team_permission(owner, 'task.control')
 
             # Step 3: stop it; its holders learn on their next request
             await self._server.stop_engine(engine_key, str(args.get('reason') or 'ops'))
@@ -526,7 +536,7 @@ class TaskCommands(DAPConn):
 
         Args:
             request (Dict[str, Any]): DAP request containing:
-                - token (str): Task token to query
+                - token (str): The control id to query
 
         Returns:
             Dict[str, Any]: DAP response with pipeline in body:
@@ -567,7 +577,8 @@ class TaskCommands(DAPConn):
 
         Returns:
             Dict[str, Any]: DAP response with token
-                - token (str): The task token
+                - token (str): The control id of the caller's control
+                - address (str): Its address
         Raises:
             Exception: If task does not exist
         """
@@ -597,10 +608,10 @@ class TaskCommands(DAPConn):
             address = build_address(developer_id, project_id, source)
             control = self._server.resolve_control(address, self._account_info, 'task.monitor', team=team_id or None)
 
-            # Return the address in the token slot
+            # Return the control id in the token slot, the address beside it
             return self.build_response(
                 request,
-                body={'token': control.address},
+                body={'token': control.control_id, 'address': control.address},
             )
 
         except Exception as e:
@@ -623,7 +634,7 @@ class TaskCommands(DAPConn):
                     - name: Task name
                     - description: Task description
                     - source: Task source
-                    - token: Task token
+                    - token: The control id; controlId the same; address its address
                     - status: Task status
                     - engineState: 'running', 'starting' or 'stopped'
                       (a dormant control: its engine stopped on its
@@ -675,7 +686,9 @@ class TaskCommands(DAPConn):
                             'name': name,
                             'description': description,
                             'source': control.source,
-                            'token': control.address,
+                            'token': control.control_id,
+                            'controlId': control.control_id,
+                            'address': control.address,
                             'status': status.status,
                             # The engine's availability (plan 7.5)
                             'engineState': engine_state,

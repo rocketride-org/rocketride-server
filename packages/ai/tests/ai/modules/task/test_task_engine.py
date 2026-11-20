@@ -214,13 +214,14 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     assert config['taskId'] == 'enginehash:user-1'
     assert config['config']['threadCount'] == 4
     assert config['config']['pipelineTraceLevel'] is None
+    # The SHAPE of the spec (C.22): the components with empty configs, the parameters map beside them
     assert config['config']['pipeline'] == {
         'version': 2,
         'source': 'src',
         'project_id': 'proj-1',
         'name': 'my-pipeline',
         'description': 'desc',
-        'components': [{'id': 'src'}],
+        'components': [{'id': 'src', 'config': {}}],
         'parameters': {},
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'
@@ -1231,16 +1232,13 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
     """The task's command line carries what the operator chose: --hosted and
     --shared-host for a hosted engine, and --dumps as the engine itself was
     started. The engine reads the first --dumps, and the operator's is written
-    before a pipeline's own arguments, so a pipeline cannot turn dumps on. The
-    pre-launch check is told the same about the shared host.
+    before a pipeline's own arguments, so a pipeline cannot turn dumps on.
     """
     import ai.modules.task.task_engine as engine
 
     _fake_db_account(monkeypatch)
     monkeypatch.setattr(engine, '_is_saas_engine', lambda: saas)
     monkeypatch.setattr(engine, 'startup_args', lambda: startup)
-    checked = []
-    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
     t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
     t.source = 'src'
     t._env_source = AsyncMock(return_value={})
@@ -1266,6 +1264,17 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
         a for a in spawn.call_args.args if a.lower().startswith(('--hosted', '--shared-host', '--dumps', '--trace='))
     ]
     assert options == passed
+
+
+@pytest.mark.parametrize('saas', [True, False])
+def test_hosted_refusal_asks_the_gate_for_the_shared_host_on_a_hosted_engine_only(monkeypatch, saas):
+    """The server's per-control check: the gate is asked, told the task shares the host, on a hosted engine only."""
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: saas)
+    checked = []
+    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']) or 'no')
+    assert engine.hosted_refusal({'components': []}) == ('no' if saas else None)
     assert checked == ([True] if saas else [])
 
 

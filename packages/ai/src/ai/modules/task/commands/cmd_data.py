@@ -41,7 +41,7 @@ from ai.account.base import OutOfCreditsError
 from ai.common.dap import DAPConn, TransportBase
 
 from .. import caller_stamp
-from ..task_control import OpenPipe
+from ..task_control import OpenPipe, is_control_id
 from .engine_access import engine_for, wait_running
 
 # Only import for type checking to avoid circular import errors
@@ -145,7 +145,7 @@ class DataCommands(DAPConn):
         Handle DAP 'rrext_process': one frame of the data path (open, write, close, cancel, tool).
 
         Every frame belongs to a BINDING. An ``open`` (or a standalone ``tool``
-        call that names no pipe) starts one: it resolves the caller's control,
+        call that names no pipe) starts one: it finds the caller's control,
         takes the engine under its hold and mints the request id. A frame that
         names a ``pipe_id`` attaches to a binding this control already has
         open, through the control's open-pipe record (plan 3.1 P1/P2).
@@ -183,32 +183,19 @@ class DataCommands(DAPConn):
             else:
                 frame = self._attached_binding(control, pipe_id)
 
-            # Step 3: forward with the caller stamped, as activity of this control;
-            # an open is in flight until the engine answers (a repoint meanwhile
-            # keeps that engine); a close retires its record whatever the
-            # engine answered
-            opening = subcommand == 'open'
-            if opening:
-                control.pending_opens[frame.engine] = control.pending_opens.get(frame.engine, 0) + 1
+            # Step 3: forward with the caller stamped, as activity of this
+            # control; a close retires its record whatever the engine answered
             succeeded = False
             body = None
             try:
                 body = await self._forward(control, frame, request, arguments)
                 succeeded = True
             finally:
-                if opening:
-                    left = control.pending_opens.get(frame.engine, 0) - 1
-                    if left > 0:
-                        control.pending_opens[frame.engine] = left
-                    else:
-                        control.pending_opens.pop(frame.engine, None)
                 if subcommand == 'close' and pipe_id is not None:
                     # Transport success is not object success: a close the
                     # engine answered normally still carries the object's error
                     # when the pipeline failed it
                     self._retire(control, pipe_id, succeeded and not _object_failed(body))
-                if (opening and not succeeded) or (subcommand == 'close' and pipe_id is not None):
-                    await self._settle_drain(control)
 
             # Step 4: a successful open is a binding the control now has open;
             # a standalone tool call was a binding that opened and closed
@@ -232,17 +219,17 @@ class DataCommands(DAPConn):
         self, request: Dict[str, Any], subcommand: Optional[str], pipe_id: Optional[Any] = None
     ) -> 'TaskControl':
         """
-        The caller's control for the request's address.
+        The caller's control for the request's token slot.
 
-        An OPEN resolves the way submit() does: the live run on the first rung
-        that answers, or the publication started from its artifact (plan 3.2,
-        one resolver for every verb). A STANDALONE TOOL CALL (a ``tool`` frame
-        naming no pipe) is a binding of its own — it opens, runs and closes in
-        one frame — so it resolves the same way: a front end exploring a
-        published pipe nobody has called recently must start its engine, not
-        be told nothing is running (plan 3.6). Every other frame ATTACHES
-        only: it must land on the control the open found, never start a
-        publication a colder rung could not.
+        An OPEN, and every frame on an open pipe, names a CONTROL ID (plan
+        section 1): the registry hit is followed by the caller check, never
+        by the id alone. A STANDALONE TOOL CALL (a ``tool`` frame naming no
+        pipe) is a binding of its own — it opens, runs and closes in one
+        frame — and keeps taking an ADDRESS as well: a front end exploring a
+        published pipe nobody has called recently resolves it the way
+        submit() does and starts its engine, not be told nothing is running
+        (plan 3.6). A 32-hex value in that slot is a control id, anything
+        else an address.
 
         Args:
             request: The DAP request.
@@ -251,9 +238,10 @@ class DataCommands(DAPConn):
                 its own binding.
 
         Returns:
-            The resolved control.
+            The control.
         """
-        if subcommand == 'open' or (subcommand == 'tool' and pipe_id is None):
+        token = (request.get('arguments') or {}).get('token')
+        if subcommand == 'tool' and pipe_id is None and not is_control_id(token):
             return await self.resolve_control_or_start(request, 'task.data')
         return self.get_control(request, 'task.data')
 
@@ -275,13 +263,8 @@ class DataCommands(DAPConn):
         """
         # Step 1: the engine under the control's hold, started again when it
         # stopped on its inactivity timer (plan 7.2) after the caller's team
-        # access is re-checked. A control whose pipes are still open on the
-        # engine it repointed away from keeps opening THERE: the slot numbers
-        # a client names are one engine's (plan 7.2 P2)
+        # access is re-checked
         engine = await engine_for(self, control, 'task.data')
-        draining = control.draining
-        if draining is not None and draining.is_live and control.pipes_on(draining):
-            engine = draining
 
         # Step 2: per-call params enter by the open: admitted by public name
         # against the control's parameters map, then by value against the
@@ -341,6 +324,7 @@ class DataCommands(DAPConn):
         """
         # Step 1: strip-then-inject the caller context (plan 5.3): every
         # reserved key the client sent is removed, the server's _caller set
+        # (the control id on every frame, the control's config on the open)
         stamped = caller_stamp.prepare(
             self, control, arguments, correlation_id=frame.correlation_id, params=frame.params
         )
@@ -430,18 +414,6 @@ class DataCommands(DAPConn):
             control.stats.failedSize += record.bytes
         # Step 2: the tree is released; it lingers for the grace, then is forgotten
         self._server.trace_owners.release(record.trace_id)
-
-    async def _settle_drain(self, control: 'TaskControl') -> None:
-        """
-        After a close: the engine a repoint left draining goes once no pipe of the control is open on it.
-
-        Args:
-            control: The caller's control.
-        """
-        draining = control.draining
-        if draining is None or control.pipes_on(draining):
-            return
-        await self._server.release_draining(control, 'repointed')
 
     def _note_borrowed(self, control: 'TaskControl', body: Any, account_info: Any) -> None:
         """

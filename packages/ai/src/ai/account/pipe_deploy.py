@@ -26,7 +26,7 @@ Published rungs: the publications of one address that serve one caller.
 ``resolve_pins(kind, ...)`` is THE published-rung resolver (plan 3.2, 10.1).
 Given the request's account and an address ``developerId.pipelineId[.source]``
 it finds the publish rows the caller may resolve, in the fixed precedence
-after ``@dev`` (which is a live-control lookup, not a publication):
+after ``@spec`` (which is a live-control lookup, not a publication):
 
 - ``@me``: the caller's personal deployment, the ``user~{uid}`` audience;
 - ``@team``: the publication of the FIRST team in the caller's TEAM ORDER

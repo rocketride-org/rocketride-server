@@ -545,7 +545,9 @@ class DeployApi:
             team_id: The team whose deployment to run.
 
         Returns:
-            ``{'token', 'version'}`` of the started run.
+            ``{'token', 'address', 'version'}`` of the started run: ``token``
+            is the control id (opaque, transient, valid for the life of the
+            control; never persist it), ``address`` rides beside it.
         """
         return await self._client.call(
             'rrext_deploy_pipe', subcommand='run', projectId=project_id, sourceId=source_id, teamId=team_id

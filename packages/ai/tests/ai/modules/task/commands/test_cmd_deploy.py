@@ -572,7 +572,7 @@ class TestReads:
                 owner_kind=owner_kind,
                 owner_user_id=owner_user_id,
             )
-            return 'deploy.team-1.acme.proj-1.webhook_1'
+            return 'c0ffee00c0ffee00c0ffee00c0ffee00'
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         account_stub.deployments_get.return_value = {
@@ -588,11 +588,19 @@ class TestReads:
             },
         }
         conn = _make_conn(_account_info())
-        # The dispatch hands back the control KEY; the client gets the ADDRESS.
-        conn._server.control_by_key = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.webhook_1'))
+        # The dispatch hands back the control KEY (the control id); the client
+        # gets that id in the token slot and the address beside it, like every
+        # other starter (plan section 1)
+        conn._server.control_by_key = MagicMock(
+            return_value=SimpleNamespace(address='acme.proj-1.webhook_1', control_id='c0ffee00c0ffee00c0ffee00c0ffee00')
+        )
         result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 'webhook_1', 'teamId': 'team-1'})
-        assert result['body'] == {'token': 'acme.proj-1.webhook_1', 'version': 1}
-        conn._server.control_by_key.assert_called_once_with('deploy.team-1.acme.proj-1.webhook_1')
+        assert result['body'] == {
+            'token': 'c0ffee00c0ffee00c0ffee00c0ffee00',
+            'address': 'acme.proj-1.webhook_1',
+            'version': 1,
+        }
+        conn._server.control_by_key.assert_called_once_with('c0ffee00c0ffee00c0ffee00c0ffee00')
         assert dispatched['trigger'] == 'manual'
         assert dispatched['team_id'] == 'team-1'
         # The run names the deployment it resolved through: disabling or
@@ -609,7 +617,7 @@ class TestReads:
         # The control KEY lands under the scheduler's overlap guard so the
         # next cron tick sees this run and skips.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
-            'team-1', 'acme.proj-1', 'webhook_1', 'deploy.team-1.acme.proj-1.webhook_1'
+            'team-1', 'acme.proj-1', 'webhook_1', 'c0ffee00c0ffee00c0ffee00c0ffee00'
         )
 
     @pytest.mark.asyncio
@@ -746,7 +754,7 @@ class TestPersonalDeploy:
 
         async def fake_dispatch(server, pipeline, **kw):
             dispatched.update(kw, pipeline=pipeline)
-            return 'deploy.user-1.acme.proj-1.s1'
+            return 'd00dd00dd00dd00dd00dd00dd00dd00d'
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         account_stub.deployments_get.return_value = {
@@ -759,16 +767,18 @@ class TestPersonalDeploy:
         }
         conn = _make_conn(_account_info(teams=[]))
         address = 'acme.proj-1.s1'
-        conn._server.control_by_key = MagicMock(return_value=SimpleNamespace(address=address))
+        conn._server.control_by_key = MagicMock(
+            return_value=SimpleNamespace(address=address, control_id='d00dd00dd00dd00dd00dd00dd00dd00d')
+        )
         result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@me'})
-        assert result['body'] == {'token': address, 'version': 1}
+        assert result['body'] == {'token': 'd00dd00dd00dd00dd00dd00dd00dd00d', 'address': address, 'version': 1}
         assert dispatched['owner_kind'] == 'user'
         assert dispatched['owner_user_id'] == 'user-1'
         # Billing team is the deployment's ABSOLUTE stamp, not the target.
         assert dispatched['team_id'] == 'team-1'
         # Overlap guard + mark_run key on the OWNER key.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
-            'user~user-1', 'acme.proj-1', 's1', 'deploy.user-1.acme.proj-1.s1'
+            'user~user-1', 'acme.proj-1', 's1', 'd00dd00dd00dd00dd00dd00dd00dd00d'
         )
         account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'user~user-1', 'acme.proj-1', 's1')
 

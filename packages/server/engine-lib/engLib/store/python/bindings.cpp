@@ -842,12 +842,14 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     /// @details
     ///		Declare the python wrapper for the IPipeType class
     ///------------------------------------------------------------
+    // No connConfig here: the node's configuration reaches Python only as
+    // the owned copy on its control's glb (plan 5.6.4), never as a view into
+    // the stack
     py::class_<IPipeType>(engLib, "IPipeType")
         .PYBIND_PROP_READONLY(IPipeType, std::string, id, id)
         .PYBIND_PROP_READONLY(IPipeType, std::string, logicalType, logicalType)
         .PYBIND_PROP_READONLY(IPipeType, std::string, physicalType,
-                              physicalType)
-        .PYBIND_PROP_READONLY(IPipeType, IJson, connConfig, connConfig);
+                              physicalType);
 
     //-------------------------------------------------------------
     /// @details
@@ -970,16 +972,28 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
-    ///		Declare the IServiceFilterGlobal
+    ///		Declare IGlobal.glb: one CONTROL's view of the node (plan
+    ///		4.1 rule 1). The node is one C++ global; each control's
+    ///		IGlobal object carries its own copy of this: the identity
+    ///		fields of the reserved config.node record (plan 5.6.4) and
+    ///		connConfig, that control's configuration as an OWNED python
+    ///		dict (never a view into engine memory). controlId names the
+    ///		control ("" for the default slot of a binding without a
+    ///		caller)
     ///------------------------------------------------------------
-    py::class_<IServiceFilterGlobal>(engLib, "IServiceFilterGlobal");
-    py::class_<IPythonGlobalBase, IServiceFilterGlobal>(engLib, "IFilterGlobal")
-        .PYBIND_PROP_READONLY(IServiceFilterGlobal, IJson, connConfig,
-                              pipeType.connConfig)
-        .PYBIND_PROP_READONLY(IServiceFilterGlobal, std::string, logicalType,
-                              pipeType.logicalType)
-        .PYBIND_PROP_READONLY(IServiceFilterGlobal, std::string, physicalType,
-                              pipeType.physicalType);
+    py::class_<GlobalContext>(engLib, "IFilterGlobal")
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, controlId,
+                              controlId)
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, id, id)
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, name, name)
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, logicalType,
+                              logicalType)
+        .PYBIND_PROP_READONLY(GlobalContext, std::string, physicalType,
+                              physicalType)
+        .PYBIND_PROP_READONLY(GlobalContext, uint32_t, capabilities,
+                              capabilities)
+        .PYBIND_PROP_READONLY(GlobalContext, py::object, connConfig,
+                              connConfig);
 
     //-------------------------------------------------------------
     /// @details

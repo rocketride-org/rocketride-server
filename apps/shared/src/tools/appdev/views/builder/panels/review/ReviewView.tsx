@@ -37,6 +37,10 @@
  * and next steps" narration is gone — DESIGN is the landing view and
  * PACKAGE › Requirements is the checklist — and the thread moved here,
  * because it is about the version submitted from this page.
+ *
+ * ONE component for both kinds (plan Step 6): the pipeline PACKAGE page
+ * mounts it over the same bus-backed adapter with `subject="pipeline"` —
+ * the thread verbs on the server accept pipe artifacts since C.17.
  */
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -47,14 +51,19 @@ import type { AppHistoryEntry, AppSummary, AppVersionInfo, BuildStatusTick, IApp
 // TYPES
 // =============================================================================
 
+/** The host members the thread reads and writes — the review slice of {@link IAppBuilderHost}. */
+export type IReviewHost = Pick<IAppBuilderHost, 'loadHistory' | 'listVersions' | 'sendReply' | 'loadBuildLog' | 'subscribeBuildStatus' | 'subscribeDeployChanged'>;
+
 /** Props for the {@link ReviewView} component. */
 export interface IReviewViewProps {
 	/** The host adapter (data + actions). */
-	host: IAppBuilderHost;
-	/** The app being shown. */
-	app: AppSummary;
+	host: IReviewHost;
+	/** The app being shown (the app page's record; the pipeline page has none). */
+	app?: AppSummary;
 	/** Namespace mismatch: disable the reply box (the view stays readable). */
 	readOnly?: boolean;
+	/** What the thread is about, for the copy; 'app' by default. */
+	subject?: 'app' | 'pipeline';
 }
 
 /** The version filter: one registry version, or the whole thread. */
@@ -349,7 +358,7 @@ export function formatAt(epochSeconds: number): string {
  *
  * @param props - See {@link IReviewViewProps}.
  */
-export const ReviewView: React.FC<IReviewViewProps> = ({ host, readOnly }) => {
+export const ReviewView: React.FC<IReviewViewProps> = ({ host, readOnly, subject = 'app' }) => {
 	// ── Data — loaded through the host adapter ───────────────────────────
 	// null = first load in flight; [] = loaded and empty.
 	const [history, setHistory] = useState<AppHistoryEntry[] | null>(null);
@@ -510,9 +519,9 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, readOnly }) => {
 				>
 					<div ref={chatRef} style={styles.chatScroll}>
 						{history === null ? (
-							<div style={styles.tlBy}>Loading the app&rsquo;s history...</div>
+							<div style={styles.tlBy}>Loading the {subject}&rsquo;s history...</div>
 						) : visible.length === 0 ? (
-							<EmptyState title="Nothing yet" description={filter === 'all' ? 'Deploys, publishes, review verdicts, and reviewer messages appear here once the app is on the server.' : `Nothing has happened to v${filter} yet.`} />
+							<EmptyState title="Nothing yet" description={filter === 'all' ? `Deploys, publishes, review verdicts, and reviewer messages appear here once the ${subject} is on the server.` : `Nothing has happened to v${filter} yet.`} />
 						) : (
 							<div style={styles.stream}>
 								<div style={styles.streamRail} />
@@ -571,7 +580,7 @@ export const ReviewView: React.FC<IReviewViewProps> = ({ host, readOnly }) => {
 								</Button>
 							</div>
 							{readOnly ? (
-								<div style={styles.replyHint}>Replies are disabled: this app&rsquo;s id is outside your organization&rsquo;s developer namespace.</div>
+								<div style={styles.replyHint}>Replies are disabled: this {subject}&rsquo;s id is outside your organization&rsquo;s developer namespace.</div>
 							) : null}
 							{replyError ? (
 								<div style={styles.replyError}>

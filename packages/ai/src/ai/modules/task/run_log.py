@@ -269,11 +269,12 @@ def live_writer(
     """
     The writer currently open on a control's continuum, whoever opened it, or None.
 
-    A control's continuum has ONE live writer. While a control drains its open
-    pipes on the engine it repointed away from, both engines emit events for
-    it; the second engine appends through this writer instead of opening a
-    competitor on the same stream (two writers would rewrite one control
-    record and issue sequences from one stored lastSeq).
+    A control's continuum has ONE live writer. While the engine a dormant
+    control held is still tearing down, the one started again for it may
+    emit events for the same control; the second engine appends through this
+    writer instead of opening a competitor on the same stream (two writers
+    would rewrite one control record and issue sequences from one stored
+    lastSeq).
 
     Args:
         run_kind: The control's run kind.

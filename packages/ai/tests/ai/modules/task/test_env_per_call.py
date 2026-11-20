@@ -22,11 +22,11 @@
 
 """Environment per call (plan 6.2, 0 S5): the spec keeps its placeholders, each control resolves its own values.
 
-The engine's content key and task file are env-independent; a private engine
-carries its owner's referenced values as its default env; a control's values
-come from ITS team context and ride ``_caller.env`` on every frame; a
-placeholder is legal only in a config value and only for a ``ROCKETRIDE_*``
-name.
+The engine key and task file are env-independent; a private engine carries
+its owner's referenced values as its default env; a control's values come
+from ITS team context and ride ``_caller.env`` on every frame, and expand the
+control's config on the open (``_caller.config``); a placeholder is legal
+only in a config value and only for a ``ROCKETRIDE_*`` name.
 """
 
 from __future__ import annotations
@@ -35,8 +35,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from ai.modules.task import caller_stamp
 from ai.modules.task.pipeline import validate_placeholders
-from ai.modules.task.task_control import TeamContext
+from ai.modules.task.task_control import TeamContext, typed_caller_config
 from ai.modules.task.types import TaskError
 
 from . import test_task_engine_sharing as sharing
@@ -134,18 +135,26 @@ async def test_a_spec_without_placeholders_asks_the_account_nothing(catalog, eng
 
 @pytest.mark.asyncio
 async def test_two_controls_on_one_engine_carry_their_own_values(catalog, engines, deployments, monkeypatch):
-    """Identical specs, one engine, two callers: each control's env is its own; the engine key is shared."""
+    """One owner, one shape, two team contexts: one engine, each control's env is its own and expands ITS config."""
 
     async def merged(user_id, org_id, team_id):
-        return {'ROCKETRIDE_TONE': f'tone-of-{user_id}'}
+        return {'ROCKETRIDE_TONE': f'tone-of-{team_id}'}
 
     monkeypatch.setattr(deployments, 'get_merged_env', merged)
     ts = _server()
-    a = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']), user='user-a')
-    b = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']), user='user-b')
+    a = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']), user='user-a', team='team-1')
+    b = await _start(
+        ts, _pipeline(project_id='other', instructions=['${ROCKETRIDE_TONE}']), user='user-a', team='team-2'
+    )
 
     assert a.task is b.task
-    assert (a.env, b.env) == ({'ROCKETRIDE_TONE': 'tone-of-user-a'}, {'ROCKETRIDE_TONE': 'tone-of-user-b'})
+    assert (a.env, b.env) == ({'ROCKETRIDE_TONE': 'tone-of-team-1'}, {'ROCKETRIDE_TONE': 'tone-of-team-2'})
+    # The identity keeps the placeholder; the open carries each control's expansion (plan 5.3)
+    assert a.config_hash == b.config_hash and a.config[0]['instructions'] == ['${ROCKETRIDE_TONE}']
+    stamps = [caller_stamp.mint(sharing._caller(), c, correlation_id='r', subcommand='open') for c in (a, b)]
+    assert [s['config'][0]['instructions'] for s in stamps] == [['tone-of-team-1'], ['tone-of-team-2']]
+    assert all(s['controlId'] == c.control_id for s, c in zip(stamps, (a, b)))
+    assert 'config' not in caller_stamp.mint(sharing._caller(), a, correlation_id='r', subcommand='write')
 
 
 @pytest.mark.asyncio
@@ -154,6 +163,116 @@ async def test_an_account_that_cannot_answer_leaves_the_control_without_env(cata
     ts = _server()
     control = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']))
     assert control.env == {}
+
+
+# =============================================================================
+# TYPED PLACEHOLDERS: A WHOLE-PLACEHOLDER LEAF TAKES ITS DECLARED TYPE
+# =============================================================================
+
+
+def _typed_pipeline(**leaves):
+    """The webhook -> prompt pipeline with ``leaves`` set on the prompt's config."""
+    pipeline = _pipeline()
+    pipeline['components'][1]['config'].update(leaves)
+    return pipeline
+
+
+async def _open_config(ts, pipeline, env, account, monkeypatch):
+    """Start a control whose ``account`` answers ``env``; the prompt's config as its open carries it (stack index 0)."""
+    monkeypatch.setattr(account, 'get_merged_env', AsyncMock(return_value=env))
+    control = await _start(ts, pipeline)
+    stamp = caller_stamp.mint(sharing._caller(), control, correlation_id='r', subcommand='open')
+    return control, stamp['config'][0]
+
+
+@pytest.mark.asyncio
+async def test_an_integer_leaf_set_to_a_placeholder_reaches_the_engine_as_an_int(
+    catalog, engines, deployments, monkeypatch
+):
+    """${ROCKETRIDE_EDGE} on an integer leaf: the stored value keeps the placeholder, the open carries 1024."""
+    ts = _server()
+    control, config = await _open_config(
+        ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'), {'ROCKETRIDE_EDGE': '1024'}, deployments, monkeypatch
+    )
+    assert config['maxTokens'] == 1024 and isinstance(config['maxTokens'], int)
+    assert control.config[0]['maxTokens'] == '${ROCKETRIDE_EDGE}'
+
+
+@pytest.mark.asyncio
+async def test_a_boolean_leaf_set_to_a_placeholder_reaches_the_engine_as_a_bool(
+    catalog, engines, deployments, monkeypatch
+):
+    ts = _server()
+    _, config = await _open_config(
+        ts, _typed_pipeline(stream='${ROCKETRIDE_STREAM}'), {'ROCKETRIDE_STREAM': 'true'}, deployments, monkeypatch
+    )
+    assert config['stream'] is True
+
+
+@pytest.mark.asyncio
+async def test_a_placeholder_inside_a_longer_string_stays_a_string(catalog, engines, deployments, monkeypatch):
+    """Only a leaf that IS one placeholder is typed; text around it is text, whatever the env value looks like."""
+    ts = _server()
+    _, config = await _open_config(
+        ts,
+        _typed_pipeline(label='edge ${ROCKETRIDE_EDGE}', instructions=['Tone: ${ROCKETRIDE_EDGE}']),
+        {'ROCKETRIDE_EDGE': '1024'},
+        deployments,
+        monkeypatch,
+    )
+    assert config['label'] == 'edge 1024' and config['instructions'] == ['Tone: 1024']
+
+
+@pytest.mark.asyncio
+async def test_an_unfilled_placeholder_on_a_typed_leaf_is_left_to_the_engine(
+    catalog, engines, deployments, monkeypatch
+):
+    """No env value: the placeholder rides as written (the engine's resolver passes a placeholder untyped)."""
+    ts = _server()
+    _, config = await _open_config(ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'), {}, deployments, monkeypatch)
+    assert config['maxTokens'] == '${ROCKETRIDE_EDGE}'
+
+
+@pytest.mark.asyncio
+async def test_a_value_that_does_not_fit_its_typed_leaf_is_refused_at_the_door(
+    catalog, engines, deployments, monkeypatch
+):
+    """A non-numeric env value on an integer leaf is invalid_argument naming the leaf; nothing starts."""
+    monkeypatch.setattr(deployments, 'get_merged_env', AsyncMock(return_value={'ROCKETRIDE_EDGE': 'lots'}))
+    ts = _server()
+    with pytest.raises(TaskError) as err:
+        await _start(ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'))
+    assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'maxTokens')
+    assert '"maxTokens" expects integer (from ${ROCKETRIDE_EDGE})' in str(err.value)
+    assert 'lots' not in str(err.value), 'the env value never leaves with the refusal'
+    assert ts._task_control == {} and ts._engines == {}
+
+
+class _DottedView:
+    """One integer leaf under a branch block whose name carries a dot."""
+
+    def __iter__(self):
+        return iter(['maxTokens'])
+
+    def path_of(self, key):
+        return 'models.gpt-5.2.maxTokens'
+
+    def descriptor_of(self, key):
+        return {'type': 'integer'}
+
+
+def test_a_typed_leaf_under_a_dotted_branch_name_takes_its_type():
+    """``models.gpt-5.2.maxTokens``: the walk matches stored keys against the path, never the path split at its dots."""
+    stored = {'models': {'gpt-5.2': {'maxTokens': '${ROCKETRIDE_EDGE}'}}}
+    expanded = {'models': {'gpt-5.2': {'maxTokens': '1024'}}}
+    assert typed_caller_config(stored, expanded, _DottedView()) == {'models': {'gpt-5.2': {'maxTokens': 1024}}}
+
+
+def test_a_placeholder_followed_by_a_newline_is_not_one_whole_placeholder():
+    """Only the placeholder itself is typed: anything after it, a newline included, keeps the expansion a string."""
+    stored = {'models': {'gpt-5.2': {'maxTokens': '${ROCKETRIDE_EDGE}\n'}}}
+    expanded = {'models': {'gpt-5.2': {'maxTokens': '1024\n'}}}
+    assert typed_caller_config(stored, expanded, _DottedView())['models']['gpt-5.2']['maxTokens'] == '1024\n'
 
 
 # =============================================================================
@@ -183,7 +302,8 @@ async def test_a_private_engines_default_env_is_its_owners_referenced_values():
     assert await engine._default_env(spec) == {'ROCKETRIDE_TONE': 'dry'}
     assert (await engine._resolve_pipeline(spec))['components'][0]['config']['instructions'] == 'dry'
     task = engine._build_task(spec, {'ROCKETRIDE_TONE': 'dry'})
-    assert task['config']['pipeline']['components'][0]['config']['instructions'] == '${ROCKETRIDE_TONE}'
+    # The task file is the SHAPE (C.22): no config at all, the default env beside it
+    assert task['config']['pipeline']['components'][0] == {'id': 'c', 'provider': 'prompt', 'config': {}}
     assert task['config']['env'] == {'ROCKETRIDE_TONE': 'dry'}
 
 

@@ -76,7 +76,7 @@ omitting it addresses your own dev run (there is no run-kind argument).
 
 | Scope                      | Set with                                    | Receives                                       |
 | -------------------------- | ------------------------------------------- | ---------------------------------------------- |
-| One running task           | `token`                                     | Events for that task only                      |
+| One running control        | `token` (the control id; a restart mints a new one, so resubscribe) | Events for that control only |
 | Your dev run (any restart) | `projectId` + `source`                      | Your own dev run of that pipeline              |
 | A team's deployed run      | `teamId` + `projectId` + `source`           | That team's deploy run of the pipeline         |
 | One pipe within a pipeline | `projectId` + `source` + `pipeId`           | That one pipe                                  |
@@ -230,9 +230,11 @@ Besides `rrext_monitor`, sent the same way over the socket:
 
 | Command                 | Uses                                  | Returns       | Purpose                                          |
 | ----------------------- | ------------------------------------- | ------------- | ------------------------------------------------ |
-| `rrext_get_task_status` | `token`                               | `TASK_STATUS` | Fetch current status synchronously               |
-| `rrext_get_token`       | `projectId` + `source` (+ `teamId`)   | `{ token }`   | Resolve a running task's token — `teamId` addresses the team's deployed run, omitted = your dev run |
-| `execute`               | `{ pipeline, pipelineTraceLevel?, … }`| `{ token }`   | Start a pipeline; sets the trace level that gates `FLOW` |
+| `rrext_get_task_status` | `token` (the control id)              | `TASK_STATUS` (carries `controlId`) | Fetch current status synchronously |
+| `rrext_get_token`       | `projectId` + `source` (+ `teamId`)   | `{ token }`   | Resolve a running task's control id — `teamId` addresses the team's deployed run, omitted = your dev run; look it up again after a restart |
+| `execute`               | `{ pipeline, pipelineTraceLevel?, … }`| `{ token, address }` | Start a pipeline; `token` is the control id (transient, never persist it), `address` the stable identity; `pipeline.project_id` is required (`invalid_argument`). Sets the trace level that gates `FLOW` |
+| `restart`               | `{ projectId, source, pipeline, token?, teamId? }` | - | Terminate the control and create a new one under a NEW control id; resubscribe `token`-keyed monitors |
+| `rrext_engine_stop`     | `{ engineKey, reason? }`              | -             | Stop an engine outright, whoever holds it: `sys.admin`, or the OWNER of an engine whose key carries their owner id (every rung today). Each holder's next request fails with `engine_unavailable` |
 | `rrext_log`             | `subcommand: "streams"` + `projectId` + `source` | `{ streams }` | Every run-log continuum of that source you may read, each tagged with `teamId`, `teamName`, `runKind`, `ownerKind` and carrying its `chapters` body — the one subcommand that spans the scopes above |
 
 ## Notes

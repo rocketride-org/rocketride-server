@@ -23,33 +23,151 @@
 """
 TaskControl: the CALLER's view of a run.
 
-A control is what a request resolves to: one per ``(owner, address, rung)``.
-It carries everything that belongs to the caller rather than to the running
-process: the address, the owner (a user or a team, never a service identity),
-the rung that answered, billing attribution, the ``parameters`` admission map,
-the trace level, the idle ttl, and exactly ONE hold on a
-``TaskEngine``. The engine is the process; many controls may hold one engine
-(plan section 1, 7.1). A hold entitles the control to its engine but does not
-keep it running: an engine that stopped on its own inactivity timer, or crashed
-after it had confirmed running, leaves the control DORMANT, and the next request
-through it starts the engine again under the same key (plan 7.2).
+A control is what a request resolves to. Its IDENTITY is ``(owner, rung,
+project_id, hash(resolved config))`` (plan section 1): a spec that differs in
+configuration under the same ``project_id`` is another control on the same
+engine. Its HANDLE is the ``control_id``, 32 hex characters minted when the
+control is created, returned to the caller in the ``token`` slot and named by
+every verb after that; it dies with the control and is never written to disk
+(plan 15 item 20). It carries everything that belongs to the caller rather
+than to the running process: the address, the owner (a user or a team, never
+a service identity), the rung that answered, the resolved component config,
+billing attribution, the ``parameters`` admission map, the trace level, the
+idle ttl, and exactly ONE hold on a ``TaskEngine``. The engine is the
+process; many controls may hold one engine (plan section 1, 7.1). A hold
+entitles the control to its engine but does not keep it running: an engine
+that stopped on its own inactivity timer, or crashed after it had confirmed
+running, leaves the control DORMANT, and the next request through it starts
+the engine again under the same key (plan 7.2).
 
-The registry key is ``<rung>.<ownerId>.<address>``. ``control.task`` names the
-held engine, so the many ``control.task.<...>`` call sites read as "the engine
-this control holds".
+The registry key is the control id. ``control_key(rung, ownerId, address)``
+is the owner-filtered INDEX a name resolves through (several controls of one
+owner may share it: one ``project_id``, several configs). ``control.task``
+names the held engine, so the many ``control.task.<...>`` call sites read as
+"the engine this control holds".
 """
 
-import asyncio
+import hashlib
+import json
+import re
 import time
+import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional, Tuple
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
 from rocketride.types.task import TASK_METRICS, TASK_TOKENS
+from rocketlib.config import ConfigError, _coerce, _type_error
 
+from ai.common import node_config
 from ai.common.parameters import resolve_call_params
 from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
+from .engine_key import stack_order
+from .pipeline import resolve_pipeline_env
 from .types import EngineState, LAUNCH_TYPE, TaskError
+
+# A config value that IS one ``${ROCKETRIDE_*}`` placeholder and nothing else:
+# the one shape whose expansion takes the leaf's declared type (plan 6.2). A
+# placeholder inside a longer string stays text.
+WHOLE_PLACEHOLDER = re.compile(r'^\$\{ROCKETRIDE_[A-Za-z0-9_]+\}$')
+TYPED_LEAVES = ('integer', 'number', 'boolean')
+
+
+class CallerConfigError(ConfigError):
+    """
+    A control's env value does not fit the typed leaf its placeholder sits on.
+
+    The resolver's error class, so the engine and the server door refuse the
+    same way; ``path`` names the leaf for the door's ``field``.
+    """
+
+    def __init__(self, path: str, message: str) -> None:
+        """Keep the leaf path beside the message."""
+        super().__init__(message)
+        self.path = path
+
+
+def _child_key(node: Dict[str, Any], remaining: str) -> Optional[str]:
+    """
+    The stored key the next step of a dotted ``remaining`` path takes, or None.
+
+    A declared child name may itself carry a dot (a branch block such as
+    ``gpt-5.2``), so the stored keys are matched against the path, never the
+    path split at its dots: the longest key that is the remaining path or
+    leads it before a dot.
+    """
+    keys = [key for key in node if key == remaining or remaining.startswith(key + '.')]
+    return max(keys, key=len) if keys else None
+
+
+def _leaf_at(tree: Any, path: str) -> Any:
+    """The value at a dotted schema ``path`` of a stored config tree, or None."""
+    remaining, node = path, tree
+    while remaining:
+        if not isinstance(node, dict):
+            return None
+        key = _child_key(node, remaining)
+        if key is None:
+            return None
+        node, remaining = node[key], remaining[len(key) + 1 :]
+    return node
+
+
+def _set_leaf(tree: Dict[str, Any], path: str, value: Any) -> None:
+    """Set the value at a dotted schema ``path`` an ``_leaf_at`` walk reached."""
+    remaining, node = path, tree
+    while True:
+        key = _child_key(node, remaining)
+        if key == remaining:
+            node[key] = value
+            return
+        node, remaining = node[key], remaining[len(key) + 1 :]
+
+
+def typed_caller_config(stored: Dict[str, Any], expanded: Dict[str, Any], view: Any) -> Dict[str, Any]:
+    """
+    Give an expanded whole-placeholder leaf the type its schema declares.
+
+    ``resolve_pipeline_env`` expands textually, so ``${ROCKETRIDE_EDGE}`` on
+    an integer leaf arrives as the string ``"1024"``, which the node's
+    resolver refuses by contract (a string on an integer leaf is a
+    ``ConfigError``; coercing engine-side would accept wrong-type literals).
+    Here the schema and the pre-expansion value are both in hand: a leaf
+    whose STORED value is exactly one placeholder is parsed to its declared
+    integer/number/boolean; an unfilled placeholder, an embedded one and
+    every other type stay as expanded.
+
+    Args:
+        stored: The component's config as the spec stores it (placeholders in place).
+        expanded: The same config after ``resolve_pipeline_env`` (modified in place).
+        view: The resolved ``ConfigView`` of the component (keys, ``path_of``, ``descriptor_of``).
+
+    Returns:
+        ``expanded``.
+
+    Raises:
+        CallerConfigError: The env value does not parse as the leaf's type.
+    """
+    for key in view:
+        path = view.path_of(key)
+        raw = _leaf_at(stored, path)
+        if not isinstance(raw, str) or not WHOLE_PLACEHOLDER.fullmatch(raw):
+            continue
+        value = _leaf_at(expanded, path)
+        if not isinstance(value, str) or value == raw:
+            continue
+        descriptor = view.descriptor_of(key)
+        kind = descriptor.get('type')
+        if kind not in TYPED_LEAVES:
+            continue
+        coerced = _coerce(value, descriptor)
+        # The refusal names the leaf, its type and the stored placeholder,
+        # never the env value it expanded to: the text goes back to a caller
+        # who may run with the team's environment without reading it
+        if _type_error(kind, coerced):
+            raise CallerConfigError(path, f'"{path}" expects {kind} (from {raw})')
+        _set_leaf(expanded, path, coerced)
+    return expanded
 
 
 # ==== Status notes ============================================================
@@ -95,34 +213,77 @@ if TYPE_CHECKING:
     from .task_engine import TaskEngine
 
 
+# ==== The control id ============================================================
+
+#: The shape of a control id: 32 lowercase hex characters (``uuid4().hex``).
+CONTROL_ID = re.compile(r'^[0-9a-f]{32}$')
+
+
+def mint_control_id() -> str:
+    """A fresh control id: random, transient, never a storage key (plan 15 item 20)."""
+    return uuid.uuid4().hex
+
+
+def is_control_id(value: Any) -> bool:
+    """
+    Whether ``value`` has the shape of a control id.
+
+    An address always carries a dot, so the two forms never overlap: the
+    verbs that take either (a standalone ``tool`` borrow, the monitor key
+    builders) tell them apart by this test.
+
+    Args:
+        value: What the client put in the token slot.
+
+    Returns:
+        True for 32 lowercase hex characters.
+    """
+    return isinstance(value, str) and CONTROL_ID.match(value) is not None
+
+
+def config_hash(configs: List[Dict[str, Any]]) -> str:
+    """
+    The configuration half of a control's identity (plan section 1).
+
+    Args:
+        configs: The resolved component config by STACK INDEX (defaults
+            applied, ``${ROCKETRIDE_*}`` placeholders unexpanded).
+
+    Returns:
+        sha256 over the sort-keyed JSON of the list.
+    """
+    content = json.dumps(list(configs), sort_keys=True, default=str)
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()
+
+
 # ==== Rungs ====================================================================
 
 #: The four rungs, in resolution order (plan section 1). ``public`` is
 #: produced only by the published-rung resolver.
-RUNGS = ('dev', 'me', 'team', 'public')
+RUNGS = ('spec', 'me', 'team', 'public')
 
 
 def rung_of(run_kind: str, owner_kind: str) -> str:
     """
     Map a run classification to its rung.
 
-    A dev run is ``dev``. A deployment run owned by a user (a ``user~`` team
-    slot) is that user's personal deployment, ``me``; owned by a team it is
-    ``team``. Deploy-rail runs (scheduled or manual) are ``team`` runs that
-    keep their trigger.
+    A dev run is ``spec``: the owner's control for the spec they sent. A
+    deployment run owned by a user (a ``user~`` team slot) is that user's
+    personal deployment, ``me``; owned by a team it is ``team``. Deploy-rail
+    runs (scheduled or manual) are ``team`` runs that keep their trigger.
 
     Args:
         run_kind: ``'dev'`` or ``'deploy'``.
         owner_kind: ``'user'`` or ``'team'`` (empty takes the run_kind default).
 
     Returns:
-        The rung: ``'dev'``, ``'me'`` or ``'team'``.
+        The rung: ``'spec'``, ``'me'`` or ``'team'``.
 
     Raises:
         ValueError: The run classification is outside the closed vocabulary.
     """
     if run_kind == 'dev':
-        return 'dev'
+        return 'spec'
     if run_kind != 'deploy':
         raise ValueError(f'invalid run_kind: {run_kind!r}')
     kind = owner_kind or 'team'
@@ -135,10 +296,12 @@ def rung_of(run_kind: str, owner_kind: str) -> str:
 
 def control_key(rung: str, owner_id: str, address: str) -> str:
     """
-    Build a control's registry key ``<rung>.<ownerId>.<address>``.
+    Build the owner-filtered index key ``<rung>.<ownerId>.<address>`` (plan 7.5).
 
-    Internal only: clients send addresses, which the resolver turns into the
-    caller's own control.
+    The registry's primary key is the control id; this is the index a NAME
+    resolves through (several controls of one owner may share it on
+    ``spec``: one ``project_id``, several configs). Internal only: clients
+    send control ids or addresses, never this.
 
     Args:
         rung: One of :data:`RUNGS`.
@@ -146,7 +309,7 @@ def control_key(rung: str, owner_id: str, address: str) -> str:
         address: ``developerId.pipelineId.source``.
 
     Returns:
-        The registry key.
+        The index key.
 
     Raises:
         ValueError: ``rung`` is not one of :data:`RUNGS`.
@@ -221,7 +384,7 @@ class TeamContext:
     - ``key``: the frozen team of a key with an ``endpoints`` scope;
     - ``deploying``: the deploying team of a deploy-rail run;
     - ``home``: the caller's home team (first in their team order) for
-      ``@dev``, ``@me`` and a ``@public`` call.
+      ``@spec``, ``@me`` and a ``@public`` call.
 
     C.10 reads the merged env from it; billing (C.13) does not.
 
@@ -273,8 +436,8 @@ class OpenPipe:
     ``write``/``close``/``tool`` naming a slot that is not on the caller's
     control is refused before anything is forwarded (on a shared engine the
     slot number alone must never reach the subprocess), and the later frames
-    of an open pipe go to the engine the pipe opened on, so a repoint never
-    redirects an in-flight request.
+    of an open pipe go to the engine the pipe opened on, so an engine started
+    again for a dormant control never receives another launch's slot numbers.
 
     Attributes:
         engine: The engine the pipe was opened on.
@@ -298,23 +461,35 @@ class TaskControl:
 
     Attributes:
         id: Display id: the address.
+        control_id: The handle (plan section 1): 32 hex characters minted at
+            creation, what the caller gets in the ``token`` slot and names on
+            every verb; the registry key. Transient, never persisted.
+        key: The registry key: the control id.
         client_id: The launching user's id (equal to ``userId`` on every dev run).
         developer_id: The address namespace.
-        address: ``developerId.pipelineId.source``: the public name, what
-            clients send in the token slot.
-        key: The registry key ``<rung>.<ownerId>.<address>``; internal.
+        address: ``developerId.pipelineId.source``: the public name a NAME
+            call resolves through the caller's rungs.
         userId / teamId / orgId: Identity derived from the account; teamId is
             billing and permission attribution, not the owner of a dev run.
         run_kind: ``'dev'`` or ``'deploy'``: the run-log continuum and the
             storage tree.
         owner_kind: ``'user'`` or ``'team'``: who owns the run.
-        rung: ``'dev'``, ``'me'``, ``'team'`` or ``'public'``.
+        rung: ``'spec'``, ``'me'``, ``'team'`` or ``'public'``.
         trigger: What fired a deployment run (``''``, ``'manual'``, ``'schedule'``, or
             ``'submit'`` for a name call started from a published artifact).
         launch_owner / launch_type: The connection that launched it and how.
         project_id / source / provider: The pipeline's short id, entry
             component and that component's provider.
         pipeline: The spec this control submitted (placeholders unexpanded).
+        config: The component config AS THE SPEC STORES IT (converted,
+            parameter tokens decoded, placeholders unexpanded) by STACK INDEX
+            (``engine_key.stack_order``, the order the task file writes): what
+            the frame that starts a binding carries to the engine as
+            ``_caller.config``, env-expanded (plan 5.3); the engine resolves
+            it against the node schemas itself.
+        config_hash: sha256 of the sort-keyed JSON of the RESOLVED config by
+            stack index (defaults applied): the configuration half of the
+            identity, so a spelled-out default is not another control.
         parameters: The pipeline's ``parameters`` admission map (plan 5.2).
         trace_level: The control's trace level (plan 7.4).
         ttl: The control's idle ttl in seconds; 0 means no idle limit.
@@ -330,11 +505,11 @@ class TaskControl:
             dispatch started it: a deployment revoked after this moment makes
             the control unavailable (plan 7.2, the kill switch).
         deployment: The deployment this control resolved through, if any.
-        version: The artifact version a published rung started from (None on @dev).
+        version: The artifact version a published rung started from (None on @spec).
         team_context: The team whose environment this control runs with.
         task: The ONE engine this control holds. It may be an engine that
             stopped on its inactivity timer or crashed after it confirmed
-            running; the next request repoints it.
+            running; the next request starts it again under the same key.
         engine_starting: True while a request through this control waits in
             the start gate for its stopped engine to start again.
     """
@@ -342,15 +517,18 @@ class TaskControl:
     # Display id: the address
     id: str = ''
 
+    # The handle and the registry key (one and the same): minted at creation
+    control_id: str = ''
+    key: str = ''
+
     # Connection identifier (the launching user's id on every dev run)
     client_id: str = ''
 
-    # The address and the registry key. The address omits the owner on
-    # purpose: the same address names different controls for different
-    # callers, and the resolver picks the caller's own.
+    # The address. It omits the owner on purpose: the same address names
+    # different controls for different callers, and the resolver picks the
+    # caller's own through the owner-filtered index (``index_key``).
     developer_id: str = ''
     address: str = ''
-    key: str = ''
 
     # User, team, and org identity (derived from AccountInfo after auth)
     userId: str = ''
@@ -365,7 +543,7 @@ class TaskControl:
     owner_kind: str = ''
 
     # The rung that answered and what fired a deployment run
-    rung: str = 'dev'
+    rung: str = 'spec'
     trigger: str = ''
 
     # Launch type and owning connection
@@ -378,6 +556,12 @@ class TaskControl:
     provider: Optional[str] = None
     pipeline: Optional[Dict[str, Any]] = None
 
+    # The stored component config by stack index (delivered to the engine on
+    # the open, plan 5.3) and the hash of its resolved view: the configuration
+    # half of the identity (plan section 1). Per control, never in the engine key
+    config: List[Dict[str, Any]] = field(default_factory=list, repr=False, compare=False)
+    config_hash: str = ''
+
     # Caller-side run settings: never part of the engine key
     parameters: Dict[str, Any] = field(default_factory=dict)
     trace_level: Optional[str] = None
@@ -386,15 +570,6 @@ class TaskControl:
     # The ROCKETRIDE_* values this control's bindings run with, resolved once
     # from the team context (plan 6.2; filled by C.10); rides _caller.env
     env: Dict[str, str] = field(default_factory=dict)
-
-    # After a repoint, the engine still serving this control's open pipes: the
-    # slot numbers a client names are that engine's, so the control opens on
-    # it until the last of them closes, then its hold goes (plan 7.2 P2)
-    draining: Optional['TaskEngine'] = None
-
-    # Opens forwarded and not yet answered, by the engine they went to: they
-    # hold no record yet, and a repoint must not let that engine go
-    pending_opens: Dict[Any, int] = field(default_factory=dict, repr=False, compare=False)
 
     # The pipes this control has open, by slot (plan 3.1 P1/P2), and what its
     # bindings did so far (plan 7.5)
@@ -418,12 +593,6 @@ class TaskControl:
     inflight: int = 0
     registered_at: float = 0.0
 
-    # One engine transition (repoint) at a time per control, readiness and
-    # rollback included, so a later restart can never be undone by an earlier
-    # one's failure handler (the engine-key start locks do not cover two
-    # replacements with different keys)
-    transition_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False, compare=False)
-
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
     version: Optional[int] = None
@@ -437,6 +606,11 @@ class TaskControl:
     # A request through this control is starting its stopped engine again
     engine_starting: bool = False
 
+    # A restart is setting up this control's successor: it stays registered
+    # (its events still route, its id still answers) but no new request
+    # resolves to it, and the restart alone decides when it leaves
+    restarting: bool = False
+
     @property
     def owner_id(self) -> str:
         """
@@ -447,24 +621,44 @@ class TaskControl:
         kind = self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
         return self.teamId if kind == 'team' else self.userId
 
-    def pipes_on(self, engine: 'TaskEngine') -> bool:
-        """
-        Whether any binding of this control is open, or opening, on ``engine``.
+    @property
+    def index_key(self) -> str:
+        """The owner-filtered index key ``<rung>.<ownerId>.<address>`` a name resolves through (plan 7.5)."""
+        return control_key(self.rung, self.owner_id, self.address)
 
-        Args:
-            engine: The engine to check.
+    def caller_config(self) -> List[Dict[str, Any]]:
+        """
+        The config a binding's first frame carries to the engine: ``config`` by stack index, expanded for THIS control (plan 5.3).
+
+        The ``${ROCKETRIDE_*}`` placeholders are filled from the control's own
+        env (resolved once from its team context, least privilege), and a
+        leaf that was one whole placeholder takes its declared scalar type
+        (``typed_caller_config``); the engine builds this control's IGlobal
+        set from it and keeps nothing it cannot rebuild from the next open.
 
         Returns:
-            True while a recorded pipe or an unanswered open is on it.
-        """
-        if any(record.engine is engine for record in self.open_pipes.values()):
-            return True
-        return self.pending_opens.get(engine, 0) > 0
+            A new list, one config per component in stack order.
 
-    @property
-    def pending_open_count(self) -> int:
-        """How many opens of this control the engines have not answered yet."""
-        return sum(self.pending_opens.values())
+        Raises:
+            CallerConfigError: An env value does not fit its typed leaf.
+        """
+        expanded = list(resolve_pipeline_env({'config': self.config}, self.env)['config'])
+        components = stack_order((self.pipeline or {}).get('components', []) or [])
+        for index, (component, stored) in enumerate(zip(components, self.config)):
+            if index >= len(expanded) or not isinstance(stored, dict):
+                continue
+            # The component's resolved view, from the same per-control cache
+            # the parameters map reads: the schema is resolved once per
+            # component for the control's life
+            component_id = str(component.get('id') or '')
+            if component_id not in self.param_views:
+                self.param_views[component_id] = node_config.resolve_node_config(
+                    str(component.get('provider') or ''), stored
+                )
+            view = self.param_views[component_id]
+            if view is not None:
+                typed_caller_config(stored, expanded[index], view)
+        return expanded
 
     @property
     def billing(self) -> BillingAttribution:
@@ -674,9 +868,9 @@ class TaskControl:
 
         The map (public name -> ``nodeId.configKey``, plan 5.2) is the admission
         list for per-call ``params``; the resolved node views cached for it are
-        dropped at the same time. Called wherever the control's pipeline is set
-        or replaced (a start, a repoint): the cached views describe components
-        of the pipeline they were resolved from, so they go with it.
+        dropped at the same time. Called where the control's pipeline is set
+        (a start): the cached views describe components of the pipeline they
+        were resolved from, so they go with it.
         """
         self.parameters = dict((self.pipeline or {}).get('parameters') or {})
         self.param_views.clear()

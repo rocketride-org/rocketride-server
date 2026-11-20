@@ -57,11 +57,16 @@ engines = sharing.engines
 # =============================================================================
 
 
-async def _two_holders(ts):
-    """Two users Play the identical certified spec: two controls, ONE shared engine."""
+async def _two_holders(ts, *, shared=False):
+    """One owner Plays one shape under two project ids: two controls, ONE engine.
+
+    ``shared`` marks the engine cross-user so the routing rules of a shared
+    engine (plan 7.5; no such engine starts before C.25) are exercised on it.
+    """
     a = await _start(ts, _pipeline(), user='user-a')
-    b = await _start(ts, _pipeline(), user='user-b')
-    assert a.task is b.task and a.task.shared
+    b = await _start(ts, _pipeline(project_id='docBrainCopy'), user='user-a')
+    assert a.task is b.task and not a.task.shared
+    a.task.shared = shared
     return a, b
 
 
@@ -151,7 +156,7 @@ async def test_a_late_event_within_the_grace_still_reaches_its_owner_stamped_lat
 @pytest.mark.asyncio
 async def test_an_event_of_a_released_tree_goes_to_ops_on_a_shared_engine_never_to_the_next_holder(catalog, engines):
     ts = _server()
-    a, _b = await _two_holders(ts)
+    a, _b = await _two_holders(ts, shared=True)
     task_events, ops = _capture(ts)
     _unlogged(a.task)
     ts.trace_owners.claim(a.task.trace_ref(7), a.key, 11)
@@ -190,7 +195,7 @@ async def test_on_a_private_engine_an_unowned_binding_is_the_owners(catalog, eng
 async def test_engine_level_output_of_a_shared_engine_is_ops_only(catalog, engines):
     """Counts, errors, bare output and the debugger channel never reach a holder of a shared engine."""
     ts = _server()
-    a, _b = await _two_holders(ts)
+    a, _b = await _two_holders(ts, shared=True)
     task_events, ops = _capture(ts)
     _unlogged(a.task)
 
@@ -220,7 +225,7 @@ async def test_engine_level_output_of_a_private_engine_reaches_its_owners_contro
 async def test_every_holder_gets_its_own_projected_status(catalog, engines):
     """Status reaches both holders; each sees its own counts and the engine's availability, never the engine's totals."""
     ts = _server()
-    a, b = await _two_holders(ts)
+    a, b = await _two_holders(ts, shared=True)
     task_events, ops = _capture(ts)
     _unlogged(a.task)
     a.stats = ControlStats(totalCount=3, completedCount=2, failedCount=1, completedSize=200, failedSize=50)

@@ -94,7 +94,8 @@ class DataMixin(DAPClient):
     and stream large datasets. It handles both simple data sending and complex
     multi-file uploads with progress tracking.
 
-    Data operations work with pipeline tokens - you first start a pipeline with
+    Data operations name a control by its control id (the ``token`` a
+    ``use()``/``submit()`` result returns) - you first start a pipeline with
     client.use(), then send data to it using the methods in this class.
 
     Key Capabilities:
@@ -153,7 +154,8 @@ class DataMixin(DAPClient):
 
             Args:
                 client: The RocketRide client instance
-                token: Pipeline token for data destination
+                token: The control id (a ``use()``/``submit()`` result's
+                    ``token``) of the control receiving the data
                 objinfo: Optional metadata about the data
                 mime_type: MIME type of data (e.g., "text/csv", "application/json")
                 provider: Optional provider specification
@@ -532,7 +534,7 @@ class DataMixin(DAPClient):
         control than the simple send() method.
 
         Args:
-            token: Pipeline token to send data to
+            token: The control id (a ``use()``/``submit()`` result's ``token``) to send data to
             objinfo: Optional metadata about your data (e.g., {"name": "my_data.csv"})
             mime_type: MIME type of your data (auto-detected if not provided)
             provider: Optional provider specification
@@ -587,11 +589,11 @@ class DataMixin(DAPClient):
         This is the simple way to send data when you have all the data ready
         at once. For streaming or multiple chunks, use pipe() instead.
 
-        The data is sent to the pipeline specified by the token, processed
+        The data is sent to the control named by the control id, processed
         according to the pipeline's configuration, and results are returned.
 
         Args:
-            token: Pipeline token (from client.use()) to send data to
+            token: The control id (a ``use()``/``submit()`` result's ``token``) to send data to
             data: Your data as string or bytes to process
             objinfo: Optional metadata about the data (e.g., {"name": "data.txt"})
             mimetype: MIME type of the data (auto-detected if not specified)
@@ -678,7 +680,7 @@ class DataMixin(DAPClient):
 
         Args:
             files: List of files to upload (see formats above)
-            token: Pipeline token to upload files to
+            token: The control id (a ``use()``/``submit()`` result's ``token``) to upload files to
 
         Returns:
             List[Dict]: Upload results for each file with status, timing, and processing results

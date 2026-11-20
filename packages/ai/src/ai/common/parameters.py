@@ -221,7 +221,7 @@ def resolve_call_params(
         parameters: The control's ``parameters`` map (public name -> target).
         admitted: The caller's params, already admitted by public name.
         views: A cache of resolved views by component id the caller keeps for
-            the pipeline's life (a control's pipeline is fixed until a repoint),
+            the pipeline's life (a control's pipeline is fixed for its life),
             so the schema is resolved once per component, not once per request.
             None resolves afresh.
 

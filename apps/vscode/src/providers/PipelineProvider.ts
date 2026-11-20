@@ -38,7 +38,6 @@ import { getLogger } from '../shared/util/output';
 // into the extension-host compile; parse.ts is pure.
 import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
-import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from 'shared/tools/pipelines/runKind';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -1017,9 +1016,6 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				name,
 				// ttl comes straight from settings (0 = no timeout).
 				...(cfg.pipelineTtl !== undefined ? { ttl: cfg.pipelineTtl } : {}),
-				// The restart setting is also this Play's answer to a live run of
-				// other content (plan §3.4).
-				...onChangeArgs(cfg.pipelineRestartBehavior),
 			});
 		} catch (error: unknown) {
 			const message = error instanceof Error ? error.message : String(error);

@@ -559,10 +559,11 @@ class MonitorCommands(DAPConn):
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
 
-            # Resolve the address under the caller's account (run-scoped: a
+            # The control id the client was handed, or an address resolved
+            # under the caller's account (plan 7.5; run-scoped either way: a
             # user-owned run is subscribable only by its owner; a team-owned
             # run by anyone with task.monitor on the run's team)
-            control = self._server.resolve_control(token, self._account_info, 'task.monitor')
+            control = self._server.resolve_token(token, self._account_info, 'task.monitor')
 
             # Build the key from the resolved run's OWNER so subscribe and
             # delivery agree regardless of how the subscription was addressed
@@ -625,7 +626,7 @@ class MonitorCommands(DAPConn):
                     self._account_info,
                     'task.monitor',
                     team=team_id or None,
-                    rung='team' if team_id else ('me' if key_kind == 'deploy' else 'dev'),
+                    rung='team' if team_id else ('me' if key_kind == 'deploy' else 'spec'),
                 )
 
                 # The task is running, we can fill it in
@@ -761,8 +762,8 @@ class MonitorCommands(DAPConn):
                     print(f"Warning: Unknown event type '{event_str}' ignored")
             return bitmask
 
-        # The address (token slot), if the subscription is task-addressed
-        token = self.get_task_address(request)
+        # The token slot (a control id or an address), if the subscription is task-addressed
+        token = self.get_token_slot(request)
 
         # Parse monitoring configuration from request arguments
         args = request.get('arguments', {})

@@ -20,26 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/** The restart-behavior setting as the server's onChange (plan §3.4). */
-
-import assert from 'node:assert/strict';
-import { test } from 'node:test';
-
-import { onChangeArgs, onChangeOf } from './restartBehavior';
-
-test('auto repoints, manual keeps, prompt and anything else send error explicitly', () => {
-	// error is never left to the server: on the execute path an omitted
-	// onChange keeps the useExisting rule and reuses the running engine.
-	assert.equal(onChangeOf('auto'), 'auto');
-	assert.equal(onChangeOf('manual'), 'keep');
-	assert.equal(onChangeOf('prompt'), 'error');
-	assert.equal(onChangeOf(undefined), 'error');
-	assert.equal(onChangeOf('bogus'), 'error');
-});
-
-test('the spread form always carries an onChange', () => {
-	assert.deepEqual(onChangeArgs('auto'), { onChange: 'auto' });
-	assert.deepEqual(onChangeArgs('manual'), { onChange: 'keep' });
-	assert.deepEqual(onChangeArgs('prompt'), { onChange: 'error' });
-	assert.deepEqual(onChangeArgs(undefined), { onChange: 'error' });
-});
+/** The PACKAGE › Requirements checklist rows, shared by the app and pipeline pages. */
+export { RequirementsChecklist } from './RequirementsChecklist';
+export type { IRequirementItem, IRequirementsChecklistProps, RequirementState } from './RequirementsChecklist';

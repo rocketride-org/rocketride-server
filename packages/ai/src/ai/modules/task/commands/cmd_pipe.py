@@ -517,9 +517,13 @@ class DeployPipeCommands(_DeployBase):
             org_id=org_id,
         )
         await self._notify_deploy_changed(org_id, team_id, project_id, 'run')
-        # The client gets the ADDRESS in the token slot, never the key
-        address = self._server.control_by_key(key).address
-        return self.build_response(request, body={'token': address, 'version': dep['version']})
+        # The client gets the CONTROL ID in the token slot, the address beside
+        # it, like every other starter (plan section 1): terminate, status and
+        # the data verbs name the run by that id
+        control = self._server.control_by_key(key)
+        return self.build_response(
+            request, body={'token': control.control_id, 'address': control.address, 'version': dep['version']}
+        )
 
     # =========================================================================
     # PREVIEW — the single cron evaluator
@@ -581,7 +585,7 @@ class DeployPipeCommands(_DeployBase):
         Body: ``{address, rung, version, teamId?, interfaces}`` where
         ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —
         sources under their own address, every other node under the pipe
-        address (see ``interfaces.pipe_interfaces``). The caller's ``@dev``
+        address (see ``interfaces.pipe_interfaces``). The caller's ``@spec``
         control answers before any publication (the spec it submitted;
         ``version`` is None), as it does for ``submit()``; nothing has to be
         running on any rung.
@@ -604,9 +608,9 @@ class DeployPipeCommands(_DeployBase):
 
         # Step 2: THE decision every name call makes (TaskServer.resolve_candidates,
         # plan 3.2): what answers this address for this caller, in the ladder's
-        # order — @dev, @me, the teams in team order, @public — without starting
+        # order — @spec, @me, the teams in team order, @public — without starting
         # anything. The first candidate is the answer: the caller's registered
-        # control (the spec it submitted; @dev has no publication, and a dormant
+        # control (the spec it submitted; @spec has no publication, and a dormant
         # control's spec stays readable) or a publication's pin (the registry
         # artifact). Nothing has to be running on any rung.
         parsed, _rungs, candidates = await self._server.resolve_candidates(
@@ -618,7 +622,7 @@ class DeployPipeCommands(_DeployBase):
                 TaskError.NOT_REGISTERED,
                 f'No rung of {pipe_address!r} serves you',
                 address=pipe_address,
-                rungsTried=['dev', 'me', 'team', 'public'],
+                rungsTried=['spec', 'me', 'team', 'public'],
             )
         first = candidates[0]
         if not isinstance(first, Pin):

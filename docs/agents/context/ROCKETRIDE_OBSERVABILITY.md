@@ -131,9 +131,10 @@ You correlate responses to requests by matching `request_seq` to the `seq` you s
 ## 4. Subscribing to events: `rrext_monitor`
 
 Subscriptions are managed with the `rrext_monitor` DAP command. The server keeps
-a per-connection registry keyed by **token** (resolved to project+source) or
+a per-connection registry keyed by **token** (the control id a `use()`/`submit()`
+result returned; a restart mints a new one, so resubscribe after one) or
 **project+source** directly, optionally narrowed to a `pipe_id` or widened to
-`*` (all your tasks).
+`*` (all your tasks). A control id you do not own is `permission_denied`.
 
 ### 4.1 Request shape
 
@@ -459,10 +460,12 @@ Sent the same way as `rrext_monitor`:
 | Command                 | `arguments`                                                                      | Returns          | Purpose                            |
 | ----------------------- | -------------------------------------------------------------------------------- | ---------------- | ---------------------------------- |
 | `auth`                  | `{ auth, clientName?, clientVersion? }`                                          | `{ success }`    | Required first message             |
-| `rrext_get_task_status` | - (uses `token`)                                                                 | `TASK_STATUS`    | Fetch current status synchronously |
-| `rrext_get_token`       | `{ projectId, source }`                                                          | `{ token }`      | Resolve a running task's token     |
-| `execute`               | `{ pipeline, token?, threads?, args?, useExisting?, ttl?, pipelineTraceLevel? }` | `{ token, ... }` | Start a pipeline                   |
-| `terminate`             | - (uses `token`)                                                                 | -                | Stop a running pipeline            |
+| `rrext_get_task_status` | - (uses `token`, the control id)                                                 | `TASK_STATUS` (carries `controlId`) | Fetch current status synchronously |
+| `rrext_get_token`       | `{ projectId, source }`                                                          | `{ token }`      | Resolve a running task's control id (a restart mints a new one) |
+| `execute`               | `{ pipeline, token?, threads?, args?, useExisting?, ttl?, pipelineTraceLevel? }` | `{ token, address, ... }` | Start a pipeline; `token` is the control id (transient, never persist it), `address` the stable identity; `pipeline.project_id` is required (`invalid_argument`) |
+| `terminate`             | - (uses `token`, the control id)                                                 | -                | Stop a running pipeline; the control is removed at once |
+| `restart`               | `{ token, pipeline, projectId, source, teamId? }`                                | `{ token, address, ... }` | Terminate the control `token` names and create its successor: a NEW control id in `token`; `token` is required (a request without one is `permission_denied`; resolve it with `rrext_get_token` first); resubscribe monitors keyed on the old id |
+| `rrext_engine_stop`     | `{ engineKey, reason? }`                                                         | -                | Stop an engine outright, whoever holds it: `sys.admin`, or the OWNER of an engine whose key carries their owner id; every holder's next request gets `engine_unavailable` |
 
 ---
 

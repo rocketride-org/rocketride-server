@@ -23,13 +23,12 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
-import threading
 import functools
 import json
-from typing import Iterable, TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
-from .config import MULTITENANT_BIT, ConfigError, ConfigView, TenancyViolation, resolveConfig
+from .config import ConfigError, ConfigView, NodeInfo, resolveConfig
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
@@ -280,17 +279,28 @@ class IFilterGlobal(IServiceGlobal, Protocol):
     """
 
     """
-    Connection configuration.
+    The control this IGlobal belongs to (plan 4.1 rule 1): the id the server
+    minted for it, transient, never a storage key. Empty for the default
+    IGlobal of a binding the engine opened itself (a scan source).
+    """
+    controlId: str
 
-    This is a standard format as follows:
-        {
-            "profile": "profileName",
-            "profileName": {
-                "key": "value"
-            }
-        }
+    """
+    The control's node configuration, as the server delivered it with the
+    control's open: env-expanded, a tree addressed by the schema's paths, an
+    OWNED dict built by the engine at slot build (never a view into engine
+    memory). One IGlobal, one control, one config.
     """
     connConfig: Dict
+
+    """
+    The component id in the pipeline, the author's display name (else the
+    id) and the node's PROTOCOL_CAPS bitmask: with controlId, logicalType
+    and physicalType they fill the reserved ``config.node`` record.
+    """
+    id: str
+    name: str
+    capabilities: int
 
     """
     Logical type of the driver as defined by your services.json.
@@ -308,6 +318,18 @@ class IGlobalBase:
     """
     Base class for all IGlobals.
 
+    One IGlobal per CONTROL per node (plan 4.1 rule 1): the engine builds it
+    on the control's first request, from the config that rode the control's
+    open, and ends it after the control has been idle for a while. Everything
+    a control needs across its requests - clients, pools, sessions, handles -
+    is built here in ``beginGlobal`` from ``self.config`` and closed in
+    ``endGlobal``. An instance reaches only its own control's IGlobal, so no
+    other control's data is ever on it; but the bindings of ONE control run
+    concurrently on the same IGlobal. The engine's slot lock serializes the
+    build, the end and the claim of a binding, not the node's own methods:
+    mutable state read across I/O that releases the GIL, and a client that
+    is not thread-safe, still need their own lock here.
+
     These calls may all be overridden in derived
     classes. The engine will call these functions.
     """
@@ -316,23 +338,6 @@ class IGlobalBase:
     glb: IFilterGlobal = None
     _config_view: Optional[ConfigView] = None  #: Cached full resolution (see _resolved).
     _config_restricted: Optional[ConfigView] = None  #: Cached node-facing view (see config).
-    #: Per-call clients by the values they were built from (see provider_client);
-    #: a dict per global, created on first use so the class attribute is never shared
-    _provider_clients: Optional[Dict[tuple, Any]] = None
-    _provider_lock_value: Optional[Any] = None
-    #: Guards the creation of a global's own lock and cache: two worker threads
-    #: reaching provider_client first on one global must agree on ONE lock
-    _PROVIDER_INIT_LOCK = threading.Lock()
-
-    @property
-    def _provider_lock(self):
-        """The lock guarding this global's provider-client cache (created once, per global)."""
-        if self._provider_lock_value is None:
-            with IGlobalBase._PROVIDER_INIT_LOCK:
-                if self._provider_lock_value is None:
-                    self._provider_clients = {}
-                    self._provider_lock_value = threading.Lock()
-        return self._provider_lock_value
 
     def preventDefault(self) -> None:
         """
@@ -343,10 +348,31 @@ class IGlobalBase:
     # ------------------------------------------------------------------
     # Configuration
     #
-    # The engine sets self.glb (logicalType, connConfig) before beginGlobal.
-    # The schema is the engine-resolved service schema, so the resolver is
-    # the schema validation: resolving IS validating.
+    # The engine sets self.glb (the node's identity and connConfig, the
+    # control's configuration as an owned dict) before beginGlobal. The
+    # schema is the engine-resolved service schema, so the resolver is the
+    # schema validation: resolving IS validating. Until C.24 moves node
+    # reads to self.config.node.*, glb's own fields keep answering too.
     # ------------------------------------------------------------------
+
+    def _node_info(self) -> NodeInfo:
+        """
+        Return this node's identity record from glb, for ``config.node``.
+
+        Returns:
+            NodeInfo: id, name (else the id), provider (the logical type),
+            physicalType, capabilities, controlId.
+        """
+        glb = self.glb
+        node_id = str(getattr(glb, 'id', '') or '')
+        return NodeInfo(
+            id=node_id,
+            name=str(getattr(glb, 'name', '') or node_id),
+            provider=str(getattr(glb, 'logicalType', '') or ''),
+            physicalType=str(getattr(glb, 'physicalType', '') or ''),
+            capabilities=int(getattr(glb, 'capabilities', 0) or 0),
+            controlId=str(getattr(glb, 'controlId', '') or ''),
+        )
 
     def _schema(self) -> Dict[str, Any]:
         """
@@ -366,92 +392,33 @@ class IGlobalBase:
             raise ConfigError(f'The service {logical_type} was not found')
         return IJson.toDict(schema)
 
-    def provider_client(self, settings: ConfigView, keys: Iterable[str], build: Callable[[ConfigView], Any]) -> Any:
-        """
-        The client for one call's effective configuration: built once per distinct set of values, then reused.
-
-        The per-call seam of plan 6.2 / 12 A: a node never builds a client from
-        ``IGlobal.config`` at global scope (that bakes one caller's
-        ``${ROCKETRIDE_*}`` values into a shared engine); it asks here with the
-        binding's ``settings``. Callers with identical values share one client,
-        so a single-user engine costs exactly what it did before.
-
-        Args:
-            settings: The binding's ``IInstanceBase.settings``.
-            keys: The config keys the client depends on (typically the node's
-                env-valued and param-flagged keys).
-            build: Builds the client from a view; called once per distinct value set.
-
-        Returns:
-            The client for these values.
-        """
-        # Step 1: the identity of this client: the values of the keys it depends on
-        cache_key = tuple((key, repr(settings[key])) for key in sorted(set(keys)))
-        # Step 2: one build per distinct identity, under a lock (bindings run on
-        # worker threads); a build that raises leaves no entry behind
-        with self._provider_lock:
-            client = self._provider_clients.get(cache_key)
-            if client is None:
-                client = build(settings)
-                self._provider_clients[cache_key] = client
-        return client
-
-    def _default_env(self) -> Dict[str, Any]:
-        """
-        The engine's DEFAULT environment from the task file (``config.env``), or nothing.
-
-        A private engine carries its owner's referenced ``ROCKETRIDE_*`` values
-        here; a shared engine carries none (plan 6.2). Read by ``config`` for
-        an uncertified node and by ``settings`` for a binding without a caller.
-
-        Returns:
-            dict: ``{name: value}``; empty outside an engine.
-        """
-        endpoint = getattr(self.IEndpoint, 'endpoint', None)
-        task_config = getattr(endpoint, 'taskConfig', None)
-        try:
-            env = task_config.get('env') if task_config is not None else None
-        except Exception:
-            env = None
-        return dict(env) if isinstance(env, dict) else {}
-
     def _resolved(self) -> ConfigView:
         """
         Return the full resolved configuration, cached on first use.
 
-        Framework accessor: ``IInstanceBase.settings`` builds from this view,
-        never through the node-facing ``config`` refusals and never through
-        the methods-only facade.
+        Framework accessor: every value, the param-flagged ones included,
+        without the node-facing refusal of ``config``.
 
         Returns:
             ConfigView: Defaults + connConfig, validated and flattened.
         """
         if self._config_view is None:
-            self._config_view = resolveConfig(self._schema(), IJson.toDict(self.glb.connConfig))
+            self._config_view = resolveConfig(self._schema(), self.glb.connConfig, node=self._node_info())
         return self._config_view
 
     @property
     def config(self) -> ConfigView:
         """
-        The node's shared configuration: defaults + connConfig, flattened to the active branch.
+        The control's resolved configuration: defaults + connConfig, flattened to the active branch.
 
-        Reading a ``param``-flagged key here raises ``TenancyViolation``: a
-        parameter is per call and belongs in ``self.settings`` on the instance.
-        A key whose value carries a ``${ROCKETRIDE_*}`` placeholder is refused
-        the same way once the node declares the ``multitenant`` capability
-        (the rule is universal in the end state; enforcement is phased so an
-        unconverted node keeps running on its single-user engine).
+        The values are the control's, already expanded from its environment by
+        the server, so a client built from them in ``beginGlobal`` is that
+        control's client. Reading a ``param``-flagged key here raises
+        ``ConfigError``: a parameter is per call and belongs in
+        ``self.settings`` on the instance.
         """
         if self._config_restricted is None:
-            full = self._resolved()
-            certified = bool(full.capabilities & MULTITENANT_BIT)
-            # An uncertified node runs on its owner's private engine: its
-            # global config reads the owner's values (the engine's default
-            # env). A certified node may serve many callers, so an env-valued
-            # key has no single value here and is refused.
-            if not certified:
-                full = full.expand_env(self._default_env())
-            self._config_restricted = full.restricted(refuse_params=True, refuse_env=certified)
+            self._config_restricted = self._resolved().restricted(refuse_params=True)
         return self._config_restricted
 
     # -------------------
@@ -498,94 +465,6 @@ class IValidatorBase(IGlobalBase):
         self.config
 
 
-# =========================================================================
-# Methods-only IGlobal facade
-#
-# C++ hands every instance its global via Python setattr
-# (python-instance.cpp: m_pyInstance.attr("IGlobal") = global), so a data
-# descriptor named IGlobal on IInstanceBase sees that assignment and can
-# wrap what the node reads back. Opt-in per certified node: a node sets
-# ``iglobal_methods_only = True`` once its IGlobal data reads are accessor
-# methods. Accident-prevention, not a sandbox.
-# =========================================================================
-
-
-class _MethodsOnlyIGlobal:
-    """
-    Read-through to the real IGlobal that serves callables only.
-
-    Methods run with the real IGlobal as ``self``, so IGlobal's own mutation
-    stays legal; a non-callable read or any write from the instance raises
-    ``TenancyViolation`` with a teaching message.
-    """
-
-    __slots__ = ('_target',)
-
-    #: Framework reach-through the base class itself needs.
-    WHITELIST = frozenset({'glb', 'tool_description'})
-
-    def __init__(self, target: Any):
-        """Wrap ``target``, the IGlobal the engine assigned."""
-        object.__setattr__(self, '_target', target)
-
-    def __getattr__(self, name: str) -> Any:
-        """Return a bound method of the real IGlobal; refuse data reads."""
-        target = object.__getattribute__(self, '_target')
-        if name in _MethodsOnlyIGlobal.WHITELIST:
-            return getattr(target, name)
-        value = getattr(target, name)
-        if callable(value):
-            return value
-        raise TenancyViolation(
-            f'IGlobal.{name} is shared state read from an instance; IGlobal access is methods-only. '
-            f'Add an accessor on IGlobal (def {name}(self)) and call self.IGlobal.{name}(), '
-            'or read a per-call value from self.settings.'
-        )
-
-    def __setattr__(self, name: str, value: Any) -> None:
-        """Refuse writes: IGlobal is shared by every caller of this engine."""
-        raise TenancyViolation(
-            f'cannot set IGlobal.{name} from an instance: IGlobal is shared by every caller of this engine; '
-            'per-call state belongs on the instance.'
-        )
-
-    def __delattr__(self, name: str) -> None:
-        """Refuse deletes."""
-        raise TenancyViolation(f'cannot delete IGlobal.{name} from an instance: IGlobal is shared state.')
-
-    def __repr__(self) -> str:
-        """Name the wrapped global."""
-        return f'<methods-only {object.__getattribute__(self, "_target")!r}>'
-
-
-class _IGlobalFacade:
-    """
-    Data descriptor behind ``IInstanceBase.IGlobal``.
-
-    Stores whatever the engine (or a test) assigns in ``instance._iglobal``
-    and hands it back as-is unless the instance's class opted in with
-    ``iglobal_methods_only = True``, in which case reads go through
-    ``_MethodsOnlyIGlobal``.
-    """
-
-    def __get__(self, instance: Any, owner: Any) -> Any:
-        """Return the global for ``instance`` (None at class level, like the old class attribute)."""
-        if instance is None:
-            return None
-        target = instance._iglobal
-        if target is None or not getattr(owner, 'iglobal_methods_only', False):
-            return target
-        return _MethodsOnlyIGlobal(target)
-
-    def __set__(self, instance: Any, value: Any) -> None:
-        """Record the engine's assignment in ``instance._iglobal``."""
-        instance._iglobal = value
-
-    def __delete__(self, instance: Any) -> None:
-        """Forget the assignment."""
-        instance._iglobal = None
-
-
 class IServiceFilterInstance(Protocol):
     """
     Define the engine side of the instance data.
@@ -600,7 +479,6 @@ class IServiceFilterInstance(Protocol):
         logicalType: str
         physicalType: str
         capabilities: int
-        connConfig: Dict[str, Any]
 
     currentObject: Entry
     pipeType: IServiceFilterInstance_PipeType
@@ -1113,14 +991,8 @@ class IInstanceBase:
     """
 
     IEndpoint: IEndpointBase = None  #: Endpoint instance for communication.
-    IGlobal: IGlobalBase = _IGlobalFacade()  #: Global instance for shared data (see _IGlobalFacade).
+    IGlobal: IGlobalBase = None  #: The IGlobal of this binding's CONTROL, assigned by the engine.
     instance: IFilterInstance = None  #: Instance data reference.
-
-    #: Opt-in for a certified node: IGlobal reads from this instance serve
-    #: callables only; data reads and writes raise TenancyViolation.
-    iglobal_methods_only: bool = False
-
-    _iglobal: IGlobalBase = None  #: The real IGlobal the engine assigned (behind the facade).
 
     # An instance lives exactly ONE binding (plan 4.1 rule 2): the engine
     # constructs it on the binding's first touch, copies the pipe's caller
@@ -1138,22 +1010,19 @@ class IInstanceBase:
     @property
     def settings(self) -> ConfigView:
         """
-        This call's effective configuration: IGlobal.config (+) the caller's env (+) the caller's params.
+        This call's effective configuration: IGlobal.config (+) the caller's params for this node.
 
         Returns:
-            ConfigView: Flattened to the active branch; ``param``-flagged and
-            env-valued keys are served here (and only here). With no caller
-            (``_caller`` None) this is the shared config unchanged.
+            ConfigView: Flattened to the active branch; ``param``-flagged keys
+            are served here (and only here). With no caller (``_caller`` None)
+            this is the control's config unchanged.
         """
         if self._settings is None:
             caller = self._caller or {}
-            params = (caller.get('params') or {}).get(self.instance.pipeType.id)
-            # The caller's environment when there is a caller; a binding the
-            # engine itself opened (a scan source) reads the engine's default
-            env = caller.get('env') if caller else None
-            if env is None:
-                env = self._iglobal._default_env()
-            self._settings = self._iglobal._resolved().expand_env(env).overlay(params)
+            # The server keys a node's params by its component id: config.node.id
+            config = self.IGlobal.config
+            params = (caller.get('params') or {}).get(config.node.id)
+            self._settings = config.overlay(params)
         return self._settings
 
     # ------------------------------------------------------------------

@@ -29,8 +29,9 @@ must not be able to profile another team's engine (the cross-team hole this
 suite pins closed). Direct mode (no target) keeps its devTeam check.
 
 The profiler gate (plan 7.5): an engine profile is engine-level signal, so a
-caller other than ``sys.admin``/``internal`` may profile only a ``@dev`` or
-``@me`` control whose engine is private to its owner.
+caller other than ``sys.admin``/``internal`` may profile only a ``@spec`` or
+``@me`` control whose engine is private to its owner. The target is a control
+id, re-checked against the caller (plan section 1).
 
 Same harness conventions as the sibling suites: __init__ bypassed via
 ``__new__``; ``_server``/``_account_info`` seeded; DAP helpers mocked.
@@ -45,6 +46,9 @@ import pytest
 
 from ai.modules.task.commands import cmd_cprofile
 from ai.modules.task.commands.cmd_cprofile import CProfileCommands
+
+#: The control id a proxy request names in ``target``.
+TARGET = '0123456789abcdef0123456789abcdef'
 
 
 # ---------------------------------------------------------------------------
@@ -75,7 +79,7 @@ def _account_info():
     )
 
 
-def _running_control(*, rung='dev', owner_id='user-1', engine_key='hash-1:user-1', shared=False):
+def _running_control(*, rung='spec', owner_id='user-1', engine_key='hash-1:user-1', shared=False):
     """TaskControl stub whose task is running and echoes _send_data calls."""
     task = SimpleNamespace(
         wait_for_running=AsyncMock(),
@@ -96,9 +100,9 @@ def _running_control(*, rung='dev', owner_id='user-1', engine_key='hash-1:user-1
 
 
 def _server_for(control):
-    """A server stub that resolves ``control`` and hands back its running engine."""
+    """A server stub that finds ``control`` by its id and hands back its running engine."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=control)
+    server.control_by_id = MagicMock(return_value=control)
     server.ensure_engine = AsyncMock(side_effect=lambda c: c.task)
     return server
 
@@ -117,11 +121,9 @@ async def test_proxy_requires_task_control_on_the_targets_team():
     server = _server_for(_running_control())
     conn = _make_conn(account_info=account, server=server)
 
-    response = await CProfileCommands.on_rrext_cprofile_start(
-        conn, {'arguments': {'target': 'acme.pipe.target', 'session': 's'}}
-    )
+    response = await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET, 'session': 's'}})
 
-    server.resolve_control.assert_called_once_with('acme.pipe.target', account, 'task.control')
+    server.control_by_id.assert_called_once_with(TARGET, account, 'task.control')
     assert response['body'] == {'status': 'started'}
 
 
@@ -132,7 +134,7 @@ async def test_proxy_is_activity_of_the_resolved_control():
     server = _server_for(control)
     conn = _make_conn(account_info=_account_info(), server=server)
 
-    await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': 'acme.pipe.target', 'session': 's'}})
+    await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET, 'session': 's'}})
 
     # In flight through the control from before the engine is awaited to after it answers
     control.begin_request.assert_called_once_with()
@@ -145,11 +147,11 @@ async def test_proxy_cross_team_target_denied_before_forwarding():
     subprocess — the cross-team profiling hole this closes.
     """
     server = MagicMock()
-    server.resolve_control = MagicMock(side_effect=PermissionError('denied for this task'))
+    server.control_by_id = MagicMock(side_effect=PermissionError('denied for this task'))
     conn = _make_conn(account_info=_account_info(), server=server)
 
     with pytest.raises(PermissionError, match='denied for this task'):
-        await CProfileCommands.on_rrext_cprofile_stop(conn, {'arguments': {'target': 'acme.pipe.other_team'}})
+        await CProfileCommands.on_rrext_cprofile_stop(conn, {'arguments': {'target': TARGET}})
 
 
 @pytest.mark.asyncio
@@ -172,9 +174,9 @@ async def test_every_proxy_handler_authorizes_the_target(handler):
     server = _server_for(_running_control())
     conn = _make_conn(account_info=account, server=server)
 
-    await handler(conn, {'arguments': {'target': 'acme.pipe.target'}})
+    await handler(conn, {'arguments': {'target': TARGET}})
 
-    server.resolve_control.assert_called_once_with('acme.pipe.target', account, 'task.control')
+    server.control_by_id.assert_called_once_with(TARGET, account, 'task.control')
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +191,7 @@ async def test_every_proxy_handler_authorizes_the_target(handler):
     [
         {'rung': 'team', 'owner_id': 'team-1', 'engine_key': 'hash-1:team-1'},
         {'rung': 'public', 'owner_id': 'user-1', 'engine_key': 'hash-1', 'shared': True},
-        {'rung': 'dev', 'owner_id': 'user-1', 'engine_key': 'hash-1', 'shared': True},
+        {'rung': 'spec', 'owner_id': 'user-1', 'engine_key': 'hash-1', 'shared': True},
     ],
     ids=['team', 'public', 'shared-engine'],
 )
@@ -201,21 +203,21 @@ async def test_operators_may_profile_any_engine(sys_permissions, shape):
     server = _server_for(control)
     conn = _make_conn(account_info=account, server=server)
 
-    response = await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': 'acme.pipe.target'}})
+    response = await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET}})
 
     assert response['body'] == {'status': 'started'}
     control.task._send_data.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('rung', ['dev', 'me'])
+@pytest.mark.parametrize('rung', ['spec', 'me'])
 async def test_an_owner_may_profile_their_own_private_engine(rung):
-    """A plain user profiles their own @dev / @me control on a hash:owner engine."""
+    """A plain user profiles their own @spec / @me control on a hash:owner engine."""
     control = _running_control(rung=rung, owner_id='user-1', engine_key='hash-1:user-1')
     server = _server_for(control)
     conn = _make_conn(account_info=_account_info(), server=server)
 
-    response = await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': 'acme.pipe.target'}})
+    response = await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET}})
 
     assert response['body'] == {'status': 'started'}
     server.ensure_engine.assert_awaited_once_with(control)
@@ -227,7 +229,7 @@ async def test_an_owner_may_profile_their_own_private_engine(rung):
     [
         {'rung': 'team', 'owner_id': 'team-1', 'engine_key': 'hash-1:team-1'},
         {'rung': 'public', 'owner_id': 'user-1', 'engine_key': 'hash-1:user-1'},
-        {'rung': 'dev', 'owner_id': 'user-1', 'engine_key': 'hash-1', 'shared': True},
+        {'rung': 'spec', 'owner_id': 'user-1', 'engine_key': 'hash-1', 'shared': True},
         {'rung': 'me', 'owner_id': 'user-1', 'engine_key': 'hash-1:user-2'},
     ],
     ids=['team', 'public', 'shared-engine', 'another-owners-engine'],
@@ -239,7 +241,7 @@ async def test_a_plain_user_is_refused_anything_but_a_private_engine(shape):
     conn = _make_conn(account_info=_account_info(), server=server)
 
     with pytest.raises(PermissionError, match='Profiling requires a private engine or sys.admin') as refused:
-        await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': 'acme.pipe.target'}})
+        await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET}})
 
     assert refused.value.required == 'private engine or sys.admin'
     server.ensure_engine.assert_not_awaited()
@@ -258,7 +260,7 @@ async def test_a_stopped_engine_is_started_again_before_the_profile():
     server.ensure_engine = AsyncMock(return_value=restarted)
     conn = _make_conn(account_info=_account_info(), server=server)
 
-    await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': 'acme.pipe.target'}})
+    await CProfileCommands.on_rrext_cprofile_start(conn, {'arguments': {'target': TARGET}})
 
     restarted._send_data.assert_awaited_once()
     control.task._send_data.assert_not_awaited()
@@ -277,7 +279,7 @@ async def test_direct_mode_does_not_touch_task_lookup():
 
     response = await CProfileCommands.on_rrext_cprofile_status(conn, {'arguments': {}})
 
-    server.resolve_control.assert_not_called()
+    server.control_by_id.assert_not_called()
     assert 'active' in (response['body'] or {})
 
 

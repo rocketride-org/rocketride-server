@@ -31,7 +31,7 @@
 // =============================================================================
 
 import type { RocketRideClient } from 'rocketride';
-import { revivalFor } from './resolver';
+import { directAddressFor, revivalFor } from './resolver';
 import type {
 	SqlEndpoint,
 	SqlExecuteResult,
@@ -81,14 +81,21 @@ class SqlToolSession implements SqlSession {
 	 * pipeline once and retries: the 15-minute idle ttl can have ended it
 	 * between two statements. Anything else surfaces as thrown.
 	 *
+	 * A direct endpoint's address is a control id, and a revival mints a
+	 * new one, so every call reads the resolver's CURRENT id for the key
+	 * rather than the one this session was created with; a pipeline-bound
+	 * endpoint has no entry there and keeps its pipe address.
+	 *
 	 * @param tool - Tool name (execute / get_schema / refresh_schema / dialect).
 	 * @param input - Tool arguments.
 	 * @param retryAfterRevival - Whether a revival retry is safe for this call.
 	 * @returns The tool's answer.
 	 */
 	private async invoke<T>(tool: string, input: Record<string, unknown>, retryAfterRevival: boolean): Promise<T> {
-		const call = (): Promise<T> =>
-			this.client.tool<T>({ address: this.endpoint.address, tool, nodeId: this.endpoint.nodeId, input });
+		const call = (): Promise<T> => {
+			const address = directAddressFor(this.endpoint.key) ?? this.endpoint.address;
+			return this.client.tool<T>({ address, tool, nodeId: this.endpoint.nodeId, input });
+		};
 		try {
 			return await call();
 		} catch (err) {

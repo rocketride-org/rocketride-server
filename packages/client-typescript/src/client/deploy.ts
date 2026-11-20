@@ -396,10 +396,12 @@ export class DeployApi {
 	 * @param projectId - The deployed project.
 	 * @param sourceId - The pipeline source to fire.
 	 * @param teamId - The team whose deployment to run.
-	 * @returns The started run's token and the version that ran.
+	 * @returns The started run's `token` (the control id: opaque, transient,
+	 *          valid for the life of the control; never persist it), its
+	 *          `address` beside it, and the version that ran.
 	 */
-	async run(projectId: string, sourceId: string, teamId: string): Promise<{ token?: string; version?: number }> {
-		return this.client.call<{ token?: string; version?: number }>('rrext_deploy_pipe', {
+	async run(projectId: string, sourceId: string, teamId: string): Promise<{ token?: string; address?: string; version?: number }> {
+		return this.client.call<{ token?: string; address?: string; version?: number }>('rrext_deploy_pipe', {
 			subcommand: 'run',
 			projectId,
 			sourceId,

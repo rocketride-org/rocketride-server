@@ -316,22 +316,23 @@ Start a RocketRide pipeline for processing data.
 
 **Parameters:**
 
-- `pipeline` (dict, optional): Flat pipeline configuration dict (`components`, `source`, `project_id` at top level). A dict wrapped as `{'pipeline': {...}}` is automatically unwrapped.
+- `pipeline` (dict, optional): Flat pipeline configuration dict (`components`, `source`, `project_id` at top level). A dict wrapped as `{'pipeline': {...}}` is automatically unwrapped. `project_id` is REQUIRED: a spec without one is refused with `invalid_argument` (`field: 'project_id'`).
 - `filepath` (str, optional): Path to a `.pipe` or JSON/JSON5 file containing pipeline configuration. Files with a top-level `pipeline` key are automatically unwrapped.
-- `token` (str, optional): Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. Pass a distinct value per instance to run the same pipeline more than once at a time, and terminate what you start. Not a credential: the developer id and the owner still come from your account
+- `token` (str, optional): Overrides the pipeline-id segment of the task address (the `project_id` of the spec): the run is addressed `developerId.<token>.source`. One segment of letters, digits, `_` and `-`. Pass a distinct value per instance to run the same pipeline more than once at a time, and terminate what you start. Not a credential, and not what the result's `token` carries: the developer id and the owner still come from your account
 - `source` (str, optional): Override the pipeline source (which source component this task runs from)
 - `threads` (int, optional): Number of threads for execution (default: None, the server decides)
-- `use_existing` (bool, optional): Reuse an existing pipeline instance with the same identity
+- `use_existing` (bool, optional): Attach to the control already live for this `project_id` whatever its configuration (the result's `reused` flag says it happened)
 - `args` (List[str], optional): Extra command-line flags appended to the run's engine process (see the note below); not a data channel
 - `ttl` (int, optional): Time-to-live in seconds for idle pipelines (server default if not provided; use 0 for no timeout)
 - `pipelineTraceLevel` (str, optional): Trace level: `'none'`, `'metadata'`, `'summary'`, or `'full'`. When set, captures every lane write and invoke call in the response under `_trace`.
 - `name` (str, optional): Display name for the task. If omitted and `filepath` is given, the file's base name (minus `.pipe`) is used.
 - `env` (Dict[str, str], optional): Extra `ROCKETRIDE_*` values for placeholder substitution, merged over the client's `.env` values for this run.
-- `on_change` (str, optional): A spec call's answer to your live `@dev` run already running OTHER content: `'error'` (server default) fails with `spec_changed`, `'keep'` delivers to the running engine, `'auto'` repoints the run to the new content. The IDEs pass their restart-behavior setting.
 
-**Returns:** Dictionary containing `token` (the full task address `developerId.pipelineId[.source]`) and other startup metadata.
+A spec call addresses your own `@spec` rung: the server reuses your live control with the same `project_id` and the same resolved configuration (the same `token` comes back) or creates one. A spec whose configuration differs under the same `project_id` is a NEW control on the same engine; the earlier one lives until it is stopped or its idle ttl ends. There is no change policy to pass: Play in the IDEs is this same spec call, so a changed configuration starts a new control beside the earlier one; replacing a control is the IDEs' Restart action, `restart()`.
 
-**Raises:** `ValueError` (no pipeline/filepath given), `FileNotFoundError` (bad filepath), `RuntimeError` (server refused to start or returned no token).
+**Returns:** Dictionary containing `token` (the CONTROL ID: an opaque transient handle, valid for the life of the control, that `send`/`pipe`/`terminate`/`get_task_status` and the monitor verbs take; never persist it, it dies with the control and a restart mints a new one), `address` (the task address `developerId.pipelineId[.source]`, the stable identity beside the id) and other startup metadata.
+
+**Raises:** `ValueError` (no pipeline/filepath given), `FileNotFoundError` (bad filepath), `RuntimeError` (server refused to start, refused a spec without `project_id`, or returned no control id).
 
 ```python
 # A document pipeline: webhook source -> parse -> text response
@@ -374,44 +375,46 @@ result = await client.use(pipeline=pipeline, args=['--trace=debugOut'])
 - They apply at task start only — attaching to an already-running task
   (`use_existing=True`) leaves the running process's arguments unchanged.
 
-### `async submit(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipeline_trace_level=None, on_change='error', team=None) -> SUBMIT_RESULT`
+### `async submit(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipeline_trace_level=None, team=None) -> SUBMIT_RESULT`
 
 One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Pass exactly one of `name`, `pipeline` or `filepath`.
 
-- **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@dev` run (attach only; a name never starts a dev run), your `@me` deployment, the first team in your team order that publishes it (`team='...'` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
-- **`pipeline` / `filepath`** address your own `@dev` run for that spec. When it already runs other content, `on_change` decides: `'error'` (default, fails with both hashes), `'keep'` (deliver to the running engine; `specMatch` is `False`), `'auto'` (move your run to the new spec; nothing is stopped for anyone else).
-- Data up to `SUBMIT_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `on_sse`, streams through a pipe. Same result either way.
+- **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@spec` control (attach only; a name never starts a spec run), your `@me` deployment, the first team in your team order that publishes it (`team='...'` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
+- **`pipeline` / `filepath`** address your own `@spec` rung. `project_id` is REQUIRED (`invalid_argument`, `field: 'project_id'`). The control with the same `project_id` and the same resolved configuration is reused (`converged: 'none'`); otherwise one is created (`converged: 'started'`). A different configuration under the same `project_id` is a new control on the same engine; nothing is stopped for anyone.
+- Data up to `SUBMIT_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `on_sse`, streams through a pipe on the control the server answered with. Same result either way.
 - No timeout of its own, on either side: the request runs until the pipeline answers or fails (a request timeout configured on the client still applies, as your own bound). To stop a request, stream it through your own `pipe()` and call `cancel()` on it. The pipeline stays up afterwards and expires on its idle ttl.
 
-Returns the pipe close body plus the stamps `token` (the address that answered), `resolved` (`'@dev'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@dev`), `engineKey`, `specMatch`, `converged` (`'none'`, `'started'`, `'repointed'`), `ignored`, and `warnings` (`address_collision`, `repoint_storm`) when any.
+Returns the pipe close body plus the stamps `token` (the control id that answered: opaque, transient, valid for the life of the control; never persist it), `address` (the address that answered), `resolved` (`'@spec'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@spec`), `engineKey`, `converged` (`'none'`, `'started'`) and `ignored`.
 
 ```python
 result = await client.submit(name='acme.docBrain', data='What is in this file?')
 print(result['resolved'], result.get('answers'))
 
-# The zero-publish loop: your own dev run of a local spec
-result = await client.submit(filepath='docBrain.pipe', data=b'...', on_change='auto')
+# The zero-publish loop: your own @spec control of a local spec
+result = await client.submit(filepath='docBrain.pipe', data=b'...')
 ```
 
 ### `async terminate(token: str) -> None`
 
-Terminate a running pipeline. Termination is graceful (in-flight items finish) and final — start a new pipeline for further processing.
+Terminate a running pipeline. `token` is the control id; the control is removed at once and its id is dead afterwards. Termination is graceful (in-flight items finish) and final — start a new pipeline for further processing.
 
-### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: Optional[str] = None, team_id: str = '') -> None`
+### `async restart(*, project_id: str, source: str, pipeline: PipelineConfig, token: str, team_id: str = '') -> None`
 
-Restart a running pipeline with a new configuration. Looks up the existing task by project/source, terminates it, and starts a new execution in one server round-trip. All arguments are keyword-only; `token` is resolved server-side if omitted; pass `team_id` to address the team's DEPLOYED run (omit for your own dev run). Raises `RuntimeError` on failure.
+Restart a running pipeline with a new configuration: terminates the control `token` names and creates its successor in one server round-trip. **A restart mints a new control id**: the id you held is dead afterwards; read the replacement with `get_task_token()` (or the next `use()`) before sending again, and resubscribe monitors keyed on the old id. Read it right after the restart: the lookup answers the most recently touched of your controls under that project/source, which the successor is at that moment (several live controls can share one `project_id`, one per configuration). The IDEs' Restart action is this call (Play is `use()`). All arguments are keyword-only; `token` (the existing control id) is required: resolve it with `get_task_token()` first when you hold only project/source; pass `team_id` to address the team's DEPLOYED run (omit for your own dev run). Raises `RuntimeError` on failure (a missing or foreign `token` is `permission_denied`).
 
 ```python
-await client.restart(project_id='my-project', source='webhook_1', pipeline=updated_pipeline)
+token = await client.get_task_token(project_id='my-project', source='webhook_1')
+await client.restart(project_id='my-project', source='webhook_1', pipeline=updated_pipeline, token=token)
+token = await client.get_task_token(project_id='my-project', source='webhook_1')  # the successor; the old id is dead
 ```
 
 ### `async get_task_status(token: str) -> TASK_STATUS`
 
-Get the current status of a running pipeline. Returns a dict with `state` (`'starting'`, `'running'`, `'waiting'`, `'completed'`, `'failed'`, `'terminated'`), plus progress, error, timing, and performance fields when available.
+Get the current status of a running pipeline. `token` is the control id. Returns a dict with `state` (`'starting'`, `'running'`, `'waiting'`, `'completed'`, `'failed'`, `'terminated'`) and `controlId`, plus progress, error, timing, and performance fields when available.
 
 ### `async get_task_token(project_id: str, source: str, *, team_id: str = '') -> str | None`
 
-Resolve a running task's token from its project ID and source component. The token is required for operations like `terminate()` and `restart()`. Returns `None` if no task is currently running for the given project/source.
+Resolve a running task's control id from its project ID and source component. The control id is what `terminate()`, `restart()`, `send()` and the status verbs take; look it up again after a restart, which mints a new one. Returns `None` if no task is currently running for the given project/source.
 
 The scope IS the kind: pass `team_id` to resolve the team's DEPLOYED run; omit it to resolve your own dev run.
 
@@ -421,7 +424,7 @@ Retrieve the unresolved pipeline for a running task. The pipeline is returned ex
 
 ### `async interfaces(address: str, *, team: str = None) -> dict`
 
-What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool(address=..., node_id=..., tool=...)` — a standalone tool call starts a dormant engine. Your own `@dev` run (Play in the Builder) answers first with the spec it submitted and `'version': None`; nothing has to be running on any rung. Raises `RuntimeError` (`TASK_NOT_REGISTERED`) when no rung serves you.
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool(address=..., node_id=..., tool=...)` — a standalone tool call starts a dormant engine. Your own `@spec` control (Play in the Builder) answers first with the spec it submitted and `'version': None`; nothing has to be running on any rung. Raises `RuntimeError` (`TASK_NOT_REGISTERED`) when no rung serves you.
 
 ```python
 answer = await client.interfaces('acme.docBrain')

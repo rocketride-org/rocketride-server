@@ -59,11 +59,13 @@ Security Features:
 Architecture:
 -------------
 Central orchestration server managing:
-- Controls (``TaskControl``): the callers' views of runs, one per
-  ``(owner, address, rung)``, each holding exactly one engine
-- Engines (``TaskEngine``): the running processes, keyed by the content hash
-  of the resolved spec and shared by every control whose spec hashes the
-  same (across users only when the pipeline is certified shareable)
+- Controls (``TaskControl``): the callers' views of runs, identified by
+  ``(owner, rung, project_id, hash(resolved config))`` and handled by a
+  control id, each holding exactly one engine
+- Engines (``TaskEngine``): the running processes, keyed by the SHAPE of the
+  spec qualified by its owner (every rung in this PR; C.25 drops the owner
+  on the published rungs) and shared by every control of that owner whose
+  spec has that shape
 - DAP connections (debugging and control interfaces)
 - Event broadcasting (real-time monitoring and notifications)
 - Resource management (automatic cleanup and metrics)
@@ -77,7 +79,7 @@ import heapq
 import socket
 import sys
 import asyncio
-import uuid
+import copy
 from collections import deque
 from collections.abc import Mapping, MutableMapping
 from contextlib import asynccontextmanager
@@ -94,14 +96,12 @@ from ai.constants import (
     CONST_ENGINE_IDLE_TTL,
     CONST_ENGINE_RESTART_BACKOFF,
     CONST_ENGINE_RESTART_MAX_PER_HOUR,
-    CONST_REPOINT_STORM_MAX,
-    CONST_REPOINT_STORM_WINDOW,
     CONST_TTL_CHECK,
     CONST_MAX_UNAUTHED_CONNS_PER_IP,
     CONST_MAX_UNAUTHED_IPS,
 )
 from ai.common.parameters import validate_parameters
-from .pipeline import references_env, substituted_env, validate_placeholders
+from .pipeline import references_env, resolve_pipeline_env, substituted_env, validate_placeholders
 from .task_convert import ConvertResult, convert_pipeline
 from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
@@ -113,11 +113,22 @@ from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .trace_owner import TraceOwners
-from .task_control import RUNGS, DeploymentRef, TaskControl, TeamContext, control_key, rung_of
-from .engine_key import engine_content
+from .task_control import (
+    RUNGS,
+    CallerConfigError,
+    DeploymentRef,
+    TaskControl,
+    TeamContext,
+    config_hash,
+    control_key,
+    is_control_id,
+    mint_control_id,
+    rung_of,
+)
+from .engine_key import EngineContent, engine_content
 from .node_id import node_id
-from .task_engine import TaskEngine, component_facts
-from .types import LAUNCH_TYPE, TaskError
+from .task_engine import TaskEngine, component_facts, hosted_refusal, resolve_parameter_tokens
+from .types import LAUNCH_TYPE, EngineState, TaskError
 from .pipeline import MultipleSourcesError, resolve_implied_source
 from .commands.cmd_monitor import owner_key
 from .address import (
@@ -133,18 +144,13 @@ from .address import (
 from rocketlib import debug, warning
 
 
-#: What a spec call does when the caller's live presence runs other content (plan 3.4)
-ON_CHANGE_MODES = ('error', 'keep', 'auto')
-
-
 def _apply_source_defaults(pipeline: Dict[str, Any], source: str) -> Dict[str, Any]:
     """
     Fill in the fields a launch stamps on a pipeline, so two copies compare equal.
 
     ``start_task`` writes the resolved source onto the pipeline and gives the
-    source component an empty config when it has none. A pipeline stored without
-    those looks different from the same pipeline after a launch, which turns a
-    useExisting comparison into a false "differs".
+    source component an empty config when it has none, so a pipeline stored
+    without those and the same pipeline after a launch read the same.
 
     Args:
         pipeline: The pipeline to normalise, mutated in place.
@@ -383,14 +389,19 @@ def _require_valid_placeholders(pipeline: Dict[str, Any]) -> None:
 
 class ControlRegistry(MutableMapping):
     """
-    The control registry and its two indexes (plan 3.2: lookups are indexed, never scanned).
+    The control registry and its indexes (plan 3.2: lookups are indexed, never scanned).
 
-    A mapping ``<rung>.<ownerId>.<address> -> TaskControl`` (``_by_key``)
-    that keeps, in its ONE register path (``__setitem__``) and its ONE forget
-    path (``__delitem__``, which ``pop`` goes through):
+    A mapping ``controlId -> TaskControl`` (``_by_key``: the control id is
+    the registry key, plan section 1) that keeps, in its ONE register path
+    (``__setitem__``) and its ONE forget path (``__delitem__``, which ``pop``
+    goes through):
 
+    - ``_by_index[<rung>.<ownerId>.<address>]``: the owner-filtered index a
+      NAME resolves through (``control_key``); on ``spec`` one owner may
+      hold several controls under one key (one ``project_id``, several
+      configs), the most recently touched answering first;
     - ``_by_address_owner[(address, ownerId)]``: the controls of one owner at
-      one address (one per rung). ``@team`` probes it once per team the
+      one address, across rungs. ``@team`` probes it once per team the
       caller belongs to;
     - ``_sources[(developerId, pipeId)]``: the sources registered for a pipe,
       with the number of controls at each, so a two-segment address finds
@@ -398,9 +409,9 @@ class ControlRegistry(MutableMapping):
     - ``_by_owner[ownerId]``: every control of one owner (user or team), so
       an owner-scoped lookup never walks the registry.
 
-    ALB seam 2: callers outside the registry use ``get`` / ``get_or_create``
-    / ``remove`` / ``for_owner`` (and the counted resolver probes below),
-    never an iteration over every control.
+    ALB seam 2: callers outside the registry use ``get`` / ``remove`` /
+    ``for_owner`` (and the counted resolver probes below), never an
+    iteration over every control.
 
     ``probes`` counts the index entries the resolver touched: the
     instrumentation behind the O(caller's teams) guarantee.
@@ -414,6 +425,7 @@ class ControlRegistry(MutableMapping):
             controls: Initial ``key -> control`` entries, registered one by one.
         """
         self._by_key: Dict[str, TaskControl] = {}
+        self._by_index: Dict[str, List[TaskControl]] = {}
         self._by_address_owner: Dict[Tuple[str, str], List[TaskControl]] = {}
         self._sources: Dict[Tuple[str, str], Dict[str, int]] = {}
         self._by_owner: Dict[str, Dict[str, TaskControl]] = {}
@@ -438,7 +450,7 @@ class ControlRegistry(MutableMapping):
 
     def __setitem__(self, key: str, control: TaskControl) -> None:
         """
-        THE register path: the key, the owner index and the source index.
+        THE register path: the control id, the name index, the owner index and the source index.
 
         A control already under ``key`` is forgotten first, so a replacement
         never leaves its predecessor in an index.
@@ -447,8 +459,10 @@ class ControlRegistry(MutableMapping):
         if key in self._by_key:
             del self[key]
 
-        # Step 2: the exact key, the owner index and the pipe's sources
+        # Step 2: the control id, the name index, the owner index and the
+        # pipe's sources
         self._by_key[key] = control
+        self._by_index.setdefault(control.index_key, []).append(control)
         self._by_address_owner.setdefault((control.address, control.owner_id), []).append(control)
         sources = self._sources.setdefault((control.developer_id, control.project_id or ''), {})
         sources[control.source or ''] = sources.get(control.source or '', 0) + 1
@@ -466,7 +480,13 @@ class ControlRegistry(MutableMapping):
             if not through:
                 self._by_deployment.pop(control.deployment, None)
 
-        # Step 2: the owner index entry, by identity
+        # Step 2: the name index entry and the owner index entry, by identity
+        index = control.index_key
+        under = [c for c in self._by_index.get(index, []) if c is not control]
+        if under:
+            self._by_index[index] = under
+        else:
+            self._by_index.pop(index, None)
         owner = (control.address, control.owner_id)
         held = [c for c in self._by_address_owner.get(owner, []) if c is not control]
         if held:
@@ -505,24 +525,6 @@ class ControlRegistry(MutableMapping):
         """
         return list(self._by_deployment.get(deployment, {}).values())
 
-    def get_or_create(self, key: str, create: Callable[[], TaskControl]) -> Tuple[TaskControl, bool]:
-        """
-        The control under ``key``, or a new one built by ``create`` and registered.
-
-        Args:
-            key: The registry key.
-            create: Builds the control when none is registered (its ``key`` must be ``key``).
-
-        Returns:
-            The control and True when it was created here.
-        """
-        existing = self._by_key.get(key)
-        if existing is not None:
-            return existing, False
-        control = create()
-        self[key] = control
-        return control, True
-
     def remove(self, key: str) -> Optional[TaskControl]:
         """Forget the control under ``key``; returns it, or None when none was registered."""
         if key not in self._by_key:
@@ -538,10 +540,20 @@ class ControlRegistry(MutableMapping):
 
     # ==== Resolver lookups (counted) ==============================================
 
-    def lookup(self, key: str) -> Optional[TaskControl]:
-        """One exact-key probe (``@dev``, ``@me``, ``@public``)."""
+    def lookup(self, index_key: str) -> List[TaskControl]:
+        """
+        One name-index probe (``@spec``, ``@me``, ``@public``): the caller's controls under ``index_key``.
+
+        Args:
+            index_key: ``control_key(rung, ownerId, address)``.
+
+        Returns:
+            Those controls, the most recently touched first (plan 3.2: when
+            several live ``spec`` controls share the address, the most
+            recently touched one answers); empty when none.
+        """
         self.probes += 1
-        return self._by_key.get(key)
+        return sorted(self._by_index.get(index_key, ()), key=lambda c: c.last_activity, reverse=True)
 
     def owned(self, address: str, owner_id: str) -> List[TaskControl]:
         """One owner-index probe: ``owner_id``'s controls at ``address``."""
@@ -552,120 +564,6 @@ class ControlRegistry(MutableMapping):
         """One source-index probe: the sources registered for a pipe, sorted."""
         self.probes += 1
         return sorted(self._sources.get((developer_id, pipe_id), {}))
-
-
-class _EngineTransition:
-    """
-    One control's move from its engine to the engine of a new pipeline (plan 7.3).
-
-    The steps are the whole protocol; ``_repoint`` runs them in order under the
-    control's transition lock:
-
-    - ``begin``: the control's spec becomes the new pipeline and its hold is
-      taken on the new content's engine (started through the start gate when
-      none is live). The hold on the OLD engine is kept, so another holder
-      leaving meanwhile can never stop the engine an abort returns to.
-    - ``confirm``: the new engine reports running (``start_task`` returns at
-      launch, before that).
-    - ``commit``: the old hold goes through the hold rule; the old engine stops
-      when that was its last hold. While the control still has pipes OPEN on
-      the old engine the hold is kept and the engine recorded as the control's
-      ``draining`` one: the pipe slots a client names are the engine's own
-      numbers, so a control's open pipes live on ONE engine at a time (the
-      data path keeps opening on the draining engine, plan 7.2 P2) and the
-      hold goes when the last of them closes.
-    - ``abort``: the control is put back on its old pipeline and engine BEFORE
-      any await, then the new hold goes through the hold rule (a replacement
-      nobody holds does not linger).
-    """
-
-    def __init__(
-        self,
-        server: 'TaskServer',
-        control: TaskControl,
-        pipeline: Dict[str, Any],
-        launch_args: Dict[str, Any],
-        env: Optional[Dict[str, str]],
-        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
-    ) -> None:
-        self._server = server
-        self._control = control
-        self._pipeline = pipeline
-        self._launch_args = launch_args
-        self._env = env
-        self._env_source = env_source
-        self.old_engine: Optional[TaskEngine] = control.task
-        self.old_pipeline = control.pipeline
-        self.engine: Optional[TaskEngine] = None
-
-    @property
-    def moved(self) -> bool:
-        """Whether the control is on a different engine than it started on."""
-        return self.engine is not None and self.engine is not self.old_engine
-
-    async def begin(self) -> None:
-        """Take the hold on the new content's engine; the old hold stays."""
-        control, server = self._control, self._server
-        control.pipeline = self._pipeline
-        key, shared, threads = server._engine_shape(control, self._launch_args)
-
-        def _hold(engine: TaskEngine) -> None:
-            if control.task is engine:
-                return
-            if control.draining is engine:
-                # Back onto the engine still draining this control's pipes:
-                # its hold is already ours and becomes the current one
-                control.draining = None
-            engine.acquire(control.key, control.ttl)
-            control.task = engine
-
-        self.engine = await server._acquire_engine(
-            key,
-            lambda: server._new_engine(
-                control,
-                key=key,
-                shared=shared,
-                threads=threads,
-                launch_args=self._launch_args,
-                env={} if shared else (self._env or {}),
-                env_source=None if shared else self._env_source,
-            ),
-            _hold,
-        )
-
-    async def confirm(self) -> None:
-        """Wait until the new engine confirmed running (nothing to confirm when it did not move)."""
-        if self.moved:
-            await self.engine.wait_for_running()
-
-    async def commit(self) -> None:
-        """The move is final: the old hold goes (once its open pipes drained), and the old engine with it when that was its last."""
-        control = self._control
-        if self.moved and self.old_engine is not None:
-            if control.pipes_on(self.old_engine):
-                # The in-flight requests (an open not yet answered included)
-                # finish where they started; the data path releases this hold
-                # at the last close (cmd_data)
-                control.draining = self.old_engine
-            else:
-                await self._server.release_hold(self.old_engine, control.key, 'repointed')
-        self._server.debug_message(
-            f'Task "{self._control.id}" {"repointed to" if self.moved else "stays on"} engine '
-            f'"{self.engine.engine_key if self.engine else "?"}"'
-        )
-
-    async def abort(self) -> None:
-        """Undo: the control is back on its old pipeline and engine before anything is awaited."""
-        control = self._control
-        control.pipeline = self.old_pipeline
-        # The declared parameters follow the pipeline: a per-call submit that
-        # ran while the new pipeline was installed cached views of ITS
-        # components (resolve_params), and those must not serve the restored one
-        control.setup_declared_parameters()
-        failed = control.task
-        control.task = self.old_engine
-        if failed is not None and failed is not self.old_engine:
-            await self._server.release_hold(failed, control.key, 'repoint failed')
 
 
 class TaskServer(DAPBase):
@@ -741,7 +639,7 @@ class TaskServer(DAPBase):
         5. Configure DAP base class for protocol handling
         """
         # Initialize registries for connection and task management
-        self._task_control = ControlRegistry()  # Control registry: <rung>.<ownerId>.<address>, indexed
+        self._task_control = ControlRegistry()  # Control registry: control id, with the name index inside
         self._engines = EngineRegistry()  # Engine pool: content key -> engine, start lock inside
         self._engine_unavailable: Dict[str, Tuple[str, str]] = {}  # Control key -> (engineKey, reason)
         # Which control each live request tree belongs to, by wire traceId (plan 7.5)
@@ -756,7 +654,6 @@ class TaskServer(DAPBase):
         self._launched: Dict[int, Set[str]] = {}  # Launching connection id -> keys of the controls it launched
         self._engine_restarts: Dict[str, Deque[float]] = {}  # Engine key -> automatic restart times, last hour
         self._restart_tasks: Set[asyncio.Task] = set()  # Pending automatic listener restarts
-        self._repoints: Dict[Tuple[str, str], Deque[float]] = {}  # (owner, address) -> repoint times (storm detector)
         self._connections: Dict[int, TaskConn] = {}  # Active client connections
         self._connection_id = 0  # Monotonic connection identifier generator
         self._unauthed_by_ip: Dict[str, int] = {}  # Count of unauthenticated connections per client IP
@@ -1245,15 +1142,15 @@ class TaskServer(DAPBase):
 
     def control_by_key(self, key: str) -> TaskControl:
         """
-        Internal registry lookup by the control's own key.
+        Internal registry lookup by the control's own key (its id), with no caller check.
 
         For code that already holds a control's key (the engine reporting
-        back, cleanup, the scheduler) — never for a client-supplied value:
-        clients send addresses, which ``resolve_control`` turns into a
-        control under the request's account.
+        back, cleanup, the scheduler, the in-process dispatch) — never for a
+        client-supplied value: a client's control id goes through
+        ``control_by_id``, which re-checks the caller.
 
         Args:
-            key (str): The registry key ``<rung>.<ownerId>.<address>``.
+            key (str): The registry key: the control id.
 
         Returns:
             TaskControl: The live control.
@@ -1265,6 +1162,75 @@ class TaskServer(DAPBase):
         if not control:
             raise TaskError(TaskError.NOT_REGISTERED, 'Your pipeline is not running')
         return control
+
+    def control_by_id(self, control_id: Any, account_info: AccountInfo, require: Optional[str] = None) -> TaskControl:
+        """
+        The control a client names by its id, re-checked against the caller (plan section 1).
+
+        Every verb that names a control id comes here: the registry hit is
+        followed by the owner check (the owner on ``@spec``/``@me``,
+        membership on ``@team``, ``sys.admin`` anywhere), never by the id
+        alone. A foreign id and an unknown id are refused the SAME way,
+        ``permission_denied``: the registry is no existence oracle.
+
+        Args:
+            control_id: What the client put in the token slot.
+            account_info: The request's account (required).
+            require: The permission the request needs, or None for reachability only.
+
+        Returns:
+            The control.
+
+        Raises:
+            PermissionError: Unauthenticated; not a control id; not the
+                caller's control (or no such control); the required
+                permission is missing; outside a scoped key's endpoints.
+        """
+        # Step 1: the account and the id's shape
+        if account_info is None:
+            raise PermissionError('Not authenticated')
+        if not is_control_id(control_id):
+            raise PermissionError('The token slot carries a control id (32 hex characters)')
+
+        # Step 2: the registry hit, then the caller: a foreign or unknown id
+        # reads the same
+        control = self._task_control.get(control_id)
+        if control is None:
+            raise PermissionError('Access denied: not your control, or it no longer exists')
+        try:
+            self._verify_control(control, account_info, require)
+        except PermissionError as exc:
+            raise PermissionError('Access denied: not your control, or it no longer exists') from exc
+        check_endpoint_scope(getattr(account_info, 'endpoints', None), control.address)
+        return self._check_engine_available(control)
+
+    def resolve_token(
+        self, token: Any, account_info: AccountInfo, require: Optional[str] = None, *, team: Optional[str] = None
+    ) -> TaskControl:
+        """
+        A control id OR an address in the token slot, for the verbs that take either (plan 7.5).
+
+        The monitor key builders send either the control id they were handed
+        or an address, which resolves to the caller's own control; a
+        standalone ``tool`` borrow resolves an address the way ``submit()``
+        does (plan 3.6). An address always carries a dot, a control id never.
+
+        Args:
+            token: What the client put in the token slot.
+            account_info: The request's account (required).
+            require: The permission the request needs.
+            team: Per-call ``@team`` override for an address.
+
+        Returns:
+            The control.
+
+        Raises:
+            PermissionError: As ``control_by_id`` / ``resolve_control``.
+            TaskError: As ``resolve_control`` (an address nothing answers).
+        """
+        if is_control_id(token):
+            return self.control_by_id(token, account_info, require)
+        return self.resolve_control(str(token or ''), account_info, require, team=team)
 
     def resolve_control(
         self,
@@ -1278,26 +1244,26 @@ class TaskServer(DAPBase):
         """
         THE resolver over the registry: an address plus the request's account yields one control.
 
-        ``rung`` holds the walk to ONE rung (``'dev'``, ``'me'``, ``'team'``,
+        ``rung`` holds the walk to ONE rung (``'spec'``, ``'me'``, ``'team'``,
         ``'public'``) for a caller that already knows which continuum it
         means (a monitor subscription keyed to the caller's dev run must
         never land on their personal deploy of the same address, nor the
         reverse); the default walks them all.
 
         Walks the rungs in the fixed order and takes the first that answers
-        (``@dev``: the caller's own presence, attach-only; ``@me``: the
+        (``@spec``: the caller's own presence, attach-only; ``@me``: the
         caller's personal deployment run; ``@team``: the first team in the
         caller's TEAM ORDER with a team-owned run of the address; ``@public``:
         the caller's control on a store publication). Starting a published
         rung from its artifact when nothing is registered is
         ``resolve_or_start``. Every hit is permission-checked; a key with an
-        ``endpoints`` scope skips ``@dev`` (a production webhook must never
+        ``endpoints`` scope skips ``@spec`` (a production webhook must never
         land on the owner's Play'd run), probes its frozen team only, and is
         refused outside its scope. There is NO owner qualifier: nobody can
         name another user's control.
 
         Every probe is an index lookup (plan 3.2), never a registry walk:
-        ``@dev``/``@me``/``@public`` are one exact key each
+        ``@spec``/``@me``/``@public`` are one name-index probe each
         (``<rung>.<userId>.<address>``), ``@team`` is one owner-index probe
         per team in the order (first hit wins; the order is total, so there
         is no ambiguity), and a two-segment address first reads the pipe's
@@ -1305,7 +1271,7 @@ class TaskServer(DAPBase):
         the registry holds.
 
         The walk runs over LIVE controls first: a stopped run never answers
-        its address while another rung has a live one (a dead ``@dev`` falls
+        its address while another rung has a live one (a dead ``@spec`` falls
         through). A dormant control (its engine stopped on its inactivity
         timer, or crashed after it confirmed running) is live: its next
         request starts the engine again. Only when no rung has a live control
@@ -1318,7 +1284,7 @@ class TaskServer(DAPBase):
         A finished source never counts against a live one.
 
         Args:
-            address (str): ``developerId.pipelineId[.source]`` (the token slot).
+            address (str): ``developerId.pipelineId[.source]``.
             account_info (AccountInfo): The request's account (required).
             require (Optional[str]): The permission the request needs
                 (``'task.data'``, ``'task.control'``, ``'task.monitor'`` ...).
@@ -1378,12 +1344,12 @@ class TaskServer(DAPBase):
 
         The fixed order of plan 3.2, each rung answered by its live control
         or, failing that, by its publication (started from the artifact):
-        ``@dev`` (live only: a name never starts a dev run), ``@me``,
+        ``@spec`` (live only: a name never starts a spec run), ``@me``,
         ``@team`` slot by slot in the caller's team order (``team=``
         overrides it), ``@public``. So a live ``@team`` control of a LATER
         team never beats an earlier team's publication, and a live
         ``@team`` control never beats the caller's own ``@me`` deployment.
-        A live ``@dev``/``@me`` hit answers without reading publications.
+        A live ``@spec``/``@me`` hit answers without reading publications.
 
         Args:
             address: ``developerId.pipelineId[.source]``.
@@ -1427,8 +1393,8 @@ class TaskServer(DAPBase):
         ``interfaces`` reads the first candidate's spec. One order, one
         implementation (plan 3.2):
 
-        - The caller's registered ``@dev`` or ``@me`` control, when there is
-          one, is the whole answer: ``@dev`` has no publication to compare
+        - The caller's registered ``@spec`` or ``@me`` control, when there is
+          one, is the whole answer: ``@spec`` has no publication to compare
           with, and nothing outranks ``@me``.
         - Otherwise the serving publications and the caller's registered
           control (``@team`` or ``@public``) are merged by rung rank — ``@me``,
@@ -1460,7 +1426,7 @@ class TaskServer(DAPBase):
         parsed = parse_address(address)
         rungs: List[str] = []
         live = self._walk_rungs(parsed, address, account_info, require, True, rungs, team)
-        if live is not None and live.rung in ('dev', 'me'):
+        if live is not None and live.rung in ('spec', 'me'):
             return parsed, rungs, [live]
 
         # Step 2: the publications, merged with the control by rung rank
@@ -1514,7 +1480,7 @@ class TaskServer(DAPBase):
             live_only: Consider only live (or dormant) controls.
             rungs: Filled with the rungs this walk tried, in order.
             team: Per-call ``@team`` override.
-            only: Walk this one rung (``'dev'``/``'me'``/``'team'``/``'public'``) instead of all four.
+            only: Walk this one rung (``'spec'``/``'me'``/``'team'``/``'public'``) instead of all four.
 
         Returns:
             The control the first answering rung resolved, or None.
@@ -1554,19 +1520,23 @@ class TaskServer(DAPBase):
             return candidates[0]
 
         def _exact(rung: str) -> Optional[TaskControl]:
-            """The caller's own control on ``rung``: one key per full address."""
-            found = [registry.lookup(control_key(rung, user_id, a)) for a in addresses]
-            return _pick([c for c in found if _usable(c)])
+            """The caller's own control on ``rung``: one index probe per full address, the most recent usable one."""
+            found = []
+            for a in addresses:
+                usable = [c for c in registry.lookup(control_key(rung, user_id, a)) if _usable(c)]
+                if usable:
+                    found.append(usable[0])
+            return _pick(found)
 
         def _wanted(rung: str) -> bool:
             """Whether this walk visits ``rung`` (every rung unless one was asked for)."""
             return only is None or only == rung
 
-        # Step 2: @dev, the caller's own presence. Attach-only, and skipped
+        # Step 2: @spec, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
-        if endpoints is None and _wanted('dev'):
-            rungs.append('@dev')
-            control = _exact('dev')
+        if endpoints is None and _wanted('spec'):
+            rungs.append('@spec')
+            control = _exact('spec')
             if control is not None:
                 return self._verify_control(control, account_info, require)
 
@@ -1641,8 +1611,7 @@ class TaskServer(DAPBase):
             # A deployment revoked after this control was registered (or after
             # its state was read by the dispatch that started it) is the kill
             # switch catching a control the release pass did not reach
-            revoked = self._deployment_revoked.get(control.deployment) if control.deployment is not None else None
-            if revoked is None or revoked <= control.registered_at:
+            if not self._revoked_after(control.deployment, control.registered_at):
                 return control
             told = (control.task.engine_key if control.task is not None else '', 'unpublished')
         engine_key_value, reason = told
@@ -1668,8 +1637,8 @@ class TaskServer(DAPBase):
         The start reuses the deploy-run dispatch (``start_server_task_as_team``,
         the path ``cmd_pipe``'s ``deploy.run`` and the scheduler take) with
         ``trigger='submit'``. The control is owned by the CALLER: the user
-        on ``@me`` and ``@public``, the answering team on ``@team``; its key
-        is ``<rung>.<owner>.<address>``, its ``rung`` the pin's rung, its
+        on ``@me`` and ``@public``, the answering team on ``@team``; its index
+        key is ``<rung>.<owner>.<address>``, its ``rung`` the pin's rung, its
         ``DeploymentRef`` the pinned publication's (so the publisher's
         disable/remove releases it) and its ``version`` the pinned version.
         Its TEAM CONTEXT (plan 6.2) is the answering team on ``@team``, the
@@ -1755,10 +1724,10 @@ class TaskServer(DAPBase):
         org_id = str(org.get('id') or deployment.org_id)
         key = control_key(pin.rung, owner_id, address)
 
-        # Step 3: one start per control key; a concurrent request attaches
+        # Step 3: one start per index key; a concurrent request attaches
         async with self._engines.control_start_lock(key):
-            existing = self._task_control.get(key)
-            if existing is not None and existing.live:
+            existing = next((c for c in self._task_control.lookup(key) if c.live), None)
+            if existing is not None:
                 return self._check_engine_available(self._verify_control(existing, account_info, require)), False
             pipeline['source'] = source
             started = await start_server_task_as_team(
@@ -2081,7 +2050,7 @@ class TaskServer(DAPBase):
 
     def _unregister_control(self, control: TaskControl, *, keep_hold: bool = False) -> None:
         """
-        Take a control out of the registry; its subscriptions stay.
+        Take a control out of the registry with its request trees; its subscriptions stay.
 
         The control's hold goes with it unless ``keep_hold`` is set, for a
         caller that releases it through ``release_hold`` (the rule that stops
@@ -2099,14 +2068,9 @@ class TaskServer(DAPBase):
             # Its request trees go with it (their records did)
             self.trace_owners.forget_control(control.key)
 
-        # The control's one hold, and the one it still has on an engine
-        # draining its open pipes after a repoint
-        if not keep_hold:
-            if control.task is not None:
-                control.task.release(control.key)
-            if control.draining is not None:
-                control.draining.release(control.key)
-                control.draining = None
+        # The control's one hold
+        if not keep_hold and control.task is not None:
+            control.task.release(control.key)
 
     async def _require_start_credit(self, control: TaskControl) -> None:
         """
@@ -2127,24 +2091,6 @@ class TaskServer(DAPBase):
         if refusal:
             raise OutOfCreditsError(f'{refusal} ({control.address})')
 
-    async def release_draining(self, control: TaskControl, reason: str) -> None:
-        """
-        Drop the hold a control kept on the engine draining its open pipes after a repoint, if any.
-
-        Through the hold rule, so the old engine stops when the control was
-        its last holder. Called by the data path at the last close and by
-        every path that drops the control.
-
-        Args:
-            control: The control.
-            reason: Why the engine stops, when it does.
-        """
-        draining = control.draining
-        if draining is None:
-            return
-        control.draining = None
-        await self.release_hold(draining, control.key, reason)
-
     async def release_hold(self, engine: Optional[TaskEngine], control_key: str, reason: str) -> None:
         """
         Drop a control's hold on ``engine``: the ONE place the last hold stops an engine (plan 7.2).
@@ -2152,7 +2098,7 @@ class TaskServer(DAPBase):
         An engine nobody holds does not linger: when this was its last hold
         and it is live, it stops now. An engine already stopping, stopped or
         failed is left as it is. Every path that lets go of a hold (terminate,
-        a repoint's commit or rollback, a failed start) comes through here.
+        a restart's predecessor, a failed start) comes through here.
 
         Args:
             engine: The engine, or None.
@@ -2182,7 +2128,13 @@ class TaskServer(DAPBase):
         # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
         # key whose prefix (everything before the last dot) IS that key —
         # never a prefix test, which a longer sibling source could satisfy.
+        # The subscriptions stay while another control of the owner still
+        # answers to the same key (another config of one project_id, plan
+        # 3.4): they are its subscriptions too.
         project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+        for sibling in self._task_control.for_owner(control.owner_id):
+            if owner_key(sibling.run_kind, sibling.owner_id, sibling.project_id, sibling.source) == project_key:
+                return
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
                 keys_to_remove = [k for k in conn._monitors if k == project_key or k.rsplit('.', 1)[0] == project_key]
@@ -2235,7 +2187,6 @@ class TaskServer(DAPBase):
         # through the one rule that stops the engine when it was the last
         self._forget_control(control, keep_hold=True)
         await self.release_hold(engine, control.key, reason)
-        await self.release_draining(control, reason)
 
         # Notify dashboard subscribers
         await self.broadcast_server_event(
@@ -2367,7 +2318,7 @@ class TaskServer(DAPBase):
         if not holders or engine.ages:
             return
 
-        # Step 3: one start, every holder repointed onto it
+        # Step 3: one start, every holder moved onto it
         try:
             for control in holders:
                 await self.ensure_engine(control)
@@ -2438,6 +2389,22 @@ class TaskServer(DAPBase):
             if not keys:
                 self._launched.pop(id(owner), None)
 
+    def _revoked_after(self, deployment: Optional[DeploymentRef], epoch: float) -> bool:
+        """
+        Whether ``deployment`` was disabled or removed after ``epoch``.
+
+        Args:
+            deployment: The deployment a control resolved through, or None (never revoked).
+            epoch: Monotonic time its state was last known good.
+
+        Returns:
+            True when the kill switch landed after ``epoch``.
+        """
+        if deployment is None:
+            return False
+        revoked = self._deployment_revoked.get(deployment)
+        return revoked is not None and revoked > epoch
+
     def _refuse_if_revoked(self, control: TaskControl, state_epoch: float) -> None:
         """
         Refuse to register a control through a deployment revoked since ``state_epoch``.
@@ -2449,10 +2416,7 @@ class TaskServer(DAPBase):
         Raises:
             TaskError: TASK_ENGINE_UNAVAILABLE with ``reason='unpublished'``.
         """
-        if control.deployment is None:
-            return
-        revoked = self._deployment_revoked.get(control.deployment)
-        if revoked is None or revoked <= state_epoch:
+        if not self._revoked_after(control.deployment, state_epoch):
             return
         raise TaskError(
             TaskError.ENGINE_UNAVAILABLE,
@@ -2469,7 +2433,7 @@ class TaskServer(DAPBase):
         The publisher's kill switch (disable/remove, plan 7.2): each such
         control is removed, and an engine stops when no hold remains on it.
         Holds of controls that did not resolve through the deployment (the
-        owner's own @dev run of identical content) keep their engine.
+        owner's own @spec run of identical content) keep their engine.
 
         Args:
             deployment: The deployment that was disabled or removed.
@@ -2525,11 +2489,18 @@ class TaskServer(DAPBase):
         rung: str = '',
         version: Optional[int] = None,
         team_context: Optional[TeamContext] = None,
-        on_change: Optional[str] = None,
         deployment_epoch: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
-        Create a control and acquire its hold on an engine, starting one if needed.
+        Resolve a spec to a control and acquire its hold on an engine, starting one if needed.
+
+        A SPEC call (plan 3.3, 3.4): the caller's control with the same
+        ``(rung, project_id, hash(resolved config))`` is reused (with
+        ``useExisting``, their live control of that ``project_id`` whatever
+        its configuration); otherwise one is created and holds the engine
+        for the spec's shape, started when none is live. A spec whose config differs under the same
+        ``project_id`` is simply another control on the same engine; nothing
+        is moved between engines and nothing is refused.
 
         This method handles the complete task creation process including validation,
         registry management, resource allocation, and startup coordination. It
@@ -2537,9 +2508,9 @@ class TaskServer(DAPBase):
 
         Args:
             request (Dict[str, Any]): Task creation request containing:
-                - arguments: Task configuration including the pipeline; an
-                  optional ``token`` overrides the pipeline-id segment of the
-                  address (the spec's ``project_id``) and is not a credential
+                - arguments: Task configuration including the pipeline, which
+                  must carry its ``project_id``; an optional ``token`` overrides
+                  that id and is not a credential
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
             env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
@@ -2556,10 +2527,6 @@ class TaskServer(DAPBase):
             team_context: The team whose environment the control runs with
                 (plan 6.2). Default: ``team_id`` as the home team of a dev
                 run, the deploying team of a deployment run.
-            on_change: Set by ``submit(spec)`` (``'error'``/``'keep'``/
-                ``'auto'``): a live presence at the address is reused, refused
-                or repointed per plan 3.4 instead of the useExisting rule, and
-                the result carries ``converged``/``specMatch`` stamps.
             deployment_epoch: Monotonic time the trusted dispatch READ the
                 deployment's state, before it loaded the artifact. A
                 disable/remove after that moment refuses the control instead
@@ -2567,83 +2534,64 @@ class TaskServer(DAPBase):
                 read and the registration is closed. Default: now.
 
         Returns:
-            Dict[str, Any]: The task's identity; ``token`` carries the ADDRESS
-                (``developerId.pipelineId.source``) for subsequent operations
+            Dict[str, Any]: The task's identity; ``token`` carries the CONTROL
+                ID for every verb after this, ``address`` the
+                ``developerId.pipelineId.source`` beside it, ``converged``
+                ``'started'`` when this call created the control and
+                ``'none'`` when an existing one answered
 
         Raises:
-            TaskError: TASK_INVALID_ARGUMENT when an identity, the project id
-                (or the ``token`` override of it), the source or a component id
-                breaks the address grammar, or when a dev launch does not name
-                the authenticated user
-            ValueError: If launch type is invalid or task already exists
+            TaskError: TASK_INVALID_ARGUMENT when the spec has no
+                ``project_id`` (``field='project_id'``), or when an identity,
+                the project id (or the ``token`` override of it), the source
+                or a component id breaks the address grammar, or when a dev
+                launch does not name the authenticated user
+            ValueError: If launch type is invalid, or a deployment run is
+                already live under its index key
             RuntimeError: If the pipeline is missing, empty or not an object
             Exception: If task creation or startup fails
 
         Task Creation Process:
         1. Parse and validate request parameters and identities
-        2. Validate the pipeline and derive the address, rung and registry key
-        3. Check for control uniqueness and handle conflicts
-        4. Compute the engine key from the spec's content (plan 7.2)
+        2. Validate the pipeline and derive the address, the rung and the
+           configuration identity (the resolved config by stack index)
+        3. Reuse the caller's control of that identity when it is live
+        4. Compute the engine key from the spec's shape (plan 7.2)
         5. Under the engine key's start lock: attach to the live engine of
            that key, or create and start one
-        6. Register the control holding the engine
-        7. Return the address for client use
+        6. Register the control, minted with its id, holding the engine
+        7. Return the control id for client use
 
         Launch Types:
-        - LAUNCH:
-            - Usually interactive debugging-enabled tasks
-            - If useTask=False:
-                * Fail if the tasks already exists.
-                * The task is created, and destroyed when the connection closes
-            - If useTask=True:
-                * Success if the task already exists. If it does, leaves the
-                task running when the connection closes. The original creator
-                of the task controls its life cycle
+        - LAUNCH: the control is destroyed when the launching connection closes
+        - EXECUTE: the control lives on its own idle ttl
         """
         # The conversion from the old node-config format, once the submitted
         # pipeline has been through it (plan 5.6.8); the result stamps carry
         # the converted text so the caller can make its file current
         conversion: Dict[str, ConvertResult] = {}
 
-        def _return_results(
-            control: TaskControl,
-            reused: bool = False,
-            *,
-            converged: Optional[str] = None,
-            spec_match: Optional[bool] = None,
-            warnings: Optional[List[Dict[str, Any]]] = None,
-        ) -> Dict[str, Any]:
+        def _return_results(control: TaskControl, reused: bool = False) -> Dict[str, Any]:
             """
-            Return the task's identity, the address in the token slot.
+            Return the task's identity, the control id in the token slot (plan 3.1 stamps).
 
             Args:
-                control (TaskControl): The existing task control structure
-                reused (bool): True when this is a live instance returned under
-                    useExisting rather than a task launched from the submitted
-                    pipeline. Without it the two are indistinguishable to the
-                    caller, and a run against stale configuration reads as a
-                    successful run of the configuration just sent.
-                converged: With ``on_change``: ``'none'``, ``'started'`` or
-                    ``'repointed'`` (plan 3.1 stamps).
-                spec_match: With ``on_change``: whether the engine runs the
-                    submitted spec.
-                warnings: ``repoint_storm`` warnings, when any.
+                control (TaskControl): The control that answered.
+                reused (bool): True when an existing control of the same
+                    identity answered rather than one created by this call;
+                    ``converged`` says the same in the plan's words.
             """
             result = {
                 'id': control.id,
-                'token': control.address,
+                'token': control.control_id,
+                'address': control.address,
                 'projectId': control.project_id,
                 'source': control.source,
                 'provider': control.provider,
                 'reused': reused,
+                'converged': 'none' if reused else 'started',
                 'engineKey': control.task.engine_key if control.task is not None else '',
             }
-            if converged is not None:
-                result['converged'] = converged
-            if spec_match is not None:
-                result['specMatch'] = spec_match
-            if warnings:
-                result['warnings'] = list(warnings)
             converted = conversion.get('result')
             if converted is not None and converted.touched:
                 result['converted'] = converted.pipeline
@@ -2656,7 +2604,9 @@ class TaskServer(DAPBase):
         # For launch/exec token is in args. An explicit "arguments": null is a
         # request with no pipeline, refused by the guard below.
         args = request.get('arguments') or {}
-        use_existing_task = args.get('useExisting', False)
+        # useExisting: attach to the caller's live @spec control of this
+        # project_id whatever its configuration (the running spec is kept)
+        use_existing = bool(args.get('useExisting', False))
 
         # Extract TTL from args (use server-configured default if not provided)
         ttl = args.get('ttl', CONST_DEFAULT_TTL)
@@ -2721,7 +2671,7 @@ class TaskServer(DAPBase):
 
         # Apply the token override as the spec's project_id. The pipeline is
         # copied so the caller's object is not rewritten, and the control
-        # records the spec it actually runs (useExisting compares against it).
+        # records the spec it actually runs (its identity hashes it).
         if token_override is not None:
             control.pipeline = {**control.pipeline, 'project_id': token_override}
 
@@ -2744,11 +2694,15 @@ class TaskServer(DAPBase):
         _apply_source_defaults(control.pipeline, control.source)
 
         # Project identity is project_id on the flat project: the SHORT,
-        # dot-free id. A missing id is minted as a GUID (dot-free by
-        # construction).
+        # dot-free id. It is REQUIRED (plan 2.2, section 1): the control's
+        # identity hangs off it, so nothing is minted in its place.
         control.project_id = control.pipeline.get('project_id', None)
         if not control.project_id:
-            control.project_id = str(uuid.uuid4())
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                'The pipeline has no project_id; a spec names the pipeline it belongs to',
+                field='project_id',
+            )
 
         # The address grammar, enforced at execute: project id, source and
         # every component id are single dot-free segments. Then old-format node
@@ -2774,17 +2728,19 @@ class TaskServer(DAPBase):
         if not control.provider:
             raise ValueError(f'Source "{control.source}" not found in pipeline')
 
-        # The rung and the registry key: one control per (owner, address,
-        # rung). The owner FIELD (user for dev and @me, team for @team) rides
-        # owner_id, and the rung separates a user's dev run from their @me
-        # deploy of the same pipeline — the only pair that shares an owner.
-        # A published rung stamped by the trusted dispatch must fit the run:
-        # @me and @public are user-owned deployment runs, @team a team-owned one
+        # The rung and the handle. The owner FIELD (user for spec and @me,
+        # team for @team) rides owner_id, and the rung separates a user's
+        # spec run from their @me deploy of the same pipeline — the only pair
+        # that shares an owner. A published rung stamped by the trusted
+        # dispatch must fit the run: @me and @public are user-owned
+        # deployment runs, @team a team-owned one. The control id is minted
+        # here and is the registry key; it leaves with the result only when
+        # this call creates the control (plan section 1)
         derived = rung_of(control.run_kind, control.owner_kind)
-        if rung and (rung not in RUNGS or derived != ('me' if rung == 'public' else rung) or derived == 'dev'):
+        if rung and (rung not in RUNGS or derived != ('me' if rung == 'public' else rung) or derived == 'spec'):
             raise ValueError(f'rung {rung!r} does not fit a {control.owner_kind}-owned {control.run_kind} run')
         control.rung = rung or derived
-        control.key = control_key(control.rung, control.owner_id, control.address)
+        control.control_id = control.key = mint_control_id()
 
         # Caller-side settings: they belong to the control and never enter
         # the engine key
@@ -2813,87 +2769,99 @@ class TaskServer(DAPBase):
         except (ValueError, TypeError):
             raise ValueError(f'Invalid launch type: "{command}"')
 
-        # Handle task uniqueness and potential conflicts
-        if control.key in self._task_control:
-            # Get the existing task control
-            existing_control = self._task_control[control.key]
+        # The spec's two identities (plan 7.2, section 1): the engine key
+        # from its SHAPE, the control's configuration from its resolved
+        # config by stack index. An unkeyable spec is engine_start_failed.
+        key, threads, content = self._engine_shape(control, args)
+        # What the open carries is the config as the spec stores it (the
+        # engine resolves it); what identifies the control is the resolved
+        # view (a spelled-out default is not another control)
+        control.config = [dict(entry) for entry in content.stored_by_index]
+        control.config_hash = config_hash(content.config_by_index)
 
-            # Prevent duplicate active tasks. A dormant control (its engine
-            # stopped on its inactivity timer) is reused when asked, else
-            # replaced like a finished one
-            reusable = use_existing_task or on_change is not None
-            if not existing_control.task.is_task_complete() or (reusable and existing_control.dormant):
-                # A Play/.use/submit(spec) for a live presence whose engine runs
-                # other content is the ordinary on_change case: spec_changed
-                # by default, keep or repoint when asked (plan 3.4). There is
-                # no cross-workspace collision warning (plan 2.3, 2026-11-16):
-                # the differing content IS the protection, so the only
-                # warnings a presence can add are repoint_storm ones.
-                current_hash = existing_control.task.engine_key.split(':', 1)[0]
-                # The same conversion the first start gets: an unkeyable spec
-                # is engine_start_failed here too, never a raw exception
-                new_hash = self._engine_shape(control, args)[0].split(':', 1)[0]
-                warnings: List[Dict[str, Any]] = []
+        # The config the open will carry is built once here: an env value that
+        # does not fit the typed leaf its placeholder sits on is refused at the
+        # door, naming the leaf, never first by the engine
+        try:
+            control.caller_config()
+        except CallerConfigError as exc:
+            raise TaskError(TaskError.INVALID_ARGUMENT, f'The pipeline cannot start: {exc}', field=exc.path) from exc
 
-                # submit(spec): on_change decides (plan 3.4)
-                if on_change is not None:
-                    return await self._converge(
-                        existing_control,
-                        control,
-                        on_change,
-                        current_hash=current_hash,
-                        new_hash=new_hash,
-                        launch_args=args,
-                        env=env,
-                        env_source=env_source,
-                        warnings=warnings,
-                        wait_for_running=wait_for_running,
-                        results=_return_results,
-                    )
+        # The hosted policy (nosaas nodes, the stdio MCP transport) holds for
+        # EVERY control before it holds an engine, a warm one included: an
+        # engine's own start checked the config of its first control only
+        refusal = hosted_refusal(resolve_pipeline_env(control.pipeline, control.env))
+        if refusal:
+            raise ValueError(refusal)
 
-                # This is an active task, if we are told we can use it, then,
-                # make sure the user actually specified the task to use. If so,
-                # then all is ok, just use the existing task
-                if use_existing_task:
-                    # A dormant control's engine starts again under its key
-                    await self.ensure_engine(existing_control)
+        def _same_spec(existing: TaskControl) -> bool:
+            """Whether ``existing`` runs this call's spec: its configuration on the engine of this shape."""
+            return existing.config_hash == control.config_hash and existing.task.engine_key == key
 
-                    # The submitted pipeline is not applied to a running instance.
-                    # Say so when it differs from what is actually running, otherwise
-                    # an edit-and-rerun loop silently measures the old configuration.
-                    if control.pipeline != existing_control.pipeline:
-                        self.debug_message(
-                            f'Task "{existing_control.id}" is already running: reusing it and ignoring the '
-                            'submitted pipeline, which differs from the running one. Restart the task to '
-                            'apply it.'
-                        )
-                    if wait_for_running:
-                        await existing_control.task.wait_for_running()
-                    return _return_results(existing_control, reused=True, warnings=warnings)
-
-                # We are absolutely supposed to create a task. Name the running
-                # task, not this request's id: the two can differ by source.
-                raise ValueError(
-                    f'Pipeline is already running (task {existing_control.id}). '
-                    'Reuse it (useExisting / use_existing), or stop it and run again.'
+        # The caller's controls under the same index key (rung, owner,
+        # address): on @spec the one with the same configuration ON THE
+        # ENGINE OF THIS SHAPE is REUSED (plan 3.4); a finished one is
+        # replaced; a stopping one and a restart's predecessor are passed
+        # over; a different configuration, or the same configs rewired
+        # (another engine), is left alone, another control. A deployment run
+        # is one per index key: the pin path attaches before it starts
+        for existing_control in self._task_control.lookup(control.index_key):
+            engine = existing_control.task
+            if existing_control.restarting:
+                # Its successor is being set up: the restart decides its fate
+                continue
+            if engine.state is EngineState.STOPPING and not existing_control.dormant:
+                # Its engine is in teardown: it takes no new hold, and a reused
+                # control would hand out an id the teardown is about to retire.
+                # It stays registered meanwhile: the terminal events and the
+                # run-log close are delivered through it, and the stop that
+                # began the teardown removes it once they are
+                continue
+            if engine.is_task_complete() and not existing_control.dormant:
+                # Its engine is done: replaced. Its subscriptions stay: they
+                # are the replacement's too
+                self._unregister_control(existing_control)
+                self.debug_message(f'Replaced finished task "{control.id}"...')
+                continue
+            if control.rung != 'spec':
+                raise ValueError(f'Pipeline is already running (task {existing_control.id}); stop it and run again.')
+            if not use_existing and not _same_spec(existing_control):
+                continue
+            # The same identity, or useExisting on the caller's live control
+            # of this project_id: a dormant control's engine starts again
+            # under its key, and the caller gets the control it already has.
+            # The submitted pipeline is not applied to a running control: say
+            # so when it differs, so an edit-and-rerun loop never silently
+            # measures the old configuration (restart applies it)
+            if not _same_spec(existing_control):
+                self.debug_message(
+                    f'Task "{existing_control.id}" is already running: reusing it (useExisting) and ignoring the '
+                    'submitted pipeline, which differs from the running one. Restart the task to apply it.'
                 )
-
-            # Clean up the completed control with the same key (its engine is
-            # done). Its subscriptions stay: they are the replacement's too.
-            self._unregister_control(existing_control)
-            self.debug_message(f'Replaced completed task "{control.id}"...')
-
-        # The engine: content-addressed (plan 7.2). Threads come from policy
-        # outside @dev; a @dev spec call that moves threads or args away from
-        # policy gets an engine of its own, so a name call never attaches to a
-        # developer's non-default shape.
-        key, shared, threads = self._engine_shape(control, args)
+            await self.ensure_engine(existing_control)
+            if wait_for_running:
+                await existing_control.task.wait_for_running()
+            return _return_results(existing_control, reused=True)
 
         # The moment the deployment's state is known good: the dispatch's read,
         # or now for a run that resolved no deployment
         state_epoch = time.monotonic() if deployment_epoch is None else float(deployment_epoch)
+        reused: Optional[TaskControl] = None
 
         def _register(engine: TaskEngine) -> None:
+            nonlocal reused
+            # A twin registered while this call waited in the gate (two
+            # identical launches passed the lookup above together): the
+            # caller gets that control and takes no hold of its own. A
+            # deployment run reads as already running, as above
+            for twin in self._task_control.lookup(control.index_key):
+                if twin.restarting:
+                    continue
+                if twin.task is engine and twin.live and (use_existing or _same_spec(twin)):
+                    if control.rung != 'spec':
+                        raise ValueError(f'Pipeline is already running (task {twin.id}); stop it and run again.')
+                    reused = twin
+                    return
             # A deployment disabled or removed while the artifact loaded or the
             # engine started never gets a registered control (plan 7.2)
             self._refuse_if_revoked(control, state_epoch)
@@ -2918,14 +2886,20 @@ class TaskServer(DAPBase):
                 lambda: self._new_engine(
                     control,
                     key=key,
-                    shared=shared,
+                    shared=False,
                     threads=threads,
                     launch_args=args,
-                    env={} if shared else (env or {}),
-                    env_source=None if shared else env_source,
+                    env=env or {},
+                    env_source=env_source,
                 ),
                 _register,
             )
+
+            # The gate answered with a twin: the caller's control already runs
+            if reused is not None:
+                if wait_for_running:
+                    await reused.task.wait_for_running()
+                return _return_results(reused, reused=True)
 
             self._debug_task_started(control, trigger, control.ttl)
 
@@ -2943,9 +2917,7 @@ class TaskServer(DAPBase):
                         engineKey=control.task.engine_key,
                     ) from exc
 
-            # Return formatted results (a submit(spec) start is 'started')
-            if on_change is not None:
-                return _return_results(control, converged='started', spec_match=True)
+            # Return formatted results: this call created the control
             return _return_results(control)
 
         except Exception:
@@ -2965,30 +2937,39 @@ class TaskServer(DAPBase):
                 await self.release_hold(engine, control.key, 'user')
             raise
 
-    # ==== Spec calls: shape, convergence, collision, storm =======================
+    # ==== Spec calls: the two identities ========================================
 
     @staticmethod
-    def _engine_shape(control: TaskControl, launch_args: Dict[str, Any]) -> Tuple[str, bool, int]:
+    def _engine_shape(control: TaskControl, launch_args: Dict[str, Any]) -> Tuple[str, int, EngineContent]:
         """
-        The engine key, cross-user sharing and thread count for ``control``'s spec (plan 7.2).
+        The engine key, thread count and resolved content of ``control``'s spec (plan 7.2).
 
-        Threads come from policy outside @dev; a @dev spec call that moves
-        threads or args away from policy gets an engine of its own, so a name
-        call never attaches to a developer's non-default shape.
+        The key is the spec's SHAPE qualified by the control's owner on every
+        rung in this PR (C.25 leaves the published rungs bare); the resolved
+        config by stack index is the control's own identity and what its open
+        carries. Threads come from policy outside @spec; a @spec call may set
+        them (the starter's value holds for the engine's life).
 
         Args:
             control: The control (its pipeline, source, rung and owner are set).
-            launch_args: The launch arguments (``threads``, ``args``).
+            launch_args: The launch arguments (``threads``).
 
         Returns:
-            ``(engine key, shared, threads)``.
+            ``(engine key, threads, content)``.
+
+        Raises:
+            TaskError: TASK_ENGINE_START_FAILED when the spec cannot be keyed.
         """
         try:
-            content = engine_content(control.pipeline, control.source, component_facts)
+            # Parameter tokens are decoded here when the deployment secret is
+            # set: the config rides the open as plain values, like the task
+            # file carried them until now
+            spec = resolve_parameter_tokens(copy.deepcopy(control.pipeline))
+            content = engine_content(spec, control.source, component_facts)
         except Exception as exc:
             # An unknown node or a config outside its schema: the spec cannot
-            # be keyed, so it is refused here instead of starting under a
-            # private key over its raw config (audit 2026-11-12)
+            # be keyed, so it is refused here instead of starting over its raw
+            # config (audit 2026-11-12)
             raise TaskError(
                 TaskError.ENGINE_START_FAILED,
                 f'The pipeline cannot start: {exc}',
@@ -2996,163 +2977,11 @@ class TaskServer(DAPBase):
                 engineKey='',
             ) from exc
         threads = CONST_DEFAULT_MAX_THREADS
-        custom_shape = False
-        if control.rung == 'dev':
+        if control.rung == 'spec':
             requested_threads = launch_args.get('threads')
-            if requested_threads is not None and requested_threads != CONST_DEFAULT_MAX_THREADS:
+            if requested_threads is not None:
                 threads = requested_threads
-                custom_shape = True
-            if launch_args.get('args'):
-                custom_shape = True
-        shared = content.shareable and not custom_shape
-        return content.key(shared=shared, owner_id=control.owner_id), shared, threads
-
-    def _storm_warning(self, control: TaskControl, now: Optional[float] = None) -> List[Dict[str, Any]]:
-        """
-        Count one repoint of ``control``'s address; the ``repoint_storm`` warning past the limit (plan 7.3).
-
-        One owner repointing one address more than
-        ``CONST_REPOINT_STORM_MAX`` times in ``CONST_REPOINT_STORM_WINDOW``
-        seconds is a symptom of per-request values baked into the spec
-        (they belong in ``params``/``data``).
-
-        Returns:
-            ``[{code, address, count, window}]`` or ``[]``.
-        """
-        now = time.monotonic() if now is None else now
-        recent = self._repoints.setdefault((control.owner_id, control.address), deque())
-        recent.append(now)
-        while recent and recent[0] <= now - CONST_REPOINT_STORM_WINDOW:
-            recent.popleft()
-        if len(recent) <= CONST_REPOINT_STORM_MAX:
-            return []
-        return [
-            {
-                'code': 'repoint_storm',
-                'address': control.address,
-                'count': len(recent),
-                'window': CONST_REPOINT_STORM_WINDOW,
-            }
-        ]
-
-    async def _converge(
-        self,
-        existing: TaskControl,
-        incoming: TaskControl,
-        on_change: str,
-        *,
-        current_hash: str,
-        new_hash: str,
-        launch_args: Dict[str, Any],
-        env: Optional[Dict[str, str]],
-        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
-        warnings: List[Dict[str, Any]],
-        wait_for_running: bool,
-        results: Callable[..., Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        """
-        A spec call against the caller's live @dev presence, per ``on_change`` (plan 3.4, 7.3).
-
-        - the same content: reuse, ``converged:'none'``, ``specMatch:true``;
-        - ``'error'``: refuse with ``TASK_SPEC_CHANGED`` and both hashes;
-        - ``'keep'``: deliver to the existing engine, ``specMatch:false``;
-        - ``'auto'``: REPOINT the control (release its hold on the old engine,
-          acquire one on the new spec's engine, starting it if needed), stamp
-          ``converged:'repointed'``. Nothing is killed: the old engine keeps
-          serving its other holders and stops when none remain.
-
-        Returns:
-            The start result with the stamps.
-
-        Raises:
-            TaskError: TASK_INVALID_ARGUMENT (unknown ``on_change``) or
-                TASK_SPEC_CHANGED (``{address, currentHash, newHash, warnings}``).
-        """
-        if on_change not in ON_CHANGE_MODES:
-            raise TaskError(
-                TaskError.INVALID_ARGUMENT,
-                f'onChange must be one of {", ".join(ON_CHANGE_MODES)}',
-                field='onChange',
-            )
-
-        # Step 1: the same content, or the caller keeps the running one
-        if current_hash == new_hash or on_change == 'keep':
-            await self.ensure_engine(existing)
-            if wait_for_running:
-                await existing.task.wait_for_running()
-            return results(
-                existing, reused=True, converged='none', spec_match=current_hash == new_hash, warnings=warnings
-            )
-
-        # Step 2: refuse
-        if on_change == 'error':
-            raise TaskError(
-                TaskError.SPEC_CHANGED,
-                f'{existing.address!r} runs another spec ({current_hash[:12]}); '
-                "pass onChange='auto' to move to the new one or 'keep' to use the running one",
-                address=existing.address,
-                currentHash=current_hash,
-                newHash=new_hash,
-                warnings=warnings,
-            )
-
-        # Step 3: repoint onto the new spec's engine (readiness inside the rollback)
-        await self._repoint(
-            existing,
-            incoming.pipeline,
-            launch_args=launch_args,
-            env=env,
-            env_source=env_source,
-            wait_running=wait_for_running,
-        )
-        # The control admits the accepted spec's parameters and runs with its
-        # references: the incoming control resolved both for the same caller
-        # and team context (a failed repoint raised above and kept the old ones)
-        existing.setup_declared_parameters()
-        existing.env = dict(incoming.env)
-        return results(
-            existing,
-            reused=True,
-            converged='repointed',
-            spec_match=True,
-            warnings=warnings + self._storm_warning(existing),
-        )
-
-    async def _repoint(
-        self,
-        control: TaskControl,
-        pipeline: Dict[str, Any],
-        *,
-        launch_args: Dict[str, Any],
-        env: Optional[Dict[str, str]],
-        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
-        wait_running: bool = False,
-    ) -> TaskEngine:
-        """
-        Move ``control``'s ONE hold onto the engine of ``pipeline`` (plan 7.3).
-
-        The control's identity, ttl and subscriptions stay; its spec becomes
-        ``pipeline``. The transition is one object (``_EngineTransition``):
-        begin (hold the new engine, the old hold kept), confirm (the new
-        engine reports running), commit (the old hold goes through the hold
-        rule, which stops the old engine when that was its last); a failure
-        anywhere aborts (the new hold goes through the same rule, the old
-        pipeline comes back). One transition per control at a time.
-
-        Returns:
-            The engine the control now holds.
-        """
-        async with control.transition_lock:
-            transition = _EngineTransition(self, control, pipeline, launch_args, env, env_source)
-            try:
-                await transition.begin()
-                if wait_running:
-                    await transition.confirm()
-            except Exception:
-                await transition.abort()
-                raise
-            await transition.commit()
-            return transition.engine
+        return content.key(rung=control.rung, owner_id=control.owner_id), threads, content
 
     def _new_engine(
         self,
@@ -3170,12 +2999,13 @@ class TaskServer(DAPBase):
 
         A cross-user engine names no user (S13), anchors no storage, carries
         no caller's env (it holds the placeholders; env rides per call) and
-        traces nothing by default; a private engine is its owner's, as today.
+        traces nothing by default; a private engine is its owner's. Every
+        engine of this PR is private (owner-qualified on every rung).
 
         Args:
             control: The control the engine is started for.
             key: The engine key (plan 7.2).
-            shared: True for a cross-user engine.
+            shared: True for a cross-user engine (never, before C.25).
             threads: The engine's thread count.
             launch_args: The launch arguments (``name``, ``args``).
             env: Fixed values for ${...} placeholders (private engines).
@@ -3263,7 +3093,7 @@ class TaskServer(DAPBase):
         A control entitles its caller to an engine but does not keep it
         running (plan 7.2): an engine that stopped on its inactivity timer, or
         crashed after it had confirmed running, is started again under the
-        SAME key through the start gate, and the control is repointed.
+        SAME key through the start gate, and the control holds the new one.
         Identity, holds, deployment and ttl are the control's and do not
         change. Concurrent requests (through this or any
         other holder of the stopped engine) attach to the one new engine.
@@ -3284,8 +3114,8 @@ class TaskServer(DAPBase):
         if stopped is None or not control.dormant:
             return stopped
 
-        def _repoint(engine: TaskEngine) -> None:
-            # A concurrent request through this control may have repointed it
+        def _hold(engine: TaskEngine) -> None:
+            # A concurrent request through this control may have moved it
             if control.task is engine:
                 return
             control.task.release(control.key)
@@ -3313,7 +3143,7 @@ class TaskServer(DAPBase):
                     env=None,
                     env_source=None if stopped.shared else stopped._env_source,
                 ),
-                _repoint,
+                _hold,
             )
 
         except Exception:
@@ -3323,7 +3153,7 @@ class TaskServer(DAPBase):
             if failed is not stopped:
                 stopped.acquire(control.key, control.ttl)
                 control.task = stopped
-                await self.release_hold(failed, control.key, 'repoint failed')
+                await self.release_hold(failed, control.key, 'restart failed')
             raise
 
         finally:
@@ -3337,45 +3167,51 @@ class TaskServer(DAPBase):
         wait_for_running=False,
     ) -> Dict[str, Any]:
         """
-        Restart a control on a new pipeline: a repoint onto the new content's engine (plan 7.3).
+        Restart a control on a new pipeline: terminate the control, create its successor (plan 7.3).
 
-        There is ONE restart path. The control keeps its identity (address,
-        project, source), its ttl and its subscriptions; it moves to the engine
-        of the new spec, started if none is live, and the old engine loses this
-        hold only: it stops when that was its last hold and keeps serving any
-        other holder unchanged. Unchanged content moves nothing and says so
-        (``converged: 'none'``). A restart is a new launch (a new engineId),
-        with fresh metrics, as plan 7.2 says every engine start is.
+        There is ONE restart path, the IDE's Play on an existing run. The
+        successor is created FIRST, holding the engine for the new spec's
+        shape (the same engine when the shape is unchanged, one started when
+        none is live), and only then is the predecessor's hold released
+        through the hold rule: an engine the successor holds never stops and
+        starts again, an engine nobody holds stops at once. The successor is
+        a new control with a new id; its ttl, trace level and launching
+        connection follow the request, its identity (owner, rung, address,
+        deployment, team context) the predecessor. The monitor subscriptions
+        keyed by the project stay: the successor answers to the same key.
 
         Args:
-            request: DAP request (``token`` = the address, ``pipeline``).
+            request: DAP request (``token`` = the control id, ``pipeline``).
             conn: The requesting connection (its account resolves the control).
             wait_for_running: Wait until the engine confirmed running.
 
         Returns:
-            ``{id, token (the address), projectId, source, provider, engineKey, converged}``.
+            ``{id, token (the new control id), address, projectId, source,
+            provider, engineKey, converged}``: ``converged`` is ``'started'``
+            when the successor holds another engine than the predecessor did,
+            ``'none'`` when the engine stayed.
 
         Raises:
-            ValueError: A missing address or pipeline, or a source change.
-            RuntimeError: A debugger is attached.
-            TaskError: The spec cannot be keyed (engine_start_failed), or the
-                control is not the caller's.
+            ValueError: A missing control id or pipeline, or a source change.
+            PermissionError: The control is not the caller's.
+            TaskError: The spec cannot be keyed (engine_start_failed), or it
+                has no ``project_id``.
         """
         try:
             args = request.get('arguments', {})
 
-            address = args.get('token', None)
-            if not address:
-                raise ValueError('Task address is required for restart')
+            control_id = args.get('token', None)
+            if not control_id:
+                raise ValueError('The control id is required for restart')
 
             pipeline = args.get('pipeline', None)
             if not pipeline:
                 raise ValueError('Missing pipeline configuration in restart request')
 
-            # Resolve under the caller's account with task.control (run-scoped:
-            # a user-owned run restarts only for its owner)
+            # Step 1: the control by its id, re-checked against the caller with
+            # task.control (run-scoped: a user-owned run restarts only for its owner)
             account_info = getattr(conn, '_account_info', None) if conn else None
-            control = self.resolve_control(address, account_info, 'task.control')
+            control = self.control_by_id(control_id, account_info, 'task.control')
             self.debug_message(f'Restart requested for task "{control.id}"')
 
             # The source is part of the task's identity: checked on the REQUEST,
@@ -3387,59 +3223,91 @@ class TaskServer(DAPBase):
                     f'({control.source!r} -> {requested_source!r})'
                 )
 
-            # The conversion and the address grammar hold on restart too: a
-            # restarted pipeline must not smuggle in a dotted component id
+            # Step 2: the conversion and the address grammar hold on restart
+            # too: a restarted pipeline must not smuggle in a dotted component id
             validate_component_ids(pipeline)
             restart_conversion = _require_converted(pipeline)
             pipeline = restart_conversion.pipeline
             _require_valid_parameters(pipeline)
             _require_valid_placeholders(pipeline)
             pipeline = _apply_source_defaults(pipeline, control.source)
+            if pipeline.get('project_id') != control.project_id:
+                raise ValueError(
+                    f"The project_id is part of the task's identity and cannot change on a restart "
+                    f'({control.project_id!r} -> {pipeline.get("project_id")!r})'
+                )
 
-            # Credit, before the new content launches (plan 0 S9): the same
-            # gate the first start of a dev run passes
-            if control.run_kind == 'dev':
-                await self._require_start_credit(control)
-
+            # Step 3: the predecessor is marked restarting and STAYS
+            # registered, keeping its hold: the successor's resolution never
+            # answers with it, the engine it holds survives until the
+            # successor holds its own, and an event its engine emits
+            # meanwhile still finds it (broadcast_task_event delivers only to
+            # a registered control), as does a request naming its id
             old_engine = control.task
-            engine = await self._repoint(
-                control,
-                pipeline,
-                launch_args=args,
-                env=None,
-                env_source=None if old_engine.shared else old_engine._env_source,
-                wait_running=wait_for_running,
-            )
-
-            # The control admits the accepted pipeline's parameters now, and
-            # its environment follows the new spec's references
-            control.setup_declared_parameters()
-            installed = control.pipeline
-            env = await self._resolve_control_env(control)
-            # A restart that overtook this one while the lookup awaited owns
-            # the control's pipeline now; its env is the one that matches it
-            if control.pipeline is installed:
-                control.env = env
-
-            # Ownership transfers ONLY once the restart has succeeded: until
-            # then the previous owner keeps the task
-            self._note_launch_owner(control, conn)
-
-            converged = 'repointed' if engine is not old_engine else 'none'
-            self.debug_message(f'Task "{control.id}" restart: {converged} ("{engine.engine_key}")')
-            result = {
-                'id': control.id,
-                'token': control.address,
-                'projectId': control.project_id,
-                'source': control.source,
-                'provider': control.provider,
-                'engineKey': engine.engine_key,
-                'converged': converged,
+            control.restarting = True
+            successor = {
+                'command': control.launch_type.value,
+                'arguments': {
+                    # Never useExisting: the successor is created, not attached
+                    # to another live control of the project
+                    **{key: value for key, value in args.items() if key not in ('token', 'useExisting')},
+                    'pipeline': pipeline,
+                    'source': control.source,
+                    'ttl': args.get('ttl', control.ttl),
+                    'pipelineTraceLevel': args.get('pipelineTraceLevel', control.trace_level),
+                },
             }
-            if restart_conversion.touched:
-                # The converted text, so the caller can make its file current (plan 5.6.8)
-                result['converted'] = restart_conversion.pipeline
-                result['conversion'] = list(restart_conversion.warnings)
+            try:
+                result = await self.start_task(
+                    successor,
+                    conn,
+                    wait_for_running=wait_for_running,
+                    client_id=control.client_id,
+                    user_id=control.userId,
+                    team_id=control.teamId,
+                    org_id=control.orgId,
+                    env_source=None if old_engine is None or old_engine.shared else old_engine._env_source,
+                    run_kind=control.run_kind,
+                    owner_kind=control.owner_kind,
+                    trigger=control.trigger,
+                    developer_id=control.developer_id,
+                    deployment=control.deployment,
+                    rung='' if control.rung == 'spec' else control.rung,
+                    version=control.version,
+                    team_context=control.team_context,
+                    # The predecessor's state epoch carries over: a deployment
+                    # revoked since it registered refuses the successor too
+                    deployment_epoch=control.registered_at,
+                )
+            except Exception:
+                # Step 3b: a predecessor whose deployment was revoked meanwhile
+                # is not kept: it goes the way the kill switch takes every hold
+                if self._revoked_after(control.deployment, control.registered_at):
+                    held = control.task
+                    self._unregister_control(control, keep_hold=True)
+                    await self.release_hold(held, control.key, 'unpublished')
+                    raise
+                # Otherwise it is as it was: it never left the registry, its
+                # hold was never released, its request trees never forgotten,
+                # its subscriptions never touched
+                control.restarting = False
+                raise
+
+            # Step 4: the successor is committed: the predecessor leaves the
+            # registry with its request trees, and its hold goes through the
+            # hold rule (the engine stops only when that was its last hold).
+            # The hold released is the one the predecessor holds NOW: a request
+            # naming its id while the successor was set up may have restarted
+            # a dormant engine and moved the hold onto the replacement
+            # (ensure_engine), so old_engine is kept for the convergence
+            # comparison only
+            held = control.task
+            self._unregister_control(control, keep_hold=True)
+            await self.release_hold(held, control.key, 'restart')
+            new_control = self.control_by_key(result['token'])
+            converged = 'none' if new_control.task is old_engine else 'started'
+            self.debug_message(f'Task "{control.id}" restarted as {new_control.control_id}: {converged}')
+            result['converged'] = converged
             return result
 
         except Exception as e:
@@ -3491,7 +3359,7 @@ class TaskServer(DAPBase):
                 await engine.stop_task(reason)
                 self.debug_message(f'Task "{control.id}" stopped on request (reason: {reason})')
 
-                # A @dev control ends with its run: no grace window and no
+                # A @spec control ends with its run: no grace window and no
                 # reaper (plan 7.1). Wait for the teardown first, because the
                 # final status, the terminal events and the run-log close are
                 # delivered through the registered control. A new run started

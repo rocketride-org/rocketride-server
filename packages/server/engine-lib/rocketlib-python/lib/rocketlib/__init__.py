@@ -59,8 +59,8 @@ from .error import APERR
 from .error import Ec
 from .config import ConfigError
 from .config import ConfigView
+from .config import NodeInfo
 from .config import resolveConfig
-from .config import TenancyViolation
 from .filters import BindingLogger
 from .filters import IEndpointBase
 from .filters import IGlobalBase
@@ -153,6 +153,7 @@ __all__ = [
     'monitorSSE',
     'monitorStatus',
     'monitorDependencyDownload',
+    'NodeInfo',
     'OPEN_MODE',
     'outputEndpointParameters',
     'outputEntry',
@@ -168,7 +169,6 @@ __all__ = [
     'shorten_path_components',
     'TAG',
     'TAG_ID',
-    'TenancyViolation',
     'tool_function',
     'ToolDescriptor',
     'validatePipeline',

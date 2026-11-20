@@ -48,7 +48,6 @@ import type { PipelineConfig } from 'shell';
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
-import { onChangeArgs } from 'shared/tools/pipelines/utils/restartBehavior';
 import { isShortId, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
@@ -148,9 +147,6 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	// Workspace-relative directory preselected when saving an untitled pipeline;
 	// SaveFileDialog renders it even before it exists and mkdirs it on confirm
 	const settingDefaultDir = String(settings['rocketride.pipeBuilder.defaultPipelinePath'] ?? '').replace(/^\/+|\/+$/g, '') || 'pipelines';
-	// What a Play does when the live run holds OTHER content: the same setting
-	// that governs restarts on a file change, passed as the call's onChange
-	const settingRestartBehavior = String(settings['rocketride.pipeBuilder.pipelineRestartBehavior'] ?? 'prompt');
 
 	// Rocket Builder is a paywalled app. Running requires an active sub —
 	// gate the run controls (lock icon) and the run action on this. Reactive:
@@ -286,7 +282,6 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 						pipelineTraceLevel: traceLevel,
 						...(taskArgs.length > 0 ? { args: taskArgs } : {}),
 						...(ttl !== undefined ? { ttl } : {}),
-						...onChangeArgs(settingRestartBehavior),
 					})
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			} else if (action === 'stop') {
@@ -303,7 +298,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 					.catch((err: unknown) => setPipelineError(err instanceof Error ? err.message : String(err)));
 			}
 		},
-		[client, isConnected, pipeline, filename, isSubscribed, promptSubscribe, settingTraceLevel, settingTtl, settingTaskArguments, settingDebugOutput, settingRestartBehavior]
+		[client, isConnected, pipeline, filename, isSubscribed, promptSubscribe, settingTraceLevel, settingTtl, settingTaskArguments, settingDebugOutput]
 	);
 
 	/** Initiates save — the save dialog for new documents, else direct. */
