@@ -37,7 +37,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { executeNodeConvert } from '../src/cli/commands/node';
+import { executeNodeConvert, reportOverwrites } from '../src/cli/commands/node';
 import { conversionText, convertDefinition, isOldFormat, loadJson } from '../src/cli/node_convert';
 import { Output } from '../src/cli/output';
 
@@ -164,5 +164,100 @@ describe('rocketride node convert', () => {
 		out.finish();
 		expect(errors.join('\n')).toContain('not an old-format node definition');
 		expect(JSON.parse(logs.join('\n')).files[0].error).toMatch(/^not an old-format/);
+	});
+});
+
+// =============================================================================
+// REVIEW RULES (PR #3393)
+// =============================================================================
+
+describe('node convert review rules', () => {
+	it('makes an upload whatever the member order', () => {
+		for (const item of [
+			{ format: 'data-url', type: 'string' },
+			{ type: 'string', format: 'data-url' },
+		]) {
+			const old = { protocol: 'x://', fields: { 'x.key': { ...item, 'ui:options:accept': '.pem' } }, shape: [{ section: 'Pipe', properties: ['x.key'] }] };
+			const definition = convertDefinition(old).definition.propertyDefinitions['x.key'];
+			expect(definition.type).toBe('upload');
+			expect(definition.options).toEqual({ accept: '.pem' });
+		}
+	});
+
+	it('keeps a __proto__ branch as a member of the written definition', () => {
+		const text = conversionText(convertDefinition(oldOf('review_rules')));
+		const branches = JSON.parse(text).properties[0].enum;
+		expect(Object.keys(branches)).toEqual(['pro', 'basic', '__proto__']);
+		expect(Object.prototype.hasOwnProperty.call(branches, '__proto__')).toBe(true);
+	});
+
+	it('keeps configuration values out of the warnings', () => {
+		const warnings = convertDefinition(oldOf('review_rules')).warnings.join(' ');
+		for (const value of ['tok-b', 'tok-p', 'root-token']) expect(warnings).not.toContain(value);
+	});
+
+	it.each([
+		['fields', ['bad'], '"fields" must be an object'],
+		['shape', { section: 'Pipe' }, '"shape" must be a list'],
+		['preconfig', [], '"preconfig" must be an object'],
+		['preconfig', { profiles: ['a'] }, '"preconfig.profiles" must be an object'],
+	])("refuses a malformed %s as this file's error", (member, value, message) => {
+		expect(() => convertDefinition({ protocol: 'x://', shape: [], [member]: value })).toThrow(message);
+	});
+
+	it('refuses an integer a JavaScript number cannot hold exactly, and only that', () => {
+		expect(() => loadJson('{"a": 9007199254740993}')).toThrow('9007199254740993');
+		expect(() => loadJson('{"a": -9007199254740993, // note\n}')).toThrow('-9007199254740993');
+		expect(loadJson('{"a": "9007199254740993", "b": 9007199254740991, "c": 1.5e300, "d": 0.25}')).toEqual({ a: '9007199254740993', b: 9007199254740991, c: 1.5e300, d: 0.25 });
+	});
+});
+
+describe('rocketride node convert, review rules', () => {
+	/** Copies of a fixture's old input, one per sub-directory. */
+	const stageMany = (name: string, count: number): string[] =>
+		Array.from({ length: count }, (_, index) => {
+			const target = path.join(workDir, String(index), 'services.json');
+			fs.mkdirSync(path.dirname(target));
+			fs.copyFileSync(path.join(FIXTURES, `${name}.old.json`), target);
+			return target;
+		});
+
+	it('continues after a malformed file', async () => {
+		const [bad, good] = stageMany('tool_gcs', 2);
+		fs.writeFileSync(bad, '{"protocol": "x://", "fields": ["bad"], "shape": []}');
+		const out = new Output(true);
+		expect(await executeNodeConvert([bad, good], {}, out)).toBe(1);
+		out.finish();
+		const files = JSON.parse(logs.join('\n')).files;
+		expect(files[0].error).toBe('"fields" must be an object');
+		expect(files[1].legacy).toBe(true);
+		expect(JSON.parse(fs.readFileSync(good, 'utf8'))).toEqual(expectedOf('tool_gcs').definition);
+	});
+
+	it('names a report file that would replace an input', () => {
+		const [target] = stageMany('tool_gcs', 1);
+		const alias = path.join(path.dirname(target), '.', 'services.json');
+		expect(reportOverwrites([target], { json: alias, dryRun: true })).toBe(target);
+		expect(reportOverwrites([target], { json: true })).toBeNull();
+		expect(reportOverwrites([target], { json: path.join(workDir, 'report.json') })).toBeNull();
+	});
+
+	it('keeps going after a destination error', async () => {
+		const [first, second, third] = stageMany('tool_gcs', 3);
+		const rename = fs.renameSync;
+		jest.spyOn(fs, 'renameSync').mockImplementation((from, to) => {
+			if (path.resolve(String(to)) === path.resolve(second)) throw new Error('read-only');
+			rename(from, to);
+		});
+		const out = new Output(true);
+		expect(await executeNodeConvert([first, second, third], {}, out)).toBe(1);
+		out.finish();
+		const files = JSON.parse(logs.join('\n')).files;
+		expect(files.map((f: { error?: string }) => Boolean(f.error))).toEqual([false, true, false]);
+		expect(files[1].error).toContain('read-only');
+		expect(JSON.parse(fs.readFileSync(third, 'utf8'))).toEqual(expectedOf('tool_gcs').definition);
+		// The failed file is untouched and no temporary file is left beside it
+		expect(fs.readFileSync(second, 'utf8')).toBe(fs.readFileSync(path.join(FIXTURES, 'tool_gcs.old.json'), 'utf8'));
+		expect(fs.readdirSync(path.dirname(second))).toEqual(['services.json']);
 	});
 });

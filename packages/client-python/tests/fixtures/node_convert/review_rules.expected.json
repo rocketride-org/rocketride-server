@@ -1,0 +1,112 @@
+{
+	"definition": {
+		"title": "Review rules",
+		"protocol": "review_rules://",
+		"classType": [
+			"text"
+		],
+		"capabilities": [],
+		"propertyDefinitions": {
+			"review.token": {
+				"type": "string",
+				"title": "Token",
+				"default": "root-token",
+				"secret": true
+			},
+			"review.keyfile": {
+				"type": "upload",
+				"title": "Key file",
+				"options": {
+					"accept": ".pem"
+				}
+			},
+			"review.port": {
+				"type": "integer",
+				"title": "Port"
+			},
+			"review.hosts": {
+				"type": "array",
+				"title": "Hosts",
+				"item": {
+					"name": "entry",
+					"properties": [
+						"shared.host",
+						"review.port"
+					]
+				}
+			}
+		},
+		"properties": [
+			{
+				"name": "profile",
+				"title": "Plan",
+				"type": "string",
+				"default": "basic",
+				"enum": {
+					"pro": {
+						"title": "Pro",
+						"properties": [
+							{
+								"name": "limit",
+								"type": "integer",
+								"title": "Limit",
+								"default": 50
+							}
+						]
+					},
+					"basic": {
+						"title": "Basic",
+						"properties": [
+							{
+								"name": "limit",
+								"type": "constant",
+								"default": 10
+							}
+						]
+					},
+					"__proto__": {
+						"title": "Proto",
+						"properties": [
+							{
+								"name": "limit",
+								"type": "constant",
+								"default": 5
+							}
+						]
+					}
+				}
+			},
+			"review.token",
+			"review.keyfile",
+			"review.hosts"
+		],
+		"legacy": {
+			"selector": "profile",
+			"default": "basic",
+			"profiles": {
+				"basic": {
+					"title": "Basic",
+					"limit": 10,
+					"token": "tok-b"
+				},
+				"pro": {
+					"title": "Pro",
+					"limit": 50,
+					"token": "tok-p"
+				},
+				"__proto__": {
+					"title": "Proto",
+					"limit": 5
+				}
+			},
+			"dropped": []
+		}
+	},
+	"warnings": [
+		"review.hosts: the array item references shared.host, which this offline conversion cannot read; the engine refuses a secret inside an array item, so check none of them is secret before loading the node",
+		"profile \"pro\" sets token, which is declared outside the profile with a different default; the profile's value is not carried",
+		"profile \"basic\" sets token, which is declared outside the profile with a different default; the profile's value is not carried",
+		"kept as references to shared definitions (check each exists in the current catalog): shared.host"
+	],
+	"legacy": true
+}

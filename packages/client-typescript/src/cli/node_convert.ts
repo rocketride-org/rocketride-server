@@ -86,6 +86,14 @@ const has = (obj: Json, key: string): boolean => Object.prototype.hasOwnProperty
 /** Own-member lookup (Python `dict.get`): never a prototype member such as `constructor`. */
 const get = (obj: Json, key: string): Json[string] => (has(obj, key) ? obj[key] : undefined);
 
+/**
+ * Own-member write (Python `dict[key] = value`): a key such as `__proto__`
+ * becomes a member that serializes, never the prototype setter.
+ */
+const put = (obj: Json, key: string, value: unknown): void => {
+	Object.defineProperty(obj, key, { value, enumerable: true, writable: true, configurable: true });
+};
+
 /** Python truthiness for JSON values. */
 const truthy = (value: unknown): boolean => {
 	if (Array.isArray(value)) return value.length > 0;
@@ -183,10 +191,49 @@ function stripTrailingCommas(text: string): string {
  * @returns The parsed definition.
  */
 export function loadJson(text: string): Json {
+	let doc: Json;
 	try {
-		return JSON.parse(text);
+		doc = JSON.parse(text);
 	} catch {
-		return JSON.parse(stripTrailingCommas(stripComments(text)));
+		doc = JSON.parse(stripTrailingCommas(stripComments(text)));
+	}
+	refuseUnsafeIntegers(stripComments(text));
+	return doc;
+}
+
+/**
+ * Refuse an integer literal a JavaScript number cannot hold exactly: parsing
+ * rounds it, and the converted file would carry another value. The Python
+ * CLI keeps such integers, so the message points there.
+ *
+ * @param text - The file text, comments removed.
+ * @throws Error naming the first such literal.
+ */
+function refuseUnsafeIntegers(text: string): void {
+	let inString = false;
+	let i = 0;
+	while (i < text.length) {
+		const ch = text[i];
+		if (inString) {
+			if (ch === '\\') i += 1;
+			else if (ch === '"') inString = false;
+			i += 1;
+			continue;
+		}
+		if (ch === '"') {
+			inString = true;
+			i += 1;
+			continue;
+		}
+		const match = /^-?\d+(?![\d.eE])/.exec(text.slice(i, i + 400));
+		if (match && (i === 0 || !/[\w.]/.test(text[i - 1]))) {
+			if (!Number.isSafeInteger(Number(match[0]))) {
+				throw new Error(`the integer ${match[0]} is larger than this converter can keep exactly; convert this file with the Python CLI (pip install rocketride)`);
+			}
+			i += match[0].length;
+			continue;
+		}
+		i += 1;
 	}
 }
 
@@ -424,6 +471,7 @@ class Converter {
 
 	private convertField(name: string, item: Json): Json {
 		const out: Json = {};
+		let upload = false;
 		for (const [key, value] of Object.entries(item)) {
 			if (CONSUMED_MEMBERS.has(key) || key.startsWith('ui:')) continue;
 			if (key === 'type' && Array.isArray(value)) {
@@ -437,11 +485,13 @@ class Converter {
 				continue;
 			}
 			if (key === 'format' && value === 'data-url') {
-				out.type = 'upload';
+				upload = true;
 				continue;
 			}
-			out[key] = clone(value);
+			put(out, key, clone(value));
 		}
+		// After the copy, so a `type` listed after `format` cannot undo it
+		if (upload) out.type = 'upload';
 		if (item.secure === true) out.secret = true;
 		if (has(item, 'enum')) out.enum = this.enumList(item);
 		if (has(item, 'const')) {
@@ -457,9 +507,26 @@ class Converter {
 				out.secret = true;
 				this.warn(`${name}: "secret" moved from the array item's members to the array`);
 			}
+			const unknown = this.unresolved(out.item);
+			if (unknown.length) {
+				this.warn(`${name}: the array item references ${unknown.join(', ')}, which this offline conversion cannot read; the engine refuses a secret inside an array item, so check none of them is secret before loading the node`);
+			}
 		}
 		this.uiHints(name, item, out);
 		return out;
+	}
+
+	/** The shared references in an array item whose definition (and so whose `secret` flag) is unknown here. */
+	private unresolved(spec: unknown): string[] {
+		if (typeof spec === 'string') return has(this.definitions, spec) || has(this.shared, spec) ? [] : [spec];
+		if (!isObject(spec)) return [];
+		if (Array.isArray(spec.properties)) {
+			const found: string[] = [];
+			for (const member of spec.properties) for (const ref of this.unresolved(member)) if (!found.includes(ref)) found.push(ref);
+			return found;
+		}
+		if (!has(spec, 'secret') && typeof spec.base === 'string') return this.unresolved(spec.base);
+		return [];
 	}
 
 	private isSecret(spec: unknown): boolean {
@@ -540,9 +607,9 @@ class Converter {
 				for (const prop of (branch as Json).properties || []) {
 					if (isObject(prop) && this.generated.has(prop) && reserved.has(prop.name)) {
 						if (prop.name !== PROFILE_SELECTOR && prop.name !== own) {
-							const sibling = this.siblingDefault(level, prop.name);
-							if (!equal(sibling, prop.default)) {
-								this.warn(`profile ${show(value)} sets ${prop.name}=${show(prop.default)}, which is declared outside the profile (default ${show(sibling)}); not carried`);
+							// Names only: the values may be secret
+							if (!equal(this.siblingDefault(level, prop.name), prop.default)) {
+								this.warn(`profile ${show(value)} sets ${prop.name}, which is declared outside the profile with a different default; the profile's value is not carried`);
 							}
 						}
 						continue;
@@ -585,7 +652,7 @@ class Converter {
 		}
 		if (has(item, 'object') || has(item, 'section')) return [this.group(ref, item, values)];
 		if (has(item, 'conditional') || this.selectsProfile(ref, item)) return this.selector(ref, item);
-		if (!has(this.definitions, ref)) this.definitions[ref] = this.convertField(ref, item);
+		if (!has(this.definitions, ref)) put(this.definitions, ref, this.convertField(ref, item));
 		return [this.withDefault(ref, values, this.definitions[ref])];
 	}
 
@@ -595,6 +662,10 @@ class Converter {
 		if (has(item, 'conditional') || this.selectsProfile(name, item)) return this.selector(name, item);
 		const converted = this.convertField(name, item);
 		if (!has(converted, 'name')) converted.name = name;
+		// The profile in force sets its default, by the rules `withDefault` applies to a reference
+		const key = short(String(converted.name));
+		const value = get(values, key);
+		if (has(values, key) && value !== '' && value !== null && value !== undefined && !equal(converted.default, value)) converted.default = clone(value);
 		return [converted];
 	}
 
@@ -661,7 +732,7 @@ class Converter {
 			for (const [condValue, condProps] of conditionals) {
 				if (equal(condValue, value) || (Array.isArray(condValue) && contains(condValue, value))) props.push(...condProps);
 			}
-			branches[value] = { title: labels.get(value) || value, properties: this.properties(props, {}, value) };
+			put(branches, value, { title: labels.get(value) || value, properties: this.properties(props, {}, value) });
 		}
 		head.enum = branches;
 		return [head];
@@ -669,7 +740,7 @@ class Converter {
 
 	private referencePlain(ref: string, item: Json): unknown[] {
 		if (has(this.fields, ref)) {
-			this.definitions[ref] = this.convertField(ref, item);
+			put(this.definitions, ref, this.convertField(ref, item));
 			return [ref];
 		}
 		const converted = this.convertField(ref, item);
@@ -705,8 +776,15 @@ class Converter {
 			for (const each of Array.isArray(value) ? value : [value]) {
 				if (typeof each === 'string' && !order.includes(each)) {
 					order.push(each);
-					labels.set(each, each);
+					labels.set(each, this.profileTitle(each));
 				}
+			}
+		}
+		// A profile no option or conditional names is still a value the old engine accepted
+		for (const each of Object.keys(this.profiles)) {
+			if (!order.includes(each)) {
+				order.push(each);
+				labels.set(each, this.profileTitle(each));
 			}
 		}
 		const branches: Json = {};
@@ -718,10 +796,17 @@ class Converter {
 			const profile: Json = isObject(get(this.profiles, value)) ? get(this.profiles, value) : {};
 			const specs = this.properties(props, profile, value);
 			specs.push(...this.constants(profile, specs));
-			branches[value] = { title: labels.get(value) || value, properties: specs };
+			put(branches, value, { title: labels.get(value) || value, properties: specs });
 		}
 		head.enum = branches;
 		return head;
+	}
+
+	/** A profile's own `title`, else its name (the label of a branch no option labels). */
+	private profileTitle(name: string): string {
+		const profile = get(this.profiles, name);
+		const title = isObject(profile) ? profile.title : undefined;
+		return typeof title === 'string' ? title : name;
 	}
 
 	constants(profile: Json, specs: unknown[]): unknown[] {
@@ -794,11 +879,11 @@ class Converter {
 					const specs = this.selector(name, item);
 					if (specs.length === 1 && isObject(specs[0]) && isObject(specs[0].enum)) {
 						const { name: _name, ...definition } = specs[0];
-						this.definitions[name] = definition;
+						put(this.definitions, name, definition);
 						continue;
 					}
 				}
-				this.definitions[name] = this.convertField(name, item);
+				put(this.definitions, name, this.convertField(name, item));
 			}
 		}
 
@@ -823,7 +908,7 @@ class Converter {
 				placedProps = true;
 			}
 			if (REPLACED_MEMBERS.has(key) || key === 'legacy') continue;
-			out[key] = clone(value);
+			put(out, key, clone(value));
 		}
 		if (haveDefs && !placedDefs) out.propertyDefinitions = this.definitions;
 		if (hasService && !placedProps) out.properties = properties;
@@ -862,6 +947,17 @@ export function convertDefinition(old: Json, shared: Json = {}): NodeConversion 
 	if (!isObject(old) || !isOldFormat(old)) {
 		throw new Error('not an old-format node definition (no "preconfig", "fields" or "shape", or it already declares "properties")');
 	}
+	// The containers the conversion walks: a wrong type is this file's error, never a crash mid-batch
+	const containers: [string, (value: unknown) => boolean, string][] = [
+		['fields', isObject, 'an object'],
+		['preconfig', isObject, 'an object'],
+		['shape', Array.isArray, 'a list'],
+	];
+	for (const [key, isKind, what] of containers) {
+		if (old[key] !== undefined && old[key] !== null && !isKind(old[key])) throw new Error(`"${key}" must be ${what}`);
+	}
+	const profiles = isObject(old.preconfig) ? old.preconfig.profiles : undefined;
+	if (profiles !== undefined && profiles !== null && !isObject(profiles)) throw new Error('"preconfig.profiles" must be an object');
 	const converter = new Converter(old, shared);
 	const definition = converter.run();
 	const result: NodeConversion = { definition, warnings: converter.warnings, legacy: false };

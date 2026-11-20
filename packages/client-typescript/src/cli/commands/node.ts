@@ -37,7 +37,7 @@ import path from 'node:path';
 import { Command } from 'commander';
 import { runCliCommand } from '../common';
 import type { ConnectionOptions } from '../common';
-import type { Output } from '../output';
+import { Output } from '../output';
 import { conversionText, convertDefinition, loadJson } from '../node_convert';
 
 // =============================================================================
@@ -48,6 +48,55 @@ import { conversionText, convertDefinition, loadJson } from '../node_convert';
 export interface NodeConvertOptions extends ConnectionOptions {
 	out?: string;
 	dryRun?: boolean;
+}
+
+/** Whether two paths name one file: the same resolved path, or the same file on disk. */
+function sameFile(a: string, b: string): boolean {
+	const norm = (p: string) => (process.platform === 'win32' ? path.resolve(p).toLowerCase() : path.resolve(p));
+	if (norm(a) === norm(b)) return true;
+	try {
+		const sa = fs.statSync(a);
+		const sb = fs.statSync(b);
+		return sa.dev === sb.dev && sa.ino === sb.ino && sa.ino !== 0;
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * The input or output file a `--json <file>` report would replace.
+ *
+ * @param files - The input files.
+ * @param options - Parsed command options.
+ * @returns The file it would replace, or null.
+ */
+export function reportOverwrites(files: string[], options: NodeConvertOptions): string | null {
+	const report = options.json;
+	if (typeof report !== 'string') return null;
+	const targets = [...files, ...(options.out ? [options.out] : [])];
+	return targets.find((target) => sameFile(report, target)) ?? null;
+}
+
+/**
+ * Replace `target` with `text` only once the new content is complete: the
+ * text goes to a temporary file in the target's directory first, then
+ * replaces the target in one rename, so a failed write (a full disk) leaves
+ * the original definition intact. The temporary file is removed on failure.
+ *
+ * @param target - The file to replace.
+ * @param text - Its new content.
+ */
+function writeAtomic(target: string, text: string): void {
+	const directory = path.dirname(path.resolve(target));
+	fs.mkdirSync(directory, { recursive: true });
+	const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
+	try {
+		fs.writeFileSync(temporary, text, { encoding: 'utf8', flag: 'wx' });
+		fs.renameSync(temporary, target);
+	} catch (error) {
+		fs.rmSync(temporary, { force: true });
+		throw error;
+	}
 }
 
 /**
@@ -78,13 +127,21 @@ export async function executeNodeConvert(files: string[], options: NodeConvertOp
 			continue;
 		}
 
-		// Step 2: write (in place unless --out), or print under --dry-run
+		// Step 2: write (in place unless --out), or print under --dry-run; a
+		// destination that cannot be written fails this file, not the batch
 		const target = options.out ?? file;
 		if (options.dryRun) {
 			out.line(conversionText(conversion).replace(/\n$/, ''));
 		} else {
-			fs.mkdirSync(path.dirname(path.resolve(target)), { recursive: true });
-			fs.writeFileSync(target, conversionText(conversion), 'utf8');
+			try {
+				writeAtomic(target, conversionText(conversion));
+			} catch (error) {
+				const message = `cannot write ${target}: ${error instanceof Error ? error.message : String(error)}`;
+				failed += 1;
+				out.warn(`${file}: ${message}`);
+				results.push({ file, out: target, error: message });
+				continue;
+			}
 			out.line(`Converted ${file} -> ${target}` + (conversion.legacy ? ' (legacy block added)' : ''));
 		}
 		for (const warning of conversion.warnings) out.warn(`${file}: ${warning}`);
@@ -136,6 +193,13 @@ Examples:
 		.option('--dry-run', 'Print the converted definition instead of writing it')
 		.option('--json [file]', 'Output the result as a JSON value (to stdout, or to the given file)')
 		.action(async (files, options) => {
+			// Checked before the output channel exists: a refused --json file
+			// must not receive even the error envelope, since it names a definition
+			const overwritten = reportOverwrites(files, options);
+			if (overwritten !== null) {
+				process.exitCode = new Output(undefined).fail(`--json ${options.json} would replace ${overwritten}`, 'write the report to another file, or use bare --json');
+				return;
+			}
 			await runCliCommand(options, (out) => executeNodeConvert(files, options, out));
 		});
 }

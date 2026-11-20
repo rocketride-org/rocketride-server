@@ -8,6 +8,7 @@
 		{ "case": "tool_github", "node": "tool_github/services.json" },
 		{ "case": "azure", "node": "azure/services.json" },
 		{ "case": "common_gcp", "node": null },
-		{ "case": "synthetic", "node": null }
+		{ "case": "synthetic", "node": null },
+		{ "case": "review_rules", "node": null }
 	]
 }

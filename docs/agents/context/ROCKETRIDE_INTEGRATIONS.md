@@ -211,7 +211,7 @@ on the request.
 
 | Key | Scope | Use it for |
 |---|---|---|
-| Endpoint-scoped key (from the panel's Create API key) | `task.data` on one address, one team | handing to external systems (Stripe, GitHub, n8n, partners) |
+| Endpoint-scoped key (from the panel's Create API key) | `task.data` on one address, one team | handing to external systems that can set a header (n8n, scripts, partners); native GitHub/Stripe webhooks cannot, so they go through a relay that verifies the provider signature and adds the key |
 | Account key with an `endpoints` list (Settings › Account › API Keys) | `task.data` on the listed addresses or `developerId.pipelineId.*` | several webhooks of one integration |
 | Full account key | your whole account | first-party callers and your own automation |
 

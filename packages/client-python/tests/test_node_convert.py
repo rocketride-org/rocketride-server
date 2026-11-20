@@ -40,6 +40,7 @@ from pathlib import Path
 
 import pytest
 
+from rocketride.cli.commands import node as node_command
 from rocketride.cli.commands.node import run_node
 from rocketride.cli.node_convert import build_block, convert_definition, is_old_format, load_json
 
@@ -236,3 +237,119 @@ def test_parser_registers_node_convert():
         None,
     )
     assert cli_main._is_local_only_command(['node', 'convert', 'a.json'])
+
+
+# ============================================================================
+# Review rules (PR #3393)
+# ============================================================================
+
+
+def _review():
+    return _expected('review_rules')['definition']
+
+
+def test_upload_does_not_depend_on_member_order():
+    for item in ({'format': 'data-url', 'type': 'string'}, {'type': 'string', 'format': 'data-url'}):
+        old = {
+            'protocol': 'x://',
+            'fields': {'x.key': {**item, 'ui:options:accept': '.pem'}},
+            'shape': [{'section': 'Pipe', 'properties': ['x.key']}],
+        }
+        definition = convert_definition(old).definition['propertyDefinitions']['x.key']
+        assert definition['type'] == 'upload'
+        assert definition['options'] == {'accept': '.pem'}
+
+
+def test_every_profile_is_a_branch_with_its_title():
+    branches = _review()['properties'][0]['enum']
+    assert list(branches) == ['pro', 'basic', '__proto__']
+    assert branches['pro']['title'] == 'Pro'
+
+
+def test_inline_branch_property_takes_the_profile_default():
+    pro = _review()['properties'][0]['enum']['pro']['properties']
+    assert pro == [{'name': 'limit', 'type': 'integer', 'title': 'Limit', 'default': 50}]
+
+
+def test_warnings_never_carry_configuration_values():
+    warnings = ' '.join(_expected('review_rules')['warnings'])
+    for value in ('tok-b', 'tok-p', 'root-token'):
+        assert value not in warnings
+    assert 'profile "pro" sets token' in warnings
+
+
+def test_unreadable_array_item_reference_is_named():
+    assert any('review.hosts' in w and 'shared.host' in w for w in _expected('review_rules')['warnings'])
+
+
+@pytest.mark.parametrize(
+    ('member', 'value', 'message'),
+    [
+        ('fields', ['bad'], '"fields" must be an object'),
+        ('shape', {'section': 'Pipe'}, '"shape" must be a list'),
+        ('preconfig', [], '"preconfig" must be an object'),
+        ('preconfig', {'profiles': ['a']}, '"preconfig.profiles" must be an object'),
+    ],
+)
+def test_malformed_containers_are_this_files_error(member, value, message):
+    with pytest.raises(ValueError, match=message.replace('.', r'\.')):
+        convert_definition({'protocol': 'x://', 'shape': [], member: value})
+
+
+def _stage(tmp_path, names):
+    paths = []
+    for index, name in enumerate(names):
+        target = tmp_path / f'{index}' / 'services.json'
+        target.parent.mkdir()
+        target.write_text((FIXTURES / f'{name}.old.json').read_text(encoding='utf-8'), encoding='utf-8')
+        paths.append(target)
+    return paths
+
+
+def test_command_continues_after_a_malformed_file(tmp_path, capsys):
+    bad, good = _stage(tmp_path, ['tool_gcs', 'tool_gcs'])
+    bad.write_text('{"protocol": "x://", "fields": ["bad"], "shape": []}', encoding='utf-8')
+    assert asyncio.run(run_node(_args([str(bad), str(good)], json_arg='-'))) == 1
+    files = json.loads(capsys.readouterr().out)['files']
+    assert files[0]['error'] == '"fields" must be an object'
+    assert files[1]['legacy'] is True
+    assert json.loads(good.read_text(encoding='utf-8')) == _expected('tool_gcs')['definition']
+
+
+def test_command_refuses_a_report_that_would_replace_an_input(tmp_path, capsys):
+    (target,) = _stage(tmp_path, ['tool_gcs'])
+    original = target.read_text(encoding='utf-8')
+    alias = str(target.parent / '.' / 'services.json')
+    assert asyncio.run(run_node(_args([str(target)], dry_run=True, json_arg=alias))) == 1
+    assert target.read_text(encoding='utf-8') == original
+    assert 'would replace' in capsys.readouterr().err
+
+
+def test_command_keeps_going_after_a_destination_error(tmp_path, capsys, monkeypatch):
+    first, second, third = _stage(tmp_path, ['tool_gcs', 'tool_gcs', 'tool_gcs'])
+    real = node_command._write_atomic
+
+    def failing(target, text):
+        if target == str(second):
+            raise PermissionError('read-only')
+        real(target, text)
+
+    monkeypatch.setattr(node_command, '_write_atomic', failing)
+    assert asyncio.run(run_node(_args([str(first), str(second), str(third)], json_arg='-'))) == 1
+    files = json.loads(capsys.readouterr().out)['files']
+    assert [bool(f.get('error')) for f in files] == [False, True, False]
+    assert 'read-only' in files[1]['error']
+    assert json.loads(third.read_text(encoding='utf-8')) == _expected('tool_gcs')['definition']
+
+
+def test_a_failed_write_leaves_the_original_and_no_temporary(tmp_path, monkeypatch):
+    (target,) = _stage(tmp_path, ['tool_gcs'])
+    original = target.read_text(encoding='utf-8')
+
+    def no_replace(_source, _destination):
+        raise OSError('disk full')
+
+    monkeypatch.setattr(node_command.os, 'replace', no_replace)
+    assert asyncio.run(run_node(_args([str(target)]))) == 1
+    assert target.read_text(encoding='utf-8') == original
+    assert [p.name for p in target.parent.iterdir()] == ['services.json']

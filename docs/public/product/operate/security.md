@@ -111,8 +111,11 @@ pays. A URL never carries a credential: `?auth=` is not accepted.
 
 - **Endpoint-scoped key** - minted from the Endpoint Info panel: permission
   `task.data` on that one address, frozen to your home team. Hand this one to
-  external systems (payment and source-control webhooks, n8n, partners); it
-  reaches nothing else.
+  external systems that can set a request header (n8n, scripts, partners); it
+  reaches nothing else. A native provider webhook that cannot add a header,
+  such as GitHub's or Stripe's (they sign the request with their own secret),
+  needs an HTTPS relay that verifies the provider's signature, then adds the
+  key and forwards the request: the server does not check provider signatures.
 - **Account key** - your whole account, for first-party callers and your own
   automation. Do not share it.
 

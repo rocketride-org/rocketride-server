@@ -1,0 +1,41 @@
+{
+	// Review cases: a profile no option names, an inline branch property with a
+	// profile default, a profile value shadowing a secret sibling, an upload
+	// whose type follows its format, an array item with an unreadable shared
+	// reference, and a profile named __proto__
+	"title": "Review rules",
+	"protocol": "review_rules://",
+	"classType": ["text"],
+	"capabilities": [],
+	"preconfig": {
+		"default": "basic",
+		"profiles": {
+			"basic": { "title": "Basic", "limit": 10, "token": "tok-b" },
+			"pro": { "title": "Pro", "limit": 50, "token": "tok-p" },
+			"__proto__": { "title": "Proto", "limit": 5 }
+		}
+	},
+	"fields": {
+		"review.profile": {
+			"type": "string",
+			"title": "Plan",
+			"default": "basic",
+			"conditional": [{ "value": "pro", "properties": [{ "name": "limit", "type": "integer", "title": "Limit", "default": 10 }] }]
+		},
+		"review.token": { "type": "string", "title": "Token", "secure": true, "default": "root-token" },
+		"review.keyfile": { "format": "data-url", "type": "string", "title": "Key file", "ui:options:accept": ".pem" },
+		"review.hosts": {
+			"type": "array",
+			"title": "Hosts",
+			"items": { "type": "object", "properties": ["shared.host", "review.port"] }
+		},
+		"review.port": { "type": "integer", "title": "Port" }
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Review rules",
+			"properties": ["review.profile", "review.token", "review.keyfile", "review.hosts"]
+		}
+	]
+}

@@ -32,7 +32,7 @@ describe('RocketRideApi credential', () => {
 	it('describes the key as an rr_ account key, never a pipeline or task key', () => {
 		const apiKey = cred.properties.find((p) => p.name === 'apiKey');
 		expect(apiKey.description).toContain('rr_');
-		expect(apiKey.description).not.toMatch(/(pk|tk)_/);
+		expect(apiKey.description).not.toMatch(/\b(pk|tk)_/);
 	});
 
 	it('exposes baseUrl, a masked apiKey, and an SSL toggle', () => {

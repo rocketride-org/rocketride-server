@@ -31,10 +31,54 @@ with the TypeScript CLI's ``src/cli/commands/node.ts``.
 """
 
 import os
+import tempfile
+from typing import List, Optional
 
 from ..node_convert import convert_definition, load_json
 from ..utils.common import run_cli_command
 from ..utils.output import Output
+
+
+def _same_file(a: str, b: str) -> bool:
+    """Whether two paths name one file: the same normalized path, or the same file on disk."""
+    if os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b)):
+        return True
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _report_overwrites(args) -> Optional[str]:
+    """The input or output file a ``--json <file>`` report would replace, or None."""
+    report = getattr(args, 'json', None)
+    if report in (None, '-'):
+        return None
+    targets: List[str] = list(args.files) + ([args.out] if args.out else [])
+    return next((target for target in targets if _same_file(report, target)), None)
+
+
+def _write_atomic(target: str, text: str) -> None:
+    """
+    Replace ``target`` with ``text`` only once the new content is complete.
+
+    The text goes to a temporary file in the target's directory first, then
+    replaces the target in one rename, so a failed write (a full disk) leaves
+    the original definition intact. The temporary file is removed on failure.
+    """
+    directory = os.path.dirname(os.path.abspath(target))
+    os.makedirs(directory, exist_ok=True)
+    handle, temporary = tempfile.mkstemp(prefix=f'.{os.path.basename(target)}.', suffix='.tmp', dir=directory)
+    try:
+        with os.fdopen(handle, 'w', encoding='utf-8', newline='\n') as stream:
+            stream.write(text)
+        os.replace(temporary, target)
+    except BaseException:
+        try:
+            os.unlink(temporary)
+        except OSError:
+            pass
+        raise
 
 
 async def run_node(args) -> int:
@@ -47,6 +91,13 @@ async def run_node(args) -> int:
     Returns:
         Exit code: 0 when every file converted, 1 otherwise.
     """
+    # Checked before the output channel exists: a refused --json file must not
+    # receive even the error envelope, since it names a definition
+    overwritten = _report_overwrites(args)
+    if overwritten is not None:
+        return Output(None).fail(
+            f'--json {args.json} would replace {overwritten}', 'write the report to another file, or use bare --json'
+        )
 
     async def action(out: Output) -> int:
         subcommand = args.node_subcommand
@@ -71,15 +122,19 @@ async def run_node(args) -> int:
                 results.append({'file': path, 'error': str(err)})
                 continue
 
-            # Step 2: write (in place unless --out), or print under --dry-run
+            # Step 2: write (in place unless --out), or print under --dry-run; a
+            # destination that cannot be written fails this file, not the batch
             target = args.out or path
             if args.dry_run:
                 out.line(conversion.text().rstrip('\n'))
             else:
-                parent = os.path.dirname(os.path.abspath(target))
-                os.makedirs(parent, exist_ok=True)
-                with open(target, 'w', encoding='utf-8', newline='\n') as handle:
-                    handle.write(conversion.text())
+                try:
+                    _write_atomic(target, conversion.text())
+                except OSError as err:
+                    failed += 1
+                    out.warn(f'{path}: cannot write {target}: {err}')
+                    results.append({'file': path, 'out': target, 'error': f'cannot write {target}: {err}'})
+                    continue
                 out.line(f'Converted {path} -> {target}' + (' (legacy block added)' if conversion.legacy else ''))
             for warning in conversion.warnings:
                 out.warn(f'{path}: {warning}')

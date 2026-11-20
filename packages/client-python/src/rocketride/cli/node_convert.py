@@ -441,6 +441,7 @@ class _Converter:
     def convert_field(self, name: str, item: Dict[str, Any]) -> Dict[str, Any]:
         """One old field (not a group, not a selector) as a new property definition."""
         out: Dict[str, Any] = {}
+        upload = False
         for key, value in item.items():
             if key in CONSUMED_MEMBERS or key.startswith('ui:'):
                 continue
@@ -453,9 +454,12 @@ class _Converter:
                 out['secret'] = True
                 continue
             if key == 'format' and value == 'data-url':
-                out['type'] = 'upload'
+                upload = True
                 continue
             out[key] = copy.deepcopy(value)
+        # After the copy, so a `type` listed after `format` cannot undo it
+        if upload:
+            out['type'] = 'upload'
         if item.get('secure') is True:
             out['secret'] = True
         if 'enum' in item:
@@ -471,8 +475,30 @@ class _Converter:
                 out['item'] = self.unsecret(out['item'], apply=True)
                 out['secret'] = True
                 self.warn(f'{name}: "secret" moved from the array item\'s members to the array')
+            unknown = self.unresolved(out['item'])
+            if unknown:
+                self.warn(
+                    f'{name}: the array item references {", ".join(unknown)}, which this offline conversion cannot '
+                    'read; the engine refuses a secret inside an array item, so check none of them is secret '
+                    'before loading the node'
+                )
         self.ui_hints(name, item, out)
         return out
+
+    def unresolved(self, spec: Any) -> List[str]:
+        """The shared references in an array item whose definition (and so whose ``secret`` flag) is unknown here."""
+        if isinstance(spec, str):
+            return [] if spec in self.definitions or spec in self.shared else [spec]
+        if not isinstance(spec, dict):
+            return []
+        if isinstance(spec.get('properties'), list):
+            found: List[str] = []
+            for member in spec['properties']:
+                found.extend(r for r in self.unresolved(member) if r not in found)
+            return found
+        if 'secret' not in spec and isinstance(spec.get('base'), str):
+            return self.unresolved(spec['base'])
+        return []
 
     def is_secret(self, spec: Any) -> bool:
         """Whether a specifier resolves to a secret property."""
@@ -558,11 +584,11 @@ class _Converter:
                 for prop in branch.get('properties') or []:
                     if id(prop) in self.generated and prop['name'] in reserved:
                         if prop['name'] not in (PROFILE_SELECTOR, self.profile_selectors[id(spec)]):
-                            sibling = self.sibling_default(level, prop['name'])
-                            if sibling != prop['default']:
+                            # Names only: the values may be secret
+                            if self.sibling_default(level, prop['name']) != prop['default']:
                                 self.warn(
-                                    f'profile {_show(value)} sets {prop["name"]}={_show(prop["default"])}, '
-                                    f'which is declared outside the profile (default {_show(sibling)}); not carried'
+                                    f'profile {_show(value)} sets {prop["name"]}, which is declared outside the '
+                                    "profile with a different default; the profile's value is not carried"
                                 )
                         continue
                     kept.append(prop)
@@ -616,6 +642,10 @@ class _Converter:
             return self.selector(name, item)
         converted = self.convert_field(name, item)
         converted.setdefault('name', name)
+        # The profile in force sets its default, by the rules `with_default` applies to a reference
+        key = _short(str(converted['name']))
+        if key in values and values[key] != '' and values[key] is not None and converted.get('default') != values[key]:
+            converted['default'] = copy.deepcopy(values[key])
         return [converted]
 
     def with_default(self, ref: str, values: Dict[str, Any], definition: Optional[Dict[str, Any]]) -> Any:
@@ -729,7 +759,12 @@ class _Converter:
             for each in value if isinstance(value, list) else [value]:
                 if isinstance(each, str) and each not in order:
                     order.append(each)
-                    labels[each] = each
+                    labels[each] = self.profile_title(each)
+        # A profile no option or conditional names is still a value the old engine accepted
+        for each in self.profiles:
+            if each not in order:
+                order.append(each)
+                labels[each] = self.profile_title(each)
         branches: Dict[str, Any] = {}
         for value in order:
             props: List[Any] = []
@@ -742,6 +777,12 @@ class _Converter:
             branches[value] = {'title': labels.get(value) or value, 'properties': specs}
         head['enum'] = branches
         return head
+
+    def profile_title(self, name: str) -> str:
+        """A profile's own ``title``, else its name (the label of a branch no option labels)."""
+        profile = self.profiles.get(name)
+        title = profile.get('title') if isinstance(profile, dict) else None
+        return title if isinstance(title, str) else name
 
     def constants(self, profile: Dict[str, Any], specs: List[Any]) -> List[Any]:
         """A ``constant`` for every profile key no property in ``specs`` declares."""
@@ -890,6 +931,13 @@ def convert_definition(old: Dict[str, Any], shared: Optional[Dict[str, Any]] = N
         raise ValueError(
             'not an old-format node definition (no "preconfig", "fields" or "shape", or it already declares "properties")'
         )
+    # The containers the conversion walks: a wrong type is this file's error, never a crash mid-batch
+    for key, kind, what in (('fields', dict, 'an object'), ('preconfig', dict, 'an object'), ('shape', list, 'a list')):
+        if old.get(key) is not None and not isinstance(old[key], kind):
+            raise ValueError(f'"{key}" must be {what}')
+    profiles = (old.get('preconfig') or {}).get('profiles')
+    if profiles is not None and not isinstance(profiles, dict):
+        raise ValueError('"preconfig.profiles" must be an object')
     shared = shared or {}
     converter = _Converter(old, shared)
     definition = converter.run()
