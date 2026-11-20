@@ -64,6 +64,19 @@ runs until the pipeline finishes or its token is terminated.
 | `errored` | A scheduled dispatch failed — on permissions, or on an unusable artifact (missing or sha256-tampered) — and the scheduler stopped retrying. |
 | `removed` | Soft delete (`deploy.remove`): hidden from listings, history and artifacts survive; re-deploying revives it. |
 
+## Deleting a version
+
+`deploy.delete(project_id, version)` removes one deployed version from the
+server, apps and pipes alike, but only while nothing points at it: the call is
+refused by name when any rung pins the version (unpublish it first), when it is
+in the review queue (withdraw it first), or while its build is queued or
+running. Every `deploy.versions` row carries `deletable`, the same check
+evaluated for you. What goes is all of the version's server storage; the history
+keeps the deploy line and gains a `delete` line (who, when), and the version
+number is never reused, so a later deploy can never be mistaken for the deleted
+one. The CLI form is `rocketride deploy delete <project> <version>`, confirmed on
+a terminal and `--yes` in scripts.
+
 ## Permissions
 
 Mutations require `task.control` on the TARGET team. Reads follow the visibility model: an org admin sees every team and every personal space; a user sees their own personal space and the teams they are a member of.

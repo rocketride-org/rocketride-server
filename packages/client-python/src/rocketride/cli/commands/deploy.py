@@ -39,7 +39,7 @@ import sys
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from ..utils.common import connect_client, run_cli_command
+from ..utils.common import connect_client, prompt_line, run_cli_command
 from ..utils.env import NO_DEPLOY_TARGET_MESSAGE
 from ..utils.output import Output
 
@@ -300,6 +300,13 @@ async def run_deploy(args) -> int:
             out.result({'deployment': deployment})
             return 0
 
+        # deploy delete: one deployed version's storage leaves the server.
+        # Destructive and final (the number is never reused), so it is
+        # confirmed on a terminal and needs --yes anywhere else; the server
+        # refuses while a rung pins the version, it is in review, or it builds.
+        if subcommand == 'delete':
+            return await _run_delete(args, out)
+
         # deploy log: fronts the build.log read verb — error detail for a
         # failed app build lives in the scrubbed build.log beside the artifact
         if subcommand == 'log':
@@ -318,6 +325,45 @@ async def run_deploy(args) -> int:
         return out.fail(f'Unknown deploy subcommand: {subcommand}')
 
     return await run_cli_command(args, action)
+
+
+async def _run_delete(args, out: Output) -> int:
+    """
+    Execute ``deploy delete <project> <version>``.
+
+    Confirms on a terminal unless ``--yes`` was given; off a terminal (CI,
+    bare ``--json``) ``--yes`` is required, so a script can never delete
+    by accident. The server owns the refusals (pinned, in review, building)
+    and states them by name.
+
+    Args:
+        args: Parsed argparse namespace (project, version, yes).
+        out: The command's output channel.
+
+    Returns:
+        Exit code.
+    """
+    label = f'{args.project} v{args.version}'
+    if not args.yes:
+        if not out.interactive:
+            return out.fail(
+                f'Deleting {label} needs confirmation',
+                'pass --yes to delete without a prompt',
+            )
+        answer = prompt_line(
+            f'Delete {label} from the server? Its storage is removed and the number is never reused [y/N]',
+        )
+        if answer.strip().lower() not in ('y', 'yes'):
+            out.line('Cancelled.')
+            out.result({'deleted': False, 'cancelled': True})
+            return 1
+    client = await _connect_deploy(args, out)
+    if client is None:
+        return 1
+    result = await client.deploy.delete(args.project, args.version)
+    out.line(f'Deleted {label} from the server.')
+    out.result(result)
+    return 0
 
 
 async def _run_schedule(args, out: Output) -> int:

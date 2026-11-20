@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Any
 
 from .types.deploy import (
     AppVerifyReport,
+    DeployDeleteResult,
     Deployment,
     DeployHistoryResult,
     DeployListResult,
@@ -654,6 +655,32 @@ class DeployApi:
             The final deployment record (state ``removed``).
         """
         return await self._client.call('rrext_deploy_pipe', subcommand='remove', projectId=project_id, teamId=team_id)
+
+    # =========================================================================
+    # DELETE — remove one deployed version from the server
+    # =========================================================================
+
+    async def delete(self, project_id: str, version: int) -> DeployDeleteResult:
+        """
+        Delete one deployed version from the server (apps and pipes alike).
+
+        Allowed only while nothing points at the version: refused with a
+        clear message when any rung pins it (unpublish it first), when it is
+        in the review queue (withdraw it first), or while its build is
+        queued or running. What goes is ALL of the version's server storage
+        (the registry JSON, its content dir, its registry entry); the
+        history keeps the deploy line and gains a delete line, and the
+        version number is never reused. ``deploy.versions`` rows carry
+        ``deletable`` — whether this call would succeed right now.
+
+        Args:
+            project_id: The project (a pipe's short id, or an app id).
+            version: The registry version to delete.
+
+        Returns:
+            ``{'projectId', 'version', 'kind', 'sha256', 'deleted', 'orgId'}``.
+        """
+        return await self._client.call('rrext_deploy', subcommand='delete', projectId=project_id, version=version)
 
     # =========================================================================
     # SCHEDULES

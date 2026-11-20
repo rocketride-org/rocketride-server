@@ -72,6 +72,10 @@ export interface IPipelineDeploy {
 	setDisabled?: (teamId: string, disabled: boolean) => Promise<void>;
 	/** Soft-remove one team's deployment from the where-live header. */
 	remove?: (teamId: string) => Promise<void>;
+	/** Delete one deployed version from the server (HARD — its storage goes,
+	 *  the number is never reused). The card offers it only on rows the
+	 *  server marks `deletable`; the server refuses by name otherwise. */
+	deleteVersion?: (version: number) => Promise<void>;
 	/** Set/clear one source's schedule on a team deployment (where-live pill). */
 	setSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
 	/** Pause/resume ONE source's schedule, preserving cron/ttl. */
@@ -169,6 +173,7 @@ export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipeline
 			pipelineName={pipelineName}
 			{...(deploy.setDisabled ? { onSetDisabled: deploy.setDisabled } : {})}
 			{...(deploy.remove ? { onRemove: deploy.remove } : {})}
+			{...(deploy.deleteVersion ? { onDeleteVersion: deploy.deleteVersion } : {})}
 			{...(deploy.setSchedule ? { onSetSchedule: deploy.setSchedule } : {})}
 			{...(deploy.setSchedulePaused ? { onSetSchedulePaused: deploy.setSchedulePaused } : {})}
 			{...(deploy.fetchArtifact ? { fetchArtifact: deploy.fetchArtifact, servicesJson, handleValidatePipeline, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})}

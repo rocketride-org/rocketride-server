@@ -755,6 +755,10 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 									await deploymentActions.remove(projectIdRef.current, teamId);
 									void fetchDeployLifecycle();
 								},
+								deleteVersion: async (version: number) => {
+									await deploymentActions.deleteVersion(projectIdRef.current, version);
+									void fetchDeployLifecycle();
+								},
 								setSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
 									await deploymentActions.setSchedule(projectIdRef.current, teamId, sourceId, cron, ttl);
 									void fetchDeployLifecycle();

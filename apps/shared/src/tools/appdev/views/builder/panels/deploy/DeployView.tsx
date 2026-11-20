@@ -39,6 +39,7 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } from 'shell';
+import { DeleteVersionMark } from 'shared/components/deploy';
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from '../../../../types';
 import { pinStatusOf, versionBadgeOf } from '../../../../servingStatus';
 import type { ServingTone } from '../../../../servingStatus';
@@ -144,6 +145,8 @@ const styles: Record<string, React.CSSProperties> = {
 		// them to one height, and ragged mid-card buttons read as clutter.
 		display: 'flex',
 		flexDirection: 'column',
+		// The delete mark anchors to the card's top-right corner.
+		position: 'relative',
 	},
 	cardVersion: {
 		fontSize: 15,
@@ -758,6 +761,23 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 		[host, refresh]
 	);
 
+	/** Delete one deployed version from the server (HARD, plan 2.3) — the
+	 * card's top-right mark, offered only on rows the server marks deletable.
+	 * A refusal (pinned / in review / building) lands on the action strip. */
+	const onDeleteVersion = useCallback(
+		async (version: number): Promise<void> => {
+			if (!host.deleteVersion) return;
+			setActionError('');
+			try {
+				await host.deleteVersion(version);
+			} catch (e) {
+				setActionError(e instanceof Error ? e.message : String(e));
+			}
+			await refresh();
+		},
+		[host, refresh]
+	);
+
 	/** The dialog rows' current-state hint: what the audience serves now. */
 	const pinStateOf = useCallback(
 		(handle: string, v: AppVersionInfo): string => {
@@ -874,6 +894,11 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 							const badge = versionBadgeOf(v.state, buildWord);
 							return (
 								<div key={v.registryVersion} style={styles.card}>
+									{/* The delete mark (plan 2.3): present ONLY while the server
+									    says the version is deletable — no rung pins it, it is
+									    not in review, its build is not running — and the host
+									    can delete. A read-only host offers no verbs at all. */}
+									<DeleteVersionMark version={v.registryVersion} deletable={v.deletable} subject={app.name} onDelete={host.deleteVersion && !readOnly ? onDeleteVersion : undefined} disabled={deployBusy} />
 									{/* Registry int IS the version identity; the package.json
 									    semver rides beside it in a pill — the same format the
 									    where-live rows render. */}

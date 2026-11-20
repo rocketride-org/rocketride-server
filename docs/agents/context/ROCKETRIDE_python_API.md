@@ -865,7 +865,7 @@ Point a team at a published version. Promotion (Staging to Production) and rollb
 
 - `async deploy.list(*, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None) -> DeployListResult` — deployments visible to the caller. `team_id` restricts to one team; omitted = every team the caller can monitor. Search covers projectId/pipelineName/teamId; filters e.g. `{'state': 'enabled'}`.
 - `async deploy.get(project_id: str, team_id: str) -> Deployment` — one team's deployment of a project, registry-joined (version, state, schedules, actors).
-- `async deploy.versions(project_id: str, *, page=None, page_size=None, search=None, filters=None, sort=None) -> DeployVersionsResult` — the org-registry versions of a project (the version strip), newest first.
+- `async deploy.versions(project_id: str, *, page=None, page_size=None, search=None, filters=None, sort=None) -> DeployVersionsResult` — the org-registry versions of a project (the version strip), newest first. Each row carries `deletable`: whether `deploy.delete` would take it right now (no rung pins it, not in review, not building).
 - `async deploy.artifact(project_id: str, version: int) -> PipelineConfig` — one immutable artifact's pipeline JSON from the registry (sha256-verified server-side on load). The source of truth for rendering a deployed version — never a local file, never a running task.
 - `async deploy.history(project_id: str, *, team_id=None, page=None, page_size=None, search=None, filters=None, sort=None) -> DeployHistoryResult` — the immutable audit trail, newest first (who published what when, who put which version live where). Rows carry `seq` (stable append-order key) as identity; `filters` supports `at__gte`/`at__lte` in epoch seconds.
 
@@ -875,6 +875,7 @@ Point a team at a published version. Promotion (Staging to Production) and rollb
 - `async deploy.disable(project_id: str, team_id: str) -> Deployment` — the kill switch: nothing new runs (schedules stop firing, manual runs are refused) until enabled again. A run already in progress is not stopped; terminate it by token.
 - `async deploy.enable(project_id: str, team_id: str) -> Deployment` — enable a disabled deployment.
 - `async deploy.remove(project_id: str, team_id: str) -> Deployment` — soft-remove one team's deployment. Listings hide it; the audit history and every registry artifact survive. Re-deploying any version revives it.
+- `async deploy.delete(project_id: str, version: int) -> DeployDeleteResult` — delete ONE deployed version from the server (apps and pipes alike, the same door). Allowed only while nothing points at it: refused by name when any rung pins it (unpublish first), when it is in review (withdraw first), or while its build is queued/running. ALL of the version's server storage goes (registry JSON, content dir, registry entry); the history keeps the deploy line and gains a `delete` line (who, when), and the version number is never reused. Needs `task.control` on one of your teams (the deploy gate). Returns `{'projectId', 'version', 'kind', 'sha256', 'deleted', 'orgId'}`.
 
 #### Schedules
 

@@ -42,7 +42,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type { DeployHistoryEntry, DeployListEnvelope, DeployListParams, Deployment, DeployArtifact, PipelineConfig, PublishResult, SchedulePreview } from './types/deploy.js';
+import type { DeployDeleteResult, DeployHistoryEntry, DeployListEnvelope, DeployListParams, Deployment, DeployArtifact, PipelineConfig, PublishResult, SchedulePreview } from './types/deploy.js';
 import { getRegisteredAppPack } from './app-pack-registry.js';
 import type { AppPackModule } from './app-pack-registry.js';
 import type { AppVerifyReport, CreatedApp, CreatedPipe } from '../app-pack/index.js';
@@ -502,6 +502,34 @@ export class DeployApi {
 			subcommand: 'remove',
 			projectId,
 			teamId,
+		});
+	}
+
+	// =========================================================================
+	// DELETE — remove one deployed version from the server
+	// =========================================================================
+
+	/**
+	 * Deletes one deployed version from the server (apps and pipes alike).
+	 *
+	 * Allowed only while nothing points at the version: refused with a clear
+	 * message when any rung pins it (unpublish it first), when it is in the
+	 * review queue (withdraw it first), or while its build is queued or
+	 * running. What goes is ALL of the version's server storage (the registry
+	 * JSON, its content dir, its registry entry); the history keeps the
+	 * deploy line and gains a delete line, and the version number is never
+	 * reused. {@link versions} rows carry `deletable`: whether this call
+	 * would succeed right now.
+	 *
+	 * @param projectId - The project (a pipe's short id, or an app id).
+	 * @param version - The registry version to delete.
+	 * @returns What was removed (`{ projectId, version, kind, sha256, deleted, orgId }`).
+	 */
+	async delete(projectId: string, version: number): Promise<DeployDeleteResult> {
+		return this.client.call<DeployDeleteResult>('rrext_deploy', {
+			subcommand: 'delete',
+			projectId,
+			version,
 		});
 	}
 

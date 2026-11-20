@@ -82,7 +82,10 @@ interface IAppBuilderClient {
 	withdrawApp(appId: string, version: number): Promise<unknown>;
 	replyApp(appId: string, message: string, version?: number): Promise<unknown>;
 	call<T>(command: string, args?: Record<string, unknown>): Promise<T>;
-	deploy: { history(projectId: string, options?: { page?: number; pageSize?: number }): Promise<unknown> };
+	deploy: {
+		history(projectId: string, options?: { page?: number; pageSize?: number }): Promise<unknown>;
+		delete(projectId: string, version: number): Promise<unknown>;
+	};
 }
 
 /** Inputs fixed per mounted App Builder surface. */
@@ -185,6 +188,9 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 		},
 		removePublish: async (target) => {
 			await client().removeAppPublish(needRegistryId(), target);
+		},
+		deleteVersion: async (version) => {
+			await client().deploy.delete(needRegistryId(), version);
 		},
 		listTeams: async () => (bus.getAccountInfo()?.organization?.teams ?? []).map((t) => ({ id: t.id, name: t.name })),
 		getWhereLive: async () => (registryId() ? toRungPins((await client().whereApp(registryId())) as WirePin[], hasReviewLadder) : []),

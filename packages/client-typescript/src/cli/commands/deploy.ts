@@ -41,7 +41,7 @@ import { resolveDeployTeams, resolveTeamArg, teamNameOf } from '../../client/dep
 import type { DeployTeamRef } from '../../client/deploy-helpers';
 import { Deployment, DeployHistoryEntry } from '../../client/types';
 import { Output } from '../output';
-import { addDeployConnectionOptions, connectDeploy, runCliCommand, formatWhen } from '../common';
+import { addDeployConnectionOptions, connectDeploy, promptLine, runCliCommand, formatWhen } from '../common';
 
 /** The caller's teams and identity, for naming rows and resolving `--team`. */
 interface TeamContext {
@@ -154,6 +154,46 @@ export async function executeDeploySourceConfig(project: string, source: string,
 	const config = deployment.schedules?.[source];
 	out.line(`Source ${project}/${source}: trace ${config?.traceLevel ?? traceLevel ?? 'full'}, debug output ${(config?.debugOut ?? options.debugOut) ? 'on' : 'off'}.`);
 	out.result({ deployment: withTeamName(deployment, teamContextOf(client, [deployment])) });
+	return 0;
+}
+
+/**
+ * Execute `deploy delete <project> <version>`: one deployed version's storage
+ * leaves the server.
+ *
+ * Destructive and final (the number is never reused), so it is confirmed on
+ * a terminal unless `--yes` was given; off a terminal (CI, bare `--json`)
+ * `--yes` is required, so a script can never delete by accident. The server
+ * owns the refusals (pinned, in review, building) and states them by name.
+ *
+ * @param project - The project id (a pipe id or an app id).
+ * @param version - The registry version to delete, as typed.
+ * @param options - Connection options plus `yes`.
+ * @param out - The command's output channel.
+ * @returns The exit code.
+ */
+export async function executeDeployDelete(project: string, version: string, options: { uri?: string; apikey?: string; yes?: boolean }, out: Output): Promise<number> {
+	const registryVersion = Number.parseInt(version.replace(/^v/i, ''), 10);
+	if (!Number.isInteger(registryVersion) || registryVersion < 1) {
+		return out.fail(`Invalid version '${version}'`, 'name the registry version number, e.g. 3');
+	}
+	const label = `${project} v${registryVersion}`;
+	if (!options.yes) {
+		if (!out.interactive) {
+			return out.fail(`Deleting ${label} needs confirmation`, 'pass --yes to delete without a prompt');
+		}
+		const answer = await promptLine(`Delete ${label} from the server? Its storage is removed and the number is never reused [y/N]`);
+		if (!['y', 'yes'].includes(answer.trim().toLowerCase())) {
+			out.line('Cancelled.');
+			out.result({ deleted: false, cancelled: true });
+			return 1;
+		}
+	}
+	const client = await connectDeploy(options, out);
+	if (!client) return 1;
+	const result = await client.deploy.delete(project, registryVersion);
+	out.line(`Deleted ${label} from the server.`);
+	out.result(result);
 	return 0;
 }
 
@@ -446,6 +486,19 @@ Examples:
 			});
 		addDeployConnectionOptions(cmd);
 	}
+
+	// ── deploy delete ────────────────────────────────────────────────────
+	// One deployed version's storage leaves the server (apps and pipes alike).
+	// Refused by the server while a rung pins it, it is in review, or its
+	// build runs; confirmed here, --yes for scripts.
+	const deleteCmd = deployCmd
+		.command('delete <project> <version>')
+		.description('Delete one deployed version from the server (refused while a rung pins it, in review, or building)')
+		.option('--yes', 'Skip the confirmation (required when not on a terminal)')
+		.action(async (project, version, options) => {
+			await runCliCommand(options, (out) => executeDeployDelete(project, version, options, out));
+		});
+	addDeployConnectionOptions(deleteCmd);
 
 	// ── deploy source-config ─────────────────────────────────────────────
 	// One source's execution settings — the VS Code deployment page's

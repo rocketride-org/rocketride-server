@@ -42,6 +42,9 @@ export interface DeployVersionCardDTO {
 	publishedBy: string;
 	/** Optional "what changed" note. */
 	comment?: string;
+	/** Whether `deploy delete` would take this version right now — the
+	 *  server's own check, carried on every versions row. */
+	deletable?: boolean;
 }
 
 /** Per-source schedule facts (keyed by sourceId on the row). */

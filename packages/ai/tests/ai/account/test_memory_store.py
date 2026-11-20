@@ -198,3 +198,27 @@ async def test_list_files_returns_sorted(store):
     await store.write_file('b.txt', '')
     await store.write_file('a.txt', '')
     assert await store.list_files() == ['a.txt', 'b.txt']
+
+
+# =============================================================================
+# delete_tree — the provider-neutral rmtree (list + delete each file)
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_delete_tree_removes_every_file_under_the_prefix_only(store):
+    await store.write_file('orgs/o/v1/dist/index.html', '')
+    await store.write_file('orgs/o/v1/bundle/app.zip', '')
+    await store.write_file('orgs/o/v1/build.log', '')
+    # A sibling whose name merely starts with the prefix is NOT part of the tree.
+    await store.write_file('orgs/o/v10/dist/index.html', '')
+    assert await store.delete_tree('orgs/o/v1') == 3
+    assert await store.list_files('orgs/o/') == ['orgs/o/v10/dist/index.html']
+    # A tree that is already gone is a no-op, never an error.
+    assert await store.delete_tree('orgs/o/v1/') == 0
+
+
+@pytest.mark.asyncio
+async def test_delete_tree_requires_a_prefix(store):
+    with pytest.raises(StorageError, match='non-empty prefix'):
+        await store.delete_tree('')

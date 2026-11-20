@@ -607,6 +607,15 @@ def setup_parser() -> argparse.ArgumentParser:
         verb_parser.add_argument('project', help='Project id')
         verb_parser.add_argument('--team', default='', help='Team the deployment belongs to')
 
+    d_delete = deploy_subparsers.add_parser(
+        'delete',
+        help='Delete one deployed version from the server (refused while a rung pins it, in review, or building)',
+    )
+    _add_deploy_connection_args(d_delete)
+    d_delete.add_argument('project', help='Project id (a pipe id or an app id)')
+    d_delete.add_argument('version', type=int, help='Registry version to delete')
+    d_delete.add_argument('--yes', action='store_true', help='Skip the confirmation (required when not on a terminal)')
+
     d_log = deploy_subparsers.add_parser('log', help="Read an app version's build log")
     _add_deploy_connection_args(d_log)
     d_log.add_argument('app_id', help='App id')
@@ -711,7 +720,7 @@ async def _dispatch(args) -> int:
     if args.command == 'deploy':
         if not getattr(args, 'deploy_subcommand', None):
             print(
-                'Error: Deploy subcommand is required (add, list, get, versions, history, publish, run, artifact, enable, disable, remove, log, schedule)',
+                'Error: Deploy subcommand is required (add, list, get, versions, history, publish, run, artifact, enable, disable, remove, delete, log, schedule)',
                 file=sys.stderr,
             )
             return 1

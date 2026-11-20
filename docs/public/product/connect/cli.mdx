@@ -724,6 +724,7 @@ Sub-commands:
 | `run <project> <source>` | Run a source now. |
 | `artifact <project> <version>` | Print one version's artifact JSON. |
 | `enable <project>`, `disable <project>`, `remove <project>` | Switch a deployment on or off, or remove it. Versions and history survive `remove`. |
+| `delete <project> <version>` | Delete one deployed version from the server (apps and pipes). Refused while a rung pins it, it is in review, or its build runs. Asks for confirmation; `--yes` skips it. The number is never reused. |
 | `schedule set <project> <source> <cron>` | Set a source's schedule (five-field cron), or `none` to clear it. `--ttl <seconds>` sets a fixed run window. |
 | `schedule pause <project> <source>`, `schedule resume <project> <source>` | Pause or resume a schedule. |
 | `schedule preview <cron>` | Check a cron expression and list its next firings. |

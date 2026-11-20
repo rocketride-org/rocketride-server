@@ -74,6 +74,27 @@ class DeployArtifact(TypedDict, total=False):
     publishedAt: float
     # Optional "what changed" note supplied at publish time.
     comment: str
+    # Whether ``deploy.delete`` would take this version right now: no rung
+    # pins it, it is not in review, its build is not queued/running. Computed
+    # by the server on every read; the version card shows its delete mark
+    # only when this is true.
+    deletable: bool
+
+
+class DeployDeleteResult(TypedDict, total=False):
+    """Body of ``deploy.delete``: what was removed from the server."""
+
+    projectId: str
+    version: int
+    # 'pipe' | 'app' | 'node'
+    kind: str
+    # The deleted artifact's content hash — the history row carries it too.
+    sha256: str
+    deleted: bool
+    # Unix timestamp (seconds).
+    deletedAt: float
+    # The organization whose registry the version left.
+    orgId: str
 
 
 class DeploymentSchedule(TypedDict, total=False):

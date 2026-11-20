@@ -168,6 +168,7 @@ from .account import (
 from .deploy import (
     DeployActor,
     DeployArtifact,
+    DeployDeleteResult,
     DeployHistoryEntry,
     DeployHistoryResult,
     DeployListResult,
@@ -326,6 +327,7 @@ __all__ = [
     'AppVerifyReport',
     'DeployActor',
     'DeployArtifact',
+    'DeployDeleteResult',
     'DeployHistoryEntry',
     'DeployHistoryResult',
     'DeployListResult',

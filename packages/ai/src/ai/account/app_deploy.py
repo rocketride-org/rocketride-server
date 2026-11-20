@@ -1172,6 +1172,11 @@ def _rail_entry(entry: Dict[str, Any], artifact: Optional[Dict[str, Any]]) -> Di
         'buildStatus': str(build.get('status') or ''),
         'buildPhase': str(build.get('phase') or ''),
         'buildEndedAt': build.get('endedAt'),
+        # Whether `deploy delete` would take this version right now (plan
+        # 2.3): computed by the registry read from the same pin/review/build
+        # checks the verb applies. The card draws its delete mark from this
+        # flag alone — no greyed control, no reason text.
+        'deletable': bool(entry.get('deletable', False)),
     }
 
 

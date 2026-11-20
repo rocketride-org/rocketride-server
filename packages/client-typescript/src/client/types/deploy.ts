@@ -57,6 +57,28 @@ export interface DeployArtifact {
 	publishedAt?: number;
 	/** Optional "what changed" note supplied at publish time. */
 	comment?: string;
+	/**
+	 * Whether `deploy.delete` would take this version right now: no rung pins
+	 * it, it is not in review, its build is not queued/running. Computed by
+	 * the server on every read; the version card shows its delete mark only
+	 * when this is true.
+	 */
+	deletable?: boolean;
+}
+
+/** Body of `deploy.delete`: what was removed from the server. */
+export interface DeployDeleteResult {
+	projectId?: string;
+	version?: number;
+	/** 'pipe' | 'app' | 'node' */
+	kind?: string;
+	/** The deleted artifact's content hash — the history row carries it too. */
+	sha256?: string;
+	deleted?: boolean;
+	/** Unix timestamp (seconds). */
+	deletedAt?: number;
+	/** The organization whose registry the version left. */
+	orgId?: string;
 }
 
 /** Per-source schedule on a team deployment. */

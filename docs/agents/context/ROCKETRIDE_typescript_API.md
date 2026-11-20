@@ -860,7 +860,7 @@ Point a team at a published version. Promotion (Staging → Production) and roll
 
 - `list(params?): Promise<DeployListEnvelope<Deployment>>` — deployments visible to the caller; `params.teamId` restricts to one team
 - `get(projectId, teamId): Promise<Deployment>` — one team's deployment, registry-joined (version, state, schedules, actors)
-- `versions(projectId, params?): Promise<DeployListEnvelope<DeployArtifact>>` — the org-registry versions (the version strip), newest first
+- `versions(projectId, params?): Promise<DeployListEnvelope<DeployArtifact>>` — the org-registry versions (the version strip), newest first. Each row carries `deletable`: whether `delete` would take it right now (no rung pins it, not in review, not building)
 - `artifact(projectId, version): Promise<PipelineConfig>` — one immutable artifact's pipeline JSON, sha256-verified server-side on load; the source of truth for rendering a deployed version
 - `history(projectId, params?): Promise<DeployListEnvelope<DeployHistoryEntry>>` — the immutable audit trail, newest first. Rows carry `seq` (stable identity); `params.teamId` restricts to one team's pointer changes (org-wide publish rows always ride along); `filters.at__gte`/`at__lte` take epoch seconds
 
@@ -869,6 +869,7 @@ Point a team at a published version. Promotion (Staging → Production) and roll
 - `run(projectId, sourceId, teamId): Promise<{ token?: string; version?: number }>` — start one deployed source NOW. Same trusted team dispatch the scheduler uses: the run executes as the team, carries no human identity, and who fired it lands in the audit history. The deployment must be enabled. A manual run has no run window: it executes until the pipeline finishes or the returned `token` is terminated (the schedule's `ttl` applies to scheduled fires only), so a long-lived pipeline can keep running and billing until it finishes or is terminated; disabling the deployment refuses new runs but does not stop one already going
 - `disable(projectId, teamId)` / `enable(projectId, teamId): Promise<Deployment>` — the kill switch: while disabled nothing new runs (schedules stop firing, manual runs are refused); a run already in progress is not stopped, terminate it by token
 - `remove(projectId, teamId): Promise<Deployment>` — soft-remove one team's deployment: listings hide it, audit history and registry artifacts survive, re-deploying any version revives it
+- `delete(projectId, version): Promise<DeployDeleteResult>` — delete ONE deployed version from the server (apps and pipes alike, the same door). Allowed only while nothing points at it: refused by name when any rung pins it (unpublish first), when it is in review (withdraw first), or while its build is queued/running. ALL of the version's server storage goes (registry JSON, content dir, registry entry); the history keeps the deploy line and gains a `delete` line (who, when), and the version number is never reused. Needs `task.control` on one of your teams (the deploy gate). Returns `{ projectId, version, kind, sha256, deleted, orgId }`
 
 **Schedules:**
 

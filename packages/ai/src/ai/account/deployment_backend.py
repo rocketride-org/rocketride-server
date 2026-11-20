@@ -332,6 +332,46 @@ def artifact_metadata(artifact: Dict[str, Any], metadata: Optional[Dict[str, Any
     return meta
 
 
+# Build statuses under which a version is still the build worker's: its
+# content dir is being written, so it cannot be deleted from under the job.
+_BUILD_IN_FLIGHT = ('queued', 'building')
+
+
+def delete_block_of(entry: Dict[str, Any], pins: List[Dict[str, Any]]) -> str:
+    """Why one registry version cannot be deleted right now ('' when it can).
+
+    THE refusal rule of ``deploy delete`` (plan 2.3), shared by both
+    editions: the file backend and the saas DB backend compute the
+    versions row's ``deletable`` flag and refuse a delete through this one
+    function, so the card's &#10005; and the verb can never disagree. A
+    version is deletable only while nothing points at it:
+
+    - no publish row pins it (``pins`` — the rows bound to this version
+      that are not soft-removed; the message names each rung's handle),
+    - it is not in the review queue (``state == 'submit'``),
+    - its build is not queued or running (``metadata.build.status``).
+
+    Args:
+        entry: The registry version row.
+        pins: The live publish rows pointing at it (``{'audience': ...}``
+              dicts; the audience may carry resolver-stamped display keys).
+
+    Returns:
+        The refusal sentence, or '' when the version may be deleted.
+    """
+    version = int(entry.get('version', 0))
+    if pins:
+        handles = sorted({audience_display(dict(pin.get('audience') or {}))['handle'] for pin in pins})
+        return f'v{version} is published to {", ".join(handles)}; unpublish it first'
+    if str(entry.get('state') or DEFAULT_REVIEW_STATE) == 'submit':
+        return f'v{version} is in review; withdraw it first'
+    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+    if str(build.get('status') or '') in _BUILD_IN_FLIGHT:
+        return f'v{version} is still building; wait for the build to finish'
+    return ''
+
+
 class FileDeploymentBackend:
     """The ``deployments_*`` operations over IStore-backed JSON files.
 
@@ -479,6 +519,99 @@ class FileDeploymentBackend:
                 history_row['data'] = {'comment': entry['comment']}
             meta['history'].append(history_row)
             return entry
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
+    # =========================================================================
+    # DELETE — remove one version's storage while nothing points at it
+    # =========================================================================
+
+    async def delete_version(
+        self,
+        org_id: str,
+        project_id: str,
+        version: int,
+        actor: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Delete ONE registry version from the server (plan 2.3, ``deploy delete``).
+
+        Refused, with the sentence ``delete_block_of`` composes, while any
+        publish row pins the version, while it is in review, or while its
+        build is queued or running. Otherwise ALL of the version's storage
+        goes and nothing is retained but the history lines: the registry
+        JSON (``artifactPath``), its sibling content dir whole (``bundle/``,
+        ``source/``, ``dist/``, the build log), and the version's entry in
+        the project's meta (the OSS build record rides that entry). The
+        history keeps the deploy line and gains a ``delete`` line (who,
+        when). ``nextVersion`` is untouched, so the number is never reused.
+
+        Everything runs inside the project's CAS mutate under the
+        per-project lock: the pin check and the removal are one step, so a
+        publish racing this call either lands before the check (refused)
+        or after the version is gone (its own refusal). The byte deletes
+        tolerate already-missing files, so a CAS retry re-runs cleanly.
+
+        Args:
+            org_id:     Owning organisation.
+            project_id: The registry name (``developerId.id``).
+            version:    The registry version to delete.
+            actor:      Who is deleting ({'userId', 'display', 'email'}).
+
+        Returns:
+            ``{'projectId', 'version', 'kind', 'sha256', 'deleted': True}``.
+
+        Raises:
+            StorageError: The project or version is not in the registry.
+            ValueError: The version is pinned, in review, or building.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(project_id, 'project_id')
+        if not isinstance(version, int) or version < 1:
+            raise ValueError('version must be a positive integer')
+        who = _actor_record(actor)
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Refuse while pinned/in review/building; else remove the version's storage and entry."""
+            entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
+            if entry is None:
+                raise StorageError(f'{project_id} v{version}: not in the registry')
+            block = delete_block_of(entry, self._pins_of(meta, version))
+            if block:
+                raise ValueError(f'{project_id} {block}')
+            # The bytes: the registry JSON and the whole sibling content dir
+            # (derived from the stored path, the one reader convention). A
+            # missing file is not an error here — a CAS retry, or a version
+            # whose content write never finished, must still delete cleanly.
+            artifact_file = str(entry.get('artifactPath') or '')
+            if artifact_file:
+                try:
+                    await self._store.delete_file(artifact_file)
+                except StorageNotFoundError:
+                    pass
+                await self._store.delete_tree(artifact_content_dir(artifact_file))
+            # The entry (and with it the OSS build record, metadata.build).
+            meta['versions'] = [v for v in meta['versions'] if int(v.get('version', 0)) != version]
+            now = time.time()
+            meta['history'].append(
+                {
+                    'at': now,
+                    'action': 'delete',
+                    'teamId': '',
+                    'version': version,
+                    'actor': who,
+                    # What was deleted rides the row: the history is all that
+                    # remains of the version, so it must describe it alone.
+                    'data': {'sha256': str(entry.get('sha256') or ''), 'kind': str(entry.get('kind') or 'pipe')},
+                }
+            )
+            return {
+                'projectId': project_id,
+                'version': version,
+                'kind': str(entry.get('kind') or 'pipe'),
+                'sha256': str(entry.get('sha256') or ''),
+                'deleted': True,
+                'deletedAt': now,
+            }
 
         return await self._mutate_meta(org_id, project_id, mutate)
 
@@ -803,7 +936,16 @@ class FileDeploymentBackend:
         meta = await self._read_meta(org_id, project_id)
         if meta is None:
             return []
-        return sorted(meta['versions'], key=lambda v: v['version'], reverse=True)
+        # ``deletable`` is computed here, never stored: it is the delete
+        # verb's own refusal check (plan 2.3), evaluated on the same pins
+        # and build state the verb would see — the card draws its mark from
+        # this flag alone.
+        rows = []
+        for entry in sorted(meta['versions'], key=lambda v: v['version'], reverse=True):
+            row = dict(entry)
+            row['deletable'] = not delete_block_of(entry, self._pins_of(meta, int(entry.get('version', 0))))
+            rows.append(row)
+        return rows
 
     # =========================================================================
     # PUBLISHES — audience pointers (PUBLISH = bind a deployment to an audience)
@@ -927,6 +1069,22 @@ class FileDeploymentBackend:
     def _pointer_of(self, meta: Dict[str, Any], team_id: str) -> Optional[Dict[str, Any]]:
         """The pointer row of a team or personal slot, or None."""
         return self._publishes_of(meta).get(self._slot_key(team_id))
+
+    def _pins_of(self, meta: Dict[str, Any], version: int) -> List[Dict[str, Any]]:
+        """Every live publish row (any audience, any kind) pointing at ``version``.
+
+        A soft-removed row points at nothing; a disabled row still pins
+        (re-enabling must find its version). The rows carry their decoded
+        audience so ``delete_block_of`` can name the rung.
+        """
+        pins: List[Dict[str, Any]] = []
+        for key, row in self._publishes_of(meta).items():
+            if not isinstance(row, dict) or row.get('state') == 'removed':
+                continue
+            if int(row.get('version') or 0) != int(version):
+                continue
+            pins.append(self._publish_row(key, row, str(meta.get('orgId') or ''), str(meta.get('projectId') or '')))
+        return pins
 
     async def publish_set(
         self,
@@ -1549,4 +1707,4 @@ class FileDeploymentBackend:
         }
 
 
-__all__ = ['FileDeploymentBackend', 'artifact_path', 'artifact_sha256']
+__all__ = ['FileDeploymentBackend', 'artifact_path', 'artifact_sha256', 'delete_block_of']

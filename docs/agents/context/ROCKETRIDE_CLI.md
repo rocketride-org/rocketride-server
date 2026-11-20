@@ -296,6 +296,7 @@ rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a
 rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value; TypeScript package only
 rocketride deploy log <appId> <version>                             # read an app version's build log (or: rocketride app log)
 rocketride deploy enable|disable|remove <projectId> --team <teamId>
+rocketride deploy delete <projectId> <version> [--yes]                # delete one deployed version from the server (apps and pipes); refused while a rung pins it, it is in review, or its build runs; confirmed on a terminal, --yes elsewhere; the number is never reused
 ```
 
 Every verb here fronts a `client.deploy.*` SDK method — prefer the API in

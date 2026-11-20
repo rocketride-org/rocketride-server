@@ -173,6 +173,44 @@ class IStore(ABC):
         """
         pass
 
+    async def delete_tree(self, prefix: str) -> int:
+        """
+        Delete every file under a prefix (the store's ``rmtree``).
+
+        The provider-neutral default lists the prefix and deletes each file;
+        a provider with real directories overrides it to remove the
+        directory itself as well (the filesystem provider), so nothing of
+        the tree remains. A prefix with no files is a no-op, never an
+        error: the caller is removing storage that may already be gone.
+
+        Args:
+            prefix: Directory-style prefix (a trailing ``/`` is added when
+                missing, so a sibling whose name merely starts with the
+                prefix is never touched).
+
+        Returns:
+            The number of files deleted.
+
+        Raises:
+            StorageError: If a listing or a delete fails.
+        """
+        if not prefix:
+            raise StorageError('delete_tree requires a non-empty prefix')
+        if not prefix.endswith('/'):
+            prefix += '/'
+        deleted = 0
+        for filename in await self.list_files(prefix):
+            # A provider that normalizes the trailing slash away would list
+            # ``v10/`` under ``v1/``: the tree boundary is enforced here.
+            if not filename.replace('\\', '/').startswith(prefix):
+                continue
+            try:
+                await self.delete_file(filename)
+            except StorageNotFoundError:
+                continue
+            deleted += 1
+        return deleted
+
     async def get_modified_time(self, filename: str) -> float:
         """
         Get the last modified time of a file as an epoch timestamp.

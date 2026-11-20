@@ -216,6 +216,9 @@ export const deploymentActions = {
 	setDisabled: (projectId: string, rawTeamId: string, disabled: boolean) => (disabled ? needClient().deploy.disable(projectId, toWireTeamId(rawTeamId)) : needClient().deploy.enable(projectId, toWireTeamId(rawTeamId))),
 	deployVersion: (projectId: string, rawTeamId: string, version: number) => needClient().deploy.deploy(projectId, version, toWireTeamId(rawTeamId)),
 	remove: (projectId: string, rawTeamId: string) => needClient().deploy.remove(projectId, toWireTeamId(rawTeamId)),
+	/** Delete one deployed version from the server (plan 2.3); the server
+	 *  refuses by name while a rung pins it, it is in review, or it builds. */
+	deleteVersion: (projectId: string, version: number) => needClient().deploy.delete(projectId, version),
 	runSource: (projectId: string, rawTeamId: string, sourceId: string) => needClient().deploy.run(projectId, sourceId, toWireTeamId(rawTeamId)),
 	stopSource: async (projectId: string, rawTeamId: string, sourceId: string) => {
 		// Existing task machinery: resolve the live task, terminate it. teamId

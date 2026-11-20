@@ -130,6 +130,7 @@ See [Deployments](/clients/python/deploy) for the model.
 | `deploy.disable` | `async def disable(self, project_id, team_id) -> Deployment` | `Deployment` |
 | `deploy.enable` | `async def enable(self, project_id, team_id) -> Deployment` | `Deployment` |
 | `deploy.remove` | `async def remove(self, project_id, team_id) -> Deployment` | `Deployment` |
+| `deploy.delete` | `async def delete(self, project_id, version) -> DeployDeleteResult` | `DeployDeleteResult` |
 | `deploy.set_schedule` | `async def set_schedule(self, project_id, source_id, schedule, team_id, *, ttl=None) -> Deployment` | `Deployment` |
 | `deploy.pause_schedule` | `async def pause_schedule(self, project_id, source_id, team_id) -> Deployment` | `Deployment` |
 | `deploy.resume_schedule` | `async def resume_schedule(self, project_id, source_id, team_id) -> Deployment` | `Deployment` |
