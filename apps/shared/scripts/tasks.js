@@ -94,9 +94,10 @@ function makeTestAction() {
 			// tsx erases types rather than checking them, so without this step
 			// neither the tests nor the source they exercise would run under any
 			// typechecker (tsconfig.json deliberately excludes tests; see
-			// tsconfig.test.json). It assumes a built shell: on a fresh clone
-			// .rocketride/shell/shell.tgz is the bootstrap stub until shell:build
-			// replaces it (scripts/lib/appModule.js).
+			// tsconfig.test.json). Inside the monorepo the bare 'shell' import
+			// resolves through pnpm-workspace.yaml (shell: 'workspace:*') to
+			// packages/shell, whose exports point at src/index.ts, so this check
+			// reads source and never the .rocketride/shell/shell.tgz bootstrap stub.
 			await execCommand('npx', ['tsc', '-p', 'tsconfig.test.json', '--noEmit'], { task, cwd: APP_ROOT });
 
 			// stub-css: no-op loader for stylesheet imports the shell barrel
