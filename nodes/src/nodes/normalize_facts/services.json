@@ -2,7 +2,7 @@
 	"title": "Normalize Facts",
 	"protocol": "normalize_facts://",
 	"classType": ["text"],
-	"capabilities": ["experimental", "multitenant"],
+	"capabilities": ["experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.normalize_facts",

@@ -19,7 +19,7 @@
 	//     Capabilities are flags that change the behavior of the underlying
 	//     engine
 	//
-	"capabilities": ["multitenant"],
+	"capabilities": [],
 	//
 	// Optional:
 	//     The node is the actual physical node to instantiate - if

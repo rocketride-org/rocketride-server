@@ -1031,7 +1031,9 @@ class TestIGlobal:
     def _glob(self, config):
         """An IGlobal on the stored config; ``self.config`` resolves it through the engine's schema."""
         glob = _ig.IGlobal.__new__(_ig.IGlobal)
-        glob.glb = Mock(logicalType='tool_notion', connConfig=config)
+        # A plain namespace, not a Mock: the base reads the node identity off glb
+        # for config.node, so an auto-created attribute would masquerade as one
+        glob.glb = types.SimpleNamespace(logicalType='tool_notion', connConfig=config)
         return glob
 
     def test_begin_global_reads_apikey_from_config(self):

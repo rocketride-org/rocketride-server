@@ -2,7 +2,7 @@
 	"title": "Hybrid Rerank",
 	"protocol": "search_hybrid://",
 	"classType": ["rerank"],
-	"capabilities": ["experimental", "multitenant"],
+	"capabilities": ["experimental"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.search_hybrid",

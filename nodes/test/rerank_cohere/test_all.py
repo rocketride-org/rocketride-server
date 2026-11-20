@@ -459,10 +459,12 @@ class TestIGlobal:
         mock_endpoint.endpoint.bag = {}
         iglobal.IEndpoint = mock_endpoint
 
-        mock_glb = Mock()
-        mock_glb.logicalType = 'rerank_cohere'
-        mock_glb.connConfig = {'apikey': 'test-key'} if config is None else config
-        iglobal.glb = mock_glb
+        # A plain namespace, not a Mock: the base reads the node identity off glb
+        # for config.node, so an auto-created attribute would masquerade as one
+        iglobal.glb = types.SimpleNamespace(
+            logicalType='rerank_cohere',
+            connConfig={'apikey': 'test-key'} if config is None else config,
+        )
         return iglobal
 
     def test_begin_global_creates_reranker_on_the_default_model(self, rerank_pkg):

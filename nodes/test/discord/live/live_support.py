@@ -41,14 +41,55 @@ from urllib.parse import urlparse
 
 import pytest
 
-# The live suite drives real Discord; an offline run without discord.py must
-# skip this directory instead of breaking collection for the unit tests.
-pytest.importorskip('discord')
-
-import discord  # noqa: E402
-from discord.ext import commands
-
 LIVE_ENV_FLAG = 'DISCORD_LIVE'
+
+
+def _is_node_package_dir(entry: str) -> bool:
+    """True when ``entry/discord`` is the discord NODE (a services.json lives there), not discord.py."""
+    return os.path.isfile(os.path.join(entry or os.getcwd(), 'discord', 'services.json'))
+
+
+def import_discord_py():
+    """
+    Import discord.py past the node package of the same name.
+
+    A bare ``import discord`` also resolves to the node package
+    ``nodes/src/nodes/discord`` once a unit-test module has put nodes/src/nodes
+    on sys.path, so the import runs with those entries removed and any such
+    shadow already in sys.modules dropped. Without discord.py the directory
+    skips when the live tests are off (a normal run must not break on it) and
+    FAILS collection when ``DISCORD_LIVE=1`` names them: an enabled run must
+    never pass by skipping.
+
+    Returns:
+        module: The discord.py package, with ``discord.ext.commands`` loaded.
+    """
+    shadows = [entry for entry in sys.path if _is_node_package_dir(entry)]
+    for name in [n for n in sys.modules if n == 'discord' or n.startswith('discord.')]:
+        module_file = getattr(sys.modules[name], '__file__', '') or ''
+        if any(os.path.abspath(module_file).startswith(os.path.abspath(os.path.join(s, 'discord'))) for s in shadows):
+            del sys.modules[name]
+    saved = sys.path[:]
+    sys.path[:] = [entry for entry in sys.path if entry not in shadows]
+    try:
+        module = importlib.import_module('discord')
+        importlib.import_module('discord.ext.commands')
+        return module
+    except ImportError as e:
+        error = e
+    finally:
+        sys.path[:] = saved
+    # outside the except so the outcome carries no chained traceback
+    shadow_note = f' (the node package shadows the name on sys.path: {", ".join(shadows)})' if shadows else ''
+    reason = f'discord.py is not importable: {error}{shadow_note}'
+    if os.environ.get(LIVE_ENV_FLAG) == '1':
+        pytest.fail(f'{LIVE_ENV_FLAG}=1 but {reason}', pytrace=False)
+    pytest.skip(reason, allow_module_level=True)
+
+
+discord = import_discord_py()
+from discord.ext import commands  # noqa: E402
+
 LIVE_PREFIX = '[LIVE-TEST'
 E2E_PREFIX = '[e2e'
 POST_THROTTLE_SECONDS = 1.5

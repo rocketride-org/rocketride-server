@@ -505,6 +505,12 @@
 			]
 		}
 	],
+	//
+	// Generated:
+	//		The pre-named-pipes schema this node's stored configs convert from
+	//		(plan 5.6.8); only task_convert.py reads it. Written by
+	//		tools/legacy_blocks.py, which replaces the member on a re-run
+	//
 	"legacy": {
 		"selector": "profile",
 		"default": "default",

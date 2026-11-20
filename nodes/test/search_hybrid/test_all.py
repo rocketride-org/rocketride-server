@@ -924,10 +924,9 @@ def search_hybrid_pkg():
     def make_instance(engine, top_k=10, rrf_k=60):
         """Build an IInstance with a mock IGlobal/engine and a mock pipeline.
 
-        The instance is certified multitenant (plan 4.2): it reaches the engine
-        through the global's accessor and its knobs through ``settings``, so
-        the mock answers ``search_engine()`` and the settings view is seeded
-        on the instance.
+        The instance reaches the engine through the global's accessor and its
+        knobs through ``settings`` (plan 4.1), so the mock answers
+        ``search_engine()`` and the settings view is seeded on the instance.
         """
         inst = IInstance.__new__(IInstance)
         iglobal = MagicMock(spec=IGlobal)

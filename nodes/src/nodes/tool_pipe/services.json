@@ -2,7 +2,7 @@
 	"title": "Pipeline Tool",
 	"protocol": "tool_pipe://",
 	"classType": ["tool"],
-	"capabilities": ["invoke", "multitenant"],
+	"capabilities": ["invoke"],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.tool_pipe",

@@ -2,7 +2,7 @@
 	"title": "Video Composer",
 	"protocol": "video_composer://",
 	"classType": ["video"],
-	"capabilities": ["multitenant"],
+	"capabilities": [],
 	"register": "filter",
 	"node": "python",
 	"path": "nodes.video_composer",
