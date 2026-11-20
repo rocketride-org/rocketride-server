@@ -380,6 +380,11 @@ def local_names(func: ast.AST) -> Set[str]:
     return names - declared
 
 
+def global_names(func: ast.AST) -> Set[str]:
+    """Return the names ``func`` declares ``global`` in its own scope."""
+    return {n for sub in own_nodes(func) if isinstance(sub, ast.Global) for n in sub.names}
+
+
 def function_scopes(node: ast.AST, enclosing: frozenset = frozenset()) -> Iterator[tuple]:
     """
     Yield ``(function, bound)`` for every function under ``node``.
@@ -391,7 +396,7 @@ def function_scopes(node: ast.AST, enclosing: frozenset = frozenset()) -> Iterat
         if isinstance(sub, ast.ClassDef):
             yield from function_scopes(sub, enclosing)
         elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-            bound = enclosing | local_names(sub)
+            bound = (enclosing - global_names(sub)) | local_names(sub)
             yield sub, bound
             yield from function_scopes(sub, bound)
 
@@ -442,20 +447,44 @@ def functions(tree: ast.AST) -> Iterator[ast.AST]:
             yield sub
 
 
+def reached_nodes(func: ast.AST) -> List[ast.AST]:
+    """
+    Return the nodes a function runs: its own body, plus the local functions it calls by name.
+
+    A nested function that is defined but never called contributes nothing; one
+    the body calls directly (``close_client()``) runs, and so does whatever it
+    calls by name in turn.
+    """
+    reached: List[ast.AST] = []
+    seen: Set[int] = set()
+    todo = [func]
+    while todo:
+        scope = todo.pop()
+        if id(scope) in seen:
+            continue
+        seen.add(id(scope))
+        body = list(own_nodes(scope))
+        reached.extend(body)
+        local_defs = {sub.name: sub for sub in body if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        called = {sub.func.id for sub in body if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)}
+        todo.extend(local_defs[name] for name in sorted(called & set(local_defs)))
+    return reached
+
+
 def self_attrs(node: ast.AST) -> Set[str]:
-    """Return every ``self.<attr>`` a method's own body references (not an uncalled nested function's)."""
+    """Return every ``self.<attr>`` a method reaches (not an uncalled nested function's)."""
     return {
         sub.attr
-        for sub in own_nodes(node)
+        for sub in reached_nodes(node)
         if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name) and sub.value.id == 'self'
     }
 
 
 def self_calls(node: ast.AST) -> Set[str]:
-    """Return the names of the ``self.<method>(...)`` calls a method's own body makes."""
+    """Return the names of the ``self.<method>(...)`` calls a method reaches."""
     return {
         sub.func.attr
-        for sub in own_nodes(node)
+        for sub in reached_nodes(node)
         if isinstance(sub, ast.Call)
         and isinstance(sub.func, ast.Attribute)
         and isinstance(sub.func.value, ast.Name)
@@ -474,6 +503,63 @@ def method_closure(methods: Dict[str, ast.AST], start: str) -> List[ast.AST]:
         order.append(methods[name])
         todo.extend(sorted(self_calls(methods[name]), reverse=True))
     return order
+
+
+def alias_flow(body: List[ast.stmt], aliases: Set[str], is_source, scan) -> Set[str]:
+    """
+    Walk ``body`` in execution order, tracking the names that may alias a source; return the set after it.
+
+    ``scan(expr, aliases)`` is called on every expression with the alias set
+    that holds where it runs. Both arms of a branch are walked and their sets
+    merged by union (a name aliases after the join if it may on any path); a
+    loop is walked as zero or more passes; a plain rebinding on the straight
+    line ends the alias. Nested function and class bodies do not run here.
+    """
+    aliases = set(aliases)
+    for stmt in body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        if isinstance(stmt, ast.If):
+            scan(stmt.test, aliases)
+            aliases = alias_flow(stmt.body, aliases, is_source, scan) | alias_flow(
+                stmt.orelse, aliases, is_source, scan
+            )
+        elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            scan(stmt.iter if isinstance(stmt, (ast.For, ast.AsyncFor)) else stmt.test, aliases)
+            entry = set(aliases)
+            for _ in range(2):  # a second pass carries what one iteration leaves into the next
+                start = set(entry)
+                if isinstance(stmt, (ast.For, ast.AsyncFor)):
+                    start -= set(assigned_names(stmt.target))
+                entry |= alias_flow(stmt.body, start, is_source, scan)
+            aliases = alias_flow(stmt.orelse, entry, is_source, scan)
+        elif isinstance(stmt, (ast.With, ast.AsyncWith)):
+            for item in stmt.items:
+                scan(item.context_expr, aliases)
+                if item.optional_vars is not None:
+                    aliases -= set(assigned_names(item.optional_vars))
+            aliases = alias_flow(stmt.body, aliases, is_source, scan)
+        elif isinstance(stmt, (ast.Try, getattr(ast, 'TryStar', ast.Try))):
+            after = alias_flow(stmt.body, aliases, is_source, scan)
+            anywhere = aliases | after
+            outs = [alias_flow(stmt.orelse, after, is_source, scan)]
+            outs += [alias_flow(h.body, anywhere, is_source, scan) for h in stmt.handlers]
+            aliases = alias_flow(stmt.finalbody, set().union(*outs), is_source, scan)
+        elif isinstance(stmt, ast.Match):
+            scan(stmt.subject, aliases)
+            outs = [aliases] + [alias_flow(case.body, aliases, is_source, scan) for case in stmt.cases]
+            aliases = set().union(*outs)
+        else:
+            # A simple statement: its reads run before its bindings.
+            scan(stmt, aliases)
+            value = assigned_value(stmt)
+            for t in write_targets(stmt):
+                if isinstance(t, ast.Name):
+                    if isinstance(stmt, ast.Assign) and value is not None and is_source(value):
+                        aliases.add(t.id)
+                    else:
+                        aliases.discard(t.id)
+    return aliases
 
 
 def opens(value: ast.AST, tainted: Set[str]) -> bool:
@@ -748,46 +834,41 @@ class FileLint:
                         and expr.value.id == 'self'
                     )
 
-                # Step 1: every binding of a plain name in beginGlobal, and whether it binds self.config.
-                bindings: Dict[str, List[tuple]] = {}
-                for sub in ast.walk(method):
-                    value = assigned_value(sub)
-                    for t in write_targets(sub):
-                        if isinstance(t, ast.Name):
-                            aliased = isinstance(sub, ast.Assign) and value is not None and is_self_config(value)
-                            bindings.setdefault(t.id, []).append((sub.lineno, aliased))
+                # Each read is judged against the names that MAY alias self.config where it
+                # runs: branches merge by union, a straight-line rebinding ends the alias.
+                found: Dict[int, tuple] = {}
 
-                def is_config(expr: ast.AST) -> bool:
-                    if not isinstance(expr, ast.Name):
-                        return is_self_config(expr)
-                    # An alias holds where the latest binding before the read bound self.config
-                    earlier = [b for b in bindings.get(expr.id, []) if b[0] < expr.lineno]
-                    return bool(earlier) and max(earlier)[1]
+                def scan(expr: ast.AST, aliases: Set[str]) -> None:
+                    def is_config(e: ast.AST) -> bool:
+                        return is_self_config(e) or (isinstance(e, ast.Name) and e.id in aliases)
 
-                # Step 2: attribute, item and get() reads of a param key.
-                for sub in ast.walk(method):
-                    key = None
-                    if isinstance(sub, ast.Attribute) and is_config(sub.value):
-                        key = sub.attr
-                    elif isinstance(sub, ast.Subscript) and is_config(sub.value):
-                        if isinstance(sub.slice, ast.Constant) and isinstance(sub.slice.value, str):
-                            key = sub.slice.value
-                    elif (
-                        isinstance(sub, ast.Call)
-                        and isinstance(sub.func, ast.Attribute)
-                        and sub.func.attr == 'get'
-                        and is_config(sub.func.value)
-                        and sub.args
-                        and isinstance(sub.args[0], ast.Constant)
-                    ):
-                        key = sub.args[0].value
-                    if key in self.params:
-                        self.add(
-                            'param-in-global',
-                            sub,
-                            f'"{key}" is a parameter: beginGlobal cannot know a per-call value; '
-                            'read it from self.settings in IInstance',
-                        )
+                    for sub in ast.walk(expr):
+                        key = None
+                        if isinstance(sub, ast.Attribute) and is_config(sub.value):
+                            key = sub.attr
+                        elif isinstance(sub, ast.Subscript) and is_config(sub.value):
+                            if isinstance(sub.slice, ast.Constant) and isinstance(sub.slice.value, str):
+                                key = sub.slice.value
+                        elif (
+                            isinstance(sub, ast.Call)
+                            and isinstance(sub.func, ast.Attribute)
+                            and sub.func.attr == 'get'
+                            and is_config(sub.func.value)
+                            and sub.args
+                            and isinstance(sub.args[0], ast.Constant)
+                        ):
+                            key = sub.args[0].value
+                        if key in self.params:
+                            found[id(sub)] = (sub, key)
+
+                alias_flow(method.body, set(), is_self_config, scan)
+                for sub, key in sorted(found.values(), key=lambda f: (f[0].lineno, f[0].col_offset)):
+                    self.add(
+                        'param-in-global',
+                        sub,
+                        f'"{key}" is a parameter: beginGlobal cannot know a per-call value; '
+                        'read it from self.settings in IInstance',
+                    )
 
     # -------------------------------------------------------------------------
     # caller-write

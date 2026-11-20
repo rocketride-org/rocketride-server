@@ -574,6 +574,76 @@ def test_a_glb_write_is_not_a_read_but_an_augmented_one_is(tmp_path):
     assert rules(node) == ['glb-pipetype']
 
 
+def test_an_explicit_global_overrides_an_enclosing_binding(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                _CLIENTS = {}
+
+                def outer():
+                    _CLIENTS = {}
+
+                    def inner(key, client):
+                        global _CLIENTS
+                        _CLIENTS[key] = client
+
+                    return _CLIENTS, inner
+            """
+        },
+    )
+    assert rules(node) == ['module-cache']
+
+
+def test_cleanup_in_a_local_function_end_global_calls_counts(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                class IGlobal:
+                    def beginGlobal(self):
+                        self.client = Client(self.config.host)
+
+                    def endGlobal(self):
+                        def close_client():
+                            self.client.close()
+                            self.client = None
+
+                        close_client()
+            """
+        },
+    )
+    assert rules(node) == []
+
+
+def test_a_config_alias_on_either_branch_survives_the_join(tmp_path):
+    services = {
+        'title': 'Fixture',
+        'protocol': 'fixture://',
+        'properties': [{'name': 'maxEdge', 'type': 'integer', 'param': True}],
+    }
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                class IGlobal:
+                    def beginGlobal(self):
+                        if self.enabled:
+                            cfg = self.config
+                        else:
+                            cfg = {}
+                        self.edge = cfg.get('maxEdge')
+                        cfg = {}
+                        self.other = cfg.get('maxEdge')
+            """
+        },
+        services,
+    )
+    findings = LINT.lint_node(node)
+    assert [f.rule for f in findings] == ['param-in-global']
+    assert 'self.edge' in (node / 'IGlobal.py').read_text(encoding='utf-8').splitlines()[findings[0].line - 1]
+
+
 @pytest.mark.parametrize('argv', [['--all'], ['no-such-node-dir'], ['--all', 'no-such-root']])
 def test_the_cli_refuses_what_it_cannot_lint(monkeypatch, argv):
     monkeypatch.setattr(LINT.sys, 'argv', ['lint-node-code.py', *argv])

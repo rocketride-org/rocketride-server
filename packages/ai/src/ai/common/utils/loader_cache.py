@@ -59,23 +59,37 @@ from typing import Callable, Dict, Hashable, TypeVar
 T = TypeVar('T')
 
 
+class _Slot:
+    """One model id's state: its load lock, its handle and who is using the slot."""
+
+    __slots__ = ('lock', 'handle', 'loaded', 'users', 'pending')
+
+    def __init__(self) -> None:
+        """An empty slot: nothing loaded, nobody holding or waiting."""
+        self.lock = threading.Lock()  #: Serializes the load (and the loaded check) for this id.
+        self.handle: object = None  #: The loaded handle, while ``loaded``.
+        self.loaded = False  #: Whether ``handle`` is live.
+        self.users = 0  #: Controls holding the handle (acquired, not yet released).
+        self.pending = 0  #: Acquires in flight that captured this slot.
+
+
 class LoaderCache:
     """Model handles keyed by model id: loaded on the first acquire, dropped on the last release."""
 
     def __init__(self) -> None:
         """Start empty: nothing loads until a control asks for it."""
-        self._lock = threading.Lock()  #: Guards the three maps.
-        self._handles: Dict[Hashable, object] = {}  #: Loaded handles by model id.
-        self._users: Dict[Hashable, int] = {}  #: Controls holding each handle.
-        self._loading: Dict[Hashable, threading.Lock] = {}  #: One lock per model id being loaded.
+        self._lock = threading.Lock()  #: Guards the slot map and every slot's counters.
+        self._slots: Dict[Hashable, _Slot] = {}  #: One slot per id in use or in flight.
 
     def acquire(self, model_id: Hashable, load: Callable[[], T]) -> T:
         """
         Return the handle for ``model_id``, loading it with ``load`` if no control holds it.
 
-        Two controls asking for the same id at once load it once (the second
-        waits on that id's lock); different ids load in parallel. Every acquire
-        that returns must be paired with one ``release``.
+        Every caller for one id goes through the same slot and its lock, and the
+        slot outlives the last release while any acquire that captured it is
+        still in flight, so an id is never loaded twice at once and its holder
+        count is never reset under a live holder. Different ids load in
+        parallel. Every acquire that returns must be paired with one ``release``.
 
         Args:
             model_id (Hashable): What the weights depend on: the model id, plus any
@@ -86,25 +100,28 @@ class LoaderCache:
         Returns:
             T: The shared handle.
         """
-        # Step 1: a held handle is shared without waiting on any load.
+        # Step 1: capture the id's slot; it cannot be dropped while we are pending.
         with self._lock:
-            if model_id in self._handles:
-                self._users[model_id] += 1
-                return self._handles[model_id]  # type: ignore[return-value]
-            key_lock = self._loading.setdefault(model_id, threading.Lock())
-
-        # Step 2: one loader per id; a second caller finds the handle when it gets the lock.
-        with key_lock:
+            slot = self._slots.get(model_id)
+            if slot is None:
+                slot = self._slots[model_id] = _Slot()
+            slot.pending += 1
+        try:
+            # Step 2: under the slot's lock, share a live handle or load one.
+            with slot.lock:
+                with self._lock:
+                    if slot.loaded:
+                        slot.users += 1
+                        return slot.handle  # type: ignore[return-value]
+                handle = load()
+                with self._lock:
+                    slot.handle, slot.loaded, slot.users = handle, True, slot.users + 1
+                return handle
+        finally:
+            # Step 3: no longer in flight; an unused slot goes.
             with self._lock:
-                if model_id in self._handles:
-                    self._users[model_id] += 1
-                    return self._handles[model_id]  # type: ignore[return-value]
-            handle = load()
-            with self._lock:
-                self._handles[model_id] = handle
-                self._users[model_id] = 1
-                self._loading.pop(model_id, None)
-            return handle
+                slot.pending -= 1
+                self._drop_if_unused(model_id, slot)
 
     def release(self, model_id: Hashable) -> None:
         """
@@ -117,9 +134,15 @@ class LoaderCache:
             model_id (Hashable): The id passed to ``acquire``.
         """
         with self._lock:
-            users = self._users.get(model_id, 0) - 1
-            if users > 0:
-                self._users[model_id] = users
+            slot = self._slots.get(model_id)
+            if slot is None or slot.users == 0:
                 return
-            self._users.pop(model_id, None)
-            self._handles.pop(model_id, None)
+            slot.users -= 1
+            if slot.users == 0:
+                slot.handle, slot.loaded = None, False
+                self._drop_if_unused(model_id, slot)
+
+    def _drop_if_unused(self, model_id: Hashable, slot: _Slot) -> None:
+        """Forget a slot no control holds and no acquire is waiting on (caller holds ``_lock``)."""
+        if slot.users == 0 and slot.pending == 0 and self._slots.get(model_id) is slot:
+            del self._slots[model_id]

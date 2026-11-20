@@ -15,6 +15,7 @@ Run with::
 from __future__ import annotations
 
 import threading
+import time
 import weakref
 
 import pytest
@@ -85,6 +86,40 @@ def test_a_failed_load_caches_and_counts_nothing():
     assert cache.acquire('m', _Model) is not handle
 
 
+def _run_all(targets):
+    """Run each callable on its own thread; return their results in order, re-raising any failure here."""
+    results = [None] * len(targets)
+    errors = []
+
+    def run(index, target):
+        try:
+            results[index] = target()
+        except BaseException as e:  # noqa: BLE001 - forwarded to the test thread, pytest outcomes included
+            errors.append(e)
+
+    threads = [threading.Thread(target=run, args=(i, target)) for i, target in enumerate(targets)]
+    for thread in threads:
+        thread.start()
+    return threads, results, errors
+
+
+def _join(threads, errors):
+    """Join every worker, then re-raise the first failure on the test thread."""
+    for thread in threads:
+        thread.join(5)
+        assert not thread.is_alive(), 'a worker did not finish'
+    if errors:
+        raise errors[0]
+
+
+def _wait_for(predicate):
+    """Wait (bounded) until ``predicate()`` holds."""
+    deadline = time.monotonic() + 5
+    while not predicate():
+        assert time.monotonic() < deadline, 'condition never held'
+        time.sleep(0.001)
+
+
 def test_concurrent_acquires_of_one_id_load_once():
     cache = LoaderCache()
     started = threading.Event()
@@ -95,12 +130,47 @@ def test_concurrent_acquires_of_one_id_load_once():
         started.wait(1)
         return _Model()
 
-    results = []
-    threads = [threading.Thread(target=lambda: results.append(cache.acquire('m', slow))) for _ in range(4)]
-    for t in threads:
-        t.start()
+    threads, results, errors = _run_all([lambda: cache.acquire('m', slow) for _ in range(4)])
     started.set()
-    for t in threads:
-        t.join()
-    assert loads == [1]
+    _join(threads, errors)
+    assert len(results) == 4 and all(r is not None for r in results)
     assert len({id(r) for r in results}) == 1
+    assert loads == [1]
+
+
+def test_a_waiting_acquire_survives_the_last_release_and_a_third_acquire_shares_its_load():
+    cache = LoaderCache()
+    loads = []
+
+    def load():
+        loads.append(1)
+        return _Model()
+
+    # A holds the model; a load in progress is simulated by holding the slot's lock.
+    first = cache.acquire('m', load)
+    slot = cache._slots['m']
+    slot.lock.acquire()
+    try:
+        # W captures the slot and waits on its lock.
+        threads, results, errors = _run_all([lambda: cache.acquire('m', load)])
+        _wait_for(lambda: slot.pending == 1)
+
+        # A's control ends: the last release drops the handle, but W keeps the slot.
+        cache.release('m')
+        assert cache._slots.get('m') is slot
+
+        # A third acquire finds the same slot and waits on the same lock.
+        more, more_results, more_errors = _run_all([lambda: cache.acquire('m', load)])
+        _wait_for(lambda: slot.pending == 2)
+    finally:
+        slot.lock.release()
+    _join(threads + more, errors + more_errors)
+
+    # One reload, shared by both waiters, with both counted as holders.
+    assert loads == [1, 1]
+    assert results[0] is more_results[0] is not first
+    assert slot.users == 2
+    cache.release('m')
+    assert cache._slots.get('m') is slot
+    cache.release('m')
+    assert 'm' not in cache._slots
