@@ -51,6 +51,9 @@ inline void enterDebugger(Location location, DebugInfo &&...info) noexcept {
 template <typename... DebugInfo>
 [[noreturn]] inline void fatality(Location location,
                                   DebugInfo &&...info) noexcept {
+    // Whether this ends in abort() on Linux and macOS: not for a start-up
+    // error before any monitor; a crash or a second fatality keeps it
+    [[maybe_unused]] bool keepAbort = true;
     if (!_exch(fatalityExecuting(), true)) {
         log::write(location, Color::Red,
                    "Fatal:", std::forward<DebugInfo>(info)..., '\n',
@@ -59,13 +62,17 @@ template <typename... DebugInfo>
 
         // A lone Error keeps its own code, e.g. Ec::Crash
         if constexpr (sizeof...(DebugInfo) == 1 &&
-                      (traits::IsErrorV<DebugInfo> && ...))
+                      (traits::IsErrorV<DebugInfo> && ...)) {
             onFatality(location, info...);
-        else
+            keepAbort = fatalityHandlerEverRegistered() ||
+                        ((info == Ec::Crash) && ...);
+        } else {
             onFatality(location,
                        error::makeError(Ec::Fatality, location,
                                         _tsd<' ', Format::ERROROROK>(
                                             std::forward<DebugInfo>(info)...)));
+            keepAbort = fatalityHandlerEverRegistered();
+        }
     }
 
 #if defined(ROCKETRIDE_PLAT_WIN)
@@ -77,10 +84,11 @@ template <typename... DebugInfo>
 #endif
 
 #if ROCKETRIDE_PLAT_UNX
-    // abort()'s SIGABRT is what makes Crashpad write a minidump: wanted for real
-    // fatalities, suppressed when we're already cancelling (exit without a
-    // signal via the existing platform-safe quickExit).
-    if (async::cancelled(location, true))
+    // abort()'s SIGABRT is what makes Crashpad write a minidump: wanted for
+    // real fatalities, suppressed when we're already cancelling or for a
+    // start-up error before any monitor (exit without a signal via the
+    // existing platform-safe quickExit).
+    if (async::cancelled(location, true) || !keepAbort)
         application::quickExit(1);
     std::abort();
 #else

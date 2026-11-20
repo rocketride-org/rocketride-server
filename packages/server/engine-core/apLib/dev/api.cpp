@@ -71,6 +71,10 @@ void deRegisterFatalityHandler(size_t slot) noexcept {
     g_fatalityHandlers.erase(slot);
 }
 
+bool fatalityHandlerEverRegistered() noexcept {
+    return g_nextSlot > 1;
+}
+
 void onFatality(Location location, const Error &ccode) noexcept {
     auto handlers = g_fatalityHandlers;
     for (auto &[slot, handler] : handlers) _call(handler, location, ccode);
