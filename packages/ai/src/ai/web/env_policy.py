@@ -17,8 +17,26 @@ def validate_hosted_env_file(path: str, args: Iterable[str]) -> None:
     if not {'--saas', '--hosted'}.intersection(args):
         return
     env_file = Path(path)
-    if env_file.exists() and dotenv_values(env_file, interpolate=False):
+    if not env_file.exists():
+        return
+    if _is_populated(env_file):
         raise RuntimeError(
             'Hosted engines cannot use an install .env file: task processes share its file permissions. '
             'Inject configuration through the process environment and remove the install .env before starting.'
         )
+
+
+def _is_populated(env_file: Path) -> bool:
+    """Whether the file holds anything but blank lines and comments, whether or not it parses.
+
+    dotenv returns nothing for a file whose only line has an unmatched quote, yet a task can still read
+    that text, so the check does not depend on the parser's answer. A file that cannot be read counts as
+    populated (fail closed).
+    """
+    try:
+        if dotenv_values(env_file, interpolate=False):
+            return True
+        text = env_file.read_text(encoding='utf-8', errors='replace')
+    except Exception:
+        return True
+    return any(line.strip() and not line.lstrip().startswith('#') for line in text.splitlines())

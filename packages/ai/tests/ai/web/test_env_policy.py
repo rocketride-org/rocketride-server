@@ -7,7 +7,16 @@ from ai.web.env_policy import validate_hosted_env_file
 
 @pytest.mark.parametrize('flag', ['--saas', '--hosted'])
 @pytest.mark.parametrize(
-    'line', ['RR_SIGNING_KEY=secret-do-not-print', 'export AWS_SECRET_ACCESS_KEY="secret-do-not-print"', 'EMPTY=']
+    'line',
+    [
+        'RR_SIGNING_KEY=secret-do-not-print',
+        'export AWS_SECRET_ACCESS_KEY="secret-do-not-print"',
+        'EMPTY=',
+        # The parser reads nothing from these, but a task can read the text.
+        'RR_SIGNING_KEY="secret-do-not-print',
+        "RR_SIGNING_KEY='secret-do-not-print",
+        'secret-do-not-print',
+    ],
 )
 def test_hosted_engine_refuses_populated_install_env(tmp_path, flag, line):
     path = tmp_path / '.env'
