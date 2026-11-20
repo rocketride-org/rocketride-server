@@ -301,6 +301,7 @@ data. The complete set in the current catalog:
 | `filestore_source` | `tags` | Reads from a RocketRide file store |
 | `filesys` | `tags` | Reads from the local file system |
 | `telegram` | `text`, `image`, `audio`, `video`, `tags` | Telegram Bot messages, routed per message type |
+| `scraper_beautifulsoup_source` | `answers`, `text` | Run-once web scraping of configured JSON APIs, RSS/Atom feeds and HTML pages (no input; schedulable). `answers` carries one JSON row list per source — wire it to a SQL node's `answers` lane to load a table |
 | `tools` | — (nothing) | Transfers no data; exists to **host tool nodes** via invoke |
 
 (`remote` is NOT a source — it is an infrastructure transport for distributed pipelines.)
@@ -662,6 +663,21 @@ Connects to an external MCP server and exposes its tools to the controlling agen
 (`endpoint` field), `sse` (legacy, `sse_endpoint` field). A plain `tool` node: control wiring
 only, no lanes.
 
+A published stdio server usually reads its API key from an environment variable: set it in
+`env`, which is added to the engine's environment for that process. `allowedTools` exposes
+only the listed tools; the agent never sees the others and a call to one is refused before it
+reaches the server. Leave it empty to expose every tool. Stdio servers do not run on
+RocketRide Cloud.
+
+```json
+{ "id": "mcp_client_1", "provider": "mcp_client",
+  "config": { "serverName": "github", "transport": "stdio",
+    "stdio": { "commandLine": "npx -y @modelcontextprotocol/server-github",
+               "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${ROCKETRIDE_GITHUB_TOKEN}" } },
+    "allowedTools": [{ "toolName": "search_issues" }, { "toolName": "get_issue" }], "parameters": {} },
+  "control": [{ "classType": "tool", "from": "agent_rocketride_1" }] }
+```
+
 ### Pattern 14: Graph store Q&A (`graph_neo4j`, `graph_falkordb`, `rocketride_graph`)
 
 ```text
@@ -876,7 +892,8 @@ Research needs two capabilities: finding sources and reading them; the agent's L
 synthesis. Search tools (pick one): `tool_tavily` (`apikey`, `maxResults`, `searchDepth`
 `basic`/`advanced`, `topic` `general`/`news`/`finance`) or `tool_exa_search` (`apikey`,
 `numResults`, `searchType` `auto`/`neural`/`keyword`, `useAutoprompt`, `includeText`). Page
-reader: `tool_firecrawl` (`apikey`; exposes `firecrawl.scrape_url` and `firecrawl.map_url`).
+reader: `tool_firecrawl` (`apikey`; exposes `firecrawl.scrape_url` and `firecrawl.map_url`), or the
+key-free `scraper_beautifulsoup` (`fetch_page`, `extract`, `fetch_feed`, `fetch_json`; no JavaScript rendering).
 Tool configs are flat — `{ "type": "tool_tavily", "apikey": "${ROCKETRIDE_TAVILY_KEY}" }` —
 and each tool declares `"control": [{ "classType": "tool", "from": "agent_rocketride_1" }]`
 exactly as in Pattern 13.
@@ -1072,6 +1089,25 @@ that broker. They take no database connection settings in the pipeline; being bu
 does not make a database available on an unconfigured local engine. For your own database,
 use `db_postgres` for SQL, PostgreSQL (pgvector), provider `postgres`, for vectors, or
 `graph_neo4j` / `graph_falkordb` for graphs.
+
+### Pattern 30: Custom skills for an agent (`tool_skills`)
+
+```json
+{ "id": "tool_skills_1", "provider": "tool_skills",
+  "config": { "folder": "skills", "skills": [
+    { "skillName": "release-notes",
+      "skillDescription": "Write release notes from merged changes. Use when asked for release notes or a changelog.",
+      "skillInstructions": "Group the changes into Added, Fixed and Changed. One short sentence per change." } ],
+    "parameters": {} },
+  "control": [{ "classType": "tool", "from": "agent_rocketride_1" }] }
+```
+
+Gives the agent skills in the `SKILL.md` format: rows in `skills` (paste a whole `SKILL.md`,
+frontmatter included, into `skillInstructions` and leave the name and description empty), or
+a `folder` in the RocketRide file store with one subfolder per skill, each holding a
+`SKILL.md` and any reference files. The agent gets `load_skill`, whose description lists every
+skill, and `read_skill_file` for a folder skill's bundled files. Skills load when the pipeline
+starts. Works with every agent node; a plain `tool` node with control wiring only.
 
 ---
 
