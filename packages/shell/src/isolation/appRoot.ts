@@ -310,11 +310,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	const endOrphan = (req: IGatedRequest, response: DAPMessage): void => {
 		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
 		if (!body) return;
+		// A resolved `success: false` is a refusal, not an end: it is logged like a rejection (best effort, nothing else to try).
+		const ended = (what: string) => (r: DAPMessage): void => {
+			if (isPlainObject(r) && r.success === false) opts.log('warn', `[isolation] could not end an unrecorded ${what}`);
+		};
 		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
-			track(sendEngine('terminate', { token: body.token }).catch(() => opts.log('warn', '[isolation] could not end an unrecorded run')));
+			track(sendEngine('terminate', { token: body.token }).then(ended('run'), () => opts.log('warn', '[isolation] could not end an unrecorded run')));
 		}
 		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') {
-			track(sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined));
+			track(sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).then(ended('store handle'), () => undefined));
 		}
 	};
 
@@ -337,7 +341,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				if (r.success === false) return (r as { code?: unknown }).code === TASK_NOT_REGISTERED ? 'absent' : 'error';
 				const token = isPlainObject(r.body) ? r.body.token : undefined;
 				if (typeof token !== 'string') return 'error';
-				await sendEngine('terminate', { token });
+				// A resolved refusal means the run is still live: keep it counted (and looked up again) instead of forgetting it.
+				const ended = await sendEngine('terminate', { token });
+				if (isPlainObject(ended) && ended.success === false) return 'error';
 				ledger.lostRuns.delete(project);
 				return 'found';
 			})

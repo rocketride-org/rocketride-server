@@ -143,6 +143,28 @@ test('G4R4-L1 a lost run whose lookup fails for another reason keeps counting', 
 	assert.equal(denialOf(await clientRequest(A, execMsg()))?.code, 'quota', 'a lookup that failed for another reason does not release the slot');
 });
 
+test('a lost run found by its lookup whose terminate is refused keeps counting until it is really ended', async (tt) => {
+	const { t, advance } = rootWithTimers();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const client = t.cm.engine.client as { request: (m: DAPMessage, timeout?: number) => Promise<DAPMessage> };
+	const original = client.request;
+	let lose = true;
+	client.request = async (m, timeout) => {
+		const answer = await original(m, timeout);
+		if (lose && m.command === 'execute') throw new Error('Request timed out'); // the engine started it, the answer is lost
+		return answer;
+	};
+	t.cm.engine.failWith('terminate', { message: 'busy' }); // the first lookup's terminate is refused (success: false)
+	assert.equal((await clientRequest(A, execMsg())).ok, false); // lost: the first lookup runs at once, finds the run, terminate is refused
+	await settle();
+	lose = false;
+	for (let i = 0; i < 7; i++) await startRun(A);
+	assert.equal(denialOf(await clientRequest(A, execMsg()))?.code, 'quota', 'a refused terminate means the run is still live: it stays counted');
+	await advance(30_000); // the retry terminates it for real
+	assert.equal((await clientRequest(A, execMsg())).ok, true, 'once it is really ended the slot is free');
+});
+
 test('G4R3-2 no lost-run lookup after detach or teardown', async (tt) => {
 	for (const how of ['detach', 'teardownAll'] as const) {
 		await tt.test(how, async (st) => {

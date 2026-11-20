@@ -138,6 +138,19 @@ test('G4-F4 detach ends the realm runs', async (tt) => {
 	assert.ok(terminated(t).includes(t.cm.engine.runs[0].token), 'detach terminates live runs');
 });
 
+test('an orphan whose terminate is refused (success: false) is reported, not treated as ended', async (tt) => {
+	const t = makeRoot({ __throwIn: 'ledger' });
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	t.cm.engine.failWith('terminate', { message: 'busy' });
+	assert.equal((await clientRequest(A, execMsg())).ok, false);
+	await t.root.teardownAll(3000);
+	assert.ok(
+		t.logs.some((l) => /could not end an unrecorded run/.test(l)),
+		`a refused terminate of an unrecorded run is logged, got ${JSON.stringify(t.logs)}`
+	);
+});
+
 test('G4-L3 a run whose answer cannot be recorded is terminated', async (tt) => {
 	const t = makeRoot({ __throwIn: 'ledger' });
 	tt.after(() => t.cleanup());
