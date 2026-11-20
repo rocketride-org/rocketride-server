@@ -727,6 +727,19 @@ def test_an_ip_address_in_the_allowlist_stops_startup_saying_the_filter_matches_
     )
 
 
+def test_an_allowlist_with_an_address_and_a_refused_entry_names_both_in_one_error(monkeypatch, logs):
+    # Joshua's review of #2950: an operator with both kinds fixes the config in one pass.
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', '*.10.0.0.1', '*.*.org']})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    assert str(refused.value) == (
+        'tenki.allow_domains has an entry Tenki refuses (entry 3). Use bare hostnames such as pypi.org, '
+        'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port. '
+        "It also lists an IP address, which the sandbox's egress filter never matches: it matches "
+        'hostnames only, so list the hostname instead. Refused: *.*.org; IP addresses: *.10.0.0.1'
+    )
+
+
 def test_a_hostname_that_only_looks_numeric_is_allowed(monkeypatch, logs):
     _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': '1password.com, 0x.org, a1.b2.io'})
     assert client.created[0]['allow_domains'] == ['1password.com', '0x.org', 'a1.b2.io']

@@ -143,10 +143,12 @@ _MAX_DOMAIN_CHARS = 253
 
 def _is_ip_address(host: str) -> bool:
     """Whether host is an IPv4 address in any form inet_aton reads (0x7f000001, 127.1), or ends in an all-digit label."""
+    if host.rsplit('.', 1)[-1].isdigit():
+        return True
     try:
         socket.inet_aton(host)
     except OSError:
-        return host.rsplit('.', 1)[-1].isdigit()
+        return False
     return True
 
 
@@ -164,20 +166,25 @@ def _allowed_domains(raw) -> list[str]:
             addresses.append(domain)  # passes the label rule and the API takes it, but never matches any traffic
         elif domain not in domains:
             domains.append(domain)
-    if addresses:
-        raise ValueError(
-            "tenki.allow_domains lists an IP address, which the sandbox's egress filter never matches: it matches "
-            f'hostnames only, so list the hostname instead. Refused: {", ".join(addresses)}'
-        )
+    # One error names every kind of refusal, every rule before any entry: the engine cuts a startup error at its
+    # first asterisk, and entries of both kinds may hold one.
+    rules, lists = [], []
     if refused:
-        # The rule before any entry: the engine cuts a startup error at its first asterisk.
         one = len(positions) == 1
-        raise ValueError(
+        rules.append(
             f'tenki.allow_domains has {"an entry" if one else "entries"} Tenki refuses '
             f'({"entry" if one else "entries"} {", ".join(positions)}). Use bare hostnames such as pypi.org, '
-            'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port. '
-            f'Refused: {", ".join(refused)}'
+            'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port.'
         )
+        lists.append(f'Refused: {", ".join(refused)}')
+    if addresses:
+        rules.append(
+            f"{'It also lists' if refused else 'tenki.allow_domains lists'} an IP address, which the sandbox's "
+            'egress filter never matches: it matches hostnames only, so list the hostname instead.'
+        )
+        lists.append(f'{"IP addresses" if refused else "Refused"}: {", ".join(addresses)}')
+    if rules:
+        raise ValueError(f'{" ".join(rules)} {"; ".join(lists)}')
     if len(domains) > _MAX_DOMAINS:
         raise ValueError(f'tenki.allow_domains lists {len(domains)} hosts, and Tenki accepts up to {_MAX_DOMAINS}')
     return domains
