@@ -219,16 +219,30 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     # stands in for the engine round-trip.
     fake_engine.base_url = captured['factory']().base_url
 
+    import ai.modules.mcp as mcp_module
+    from ai.modules.mcp import identity
+
+    # handle_mcp binds the server's OWN origin per request; the handler is
+    # driven directly here, so bind what initModule resolved for this bind.
+    mcp_origin = mcp_module._resolve_mcp_origin(host, 5565)
     registry = ToolRegistry()
     execution.register(registry)
-    result = await registry.handler('run_dropper_pipe')(
-        fake_engine, TaskRegistry(), {'pipeline': {'components': [], 'source': 'x'}}
-    )
+    origin_token = identity.MCP_ORIGIN.set(mcp_origin)
+    try:
+        result = await registry.handler('run_dropper_pipe')(
+            fake_engine, TaskRegistry(), {'pipeline': {'components': [], 'source': 'x'}}
+        )
+    finally:
+        identity.MCP_ORIGIN.reset(origin_token)
 
     assert result['ok'] is True, result
-    # The upload door is the MCP module's own nonce route on the resolved
-    # origin (plan 3.7); only the one-time nonce rides the URL, no credential.
-    assert result['upload_url'].startswith(f'{origin}/mcp/upload/')
+    # The upload door is the MCP module's own nonce route on THIS server's
+    # origin (plan 3.7) -- a loopback bind is reached at 127.0.0.1, any other
+    # at the resource identifier's origin -- never on the engine origin, which
+    # does not hold the nonce. Only the one-time nonce rides the URL.
+    expected = 'http://127.0.0.1:5565' if host == '127.0.0.1' else 'https://api.rocketride.ai'
+    assert mcp_origin == expected
+    assert result['upload_url'].startswith(f'{mcp_origin}/mcp/upload/')
     assert '?' not in result['upload_url']
     assert result['address'] not in result['upload_url']
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential

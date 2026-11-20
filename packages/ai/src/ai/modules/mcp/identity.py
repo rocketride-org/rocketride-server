@@ -13,6 +13,11 @@ from typing import Any, Optional
 
 CALLER_AUTH: ContextVar[Optional[str]] = ContextVar('mcp_caller_auth', default=None)
 REQUEST_CLIENTS: ContextVar[Optional[list]] = ContextVar('mcp_request_clients', default=None)
+# The MCP server's OWN public origin (resolved once by ``initModule``, see
+# ``_resolve_mcp_origin``), bound by ``handle_mcp`` for the request so a tool
+# can compose links back to THIS server -- the dropper's ``/mcp/upload/{nonce}``
+# lives here, not on the engine the tools talk to.
+MCP_ORIGIN: ContextVar[Optional[str]] = ContextVar('mcp_origin', default=None)
 
 
 def credential_from_scope(scope: Any) -> Optional[str]:

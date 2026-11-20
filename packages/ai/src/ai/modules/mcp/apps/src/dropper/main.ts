@@ -262,7 +262,11 @@ function upload(files: FileList | File[]): void {
 			root.replaceChildren(el('p', 'empty', SPENT_MESSAGE));
 			return;
 		}
-		const message = envelope?.status === 'Error'
+		// 413: the server names its byte limit and hands back a link to retry
+		// with once the drop is split into smaller uploads.
+		const message = xhr.status === 413
+			? `Upload refused: ${String(envelope?.error?.error ?? 'the upload is too large')}`
+			: envelope?.status === 'Error'
 			? `Pipeline error: ${JSON.stringify(envelope.error ?? {})}`
 			: `Unexpected response (HTTP ${xhr.status})`;
 		root.replaceChildren(

@@ -89,6 +89,7 @@ def build_mcp_server(
     registry: Optional[ToolRegistry] = None,
     apps_dir: Optional[Path] = None,
     engine_origin: Optional[str] = None,
+    mcp_origin: Optional[str] = None,
     local_engine: bool = False,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
@@ -125,6 +126,10 @@ def build_mcp_server(
             `engine_factory().base_url` -- avoids building (and, on the
             per-caller path above, leaking into the request's close bucket) a
             whole EngineClient just to read a string.
+        mcp_origin: This MCP server's own public origin (see
+            `__init__._resolve_mcp_origin`): the dropper widget uploads to
+            `/mcp/upload/{nonce}` HERE, so the widget CSP must admit it next to
+            the engine origin.
         local_engine: True when the engine is bound to loopback (decided once
             in ``__init__.initModule``). Only then are ``local_engine_only``
             tools such as ``send_files`` listed and dispatched; the default is
@@ -197,7 +202,7 @@ def build_mcp_server(
 
     async def _on_list_resources(ctx, params: types.PaginatedRequestParams | None) -> types.ListResourcesResult:
         return types.ListResourcesResult(
-            resources=resources_mod.list_resources() + apps_mod.list_ui_resources(apps_dir, engine_origin),
+            resources=resources_mod.list_resources() + apps_mod.list_ui_resources(apps_dir, engine_origin, mcp_origin),
             ttl_ms=RESOURCES_LIST_TTL_MS,
             cache_scope=CACHE_SCOPE,
         )

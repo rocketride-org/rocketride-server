@@ -148,13 +148,43 @@ def test_registry_eviction_drops_the_evicted_tasks_nonces(monkeypatch):
     assert tasks.consume_upload_nonce(nonce) is None
 
 
-def test_registry_re_add_keeps_the_tasks_nonces():
-    """`use_existing` re-registers the same task; its live nonce stays valid."""
+def test_registry_re_add_of_the_same_live_instance_keeps_the_tasks_nonces():
+    """`use_existing` attached to the LIVE instance (use() said reused): the nonce stays valid."""
     tasks = TaskRegistry()
     tasks.add('tok-1')
     nonce = tasks.issue_upload_nonce('tok-1', None)
-    tasks.add('tok-1', pipeline_ref='<inline>')
+    tasks.add('tok-1', same_instance=True, pipeline_ref='<inline>')
     assert tasks.consume_upload_nonce(nonce) == {'token': 'tok-1', 'caller_auth': None}
+
+
+def test_registry_new_launch_at_the_same_address_drops_the_earlier_runs_nonces():
+    """The address is reused by the next run of the same project/source and the
+    engine never calls remove on expiry: a fresh launch (the default add) is a
+    new instance, so the earlier run's nonce must not redeem into it.
+    """
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    stale = tasks.issue_upload_nonce('tok-1', 'rr_first_caller')
+    tasks.add('tok-1', pipeline_ref='<inline>')
+    assert tasks.consume_upload_nonce(stale) is None
+    assert tasks.get('tok-1') is not None
+
+
+def test_allocate_keys_never_shadows_a_submitted_key():
+    assert apps._allocate_keys(['file', 'file', 'file_0']) == ['file_1', 'file_2', 'file_0']
+    assert apps._allocate_keys(['file_0', 'file', 'file']) == ['file_0', 'file_1', 'file_2']
+    assert apps._allocate_keys(['a', 'b', 'a', 'c']) == ['a_0', 'b', 'a_1', 'c']
+    assert apps._allocate_keys(['only']) == ['only']
+    assert apps._allocate_keys([]) == []
+
+
+def test_dropper_csp_admits_the_mcp_origin_next_to_the_engine_origin(tmp_path):
+    (tmp_path / 'dropper.html').write_text('<!doctype html>', encoding='utf-8')
+    [two] = apps.list_ui_resources(tmp_path, 'https://engine.example', 'https://mcp.example')
+    assert two.meta == {'ui': {'csp': {'connectDomains': ['https://engine.example', 'https://mcp.example']}}}
+    # one engine mounting its own MCP module: one origin, listed once
+    [one] = apps.list_ui_resources(tmp_path, 'https://api.example', 'https://api.example')
+    assert one.meta == {'ui': {'csp': {'connectDomains': ['https://api.example']}}}
 
 
 def test_registry_caps_live_nonces_per_task_oldest_first(monkeypatch):
@@ -430,3 +460,175 @@ async def test_credential_less_upload_passes_auth_middleware_and_lands_as_the_ca
     assert resp.json()['status'] == 'OK'
     assert built[-1].auth == 'rr_e2e_key'
     assert built[-1].sent[0]['token'] == started['address'] and built[-1].sent[0]['data'] == b'hello'
+
+
+# --- CodeRabbit round 1: origin, byte cap, key collisions, task instance ---
+
+
+@pytest.mark.asyncio
+async def test_links_point_at_the_mcp_server_not_the_engine(monkeypatch):
+    """With rocketride_uri on another host, the engine origin differs from this
+    server's: upload_url (initial AND rotated) must name THIS server, the only
+    holder of the nonce; dropper_url stays the engine's shell app.
+    """
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        # The fake engine client answers base_url 'http://localhost:5565' whatever
+        # the configured URI; this server's own origin resolves to 127.0.0.1.
+        engine_origin = built[0].base_url
+        assert started['dropper_url'].startswith(f'{engine_origin}/')
+        assert started['upload_url'].startswith('http://127.0.0.1:')
+        assert not started['upload_url'].startswith(engine_origin)
+        first = await _upload(app, started['upload_url'])
+        assert first.status_code == 200
+        rotated = first.json()['upload_url']
+        assert rotated.startswith('http://127.0.0.1:') and not rotated.startswith(engine_origin)
+
+
+@pytest.mark.asyncio
+async def test_declared_oversize_is_refused_before_the_nonce_is_spent(monkeypatch):
+    monkeypatch.setattr(apps, 'MAX_UPLOAD_BYTES', 16)
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        refused = await app.post(urlsplit(started['upload_url']).path, content=b'x' * 64)
+        assert refused.status_code == 413
+        body = refused.json()
+        assert body['status'] == 'Error' and '16 byte limit' in body['error']['error']
+        # the same link is still good: the nonce was not spent
+        assert body['upload_url'] == started['upload_url']
+        assert (await app.post(urlsplit(started['upload_url']).path, content=b'small')).status_code == 200
+
+    assert [c.sent[0]['data'] for c in built if c.sent] == [b'small']
+
+
+@pytest.mark.asyncio
+async def test_streaming_oversize_is_cut_off_before_buffering_and_nothing_is_forwarded(monkeypatch):
+    """A body that declares no length is counted as it arrives and refused the
+    moment it passes the cap -- on the raw path and on the multipart path --
+    with no part forwarded; the spent nonce is replaced in the 413 answer.
+    """
+    import json as _json
+
+    from starlette.requests import Request
+
+    from .conftest import FakeEngineClient
+
+    monkeypatch.setattr(apps, 'MAX_UPLOAD_BYTES', 16)
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    clients = []
+
+    def factory():
+        # as the module's own factory does: bucket the per-request client so the
+        # route closes it when the request ends
+        from ai.modules.mcp import identity
+
+        client = FakeEngineClient()
+        clients.append(client)
+        identity.REQUEST_CLIENTS.get().append(client)
+        return client
+
+    async def drive(content_type, chunks):
+        nonce = tasks.issue_upload_nonce('tok-1', 'rr_x')
+        pending = [{'type': 'http.request', 'body': chunk, 'more_body': True} for chunk in chunks]
+        pending.append({'type': 'http.request', 'body': b'', 'more_body': False})
+
+        async def receive():
+            return pending.pop(0)
+
+        scope = {
+            'type': 'http',
+            'method': 'POST',
+            'path': f'/mcp/upload/{nonce}',
+            'headers': [(b'content-type', content_type)],
+            'query_string': b'',
+            'path_params': {'nonce': nonce},
+        }
+        response = await apps.handle_upload(Request(scope, receive), factory, tasks, 'http://mcp.test')
+        return nonce, response, _json.loads(response.body)
+
+    nonce, response, body = await drive(b'application/octet-stream', [b'x' * 10, b'y' * 10, b'z' * 10])
+    assert response.status_code == 413 and 'limit' in body['error']['error']
+    assert tasks.consume_upload_nonce(nonce) is None  # the request spent it...
+    assert body['upload_url'].startswith('http://mcp.test/mcp/upload/')  # ...and was handed the next one
+
+    boundary = b'----b'
+    part = b'--' + boundary + b'\r\nContent-Disposition: form-data; name="f"; filename="a.bin"\r\n\r\n'
+    nonce, response, body = await drive(
+        b'multipart/form-data; boundary=' + boundary, [part, b'x' * 10, b'y' * 10, b'\r\n--' + boundary + b'--\r\n']
+    )
+    assert response.status_code == 413
+    assert not any(c.sent for c in clients)
+    assert all(c.close_calls == 1 for c in clients)
+
+
+@pytest.mark.asyncio
+async def test_colliding_field_names_all_land_in_the_result_map(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        resp = await app.post(
+            urlsplit(started['upload_url']).path,
+            files=[
+                ('file', ('one.txt', b'1', 'text/plain')),
+                ('file', ('two.txt', b'2', 'text/plain')),
+                ('file_0', ('zero.txt', b'0', 'text/plain')),
+            ],
+        )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()['data']
+    assert data['objectsRequested'] == 3 and data['objectsCompleted'] == 3
+    assert set(data['objects']) == {'file_1', 'file_2', 'file_0'}
+    assert [s['objinfo']['name'] for s in built[-1].sent] == ['one.txt', 'two.txt', 'zero.txt']
+
+
+@pytest.mark.asyncio
+async def test_a_new_run_at_the_same_address_refuses_the_old_nonce_and_use_existing_keeps_it(monkeypatch):
+    """use() answers `reused: True` only when use_existing attached to the live
+    instance; a fresh launch at the same address is a new instance and the
+    earlier run's nonce must not upload into it.
+    """
+    import ai.modules.mcp as mcp_module
+
+    from .conftest import FakeEngineClient, FakeWebServer
+
+    built = []
+
+    def _make(config, on_event=None):
+        client = FakeEngineClient(env_keys=[], auth=config.get('rocketride_auth'))
+
+        async def _use(**kwargs):
+            return {'token': 'tok-1', 'projectId': 'p', 'source': 's', 'reused': bool(kwargs.get('use_existing'))}
+
+        client.use = _use
+        built.append(client)
+        return client
+
+    monkeypatch.setattr(mcp_module, 'make_engine_client', _make)
+    srv = FakeWebServer()
+    mcp_module.initModule(srv, {'mcp_dev_no_auth': True})
+    for handler in srv.app.router.on_startup:
+        await handler()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=srv.app), base_url='http://testserver') as app:
+            headers = {**_HEADERS, 'Mcp-Method': 'tools/call', 'Mcp-Name': 'run_dropper_pipe'}
+
+            async def start(**extra):
+                args = {'pipeline': PIPE, **extra}
+                result = _tool_result(
+                    await app.post('/mcp', json=_tools_call('run_dropper_pipe', args), headers=headers)
+                )
+                assert result['ok'] is True and result['address'] == 'tok-1'
+                return result['upload_url']
+
+            first = await start()
+            attached = await start(use_existing=True)  # the same live instance: both links stay good
+            assert (await _upload(app, first)).status_code == 200
+            relaunched = await start()  # a fresh launch at the same address: a new instance
+            assert (await _upload(app, attached)).status_code == 404
+            assert (await _upload(app, relaunched)).status_code == 200
+    finally:
+        for handler in srv.app.router.on_shutdown:
+            await handler()

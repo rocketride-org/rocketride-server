@@ -16,6 +16,21 @@ from ai.modules.mcp.tools import register_all
 # Minimal inline pipeline used everywhere a definition is required — the
 # tools are inline-only (no server-side filepath reads by design).
 PIPE = {'source': 'a', 'components': []}
+MCP_ORIGIN = 'http://mcp.test:5565'
+
+
+@pytest.fixture(autouse=True)
+def _bound_mcp_origin():
+    """`handle_mcp` binds the server's own origin for every request; the handlers
+    under test run outside it, so bind one here (run_dropper_pipe needs it).
+    """
+    from ai.modules.mcp import identity
+
+    token = identity.MCP_ORIGIN.set(MCP_ORIGIN)
+    try:
+        yield
+    finally:
+        identity.MCP_ORIGIN.reset(token)
 
 
 # --- registration -----------------------------------------------------------
@@ -351,7 +366,10 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
     # URL-carried value is a one-time nonce minted in the task tracker and
     # bound to this task. No credential ever rides a URL (access logs,
     # Referer, history) and the address does not ride this one either.
-    prefix = f'{fake_engine.base_url}/mcp/upload/'
+    # ...and the link names THIS MCP server (the only holder of the nonce), not
+    # the engine the tool talked to
+    prefix = f'{MCP_ORIGIN}/mcp/upload/'
+    assert not result['upload_url'].startswith(fake_engine.base_url)
     assert result['upload_url'].startswith(prefix)
     nonce = result['upload_url'][len(prefix) :]
     assert nonce and '/' not in nonce and '?' not in result['upload_url']

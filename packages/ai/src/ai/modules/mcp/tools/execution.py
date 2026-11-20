@@ -159,7 +159,7 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
             'engine did not return a task address',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    tasks.add(token, pipeline_ref='<inline>')
+    tasks.add(token, same_instance=bool(started.get('reused')), pipeline_ref='<inline>')
 
     result_payload: Dict[str, Any] = {'ok': True, 'address': token}
     result_payload['projectId'] = started.get('projectId')
@@ -223,17 +223,25 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
             'engine did not return a task address for the dropper URL',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    tasks.add(address, pipeline_ref='<inline>')
+    # A fresh launch is a new task instance at this address: earlier nonces
+    # die with the instance that issued them; use_existing keeps them
+    tasks.add(address, same_instance=bool(started.get('reused')), pipeline_ref='<inline>')
 
     # The nonce binds this task to the caller identity the route will forward
     # as (None on the shared-client path, where the route uses that client too)
     nonce = tasks.issue_upload_nonce(address, identity.CALLER_AUTH.get())
 
+    # upload_url points at THIS MCP server -- the only place that holds the
+    # nonce -- never at the engine the tools talk to, which may be another
+    # origin; dropper_url is the engine's shell app
+    mcp_origin = identity.MCP_ORIGIN.get()
+    if not mcp_origin:
+        raise RuntimeError('MCP origin is not bound: run_dropper_pipe runs only under handle_mcp')
     base_url = str(client.base_url).rstrip('/')
     result_payload: Dict[str, Any] = {
         'ok': True,
         'address': address,
-        'upload_url': upload_url(base_url, nonce),
+        'upload_url': upload_url(mcp_origin, nonce),
         'dropper_url': f'{base_url}/?appid=rocketride.dropper&pipe={address}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),

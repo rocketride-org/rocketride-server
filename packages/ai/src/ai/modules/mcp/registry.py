@@ -44,15 +44,31 @@ class TaskRegistry:
         # nonce -> {'token': task address, 'caller_auth': credential or None}
         self._upload_nonces: Dict[str, Dict[str, Any]] = {}
 
-    def add(self, token: str, **metadata: Any) -> None:
+    def add(self, token: str, *, same_instance: bool = False, **metadata: Any) -> None:
         """Register ``token`` with the given metadata, replacing any prior entry.
 
         At ``MAX_TASKS`` entries the oldest is evicted (dict preserves
         insertion order) so leaked tokens can't grow the process forever. An
-        evicted task takes its upload nonces with it; a re-added task keeps
-        them (same task, refreshed bookkeeping).
+        evicted task takes its upload nonces with it.
+
+        A re-add drops the token's nonces unless ``same_instance`` says the
+        entry still names the task instance that issued them. The address is
+        reused by every later run of the same project/source, and the engine
+        never tells this registry when a run expires -- so a nonce minted for
+        an earlier run must never redeem into a later run at the same address
+        with the earlier caller's identity. The ``use()`` result says which
+        case this is: ``reused`` is True only when ``use_existing`` attached to
+        the LIVE instance (nonces kept); a fresh launch is a new instance.
+
+        Args:
+            token: The task address.
+            same_instance: True when the entry refreshes the live instance that
+                already holds this token (``use_existing`` on a running task);
+                False (the default, the safe direction) for a new launch.
+            **metadata: Advisory metadata stored with the token.
         """
-        self._tasks.pop(token, None)  # re-add moves the token to newest
+        if self._tasks.pop(token, None) is not None and not same_instance:
+            self._drop_upload_nonces(token)
         while len(self._tasks) >= MAX_TASKS:
             evicted = next(iter(self._tasks))
             self._tasks.pop(evicted)
