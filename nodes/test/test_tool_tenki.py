@@ -706,13 +706,30 @@ def test_allowed_domains_are_sent_as_tenki_normalizes_them(monkeypatch, logs):
 
 
 @pytest.mark.parametrize(
-    'entry', ['https://pypi.org', 'pypi.org:443', 'under_score.org', '*.*.org', '10.0.0.0/8', '1.1.1.1', 'ｐypi.org']
+    'entry', ['https://pypi.org', 'pypi.org:443', 'under_score.org', '*.*.org', '10.0.0.0/8', 'ｐypi.org']
 )
 def test_an_allowlist_entry_tenki_refuses_stops_startup_naming_the_rule_first(monkeypatch, logs, entry):
     glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', entry]})
     with pytest.raises(ValueError) as refused:
         glb.beginGlobal()
     assert str(refused.value).startswith('tenki.allow_domains has an entry Tenki refuses (entry 2). Use bare hostnames')
+
+
+@pytest.mark.parametrize('entry', ['1.1.1.1', '127.1', '0x7f000001', '127.0.0.0x1', '*.10.0.0.1', '1.2.3.4.5'])
+def test_an_ip_address_in_the_allowlist_stops_startup_saying_the_filter_matches_hostnames(monkeypatch, logs, entry):
+    # Dylan's review of #2950: hex and short forms are addresses too, and the API takes them, so the node says why.
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['ok.org', entry]})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    assert str(refused.value) == (
+        "tenki.allow_domains lists an IP address, which the sandbox's egress filter never matches: it matches "
+        f'hostnames only, so list the hostname instead. Refused: {entry.lower()}'
+    )
+
+
+def test_a_hostname_that_only_looks_numeric_is_allowed(monkeypatch, logs):
+    _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': '1password.com, 0x.org, a1.b2.io'})
+    assert client.created[0]['allow_domains'] == ['1password.com', '0x.org', 'a1.b2.io']
 
 
 def test_an_allowlist_entry_that_may_carry_a_credential_is_not_repeated(monkeypatch, logs):
@@ -790,6 +807,7 @@ def test_the_private_prefix_is_kept_in_the_form_git_matches(monkeypatch, logs, u
         ({'git_auth_url': 'https://u:p@github.com/'}, 'not shown'),
         ({'git_auth_url': 'https://github.com:8443/'}, 'must be an https URL'),
         ({'git_auth_url': 'http://github.com/'}, 'must be an https URL'),
+        ({'git_auth_url': 'https://10.0.0.5/acme/'}, 'is on 10.0.0.5, an IP address'),
         ({'git_auth_url': 'https://github.com/a/../b'}, 'must be an https URL'),
         ({'git_auth_url': 7}, 'must be a URL'),
         ({'git_auth_secret': '9lives'}, 'must be the name of a Tenki secret'),

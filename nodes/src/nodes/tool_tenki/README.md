@@ -102,6 +102,8 @@ That access can change every secret and policy in the workspace, so give the nod
 >   restarts.
 > - Secret injection needs an image with Tenki's managed HTTPS trust.
 > - IPv4 ranges in **Allowed outbound domains** are refused.
+> - IP addresses are refused in **Allowed outbound domains** and in the private repositories' URL
+>   prefix: the egress filter matches hostnames only.
 > - **Tool groups** are not a security boundary.
 
 ## Upstream docs

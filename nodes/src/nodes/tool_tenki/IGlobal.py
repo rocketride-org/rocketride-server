@@ -28,6 +28,7 @@
 from __future__ import annotations
 
 import re
+import socket
 import threading
 import time
 import urllib.parse
@@ -140,20 +141,34 @@ _MAX_DOMAINS = 256
 _MAX_DOMAIN_CHARS = 253
 
 
+def _is_ip_address(host: str) -> bool:
+    """Whether host is an IPv4 address in any form inet_aton reads (0x7f000001, 127.1), or ends in an all-digit label."""
+    try:
+        socket.inet_aton(host)
+    except OSError:
+        return host.rsplit('.', 1)[-1].isdigit()
+    return True
+
+
 def _allowed_domains(raw) -> list[str]:
     """The outbound allowlist, lowercase and without a trailing dot as Tenki stores it; any refused entry raises."""
-    domains, refused, positions = [], [], []
+    domains, refused, positions, addresses = [], [], [], []
     for position, name in enumerate(_names(raw, 'allow_domains'), 1):
         domain = name.lower().rstrip('.')
         # ASCII is checked before lowercasing could make it so (the Kelvin sign lowercases to "k").
-        # An IP literal passes the label rule, but the sandbox's egress filter matches hostnames, so it would never allow anything.
-        ip_literal = domain.rsplit('.', 1)[-1].isdigit()
-        if not name.isascii() or len(domain) > _MAX_DOMAIN_CHARS or not _DOMAIN.match(domain) or ip_literal:
+        if not name.isascii() or len(domain) > _MAX_DOMAIN_CHARS or not _DOMAIN.match(domain):
             # An entry with an "@" may be a URL that carries credentials: say where it is, not what it says.
             refused.append(f'entry {position} (not shown: it may hold a credential)' if '@' in name else name)
             positions.append(str(position))
+        elif _is_ip_address(domain):
+            addresses.append(domain)  # passes the label rule and the API takes it, but never matches any traffic
         elif domain not in domains:
             domains.append(domain)
+    if addresses:
+        raise ValueError(
+            "tenki.allow_domains lists an IP address, which the sandbox's egress filter never matches: it matches "
+            f'hostnames only, so list the hostname instead. Refused: {", ".join(addresses)}'
+        )
     if refused:
         # The rule before any entry: the engine cuts a startup error at its first asterisk.
         one = len(positions) == 1
@@ -231,6 +246,11 @@ def _git_auth_url(raw: str) -> str:
             'tenki.git_auth_url must be an https URL with a host and, optionally, a path, such as '
             'https://github.com/acme/, with no credentials, port, query or fragment (the value is not shown: '
             'it may hold a credential)'
+        )
+    if _is_ip_address(host):
+        raise ValueError(
+            f"tenki.git_auth_url is on {host}, an IP address, which tenki.allow_domains cannot list: the sandbox's "
+            "egress filter matches hostnames only, so use the git server's hostname"
         )
     return f'https://{host}{path if path.endswith("/") else path + "/"}'
 
