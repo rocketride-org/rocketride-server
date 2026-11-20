@@ -37,7 +37,7 @@ import { ConfirmDialog } from '../../../components/modal/ConfirmDialog';
 import { Section, LabelValue } from '../../../components/section/Section';
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import type { IDataGridPageRequest } from '../../../components/data-grid/DataGrid';
-import type { BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from '../../billing/types';
+import type { BillingDetail, CreditBalance, PublicationUsage, TransactionsResult, UsageRollup } from '../../billing/types';
 import { CreditsPanel } from '../../billing/components/CreditsPanel';
 import { BillingDashboard } from '../../billing/components/BillingDashboard';
 import { TopUpModal } from '../../billing/components/TopUpModal';
@@ -335,6 +335,12 @@ export interface BillingPanelProps {
 	usageByUser?: UsageRollup[];
 	/** Per-team usage rollup. */
 	usageByTeam?: UsageRollup[];
+	/** The org's own usage by the publication that served it (plan 8.3). */
+	usageByPublication?: PublicationUsage[];
+	/** Label of the period the publication breakdown covers (e.g. "November 2026"). */
+	publicationPeriod?: string;
+	/** Why the served-by-publication read failed, or null when it answered (rows or none). */
+	publicationError?: string | null;
 	/** Currently running tasks with live token data. */
 	activeTasks?: ActiveTask[];
 	/** Whether dashboard data is still loading. */
@@ -368,7 +374,7 @@ export interface BillingPanelProps {
  * panel (view / change plan / cancel), and the admin dashboard. The cancel
  * confirmation and its error handling live HERE, not in AccountView.
  */
-export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
+export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscriptions, loading, error, creditBalance, onCancelSubscription, onOpenPortal, isOrgAdmin, onSubscribe, transactions, usageByUser, usageByTeam, usageByPublication, publicationPeriod, publicationError, activeTasks, dashboardLoading, onTransactionPage, fetchTransactions, fetchTransactionDistinct, topupPlans, onBuyTopup, allPlans, onPurchaseTopup, onUpgradeSubscription }) => {
 	// ── Top-up modal state ──────────────────────────────────────────────────
 	const [showTopUpModal, setShowTopUpModal] = useState(false);
 	// ── Upgrade modal state ─────────────────────────────────────────────────
@@ -668,6 +674,9 @@ export const BillingPanel: React.FC<BillingPanelProps> = ({ isConnected, subscri
 					transactions={transactions ?? null}
 					usageByUser={usageByUser ?? []}
 					usageByTeam={usageByTeam ?? []}
+					usageByPublication={usageByPublication}
+					publicationPeriod={publicationPeriod}
+					publicationError={publicationError}
 					activeTasks={activeTasks ?? []}
 					topupPlans={topupPlans ?? []}
 					loading={dashboardLoading ?? false}

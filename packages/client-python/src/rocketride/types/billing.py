@@ -320,3 +320,32 @@ class UsageRollup(TypedDict):
     id: str
     name: str | None
     credits: dict[str, float]
+
+
+class PublicationUsage(TypedDict):
+    """
+    One publication's share of the org's own named-pipe usage.
+
+    Returned by the ``usage_by_publication`` subcommand. Computed from the
+    VIEWER's org rows only: the org's calls through each publication, never
+    other orgs' calls to it.
+
+    Attributes:
+        pipe: Published pipe name, ``developerId.pipeId``.
+        rung: Rung that answered: ``dev``, ``me``, ``team`` or ``public``.
+        team: Answering team (the publication's audience slot), or None for a
+            development run.
+        teamName: Display name of the answering team when it is one of the
+            org's own teams, else None.
+        version: Artifact version that answered, or None for a development run.
+        requestCount: Requests served in the period.
+        credits: Consumption per resource type (absolute values).
+    """
+
+    pipe: str
+    rung: str
+    team: str | None
+    teamName: str | None
+    version: int | None
+    requestCount: int
+    credits: dict[str, float]

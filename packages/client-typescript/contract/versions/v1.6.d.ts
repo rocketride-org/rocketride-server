@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 403e6a7e6ed67413ed338e93c3957a04642ea413
+// Source commit: a1e8790989c99513f4a12d04c002c0be04feae5c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1018,6 +1018,27 @@ export interface UsageRollup {
     id: string;
     /** Resolved display name of the user or team, or null when unresolvable. */
     name?: string | null;
+    /** Consumption per resource type (absolute values — always positive). */
+    credits: Record<string, number>;
+}
+/**
+ * One publication's share of the org's own named-pipe usage, returned by
+ * usage_by_publication. Computed from the VIEWER's org rows only: the org's
+ * calls through each publication, never other orgs' calls to it.
+ */
+export interface PublicationUsage {
+    /** Published pipe name, `developerId.pipeId`. */
+    pipe: string;
+    /** Rung that answered: `dev`, `me`, `team` or `public`. */
+    rung: string;
+    /** Answering team (the publication's audience slot), or null for a development run. */
+    team: string | null;
+    /** Display name of the answering team when it is one of the org's own teams, else null. */
+    teamName: string | null;
+    /** Artifact version that answered, or null for a development run. */
+    version: number | null;
+    /** Requests served in the period. */
+    requestCount: number;
     /** Consumption per resource type (absolute values — always positive). */
     credits: Record<string, number>;
 }
@@ -4344,6 +4365,19 @@ declare class BillingApi {
      * @returns Array of usage rollup rows ordered by total consumption descending.
      */
     getUsageByTeam(orgId: string): Promise<UsageRollup[]>;
+    /**
+     * Fetches the org's own named-pipe usage grouped by the publication that
+     * served it (pipe, rung, answering team, version). Only the org's rows
+     * are read, so a publisher never sees other orgs' calls.
+     *
+     * @param orgId - Organisation UUID.
+     * @param options - Period: `since` (first UTC day counted) and `until` (first UTC day not counted), ISO datetimes.
+     * @returns One row per publication, ordered by total consumption descending.
+     */
+    getUsageByPublication(orgId: string, options?: {
+        since?: string;
+        until?: string;
+    }): Promise<PublicationUsage[]>;
     /**
      * Creates a one-off Stripe Checkout session for a credit pack purchase
      * and returns the redirect URL.

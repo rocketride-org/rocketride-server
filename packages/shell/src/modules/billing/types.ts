@@ -8,4 +8,4 @@
  * the RocketRide SDK so all consumers share a single type definition.
  */
 
-export type { BillingDetail, AppPrice, StripePlan, CreditBalance, CreditPack, LedgerTransaction, TransactionsResult, UsageRollup } from 'rocketride';
+export type { BillingDetail, AppPrice, StripePlan, CreditBalance, CreditPack, LedgerTransaction, PublicationUsage, TransactionsResult, UsageRollup } from 'rocketride';

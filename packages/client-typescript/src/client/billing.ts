@@ -31,7 +31,7 @@
  */
 
 import type { RocketRideClient } from './client.js';
-import type { BillingDetail, AppPrice, CreditBalance, CreditPack, PromoRedemption, PromoValidation, TransactionsResult, UsageRollup } from './types/billing.js';
+import type { BillingDetail, AppPrice, CreditBalance, CreditPack, PromoRedemption, PromoValidation, PublicationUsage, TransactionsResult, UsageRollup } from './types/billing.js';
 
 // =============================================================================
 // BILLING API CLASS
@@ -340,6 +340,20 @@ export class BillingApi {
 	 */
 	async getUsageByTeam(orgId: string): Promise<UsageRollup[]> {
 		const body = await this.client.call('rrext_account_billing', { subcommand: 'usage_by_team', orgId });
+		return body.usage ?? [];
+	}
+
+	/**
+	 * Fetches the org's own named-pipe usage grouped by the publication that
+	 * served it (pipe, rung, answering team, version). Only the org's rows
+	 * are read, so a publisher never sees other orgs' calls.
+	 *
+	 * @param orgId - Organisation UUID.
+	 * @param options - Period: `since` (first UTC day counted) and `until` (first UTC day not counted), ISO datetimes.
+	 * @returns One row per publication, ordered by total consumption descending.
+	 */
+	async getUsageByPublication(orgId: string, options: { since?: string; until?: string } = {}): Promise<PublicationUsage[]> {
+		const body = await this.client.call('rrext_account_billing', { subcommand: 'usage_by_publication', orgId, ...options });
 		return body.usage ?? [];
 	}
 
