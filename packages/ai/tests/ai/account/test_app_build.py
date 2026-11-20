@@ -1404,6 +1404,40 @@ def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
     assert app_build._unsafe_spec(spec) is unsafe
 
 
+@pytest.mark.parametrize(
+    'spec,base,unsafe',
+    [
+        ('file:../shared', 'apps/x', False),
+        ('workspace:../shared', 'apps/x', False),
+        ('../shared/pkg.tgz', 'apps/x', False),
+        ('file:../../packages/lib', 'apps/x', False),
+        ('file:../../../elsewhere', 'apps/x', True),
+        ('file:../..', 'apps/x', False),
+        ('file:../../..', 'apps/x', True),
+        ('file:../x', '', True),
+        ('workspace:../../x', 'apps/x', False),
+        ('link:../shared', 'apps/x', True),
+        ('file:/abs/path', 'apps/x', True),
+    ],
+)
+def test_relative_specs_that_stay_inside_the_workspace_are_allowed(spec, base, unsafe):
+    """A path is resolved against the manifest holding it: siblings are fine, escapes are not."""
+    assert app_build._unsafe_spec(spec, base) is unsafe
+
+
+def test_a_sibling_package_dependency_passes_the_manifest_check(tmp_path):
+    ws = tmp_path / 'ws'
+    app, shared = ws / 'apps' / 'x', ws / 'apps' / 'shared'
+    app.mkdir(parents=True)
+    shared.mkdir(parents=True)
+    (app / 'package.json').write_text(json.dumps({'name': 'x', 'dependencies': {'shared': 'file:../shared'}}), encoding='utf-8')
+    (shared / 'package.json').write_text(json.dumps({'name': 'shared'}), encoding='utf-8')
+    app_build._neutralize_tool_configs(str(ws), str(app))
+    (app / 'package.json').write_text(json.dumps({'name': 'x', 'dependencies': {'out': 'file:../../../elsewhere'}}), encoding='utf-8')
+    with pytest.raises(app_build.BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(app))
+
+
 def test_under_refuses_a_symlink_out_of_the_root(tmp_path):
     """Harvest containment: a file inside a root that links elsewhere is out."""
     root = tmp_path / 'out'

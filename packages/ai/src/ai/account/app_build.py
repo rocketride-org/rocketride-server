@@ -720,8 +720,13 @@ def _patched_workspace_yaml(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def _unsafe_spec(spec: Any) -> bool:
+def _unsafe_spec(spec: Any, base: str = '') -> bool:
     """True when a dependency spec reaches outside the source tree.
+
+    ``base`` is the directory of the manifest that holds the spec, relative to
+    the packed workspace root (posix, ``''`` for the root). A relative path is
+    resolved against it, so a sibling package reached with ``..`` stays
+    allowed while anything that lands above the workspace root is refused.
 
     ``link:`` (any target) is refused. A local path spec — ``file:``,
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
@@ -758,10 +763,13 @@ def _unsafe_spec(spec: Any) -> bool:
     target = target.replace('\\', '/')
     if target == '~' or target.startswith('~/'):
         return True
-    return target.startswith('/') or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
+    if target.startswith('/') or re.match(r'^[a-z]:', target) is not None:
+        return True
+    resolved = posixpath.normpath(posixpath.join(base.replace('\\', '/'), target))
+    return resolved == '..' or resolved.startswith('../')
 
 
-def _refuse_unsafe_specs(table: Any, where: str) -> None:
+def _refuse_unsafe_specs(table: Any, where: str, base: str = '') -> None:
     """Raise BuildFailure when a dependency table holds an unsafe spec.
 
     Nested tables (npm-style nested overrides) are walked.
@@ -770,8 +778,8 @@ def _refuse_unsafe_specs(table: Any, where: str) -> None:
         return
     for name, spec in table.items():
         if isinstance(spec, dict):
-            _refuse_unsafe_specs(spec, where)
-        elif _unsafe_spec(spec):
+            _refuse_unsafe_specs(spec, where, base)
+        elif _unsafe_spec(spec, base):
             raise BuildFailure(
                 'materialize',
                 f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link:, git+file: and out-of-tree path specs are not supported',
@@ -877,7 +885,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
                 if not isinstance(manifest, dict):
                     continue
                 for table in _DEPENDENCY_TABLES:
-                    _refuse_unsafe_specs(manifest.get(table), rel)
+                    _refuse_unsafe_specs(manifest.get(table), rel, posixpath.dirname(rel))
                 if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
                     for key in _NEUTRALIZED_PACKAGE_KEYS:
                         if manifest.pop(key, None) is not None:
