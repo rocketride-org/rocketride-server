@@ -1,4 +1,4 @@
-"""Exercise the real dotenv parser on files a same-UID task could open."""
+"""Hosted engines refuse an install .env with any binding line a same-UID task could read."""
 
 import pytest
 
