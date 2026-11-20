@@ -22,4 +22,5 @@
 
 // The deployed-version card pieces both DEPLOY screens share.
 export { DeleteVersionMark } from './DeleteVersionMark';
-export type { IDeleteVersionMarkProps } from './DeleteVersionMark';
+export { deleteConfirmPropsOf } from './DeleteVersionMark';
+export type { IDeleteConfirmInput, IDeleteVersionMarkProps } from './DeleteVersionMark';

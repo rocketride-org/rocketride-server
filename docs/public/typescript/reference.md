@@ -145,7 +145,7 @@ See [Deployments](/clients/typescript/deploy) for the model.
 | `deploy.disable(projectId, teamId)` | The kill switch: nothing runs until enabled again. |
 | `deploy.enable(projectId, teamId)` | Enable a disabled deployment. |
 | `deploy.remove(projectId, teamId)` | Soft remove — history and artifacts survive forever. |
-| `deploy.delete(projectId, version)` | Delete one deployed version's storage from the server; refused while a rung pins it, it is in review, or its build runs. The number is never reused. |
+| `deploy.delete(projectId, version)` | Delete one deployed version's storage from the server; refused while a rung pins it, it is in review, or its build runs. The number is never reused. Returns `DeployDeleteResult`. |
 | `deploy.setSchedule(projectId, sourceId, schedule, teamId, options?)` | Set (or clear with `null`) one source's cron schedule; the paused flag is untouched. |
 | `deploy.pauseSchedule(projectId, sourceId, teamId)` | Pause ONE schedule — cron/ttl kept, it just stops firing. |
 | `deploy.resumeSchedule(projectId, sourceId, teamId)` | Resume a paused schedule. |
@@ -159,7 +159,7 @@ Returns mirror the Python table: `add`/`addApp` → `PublishResult`; `createApp`
 `disable`, `enable`, `remove`, `setSchedule`, `pauseSchedule`, `resumeSchedule`,
 `setSourceConfig` → `Deployment`; `list`/`versions`/`history` →
 `DeployListEnvelope<T>`; `run` → `{ token, version }`; `artifact` →
-`PipelineConfig`; `preview` → `SchedulePreview`.
+`PipelineConfig`; `preview` → `SchedulePreview`; `delete` → `DeployDeleteResult`.
 
 ### App publish ladder
 

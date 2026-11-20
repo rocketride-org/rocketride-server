@@ -81,6 +81,47 @@ const S = {
 };
 
 // =============================================================================
+// THE CONFIRMATION
+// =============================================================================
+
+/** The ConfirmDialog props the mark opens with — a pure builder so the rule is testable. */
+export interface IDeleteConfirmInput {
+	version: number;
+	subject: string;
+	/** The screen went busy: the confirm is disabled and inert; Cancel stays available. */
+	disabled: boolean;
+	onDelete: (version: number) => Promise<void>;
+	/** Closes the dialog (state owned by the mark). */
+	close: () => void;
+}
+
+/**
+ * Builds the confirmation dialog's props: what goes, what stays, and a
+ * confirm that is disabled AND inert while the screen is busy.
+ *
+ * @param input - See {@link IDeleteConfirmInput}.
+ * @returns The props for the shell `ConfirmDialog`.
+ */
+export function deleteConfirmPropsOf({ version, subject, disabled, onDelete, close }: IDeleteConfirmInput): React.ComponentProps<typeof ConfirmDialog> {
+	return {
+		title: `Delete v${version} of ${subject}?`,
+		message: `Removes v${version} from the server: its deployed files and build are deleted and cannot be recovered. The history keeps the record, and v${version} is never reused. Nothing is serving this version.`,
+		confirmLabel: 'Delete',
+		cancelLabel: 'Cancel',
+		destructive: true,
+		// A screen that went busy after the dialog opened cannot run a second
+		// verb from it; the button says so and the callback guards it too.
+		confirmDisabled: disabled,
+		onConfirm: () => {
+			if (disabled) return;
+			close();
+			void onDelete(version);
+		},
+		onCancel: close,
+	};
+}
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
@@ -106,20 +147,7 @@ export const DeleteVersionMark: React.FC<IDeleteVersionMarkProps> = ({ version, 
 			<Button variant="ghost" mini disabled={disabled} ariaLabel={`Delete v${version}`} title={`Delete v${version} from the server`} onClick={() => setConfirming(true)}>
 				&#10005;
 			</Button>
-			{confirming && (
-				<ConfirmDialog
-					title={`Delete v${version} of ${subject}?`}
-					message={`Removes v${version} from the server: its deployed files and build are deleted and cannot be recovered. The history keeps the record, and v${version} is never reused. Nothing is serving this version.`}
-					confirmLabel="Delete"
-					cancelLabel="Cancel"
-					destructive
-					onConfirm={() => {
-						setConfirming(false);
-						void onDelete(version);
-					}}
-					onCancel={() => setConfirming(false)}
-				/>
-			)}
+			{confirming && <ConfirmDialog {...deleteConfirmPropsOf({ version, subject, disabled, onDelete, close: () => setConfirming(false) })} />}
 		</div>
 	);
 };

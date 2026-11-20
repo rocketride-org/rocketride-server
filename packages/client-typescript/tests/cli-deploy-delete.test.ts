@@ -107,6 +107,17 @@ describe('rocketride deploy delete', () => {
 		expect(client.deploy.delete).toHaveBeenCalledTimes(1);
 	});
 
+	it('refuses anything that is not a whole registry number, so a typo never deletes a neighbour', async () => {
+		const client = stubClient();
+		// parseInt would have read every one of these as 3.
+		for (const typed of ['3.5', '3abc', '3e1', '0', '-3', 'v', '', ' 3 4 ', '1e400']) {
+			expect(await executeDeployDelete('docBrain', typed, { ...target, yes: true }, new Output(undefined))).toBe(1);
+		}
+		expect(client.deploy.delete).not.toHaveBeenCalled();
+		expect(await executeDeployDelete('docBrain', ' V3 ', { ...target, yes: true }, new Output(undefined))).toBe(0);
+		expect(client.deploy.delete).toHaveBeenCalledWith('docBrain', 3);
+	});
+
 	it('needs --yes off a terminal and never reaches the server without it', async () => {
 		const client = stubClient();
 		terminal(false);

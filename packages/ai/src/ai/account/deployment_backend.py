@@ -545,11 +545,18 @@ class FileDeploymentBackend:
         history keeps the deploy line and gains a ``delete`` line (who,
         when). ``nextVersion`` is untouched, so the number is never reused.
 
-        Everything runs inside the project's CAS mutate under the
-        per-project lock: the pin check and the removal are one step, so a
-        publish racing this call either lands before the check (refused)
-        or after the version is gone (its own refusal). The byte deletes
-        tolerate already-missing files, so a CAS retry re-runs cleanly.
+        Two steps, the same shape as the saas twin. FIRST the meta commits
+        inside the project's CAS mutate under the per-project lock: the pin
+        check and the entry's removal are one step (a publish racing this
+        call either lands before the check and refuses it, or after the
+        version is gone and is refused itself), the history gains the delete
+        line, and a legacy meta without a top-level ``kind`` has it persisted
+        from its versions before the last one can disappear (B37). THEN the
+        bytes go: the content tree first, the registry JSON last (the
+        marker). A store failure after the commit is logged and re-raised
+        naming the leftover path; calling again finishes the job — the
+        history's delete line rebuilds the paths — and answers
+        ``deleted: True`` without a second history line (idempotent).
 
         Args:
             org_id:     Owning organisation.
@@ -571,24 +578,45 @@ class FileDeploymentBackend:
         who = _actor_record(actor)
 
         async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
-            """Refuse while pinned/in review/building; else remove the version's storage and entry."""
+            """Refuse while pinned/in review/building; else forget the version in the meta (bytes go after the commit)."""
             entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
             if entry is None:
-                raise StorageError(f'{project_id} v{version}: not in the registry')
+                # The RETRY path: the registry already forgot the version (an
+                # earlier call committed the meta, then a store failure left
+                # bytes behind). The history's delete line is all that is
+                # left of it, and it carries what the paths need (the sha);
+                # no second history line is written.
+                deleted = next(
+                    (
+                        row
+                        for row in reversed(meta['history'])
+                        if row.get('action') == 'delete' and int(row.get('version') or 0) == version
+                    ),
+                    None,
+                )
+                if deleted is None:
+                    raise StorageError(f'{project_id} v{version}: not in the registry')
+                data = deleted.get('data') if isinstance(deleted.get('data'), dict) else {}
+                sha = str(data.get('sha256') or '')
+                return {
+                    'projectId': project_id,
+                    'version': version,
+                    'kind': str(data.get('kind') or 'pipe'),
+                    'sha256': sha,
+                    'deleted': True,
+                    'deletedAt': deleted.get('at'),
+                    '_artifactPath': artifact_path(org_id, project_id, version, sha) if sha else '',
+                }
             block = delete_block_of(entry, self._pins_of(meta, version))
             if block:
                 raise ValueError(f'{project_id} {block}')
-            # The bytes: the registry JSON and the whole sibling content dir
-            # (derived from the stored path, the one reader convention). A
-            # missing file is not an error here — a CAS retry, or a version
-            # whose content write never finished, must still delete cleanly.
-            artifact_file = str(entry.get('artifactPath') or '')
-            if artifact_file:
-                try:
-                    await self._store.delete_file(artifact_file)
-                except StorageNotFoundError:
-                    pass
-                await self._store.delete_tree(artifact_content_dir(artifact_file))
+            # The NAME row keeps its kind (B37): a pre-C.17 meta carries none
+            # and publish() infers it from the versions — once the last
+            # version is gone there is nothing left to infer from, and
+            # another kind could claim the name. Persist the same inference
+            # before the entry goes.
+            if not meta.get('kind'):
+                meta['kind'] = str(meta['versions'][-1].get('kind') or 'pipe')
             # The entry (and with it the OSS build record, metadata.build).
             meta['versions'] = [v for v in meta['versions'] if int(v.get('version', 0)) != version]
             now = time.time()
@@ -600,7 +628,8 @@ class FileDeploymentBackend:
                     'version': version,
                     'actor': who,
                     # What was deleted rides the row: the history is all that
-                    # remains of the version, so it must describe it alone.
+                    # remains of the version, so it must describe it alone
+                    # (the sha also rebuilds the paths on a retry).
                     'data': {'sha256': str(entry.get('sha256') or ''), 'kind': str(entry.get('kind') or 'pipe')},
                 }
             )
@@ -611,9 +640,36 @@ class FileDeploymentBackend:
                 'sha256': str(entry.get('sha256') or ''),
                 'deleted': True,
                 'deletedAt': now,
+                '_artifactPath': str(entry.get('artifactPath') or ''),
             }
 
-        return await self._mutate_meta(org_id, project_id, mutate)
+        # The META commits first (the registry forgets the version; the
+        # history says so), the bytes go AFTER — the same shape as the saas
+        # twin, so a crash between the two leaves a registry that is already
+        # right and files a retry finishes. Content tree first, the registry
+        # JSON last: the JSON is the marker a retry finds or finds gone.
+        result = await self._mutate_meta(org_id, project_id, mutate)
+        artifact_file = str(result.pop('_artifactPath', '') or '')
+        if artifact_file:
+            content_dir = artifact_content_dir(artifact_file)
+            leftover = content_dir
+            try:
+                await self._store.delete_tree(content_dir)
+                leftover = artifact_file
+                try:
+                    await self._store.delete_file(artifact_file)
+                except StorageNotFoundError:
+                    pass
+            except StorageError as exc:
+                error(
+                    f'deployments: {project_id} v{version} left the registry but its storage remains at '
+                    f'{leftover}: {exc} — run deploy delete again'
+                )
+                raise StorageError(
+                    f'{project_id} v{version} was removed from the registry but its storage could not be '
+                    f'deleted ({leftover}): {exc}; run deploy delete again'
+                ) from exc
+        return result
 
     # =========================================================================
     # DEPLOY — point a team at a version (promotion and rollback alike)

@@ -173,8 +173,11 @@ export async function executeDeploySourceConfig(project: string, source: string,
  * @returns The exit code.
  */
 export async function executeDeployDelete(project: string, version: string, options: { uri?: string; apikey?: string; yes?: boolean }, out: Output): Promise<number> {
-	const registryVersion = Number.parseInt(version.replace(/^v/i, ''), 10);
-	if (!Number.isInteger(registryVersion) || registryVersion < 1) {
+	// The WHOLE argument must be a registry number (an optional v prefix):
+	// parseInt would read '3.5', '3abc' and '3e1' as 3 and delete the wrong version.
+	const digits = /^v?(\d+)$/i.exec(version.trim());
+	const registryVersion = digits ? Number(digits[1]) : Number.NaN;
+	if (!Number.isSafeInteger(registryVersion) || registryVersion < 1) {
 		return out.fail(`Invalid version '${version}'`, 'name the registry version number, e.g. 3');
 	}
 	const label = `${project} v${registryVersion}`;

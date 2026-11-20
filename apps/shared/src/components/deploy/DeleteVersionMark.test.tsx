@@ -32,7 +32,7 @@ import { test } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { DeleteVersionMark } from './DeleteVersionMark';
+import { DeleteVersionMark, deleteConfirmPropsOf } from './DeleteVersionMark';
 
 const noop = async (): Promise<void> => undefined;
 
@@ -59,4 +59,29 @@ test('the mark is disabled while the screen is busy', () => {
 	const markup = renderToStaticMarkup(<DeleteVersionMark version={3} deletable subject="docBrain" onDelete={noop} disabled />);
 	assert.match(markup, /aria-label="Delete v3"/);
 	assert.match(markup, /disabled=""/);
+});
+
+test('the confirmation disables and inerts Delete while the screen is busy; Cancel stays available', async () => {
+	const calls: number[] = [];
+	let closed = 0;
+	const onDelete = async (version: number): Promise<void> => {
+		calls.push(version);
+	};
+	const close = (): void => {
+		closed += 1;
+	};
+	const busy = deleteConfirmPropsOf({ version: 3, subject: 'docBrain', disabled: true, onDelete, close });
+	assert.equal(busy.confirmDisabled, true);
+	assert.equal(busy.destructive, true);
+	busy.onConfirm();
+	assert.deepEqual(calls, []);
+	assert.equal(closed, 0);
+	busy.onCancel();
+	assert.equal(closed, 1);
+	const idle = deleteConfirmPropsOf({ version: 3, subject: 'docBrain', disabled: false, onDelete, close });
+	assert.equal(idle.confirmDisabled, false);
+	assert.match(idle.title, /Delete v3 of docBrain\?/);
+	idle.onConfirm();
+	assert.deepEqual(calls, [3]);
+	assert.equal(closed, 2);
 });

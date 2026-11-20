@@ -173,7 +173,12 @@ async def test_cli_passes_the_server_refusal_through_by_name(monkeypatch, capsys
     assert 'published to @team/Production; unpublish it first' in capsys.readouterr().err
 
 
-def test_cli_version_must_be_an_integer():
+def test_cli_version_must_be_a_whole_registry_number(capsys):
+    """``3`` and ``v3`` name a version; anything else is refused before the server (the TS CLI's rule)."""
     parser = cli_main.setup_parser()
-    with pytest.raises(SystemExit):
-        parser.parse_args(['deploy', 'delete', 'docBrain', 'latest'])
+    assert parser.parse_args(['deploy', 'delete', 'docBrain', '3']).version == 3
+    assert parser.parse_args(['deploy', 'delete', 'docBrain', 'V3']).version == 3
+    for typed in ('latest', '3.5', '3abc', '3e1', '0', '-3', 'v', ''):
+        with pytest.raises(SystemExit):
+            parser.parse_args(['deploy', 'delete', 'docBrain', typed])
+    assert "invalid version '3.5'" in capsys.readouterr().err

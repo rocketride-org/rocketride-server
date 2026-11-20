@@ -52,6 +52,7 @@ ROCKETRIDE_DEPLOY_URI/ROCKETRIDE_DEPLOY_APIKEY for deploy verbs), which
 import argparse
 import asyncio
 import os
+import re
 import sys
 
 from .utils.env import (
@@ -112,6 +113,29 @@ def _add_deploy_connection_args(parser: argparse.ArgumentParser) -> None:
         help=f'Deployment target API key (can use {ENV_DEPLOY_APIKEY} env var)',
     )
     _add_json_arg(parser)
+
+
+def _registry_version(text: str) -> int:
+    """
+    Parse a registry version argument: the WHOLE value is digits, with an optional ``v``.
+
+    ``int()`` would accept ``'0'`` and the TypeScript CLI's ``parseInt`` once
+    read ``'3.5'`` as 3: a typo must never address a neighbouring version.
+    Mirrors ``executeDeployDelete`` in the TypeScript CLI (``3`` and ``v3``).
+
+    Args:
+        text: The argument as typed.
+
+    Returns:
+        The positive registry version.
+
+    Raises:
+        argparse.ArgumentTypeError: Anything else.
+    """
+    match = re.fullmatch(r'v?(\d+)', text.strip(), re.IGNORECASE)
+    if match is None or int(match.group(1)) < 1:
+        raise argparse.ArgumentTypeError(f"invalid version '{text}': name the registry version number, e.g. 3")
+    return int(match.group(1))
 
 
 def _add_json_arg(parser: argparse.ArgumentParser) -> None:
@@ -613,7 +637,7 @@ def setup_parser() -> argparse.ArgumentParser:
     )
     _add_deploy_connection_args(d_delete)
     d_delete.add_argument('project', help='Project id (a pipe id or an app id)')
-    d_delete.add_argument('version', type=int, help='Registry version to delete')
+    d_delete.add_argument('version', type=_registry_version, help='Registry version to delete (3 or v3)')
     d_delete.add_argument('--yes', action='store_true', help='Skip the confirmation (required when not on a terminal)')
 
     d_log = deploy_subparsers.add_parser('log', help="Read an app version's build log")

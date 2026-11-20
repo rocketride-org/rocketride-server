@@ -293,14 +293,19 @@ class FilesystemStore(IStore):
         full_path = self._get_full_path(prefix.rstrip('/'))
         if full_path == self._root_path:
             raise StorageError('delete_tree cannot target the store root')
-        if not full_path.is_dir():
-            return 0
-        count = sum(1 for entry in full_path.rglob('*') if entry.is_file())
+
+        def remove_tree() -> int:
+            """Count the files, then remove the tree — one blocking unit off the loop."""
+            if not full_path.is_dir():
+                return 0
+            count = sum(1 for entry in full_path.rglob('*') if entry.is_file())
+            shutil.rmtree(full_path)
+            return count
+
         try:
-            await asyncio.to_thread(shutil.rmtree, full_path)
+            return await asyncio.to_thread(remove_tree)
         except Exception as e:
             raise StorageError(f'Failed to delete tree {prefix}: {e}') from e
-        return count
 
     async def get_modified_time(self, filename: str) -> float:
         """Get the last modified time of a file as an epoch timestamp."""
