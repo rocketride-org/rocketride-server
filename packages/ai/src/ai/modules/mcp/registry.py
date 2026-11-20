@@ -160,6 +160,15 @@ class TaskRegistry:
         self._upload_nonces[nonce] = {'token': address, 'instance': current, 'caller_auth': caller_auth}
         return nonce
 
+    def has_upload_nonce(self, nonce: str) -> bool:
+        """Report whether ``nonce`` is live, WITHOUT redeeming it.
+
+        For checks the route must answer before it is willing to spend the
+        nonce (a declared body size over the cap): a dead nonce is refused as
+        unknown there, never echoed back as a link to retry with.
+        """
+        return nonce in self._upload_nonces
+
     def consume_upload_nonce(self, nonce: str) -> Optional[Dict[str, Any]]:
         """Redeem ``nonce`` exactly once.
 

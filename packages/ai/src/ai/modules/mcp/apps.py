@@ -33,7 +33,7 @@ from fastapi.responses import JSONResponse, Response
 from starlette.datastructures import UploadFile
 from starlette.requests import Request
 
-from ai.web.response import ResultError, ResultSuccess, error, exception, formatException
+from ai.web.response import ResultError, ResultSuccess, error, formatException
 
 from . import identity
 from .registry import TaskRegistry
@@ -219,19 +219,37 @@ def _capped(request: Request) -> Request:
     return Request(request.scope, receive)
 
 
-def _too_large(mcp_origin: str, nonce: Optional[str]) -> Response:
-    """The 413 envelope, carrying the link to retry with once the upload is split.
+def _refusal(mcp_origin: str, status: int, error_body: Dict[str, Any], nonce: Optional[str]) -> Response:
+    """An error envelope that still leaves the widget a link to retry with.
 
-    ``nonce`` is the one still live for the task: the unspent one when the
-    declared length was refused before any read, a fresh one when the body
-    was cut off mid-stream (that request spent its nonce); ``None`` when the
-    task has left the tracker and there is nothing further to authorize.
+    ``nonce`` is the one live for the run: the unspent one when the request
+    was refused before any read (a declared length over the cap), a fresh one
+    when the request spent its nonce (a body cut off mid-stream, a body that
+    could not be read); ``None`` when the run has left the tracker or a fresh
+    launch replaced it, and there is nothing further to authorize.
     """
-    message = f'the upload exceeds the {MAX_UPLOAD_BYTES} byte limit of this door; split it into smaller uploads'
-    content = ResultError(error={'error': message}).model_dump(exclude_none=True)
+    content = ResultError(error=error_body).model_dump(exclude_none=True)
     if nonce:
         content['upload_url'] = upload_url(mcp_origin, nonce)
-    return JSONResponse(content=content, status_code=413)
+    return JSONResponse(content=content, status_code=status)
+
+
+def _too_large(mcp_origin: str, nonce: Optional[str]) -> Response:
+    """The 413 envelope: the byte limit, and the link to retry with once the upload is split."""
+    message = f'the upload exceeds the {MAX_UPLOAD_BYTES} byte limit of this door; split it into smaller uploads'
+    return _refusal(mcp_origin, 413, {'error': message}, nonce)
+
+
+def _replacement_nonce(tasks: TaskRegistry, address: str, caller_auth: Optional[str], instance: str) -> Optional[str]:
+    """The next nonce for a redeemed one -- only while the run it named is still the one tracked.
+
+    A fresh launch that took the address over meanwhile gets no link: it
+    would carry this request's caller into a run that is not theirs.
+    """
+    try:
+        return tasks.issue_upload_nonce(address, caller_auth, instance=instance)
+    except KeyError:
+        return None
 
 
 def _declared_too_large(request: Request) -> bool:
@@ -352,8 +370,9 @@ async def handle_upload(
     Steps:
 
     1. Refuse a URL-carried credential (400): the nonce is the authorization.
-       Refuse a declared body over ``MAX_UPLOAD_BYTES`` (413). Both before the
-       nonce is touched, so a refused request does not spend it.
+       Refuse a dead nonce (404) before anything else is judged. Refuse a
+       declared body over ``MAX_UPLOAD_BYTES`` (413) without spending the
+       live nonce, so the same link retries.
     2. Redeem the nonce (404 when unknown, already used, or its task is no
        longer tracked -- the three are indistinguishable on purpose).
     3. Bind the credential the nonce was minted under and build the caller's
@@ -362,8 +381,10 @@ async def handle_upload(
        closed when the request ends, exactly as ``handle_mcp`` closes its
        per-request clients.
     4. Forward the parts (open -> write -> close per object, via ``send``);
-       a body that passes the cap while streaming in is answered 413 (the
-       nonce it rode is spent, as any answered request spends it).
+       a body that passes the cap while streaming in is answered 413 and a
+       body that cannot be read 400 -- both with the next link while the run
+       is still the one tracked (the nonce they rode is spent, as any
+       answered request spends it).
     5. Answer the standard engine envelope ``{status: 'OK', data}`` plus the
        NEXT ``upload_url`` on this server's origin: the redeemed nonce is
        spent, and the widget's "drop more files" needs a fresh one. No next
@@ -389,16 +410,21 @@ async def handle_upload(
             httpStatus=400,
         )
     nonce = str(request.path_params.get('nonce') or '')
+    unknown = error(
+        'unknown or already used upload nonce; call run_dropper_pipe again for a fresh upload_url',
+        httpStatus=404,
+    )
+    # a dead nonce is 404 whatever the body declares: it is never echoed back
+    # as a link to retry with
+    if not tasks.has_upload_nonce(nonce):
+        return unknown
     if _declared_too_large(request):
         return _too_large(mcp_origin, nonce)  # the nonce is untouched: the same link retries
 
     # 2. one nonce, one upload
     bound = tasks.consume_upload_nonce(nonce)
-    if bound is None:
-        return error(
-            'unknown or already used upload nonce; call run_dropper_pipe again for a fresh upload_url',
-            httpStatus=404,
-        )
+    if bound is None:  # redeemed by a concurrent request between the peek and here
+        return unknown
     address, instance, caller_auth = bound['token'], bound['instance'], bound['caller_auth']
 
     # 3. the caller's own engine client, 4. forward
@@ -410,16 +436,19 @@ async def handle_upload(
         try:
             data = await _forward_upload(client, instance, request)
         except UploadTooLarge:
-            # this request spent its nonce; while the SAME instance is still
-            # tracked, hand out the next link with the refusal. A fresh launch
-            # that took the address over meanwhile gets no link: it would carry
-            # this request's caller into a run that is not theirs
-            try:
-                return _too_large(mcp_origin, tasks.issue_upload_nonce(address, caller_auth, instance=instance))
-            except KeyError:
-                return _too_large(mcp_origin, None)
-        except Exception as exc:  # noqa: BLE001 - the body could not be read or split; same envelope as the door
-            return exception(exc)
+            # this request spent its nonce; while the SAME run is still tracked,
+            # hand out the next link with the refusal
+            return _too_large(mcp_origin, _replacement_nonce(tasks, address, caller_auth, instance))
+        except Exception as exc:  # noqa: BLE001 - the body could not be read or split
+            # the door's error envelope (400), plus the same replacement link the
+            # 413 branch gives: the nonce is spent, and a widget left without a
+            # link has no retry
+            return _refusal(
+                mcp_origin,
+                400,
+                formatException(exc).model_dump(exclude_none=True).get('error') or {'error': str(exc)},
+                _replacement_nonce(tasks, address, caller_auth, instance),
+            )
     finally:
         try:
             for per_request in bucket:
@@ -435,12 +464,9 @@ async def handle_upload(
     # nonce named: none when that instance left the tracker or a fresh launch
     # replaced it while the upload ran
     content = ResultSuccess(data=data).model_dump(exclude_none=True)
-    try:
-        content['upload_url'] = upload_url(
-            mcp_origin, tasks.issue_upload_nonce(address, caller_auth, instance=instance)
-        )
-    except KeyError:
-        pass
+    replacement = _replacement_nonce(tasks, address, caller_auth, instance)
+    if replacement:
+        content['upload_url'] = upload_url(mcp_origin, replacement)
     return JSONResponse(content=content)
 
 

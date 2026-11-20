@@ -667,7 +667,7 @@ async def test_a_new_run_at_the_same_address_refuses_the_old_nonce_and_use_exist
 # --- CodeRabbit round 2: replacement links bind to the redeemed instance -----
 
 
-async def _drive_renewal(monkeypatch, between, *, oversize=False):
+async def _drive_renewal(monkeypatch, between, *, oversize=False, body=None, content_type=b'application/octet-stream'):
     """Redeem a nonce, run `between(tasks)` while the body is being read (the
     window a fresh launch can land in), and return the parsed answer.
     """
@@ -689,7 +689,7 @@ async def _drive_renewal(monkeypatch, between, *, oversize=False):
         identity.REQUEST_CLIENTS.get().append(client)
         return client
 
-    body = b'x' * (64 if oversize else 4)
+    body = body if body is not None else b'x' * (64 if oversize else 4)
     pending = [{'type': 'http.request', 'body': body, 'more_body': False}]
 
     async def receive():
@@ -700,7 +700,7 @@ async def _drive_renewal(monkeypatch, between, *, oversize=False):
         'type': 'http',
         'method': 'POST',
         'path': f'/mcp/upload/{nonce}',
-        'headers': [(b'content-type', b'application/octet-stream')],
+        'headers': [(b'content-type', content_type)],
         'query_string': b'',
         'path_params': {'nonce': nonce},
     }
@@ -728,3 +728,64 @@ async def test_a_same_instance_re_add_between_redeem_and_renewal_keeps_the_repla
     status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add(ADDRESS, instance='c1'), oversize=True)
     assert status == 413
     assert body['upload_url'].startswith('http://mcp.test/mcp/upload/')
+
+
+# --- CodeRabbit round 3: a dead nonce is 404 first; a body-read failure keeps the retry ---
+
+
+def test_registry_has_upload_nonce_peeks_without_redeeming():
+    tasks = TaskRegistry()
+    tasks.add(ADDRESS, instance='c1')
+    nonce = tasks.issue_upload_nonce(ADDRESS, None)
+    assert tasks.has_upload_nonce(nonce) is True
+    assert tasks.has_upload_nonce(nonce) is True  # a peek spends nothing
+    assert tasks.has_upload_nonce('never-issued') is False
+    assert tasks.consume_upload_nonce(nonce) is not None
+    assert tasks.has_upload_nonce(nonce) is False
+
+
+@pytest.mark.asyncio
+async def test_a_dead_nonce_with_an_oversize_declaration_is_404_and_echoes_no_link(monkeypatch):
+    monkeypatch.setattr(apps, 'MAX_UPLOAD_BYTES', 16)
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        unknown = await app.post('/mcp/upload/not-a-nonce', content=b'x' * 64)
+        assert unknown.status_code == 404
+        assert 'upload_url' not in unknown.json()
+
+        started = await _start_dropper(app)
+        assert (await app.post(urlsplit(started['upload_url']).path, content=b'ok')).status_code == 200  # spends it
+        spent = await app.post(urlsplit(started['upload_url']).path, content=b'x' * 64)
+        assert spent.status_code == 404
+        assert 'upload_url' not in spent.json()
+
+        # a LIVE nonce over the cap keeps its contract: 413, the same link, unspent
+        again = await _start_dropper(app)
+        refused = await app.post(urlsplit(again['upload_url']).path, content=b'x' * 64)
+        assert refused.status_code == 413 and refused.json()['upload_url'] == again['upload_url']
+        assert (await app.post(urlsplit(again['upload_url']).path, content=b'ok')).status_code == 200
+
+
+_BROKEN_MULTIPART = (b'multipart/form-data; boundary=----b', b'not multipart')  # under the 16-byte test cap
+
+
+@pytest.mark.asyncio
+async def test_a_body_read_failure_answers_400_with_a_replacement_link_for_the_same_run(monkeypatch):
+    content_type, body = _BROKEN_MULTIPART
+    status, answer = await _drive_renewal(monkeypatch, lambda tasks: None, body=body, content_type=content_type)
+    assert status == 400 and answer['status'] == 'Error'
+    assert answer['upload_url'].startswith('http://mcp.test/mcp/upload/')
+
+
+@pytest.mark.asyncio
+async def test_a_body_read_failure_after_a_fresh_launch_or_removal_carries_no_link(monkeypatch):
+    content_type, body = _BROKEN_MULTIPART
+    status, answer = await _drive_renewal(
+        monkeypatch, lambda tasks: tasks.add(ADDRESS, instance='c2'), body=body, content_type=content_type
+    )
+    assert status == 400 and 'upload_url' not in answer
+
+    status, answer = await _drive_renewal(
+        monkeypatch, lambda tasks: tasks.remove(ADDRESS), body=body, content_type=content_type
+    )
+    assert status == 400 and 'upload_url' not in answer
