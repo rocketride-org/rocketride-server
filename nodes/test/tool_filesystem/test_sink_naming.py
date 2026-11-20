@@ -178,6 +178,7 @@ def _install_stubs():
         m.require_dict = require_dict
         m.require_str = require_str
         m.optional_str = optional_str
+        m.register_debugger_thread = _load_debugger_utils().register_debugger_thread
         sys.modules['ai.common.utils'] = m
     if 'ai.common.schema' not in sys.modules:
         m = types.ModuleType('ai.common.schema')
@@ -200,6 +201,27 @@ def _install_stubs():
         m.Doc = _Doc
         m.DocMetadata = _DocMetadata
         sys.modules['ai.common.schema'] = m
+
+
+def _load_debugger_utils():
+    """Load the real shared ``debugger_utils`` standalone (it has no engine imports)."""
+    name = 'ai.common.utils.debugger_utils'
+    if name not in sys.modules:
+        path = (
+            Path(__file__).resolve().parents[3]
+            / 'packages'
+            / 'ai'
+            / 'src'
+            / 'ai'
+            / 'common'
+            / 'utils'
+            / 'debugger_utils.py'
+        )
+        spec = importlib.util.spec_from_file_location(name, path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
 
 
 def _load_real_iglobal_module():
