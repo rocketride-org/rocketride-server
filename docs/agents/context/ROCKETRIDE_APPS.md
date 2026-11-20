@@ -1004,12 +1004,16 @@ question was not a database query. Every one of these tools returns `valid`,
 on a successful read as well as on a failure, including the ArangoDB
 `get_data`.
 
-A pipeline's `questions` lane treats the two failures differently. A database
-that cannot be reached, or that drops the connection while the query runs,
-fails the step. A generated query that a database which is up refuses (a row
-cast failure, a statement timeout) is reported as `Query execution failed` on
-the `text` and `answers` lanes, so an app that reads those lanes must handle
-that error as well as a failed step.
+A pipeline's `questions` lane depends on the node family. On the SQL nodes
+(`rocketride_sql`, `db_postgres`, `db_mysql`, `db_clickhouse`), a database that
+cannot be reached, or that drops the connection while the query runs, fails the
+step, while a generated query that a database which is up refuses (a row cast
+failure, a statement timeout) is reported as `Query execution failed` on the
+`text` and `answers` lanes, so an app that reads those lanes must handle that
+error as well as a failed step. The graph nodes (`rocketride_graph`,
+`graph_neo4j`, `graph_falkordb`, `graph_arango`) do not make that distinction:
+any read that fails on the `questions` lane, an outage or a query the database
+refuses, fails the step and writes nothing to the lanes.
 
 ### Data in the RocketRide cloud databases
 
