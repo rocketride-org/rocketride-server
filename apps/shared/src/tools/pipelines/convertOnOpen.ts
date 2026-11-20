@@ -78,6 +78,10 @@ export interface IConversionBanner {
 	title: string;
 	/** The converter's notes, one per line, component-prefixed. */
 	items: string[];
+	/** The signature of the document text this banner describes: the text
+	 *  the editor wrote, or the text sent when nothing changed. A refusal is
+	 *  retired once the text moves on ({@link currentBanner}). */
+	forSig: string;
 }
 
 /** What one converter reply does to the editor. */
@@ -133,8 +137,10 @@ export function unknownConfigKeyNodes(nodes: readonly IConfigShapeNode[], servic
 // =============================================================================
 
 /**
- * The text signature a conversion is keyed on: the pipeline's name and its
- * components, which is what the converter reads and rewrites. Editor-only
+ * The text signature a conversion is keyed on: the pipeline's name, its
+ * components and its parameters map — everything the converter's reply
+ * would write back over, so an edit to any of them while a call is pending
+ * retires the reply instead of letting it restore the old map. Editor-only
  * fields (viewport, revision counters) are left out so a view change never
  * reads as a new text.
  *
@@ -144,7 +150,7 @@ export function unknownConfigKeyNodes(nodes: readonly IConfigShapeNode[], servic
 export function documentSig(project: unknown): string {
 	const doc = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
 	try {
-		return JSON.stringify({ name: doc.name ?? null, components: doc.components ?? [] });
+		return JSON.stringify({ name: doc.name ?? null, components: doc.components ?? [], parameters: doc.parameters ?? null });
 	} catch {
 		return ' nosig';
 	}
@@ -206,13 +212,17 @@ export function applyConvertResult(state: IConvertOnOpenState, project: Record<s
 
 	let nextProject: Record<string, unknown> | null = null;
 	let next = state;
+	// The banner describes the text the editor leaves behind: the written
+	// text, or the sent text when nothing changed.
+	let forSig = documentSig(project);
 	if (result.touched) {
 		const revision = typeof project.docRevision === 'number' ? project.docRevision : 0;
 		nextProject = { ...project, ...result.pipeline, docRevision: revision + 1 };
-		next = { ...state, writtenSig: documentSig(nextProject) };
+		forSig = documentSig(nextProject);
+		next = { ...state, writtenSig: forSig };
 	}
 
-	return { state: next, nextProject, banner: conversionBanner(result), nodeErrors };
+	return { state: next, nextProject, banner: conversionBanner(result, forSig), nodeErrors };
 }
 
 /**
@@ -221,9 +231,10 @@ export function applyConvertResult(state: IConvertOnOpenState, project: Record<s
  * author's to fix, not the converter's to announce).
  *
  * @param result - The converter's reply.
+ * @param forSig - The signature of the document text the banner describes.
  * @returns The banner model.
  */
-export function conversionBanner(result: IConvertOutcome): IConversionBanner | null {
+export function conversionBanner(result: IConvertOutcome, forSig: string): IConversionBanner | null {
 	if (!result.touched && result.errors.length === 0) return null;
 	const prefixed = (note: IConvertNote): string => (note.id ? `${note.id}: ${note.message}` : note.message);
 	const items = [...result.errors.map(prefixed), ...result.warnings.map(prefixed)];
@@ -231,9 +242,26 @@ export function conversionBanner(result: IConvertOutcome): IConversionBanner | n
 		const refused = new Set(result.errors.map((note) => note.id).filter((id): id is string => !!id)).size;
 		const head = refused === 1 ? '1 node could not be converted' : `${refused} nodes could not be converted`;
 		const tail = result.touched ? ' to the current config format; the others were. Fix the red nodes, then save.' : ' to the current config format. Fix the red nodes, then save.';
-		return { variant: 'error', title: `${head}${tail}`, items };
+		return { variant: 'error', title: `${head}${tail}`, items, forSig };
 	}
-	return { variant: 'warning', title: 'This pipeline was converted to the current config format. Save to keep it.', items };
+	return { variant: 'warning', title: 'This pipeline was converted to the current config format. Save to keep it.', items, forSig };
+}
+
+/**
+ * The banner still worth showing for the document as it stands now. A
+ * refusal describes one text: once the author moves the text on (a repair
+ * by hand, any edit) it is retired, and the next conversion speaks for the
+ * new text. A warning for an applied conversion stays until the save it
+ * asks for, whatever the author edits meanwhile.
+ *
+ * @param banner - The last reply's banner, or null.
+ * @param sig - The current document's signature.
+ * @returns The banner to show, or null.
+ */
+export function currentBanner(banner: IConversionBanner | null, sig: string): IConversionBanner | null {
+	if (!banner) return null;
+	if (banner.variant === 'error' && banner.forSig !== sig) return null;
+	return banner;
 }
 
 // =============================================================================

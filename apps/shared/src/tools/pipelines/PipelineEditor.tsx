@@ -28,7 +28,7 @@ import type { EndpointKeyMinter } from './components/pipeline-actions/endpointKe
 import { NewPipelineForm } from './components/NewPipelineForm';
 import { DeveloperIdBanner } from './components/DeveloperIdBanner';
 import type { NewPipelineIdentity } from './components/NewPipelineForm';
-import { INITIAL_CONVERT_STATE, applyConvertResult, documentSig, gearMessages, markAttempted, shouldConvert } from './convertOnOpen';
+import { INITIAL_CONVERT_STATE, applyConvertResult, currentBanner, documentSig, gearMessages, markAttempted, shouldConvert } from './convertOnOpen';
 import type { IConvertOnOpenState, IConversionBanner } from './convertOnOpen';
 
 import type { IProject } from 'shell';
@@ -485,6 +485,17 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	const convertStateRef = useRef<IConvertOnOpenState>(INITIAL_CONVERT_STATE);
 	const projectRef = useRef(project);
 	projectRef.current = project;
+	// A reply that lands after this frame is gone must not write through a
+	// host that no longer has the document. Mount-scoped on purpose: a
+	// dependency-driven re-run of the convert effect leaves pending replies
+	// alone (their own signature check decides).
+	const mountedRef = useRef(true);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
 	const docSig = useMemo(() => documentSig(project), [project]);
 	const handleUnknownConfigKeys = useCallback((nodeIds: string[]) => setUnknownKeyNodes(nodeIds), []);
 	// Another document in this frame starts with a clean memory.
@@ -507,8 +518,11 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		void client
 			.convert({ pipeline: sent })
 			.then((result) => {
-				// The author edited meanwhile: this reply describes a text that is
-				// gone, and the new text triggers its own call.
+				// The frame unmounted: nobody holds the document any more.
+				if (!mountedRef.current) return;
+				// The author edited meanwhile (a node, the name, the parameters
+				// map): this reply describes a text that is gone, and the new
+				// text triggers its own call.
 				if (documentSig(projectRef.current) !== docSig) return;
 				const applied = applyConvertResult(convertStateRef.current, sent, result);
 				convertStateRef.current = applied.state;
@@ -525,12 +539,14 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		// reason is a no-op under shouldConvert's memory.
 	}, [docSig, unknownKeyNodes, isConnected, host]);
 	// "Save to keep it": the save the banner asks for retires it. A refusal
-	// banner stays with its red nodes until the text changes and converts.
+	// banner is keyed to the text it answered and retires with the author's
+	// next edit (currentBanner), repaired by hand or re-converted alike.
 	const wasDirtyRef = useRef(host.isDirty);
 	useEffect(() => {
 		if (wasDirtyRef.current && !host.isDirty) setConversion((shown) => (shown?.variant === 'warning' ? null : shown));
 		wasDirtyRef.current = host.isDirty;
 	}, [host.isDirty]);
+	const shownBanner = useMemo(() => currentBanner(conversion, docSig), [conversion, docSig]);
 	const configMessages = useMemo(() => gearMessages(unknownKeyNodes, isConnected, conversionErrors), [unknownKeyNodes, isConnected, conversionErrors]);
 
 	// --- Run-log DVR (the brokered session family — identical in every realm) --
@@ -787,7 +803,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				canRegisterDeveloper={canRegisterDeveloper}
 				onUnknownConfigKeys={handleUnknownConfigKeys}
 				configMessages={configMessages}
-				conversion={conversion}
+				conversion={shownBanner}
 				onPipelineAction={host.runAction}
 				{...(host.onViewStateChange ? { onViewStateChange: host.onViewStateChange } : {})}
 				onOpenLink={host.openLink} onCreateEndpointKey={host.createEndpointKey}

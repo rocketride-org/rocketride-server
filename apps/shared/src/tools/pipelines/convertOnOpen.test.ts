@@ -34,7 +34,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { CONNECT_TO_CONVERT, INITIAL_CONVERT_STATE, applyConvertResult, conversionBanner, documentSig, gearMessages, markAttempted, shouldConvert, unknownConfigKeyNodes } from './convertOnOpen';
+import { CONNECT_TO_CONVERT, INITIAL_CONVERT_STATE, applyConvertResult, conversionBanner, currentBanner, documentSig, gearMessages, markAttempted, shouldConvert, unknownConfigKeyNodes } from './convertOnOpen';
 import type { IConvertOutcome } from './convertOnOpen';
 
 // =============================================================================
@@ -170,11 +170,29 @@ test('a reachable-leaf problem alone (a missing secret) is not a trigger', () =>
 // Once per revision
 // =============================================================================
 
-test('the signature follows the name and components only', () => {
+test('the signature follows the name, components and parameters only', () => {
 	const a = documentSig(OLD_PIPE);
 	assert.equal(documentSig({ ...OLD_PIPE, viewport: { x: 9, y: 9, zoom: 2 }, docRevision: 99 }), a);
 	assert.notEqual(documentSig({ ...OLD_PIPE, name: 'renamed' }), a);
+	assert.notEqual(documentSig({ ...OLD_PIPE, parameters: { apikey: 'llm_1.apikey' } }), a);
 	assert.notEqual(documentSig(NEW_PIPE), a);
+});
+
+test('a parameters edit during the pending call drops the reply and the next run sends the current text', () => {
+	// The editor keeps the sent signature and compares it to the document as
+	// it stands when the reply lands; the API Params page writes `parameters`
+	// through the document, so that edit must read as a new text or the
+	// stale reply would restore the old map.
+	const sentSig = documentSig(OLD_PIPE);
+	const pending = markAttempted(INITIAL_CONVERT_STATE, sentSig);
+	const edited = { ...OLD_PIPE, parameters: { apikey: 'llm_1.apikey' }, docRevision: 4 };
+	assert.notEqual(documentSig(edited), sentSig);
+	// The next effect run sees the current text as unsent and asks again
+	assert.equal(shouldConvert(pending, documentSig(edited), 4, true), true);
+	// ...and the reply for THAT text carries the edited map forward
+	const applied = applyConvertResult(markAttempted(pending, documentSig(edited)), edited, { ...CLEAN_REPLY, pipeline: { ...NEW_PIPE, parameters: edited.parameters } });
+	assert.deepEqual(applied.nextProject?.parameters, edited.parameters);
+	assert.equal(applied.nextProject?.docRevision, 5);
 });
 
 test('a flagged document on a connected host converts once', () => {
@@ -236,7 +254,7 @@ test('two refusals on one node read as one message', () => {
 // =============================================================================
 
 test('a clean conversion shows a warning banner listing the notes', () => {
-	const banner = conversionBanner(CLEAN_REPLY);
+	const banner = conversionBanner(CLEAN_REPLY, documentSig(NEW_PIPE));
 	assert.ok(banner);
 	assert.equal(banner.variant, 'warning');
 	assert.match(banner.title, /converted to the current config format/);
@@ -244,7 +262,7 @@ test('a clean conversion shows a warning banner listing the notes', () => {
 });
 
 test('a refusal shows an error banner, errors first, counting nodes not messages', () => {
-	const banner = conversionBanner({ ...PARTIAL_REPLY, errors: [...PARTIAL_REPLY.errors, { id: 'llm_1', message: 'second' }] });
+	const banner = conversionBanner({ ...PARTIAL_REPLY, errors: [...PARTIAL_REPLY.errors, { id: 'llm_1', message: 'second' }] }, documentSig(PARTIAL_REPLY.pipeline));
 	assert.ok(banner);
 	assert.equal(banner.variant, 'error');
 	assert.match(banner.title, /^1 node could not be converted to the current config format; the others were\./);
@@ -253,13 +271,43 @@ test('a refusal shows an error banner, errors first, counting nodes not messages
 });
 
 test('a refusal with nothing converted says so', () => {
-	const banner = conversionBanner({ ...PARTIAL_REPLY, touched: false, warnings: [] });
+	const banner = conversionBanner({ ...PARTIAL_REPLY, touched: false, warnings: [] }, documentSig(OLD_PIPE));
 	assert.ok(banner);
 	assert.match(banner.title, /^1 node could not be converted to the current config format\. Fix/);
 });
 
 test('nothing changed and nothing refused is no banner', () => {
-	assert.equal(conversionBanner({ pipeline: NEW_PIPE, warnings: [], errors: [], touched: false }), null);
+	assert.equal(conversionBanner({ pipeline: NEW_PIPE, warnings: [], errors: [], touched: false }, documentSig(NEW_PIPE)), null);
+});
+
+test('a refusal banner is keyed to the text it answered and retires when the text moves on', () => {
+	const applied = applyConvertResult(markAttempted(INITIAL_CONVERT_STATE, documentSig(OLD_PIPE)), OLD_PIPE, PARTIAL_REPLY);
+	assert.ok(applied.banner && applied.nextProject);
+	assert.equal(applied.banner.variant, 'error');
+	// It describes the written text, which is what the canvas now holds
+	const written = documentSig(applied.nextProject);
+	assert.equal(applied.banner.forSig, written);
+	assert.equal(currentBanner(applied.banner, written), applied.banner);
+	// The author repairs the refused node by hand: no unknown keys remain, no
+	// conversion will replace the banner, so the text change retires it
+	const repaired = { ...applied.nextProject, components: NEW_PIPE.components };
+	assert.equal(currentBanner(applied.banner, documentSig(repaired)), null);
+});
+
+test('a refusal with nothing written is keyed to the text that was sent', () => {
+	const applied = applyConvertResult(markAttempted(INITIAL_CONVERT_STATE, documentSig(OLD_PIPE)), OLD_PIPE, { ...PARTIAL_REPLY, pipeline: OLD_PIPE, touched: false, warnings: [] });
+	assert.equal(applied.nextProject, null);
+	assert.equal(applied.banner?.forSig, documentSig(OLD_PIPE));
+	assert.equal(currentBanner(applied.banner, documentSig(OLD_PIPE)), applied.banner);
+	assert.equal(currentBanner(applied.banner, documentSig(NEW_PIPE)), null);
+});
+
+test('a warning banner for an applied conversion outlives later edits (the save retires it)', () => {
+	const applied = applyConvertResult(markAttempted(INITIAL_CONVERT_STATE, documentSig(OLD_PIPE)), OLD_PIPE, CLEAN_REPLY);
+	assert.ok(applied.banner && applied.nextProject);
+	assert.equal(applied.banner.forSig, documentSig(applied.nextProject));
+	assert.equal(currentBanner(applied.banner, documentSig({ ...applied.nextProject, name: 'edited after' })), applied.banner);
+	assert.equal(currentBanner(null, documentSig(NEW_PIPE)), null);
 });
 
 // =============================================================================
