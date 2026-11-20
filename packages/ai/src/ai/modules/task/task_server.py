@@ -641,8 +641,8 @@ class TaskServer(DAPBase):
         # A deauthed connection likewise keeps its former user (_deauthed_user_id).
         conn_user_id = (
             getattr(conn, '_revoked_user_id', None)
-            or getattr(getattr(conn, '_account_info', None), 'userId', None)
             or getattr(conn, '_deauthed_user_id', None)
+            or getattr(getattr(conn, '_account_info', None), 'userId', None)
         )
 
         # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the

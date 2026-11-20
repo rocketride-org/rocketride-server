@@ -371,3 +371,15 @@ async def test_r972_deauth_disconnect_event_stays_user_scoped(monkeypatch):
     await server._dapbase_on_disconnected(conn)
 
     assert server.broadcast_server_event.call_args.kwargs['user_id'] == 'admin'
+
+
+@pytest.mark.asyncio
+async def test_r972_empty_user_id_disconnect_event_stays_scoped(monkeypatch):
+    """A never-deauthed connection with userId '' disconnects scoped to '', not None."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('', []), monitors=WILDCARD_ALL)
+
+    server.broadcast_server_event = AsyncMock()
+    await server._dapbase_on_disconnected(conn)
+
+    assert server.broadcast_server_event.call_args.kwargs['user_id'] == ''
