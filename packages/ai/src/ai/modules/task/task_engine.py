@@ -1717,6 +1717,9 @@ class Task(DAPBase):
             if not self._data_client:
                 # No token: the run never started or was torn down while we waited for the lock
                 if not self._data_token:
+                    # Termination clears the token while we wait: same code as a stopped task
+                    if self._is_terminating:
+                        raise TaskError(TaskError.STOPPED, 'Task is terminating, cannot process data requests')
                     raise RuntimeError('Task is not running, cannot open the data channel')
                 self._data_client = await self._dial()
                 self._data_connected.set()
