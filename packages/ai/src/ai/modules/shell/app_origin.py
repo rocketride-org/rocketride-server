@@ -1118,9 +1118,13 @@ async def isolated_for(token: str, app_id: str) -> bool:
 
 # Rate counters are never evicted while their window runs: dropping a live
 # bucket would give its caller a fresh budget, so flooding a cache with other
-# keys would lift a limit. Past this many live keys a NEW key is refused (the
-# limit fails closed) until windows end.
+# keys would lift a limit. Past this many live keys a NEW key no longer gets a
+# bucket of its own: it shares one overflow bucket (below) until windows end.
 _RATE_KEYS_MAX = 65536
+# The shared overflow bucket admits this many times one caller's budget per
+# window, so new callers still get through when the table is full, bounded as a group.
+_RATE_OVERFLOW_FACTOR = 50
+_RATE_OVERFLOW_KEY = ('overflow',)  # not a str: no client or caller name can equal it
 
 
 def _rate_ok(cache: dict, key: str, limit: int) -> bool:
@@ -1131,10 +1135,13 @@ def _rate_ok(cache: dict, key: str, limit: int) -> bool:
             now = time.time()
             for k in [k for k, v in cache.items() if v['expiry'] <= now]:
                 cache.pop(k, None)
-            if len(cache) >= _RATE_KEYS_MAX:
-                return False
-        cache[key] = {'count': 1, 'expiry': time.time() + FRAME_RATE_WINDOW, 'appId': ''}
-        return True
+        if len(cache) >= _RATE_KEYS_MAX:
+            # Full of live windows: existing buckets stay as they are; a new key counts against the shared one.
+            key, limit = _RATE_OVERFLOW_KEY, limit * _RATE_OVERFLOW_FACTOR
+            hit = _cached(cache, key)
+        if hit is None:
+            cache[key] = {'count': 1, 'expiry': time.time() + FRAME_RATE_WINDOW, 'appId': ''}
+            return True
     hit['count'] += 1
     return hit['count'] <= limit
 

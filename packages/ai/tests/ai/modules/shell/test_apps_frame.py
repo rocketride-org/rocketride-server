@@ -618,10 +618,27 @@ def test_rate_counters_survive_a_flood_of_other_keys(clock, monkeypatch):
     cache: dict = {}
     assert [ao._rate_ok(cache, 'a', 2) for _ in range(3)] == [True, True, False]
     assert ao._rate_ok(cache, 'b', 2) and ao._rate_ok(cache, 'c', 2)
-    assert ao._rate_ok(cache, 'd', 2) is False, 'a full cache of live windows refuses a new key'
     assert ao._rate_ok(cache, 'a', 2) is False, "the first caller's counter was not evicted and reset"
     clock.advance(ao.FRAME_RATE_WINDOW + 1)
     assert ao._rate_ok(cache, 'd', 2) is True, 'once the windows end the cache has room again'
+
+
+def test_a_full_rate_table_admits_new_callers_up_to_a_shared_overflow_limit(clock, monkeypatch):
+    """Past the cap a new caller is not refused outright: new keys share one bounded overflow bucket."""
+    ao = _ao()
+    monkeypatch.setattr(ao, '_RATE_KEYS_MAX', 3)
+    monkeypatch.setattr(ao, '_RATE_OVERFLOW_FACTOR', 2)
+    cache: dict = {}
+    assert [ao._rate_ok(cache, 'a', 2) for _ in range(3)] == [True, True, False]  # 'a' is exhausted
+    assert ao._rate_ok(cache, 'b', 2) and ao._rate_ok(cache, 'c', 2)  # the table is full
+    # New callers past the cap share an overflow bucket of 2 x 2 = 4.
+    assert [ao._rate_ok(cache, f'new{i}', 2) for i in range(5)] == [True, True, True, True, False]
+    assert ao._rate_ok(cache, 'a', 2) is False, "an existing caller's exhausted count is not reset by the overflow"
+    assert ao._rate_ok(cache, 'b', 2) is True, 'an existing caller keeps its own budget, not the shared one'
+    clock.advance(ao.FRAME_RATE_WINDOW + 1)
+    assert ao._rate_ok(cache, 'newer', 2) is True, (
+        'once the windows end the overflow bucket is fresh and callers get their own'
+    )
 
 
 @pytest.mark.asyncio
