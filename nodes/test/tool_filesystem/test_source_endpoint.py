@@ -13,7 +13,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from test_sink_naming import _install_stubs, _NODE_DIR
+from test_sink_naming import _install_stubs, _NODE_DIR, with_files
 
 
 def _install_endpoint_stubs():
@@ -34,12 +34,12 @@ def _load_endpoint_module():
 
 
 class _FakeStore:
-    """Async FileStore stub over a dict of {relative_path: bytes}."""
+    """A ``self.files`` door double over a dict of {relative_path: bytes}."""
 
     def __init__(self, files):
         self.files = dict(files)
 
-    async def stat(self, path):
+    def stat(self, path):
         p = path.strip('/')
         if p in self.files:
             return {'exists': True, 'type': 'file', 'size': len(self.files[p])}
@@ -47,7 +47,7 @@ class _FakeStore:
             return {'exists': True, 'type': 'dir'}
         return {'exists': False}
 
-    async def list_dir(self, path=''):
+    def list_dir(self, path=''):
         p = path.strip('/')
         prefix = f'{p}/' if p else ''
         names = {}
@@ -62,7 +62,7 @@ class _FakeStore:
                 names.setdefault(head, {'name': head, 'type': 'file', 'size': len(self.files[k])})
         return {'entries': [names[n] for n in sorted(names)], 'count': len(names)}
 
-    async def read(self, path, connection_id=0, max_size=None):
+    def read(self, path, max_size=None):
         return self.files[path.strip('/')]
 
 
@@ -79,11 +79,10 @@ class _FakeInstance:
         return record
 
 
-def _endpoint(mod, files, *, path='inbox', recursive=False, monkeypatch=None):
-    store = _FakeStore(files)
-    mod.Store = MagicMock()
-    mod.Store.engine_file_store.return_value = store
-    ep = mod.IEndpoint()
+def _endpoint(mod, files, *, path='inbox', recursive=False, monkeypatch=None, store=None):
+    """An endpoint whose engine-level ``files`` door is the double (the server's store in production)."""
+    ep = with_files(mod.IEndpoint)()
+    ep.files = store if store is not None else _FakeStore(files)
     ep.endpoint = types.SimpleNamespace(
         serviceConfig={'parameters': {'path': path, 'recursive': recursive}},
     )
@@ -167,13 +166,14 @@ def test_blank_path_raises(monkeypatch):
         ep.scanObjects('', lambda e: 0)
 
 
-def test_no_task_identity_raises(monkeypatch):
-    # Store.engine_file_store() returns None when no task is running or the
-    # task carries no identity — the scan must fail loudly, not silently no-op.
+def test_a_refused_store_fails_the_scan(monkeypatch):
+    # The server refuses self.files where it can name no owner (plan 5.7) —
+    # the scan must fail loudly with its reason, not silently no-op.
     mod = _load_endpoint_module()
-    ep = _endpoint(mod, {'inbox/a.txt': b'A'}, path='inbox', monkeypatch=monkeypatch)
-    mod.Store.engine_file_store.return_value = None
-    with pytest.raises(ValueError, match='task'):
+    refused = MagicMock()
+    refused.stat.side_effect = RuntimeError('fs_stat: this binding belongs to no control the server can name')
+    ep = _endpoint(mod, {}, path='inbox', monkeypatch=monkeypatch, store=refused)
+    with pytest.raises(RuntimeError, match='no control'):
         ep.scanObjects('', lambda e: 0)
 
 
@@ -186,7 +186,7 @@ def test_render_sends_tag_stream_sequence(monkeypatch):
     mod = _load_endpoint_module()
     ep = _endpoint(mod, {'inbox/a.pdf': b'PDFDATA'}, monkeypatch=monkeypatch)
     inst = _FakeInstance()
-    ep.renderStoreObject(types.SimpleNamespace(name='inbox/a.pdf'), inst)
+    ep.renderStoreObject(types.SimpleNamespace(name='inbox/a.pdf'), inst, ep.files)
     assert [c[0] for c in inst.calls] == [
         'sendTagBeginObject',
         'sendTagBeginStream',
@@ -208,7 +208,7 @@ def test_render_strips_engine_root_slash(monkeypatch):
     mod = _load_endpoint_module()
     ep = _endpoint(mod, {'inbox/a.txt': b'A'}, monkeypatch=monkeypatch)
     inst = _FakeInstance()
-    ep.renderStoreObject(types.SimpleNamespace(name='/inbox/a.txt'), inst)
+    ep.renderStoreObject(types.SimpleNamespace(name='/inbox/a.txt'), inst, ep.files)
     assert dict(inst.calls)['sendTagData'] == (b'A',)
 
 
@@ -219,7 +219,7 @@ def test_render_read_failure_propagates_before_any_send(monkeypatch):
     ep = _endpoint(mod, {}, monkeypatch=monkeypatch)
     inst = _FakeInstance()
     with pytest.raises(KeyError):
-        ep.renderStoreObject(types.SimpleNamespace(name='inbox/missing.txt'), inst)
+        ep.renderStoreObject(types.SimpleNamespace(name='inbox/missing.txt'), inst, ep.files)
     assert inst.calls == []
 
 
@@ -235,9 +235,9 @@ def test_instance_render_object_delegates_and_prevents_default():
     entry = types.SimpleNamespace(name='inbox/a.txt')
 
     calls = []
-    inst.IEndpoint = types.SimpleNamespace(renderStoreObject=lambda e, i: calls.append((e, i)))
+    inst.IEndpoint = types.SimpleNamespace(renderStoreObject=lambda e, i, f: calls.append((e, i, f)))
     assert inst.renderObject(entry) == 'PREVENT_DEFAULT'
-    assert calls == [(entry, inst.instance)]
+    assert calls == [(entry, inst.instance, inst.files)]
 
 
 def test_instance_render_object_falls_through_without_source_endpoint():
@@ -271,7 +271,7 @@ def _render_ready_instance():
     from test_sink_naming import _fs, _sink_instance
 
     inst = _sink_instance(_fs())
-    inst.IEndpoint = types.SimpleNamespace(renderStoreObject=lambda e, i: None)
+    inst.IEndpoint = types.SimpleNamespace(renderStoreObject=lambda e, i, f: None)
     return inst, sys.modules['ai.common.utils.process_hooks']
 
 
@@ -315,21 +315,16 @@ def test_recursive_scan_bounds_directory_cycles(monkeypatch):
     monkeypatch.setattr(mod, '_MAX_SCAN_FOLDERS', 5)
 
     class _CycleStore(_FakeStore):
-        async def stat(self, path):
+        def stat(self, path):
             return {'exists': True, 'type': 'dir'}
 
-        async def list_dir(self, path=''):
+        def list_dir(self, path=''):
             # Self-limiting: if the folder cap ever regresses, fail fast here
             # instead of walking this fake forever.
             self.calls = getattr(self, 'calls', 0) + 1
             assert self.calls <= 50, 'scan not bounded: cycling list_dir called past the cap'
             return {'entries': [{'name': 'loop', 'type': 'dir'}], 'count': 1}
 
-    mod.Store = MagicMock()
-    mod.Store.engine_file_store.return_value = _CycleStore({})
-    ep = mod.IEndpoint()
-    ep.endpoint = types.SimpleNamespace(
-        serviceConfig={'parameters': {'path': 'inbox', 'recursive': True}},
-    )
+    ep = _endpoint(mod, {}, path='inbox', recursive=True, monkeypatch=monkeypatch, store=_CycleStore({}))
     with pytest.raises(ValueError, match='exceeded 5 folders'):
         ep.scanObjects('', lambda e: 0)

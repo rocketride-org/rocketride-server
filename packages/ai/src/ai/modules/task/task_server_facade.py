@@ -137,8 +137,9 @@ async def start_server_task_as_team(
     # Trusted entry point, but still validate the owner pair: owner_kind='user'
     # with an empty owner_user_id would build an identity with userId='' — a
     # user-owned run with no owner. Downstream that yields no storage anchor
-    # (Task._storage_root) and an empty run-log anchor (raises), so the run
-    # executes with storage tools disabled and no log, both SILENTLY. Fail loud.
+    # (storage_root_for refuses a node's self.files) and an empty run-log
+    # anchor (raises), so the run executes with storage tools refused and no
+    # log, both SILENTLY. Fail loud.
     if owner_kind == 'user' and not owner_user_id:
         raise ValueError("owner_kind='user' requires a non-empty owner_user_id")
 

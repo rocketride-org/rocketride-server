@@ -25,16 +25,27 @@
 Anomaly detection engine using statistical methods.
 
 Supports Z-Score, IQR (Interquartile Range), and Rolling Average deviation
-detection with a thread-safe sliding window for streaming pipeline data.
+detection over a thread-safe sliding window of ONE series.
+
+The window is state, not a cache: whose history it is changes the answer, so
+it lives in the node's ``self.state`` between calls (plan 5.7) and a detector
+is rebuilt from its stored blob for each call (``AnomalyDetector(settings,
+state)``) and written back with ``to_state``. Every replica that serves the
+series therefore scores it from the same history. Every value maintains the
+incremental z-score aggregates, whatever method scored it, so one window
+serves any method a call asks for.
 """
 
 import math
 import re
 import threading
 from collections import deque
-from typing import Any, Dict
+from typing import Any, Dict, Mapping, Optional
 
 from rocketlib import debug
+
+#: The layout of a stored window; a blob of any other version starts empty.
+STATE_VERSION = 1
 
 
 class AnomalyDetector:
@@ -45,8 +56,16 @@ class AnomalyDetector:
     data points against statistical thresholds to classify severity.
     """
 
-    def __init__(self, config: Dict[str, Any]):
-        """Initialize the anomaly detector with the given configuration."""
+    def __init__(self, config: Mapping[str, Any], state: Optional[Mapping[str, Any]] = None):
+        """
+        Initialize the detector for one call.
+
+        Args:
+            config: The call's settings (method, sensitivity, windowSize,
+                warningThreshold, criticalThreshold, metric).
+            state: The series' stored window (``to_state``), or None for a
+                series not seen yet.
+        """
         self.method = config.get('method', 'z_score')
         self.sensitivity = config.get('sensitivity', 2.0)
         self.window_size = config.get('windowSize', 100)
@@ -72,10 +91,66 @@ class AnomalyDetector:
             self.window_size if isinstance(self.window_size, int) and self.window_size >= 1 else 1
         )
 
-    def _add_value(self, value: float) -> None:
-        """Add a value to the sliding window (thread-safe)."""
+        # Whether this call added a value: only then is the window written back
+        self.changed = False
+
+        if state is not None:
+            self._restore(state)
+
+    # ------------------------------------------------------------------
+    # The stored window
+    # ------------------------------------------------------------------
+
+    def to_state(self) -> Dict[str, Any]:
+        """
+        Return the window and its aggregates as a JSON value for ``self.state``.
+
+        Floats round-trip exactly through JSON, so a detector restored from
+        this blob continues exactly where this one stopped.
+        """
         with self._lock:
-            self._window.append(value)
+            return {
+                'version': STATE_VERSION,
+                'window': list(self._window),
+                'k': self._z_k,
+                'sx': self._z_sx,
+                'sxx': self._z_sxx,
+                'since': self._z_since_recompute,
+            }
+
+    def _restore(self, state: Mapping[str, Any]) -> None:
+        """
+        Load a stored window, fitting it to this call's ``windowSize``.
+
+        Step 1: a blob of another version, or with no list, starts the series empty.
+        Step 2: the newest ``windowSize`` finite values are kept.
+        Step 3: when nothing was dropped the stored aggregates continue as they
+        were; otherwise they are rebuilt from the kept values.
+        """
+        if not isinstance(state, Mapping) or state.get('version') != STATE_VERSION:
+            return
+        raw = state.get('window')
+        if not isinstance(raw, list):
+            return
+        values = [float(v) for v in raw if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v)]
+        kept = values[-self._window.maxlen :] if self._window.maxlen else values
+        self._window.extend(kept)
+
+        aggregates = [state.get(name) for name in ('k', 'sx', 'sxx')]
+        since = state.get('since')
+        intact = (
+            len(kept) == len(raw)
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in aggregates)
+            and isinstance(since, int)
+            and not isinstance(since, bool)
+            and since >= 0
+        )
+        if intact:
+            self._z_k, self._z_sx, self._z_sxx = (float(v) for v in aggregates)
+            self._z_since_recompute = since
+        else:
+            self._recompute_z_aggregates()
+            self._z_since_recompute = 0
 
     def _get_window_snapshot(self) -> list:
         """Return a snapshot of the current window (thread-safe)."""
@@ -293,45 +368,51 @@ class AnomalyDetector:
         if not math.isfinite(value):
             return {'score': 0.0, 'severity': 'normal', 'is_anomalous': False, 'details': 'non-finite input'}
 
-        # IQR and rolling_avg keep the original snapshot-and-scan path: they
-        # need the full window contents (sorted / most-recent slice).
-        if self.method == 'iqr' or self.method == 'rolling_avg':
-            with self._lock:
-                window = list(self._window)
-                self._window.append(value)
-            if self.method == 'iqr':
-                return self._detect_iqr(value, window)
+        # Every value maintains the z-score aggregates, whatever method scores
+        # it, so the window serves a later call that asks for z_score. IQR and
+        # rolling_avg also need the full window contents (sorted / most-recent
+        # slice), snapshotted before the append.
+        with self._lock:
+            n = len(self._window)
+            window = list(self._window) if self.method in ('iqr', 'rolling_avg') else None
+            k, sx, sxx = self._z_k, self._z_sx, self._z_sxx
+            self._update_z_aggregates(value, n)
+            self.changed = True
+
+        if self.method == 'iqr':
+            return self._detect_iqr(value, window)
+        if self.method == 'rolling_avg':
             return self._detect_rolling_avg(value, window)
 
         # z_score (and any unrecognized method, preserving the original
-        # fallback) is maintained incrementally. The result is a function of
-        # the window as it stood before this value, so capture the aggregates
-        # under the lock, then release it before the O(1) formatting work.
-        with self._lock:
-            n = len(self._window)
-            k, sx, sxx = self._z_k, self._z_sx, self._z_sxx
-            self._update_z_aggregates(value, n)
-
+        # fallback): a function of the window as it stood before this value,
+        # from the aggregates captured under the lock
         return self._format_z_score(value, n, k, sx, sxx)
 
     _NUMERIC_PATTERN = re.compile(r'-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?')
+
+    @classmethod
+    def text_value(cls, text: str) -> Optional[float]:
+        """
+        Return the number a text carries, or None.
+
+        First tries to parse the entire text as a float. If that fails,
+        extracts the first numeric value via regex.
+        """
+        try:
+            return float(text.strip())
+        except (ValueError, AttributeError):
+            match = cls._NUMERIC_PATTERN.search(text if isinstance(text, str) else '')
+            return float(match.group()) if match else None
 
     def evaluate_text(self, text: str) -> str:
         """
         Evaluate text for anomalous numeric values.
 
-        First tries to parse the entire text as a float. If that fails,
-        extracts the first numeric value via regex. If no number can be
-        found, logs a debug message and passes the text through unchanged.
+        Scores the number ``text_value`` finds. If no number can be found,
+        logs a debug message and passes the text through unchanged.
         """
-        value = None
-        try:
-            value = float(text.strip())
-        except (ValueError, AttributeError):
-            match = self._NUMERIC_PATTERN.search(text if isinstance(text, str) else '')
-            if match:
-                value = float(match.group())
-
+        value = self.text_value(text)
         if value is None:
             debug(
                 f'    Anomaly detector: skipping non-numeric text (length={len(text) if isinstance(text, str) else 0})'

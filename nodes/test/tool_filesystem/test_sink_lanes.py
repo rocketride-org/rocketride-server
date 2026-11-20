@@ -6,26 +6,10 @@
 
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
-from test_sink_naming import _fs, _install_iinstance_stubs, _sink_instance
-
-
-def test_run_async_rejects_running_loop_before_creating_coroutine():
-    """Reject unsupported async callers before invoking the coroutine factory."""
-    _install_iinstance_stubs()
-    import tool_filesystem.IInstance as mod
-
-    operation = MagicMock()
-
-    async def invoke_from_running_loop():
-        with pytest.raises(RuntimeError, match='running event loop'):
-            mod._run_async(operation)
-
-    asyncio.run(invoke_from_running_loop())
-    operation.assert_not_called()
+from test_sink_naming import _fs, _sink_instance
 
 
 # ---------------------------------------------------------------------------
@@ -38,7 +22,7 @@ def test_documents_lane_stores_txt_even_for_named_object():
     fs = _fs()
     inst = _sink_instance(fs, name='report.pdf', object_id='obj-123')
     inst.writeDocuments([MagicMock(page_content='parsed text')])
-    (path_arg, data_arg), _ = fs.write.await_args
+    (path_arg, data_arg), _ = fs.write.call_args
     assert path_arg == 'output/report.txt' and data_arg == b'parsed text'
 
 
@@ -46,7 +30,7 @@ def test_documents_nameless_uses_object_id_txt():
     fs = _fs()
     inst = _sink_instance(fs, has_name=False, object_id='d7')
     inst.writeDocuments([MagicMock(page_content='x')])
-    (path_arg, _d), _ = fs.write.await_args
+    (path_arg, _d), _ = fs.write.call_args
     assert path_arg == 'output/d7.txt'
 
 
@@ -55,7 +39,7 @@ def test_documents_multi_doc_emits_one_json_ref_per_file():
     inst = _sink_instance(fs, name='a.txt', object_id='obj-x')
     result = inst.writeDocuments([MagicMock(page_content='one'), MagicMock(page_content='two')])
     assert result == 'PREVENT_DEFAULT'
-    paths = [c.args[0] for c in fs.write.await_args_list]
+    paths = [c.args[0] for c in fs.write.call_args_list]
     assert paths == ['output/a_0.txt', 'output/a_1.txt']
     payloads = [c.args[0] for c in inst.instance.writeJson.call_args_list]
     assert payloads == [{'path': 'output/a_0.txt'}, {'path': 'output/a_1.txt'}]
@@ -65,7 +49,7 @@ def test_documents_single_doc_has_no_index_suffix():
     fs = _fs()
     inst = _sink_instance(fs, name='a.txt', object_id='obj-x')
     inst.writeDocuments([MagicMock(page_content='only')])
-    (path_arg, _d), _ = fs.write.await_args
+    (path_arg, _d), _ = fs.write.call_args
     assert path_arg == 'output/a.txt'
 
 
@@ -73,7 +57,7 @@ def test_documents_persists_without_listener_but_does_not_emit():
     fs = _fs()
     inst = _sink_instance(fs, name='a.txt', listeners=())
     inst.writeDocuments([MagicMock(page_content='hello')])
-    fs.write.assert_awaited_once()  # still persisted
+    fs.write.assert_called_once()  # still persisted
     inst.instance.writeJson.assert_not_called()  # nothing to emit to
 
 
@@ -89,7 +73,7 @@ def test_text_lane_forces_md_even_for_named_object():
     inst = _sink_instance(fs, name='report.pdf', object_id='obj-123')
     result = inst.writeText('# heading')
     assert result == 'PREVENT_DEFAULT'
-    (path_arg, data_arg), _ = fs.write.await_args
+    (path_arg, data_arg), _ = fs.write.call_args
     assert path_arg == 'output/report.md' and data_arg == b'# heading'
 
 
@@ -98,7 +82,7 @@ def test_table_lane_forces_md_even_for_named_object():
     inst = _sink_instance(fs, name='sheet.xlsx', object_id='obj-7')
     result = inst.writeTable('| a | b |')
     assert result == 'PREVENT_DEFAULT'
-    (path_arg, _d), _ = fs.write.await_args
+    (path_arg, _d), _ = fs.write.call_args
     assert path_arg == 'output/sheet.md'
 
 
@@ -106,7 +90,7 @@ def test_text_lane_nameless_uses_object_id():
     fs = _fs()
     inst = _sink_instance(fs, has_name=False, object_id='t1')
     inst.writeText('some text')
-    (path_arg, data_arg), _ = fs.write.await_args
+    (path_arg, data_arg), _ = fs.write.call_args
     assert path_arg == 'output/t1.md' and data_arg == b'some text'
 
 
@@ -123,11 +107,11 @@ def test_image_streams_to_store_and_emits_on_end():
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\x89PNG')
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'rest')
-    fs.open_write.assert_awaited_once()  # opened lazily on first non-empty chunk
-    fs.write.assert_not_awaited()  # streamed, never one-shot
+    fs.open_write.assert_called_once()  # opened lazily on first non-empty chunk
+    fs.write.assert_not_called()  # streamed, never one-shot
     result = inst.writeImage(AVI_ACTION.END, 'image/png', b'')
     assert result == 'PREVENT_DEFAULT'
-    fs.close_write.assert_awaited_once()
+    fs.close_write.assert_called_once()
     ((_handle, stream),) = fs.streams.items()
     assert stream['path'] == 'output/img1.png'
     assert b''.join(stream['chunks']) == b'\x89PNGrest'
@@ -170,8 +154,8 @@ def test_empty_media_stream_writes_no_file():
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'')  # empty chunk
     inst.writeImage(AVI_ACTION.END, 'image/png', b'')
-    fs.open_write.assert_not_awaited()  # nothing was ever opened
-    fs.close_write.assert_not_awaited()
+    fs.open_write.assert_not_called()  # nothing was ever opened
+    fs.close_write.assert_not_called()
     inst.instance.writeJson.assert_not_called()
 
 
@@ -184,8 +168,8 @@ def test_new_begin_discards_half_written_prior_stream():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
     # A fresh BEGIN before END must discard the aborted stream and its file.
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
-    fs.close_write.assert_awaited()  # stale handle committed/closed
-    fs.delete.assert_awaited()  # partial file removed
+    fs.close_write.assert_called()  # stale handle committed/closed
+    fs.delete.assert_called()  # partial file removed
 
 
 def test_open_discards_stream_the_previous_object_left_unfinished():
@@ -196,8 +180,8 @@ def test_open_discards_stream_the_previous_object_left_unfinished():
     inst.writeAudio(AVI_ACTION.BEGIN, 'audio/wav', b'')
     inst.writeAudio(AVI_ACTION.WRITE, 'audio/wav', b'RIFF')  # aborted: no END
     inst.open(MagicMock())  # engine opens the next object
-    fs.close_write.assert_awaited_once()  # stale handle released
-    fs.delete.assert_awaited_once_with('output/track.wav')  # partial removed
+    fs.close_write.assert_called_once()  # stale handle released
+    fs.delete.assert_called_once_with('output/track.wav')  # partial removed
     inst.instance.writeJson.assert_not_called()
 
 
@@ -210,8 +194,8 @@ def test_closing_discards_a_stream_no_later_object_would_sweep():
     inst.writeAudio(AVI_ACTION.BEGIN, 'audio/wav', b'')
     inst.writeAudio(AVI_ACTION.WRITE, 'audio/wav', b'RIFF')  # cut off: no END
     inst.closing()
-    fs.close_write.assert_awaited_once()
-    fs.delete.assert_awaited_once_with('output/track.wav')
+    fs.close_write.assert_called_once()
+    fs.delete.assert_called_once_with('output/track.wav')
     inst.instance.writeJson.assert_not_called()  # nothing was completed, so nothing is claimed
 
 
@@ -225,15 +209,15 @@ def test_closing_removes_the_staging_file_not_the_operators_own():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\x89PNG')
     inst.closing()
     # once, and with the staging path: the destination is never a delete target
-    fs.delete.assert_awaited_once_with('output/o9.png.part-o9')
+    fs.delete.assert_called_once_with('output/o9.png.part-o9')
 
 
 def test_closing_without_any_stream_is_a_noop():
     fs = _fs()
     inst = _sink_instance(fs, name='a.txt')
     inst.closing()
-    fs.close_write.assert_not_awaited()
-    fs.delete.assert_not_awaited()
+    fs.close_write.assert_not_called()
+    fs.delete.assert_not_called()
 
 
 def test_open_does_not_leak_state_between_objects():
@@ -307,34 +291,10 @@ def test_no_url_key_when_emit_url_off():
     assert 'url' not in payload
 
 
-def test_media_stream_ops_share_one_live_event_loop():
-    # aiofiles write handles bind to the loop that opened them: open_write,
-    # every write_chunk, and close_write MUST run on the same still-running
-    # loop, or the real store raises 'Event loop is closed' mid-stream and
-    # leaves a 0-byte file (live bug: image drop via parse -> filestore).
-    import asyncio
-
+def test_media_stream_ops_go_through_the_files_door_in_order():
+    # The handle lives on the server (self.files, plan 5.7): open, every chunk
+    # and the close reach the same door, in order, on the same handle
     fs = _fs()
-    seen = []
-
-    async def _open_write(path):
-        seen.append(('open', asyncio.get_running_loop()))
-        fs.streams['h1'] = {'path': path, 'chunks': []}
-        return 'h1'
-
-    async def _write_chunk(handle, data):
-        seen.append(('chunk', asyncio.get_running_loop()))
-        fs.streams[handle]['chunks'].append(bytes(data))
-        return len(data)
-
-    async def _close_write(handle):
-        seen.append(('close', asyncio.get_running_loop()))
-        return None
-
-    fs.open_write.side_effect = _open_write
-    fs.write_chunk.side_effect = _write_chunk
-    fs.close_write.side_effect = _close_write
-
     inst = _sink_instance(fs, has_name=False, object_id='loop1')
     from rocketlib import AVI_ACTION
 
@@ -343,10 +303,10 @@ def test_media_stream_ops_share_one_live_event_loop():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'\xde\xad')
     inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    loops = {loop for _op, loop in seen}
-    assert len(seen) == 4  # open, chunk, chunk, close
-    assert len(loops) == 1, f'handle ops crossed {len(loops)} loops: {[op for op, _ in seen]}'
-    assert all(not loop.is_closed() for loop in loops)
+    fs.open_write.assert_called_once()
+    assert [c.args[0] for c in fs.write_chunk.call_args_list] == ['h1', 'h1']
+    fs.close_write.assert_called_once_with('h1')
+    assert fs.streams['h1']['chunks'] == [b'\x89PNG', b'\xde\xad']
 
 
 def test_abort_deletes_partial_even_when_close_fails():
@@ -359,7 +319,7 @@ def test_abort_deletes_partial_even_when_close_fails():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
     fs.close_write.side_effect = RuntimeError('close boom')
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')  # abort path
-    fs.delete.assert_awaited_once_with('output/s2.png')
+    fs.delete.assert_called_once_with('output/s2.png')
 
 
 def test_end_close_failure_deletes_partial_and_raises():
@@ -376,7 +336,7 @@ def test_end_close_failure_deletes_partial_and_raises():
     fs.close_write.side_effect = RuntimeError('close boom')
     with pytest.raises(RuntimeError, match='close boom'):
         inst.writeImage(AVI_ACTION.END, 'image/png', b'')
-    fs.delete.assert_awaited_once_with('output/s3.png')
+    fs.delete.assert_called_once_with('output/s3.png')
     inst.instance.writeJson.assert_not_called()
 
 
@@ -397,9 +357,9 @@ def test_overwrite_streams_to_a_sibling_and_renames_on_success():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
     inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    (opened,), _ = fs.open_write.await_args
+    (opened,), _ = fs.open_write.call_args
     assert opened == 'output/o1.png.part-o1', 'the destination must not be opened directly'
-    (src, dst), kwargs = fs.rename.await_args
+    (src, dst), kwargs = fs.rename.call_args
     assert (src, dst) == ('output/o1.png.part-o1', 'output/o1.png') and kwargs == {'overwrite': True}
 
 
@@ -415,8 +375,8 @@ def test_overwrite_leaves_the_destination_alone_when_the_stream_fails():
     with pytest.raises(RuntimeError, match='commit failed'):
         inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    fs.rename.assert_not_awaited()  # nothing was swapped in
-    (deleted,), _ = fs.delete.await_args
+    fs.rename.assert_not_called()  # nothing was swapped in
+    (deleted,), _ = fs.delete.call_args
     assert deleted == 'output/o2.png.part-o2', 'only the staging file may be removed'
 
 
@@ -429,9 +389,9 @@ def test_overwrite_abort_removes_only_the_staging_file():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')  # abort the first stream
 
-    (deleted,), _ = fs.delete.await_args
+    (deleted,), _ = fs.delete.call_args
     assert deleted == 'output/o3.png.part-o3'
-    fs.rename.assert_not_awaited()
+    fs.rename.assert_not_called()
 
 
 def test_unique_writes_straight_to_the_destination():
@@ -444,9 +404,9 @@ def test_unique_writes_straight_to_the_destination():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
     inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    (opened,), _ = fs.open_write.await_args
+    (opened,), _ = fs.open_write.call_args
     assert opened == 'output/o4.png'
-    fs.rename.assert_not_awaited()
+    fs.rename.assert_not_called()
 
 
 def test_unique_abort_still_deletes_its_own_partial():
@@ -458,7 +418,7 @@ def test_unique_abort_still_deletes_its_own_partial():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'partial')
     inst.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
 
-    (deleted,), _ = fs.delete.await_args
+    (deleted,), _ = fs.delete.call_args
     assert deleted == 'output/o5.png'
 
 
@@ -480,9 +440,9 @@ def test_whitelist_rejecting_the_sibling_falls_back_to_writing_in_place():
     inst.writeImage(AVI_ACTION.WRITE, 'image/png', b'bytes')
     inst.writeImage(AVI_ACTION.END, 'image/png', b'')
 
-    (opened,), _ = fs.open_write.await_args
+    (opened,), _ = fs.open_write.call_args
     assert opened == 'output/o6.png'
-    fs.rename.assert_not_awaited()
+    fs.rename.assert_not_called()
 
 
 def test_chunk_write_failure_discards_the_stream():
@@ -503,7 +463,7 @@ def test_chunk_write_failure_discards_the_stream():
     # is still open, so a cleanup that deleted before closing would fail against a real store
     # while passing against mocks that accept either.
     assert [c[0] for c in order] == ['close_write', 'delete'], order
-    (deleted,), _ = fs.delete.await_args
+    (deleted,), _ = fs.delete.call_args
     assert deleted == 'output/o7.png'
     assert not inst._media_streams.get('image'), 'the stream must not stay pending'
 
@@ -529,6 +489,6 @@ def test_failed_cleanup_is_reported_not_swallowed():
     finally:
         mod.warning = original
 
-    (attempted,), _ = fs.delete.await_args
+    (attempted,), _ = fs.delete.call_args
     assert attempted == 'output/o8.png.part-o8', 'the staging path is what cleanup must try to remove'
     assert any('o8.png.part-o8' in m for m in said), f'the leftover path must be named: {said}'

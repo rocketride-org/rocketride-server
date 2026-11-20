@@ -56,8 +56,11 @@ TEST_CASE("store::Services") {
         for (const auto &name : schema["services"].getMemberNames()) {
             const auto &service = schema["services"][name];
             REQUIRE(service["params"].isArray());
+            for (const auto &descriptor : service["params"])
+                REQUIRE(descriptor["tool"].isBool());
             for (const auto &property : service["properties"]) {
                 REQUIRE_FALSE(property.isMember("param"));
+                REQUIRE_FALSE(property.isMember("tool"));
                 if (!property.isMember("properties") ||
                     property.isMember("enum"))
                     REQUIRE(property["path"].isString());
@@ -244,6 +247,8 @@ TEST_CASE("store::Services::paths") {
         REQUIRE(access["enum"][0] == "readonly");
         REQUIRE(access["enum"][1] == "readwrite");
         REQUIRE_FALSE(access.isMember("minimum"));
+        // "tool" defaults to "param"
+        REQUIRE(access["tool"] == true);
 
         const auto &maxResults = params[1];
         REQUIRE(maxResults["field"] == "maxResults");
@@ -254,6 +259,7 @@ TEST_CASE("store::Services::paths") {
         REQUIRE(maxResults["minimum"] == 1);
         REQUIRE(maxResults["maximum"] == 500);
         REQUIRE_FALSE(maxResults.isMember("enum"));
+        REQUIRE(maxResults["tool"] == true);
 
         // The flag never reaches the schema - also not on the hoisted
         // copy placed into each branch
@@ -308,20 +314,12 @@ TEST_CASE("store::Services::groupsAndArrays") {
 }
 
 //-----------------------------------------------------------------------------
-// "param" placement is a load error wherever a value would not resolve
-// context-free, or would be credential-shaped
+// "param" is a load error only inside an array item, on a group, and where
+// the value would be credential-shaped (plan 5.1); "tool" never stands
+// without "param"
 //-----------------------------------------------------------------------------
 TEST_CASE("store::Services::paramErrors") {
     const auto definitions = R"({
-        "fx.mode": {
-            "type": "string",
-            "default": "a",
-            "enum": {
-                "a": { "title": "A", "properties": ["fx.inBranch"] },
-                "b": { "title": "B", "properties": [] }
-            }
-        },
-        "fx.inBranch": { "type": "string", "title": "In branch", "param": true },
         "fx.item": { "type": "string", "title": "Item", "param": true },
         "fx.secret": { "type": "string", "title": "Token", "secret": true },
         "fx.env": { "type": "string", "title": "Key", "env": "ROCKETRIDE_FX_KEY" },
@@ -329,21 +327,30 @@ TEST_CASE("store::Services::paramErrors") {
         "fx.file": { "type": "upload", "title": "File", "param": true },
         "fx.group": { "name": "group", "properties": ["fx.plain"], "param": true },
         "fx.plain": { "type": "string", "title": "Plain" },
-        "fx.choice": { "type": "string", "title": "Choice", "default": "x", "enum": ["x", "y"] }
+        "fx.mode": {
+            "type": "string",
+            "default": "a",
+            "enum": {
+                "a": { "title": "A", "properties": ["fx.item"] },
+                "b": { "title": "B", "properties": [] }
+            }
+        }
     })"_json;
-
-    SECTION("inside an enum branch, naming the property") {
-        auto schema = resolveFixture(fixture(definitions, R"(["fx.mode"])"_json));
-        REQUIRE_ERROR(schema, Ec::InvalidParam,
-                      "\"param\" on property inBranch in");
-        REQUIRE(schema.ccode().message().contains(
-            "is not allowed inside an enum branch"));
-    }
 
     SECTION("inside an array item") {
         auto schema = resolveFixture(fixture(
             definitions,
             R"([{ "name": "list", "type": "array", "item": "fx.item" }])"_json));
+        REQUIRE_ERROR(schema, Ec::InvalidParam, "\"param\" on property item in");
+        REQUIRE(schema.ccode().message().contains(
+            "is not allowed inside an array item"));
+    }
+
+    SECTION("inside a selector branch inside an array item") {
+        // The branch does not lift the item rule: the leaf is still per element
+        auto schema = resolveFixture(fixture(
+            definitions,
+            R"([{ "name": "list", "type": "array", "item": "fx.mode" }])"_json));
         REQUIRE_ERROR(schema, Ec::InvalidParam, "\"param\" on property item in");
         REQUIRE(schema.ccode().message().contains(
             "is not allowed inside an array item"));
@@ -386,33 +393,125 @@ TEST_CASE("store::Services::paramErrors") {
                       "is not allowed on an env-backed property");
     }
 
-    SECTION("on a group or an array") {
+    SECTION("on a group, naming the property") {
         auto group = resolveFixture(fixture(definitions, R"(["fx.group"])"_json));
-        REQUIRE_ERROR(group, Ec::InvalidParam,
-                      "is only allowed on a plain field or a plain enum");
-
-        auto list = resolveFixture(fixture(
-            definitions,
-            R"([{ "name": "list", "type": "array", "item": "fx.plain", "param": true }])"_json));
-        REQUIRE_ERROR(list, Ec::InvalidParam,
-                      "is only allowed on a plain field or a plain enum");
+        REQUIRE_ERROR(group, Ec::InvalidParam, "\"param\" on property group in");
+        REQUIRE(group.ccode().message().contains(
+            "is not allowed on a group; flag its leaves instead"));
     }
 
     SECTION("a non-boolean flag") {
         auto schema = resolveFixture(fixture(
             definitions, R"([{ "base": "fx.plain", "param": "yes" }])"_json));
         REQUIRE_ERROR(schema, Ec::InvalidParam, "must be a boolean");
+
+        auto tool = resolveFixture(fixture(
+            definitions,
+            R"([{ "base": "fx.plain", "param": true, "tool": "no" }])"_json));
+        REQUIRE_ERROR(tool, Ec::InvalidParam, "\"tool\" on property plain in");
+        REQUIRE(tool.ccode().message().contains("must be a boolean"));
     }
 
-    SECTION("a selector (an enum with property sets) is refused, naming the property") {
+    SECTION("tool: true without param: true") {
+        auto bare = resolveFixture(fixture(
+            definitions, R"([{ "base": "fx.plain", "tool": true }])"_json));
+        REQUIRE_ERROR(bare, Ec::InvalidParam,
+                      "\"tool\": true on property plain in");
+        REQUIRE(bare.ccode().message().contains("requires \"param\": true"));
+
+        auto off = resolveFixture(fixture(
+            definitions,
+            R"([{ "base": "fx.plain", "param": false, "tool": true }])"_json));
+        REQUIRE_ERROR(off, Ec::InvalidParam, "requires \"param\": true");
+    }
+}
+
+//-----------------------------------------------------------------------------
+// Eligibility is the node author's cost judgement (plan 5.1, decided
+// 2026-11-19): a leaf inside a selector branch, a selector itself and a whole
+// array are parameters like any plain field. "tool" defaults to "param" and
+// rides the descriptor; "tool": false is the one value an author writes
+//-----------------------------------------------------------------------------
+TEST_CASE("store::Services::paramEligibility") {
+    const auto definitions = R"({
+        "fx.mode": {
+            "type": "string",
+            "title": "Mode",
+            "default": "a",
+            "enum": {
+                "a": { "title": "A", "properties": ["fx.inBranch", "fx.shared"] },
+                "b": { "title": "B", "properties": ["fx.shared"] }
+            }
+        },
+        "fx.inBranch": { "type": "integer", "title": "In branch", "default": 3, "maximum": 9, "param": true },
+        "fx.shared": { "type": "string", "title": "Shared", "param": true },
+        "fx.plain": { "type": "string", "title": "Plain" },
+        "fx.frame": { "type": "integer", "title": "Frame", "minimum": 0 },
+        "fx.choice": { "type": "string", "title": "Choice", "default": "x", "enum": ["x", "y"] }
+    })"_json;
+
+    SECTION("a leaf inside a selector branch is a param at its branch path") {
+        auto schema = resolveFixture(fixture(definitions, R"(["fx.mode"])"_json));
+        REQUIRE_NO_ERROR(schema);
+
+        const auto &params = (*schema)["params"];
+        REQUIRE(params.size() == 2u);
+
+        // The hoisted leaf is expanded first (once, at the parent path),
+        // then the branch-specific leaf at parent + branch
+        REQUIRE(params[0]["field"] == "shared");
+        REQUIRE(params[1]["field"] == "a.inBranch");
+        REQUIRE(params[1]["default"] == 3);
+        REQUIRE(params[1]["maximum"] == 9);
+        REQUIRE(params[1]["tool"] == true);
+
+        // The flags never reach the branch's resolved leaves
+        for (const auto &property :
+             (*schema)["properties"][0]["enum"]["a"]["properties"]) {
+            REQUIRE_FALSE(property.isMember("param"));
+            REQUIRE_FALSE(property.isMember("tool"));
+        }
+    }
+
+    SECTION("a selector is a param; its enum lists the branch names") {
+        auto schema = resolveFixture(fixture(
+            definitions, R"([{ "base": "fx.mode", "param": true }])"_json));
+        REQUIRE_NO_ERROR(schema);
+
+        const auto &params = (*schema)["params"];
+        REQUIRE(params.size() == 3u);
+
+        // The selector's own descriptor comes before its branch leaves
+        const auto &mode = params[0];
+        REQUIRE(mode["field"] == "mode");
+        REQUIRE(mode["default"] == "a");
+        REQUIRE(mode["enum"].size() == 2u);
+        REQUIRE(mode["enum"][0] == "a");
+        REQUIRE(mode["enum"][1] == "b");
+        REQUIRE(mode["tool"] == true);
+        REQUIRE_FALSE((*schema)["properties"][0].isMember("param"));
+    }
+
+    SECTION("a whole array is a param; its descriptor carries the item") {
         auto schema = resolveFixture(fixture(
             definitions,
-            R"([{ "base": "fx.mode", "param": true, "enum": {
-                "a": { "title": "A", "properties": ["fx.plain"] },
-                "b": { "title": "B", "properties": ["fx.plain"] } } }])"_json));
-        REQUIRE_ERROR(schema, Ec::InvalidParam, "\"param\" on property mode in");
-        REQUIRE(schema.ccode().message().contains(
-            "is not allowed on a selector"));
+            R"([{ "name": "frames", "type": "array", "title": "Frames",
+                  "item": "fx.frame", "param": true }])"_json));
+        REQUIRE_NO_ERROR(schema);
+
+        const auto &params = (*schema)["params"];
+        REQUIRE(params.size() == 1u);
+
+        const auto &frames = params[0];
+        REQUIRE(frames["field"] == "frames");
+        REQUIRE(frames["type"] == "array");
+
+        // The item as the schema resolved it: its own name, type and
+        // bounds, relative to the array
+        REQUIRE(frames["item"]["type"] == "integer");
+        REQUIRE(frames["item"]["minimum"] == 0);
+        REQUIRE(frames["item"]["path"] == "frames[].frame");
+        REQUIRE(frames["item"] == (*schema)["properties"][0]["item"]);
     }
 
     SECTION("a plain enum (no property sets) may be a param") {
@@ -422,6 +521,25 @@ TEST_CASE("store::Services::paramErrors") {
         REQUIRE((*schema)["params"].size() == 1u);
         REQUIRE((*schema)["params"][0]["field"] == "choice");
         REQUIRE((*schema)["params"][0]["enum"].size() == 2u);
+    }
+
+    SECTION("tool: false narrows a param to callers; it is stripped") {
+        auto schema = resolveFixture(fixture(
+            definitions,
+            R"([{ "base": "fx.plain", "param": true, "tool": false }])"_json));
+        REQUIRE_NO_ERROR(schema);
+        REQUIRE((*schema)["params"].size() == 1u);
+        REQUIRE((*schema)["params"][0]["tool"] == false);
+        REQUIRE_FALSE((*schema)["properties"][0].isMember("tool"));
+        REQUIRE_FALSE((*schema)["properties"][0].isMember("param"));
+    }
+
+    SECTION("tool: false without param adds nothing; it is stripped") {
+        auto schema = resolveFixture(fixture(
+            definitions, R"([{ "base": "fx.plain", "tool": false }])"_json));
+        REQUIRE_NO_ERROR(schema);
+        REQUIRE((*schema)["params"].size() == 0u);
+        REQUIRE_FALSE((*schema)["properties"][0].isMember("tool"));
     }
 }
 

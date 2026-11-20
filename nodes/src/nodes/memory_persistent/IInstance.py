@@ -37,7 +37,7 @@ class IInstance(IInstanceBase):
         """
         if not session_id:
             return session_id
-        owner = str((getattr(self, '_caller', None) or {}).get('userId') or '')
+        owner = self.caller.userId
         return f'{owner}__{session_id}' if owner else session_id
 
     """Pipeline instance for the memory_persistent node.

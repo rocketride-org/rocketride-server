@@ -62,10 +62,11 @@ def _ensure_rocketlib() -> None:
     # the engine's schema for tool_laserdata_memory (rocketlib.filters is never stubbed).
     import importlib
 
-    from rocketlib.filters import IGlobalBase
+    from rocketlib.filters import NO_CALLER, IGlobalBase
 
     mod = types.ModuleType('rocketlib')
-    mod.IInstanceBase = type('IInstanceBase', (), {})
+    # An instance with no binding caller answers self.caller as the real base does
+    mod.IInstanceBase = type('IInstanceBase', (), {'caller': NO_CALLER})
     mod.IGlobalBase = IGlobalBase
     mod.engine = importlib.import_module('rocketlib.engine')
     mod.config = importlib.import_module('rocketlib.config')

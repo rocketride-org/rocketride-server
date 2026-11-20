@@ -616,14 +616,18 @@ class TaskControl:
     restarting: bool = False
 
     @property
+    def owner_type(self) -> str:
+        """``'team'`` or ``'user'``: who owns this control, the run_kind default when unstamped."""
+        return self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
+
+    @property
     def owner_id(self) -> str:
         """
         The identity that OWNS this control: the user of a user-owned run, the
         team of a team-owned run (never the attribution teamId of a user-owned
         run). Monitor keys, the registry key and identity lookups scope by it.
         """
-        kind = self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
-        return self.teamId if kind == 'team' else self.userId
+        return self.teamId if self.owner_type == 'team' else self.userId
 
     @property
     def index_key(self) -> str:
@@ -775,8 +779,8 @@ class TaskControl:
 
         The map half of plan 5.4 item 5: a name the pipeline does not expose
         is refused here, never silently dropped, before anything reaches the
-        engine. The descriptor half (type, bounds, never a selector or a
-        secret) is the data path's allow-list (C.8).
+        engine. The descriptor half (type, bounds, an array's items, which
+        branch a selector reaches) is ``resolve_params``.
 
         Args:
             params: The caller's ``params`` (public name -> value), or None.
@@ -786,7 +790,8 @@ class TaskControl:
 
         Raises:
             TaskError: TASK_PARAM_REJECTED with ``errors=[{name, reason}]``
-                for every unknown name, and for a value that is not scalar.
+                for every unknown name, and for a value that is neither a
+                scalar nor a whole list (an array parameter, plan 5.1).
         """
         if not params:
             return {}
@@ -801,8 +806,8 @@ class TaskControl:
         for name, value in params.items():
             if name not in self.parameters:
                 errors.append({'name': str(name), 'reason': 'not a parameter of this pipeline'})
-            elif isinstance(value, (dict, list, tuple, set)):
-                errors.append({'name': str(name), 'reason': 'a parameter value is a scalar'})
+            elif isinstance(value, (dict, tuple, set)):
+                errors.append({'name': str(name), 'reason': 'a parameter value is a scalar or a whole list'})
         if errors:
             names = ', '.join(e['name'] for e in errors)
             raise TaskError(

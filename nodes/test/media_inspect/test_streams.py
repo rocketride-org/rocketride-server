@@ -195,7 +195,7 @@ def test_no_storage_or_cross_node_dependency():
     package = Path(importlib.import_module(NODE).__file__).parent
     for path in package.rglob('*.py'):
         text = path.read_text(encoding='utf-8')
-        assert 'ai.account' not in text and 'engine_file_store' not in text and 'ai.common.media' not in text
+        assert 'ai.account' not in text and 'ai.common.media' not in text
         other_nodes = {'media_inspect', 'media_speech', 'media_render'} - {NODE}
         for statement in ast.walk(ast.parse(text, filename=str(path))):
             imports = []

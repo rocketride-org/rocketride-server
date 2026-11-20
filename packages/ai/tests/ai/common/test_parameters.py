@@ -26,52 +26,40 @@ import pytest
 import rocketlib
 
 from ai.common import node_config, parameters
+from tests.rocketlib.schemas import DETECTOR
 
-# ==== A two-node catalog ========================================================
+# ==== A three-node catalog: the real resolver over engine-shaped schemas =======
 
-#: Resolved defaults and the ``param``-flagged keys per provider.
-DEFAULTS = {
-    'webhook': {'type': 'webhook'},
-    'depth_estimate': {'max_edge': 640, 'model': 'small', 'apikey': ''},
+#: Resolved schemas as the engine emits them: a leaf's ``param`` flag lives in
+#: the ``params`` descriptors only.
+SCHEMAS = {
+    'webhook': {
+        'properties': [{'name': 'type', 'path': 'type', 'type': 'constant', 'default': 'webhook'}],
+        'params': [],
+    },
+    'depth_estimate': {
+        'properties': [
+            {'name': 'max_edge', 'path': 'max_edge', 'type': 'integer', 'default': 640, 'minimum': 1},
+            {
+                'name': 'service',
+                'properties': [{'name': 'model', 'path': 'service.model', 'type': 'string', 'default': 'small'}],
+            },
+            {'name': 'apikey', 'path': 'apikey', 'type': 'string', 'secret': True},
+        ],
+        'params': [{'field': 'max_edge', 'type': 'integer', 'default': 640, 'minimum': 1, 'tool': True}],
+    },
+    'detector': DETECTOR,
 }
-PARAMS = {'depth_estimate': ('max_edge',)}
-PATHS = {'depth_estimate': {'max_edge': 'max_edge', 'model': 'service.model', 'apikey': 'apikey'}}
-
-
-class _View:
-    """The slice of a resolved ConfigView the parameters module reads."""
-
-    def __init__(self, provider, config):
-        self._provider = provider
-        self._values = {**DEFAULTS[provider], **(config or {})}
-        self.param_keys = frozenset(PARAMS.get(provider, ()))
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __contains__(self, key):
-        return key in self._values
-
-    def path_of(self, key):
-        return PATHS.get(self._provider, {}).get(key, key)
-
-    def overlay(self, params):
-        for key, value in params.items():
-            if key not in self.param_keys:
-                raise rocketlib.ConfigError(f'"{key}" is not a parameter of this node')
-            if not isinstance(value, int) or value < 1:
-                raise rocketlib.ConfigError(f'"{key}" must be an integer >= 1')
-        return self
 
 
 @pytest.fixture
 def catalog(monkeypatch):
-    """The resolver answers from DEFAULTS; an unknown provider is a ConfigError."""
+    """The resolver answers from SCHEMAS; an unknown provider is a ConfigError."""
 
     def resolve(provider, config):
-        if provider not in DEFAULTS:
+        if provider not in SCHEMAS:
             raise rocketlib.ConfigError(f'The service {provider} was not found')
-        return _View(provider, config)
+        return rocketlib.resolveConfig(SCHEMAS[provider], config)
 
     monkeypatch.setattr(node_config, 'resolve_node_config', resolve)
 
@@ -80,6 +68,7 @@ def _pipeline(**kwargs):
     components = [
         {'id': 'webhook_1', 'provider': 'webhook', 'config': {}},
         {'id': 'depth_1', 'provider': 'depth_estimate', 'config': {}},
+        {'id': 'detect_1', 'provider': 'detector', 'config': {'iqr': {'quantiles': 4}}},
     ]
     return {'project_id': 'docBrain', 'source': 'webhook_1', 'components': components, **kwargs}
 
@@ -152,6 +141,15 @@ def test_a_component_that_does_not_resolve_is_not_a_second_error(catalog):
     assert parameters.validate_parameters(pipeline) == []
 
 
+def test_a_selector_and_a_leaf_of_any_branch_may_be_exposed(catalog):
+    # The stored config selects z_score; the iqr branch's leaf is still a
+    # parameter of the node (plan 5.1): the call's selector picks the branch
+    mapping = {'method': 'detect_1.method', 'iqrSensitivity': 'detect_1.iqr.sensitivity', 'frames': 'detect_1.frames'}
+    assert parameters.validate_parameters(_pipeline(parameters=mapping)) == []
+    errors = parameters.validate_parameters(_pipeline(parameters={'q': 'detect_1.iqr.quantiles'}))
+    assert len(errors) == 1 and 'not a per-call parameter' in errors[0]['message']
+
+
 # ==== resolve_call_params ========================================================
 
 
@@ -176,3 +174,65 @@ def test_a_map_target_that_is_not_a_param_is_refused_at_call_time_too(catalog):
 def test_values_are_literal_and_never_env_expanded(catalog):
     per_node, _errors = parameters.resolve_call_params(_pipeline(), {'maxEdge': 'depth_1.max_edge'}, {'maxEdge': 2})
     assert per_node['depth_1']['max_edge'] == 2
+    per_node, _errors = parameters.resolve_call_params(
+        _pipeline(), {'metric': 'detect_1.criticalThreshold'}, {'metric': 4.0}
+    )
+    assert per_node == {'detect_1': {'criticalThreshold': 4.0}}
+
+
+# ==== Selector, branch and array parameters (plan 5.1) =========================
+
+DETECT_MAP = {
+    'method': 'detect_1.method',
+    'iqrSensitivity': 'detect_1.iqr.sensitivity',
+    'zWindow': 'detect_1.z_score.windowSize',
+    'frames': 'detect_1.frames',
+}
+
+
+def test_selector_values_apply_first_then_the_branch_leaf_is_reachable(catalog):
+    per_node, errors = parameters.resolve_call_params(_pipeline(), DETECT_MAP, {'iqrSensitivity': 0.5, 'method': 'iqr'})
+    assert errors == []
+    assert per_node == {'detect_1': {'method': 'iqr', 'iqr.sensitivity': 0.5}}
+
+
+def test_a_leaf_the_calls_branch_set_does_not_reach_is_refused_by_name(catalog):
+    # No selector value in the call: the stored branch (z_score) is the set
+    per_node, errors = parameters.resolve_call_params(_pipeline(), DETECT_MAP, {'iqrSensitivity': 0.5})
+    assert per_node == {}
+    assert errors == [{'name': 'iqrSensitivity', 'reason': 'is under a branch this call does not select'}]
+
+    # The call's selector moves the set away from a leaf it also names
+    per_node, errors = parameters.resolve_call_params(_pipeline(), DETECT_MAP, {'method': 'iqr', 'zWindow': 50})
+    assert per_node == {}
+    assert [e['name'] for e in errors] == ['zWindow']
+
+
+def test_a_selector_whose_branch_does_not_resolve_is_refused_by_name(catalog):
+    pipeline = _pipeline()
+    pipeline['components'][2]['config'] = {}
+    per_node, errors = parameters.resolve_call_params(pipeline, DETECT_MAP, {'method': 'iqr'})
+    assert per_node == {}
+    assert [e['name'] for e in errors] == ['method']
+    assert '"iqr.quantiles" is required' in errors[0]['reason']
+
+
+def test_an_array_is_one_param_validated_by_its_item(catalog):
+    per_node, errors = parameters.resolve_call_params(_pipeline(), DETECT_MAP, {'frames': [1, 456, 712]})
+    assert errors == [] and per_node == {'detect_1': {'frames': [1, 456, 712]}}
+    per_node, errors = parameters.resolve_call_params(_pipeline(), DETECT_MAP, {'frames': [1, -1]})
+    assert per_node == {}
+    assert errors[0]['name'] == 'frames' and 'must be >= 0' in errors[0]['reason']
+
+
+def test_the_views_cache_resolves_each_component_once(catalog, monkeypatch):
+    calls = []
+    real = node_config.resolve_node_config
+    monkeypatch.setattr(node_config, 'resolve_node_config', lambda p, c: calls.append(p) or real(p, c))
+    views = {}
+    for value in (0.5, 0.6, 0.7):
+        per_node, errors = parameters.resolve_call_params(
+            _pipeline(), DETECT_MAP, {'method': 'iqr', 'iqrSensitivity': value}, views
+        )
+        assert errors == [] and per_node['detect_1']['iqr.sensitivity'] == value
+    assert calls == ['detector']

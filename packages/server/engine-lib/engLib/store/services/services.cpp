@@ -130,13 +130,25 @@ static Error checkDepth(const json::Value &definition) noexcept {
 //			"param": true is the one flag the parser itself acts on: the
 //			property becomes a pipeline parameter (a caller may override
 //			its value per call), it is described in the resolved schema's
-//			"params" list, and the flag is stripped. It is legal on a plain
-//			field or an enum selector at the top level, inside a plain
-//			group, or hoisted above a selector (see "path" below). It is a
-//			load error inside an enum branch or an array item - such a
-//			property resolves branch- or item-dependently - and on a
+//			"params" list, and the flag is stripped. It is legal on any
+//			leaf: a plain field, a plain enum, a leaf inside a selector
+//			branch, a selector itself (an enum with property sets: the
+//			call's value picks the branch its settings resolve under) and
+//			a whole array (the caller always sends the whole list). It is
+//			a load error on a grouped subsection (flag its leaves), inside
+//			an array item (items have no path of their own), and on a
 //			"constant", "oauth2" or "upload" property or one flagged
 //			"secret" or "env": a parameter is never credential-shaped.
+//			Whether a key SHOULD be a parameter is the node author's cost
+//			judgement: a value the IGlobal builds something expensive
+//			from stays configuration.
+//
+//			"tool" rides beside it: whether an LLM may set the value
+//			through a tool input schema. It defaults to the value of
+//			"param", so "tool": false on a parameter is the only value
+//			ever written (a safety switch, a gate, a budget), and
+//			"tool": true without "param": true is a load error. It is
+//			stripped the same way and carried on the descriptor.
 //
 //		An enum field:
 //			{
@@ -202,11 +214,14 @@ static Error checkDepth(const json::Value &definition) noexcept {
 //
 //		"params":
 //			The flat, self-contained descriptors of the "param"-flagged
-//			properties - {field, type, title, description, default} plus
-//			"enum"/"minimum"/"maximum" when the leaf has them - copied
-//			from the resolved leaf so a consumer validates a parameter
-//			value from the descriptor alone, never re-walking the schema.
-//			"field" is the leaf's "path".
+//			properties - {field, type, title, description, default, tool}
+//			plus "enum"/"minimum"/"maximum" when the leaf has them and
+//			"item" (the expanded item schema) on an array - copied from
+//			the resolved leaf so a consumer validates a parameter value
+//			from the descriptor alone, never re-walking the schema.
+//			"field" is the leaf's "path"; "tool" says whether an LLM may
+//			set it. A selector's descriptor lists its branch names as its
+//			"enum".
 //
 //		"capabilities":
 //			The node's PROTOCOL_CAPS bitmask - the same value the service
@@ -632,8 +647,9 @@ ErrorOr<json::Value> IServices::expandBranches(ServiceContext &context,
     }
 
     // Expand each hoisted specifier once, at the parent path and outside
-    // any branch (so it stays param-eligible); its name joins the parent
-    // level's namespace
+    // any branch; its name joins the parent level's namespace. Hoisting is
+    // a storage rule only: it decides which key survives a selector switch,
+    // never whether a leaf may be a parameter
     std::vector<json::Value> hoistedExpanded;
     for (auto &specifier : hoisted) {
         auto res = expandProperty(context, specifier);
@@ -667,21 +683,16 @@ ErrorOr<json::Value> IServices::expandBranches(ServiceContext &context,
             } else {
                 // Everything else resolves at parent + branch, inside the
                 // branch. A nested selector's branch names and hoists join
-                // this branch's namespace
-                const auto outerNestedIn = context.nestedIn;
+                // this branch's namespace. A branch inside an array item is
+                // still inside the item, so the item's refusals ("param",
+                // "secret") carry into it unchanged
                 auto *outerNames = context.levelNames;
                 context.pathPrefix.push_back(Text{branchName});
-                // A branch inside an array item is still inside the item:
-                // "secret" is refused there too, since the encrypt walk
-                // has no "[]" semantics (the item rule outranks the branch)
-                if (context.nestedIn != "an array item")
-                    context.nestedIn = "an enum branch";
                 context.levelNames = &seen;
 
                 auto res = expandProperty(context, specifier);
 
                 context.levelNames = outerNames;
-                context.nestedIn = outerNestedIn;
                 context.pathPrefix.pop_back();
                 if (!res) return res.ccode();
 
@@ -729,8 +740,8 @@ ErrorOr<json::Value> IServices::expandChildren(ServiceContext &context,
     // An array field - expand its single item specifier. "type": "array"
     // is required so an array field is unambiguous from a plain field that
     // happens to carry an "item" member. Items resolve per element, so the
-    // item's paths are relative to "<array path>[]" and it counts as
-    // nested for "param"
+    // item's paths are relative to "<array path>[]" and nothing inside one
+    // may be a parameter or a secret (the array as a whole may be one)
     if (property.isMember("item")) {
         if (property.lookup<Text>("type") != "array")
             return APERR(Ec::InvalidParam,
@@ -765,61 +776,62 @@ ErrorOr<json::Value> IServices::expandChildren(ServiceContext &context,
 
 //-------------------------------------------------------------------------
 /// @details
-///		Acts on a resolved property's "param" flag: validates that the
-///		property may be a pipeline parameter, records its flat descriptor
-///		in context.params, and strips the flag from the schema. Called
-///		with the FINAL field - name shortened, every {base, ...} override
-///		merged in - so a reference that adds "secret" or "env" is seen
+///		Acts on a resolved property's "param" and "tool" flags: validates
+///		that the property may be a pipeline parameter, records its flat
+///		descriptor in context.params, and strips both flags from the
+///		schema. Called with the FINAL field - name shortened, every
+///		{base, ...} override merged in - so a reference that adds "secret"
+///		or "env" is seen. Eligibility is a cost judgement of the node
+///		author (plan 5.1): any leaf, selector or whole array may be a
+///		parameter; only the credential-shaped kinds may not. An array's
+///		descriptor gets its "item" once the item is expanded
+///		(expandProperty)
 ///	@param[in] context
 ///		The context we are working in
 ///	@param[in,out] field
-///		The resolved property carrying "param"
+///		The resolved property carrying "param" and/or "tool"
 //-------------------------------------------------------------------------
 Error IServices::applyParam(ServiceContext &context, json::Value &field) {
     const auto name = field.lookup<Text>("name");
 
-    // The flag itself is never part of the schema
-    const auto flag = field["param"];
+    // Neither flag is ever part of the schema
+    const auto flag = field.isMember("param") ? field["param"] : json::Value{};
+    const auto tool = field.isMember("tool") ? field["tool"] : json::Value{};
     field.removeMember("param");
+    field.removeMember("tool");
 
-    if (!flag.isBool())
+    if (!flag.isNull() && !flag.isBool())
         return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
                      context.def.definitionPath, "must be a boolean");
-    if (!flag.asBool()) return {};
+    if (!tool.isNull() && !tool.isBool())
+        return APERR(Ec::InvalidParam, "\"tool\" on property", name, "in",
+                     context.def.definitionPath, "must be a boolean");
 
-    // A parameter resolves context-free: never branch- or item-dependent
+    // "tool" defaults to "param": an LLM may set exactly what a caller may,
+    // unless the author narrows it with "tool": false. A value an LLM sets
+    // is always a parameter, so the reverse is a load error
+    const bool isParam = flag.isBool() && flag.asBool();
+    if (tool.isBool() && tool.asBool() && !isParam)
+        return APERR(Ec::InvalidParam, "\"tool\": true on property", name, "in",
+                     context.def.definitionPath, "requires \"param\": true");
+    if (!isParam) return {};
+
+    // Nothing inside an array item is a parameter: an item has no path of
+    // its own and the caller always sends the whole list, so the ARRAY is
+    // the parameter
     if (context.nestedIn)
         return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
                      context.def.definitionPath, "is not allowed inside",
                      context.nestedIn);
 
-    // ... and is a scalar: a plain field or a plain enum
-    const auto type = field.lookup<Text>("type");
-    if ((field.isMember("properties") && !field.isMember("enum")) ||
-        type == "array")
+    // A grouped subsection is not a value: its leaves are, one by one
+    if (field.isMember("properties") && !field.isMember("enum"))
         return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
                      context.def.definitionPath,
-                     "is only allowed on a plain field or a plain enum");
-
-    // ... and never a SELECTOR (an enum with property sets): its branches are
-    // resolved once when the engine's config is flattened and are part of the
-    // content key, while params overlay the flattened config per call, so a
-    // per-call selector value could neither be applied nor hashed (plan 5.1,
-    // P12). A plain enum, one with no property sets, is fine
-    if (field.isMember("enum") && field["enum"].isObject()) {
-        const auto &options = field["enum"];
-        for (const auto &value : options.getMemberNames()) {
-            const auto &branch = options[value];
-            if (branch.isObject() && branch.isMember("properties"))
-                return APERR(Ec::InvalidParam, "\"param\" on property", name,
-                             "in", context.def.definitionPath,
-                             "is not allowed on a selector (an enum with "
-                             "property sets); a caller who needs the other "
-                             "branch publishes a second pipeline");
-        }
-    }
+                     "is not allowed on a group; flag its leaves instead");
 
     // ... and is never fixed or credential-shaped
+    const auto type = field.lookup<Text>("type");
     if (type == "constant" || type == "oauth2" || type == "upload")
         return APERR(Ec::InvalidParam, "\"param\" on property", name, "in",
                      context.def.definitionPath, "is not allowed on a", type,
@@ -843,9 +855,11 @@ Error IServices::applyParam(ServiceContext &context, json::Value &field) {
             field.isMember(member) ? field[member] : json::Value{};
     for (const auto *member : {"minimum", "maximum"})
         if (field.isMember(member)) descriptor[member] = field[member];
+    descriptor["tool"] = tool.isBool() ? tool.asBool() : true;
 
     // The enum's values - [["value", "Label"], ...] / ["value", ...] /
-    // {"value": {...}} all reduce to the list of values
+    // {"value": {...}} all reduce to the list of values; a selector's are
+    // its branch names
     if (field.isMember("enum")) {
         json::Value values(json::arrayValue);
         const auto &options = field["enum"];
@@ -870,8 +884,9 @@ Error IServices::applyParam(ServiceContext &context, json::Value &field) {
 ///		definition - into its fully expanded final form. Referenced
 ///		definitions are recursively expanded via expandChildren, so a
 ///		reference to a grouped subsection, array, or enum field resolves
-///		completely. Every leaf gets its "path"; a "param" flag is acted
-///		on and stripped.
+///		completely. Every leaf gets its "path"; the "param" and "tool"
+///		flags are acted on and stripped, and an array parameter's
+///		descriptor takes the expanded item schema.
 ///	@param[in] context
 ///		The context we are working in
 ///	@param[in] property
@@ -1000,9 +1015,14 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
         }
     }
 
-    // "param" is read, acted on and stripped
-    if (field.isMember("param"))
+    // "param" and "tool" are read, acted on and stripped. The descriptor a
+    // parameter adds is the last one when applyParam returns; nothing
+    // inside an array item can add another, so an array keeps that index
+    // until its item is expanded below
+    const auto descriptors = context.params.size();
+    if (field.isMember("param") || field.isMember("tool"))
         if (auto ccode = applyParam(context, field)) return ccode;
+    const bool described = context.params.size() > descriptors;
 
     // A property reached again inside its own expansion (a group, branch
     // or array item that lists a property it belongs to) would recurse
@@ -1029,6 +1049,12 @@ ErrorOr<json::Value> IServices::expandProperty(ServiceContext &context,
     auto expanded = expandChildren(context, _mv(field));
     --context.depth;
     context.chain.resize(chained);
+
+    // An array parameter is validated per element by its item schema, so
+    // the descriptor carries the item as the schema resolved it
+    if (expanded && described && expanded->isMember("item"))
+        context.params[static_cast<int>(descriptors)]["item"] =
+            (*expanded)["item"];
     return expanded;
 }
 

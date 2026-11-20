@@ -226,57 +226,11 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
         'parameters': {},
     }
     assert config['config']['keystore'] == 'kvsfile://data/keystore.json'
-    # Trusted identity travels IN THE TASK FILE (never the environment).
-    assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
-    # Dev runs anchor node storage at the owner's whole tree.
-    assert config['storage'] == {'root': 'users/user-1/files'}
+    # No identity and no storage anchor ride the task file: a node's state and
+    # files are stamped by the server per binding (plan 5.7)
+    assert 'identity' not in config and 'storage' not in config
     # The channel token stays with the engine; nothing of it is in the task file.
     assert 'dt_test' not in json.dumps(config)
-
-
-def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
-    """Deploy runs anchor node storage at a task-specific TEAM subtree —
-    no user dependency, and concurrent deployments never share storage.
-    """
-    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
-    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
-
-    pipeline = {'source': 'src', 'components': []}
-    t = _task(pipeline=pipeline)
-    t._run_kind = 'deploy'
-    t._owner_kind = 'team'
-    config = TaskEngine._build_task(t, pipeline)
-    assert config['storage'] == {'root': 'teams/team-1/files/tasks/proj-test'}
-
-
-def test_build_task_deploy_without_team_refuses(monkeypatch, tmp_path):
-    """A deploy run with no team has no valid anchor — fail loudly."""
-    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
-    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
-
-    t = _task(pipeline={'components': []})
-    t._run_kind = 'deploy'
-    t._owner_kind = 'team'
-    t.team_id = ''
-    with pytest.raises(ValueError, match='team_id'):
-        TaskEngine._build_task(t, {'components': []})
-
-
-def test_build_task_dev_without_client_gets_no_anchor(monkeypatch, tmp_path):
-    """An anonymous dev run (client_id='' — OSS/standalone launch) carries NO
-    anchor rather than failing the launch: identity.userId rides empty too,
-    so the subprocess's engine_file_store() yields None and the storage
-    tools disable themselves. The pin: the shared 'users//files' prefix must
-    never be composed as an anchor.
-    """
-    monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine.exe'))
-    monkeypatch.setattr(os, 'makedirs', lambda p, exist_ok=False: None)
-
-    pipeline = {'source': 'src', 'components': []}
-    t = _task(pipeline=pipeline)
-    t.client_id = ''
-    config = TaskEngine._build_task(t, pipeline)
-    assert config['storage'] == {'root': ''}
 
 
 def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
@@ -1330,8 +1284,10 @@ def test_hosted_refusal_asks_the_gate_for_the_shared_host_on_a_hosted_engine_onl
 def test_filter_subprocess_env_is_an_allowlist():
     """Engine-tier configuration never reaches pipeline code: only the runtime
     baseline, the ROCKETRIDE_* namespace, the services the child reaches
-    itself (store, fetch URLs, OAuth broker) and README-documented node
-    fallbacks pass.
+    itself (the OAuth broker) and README-documented node fallbacks pass. The
+    object store, its secret, the public address and the fetch-URL signing
+    key stay with the server: a node's files and state go through it (plan
+    5.7), and so does any shared state store.
     """
     env = filter_subprocess_env(
         {
@@ -1359,6 +1315,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             'ENGINE_API_KEY': 'engine',
             'DATABASE_URL': 'postgresql://other',
             'SLACK_BOT_TOKEN': 'xoxb',
+            'RR_REDIS_URL': 'redis://state',
         }
     )
     assert env == {
@@ -1368,10 +1325,6 @@ def test_filter_subprocess_env_is_an_allowlist():
         'PYTHONPATH': '/opt/rocketride/ai',
         'HF_HOME': '/cache/hf',
         'ROCKETRIDE_OPENAI_KEY': 'sk-pipe',
-        'RR_STORE_URL': 's3://bucket',
-        'RR_STORE_SECRET_KEY': 'store',
-        'RR_BASE_URL': 'https://engine.example',
-        'RR_SIGNING_KEY': 'sign',
         'RR_OAUTH_BROKER_URL': 'https://broker.example',
         'RR_PROC_PRIVATE': '1',  # tasks must see the opt-in to act on it
         'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',

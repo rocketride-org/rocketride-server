@@ -15,7 +15,7 @@ import pytest
 
 engLib = pytest.importorskip('engLib')
 
-from rocketlib.filters import BindingLogger, IInstanceBase  # noqa: E402
+from rocketlib.filters import BindingLogger, IInstanceBase, freeze_caller  # noqa: E402
 
 
 PIPELINE = {
@@ -179,17 +179,20 @@ def test_instance_getpipe_joins_its_own_trace(endpoint):
 
 
 def test_instance_getpipe_sets_the_caller_on_the_sub_pipe(endpoint):
-    """The opener's ``_caller`` is set on the sub-pipe, reaches its instances at construction, and dies at putPipe."""
+    """The binding's caller context, as the server set it on the pipe, rides the sub-pipe, binds its instances, and dies at putPipe."""
+    envelope = {'userId': 'u-1', 'params': {}}
     pipe = endpoint.getPipe('none')
+    pipe.caller = envelope
     node = _Node(pipe.next, endpoint)
-    node._caller = {'userId': 'u-1', 'params': {}}
+    node._caller = envelope
     try:
         sub = node.getPipe()
         try:
-            assert sub.caller == node._caller
+            assert sub.caller == envelope
             built = [n.pyInstance for n in _chain(sub) if n.pyInstance is not None]
             assert built, 'the response node is a Python instance'
-            assert all(inst._caller == node._caller for inst in built)
+            assert all(inst.caller == node.caller for inst in built)
+            assert all(inst.caller.userId == 'u-1' for inst in built)
         finally:
             node.putPipe(sub)
         assert sub.caller is None
@@ -322,9 +325,9 @@ def test_components_are_constructed_on_first_touch_only(monkeypatch):
 
 
 def test_the_caller_is_in_place_before_begin_instance(monkeypatch):
-    """``_caller`` is set from the pipe before the node's beginInstance runs; putPipe clears the pipe's."""
+    """The engine binds the pipe's caller before beginInstance runs, once and frozen; putPipe clears the pipe's."""
     seen = []
-    monkeypatch.setattr(_response_class(), 'beginInstance', lambda self: seen.append(dict(self._caller)))
+    monkeypatch.setattr(_response_class(), 'beginInstance', lambda self: seen.append(self.caller))
 
     loader = engLib.ILoader()
     loader.beginLoad(PIPELINE)
@@ -334,8 +337,16 @@ def test_the_caller_is_in_place_before_begin_instance(monkeypatch):
         try:
             pipe.caller = {'userId': 'u-1', 'params': {}}
             instance = _node(pipe, 'response_1').pyInstance
-            assert instance._caller == {'userId': 'u-1', 'params': {}}
-            assert seen == [{'userId': 'u-1', 'params': {}}]
+            assert instance._caller == freeze_caller({'userId': 'u-1', 'params': {}})
+            assert [caller.userId for caller in seen] == ['u-1']
+
+            # The engine's one write is the only one: a node can neither
+            # rebind the caller nor assign into it
+            with pytest.raises(AttributeError):
+                instance._caller = {'userId': 'u-2'}
+            with pytest.raises(AttributeError):
+                instance.caller.userId = 'x'
+            assert instance.caller.userId == 'u-1'
         finally:
             endpoint.putPipe(pipe)
         assert pipe.caller is None

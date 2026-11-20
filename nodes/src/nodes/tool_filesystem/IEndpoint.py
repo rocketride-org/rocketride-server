@@ -25,9 +25,11 @@
 File Store source endpoint.
 
 Streams files from the account-scoped RocketRide file store into the pipeline
-as raw objects. The configured ``path`` (relative to the task's storage anchor)
-may be a single file or a folder; with ``recursive`` on, subfolders are
-descended as well.
+as raw objects. The configured ``path`` (relative to the owner's storage
+anchor) may be a single file or a folder; with ``recursive`` on, subfolders are
+descended as well. The store is ``self.files`` (plan 5.7): the server roots it
+at the owner of the control running this source and refuses the scan where it
+cannot name one.
 
 Delivery uses the engine's DIRECT pipeline mode contract (see
 ``engine-lib/task/pipe/Pipeline.cpp``: "Connect the scanObjects function to the
@@ -44,12 +46,14 @@ finite source, not a long-running server.
 
 from __future__ import annotations
 
-import asyncio
 from collections import deque
-from typing import Any, Callable, Dict
+from typing import TYPE_CHECKING, Any, Callable, Dict
 
-from ai.account.store import Store
 from rocketlib import IEndpointBase
+
+if TYPE_CHECKING:
+    # Annotation-only: keeps the minimal rocketlib test stubs importable
+    from rocketlib import NodeFiles
 
 
 # Upper bound on folders visited by one recursive scan. Backends that surface
@@ -57,13 +61,13 @@ from rocketlib import IEndpointBase
 _MAX_SCAN_FOLDERS = 10_000
 
 
-async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
+def _collect(files: NodeFiles, rel: str, recursive: bool) -> list[tuple[str, int]]:
     """Resolve ``rel`` to a sorted list of ``(path, size)`` files to process.
 
     A file path yields itself; a folder yields its files (breadth-first into
     subfolders when ``recursive``). Raises if the path does not exist.
     """
-    st = await store.stat(rel)
+    st = files.stat(rel)
     if not st.get('exists'):
         raise ValueError(f'File Store Source: path {rel!r} does not exist in the account file store')
     if st.get('type') == 'file':
@@ -83,7 +87,7 @@ async def _collect(store, rel: str, recursive: bool) -> list[tuple[str, int]]:
                 f'File Store Source: scan exceeded {_MAX_SCAN_FOLDERS} folders under {rel!r}; '
                 'aborting (possible directory cycle in the store backend)'
             )
-        listing = await store.list_dir(folder)
+        listing = files.list_dir(folder)
         for entry in listing.get('entries', []):
             child = f'{folder}/{entry["name"]}' if folder else entry['name']
             if entry.get('type') == 'dir':
@@ -102,22 +106,6 @@ class IEndpoint(IEndpointBase):
             return self.endpoint.serviceConfig['parameters'] or {}
         except Exception:
             return {}
-
-    @staticmethod
-    def _store():
-        """Build the FileStore anchored at the current engine task's storage root.
-
-        Identity and the storage anchor come from the task file the engine
-        published (``rocketlib.getTask()``) — never from the environment —
-        so paths behave identically in development and deployed runs (same
-        contract as the tool/sink variants' ``IGlobal``).
-        """
-        store = Store.engine_file_store()
-        if store is None:
-            raise ValueError(
-                'File Store Source: no running task with an identity (rocketlib.getTask); this source must run inside the task engine'
-            )
-        return store
 
     def validateConfig(self, syntaxOnly: bool) -> None:
         if not str(self._params().get('path') or '').strip():
@@ -138,19 +126,19 @@ class IEndpoint(IEndpointBase):
             raise ValueError('File Store Source: "path" is required')
         recursive = bool(params.get('recursive', False))
 
-        store = self._store()
-        for file_path, size in asyncio.run(_collect(store, rel, recursive)):
+        for file_path, size in _collect(self.files, rel, recursive):
             # A non-zero return means the engine wants the scan stopped
             # (cancellation or license limit reached).
             if scanCallback({'name': file_path, 'size': size}):
                 break
 
-    def renderStoreObject(self, entry, instance) -> None:
+    def renderStoreObject(self, entry, instance, files: NodeFiles) -> None:
         """Render one scanned entry: read the file and send it as a raw tag stream.
 
         Called by ``IInstance.renderObject`` with the engine ``instance`` whose
-        ``sendTag*`` functions write into the already-open target pipe. Errors
-        propagate so the engine marks the entry failed and counts it.
+        ``sendTag*`` functions write into the already-open target pipe, and the
+        rendering binding's ``files``. Errors propagate so the engine marks the
+        entry failed and counts it.
 
         Ends with an explicit ``sendClose``: task-mode ``processItem`` closes
         the object pipe itself, but the dev-mode runner leaves closure to the
@@ -160,7 +148,7 @@ class IEndpoint(IEndpointBase):
         safe. Same contract the telegram/webhook push sources follow.
         """
         file_path = str(entry.name).strip('/')
-        data = asyncio.run(self._store().read(file_path))
+        data = files.read(file_path)
         instance.sendTagBeginObject()
         instance.sendTagBeginStream()
         instance.sendTagData(data)

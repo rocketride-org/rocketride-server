@@ -485,29 +485,40 @@ class TestEngineIdentity:
         with pytest.raises(ValueError, match='engine contexts only'):
             store._file_store(_ctx(_account()), root='users/user-1/files')
 
-    def test_engine_file_store_binds_task_identity_and_anchor(self, store, monkeypatch):
-        # The transparent path: identity + anchor come from the engine's
-        # published task (rocketlib.getTask) — zero node-level plumbing.
+    def test_file_store_for_caller_anchors_a_team_run_in_its_task_subtree(self, store, monkeypatch):
+        # A node's self.files (plan 5.7): the server builds it from the
+        # control that owns the binding, never from the subprocess
         monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: store))
-        monkeypatch.setattr(
-            Store,
-            '_get_current_task',
-            staticmethod(
-                lambda: {
-                    'identity': {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'},
-                    'storage': {'root': 'teams/team-1/files/tasks/proj-1'},
-                }
-            ),
+        fs = Store.file_store_for_caller(
+            owner_kind='team', user_id='user-1', team_id='team-1', project_id='proj-1', conn_id='engine:7:team-1'
         )
-        fs = Store.engine_file_store()
         assert fs._client_id == 'user-1'
+        assert fs._ctx.source == 'engine' and fs._ctx.conn_id == 'engine:7:team-1'
         assert fs._full_path('out/x.csv') == 'teams/team-1/files/tasks/proj-1/out/x.csv'
+        with pytest.raises(PermissionError, match='engine context'):
+            fs._full_path('@/Team/=team-2/x')
 
-    def test_engine_file_store_none_without_task(self, monkeypatch):
-        # Outside a running task (or without identity) there is no store.
-        for task in (None, {}, {'identity': {}}):
-            monkeypatch.setattr(Store, '_get_current_task', staticmethod(lambda t=task: t))
-            assert Store.engine_file_store() is None
+    def test_file_store_for_caller_anchors_a_user_run_in_the_owners_tree(self, store, monkeypatch):
+        monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: store))
+        fs = Store.file_store_for_caller(
+            owner_kind='user', user_id='user-1', team_id='team-1', project_id='proj-1', conn_id='engine:7:user-1'
+        )
+        assert fs._full_path('out/x.csv') == 'users/user-1/files/out/x.csv'
+
+    def test_file_store_for_caller_refuses_an_owner_with_no_tree(self, store, monkeypatch):
+        # A team run with no team, and an anonymous user run, have no anchor:
+        # the shared 'users//files' prefix is never composed
+        monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: store))
+        with pytest.raises(ValueError, match='team_id'):
+            Store.file_store_for_caller(owner_kind='team', user_id='u', team_id='', project_id='p', conn_id='c')
+        with pytest.raises(ValueError, match='no owner'):
+            Store.file_store_for_caller(owner_kind='user', user_id='', team_id='t', project_id='p', conn_id='c')
+        with pytest.raises(ValueError):
+            Store.file_store_for_caller(owner_kind='team', user_id='u', team_id='t', project_id='../x', conn_id='c')
+
+    def test_storage_root_for(self):
+        assert file_store.storage_root_for('team', 'u1', 't1', 'p1') == 'teams/t1/files/tasks/p1'
+        assert file_store.storage_root_for('user', 'u1', 't1', 'p1') == 'users/u1/files'
 
 
 # ============================================================================

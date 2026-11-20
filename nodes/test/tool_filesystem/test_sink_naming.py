@@ -13,7 +13,7 @@ import json
 import sys
 import types
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -266,6 +266,11 @@ class TestSinkConfig:
 # ---------------------------------------------------------------------------
 
 
+def with_files(cls):
+    """A test subclass whose ``files`` door the test sets: the double replaces the server's store."""
+    return type(f'{cls.__name__}UnderTest', (cls,), {'files': None})
+
+
 def _install_iinstance_stubs():
     """Stubs for importing the real IInstance: engine/ai stubs + a stub
     ``tool_filesystem`` package whose ``__path__`` points at the node dir.
@@ -279,7 +284,6 @@ def _install_iinstance_stubs():
         ig = types.ModuleType('tool_filesystem.IGlobal')
 
         class _IGlobalStub:
-            file_store = None
             allow_write = True
             path_patterns = None
             target_dir = 'output/'
@@ -297,44 +301,44 @@ def _install_iinstance_stubs():
 
 
 def _fs(exists_paths=()):
-    """AsyncMock FileStore covering the one-shot write API and the streaming
-    write API. ``stat`` reports the paths in ``exists_paths`` as existing so
-    collision handling can be exercised; streamed chunks are recorded per handle
-    so lane tests can assert the bytes and final path.
+    """A ``self.files`` door double covering the one-shot write API and the
+    streaming write API. ``stat`` reports the paths in ``exists_paths`` as
+    existing so collision handling can be exercised; streamed chunks are
+    recorded per handle so lane tests can assert the bytes and final path.
     """
-    fs = AsyncMock()
-    fs.write = AsyncMock(return_value=None)
-    fs.get_url = AsyncMock(return_value='https://x/task/fetch?token=t')
-    fs.delete = AsyncMock(return_value=None)
+    fs = MagicMock()
+    fs.write = MagicMock(return_value=None)
+    fs.get_url = MagicMock(return_value='https://x/task/fetch?token=t')
+    fs.delete = MagicMock(return_value=None)
 
-    async def _stat(path):
+    def _stat(path):
         # Shaped like the real FileStore.stat, which reports `type` alongside `exists` —
         # the conflict policy distinguishes a file from a directory sharing the name.
         if path in exists_paths:
             return {'exists': True, 'type': 'file', 'size': 1, 'modified': 0}
         return {'exists': False}
 
-    fs.stat = AsyncMock(side_effect=_stat)
+    fs.stat = MagicMock(side_effect=_stat)
 
     fs.streams = {}
     counter = {'n': 0}
 
-    async def _open_write(path):
+    def _open_write(path):
         counter['n'] += 1
         handle = f'h{counter["n"]}'
         fs.streams[handle] = {'path': path, 'chunks': []}
         return handle
 
-    async def _write_chunk(handle, data):
+    def _write_chunk(handle, data):
         fs.streams[handle]['chunks'].append(bytes(data))
         return len(data)
 
-    async def _close_write(handle):
+    def _close_write(handle):
         return None
 
-    fs.open_write = AsyncMock(side_effect=_open_write)
-    fs.write_chunk = AsyncMock(side_effect=_write_chunk)
-    fs.close_write = AsyncMock(side_effect=_close_write)
+    fs.open_write = MagicMock(side_effect=_open_write)
+    fs.write_chunk = MagicMock(side_effect=_write_chunk)
+    fs.close_write = MagicMock(side_effect=_close_write)
     return fs
 
 
@@ -352,14 +356,14 @@ def _sink_instance(
     listeners=('json',),
     on_conflict='unique',
 ):
-    """Build an IInstance wired to a stub IGlobal + mocked engine ``instance``."""
+    """Build an IInstance wired to a stub IGlobal, a ``self.files`` double and a mocked engine ``instance``."""
     _install_iinstance_stubs()
     from tool_filesystem.IGlobal import IGlobal, OnConflict
     from tool_filesystem.IInstance import IInstance
 
-    inst = IInstance()
+    inst = with_files(IInstance)()
+    inst.files = file_store
     g = IGlobal()
-    g.file_store = file_store
     g.allow_write = allow_write
     g.path_patterns = path_patterns
     g.target_dir = target_dir
@@ -433,7 +437,7 @@ class TestNamingHelpers:
         inst = _sink_instance(fs, path_patterns=[re.compile(r'^output/allowed')])
         with pytest.raises(ValueError, match='does not match any allowed path pattern'):
             inst._sink_target_path('secret.pdf')
-        fs.stat.assert_not_awaited()  # no existence oracle for rejected paths
+        fs.stat.assert_not_called()  # no existence oracle for rejected paths
 
     def test_target_path_honours_target_dir(self):
         inst = _sink_instance(_fs(), object_id='o1', target_dir='exports')
@@ -497,7 +501,7 @@ class TestSinkWrite:
         inst = _sink_instance(fs, name='report.pdf', object_id='obj-123')
         ref = inst._sink_write(b'data', 'report.pdf')
         assert ref['storePath'] == 'output/report.pdf'
-        (path_arg, data_arg), _ = fs.write.await_args
+        (path_arg, data_arg), _ = fs.write.call_args
         assert path_arg == 'output/report.pdf' and data_arg == b'data'
 
     def test_emit_url_attaches_signed_url(self):
@@ -505,7 +509,7 @@ class TestSinkWrite:
         inst = _sink_instance(fs, emit_url=True, url_expires_in=120)
         ref = inst._sink_write(b'd', 'report.pdf')
         assert ref['url'] == 'https://x/task/fetch?token=t'
-        _, kwargs = fs.get_url.await_args
+        _, kwargs = fs.get_url.call_args
         assert kwargs.get('expires_in') == 120
 
     def test_no_url_when_emit_disabled(self):
@@ -513,14 +517,14 @@ class TestSinkWrite:
         inst = _sink_instance(fs, emit_url=False)
         ref = inst._sink_write(b'd', 'report.pdf')
         assert ref['url'] is None
-        fs.get_url.assert_not_awaited()
+        fs.get_url.assert_not_called()
 
     def test_allow_write_gate(self):
         fs = _fs()
         inst = _sink_instance(fs, allow_write=False)
         with pytest.raises(ValueError, match='write access is not enabled'):
             inst._sink_write(b'd', 'report.pdf')
-        fs.write.assert_not_awaited()
+        fs.write.assert_not_called()
 
     def test_path_whitelist_enforced_before_write(self):
         import re
@@ -529,7 +533,7 @@ class TestSinkWrite:
         inst = _sink_instance(fs, name='secret.pdf', path_patterns=[re.compile(r'^output/allowed')])
         with pytest.raises(ValueError, match='does not match any allowed path pattern'):
             inst._sink_write(b'd', 'secret.pdf')
-        fs.write.assert_not_awaited()
+        fs.write.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -614,7 +618,7 @@ class TestConflictPolicy:
         fs = _fs(exists_paths={'output/report.pdf'})
         inst = _sink_instance(fs, object_id='obj-123', on_conflict='overwrite')
         inst._sink_target_path('report.pdf')
-        fs.stat.assert_not_awaited()
+        fs.stat.assert_not_called()
 
     def test_skip_returns_none_when_taken(self):
         """`None` means "leave it alone" — it is a decision, not a failure."""
@@ -632,7 +636,7 @@ class TestConflictPolicy:
         fs = _fs(exists_paths={'output/report.md'})
         inst = _sink_instance(fs, name='report.pdf', on_conflict='skip')
         assert inst._sink_write(b'data', 'report.md') is None
-        fs.write.assert_not_awaited()
+        fs.write.assert_not_called()
         inst._sink_emit([None])
         inst.instance.writeJson.assert_not_called()
 
@@ -640,7 +644,7 @@ class TestConflictPolicy:
         """A directory sharing the name is not a file to preserve, so it does not skip."""
         fs = _fs()
 
-        async def _dir_stat(path):
+        def _dir_stat(path):
             return {'exists': True, 'type': 'dir'}
 
         fs.stat.side_effect = _dir_stat
@@ -651,7 +655,7 @@ class TestConflictPolicy:
         """`both` still has a file to leave alone, so it skips."""
         fs = _fs()
 
-        async def _both_stat(path):
+        def _both_stat(path):
             return {'exists': True, 'type': 'both', 'size': 1, 'modified': 0}
 
         fs.stat.side_effect = _both_stat

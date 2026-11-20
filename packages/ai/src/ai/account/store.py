@@ -518,8 +518,8 @@ class Store:
     # constructor stays reachable for backend-specific tests only.
     _instance: 'Optional[Store]' = None
 
-    # Guards lazy creation: two threads racing instance() (e.g. node init in
-    # the engine subprocess via engine_file_store) must never each build a
+    # Guards lazy creation: two threads racing instance() (e.g. two handlers
+    # building a node's self.files at once) must never each build a
     # Store — the loser's copy would carry its own _shared_handles /
     # _shared_write_locks and silently defeat cross-instance write exclusion.
     _instance_lock = threading.Lock()
@@ -605,51 +605,47 @@ class Store:
                  and may NOT name a foreign one (mismatch raises) — only
                  internal/engine identities address other users' namespaces,
                  and must pass it explicitly.
-            root: ENGINE contexts only — the task-file storage anchor
-                 (``storage.root``) all plain paths resolve under; see
-                 FileStore.__init__.
+            root: ENGINE contexts only — the storage anchor all plain paths
+                 resolve under; see FileStore.__init__.
 
         Returns:
             A new FileStore bound to (singleton store, client_id, ctx).
         """
         return cls.instance()._file_store(ctx, client_id, root)
 
-    @staticmethod
-    def _get_current_task() -> 'Optional[dict]':
-        """The engine's currently-executing task file (rocketlib.getTask).
-
-        Isolated for testability and for running outside the engine (plain
-        python has no rocketlib) — both simply report 'no task'.
-        """
-        try:
-            from rocketlib import getTask
-        except ImportError:
-            return None
-        return getTask()
-
     @classmethod
-    def engine_file_store(cls) -> 'Optional[FileStore]':
-        """A FileStore for the CURRENT engine task — fully transparent to
-        nodes: identity and the storage anchor come from the task file the
-        engine published (rocketlib.getTask), never from the environment
-        and never from per-node jobConfig plumbing.
+    def file_store_for_caller(
+        cls, *, owner_kind: str, user_id: str, team_id: str, project_id: str, conn_id: str
+    ) -> 'FileStore':
+        """The FileStore behind a node's ``self.files``: rooted at the CALLER's owner tree (plan 5.7).
+
+        The server builds it per request from the control that owns the
+        binding, never from anything the engine subprocess says: the
+        identifiers come from the control record, so a node can neither name
+        nor reach another owner's tree. The engine context is the most
+        restricted one: plain relative paths only, every scoped (``@``) path
+        and system tree refused.
+
+        Args:
+            owner_kind: ``'team'`` or ``'user'``: who owns the control.
+            user_id: The control's user (the launcher of a team-owned run).
+            team_id: The control's team.
+            project_id: The control's pipeline id (a team run's subtree).
+            conn_id: Whose handles these are: the engine they were opened
+                from, so they close with it.
 
         Returns:
-            An engine-context FileStore anchored at the task's
-            ``storage.root`` (the owner's tree for dev runs, a
-            task-specific team subtree for deploy runs), or None when no
-            task is running or it carries no identity.
+            An engine-context FileStore anchored at ``storage_root_for`` the owner.
+
+        Raises:
+            ValueError: The control has no owner to anchor in.
         """
-        from .file_store import FileStore  # noqa: F401  (return type)
+        from .file_store import storage_root_for
         from .models import RequestContext
 
-        task = cls._get_current_task() or {}
-        identity = task.get('identity') or {}
-        client_id = str(identity.get('userId') or '').strip()
-        if not client_id:
-            return None
-        root = str((task.get('storage') or {}).get('root') or '').strip() or None
-        return cls.file_store(RequestContext.engine(client_id), client_id=client_id, root=root)
+        root = storage_root_for(owner_kind, user_id, team_id, project_id)
+        client_id = user_id or team_id
+        return cls.file_store(RequestContext.engine(client_id, conn_id=conn_id), client_id=client_id, root=root)
 
     # =========================================================================
     # Public Static Methods

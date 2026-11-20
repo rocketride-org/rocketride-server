@@ -31,7 +31,15 @@ import copy
 import pytest
 from rocketlib.config import ConfigError, ConfigView, NodeInfo, resolveConfig
 
-from tests.rocketlib.schemas import CAP_GPU, CAP_MULTITENANT, DEPTH_ESTIMATE, GOOGLE_WORKSPACE, QDRANT, multitenant
+from tests.rocketlib.schemas import (
+    CAP_GPU,
+    CAP_MULTITENANT,
+    DEPTH_ESTIMATE,
+    DETECTOR,
+    GOOGLE_WORKSPACE,
+    QDRANT,
+    multitenant,
+)
 
 # ==== Defaults and selectors =================================================
 
@@ -339,6 +347,128 @@ class TestConfigView:
         schema['properties'].append({'name': 'threads', 'path': 'threads', 'type': 'integer', 'default': 1})
         with pytest.raises(ConfigError, match='both resolve to "threads"'):
             resolveConfig(schema, {})
+
+    def test_param_keys_come_from_the_descriptors(self):
+        # The engine strips "param" from the resolved leaf; the descriptors are
+        # the record, so a leaf with no flag is a parameter when one names it
+        leaf = next(p for p in DEPTH_ESTIMATE['properties'] if p.get('name') == 'maxEdge')
+        assert 'param' not in leaf
+        assert resolveConfig(DEPTH_ESTIMATE, {}).param_keys == frozenset({'maxEdge'})
+        assert resolveConfig({**DEPTH_ESTIMATE, 'params': []}, {}).param_keys == frozenset()
+
+
+# ==== Selector, branch and array parameters (plan 5.1) ======================
+
+
+class TestSelectorParams:
+    """A call's selector values apply first and re-resolve; leaves must be reachable; arrays check their items."""
+
+    STORED = {'iqr': {'quantiles': 4}}
+
+    @pytest.fixture
+    def view(self) -> ConfigView:
+        return resolveConfig(DETECTOR, self.STORED).restricted(refuse_params=True)
+
+    def test_every_branch_leaf_is_known_as_a_param(self, view):
+        assert view.param_keys == frozenset(
+            {'method', 'criticalThreshold', 'sensitivity', 'windowSize', 'frames', 'rules'}
+        )
+        assert {'iqr.sensitivity', 'z_score.sensitivity', 'method'} <= view.param_paths
+        assert 'iqr.quantiles' not in view.param_paths
+
+    def test_a_leaf_of_the_selected_branch_overlays_flat(self, view):
+        settings = view.overlay({'z_score.sensitivity': 3.5, 'criticalThreshold': 4.0})
+        assert (settings.sensitivity, settings.criticalThreshold, settings.method) == (3.5, 4.0, 'z_score')
+        # The short key of the selected branch names the same leaf
+        assert view.overlay({'sensitivity': 2.5}).path_of('sensitivity') == 'z_score.sensitivity'
+
+    def test_a_selector_param_reresolves_to_the_calls_branch(self, view):
+        settings = view.overlay({'method': 'iqr'})
+        assert settings.method == 'iqr'
+        assert settings.sensitivity == 1.5
+        assert settings.path_of('sensitivity') == 'iqr.sensitivity'
+        assert settings.quantiles == 4
+        assert 'windowSize' not in settings
+        # The control's own view is untouched, and settings never refuse
+        assert view.to_dict()['method'] == 'z_score'
+        assert settings.method == 'iqr'
+
+    def test_selector_first_then_the_branch_leaf(self, view):
+        settings = view.overlay({'iqr.sensitivity': 0.5, 'method': 'iqr'})
+        assert (settings.method, settings.sensitivity) == ('iqr', 0.5)
+
+    def test_a_leaf_the_calls_branch_set_does_not_reach_is_refused(self, view):
+        with pytest.raises(ConfigError) as info:
+            view.overlay({'iqr.sensitivity': 0.5})
+        assert info.value.problems == {'iqr.sensitivity': 'is under a branch this call does not select'}
+        with pytest.raises(ConfigError, match='"z_score.windowSize" is under a branch this call does not select'):
+            view.overlay({'method': 'iqr', 'z_score.windowSize': 50})
+
+    def test_a_branch_that_does_not_resolve_is_refused_naming_the_selector(self):
+        # Nothing stored for the iqr branch's required (non-param) leaf
+        bare = resolveConfig(DETECTOR, {})
+        with pytest.raises(ConfigError) as info:
+            bare.overlay({'method': 'iqr'})
+        assert list(info.value.problems) == ['method']
+        assert '"iqr.quantiles" is required' in info.value.problems['method']
+
+    def test_a_stale_selector_value_is_refused(self, view):
+        with pytest.raises(ConfigError, match='"method" must be one of'):
+            view.overlay({'method': 'mad'})
+
+    def test_every_problem_is_named(self, view):
+        with pytest.raises(ConfigError) as info:
+            view.overlay({'metric': 'x', 'nope': 1, 'criticalThreshold': 99})
+        assert set(info.value.problems) == {'metric', 'nope', 'criticalThreshold'}
+        assert info.value.problems['metric'] == 'is not a parameter of this node'
+        assert info.value.problems['nope'] == 'is not a config key of this node'
+        assert 'must be <= 20.0' in info.value.problems['criticalThreshold']
+
+    def test_reresolution_is_cached_per_params_map(self, view, monkeypatch):
+        import rocketlib.config as config_module
+
+        calls = []
+        resolve = config_module.resolveConfig
+
+        def counting(*args, **kwargs):
+            calls.append(1)
+            return resolve(*args, **kwargs)
+
+        monkeypatch.setattr(config_module, 'resolveConfig', counting)
+        first = view.overlay({'method': 'iqr'})
+        again = view.overlay({'method': 'iqr'})
+        other = view.overlay({'method': 'iqr', 'iqr.sensitivity': 0.7})
+        assert first.to_dict() == again.to_dict()
+        assert other.sensitivity == 0.7
+        assert len(calls) == 2, 'one resolution per distinct params map'
+        # A plain overlay (no selector among the params) never re-resolves
+        view.overlay({'criticalThreshold': 5.0})
+        assert len(calls) == 2
+
+    def test_scalar_array_items_are_validated(self, view):
+        assert view.overlay({'frames': [1, 456, 712]}).frames == [1, 456, 712]
+        with pytest.raises(ConfigError, match=r'"frames\[1\]" must be >= 0'):
+            view.overlay({'frames': [1, -2]})
+        with pytest.raises(ConfigError, match=r'"frames\[0\]" expects integer'):
+            view.overlay({'frames': ['1']})
+
+    def test_object_array_items_are_validated(self, view):
+        rows = [{'field': 'cpu', 'limit': 90}, {'field': 'mem'}]
+        assert view.overlay({'rules': rows}).rules == rows
+        with pytest.raises(ConfigError, match=r'"rules\[0\]" has no field "bogus"'):
+            view.overlay({'rules': [{'field': 'cpu', 'bogus': 1}]})
+        with pytest.raises(ConfigError, match=r'"rules\[0\].field" is required'):
+            view.overlay({'rules': [{'limit': 1}]})
+        with pytest.raises(ConfigError, match=r'"rules\[0\].limit" must be <= 100'):
+            view.overlay({'rules': [{'field': 'cpu', 'limit': 101}]})
+        with pytest.raises(ConfigError, match=r'"rules\[0\]" expects object'):
+            view.overlay({'rules': ['cpu']})
+
+    def test_leaf_path_resolves_any_branch(self, view):
+        assert view.leaf_path('iqr.sensitivity') == 'iqr.sensitivity'
+        assert view.leaf_path('windowSize') == 'z_score.windowSize'
+        assert view.leaf_path('quantiles') == 'iqr.quantiles'
+        assert view.leaf_path('nope') is None
 
 
 class TestNodeGroup:

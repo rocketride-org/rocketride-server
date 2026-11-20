@@ -61,7 +61,14 @@ from .config import ConfigError
 from .config import ConfigView
 from .config import NodeInfo
 from .config import resolveConfig
+from .doors import DoorError
+from .doors import NodeFiles
+from .doors import NodeState
+from .doors import setNodeChannel
 from .filters import BindingLogger
+from .filters import Caller
+from .filters import freeze_caller
+from .filters import NO_CALLER
 from .filters import IEndpointBase
 from .filters import IGlobalBase
 from .filters import IInstanceBase
@@ -103,11 +110,13 @@ __all__ = [
     'APERR',
     'args',
     'AVI_ACTION',
+    'Caller',
     'ConfigError',
     'ConfigView',
     'configureLogger',
     'debug',
     'DEFAULT_MAX_COMPONENT',
+    'DoorError',
     'Ec',
     'error',
     'Entry',
@@ -117,6 +126,7 @@ __all__ = [
     'extended_length_path',
     'Filters',
     'FLAGS',
+    'freeze_caller',
     'getObject',
     'getServiceDefinition',
     'getServiceDefinitions',
@@ -153,7 +163,10 @@ __all__ = [
     'monitorSSE',
     'monitorStatus',
     'monitorDependencyDownload',
+    'NO_CALLER',
+    'NodeFiles',
     'NodeInfo',
+    'NodeState',
     'OPEN_MODE',
     'outputEndpointParameters',
     'outputEntry',
@@ -165,6 +178,7 @@ __all__ = [
     'resolveSecureParameters',
     'PROTOCOL_CAPS',
     'SERVICE_MODE',
+    'setNodeChannel',
     'shorten_path_component',
     'shorten_path_components',
     'TAG',

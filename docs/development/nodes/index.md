@@ -207,7 +207,7 @@ standalone catalog nodes.
    ```text
    nodes/src/nodes/my_node/
    ├── __init__.py        # license header only
-   ├── IGlobal.py         # optional: shared state, one per pipeline run
+   ├── IGlobal.py         # optional: per-control caches (clients, models), never state
    ├── IInstance.py       # required: per-object state
    ├── IValidator.py      # optional: semantic config checks, import-light
    ├── services.json      # "path": "nodes.my_node"
@@ -221,7 +221,7 @@ standalone catalog nodes.
 
 
    class IGlobal(IGlobalBase):
-       """Shared state, one per pipeline run."""
+       """Per-control caches, built once from self.config; never state."""
 
        def beginGlobal(self) -> None:
            # Only called when the pipeline runs; validation imports IValidator
@@ -273,6 +273,35 @@ standalone catalog nodes.
    Agent-facing behaviour does not go through that list: decorate `IInstance`
    methods with `@tool_function` (or `@invoke_function` for control-plane ops) and
    `IInstanceBase.invoke()` dispatches to them by name.
+
+   **What a node reads, and where it keeps what must survive a call.** The
+   IGlobal holds caches, never state: the balancer sends one pipeline's calls to
+   different replicas and an idle IGlobal is swept, so anything whose loss
+   changes an answer (a rolling window, a session, a counter) never lives on it,
+   at module scope, or on the instance (which lives one call). The doors:
+
+   - `self.config` (IGlobal): the configuration, the same for every call;
+     reading a `param`-flagged key here raises.
+   - `self.settings` (IInstance): this call's configuration, the configuration
+     plus the call's parameters; a selector among them re-resolves which branch
+     applies.
+   - `self.caller` (IInstance): who the call is for, read-only and bound once
+     by the engine. Use it for the node's own decisions and logs, never as a
+     key for anything the node keeps.
+   - `self.state` (IInstance): small JSON values that survive a call —
+     `get`, `put(key, value, ttl=)`, `delete`, `incr`, and
+     `with self.state.lock(key):` around a read-modify-write. The node names
+     only its own key; the server prefixes it with the calling owner, so one
+     owner never reads another's values.
+   - `self.files` (IInstance; `IEndpoint.files` for a source's own scan): the
+     file store rooted at the calling owner's tree — `read`, `write`,
+     `open_write`/`write_chunk`/`close_write`, `list_dir`, `stat`, `mkdir`,
+     `rename`, `delete`, `put_json`/`get_json`, `get_url` (a short expiry by
+     default). Plain relative paths only.
+
+   The node test framework's two-replica harness (`nodes/test/framework/replicas.py`)
+   runs a node's calls alternately on two independent replicas sharing only the
+   server's state and files, and checks the answers match a single replica's.
 
 3. Add a `services.json` (or `services.<variant>.json`) node definition. This is
    where you declare `classType`, `capabilities`, the `lanes` block (which makes

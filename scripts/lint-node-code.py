@@ -45,6 +45,12 @@ directory and never imports it. One check per rule of the contract:
                    ``self.config``: a parameter is per call (``self.settings``).
   caller-write     a class-level ``caller`` / ``_caller`` or any assignment to
                    ``.caller`` / ``._caller``: the engine binds the caller once.
+  identity-persist a caller identity field (``self.caller.userId`` and the
+                   other identity fields, or a name assigned from one) that
+                   reaches a call, a container, an attribute or a return:
+                   whatever a node keeps per owner lives in ``self.state`` /
+                   ``self.files``, which the server keys by the binding's
+                   owner (plan 5.7). Logging and the two doors are not sinks.
   introspection    ``gc``, ``inspect.stack`` or ``sys.modules`` of another
                    package: a node never reaches past its own objects.
   glb-pipetype     any ``.glb`` or ``.pipeType`` read: the node's identity is
@@ -110,6 +116,31 @@ MEMO_DECORATORS = {'lru_cache', 'cache', 'cached'}
 
 #: Names whose value is the node's configuration (the taint sources).
 CONFIG_NAMES = {'config', 'settings', 'connConfig'}
+
+#: The caller's identity fields (plan 4.1 rule 7): who a call is for. Whatever a
+#: node persists by identity is keyed by the SERVER (self.state / self.files).
+IDENTITY_FIELDS = {'userId', 'teamId', 'orgId', 'address', 'controlId'}
+
+#: The two attributes the caller record is read through.
+CALLER_NAMES = {'caller', '_caller'}
+
+#: Calls that only convert, test or log a value: an identity passed to one persists nothing.
+IDENTITY_SAFE_CALLS = {
+    'str',
+    'repr',
+    'len',
+    'bool',
+    'format',
+    'isinstance',
+    'debug',
+    'info',
+    'warning',
+    'error',
+    'sendSSE',
+}
+
+#: The doors whose identity the server stamps (plan 5.7).
+DOOR_NAMES = {'state', 'files'}
 
 #: Name words of a beginGlobal call that opens something (a connection, a client, a worker).
 OPENER_WORDS = {
@@ -417,6 +448,81 @@ def function_taint(func: ast.AST) -> Set[str]:
             return tainted
 
 
+def is_caller_record(expr: ast.AST) -> bool:
+    """True when ``expr`` is the caller record: ``<x>.caller``, ``<x>._caller`` or ``getattr(<x>, 'caller')``."""
+    if isinstance(expr, ast.Attribute) and expr.attr in CALLER_NAMES:
+        return True
+    return (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id == 'getattr'
+        and len(expr.args) >= 2
+        and isinstance(expr.args[1], ast.Constant)
+        and expr.args[1].value in CALLER_NAMES
+    )
+
+
+def names_identity_field(expr: ast.AST) -> bool:
+    """True when ``expr`` is a string constant naming an identity field."""
+    return isinstance(expr, ast.Constant) and expr.value in IDENTITY_FIELDS
+
+
+def reads_identity(expr: ast.AST, tainted: Set[str]) -> bool:
+    """
+    True when ``expr`` reads a caller identity field, or a name assigned from one.
+
+    The field may be read as an attribute (``self.caller.userId``), an item or
+    a ``get`` of the record (``caller['userId']``, ``caller.get('userId')``)
+    or through ``getattr(self.caller, 'userId')``.
+    """
+    for sub in ast.walk(expr):
+        if isinstance(sub, ast.Attribute) and sub.attr in IDENTITY_FIELDS and is_caller_record(sub.value):
+            return True
+        if isinstance(sub, ast.Subscript) and names_identity_field(sub.slice):
+            if any(is_caller_record(s) for s in ast.walk(sub.value)):
+                return True
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == 'get':
+            if (
+                sub.args
+                and names_identity_field(sub.args[0])
+                and any(is_caller_record(s) for s in ast.walk(sub.func.value))
+            ):
+                return True
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == 'getattr':
+            if len(sub.args) >= 2 and names_identity_field(sub.args[1]):
+                if any(is_caller_record(s) for s in ast.walk(sub.args[0])):
+                    return True
+        if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load) and sub.id in tainted:
+            return True
+    return False
+
+
+def identity_taint(func: ast.AST) -> Set[str]:
+    """Return the names of ``func`` assigned from a caller identity, iterated until no new name is tainted."""
+    tainted: Set[str] = set()
+    while True:
+        before = len(tainted)
+        for sub in ast.walk(func):
+            value = assigned_value(sub)
+            if value is not None and reads_identity(value, tainted):
+                for t in write_targets(sub):
+                    tainted.update(assigned_names(t))
+        if len(tainted) == before:
+            return tainted
+
+
+def is_identity_safe_call(call: ast.Call) -> bool:
+    """True for a call that only converts, tests or logs, and for a call on ``self.state`` / ``self.files``."""
+    if call_name(call) in IDENTITY_SAFE_CALLS:
+        return True
+    node = call.func.value if isinstance(call.func, ast.Attribute) else None
+    while isinstance(node, ast.Attribute):
+        if node.attr in DOOR_NAMES:
+            return True
+        node = node.value
+    return False
+
+
 def paired_values(target: ast.AST, value: ast.AST) -> Iterator[tuple]:
     """
     Yield ``(name, value)`` for each plain name an assignment binds.
@@ -655,6 +761,7 @@ class FileLint:
         self.global_unclosed()
         self.param_in_global()
         self.caller_write()
+        self.identity_persist()
         self.introspection()
         self.glb_pipetype()
         return sorted(self.findings, key=lambda f: (f.line, f.rule))
@@ -936,6 +1043,53 @@ class FileLint:
                 and sub.args[1].value in names
             ):
                 self.add('caller-write', sub, 'setattr of the caller: the caller is bound once by the engine')
+
+    # -------------------------------------------------------------------------
+    # identity-persist
+    # -------------------------------------------------------------------------
+
+    def identity_persist(self) -> None:
+        """
+        A caller identity that reaches anything a node keeps: a call, a container, an attribute, a return.
+
+        Whose data a node keeps is decided by the SERVER from the binding
+        (``self.state`` / ``self.files`` stamp the owner, plan 5.7); an identity
+        the node reads off ``self.caller`` keys nothing. Best-effort, per
+        function: names assigned from an identity field are followed through
+        the function; logging and converting calls and the two doors are not
+        sinks.
+        """
+        for func in functions(self.tree):
+            tainted = identity_taint(func)
+            for sub in own_nodes(func):
+                if isinstance(sub, ast.Call) and not is_identity_safe_call(sub):
+                    values = list(sub.args) + [k.value for k in sub.keywords]
+                    if any(reads_identity(v, tainted) for v in values):
+                        self.add(
+                            'identity-persist',
+                            sub,
+                            f'caller identity passed to {call_name(sub) or "a call"}(): '
+                            'keep per-owner data in self.state / self.files, which the server keys by owner',
+                        )
+                elif isinstance(sub, ast.Return) and sub.value is not None and reads_identity(sub.value, tainted):
+                    self.add(
+                        'identity-persist',
+                        sub,
+                        f'caller identity returned from {getattr(func, "name", "a lambda")}(): '
+                        'a key built from self.caller is a key the node chose; use self.state / self.files',
+                    )
+                for target in write_targets(sub):
+                    value = assigned_value(sub)
+                    if isinstance(target, ast.Subscript) and (
+                        reads_identity(target.slice, tainted) or (value is not None and reads_identity(value, tainted))
+                    ):
+                        self.add('identity-persist', sub, 'caller identity stored in a container: use self.state')
+                    elif isinstance(target, ast.Attribute) and value is not None and reads_identity(value, tainted):
+                        self.add(
+                            'identity-persist',
+                            sub,
+                            f'caller identity stored on .{target.attr}: use self.state / self.files',
+                        )
 
     # -------------------------------------------------------------------------
     # introspection

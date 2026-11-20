@@ -360,9 +360,10 @@ processArguments = engLib.processArguments  # noqa
 def getTask() -> 'Optional[dict]':
     """
     Return the complete task-file JSON of the task currently executing in
-    this process, or None when no task is running. Trusted point-to-point
-    task data (identity, storage anchor) — published by the engine around
-    the task's begin/end window, never sourced from the environment.
+    this process, or None when no task is running. Published by the engine
+    around the task's begin/end window, never sourced from the environment.
+    It carries no identity: whose state and files a node reaches is decided
+    by the server per binding (``self.state`` / ``self.files``).
     """
     ...
 

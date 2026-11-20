@@ -19,7 +19,7 @@ Designed for integration with a FastAPI application and built on top of the ai.w
 
 import threading
 import time
-from typing import TYPE_CHECKING, Callable, Dict, Optional
+from typing import TYPE_CHECKING, Any, Callable, Dict, Optional, Tuple
 import hashlib
 import hmac
 from fastapi import WebSocket
@@ -27,10 +27,10 @@ from dataclasses import dataclass
 import engLib
 from hosting import is_hosted
 from starlette.websockets import WebSocketState
-from rocketlib import IEndpointBase
+from rocketlib import IEndpointBase, setNodeChannel
 from ai.common.dap import DAPBase, TransportWebSocket
 from ai.account.base import OutOfCreditsError
-from ai.constants import CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
+from ai.constants import CONST_CHANNEL_CHUNK, CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
 from .channel import ChannelError, ChannelUnavailable, task_channel
 from .caller_context import pending_caller
 from .data_conn import DataConn
@@ -118,6 +118,10 @@ class DataServer(DAPBase):
         # A hosted task asks EaaS for credit before every getPipe()
         if is_hosted():
             engLib.setPipeGate(require_credit)
+
+        # A node's self.state and self.files ask EaaS over this channel, which
+        # decides whose state and files those are (plan 5.7)
+        setNodeChannel(node_request, CONST_CHANNEL_CHUNK)
 
         # Only the token's hash is known here; None fails closed
         self._token_sha256 = token_sha256
@@ -317,3 +321,26 @@ def require_credit() -> None:
             _allowed_units[unit] = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
         else:
             _allowed_until = time.monotonic() + CONST_SPEND_ALLOW_SECONDS
+
+
+def node_request(command: str, arguments: Dict[str, Any], data: Optional[bytes]) -> Tuple[Dict[str, Any], Any]:
+    """
+    One ``self.state`` / ``self.files`` request from a node, over the task channel (plan 5.7).
+
+    The node's door already put the binding (``traceId``) and its own key or
+    path in ``arguments``; EaaS decides whose state and files they are.
+
+    Args:
+        command: The channel command (``state.get``, ``fs_open``, ...).
+        arguments: The request arguments.
+        data: A binary payload of at most one channel chunk.
+
+    Returns:
+        ``(body, data)`` as EaaS answered.
+
+    Raises:
+        ChannelUnavailable: No channel, or it closed during the request.
+        ChannelError: EaaS refused, with its reason.
+    """
+    reply = task_channel.request_sync(command, arguments, data=data)
+    return reply.body, reply.data
