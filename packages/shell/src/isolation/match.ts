@@ -266,22 +266,26 @@ export function releaseWindows(w: IWindows): void {
  * @param onMatch - Called per match.
  * @param overlap - Report matches at every position.
  * @param windows - The window hashes of `s`, when the caller computed them ({@link hashWindows}).
+ * @param every - Report EVERY needle that matches at a position (longest first), not only the longest: for a caller
+ *   that exempts some needles and must still see a shorter one that starts at the same offset. The scan then
+ *   resumes after the longest, as without it.
  */
-export function scan<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap = false, windows?: IWindows): void {
+export function scan<T>(s: string, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap = false, windows?: IWindows, every = false): void {
 	const n = s.length;
 	if (n < PREFIX || !matchers.some((m) => m.size > 0)) return;
 	const own = windows === undefined || windows.s !== s ? hashWindows(s) : undefined;
 	try {
-		scanWith(s, (own ?? windows!).h, matchers, onMatch, overlap);
+		scanWith(s, (own ?? windows!).h, matchers, onMatch, overlap, every);
 	} finally {
 		if (own) releaseWindows(own);
 	}
 }
 
-function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap: boolean): void {
+function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<T>>, onMatch: (m: IMatch<T>) => boolean | void, overlap: boolean, every: boolean): void {
 	const n = s.length;
 	const count = n - PREFIX + 1;
 	const union = unionOf(matchers);
+	const found: Array<{ len: number; needle: string; value: T | undefined; matcher: number }> = [];
 	const consider = (groups: Array<IGroup<T>> | undefined, p: number, best: { len: number; needle: string; value: T | undefined; matcher: number }, mi: number): void => {
 		if (!groups) return;
 		for (const root of groups) {
@@ -290,15 +294,18 @@ function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<
 			for (let node: IGroup<T> | undefined = root; node !== undefined; ) {
 				const width: number = node.prefix.length;
 				for (const entry of node.lengths) {
-					if (entry.len <= best.len) break;
+					if (!every && entry.len <= best.len) break;
 					if (p + entry.len > n) continue;
 					const candidate = entry.len === width ? node.prefix : s.slice(p, p + entry.len);
 					if (entry.needles.has(candidate)) {
-						best.len = entry.len;
-						best.needle = candidate;
-						best.value = entry.needles.get(candidate);
-						best.matcher = mi;
-						break;
+						if (every) found.push({ len: entry.len, needle: candidate, value: entry.needles.get(candidate), matcher: mi });
+						if (entry.len > best.len) {
+							best.len = entry.len;
+							best.needle = candidate;
+							best.value = entry.needles.get(candidate);
+							best.matcher = mi;
+						}
+						if (!every) break;
 					}
 				}
 				if (node.next === null || p + width + PREFIX > n) break;
@@ -313,6 +320,7 @@ function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<
 	while (p < count) {
 		const h1 = H[p];
 		best.len = 0;
+		found.length = 0;
 		if (p + LONG <= n && union.long !== null) {
 			const key = pairKey(h1, H[p + PREFIX]);
 			if (testBit(union.long, key))
@@ -321,14 +329,18 @@ function scanWith<T>(s: string, H: Int32Array, matchers: ReadonlyArray<IMatcher<
 					if (m.longBits !== null && testBit(m.longBits, key)) consider(m.long.get(key), p, best, mi);
 				}
 		}
-		if (best.len === 0 && union.short !== null && testBit(union.short, h1)) {
+		if ((every || best.len === 0) && union.short !== null && testBit(union.short, h1)) {
 			for (let mi = 0; mi < matchers.length; mi++) {
 				const m = matchers[mi];
 				if (m.shortBits !== null && testBit(m.shortBits, h1)) consider(m.short.get(h1), p, best, mi);
 			}
 		}
 		if (best.len > 0) {
-			if (onMatch({ index: p, needle: best.needle, value: best.value as T, matcher: best.matcher }) === false) return;
+			if (every) {
+				// Longest first (a stable sort keeps the matcher order among equals).
+				found.sort((x, y) => y.len - x.len);
+				for (const f of found) if (onMatch({ index: p, needle: f.needle, value: f.value as T, matcher: f.matcher }) === false) return;
+			} else if (onMatch({ index: p, needle: best.needle, value: best.value as T, matcher: best.matcher }) === false) return;
 			if (!overlap) {
 				p += best.len;
 				continue;

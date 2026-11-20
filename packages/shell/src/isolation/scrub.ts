@@ -418,7 +418,8 @@ function scrubStringWith(pass: IPass, s: string, mode: Mode, windows: IWindows):
 			return false;
 		},
 		true,
-		windows
+		windows,
+		true // every must-deny needle at an offset, not only the longest: an exempt own value must not hide a shorter deny hit
 	);
 	const replacement = (m: IMatch<Repl>): string => {
 		const r = m.value;

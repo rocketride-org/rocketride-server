@@ -120,3 +120,21 @@ test('the hash-buffer pool is bounded by bytes: a scan of a very large string do
 	const { buffers, bytes } = windowPoolStats();
 	assert.ok(bytes <= 4 * 1024 * 1024, `the pool holds ${bytes} bytes in ${buffers} buffers`);
 });
+
+test('scan with every reports each needle that starts at one offset, longest first', () => {
+	const m = createMatcher([
+		['abcdefgh', 'short'],
+		['abcdefgh12345678', 'long'],
+		['abcdefgh1234', 'mid'],
+	] as const);
+	const text = 'xx abcdefgh12345678 yy';
+	const longest: string[] = [];
+	scan(text, [m], (x) => void longest.push(x.value), true);
+	assert.deepEqual(longest, ['long'], 'control: the plain scan reports only the longest at the offset');
+	const every: string[] = [];
+	scan(text, [m], (x) => void every.push(`${x.index}:${x.value}`), true, undefined, true);
+	assert.deepEqual(every.slice(0, 3), ['3:long', '3:mid', '3:short'], 'every needle at the offset, longest first');
+	const resumed: string[] = [];
+	scan(text, [m], (x) => void resumed.push(x.value), false, undefined, true);
+	assert.deepEqual(resumed, ['long', 'mid', 'short'], 'without overlap the scan still resumes after the longest');
+});

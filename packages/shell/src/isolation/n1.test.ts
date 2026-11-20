@@ -420,3 +420,19 @@ test('T108 the task id is aliased as <8 chars after rh_>.<source> everywhere; a 
 	t.cm.engine.setStatus({ name: `run ${otherReal.id}` });
 	expectDenied(await status(A, run.token), 'credential', "another realm's real task id in a non-note field");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A replaced own value must not hide a shorter must-deny value that starts at the same offset
+// ─────────────────────────────────────────────────────────────────────────────
+
+test('an own project id (replaced) does not hide the API key that is a prefix of it', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A, { grant: GRANT_A });
+	const run = await startRun(A);
+	const real = lastRun(t.cm);
+	t.cm.engine.setStatus({ name: `see ${real.projectId} now` });
+	assert.equal(expectOk(await status(A, run.token), 'control: the own project id alone').name, `see ${run.projectId} now`, 'control: the id is replaced by its alias');
+	t.cm.apiKey = real.projectId.slice(0, 24); // a must-deny value that starts where the own id starts
+	expectDenied(await status(A, run.token), 'credential', 'a deny value shorter than the exempt own id at the same offset');
+});
