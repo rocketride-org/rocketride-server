@@ -43,24 +43,36 @@
  *   edited in place with a store preview, the files the README references;
  *   the pane writes the files beside the pipe through the host and the
  *   block's icon/readme paths through the document.
- * - Requirements and Review need the review ladder (plan Step 6); until then
- *   each is an empty state that says so, so the tab list is complete.
+ * - Requirements (2.10) is the only checklist, read-only: what deploying
+ *   needs, what callers need, the public parameters, the store ladder — the
+ *   pure derivation lives in `requirements.ts`, the rows in the shared
+ *   {@link RequirementsChecklist} the app page draws too. No engine-sharing
+ *   line (decided 2026-11-16).
+ * - Review (1.8b) is the store thread for this pipeline by version: the app's
+ *   {@link ReviewView} over the host's review adapter (one component, two
+ *   adapters); absent the adapter (a readonly host, an unsaved document) the
+ *   tab says so.
  *
  * The `store` block (plan §9, C.17b) is what makes a pipeline LISTABLE: with
  * it absent the panes show the default block, and the first write (or a save)
  * Store each offer the one button that stamps the SDK's default block.
  */
 
-import React, { CSSProperties, useCallback, useMemo, useRef, useState } from 'react';
+import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewMenu } from 'shell';
-import { Button, Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
+import { Banner, Button, Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
 import type { BillingPlan, PipeStoreBlock, StoreMode, ServiceParamDescriptor } from 'rocketride';
 import { defaultStoreBlock, pipeReadmeStub, STORE_MODES } from 'rocketride';
 import { AssetsPane } from '../../../../components/assets';
 import type { IAssetPaths, IAssetsHost } from '../../../../components/assets';
+import { RequirementsChecklist } from '../../../../components/requirements';
 import { PlanPanel } from '../../../appdev/views/builder/panels/store/PlanPanel';
+import { ReviewView } from '../../../appdev/views/builder/panels/review/ReviewView';
+import type { IReviewHost } from '../../../appdev/views/builder/panels/review/ReviewView';
 import { ParamsPanel } from '../params';
 import type { IParamsProject } from '../params';
+import { callerNeedsOf, deployRequirements, isShortId, publicParametersOf, requirementsLead, SHORT_ID_PATTERN, storeLadder } from './requirements';
+import type { IRequirementsVersion } from './requirements';
 
 // =============================================================================
 // TYPES
@@ -111,6 +123,14 @@ export interface IPackagePanelProps {
 	 * that cannot reach the pipe's folder: Assets then says so.
 	 */
 	assetsHost?: IAssetsHost;
+	/**
+	 * The store-review adapter for this pipeline (the thread, the rail, the
+	 * reply): Review mounts the app's view over it, Requirements reads the
+	 * rail's review states for the store ladder. Absent on a readonly host
+	 * or an unsaved document: Review then says so and the ladder shows no
+	 * version.
+	 */
+	review?: IReviewHost;
 }
 
 // =============================================================================
@@ -129,16 +149,6 @@ const SECTION_MENU: ViewMenu = {
 	],
 };
 
-/** Short-id grammar (plan §2.2, B5): one dot-free segment. */
-const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
-
-/** What the Step 6 tabs will hold, told as an empty state until they land. */
-const PENDING_SECTIONS: Record<'requirements' | 'review', { title: string; description: string }> = {
-	requirements: { title: 'Requirements land with publishing', description: 'The one checklist: what deploying needs, what callers need, the public parameters, the store ladder (plan Step 6).' },
-	review: { title: 'Review lands with publishing', description: 'The conversation with the store review team, by version (plan Step 6).' },
-};
-
-/** The one empty state every store-bound pane shows for a pipeline without a block. */
 /** The store modes as the select shows them (the SDK owns the values). */
 const MODE_LABELS: Record<StoreMode, string> = { free: 'Free', subscription: 'Subscription', paywall: 'Paywall' };
 
@@ -261,6 +271,43 @@ const styles = {
 	planActions: {
 		marginTop: 10,
 	} as CSSProperties,
+	// ── Requirements: group labels between row runs; plain rows for the lists ─
+	reqGroup: {
+		...commonStyles.labelUppercase,
+		color: 'var(--rr-text-secondary)',
+		marginTop: 16,
+		marginBottom: 4,
+	} as CSSProperties,
+	reqGroupFirst: {
+		marginTop: 0,
+	} as CSSProperties,
+	reqGroupRow: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 8,
+	} as CSSProperties,
+	reqListRow: {
+		display: 'flex',
+		alignItems: 'baseline',
+		gap: 10,
+		padding: '4px 0',
+		fontSize: 12.5,
+		color: 'var(--rr-text-primary)',
+	} as CSSProperties,
+	reqListNote: {
+		color: 'var(--rr-text-disabled)',
+		fontSize: 11.5,
+	} as CSSProperties,
+	railError: {
+		marginBottom: 8,
+	} as CSSProperties,
+	// The Review pane owns the pane height: the thread card flexes inside it.
+	reviewFill: {
+		display: 'flex',
+		flexDirection: 'column',
+		height: '100%',
+		minHeight: 0,
+	} as CSSProperties,
 };
 
 // =============================================================================
@@ -326,7 +373,7 @@ function IdentitySection(props: IPackagePanelProps): React.ReactElement {
 	const { project, sources, developerId } = props;
 	const { readonly, write, writeStore } = documentWriter(props);
 	const shortId = project.project_id ?? '';
-	const idProblem = shortId && !SHORT_ID_PATTERN.test(shortId) ? 'A pipeline id is one dot-free segment: letters, digits, _ and - only (B5).' : null;
+	const idProblem = shortId && !isShortId(shortId) ? 'A pipeline id is one dot-free segment: letters, digits, _ and - only (B5).' : null;
 	const publishedAs = `${developerId || '{developerId}'}.${shortId || '{pipeId}'}`;
 	const store = project.store ?? defaultStoreBlock();
 	// The links editor keeps insertion order; an entry being renamed keeps its
@@ -558,6 +605,134 @@ function AssetsSection(props: IPackagePanelProps): React.ReactElement {
 }
 
 // =============================================================================
+// REQUIREMENTS
+// =============================================================================
+
+/**
+ * The Requirements pane (mockup 2.10): the only checklist, read-only. Four
+ * groups — To deploy, Public parameters, Callers need, To list publicly —
+ * derived from the document by `requirements.ts`; the ladder group reads the
+ * review states off the rail the review adapter serves (the same rail DEPLOY
+ * draws). Every fix lives on the side tab that owns the field, so the rows
+ * only point there.
+ *
+ * @param props - The panel props plus the side-tab switch for the API Params link.
+ * @returns The Requirements pane.
+ */
+function RequirementsSection({ project, developerId, review, onOpenSection }: IPackagePanelProps & { onOpenSection: (section: PackageSection) => void }): React.ReactElement {
+	// The rail's review states, for the ladder: fetched through the review
+	// adapter and re-pulled on a deploy change (a submit or a verdict from
+	// any session); the adapter re-mints on reconnect, which re-runs this
+	// effect. null = no adapter (readonly host, unsaved document). A failed
+	// read keeps the last rail that loaded and raises railError instead of
+	// pretending the rail is empty. Only the newest pull commits: the mount
+	// pull resolving after a deploy event's pull must not replace the newer
+	// snapshot with the older one.
+	const [versions, setVersions] = useState<IRequirementsVersion[] | null>(null);
+	const [railError, setRailError] = useState('');
+	useEffect(() => {
+		if (!review?.listVersions) {
+			setVersions(null);
+			setRailError('');
+			return;
+		}
+		let live = true;
+		let generation = 0;
+		const pull = (): void => {
+			const current = ++generation;
+			void review.listVersions!()
+				.then((rail) => {
+					if (!live || current !== generation) return;
+					setVersions(rail);
+					setRailError('');
+				})
+				.catch((e) => {
+					if (!live || current !== generation) return;
+					setRailError(e instanceof Error ? e.message : String(e));
+				});
+		};
+		pull();
+		const off = review.subscribeDeployChanged?.(pull);
+		return () => {
+			live = false;
+			off?.();
+		};
+	}, [review]);
+
+	const deploy = useMemo(() => deployRequirements(project, developerId), [project, developerId]);
+	const parameters = useMemo(() => publicParametersOf(project), [project]);
+	const callerNeeds = useMemo(() => callerNeedsOf(project), [project]);
+	const ladder = useMemo(() => storeLadder(project, versions ?? []), [project, versions]);
+
+	return (
+		<Card header="Requirements">
+			<div style={{ ...styles.reqGroup, ...styles.reqGroupFirst }}>To deploy</div>
+			<RequirementsChecklist items={deploy} lead={requirementsLead(deploy)} />
+
+			<div style={{ ...styles.reqGroup, ...styles.reqGroupRow }}>
+				<span>Public parameters</span>
+				<Button variant="ghost" small onClick={() => onOpenSection('api-params')}>
+					API Params
+				</Button>
+			</div>
+			{parameters.length === 0 ? (
+				<div style={styles.help}>None: callers can only pass what the pipeline reads from its own config. Expose a field on API Params.</div>
+			) : (
+				parameters.map(({ name, target }) => (
+					<div key={name} style={styles.reqListRow}>
+						<span style={styles.mono}>{name}</span>
+						<span style={styles.reqListNote}>
+							writes <span style={styles.mono}>{target}</span>
+						</span>
+					</div>
+				))
+			)}
+
+			<div style={styles.reqGroup}>Callers need</div>
+			{callerNeeds.length === 0 ? (
+				<div style={styles.help}>Nothing beyond an API key: the pipeline references no environment variables.</div>
+			) : (
+				callerNeeds.map((key) => (
+					<div key={key} style={styles.reqListRow}>
+						<span>callers must have</span>
+						<span style={styles.mono}>{key}</span>
+					</div>
+				))
+			)}
+
+			<div style={styles.reqGroup}>To list publicly</div>
+			{railError ? (
+				<div style={styles.railError}>
+					<Banner variant="error">The version rail could not be read: {railError}. The ladder shows the last rail that loaded.</Banner>
+				</div>
+			) : null}
+			<RequirementsChecklist items={ladder} />
+			{versions === null && <div style={styles.help}>The ladder reads the version rail once the pipeline is saved and this host is connected.</div>}
+		</Card>
+	);
+}
+
+// =============================================================================
+// REVIEW
+// =============================================================================
+
+/**
+ * The Review pane (mockup 1.8b): the store thread for this pipeline by
+ * version — the app's {@link ReviewView} over the review adapter.
+ *
+ * @param props - The panel props.
+ * @returns The Review pane, or the empty state when no adapter serves it.
+ */
+function ReviewSection({ review, onContentChanged }: IPackagePanelProps): React.ReactElement {
+	if (!review) return <EmptyState title="No review thread here" description="The conversation with the store review team opens once the pipeline is saved on a connected, editable host." />;
+	return (
+		<div style={styles.reviewFill}>
+			<ReviewView host={review} subject="pipeline" readOnly={!onContentChanged} />
+		</div>
+	);
+}
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
@@ -587,10 +762,12 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 		case 'store':
 			pane = <StoreSection {...props} />;
 			break;
-		default: {
-			const pending = PENDING_SECTIONS[section];
-			pane = <EmptyState title={pending.title} description={pending.description} />;
-		}
+		case 'requirements':
+			pane = <RequirementsSection {...props} onOpenSection={setSection} />;
+			break;
+		case 'review':
+			pane = <ReviewSection {...props} />;
+			break;
 	}
 
 	return (
