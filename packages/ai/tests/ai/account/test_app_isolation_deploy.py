@@ -166,7 +166,9 @@ async def test_resolve_app_pins_off_adds_nothing(pins, stamp_env):
     stamp_env(RR_APP_ISOLATION=None)
     pins.add('acme.thirdparty', 1, org='acme-org')
     pins.add('rocketride.home', 1, org='platform-org', platform=True)
-    for entry in await resolve_app_pins('org-1', 'u1', []):
+    entries = await resolve_app_pins('org-1', 'u1', [])
+    assert sorted(e['id'] for e in entries) == ['acme.thirdparty', 'rocketride.home']  # both pins still returned
+    for entry in entries:
         assert 'firstParty' not in entry and 'isolated' not in entry, entry['id']
 
 

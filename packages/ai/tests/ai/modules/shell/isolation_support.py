@@ -536,12 +536,19 @@ def meta_content(html: str, name: str) -> Optional[str]:
 
 
 def csp_directives(value: str) -> Dict[str, List[str]]:
-    """Parse a CSP header into ``{directive: [sources]}``."""
+    """Parse a CSP header into ``{directive: [sources]}``.
+
+    A repeated directive fails: a browser keeps the FIRST occurrence and drops
+    the rest, so a parser that keeps the last could vouch for a policy the
+    browser does not enforce. Names are case-folded (CSP names are case-insensitive).
+    """
     out: Dict[str, List[str]] = {}
     for part in value.split(';'):
         tokens = part.split()
         if tokens:
-            out[tokens[0]] = tokens[1:]
+            name = tokens[0].lower()
+            assert name not in out, f'duplicate CSP directive {name!r} in {value!r}'
+            out[name] = tokens[1:]
     return out
 
 

@@ -68,6 +68,16 @@ def world(monkeypatch, tmp_path):
     acct = install(monkeypatch, hostile_account())
     (tmp_path / 'index.html').write_text('<html><head><title>shell</title></head><body>SPA</body></html>')
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    # Pin the DEFAULT framing policy, whatever RR_SHELL_FRAME_ANCESTORS_EXTRA the test
+    # process inherits (shell.py appends it at import time).
+    monkeypatch.setattr(
+        shell_mod,
+        '_SHELL_DOCUMENT_HEADERS',
+        {
+            **shell_mod._SHELL_DOCUMENT_HEADERS,
+            'Content-Security-Policy': f'frame-ancestors {shell_mod._frame_ancestor_sources("")}',
+        },
+    )
     assert asyncio.run(pp.rebuild())
     app = FastAPI()
     app.get('/')(public_page)

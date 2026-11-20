@@ -398,6 +398,9 @@ def test_public_lookups_are_rate_limited_per_client(served_app, monkeypatch):
         return await real(*args, **kwargs)
 
     monkeypatch.setattr(account, 'publish_list', counting)
+    # Warm the published app's answer BEFORE the burst, so the final request
+    # can only succeed from the cache (a cold lookup would be throttled too).
+    assert served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js').status_code == 200
     statuses = []
     for i in range(200):
         app_id = f'acme.random{i}'
@@ -407,8 +410,8 @@ def test_public_lookups_are_rate_limited_per_client(served_app, monkeypatch):
     assert set(statuses[:50]) == {404}
     assert statuses[-1] == 429
     assert len(walks) < 200
-    # a published app whose answer is already known keeps serving
-    assert served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js').status_code in (200, 429)
+    # a published app whose answer is already known keeps serving, throttled client or not
+    assert served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js').status_code == 200
 
 
 def test_public_route_refuses_non_canonical_ids(served_app):
@@ -503,33 +506,42 @@ def test_app_host_headers_snapshot(served_app):
     responses = {
         'frame': served_app.get('/_rr/frame.html'),
         'guest': served_app.get('/_rr/guest-test.js'),
-        'clear': served_app.get('/_rr/clear'),
+        'clear': served_app.get('/_rr/clear', headers=SAME_ORIGIN_FRAME),
         'token': served_app.get(f'/_t/{token}/v1/remoteEntry.js'),
         'public': served_app.get('/_p/acme.thirdparty/v1/remoteEntry.js'),
         'missing': served_app.get('/nothing/here'),
     }
+    # Each status is asserted before its headers: a refusal also carries the common headers.
+    for name in ('frame', 'guest', 'clear', 'token', 'public'):
+        assert responses[name].status_code == 200, name
+    assert responses['missing'].status_code == 404  # the explicit refusal control
+    assert responses['clear'].headers['clear-site-data'] == '"storage"'
     for name, resp in responses.items():
         _assert_common_headers(resp, name)
 
-    frame = csp_directives(responses['frame'].headers['content-security-policy'])
-    assert frame['default-src'] == ["'none'"]
-    assert frame['script-src'] == ["'self'", "'wasm-unsafe-eval'"]
-    assert frame['style-src'] == ["'self'", "'unsafe-inline'"]
-    assert frame['img-src'] == ["'self'", 'data:', 'blob:']
-    assert frame['font-src'] == ["'self'", 'data:']
-    assert frame['connect-src'] == ["'self'"]
-    assert frame['worker-src'] == ["'self'", 'blob:']
-    assert frame['frame-src'] == ["'none'"]
-    assert frame['form-action'] == ["'none'"]
-    assert frame['base-uri'] == ["'none'"]
-    assert frame['object-src'] == ["'none'"]
-    assert frame['frame-ancestors'] == [sup.SHELL_ORIGIN]
+    # The WHOLE frame policy against a fixed map (an extra directive anywhere fails), not a
+    # list of directives that the other responses are then compared to.
+    expected_frame = {
+        'default-src': ["'none'"],
+        'script-src': ["'self'", "'wasm-unsafe-eval'"],
+        'style-src': ["'self'", "'unsafe-inline'"],
+        'img-src': ["'self'", 'data:', 'blob:'],
+        'font-src': ["'self'", 'data:'],
+        'connect-src': ["'self'"],
+        'worker-src': ["'self'", 'blob:'],
+        'frame-src': ["'none'"],
+        'form-action': ["'none'"],
+        'base-uri': ["'none'"],
+        'object-src': ["'none'"],
+        'frame-ancestors': [sup.SHELL_ORIGIN],
+    }
+    assert csp_directives(responses['frame'].headers['content-security-policy']) == expected_frame
 
     # The same policy minus frame-ancestors on everything else that serves code.
+    expected_guest = {k: v for k, v in expected_frame.items() if k != 'frame-ancestors'}
     for name in ('guest', 'token', 'public'):
         csp = csp_directives(responses[name].headers['content-security-policy'])
-        assert 'frame-ancestors' not in csp, name
-        assert csp == {k: v for k, v in frame.items() if k != 'frame-ancestors'}, name
+        assert csp == expected_guest, name
 
 
 def test_csp_never_widens_beyond_self_and_network_origins(served_app):

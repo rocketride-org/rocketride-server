@@ -187,20 +187,40 @@ def test_several_keys_are_accepted_first_signs(isolation_env):
 # ---------------------------------------------------------------------------
 
 
+def _marker(**changes) -> str:
+    """The fixture's valid marker (a well-formed digest included) with ONLY ``changes`` applied; ``None`` drops a key."""
+    import json
+
+    marker = json.loads((sup.FIXTURES / 'runtime.json').read_text())
+    marker['capabilitiesSha256'] = '0' * 64
+    for key, value in changes.items():
+        if value is None:
+            marker.pop(key, None)
+        else:
+            marker[key] = value
+    return json.dumps(marker)
+
+
 @pytest.mark.parametrize(
-    'runtime',
+    'runtime, reason',
     [
-        False,  # file absent
-        'not json',
-        '{"runtime": 2, "guest": "guest-test.js", "protoMin": 1, "protoMax": 1, "capabilitiesSha256": "x"}',
-        '{"runtime": 1, "protoMin": 1, "protoMax": 1, "capabilitiesSha256": "x"}',  # no guest
-        '[]',
+        (False, 'runtime missing'),  # file absent
+        ('not json', 'is not valid JSON'),
+        (_marker(runtime=2), 'is not a runtime 1 marker'),  # only the runtime version is wrong
+        (_marker(guest=None), 'is not a runtime 1 marker'),  # only the guest name is missing
+        ('[]', 'is not a runtime 1 marker'),
     ],
 )
-def test_missing_runtime_marker_refuses_start(runtime, isolation_env):
-    """T4: the guest runtime marker (PR2) must exist and be valid; the line gives the remedy."""
+def test_missing_runtime_marker_refuses_start(runtime, reason, isolation_env):
+    """T4: the guest runtime marker (PR2) must exist and be valid; the line gives the remedy.
+
+    Each case is wrong in ONE way (the rest of the marker, its digest included,
+    is well formed) and the refusal names that reason, so dropping any one
+    check fails its own case.
+    """
     isolation_env.rebuild_static(runtime=runtime)
     message = _refuses('runtime')
+    assert reason in message, message
     assert 'RR_APP_ISOLATION=off' in message
 
 
