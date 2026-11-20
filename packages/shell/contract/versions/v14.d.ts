@@ -15236,7 +15236,7 @@ interface IAccountViewProps {
     onDeleteAccount?: () => Promise<void>;
     /** Persists an updated organization name. */
     onSaveOrgName: (name: string) => Promise<void>;
-    /** Creates a new API key and returns the raw key string. */
+    /** Creates a new API key and returns the raw key string. Key-only: any extra fields a host returns are ignored (see `onCreateKeyWithExpiry`). */
     onCreateKey: (params: {
         name: string;
         permissions: string[];
@@ -15244,8 +15244,19 @@ interface IAccountViewProps {
         teamId?: string;
     }) => Promise<{
         key: string;
-        expiresAt?: string | null;
     }>;
+    /**
+     * Expiry-aware variant of `onCreateKey`: resolves with the key and the expiry
+     * the server GRANTED (a timestamp, null for none, or omitted when unreported).
+     * When provided it is used instead of `onCreateKey`, so the reveal can show a
+     * capped expiry.
+     */
+    onCreateKeyWithExpiry?: (params: {
+        name: string;
+        permissions: string[];
+        expiresAt?: string;
+        teamId?: string;
+    }) => Promise<CreateKeyResult>;
     /** Revokes an API key by its ID. */
     onRevokeKey: (keyId: string) => Promise<void>;
     /** Sends an invitation to a new organization member. */

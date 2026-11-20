@@ -782,6 +782,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				onLogout={() => logout?.()}
 				onDeleteAccount={handleDeleteAccount}
 				onSaveOrgName={handleSaveOrgName}
+				onCreateKeyWithExpiry={handleCreateKey}
 				onCreateKey={handleCreateKey}
 				onRevokeKey={handleRevokeKey}
 				onInviteMember={handleInviteMember}
