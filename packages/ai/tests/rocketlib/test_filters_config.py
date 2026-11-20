@@ -297,7 +297,24 @@ class TestCaller:
         envelope['params']['chunker_1']['tags'].append('b')
         assert inst.caller.userId == 'user-1'
         assert inst.caller.params['depth_estimate_1']['maxEdge'] == 1024
-        assert inst.caller.params['chunker_1']['tags'] == ['a']
+        assert inst.caller.params['chunker_1']['tags'] == ('a',)
+
+    def test_nested_params_are_read_only_at_every_depth(self):
+        frozen = freeze_caller({'params': {'n': {'items': [{'value': 1}], 'limits': {'max': 2}}}})
+        with pytest.raises(TypeError):
+            frozen.params['n']['items'][0]['value'] = 2
+        with pytest.raises(TypeError):
+            frozen.params['n']['limits']['max'] = 3
+        with pytest.raises(AttributeError):
+            frozen.params['n']['items'].append({'value': 3})
+        assert frozen.params['n']['items'][0]['value'] == 1
+
+    def test_frozen_arrays_and_objects_still_reach_settings(self):
+        glb = _Global('detector', node_id='detector_1', conn_config={'iqr': {'quantiles': 4}})
+        inst = _Instance(glb, node_id='detector_1')
+        inst._caller = {'params': {'detector_1': {'frames': [1, 2], 'rules': [{'field': 'cpu', 'limit': 9}]}}}
+        assert inst.settings.frames == [1, 2]
+        assert inst.settings.rules == [{'field': 'cpu', 'limit': 9}]
 
     def test_freezing_is_idempotent_and_typed(self):
         frozen = freeze_caller(self.ENVELOPE)

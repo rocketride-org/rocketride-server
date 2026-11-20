@@ -306,10 +306,13 @@ class SubmitCommands(DAPConn):
 
         # Step 2: the request, unbounded: it ends when the pipeline answers
         # or fails. A caller that wants a bound streams through its own pipe
-        # and cancels it
+        # and cancels it. The binding is the control's on the engine from
+        # before its open to after its close (plan 5.7)
+        task.admit_binding(correlation_id, control.key)
         try:
             return await _round_trip()
         finally:
+            task.end_binding(correlation_id)
             control.end_request()
 
     async def _close_after_failure(self, task: Any, close: Dict[str, Any]) -> None:

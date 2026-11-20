@@ -290,11 +290,13 @@ standalone catalog nodes.
      key for anything the node keeps.
    - `self.state` (IInstance): small JSON values that survive a call —
      `get`, `put(key, value, ttl=)`, `delete`, `incr`, and
-     `with self.state.lock(key):` around a read-modify-write. The node names
-     only its own key; the server prefixes it with the calling owner, so one
-     owner never reads another's values.
+     `with self.state.lock(key):` around a read-modify-write (a write to the
+     locked key after the lock's lease lapsed is refused, never laid over the
+     next holder's). The node names only its own key; the server prefixes it
+     with the calling owner, so one owner never reads another's values.
    - `self.files` (IInstance; `IEndpoint.files` for a source's own scan): the
-     file store rooted at the calling owner's tree — `read`, `write`,
+     file store rooted at the calling owner's tree — `read` (100 MB at most
+     unless the node names `max_size`), `write`,
      `open_write`/`write_chunk`/`close_write`, `list_dir`, `stat`, `mkdir`,
      `rename`, `delete`, `put_json`/`get_json`, `get_url` (a short expiry by
      default). Plain relative paths only.

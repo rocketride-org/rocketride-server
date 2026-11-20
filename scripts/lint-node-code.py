@@ -69,7 +69,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Set
+from typing import Dict, FrozenSet, Iterable, Iterator, List, Optional, Set
 
 # =============================================================================
 # Vocabulary
@@ -497,30 +497,119 @@ def reads_identity(expr: ast.AST, tainted: Set[str]) -> bool:
     return False
 
 
-def identity_taint(func: ast.AST) -> Set[str]:
-    """Return the names of ``func`` assigned from a caller identity, iterated until no new name is tainted."""
-    tainted: Set[str] = set()
-    while True:
-        before = len(tainted)
-        for sub in ast.walk(func):
-            value = assigned_value(sub)
-            if value is not None and reads_identity(value, tainted):
-                for t in write_targets(sub):
-                    tainted.update(assigned_names(t))
-        if len(tainted) == before:
-            return tainted
+def _own_walk(node: ast.AST) -> Iterator[ast.AST]:
+    """Yield ``node`` and its descendants, never entering a nested function, lambda or class."""
+    yield node
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+        yield from own_nodes(node)
+
+
+def _bound_names(target: Optional[ast.AST]) -> Set[str]:
+    """The plain names an assignment target binds, unpacking included."""
+    if target is None:
+        return set()
+    return {name for t in flat_targets(target) for name in assigned_names(t)}
+
+
+def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
+    """
+    The names holding a caller identity where each node of ``func`` runs, followed in statement order.
+
+    An assignment from an identity taints the names it binds and any other
+    assignment to a name clears it, so a name reused for something else is
+    clean again. A branch keeps a name tainted when either way taints it, and
+    a loop body is followed twice so a value carried round the loop is seen.
+
+    Returns:
+        The taint in effect BEFORE each node of the function's own statements
+        runs, by ``id(node)``.
+    """
+    taint_of: Dict[int, FrozenSet[str]] = {}
+
+    def mark(nodes: Iterable[Optional[ast.AST]], tainted: Set[str]) -> None:
+        frozen = frozenset(tainted)
+        for node in nodes:
+            if node is None:
+                continue
+            for sub in _own_walk(node):
+                taint_of[id(sub)] = taint_of.get(id(sub), frozenset()) | frozen
+
+    def bind(names: Set[str], value: Optional[ast.AST], tainted: Set[str], keep: bool = False) -> Set[str]:
+        if value is not None and reads_identity(value, tainted):
+            return tainted | names
+        return set(tainted) if keep else tainted - names
+
+    def block(statements: List[ast.stmt], tainted: Set[str]) -> Set[str]:
+        for stmt in statements:
+            tainted = statement(stmt, tainted)
+        return tainted
+
+    def statement(stmt: ast.stmt, tainted: Set[str]) -> Set[str]:
+        # Step 1: a nested definition is its own scope; it rebinds its name
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            mark(stmt.decorator_list, tainted)
+            return tainted - {stmt.name}
+
+        # Step 2: compound statements: their header runs before the body
+        if isinstance(stmt, ast.If):
+            mark([stmt.test], tainted)
+            return block(stmt.body, set(tainted)) | block(stmt.orelse, set(tainted))
+        if isinstance(stmt, (ast.For, ast.AsyncFor)):
+            mark([stmt.iter, stmt.target], tainted)
+            names = _bound_names(stmt.target)
+            first = block(stmt.body, bind(names, stmt.iter, set(tainted)))
+            second = block(stmt.body, bind(names, stmt.iter, tainted | first))
+            return block(stmt.orelse, tainted | second)
+        if isinstance(stmt, ast.While):
+            mark([stmt.test], tainted)
+            first = block(stmt.body, set(tainted))
+            second = block(stmt.body, tainted | first)
+            return block(stmt.orelse, tainted | second)
+        if isinstance(stmt, (ast.With, ast.AsyncWith)):
+            for item in stmt.items:
+                mark([item.context_expr, item.optional_vars], tainted)
+                tainted = bind(_bound_names(item.optional_vars), item.context_expr, tainted)
+            return block(stmt.body, tainted)
+        if isinstance(stmt, ast.Try) or type(stmt).__name__ == 'TryStar':
+            body = block(stmt.body, set(tainted))
+            merged = tainted | body | block(stmt.orelse, set(body))
+            for handler in stmt.handlers:
+                mark([handler.type], tainted | body)
+                merged |= block(handler.body, (tainted | body) - ({handler.name} if handler.name else set()))
+            return block(stmt.finalbody, merged)
+        if isinstance(stmt, ast.Match):
+            mark([stmt.subject], tainted)
+            merged = set(tainted)
+            for case in stmt.cases:
+                mark([case.guard], tainted)
+                merged |= block(case.body, set(tainted))
+            return merged
+
+        # Step 3: a simple statement runs with the taint before it, then binds
+        mark([stmt], tainted)
+        if isinstance(stmt, ast.AugAssign):
+            return bind(_bound_names(stmt.target), stmt.value, tainted, keep=True)
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.Delete)):
+            names = {name for t in write_targets(stmt) for name in assigned_names(t)}
+            return bind(names, assigned_value(stmt), tainted)
+        return tainted
+
+    if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        block(func.body, set())
+    return taint_of
 
 
 def is_identity_safe_call(call: ast.Call) -> bool:
-    """True for a call that only converts, tests or logs, and for a call on ``self.state`` / ``self.files``."""
+    """True for a call that only converts, tests or logs, and for a call on the node's own ``self.state`` / ``self.files``."""
     if call_name(call) in IDENTITY_SAFE_CALLS:
         return True
-    node = call.func.value if isinstance(call.func, ast.Attribute) else None
-    while isinstance(node, ast.Attribute):
-        if node.attr in DOOR_NAMES:
-            return True
-        node = node.value
-    return False
+    receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+    return (
+        isinstance(receiver, ast.Attribute)
+        and receiver.attr in DOOR_NAMES
+        and isinstance(receiver.value, ast.Name)
+        and receiver.value.id == 'self'
+    )
 
 
 def paired_values(target: ast.AST, value: ast.AST) -> Iterator[tuple]:
@@ -1055,13 +1144,15 @@ class FileLint:
         Whose data a node keeps is decided by the SERVER from the binding
         (``self.state`` / ``self.files`` stamp the owner, plan 5.7); an identity
         the node reads off ``self.caller`` keys nothing. Best-effort, per
-        function: names assigned from an identity field are followed through
-        the function; logging and converting calls and the two doors are not
-        sinks.
+        function: names assigned from an identity field are followed in
+        statement order (a reassignment to anything else clears them); logging
+        and converting calls and calls on ``self.state`` / ``self.files`` are
+        not sinks.
         """
         for func in functions(self.tree):
-            tainted = identity_taint(func)
+            taint_of = identity_taint(func)
             for sub in own_nodes(func):
+                tainted = taint_of.get(id(sub), frozenset())
                 if isinstance(sub, ast.Call) and not is_identity_safe_call(sub):
                     values = list(sub.args) + [k.value for k in sub.keywords]
                     if any(reads_identity(v, tainted) for v in values):

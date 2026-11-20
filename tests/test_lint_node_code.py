@@ -334,6 +334,55 @@ def test_a_caller_identity_reaching_what_a_node_keeps_is_refused(tmp_path):
     assert rules(node) == ['identity-persist'] * 5
 
 
+def test_only_the_nodes_own_doors_are_exempt(tmp_path):
+    # A client that happens to have a .files attribute is somebody else's storage
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def run(self):
+                        self.client.files.write('out.txt', self.caller.userId)
+                        self.files.write('out.txt', self.caller.userId)
+            """
+        },
+    )
+    assert rules(node) == ['identity-persist']
+
+
+def test_identity_taint_follows_statement_order(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                from rocketlib import debug
+
+
+                class IInstance:
+                    def cleared(self):
+                        owner = self.caller.userId
+                        debug(owner)
+                        owner = 'shared'
+                        self.store.put(owner, 1)
+
+                    def still_tainted(self):
+                        owner = 'shared'
+                        owner = self.caller.userId
+                        self.store.put(owner, 2)
+
+                    def in_a_branch(self, flag):
+                        owner = 'shared'
+                        if flag:
+                            owner = self.caller.userId
+                        self.store.put(owner, 3)
+            """
+        },
+    )
+    lines = (node / 'IInstance.py').read_text(encoding='utf-8').splitlines()
+    found = [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+    assert found == [('identity-persist', 'self.store.put(owner, 2)'), ('identity-persist', 'self.store.put(owner, 3)')]
+
+
 def test_logging_and_the_doors_are_not_identity_sinks(tmp_path):
     node = write_node(
         tmp_path,

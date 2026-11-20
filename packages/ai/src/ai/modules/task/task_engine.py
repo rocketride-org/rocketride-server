@@ -844,6 +844,12 @@ class TaskEngine(DAPBase):
         # holder (a listener source) keeps the engine from aging at all.
         self._holds: Dict[str, int] = {}
 
+        # Bindings: the server-minted correlationId of every binding EaaS has
+        # sent this engine and not yet ended, with its control's key. It is
+        # recorded BEFORE the first frame goes out, so a node's self.state and
+        # self.files reach their owner from the open on (plan 5.7)
+        self._bindings: Dict[str, str] = {}
+
         # Why the engine is unavailable to its holders (an ops stop), or None
         self.unavailable_reason: Optional[str] = None
 
@@ -1819,36 +1825,58 @@ class TaskEngine(DAPBase):
         """
         return f'{self._server.node_id}.{self.engine_id}.{trace_id}'
 
-    def binding_control(self, trace_id: Any) -> Optional['TaskControl']:
+    def admit_binding(self, correlation_id: str, control_key: str) -> None:
+        """
+        Record a binding EaaS is about to send this engine, before its first frame goes out.
+
+        Args:
+            correlation_id: The binding's server-minted request id (it rides
+                the binding's ``_caller``).
+            control_key: The registry key of the control the binding runs under.
+        """
+        self._bindings[correlation_id] = control_key
+
+    def end_binding(self, correlation_id: str) -> None:
+        """
+        Forget a binding that closed (or never opened): its nodes reach no state or files after this.
+
+        Args:
+            correlation_id: The binding's request id.
+        """
+        self._bindings.pop(correlation_id, None)
+
+    def binding_control(self, correlation_id: Any) -> Optional['TaskControl']:
         """
         The control a binding of THIS engine works for: whose state and files its nodes reach (plan 5.7).
 
         The identity comes from the server's own records, never from the
-        subprocess: the tree's owner when the server claimed it (an open, a
-        tool call through a control), else the one control holding a private
-        engine (engine-level work such as a source's scan, a binding the
-        engine opened itself). A shared engine answers only for claimed
-        trees: an unclaimed binding there is nobody's.
+        subprocess: a binding EaaS sent is named by its server-minted
+        ``correlationId`` (unguessable, recorded before the first frame went
+        out, forgotten when the binding ends), and is its control's. Work
+        without one (a source's scan, a binding the engine opened itself) is
+        the owner's only where one control holds a private engine.
 
         Args:
-            trace_id: The engine's bare traceId of the binding (0 or absent
-                for engine-level work).
+            correlation_id: The binding's request id from its frozen caller;
+                empty or absent for engine-level work.
 
         Returns:
             The control, or None when the binding has no owner the server
             can name.
         """
-        # Step 1: a claimed tree is its owner's, live or within the grace
-        if isinstance(trace_id, int) and not isinstance(trace_id, bool) and trace_id > 0:
-            owner = self._server.trace_owners.owner(self.trace_ref(trace_id))
-            if owner is not None:
-                try:
-                    return self._server.control_by_key(owner.control_key)
-                except TaskError:
-                    return None
+        # Step 1: a binding EaaS sent is its control's while it is open; an id
+        # the server never minted, or one whose binding ended, is nobody's
+        if correlation_id:
+            control_key = self._bindings.get(correlation_id) if isinstance(correlation_id, str) else None
+            if control_key is None:
+                return None
+            try:
+                return self._server.control_by_key(control_key)
+            except TaskError:
+                return None
 
-        # Step 2: unclaimed work is the owner's only where one control holds a
-        # private engine; with several, or on a shared engine, nobody's
+        # Step 2: engine-level work is the owner's only where one control holds
+        # a private engine; with several, or on a shared engine, nobody's
         if self.shared or len(self._holds) != 1:
             return None
         try:
@@ -1994,7 +2022,9 @@ class TaskEngine(DAPBase):
             self.debug_message(f'Error cleaning up data client: {e}')
 
         # The file handles its nodes opened through self.files close with it
-        # (plan 5.7): a node that died mid-write leaves no lock behind
+        # (plan 5.7): a node that died mid-write leaves no lock behind; its
+        # bindings end with it
+        self._bindings.clear()
         try:
             await node_doors.release_engine(self)
         except Exception as e:

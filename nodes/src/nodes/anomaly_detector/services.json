@@ -113,7 +113,8 @@
 			"title": "Series field",
 			"description": "The metadata field naming the series a document belongs to. Leave empty to keep every value in one series",
 			"default": "",
-			"maxLength": 128
+			"maxLength": 128,
+			"param": true
 		},
 		"anomaly_detector.series": {
 			"type": "string",

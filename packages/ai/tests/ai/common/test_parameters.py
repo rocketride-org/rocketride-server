@@ -165,6 +165,17 @@ def test_a_value_outside_the_descriptor_is_refused_by_name(catalog):
     assert [e['name'] for e in errors] == ['maxEdge'] and 'integer' in errors[0]['reason']
 
 
+def test_two_names_for_one_leaf_never_hide_a_value(catalog):
+    aliases = {'goodEdge': 'depth_1.max_edge', 'badEdge': 'depth_1.max_edge'}
+    _per_node, errors = parameters.resolve_call_params(_pipeline(), aliases, {'badEdge': 'invalid', 'goodEdge': 640})
+    reasons = {e['name']: e['reason'] for e in errors}
+    assert 'integer' in reasons['badEdge']
+    assert "same config key as 'badEdge'" in reasons['goodEdge']
+    # One name of the two is an ordinary call
+    per_node, errors = parameters.resolve_call_params(_pipeline(), aliases, {'goodEdge': 640})
+    assert errors == [] and per_node == {'depth_1': {'max_edge': 640}}
+
+
 def test_a_map_target_that_is_not_a_param_is_refused_at_call_time_too(catalog):
     # A map that slipped past validate (an older artifact) still cannot set a secret
     per_node, errors = parameters.resolve_call_params(_pipeline(), {'k': 'depth_1.apikey'}, {'k': 'sk-x'})

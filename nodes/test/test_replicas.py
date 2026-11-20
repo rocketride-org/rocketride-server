@@ -33,6 +33,7 @@ moves another's.
 import textwrap
 
 import pytest
+import rocketlib.doors
 
 from .framework.replicas import Call, Owner, Replica, ReplicaServer, run, run_alternating_and_alone
 
@@ -71,12 +72,44 @@ class IInstance(IInstanceBase):
 """
 
 
-def _node(tmp_path, name, instance_source):
+#: Keeps the count in a file through self.files: the server's too.
+_IN_A_FILE = """
+from rocketlib import DoorError, IInstanceBase
+
+
+class IInstance(IInstanceBase):
+    def writeText(self, text):
+        try:
+            count = self.files.get_json('count.json') + 1
+        except DoorError:
+            count = 1
+        self.files.put_json('count.json', count)
+        self.instance.writeText(str(count))
+        return self.preventDefault()
+"""
+
+#: Records every endGlobal in a module-level list the test reads.
+_ENDS = """
+from rocketlib import IGlobalBase
+
+ENDED = []
+
+
+class IGlobal(IGlobalBase):
+    def beginGlobal(self):
+        self.count = 0
+
+    def endGlobal(self):
+        ENDED.append(self.glb.controlId)
+"""
+
+
+def _node(tmp_path, name, instance_source, global_source=_IGLOBAL):
     """Write a fixture node package and return its directory."""
     node = tmp_path / name
     node.mkdir()
     (node / '__init__.py').write_text('')
-    (node / 'IGlobal.py').write_text(textwrap.dedent(_IGLOBAL))
+    (node / 'IGlobal.py').write_text(textwrap.dedent(global_source))
     (node / 'IInstance.py').write_text(textwrap.dedent(instance_source))
     return node
 
@@ -122,6 +155,37 @@ def test_the_idle_sweep_loses_nothing_in_self_state(tmp_path):
     assert _texts(first + second) == [['1'], ['2'], ['3'], ['4']]
 
 
+def test_each_server_has_its_own_file_root(tmp_path):
+    # A count kept in a file starts from nothing on the reference server too
+    node = _node(tmp_path, 'counter_file', _IN_A_FILE)
+    alternating, reference = run_alternating_and_alone(node, 'counter', 'counter_1', [_count(ALICE)] * 3)
+    assert _texts(reference) == [['1'], ['2'], ['3']]
+    assert alternating == reference
+
+
+def test_every_replica_ends_before_its_server_goes(tmp_path, monkeypatch):
+    node = _node(tmp_path, 'counter_ends', _IN_STATE, _ENDS)
+    ends = []
+    real_end = Replica.end
+
+    def end(self):
+        # The server's channel is still installed when the replica ends
+        ends.append(rocketlib.doors._channel is not None)
+        real_end(self)
+
+    monkeypatch.setattr(Replica, 'end', end)
+    run_alternating_and_alone(node, 'counter', 'counter_1', [_count(ALICE)] * 2)
+    assert ends == [True, True, True]
+
+    def failing(instance):
+        raise RuntimeError('the call failed')
+
+    ends.clear()
+    with pytest.raises(RuntimeError, match='the call failed'):
+        run_alternating_and_alone(node, 'counter', 'counter_1', [Call(owner=ALICE, invoke=failing)])
+    assert ends == [True, True]
+
+
 # ==== The leak test ==============================================================
 
 
@@ -139,6 +203,6 @@ def test_a_binding_the_server_cannot_name_is_refused(tmp_path):
     node = _node(tmp_path, 'counter_unclaimed', _IN_STATE)
     with ReplicaServer() as server:
         replica = Replica(server, node, 'counter', 'counter_1')
-        server.claim = lambda engine, trace_id, owner: None
+        server.admit = lambda engine, correlation_id, owner: None
         with pytest.raises(Exception, match='belongs to no control'):
             replica.call(_count(ALICE))

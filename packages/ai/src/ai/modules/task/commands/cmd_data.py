@@ -177,9 +177,12 @@ class DataCommands(DAPConn):
             control = await self._control_for(request, subcommand, pipe_id)
 
             # Step 2: the binding this frame belongs to: a new one, or the one
-            # the named pipe was opened on
+            # the named pipe was opened on. A new one is its control's on the
+            # engine BEFORE its first frame goes out, so its nodes' self.state
+            # and self.files reach the owner from the open on (plan 5.7)
             if pipe_id is None:
                 frame = await self._new_binding(control, arguments)
+                frame.engine.admit_binding(frame.correlation_id, control.key)
             else:
                 frame = self._attached_binding(control, pipe_id)
 
@@ -187,22 +190,29 @@ class DataCommands(DAPConn):
             # control; a close retires its record whatever the engine answered
             succeeded = False
             body = None
+            kept = False
             try:
-                body = await self._forward(control, frame, request, arguments)
-                succeeded = True
-            finally:
-                if subcommand == 'close' and pipe_id is not None:
-                    # Transport success is not object success: a close the
-                    # engine answered normally still carries the object's error
-                    # when the pipeline failed it
-                    self._retire(control, pipe_id, succeeded and not _object_failed(body))
+                try:
+                    body = await self._forward(control, frame, request, arguments)
+                    succeeded = True
+                finally:
+                    if subcommand == 'close' and pipe_id is not None:
+                        # Transport success is not object success: a close the
+                        # engine answered normally still carries the object's error
+                        # when the pipeline failed it
+                        self._retire(control, pipe_id, succeeded and not _object_failed(body))
 
-            # Step 4: a successful open is a binding the control now has open;
-            # a standalone tool call was a binding that opened and closed
-            if subcommand == 'open':
-                self._record_open(control, frame, body, account_info)
-            elif subcommand == 'tool' and pipe_id is None:
-                self._note_borrowed(control, body, account_info)
+                # Step 4: a successful open is a binding the control now has open;
+                # a standalone tool call was a binding that opened and closed
+                if subcommand == 'open':
+                    kept = self._record_open(control, frame, body, account_info)
+                elif subcommand == 'tool' and pipe_id is None:
+                    self._note_borrowed(control, body, account_info)
+            finally:
+                # A new binding that is not open now (a standalone tool call, a
+                # failed open) has ended: its nodes reach no state or files after it
+                if pipe_id is None and not kept:
+                    frame.engine.end_binding(frame.correlation_id)
 
             # The envelope is keyed off the INBOUND request so the inbound
             # DAPConn correlates it to the originating client (_send_data
@@ -351,7 +361,7 @@ class DataCommands(DAPConn):
             control.end_request()
         return response.get('body')
 
-    def _record_open(self, control: 'TaskControl', frame: '_Frame', body: Any, account_info: Any) -> None:
+    def _record_open(self, control: 'TaskControl', frame: '_Frame', body: Any, account_info: Any) -> bool:
         """
         Record a successful open on the control: the slot, its engine and its request tree.
 
@@ -362,15 +372,19 @@ class DataCommands(DAPConn):
             control: The caller's control.
             frame: The binding the open started.
             body: The engine's open response (``pipe_id``, wire ``traceId``).
+
+        Returns:
+            True when the binding is open on the control now.
         """
         if not isinstance(body, dict) or body.get('pipeId') is None:
-            return
+            return False
         trace_id = str(body.get('traceId') or '')
         control.open_pipes[body['pipeId']] = OpenPipe(
             engine=frame.engine, trace_id=trace_id, correlation_id=frame.correlation_id
         )
         control.stats.totalCount += 1
         self._claim(control, trace_id, account_info)
+        return True
 
     def _claim(self, control: 'TaskControl', trace_id: str, account_info: Any) -> None:
         """
@@ -412,8 +426,10 @@ class DataCommands(DAPConn):
         else:
             control.stats.failedCount += 1
             control.stats.failedSize += record.bytes
-        # Step 2: the tree is released; it lingers for the grace, then is forgotten
+        # Step 2: the tree is released; it lingers for the grace, then is
+        # forgotten. The binding has ended: its nodes reach no state or files
         self._server.trace_owners.release(record.trace_id)
+        record.engine.end_binding(record.correlation_id)
 
     def _note_borrowed(self, control: 'TaskControl', body: Any, account_info: Any) -> None:
         """

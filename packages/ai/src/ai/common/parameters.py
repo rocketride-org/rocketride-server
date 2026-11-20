@@ -261,6 +261,11 @@ def resolve_call_params(
         if path is None:
             errors.append({'name': str(name), 'reason': f'{node_id!r} has no config key {key!r}'})
             continue
+        # Two names for one leaf would leave only the last value to validate
+        other = names.get((node_id, path))
+        if other is not None:
+            errors.append({'name': str(name), 'reason': f'sets the same config key as {other!r}; supply one of them'})
+            continue
         by_node.setdefault(node_id, {})[path] = value
         names[(node_id, path)] = str(name)
 

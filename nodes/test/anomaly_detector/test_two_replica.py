@@ -138,3 +138,17 @@ def test_another_owners_values_never_enter_a_series():
     alone, _ = _run(alice)
     assert _texts(together)[0::2] == _texts(alone)
     assert all('[ANOMALY' not in text for text in _texts(together)[1::2][2:])
+
+
+def test_two_owners_of_one_organization_keep_their_own_series():
+    # Same organization, address, node id and series: only the owner differs,
+    # so the owner segment of the key alone keeps the histories apart
+    carol = Owner(orgId='org-a', userId='carol')
+    alice = [_text(ALICE, value) for value in VALUES]
+    carol_calls = [_text(carol, 160) for _ in VALUES]
+    interleaved = [call for pair in zip(alice, carol_calls) for call in pair]
+
+    together, _reference = _run(interleaved)
+    alone, _ = _run(alice)
+    assert _texts(together)[0::2] == _texts(alone)
+    assert all('[ANOMALY' not in text for text in _texts(together)[1::2][2:])

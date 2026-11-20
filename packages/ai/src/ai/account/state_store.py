@@ -121,6 +121,11 @@ class StateStore(ABC):
     Where ``self.state`` lives. Keys are physical (``state_key``); values are JSON text.
 
     ``ttl`` is in seconds; None or 0 means the value does not expire.
+
+    A write made under a lock names the lock's ``token`` and is FENCED: it
+    commits only while that token holds a live lease on the key, so a holder
+    whose lease lapsed (and may have been reassigned) can never overwrite the
+    next holder's work; it gets a ``StateError`` instead.
     """
 
     @abstractmethod
@@ -128,15 +133,15 @@ class StateStore(ABC):
         """Return the JSON text stored under ``key``, or None when absent or expired."""
 
     @abstractmethod
-    async def put(self, key: str, text: str, ttl: Optional[float]) -> None:
-        """Store ``text`` under ``key``, replacing any value."""
+    async def put(self, key: str, text: str, ttl: Optional[float], token: Optional[str] = None) -> None:
+        """Store ``text`` under ``key``, replacing any value (fenced by ``token`` when given)."""
 
     @abstractmethod
-    async def delete(self, key: str) -> bool:
-        """Remove ``key``; True when a live value was there."""
+    async def delete(self, key: str, token: Optional[str] = None) -> bool:
+        """Remove ``key``; True when a live value was there (fenced by ``token`` when given)."""
 
     @abstractmethod
-    async def incr(self, key: str, amount: int, ttl: Optional[float]) -> int:
+    async def incr(self, key: str, amount: int, ttl: Optional[float], token: Optional[str] = None) -> int:
         """Add ``amount`` to the integer under ``key`` (absent counts as 0) atomically; return the new value."""
 
     @abstractmethod
@@ -155,8 +160,9 @@ class MemoryStateStore(StateStore):
     """
     The OSS backend: an in-process dict with expiry, shared by every engine of this server.
 
-    Bounded by ``max_entries``: expired values are dropped first, and a store
-    still full refuses the next new key rather than evicting a live one.
+    Bounded by ``max_entries``, values and locks alike: expired entries are
+    dropped first, and a store still full refuses the next new key rather
+    than evicting a live value or a live lease.
     """
 
     def __init__(self, max_entries: int = CONST_STATE_MAX_ENTRIES):
@@ -196,6 +202,14 @@ class MemoryStateStore(StateStore):
         if len(self._values) >= self._max_entries:
             raise StateError(f'the state store holds its maximum of {self._max_entries} values')
 
+    def _fence(self, key: str, token: Optional[str]) -> None:
+        """Refuse a write under a lock whose lease ``token`` no longer holds. Caller holds the lock."""
+        if token is None:
+            return
+        held = self._locks.get(key)
+        if held is None or held[0] != token or held[1] <= time.monotonic():
+            raise StateError('the lock on this key was lost (its lease lapsed); the write was refused')
+
     # ---- StateStore ----------------------------------------------------------
 
     async def get(self, key: str) -> Optional[str]:
@@ -204,21 +218,24 @@ class MemoryStateStore(StateStore):
             entry = self._live(key)
             return entry[0] if entry is not None else None
 
-    async def put(self, key: str, text: str, ttl: Optional[float]) -> None:
+    async def put(self, key: str, text: str, ttl: Optional[float], token: Optional[str] = None) -> None:
         """Store ``text`` under ``key``."""
         with self._lock:
+            self._fence(key, token)
             self._live(key)
             self._room_for(key)
             self._values[key] = (text, self._expiry(ttl))
 
-    async def delete(self, key: str) -> bool:
+    async def delete(self, key: str, token: Optional[str] = None) -> bool:
         """Remove ``key``."""
         with self._lock:
+            self._fence(key, token)
             return self._live(key) is not None and self._values.pop(key, None) is not None
 
-    async def incr(self, key: str, amount: int, ttl: Optional[float]) -> int:
+    async def incr(self, key: str, amount: int, ttl: Optional[float], token: Optional[str] = None) -> int:
         """Add ``amount`` to the integer under ``key``."""
         with self._lock:
+            self._fence(key, token)
             entry = self._live(key)
             current = 0
             if entry is not None:
@@ -234,10 +251,18 @@ class MemoryStateStore(StateStore):
     async def try_lock(self, key: str, token: str, lease: float) -> bool:
         """Take the lock on ``key`` unless a live lease of another token holds it."""
         with self._lock:
+            now = time.monotonic()
             held = self._locks.get(key)
-            if held is not None and held[0] != token and held[1] > time.monotonic():
+            if held is not None and held[0] != token and held[1] > now:
                 return False
-            self._locks[key] = (token, time.monotonic() + float(lease))
+            # A NEW key needs room: leases nobody released (a crashed holder,
+            # a lost unlock) are reclaimed first; a live lease is never evicted
+            if held is None and len(self._locks) >= self._max_entries:
+                for stale in [k for k, (_, deadline) in self._locks.items() if deadline <= now]:
+                    del self._locks[stale]
+                if len(self._locks) >= self._max_entries:
+                    raise StateError(f'the state store holds its maximum of {self._max_entries} locks')
+            self._locks[key] = (token, now + float(lease))
             return True
 
     async def unlock(self, key: str, token: str) -> bool:

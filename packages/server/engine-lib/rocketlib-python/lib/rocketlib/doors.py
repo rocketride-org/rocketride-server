@@ -31,10 +31,11 @@ anything whose loss changes an answer (a rolling window, a session, a counter)
 lives behind one of these doors instead.
 
 Both are clients of the SERVER. A request carries the binding it is made from
-(the ``traceId`` of the request tree, captured when the door is first used in
-the binding) plus the node's own key or path, and nothing else: the server
-finds the control that owns the binding and decides from its own record whose
-rows and whose files those are. No identity crosses the process boundary in
+(the server-minted ``correlationId`` of the request, which the instance froze
+with its caller when the engine bound it) plus the node's own key or path, and
+nothing else: the server finds the control that owns the binding and decides
+from its own record whose rows and whose files those are; a binding that has
+ended reaches nothing. No identity crosses the process boundary in
 the request direction, so a node that rewrites what it believes about its
 caller mislabels its own logs and reaches nobody else's data.
 
@@ -71,6 +72,10 @@ STATE_LOCK_BACKOFF = (0.02, 0.25)
 
 #: Seconds a ``NodeFiles.get_url`` link lives when the node names no expiry.
 FILES_URL_EXPIRES_IN = 300
+
+#: Bytes a whole-file ``NodeFiles.read`` returns at most unless the node names
+#: another limit (the account FileStore's own ``read`` default).
+FILES_READ_MAX_SIZE = 100 * 1024 * 1024
 
 # ==== The channel ============================================================
 
@@ -149,21 +154,33 @@ class NodeState:
             self.state.put(key, window[-100:])
     """
 
-    def __init__(self, trace_id: int):
+    def __init__(self, binding: str):
         """
         Bind the door to one binding.
 
         Args:
-            trace_id: The binding's request tree (0 for engine-level work, which
-                the server answers only on an engine one control holds).
+            binding: The binding's ``correlationId`` from its frozen caller
+                (empty for engine-level work, which the server answers only on
+                an engine one control holds).
         """
-        self._trace_id = int(trace_id or 0)
+        self._binding = str(binding or '')
+        # key -> the token of the lease ``lock`` holds on it: a write to a held
+        # key names it, and the server refuses the write once the lease lapsed
+        self._held: Dict[str, str] = {}
 
     def _args(self, key: str, **extra: Any) -> Dict[str, Any]:
         """The arguments of one request: the binding, the node's key, the rest."""
         if not isinstance(key, str) or not key:
             raise DoorError('a state key is a non-empty string')
-        return {'traceId': self._trace_id, 'key': key, **extra}
+        return {'correlationId': self._binding, 'key': key, **extra}
+
+    def _write_args(self, key: str, **extra: Any) -> Dict[str, Any]:
+        """The arguments of a write: a held key's write is fenced by its lock's token."""
+        arguments = self._args(key, **extra)
+        token = self._held.get(key)
+        if token is not None:
+            arguments['token'] = token
+        return arguments
 
     def get(self, key: str, default: Any = None) -> Any:
         """
@@ -188,7 +205,7 @@ class NodeState:
             value: Any JSON value (capped by the server).
             ttl: Seconds until it expires; None follows the control's idle policy.
         """
-        _send('state.put', self._args(key, value=value, ttl=ttl))
+        _send('state.put', self._write_args(key, value=value, ttl=ttl))
 
     def delete(self, key: str) -> bool:
         """
@@ -197,7 +214,7 @@ class NodeState:
         Returns:
             True when a value was there.
         """
-        body, _ = _send('state.delete', self._args(key))
+        body, _ = _send('state.delete', self._write_args(key))
         return bool(body.get('deleted'))
 
     def incr(self, key: str, amount: int = 1, ttl: Optional[float] = None) -> int:
@@ -212,7 +229,7 @@ class NodeState:
         Returns:
             The new value.
         """
-        body, _ = _send('state.incr', self._args(key, amount=int(amount), ttl=ttl))
+        body, _ = _send('state.incr', self._write_args(key, amount=int(amount), ttl=ttl))
         return int(body.get('value', 0))
 
     @contextmanager
@@ -223,7 +240,10 @@ class NodeState:
         The server never blocks on a held lock (a waiting request would hold
         a channel slot the holder needs to release it); this side retries
         with backoff until ``timeout``. A holder that dies loses the lock
-        after ``STATE_LOCK_LEASE`` seconds.
+        after ``STATE_LOCK_LEASE`` seconds; ``put``/``delete``/``incr`` of the
+        key inside the block are fenced by the lease, so a holder that
+        outlived it gets a ``DoorError`` instead of overwriting the next
+        holder's work.
 
         Args:
             key: The node's key.
@@ -244,9 +264,11 @@ class NodeState:
                 raise DoorError(f'state.lock: "{key}" is held by another binding; gave up after {timeout} seconds')
             time.sleep(pause)
             pause = min(pause * 2, longest)
+        self._held[key] = token
         try:
             yield
         finally:
+            self._held.pop(key, None)
             _send('state.unlock', self._args(key, token=token))
 
 
@@ -262,29 +284,33 @@ class NodeFiles:
     subtree on the deploy rail) and refuses every scoped (``@``) path.
     """
 
-    def __init__(self, trace_id: int):
+    def __init__(self, binding: str):
         """
         Bind the door to one binding.
 
         Args:
-            trace_id: The binding's request tree (0 for engine-level work, which
-                the server answers only on an engine one control holds).
+            binding: The binding's ``correlationId`` from its frozen caller
+                (empty for engine-level work, which the server answers only on
+                an engine one control holds).
         """
-        self._trace_id = int(trace_id or 0)
+        self._binding = str(binding or '')
 
     def _call(self, command: str, data: Optional[bytes] = None, **arguments: Any) -> Tuple[Dict[str, Any], Any]:
         """One request carrying this door's binding."""
-        return _send(command, {'traceId': self._trace_id, **arguments}, data)
+        return _send(command, {'correlationId': self._binding, **arguments}, data)
 
     # ---- Whole files -----------------------------------------------------
 
-    def read(self, path: str, max_size: Optional[int] = None) -> bytes:
+    def read(self, path: str, max_size: int = FILES_READ_MAX_SIZE) -> bytes:
         """
         Return a file's bytes.
 
         Args:
             path: The file, relative to the owner's tree.
-            max_size: Refuse a file larger than this many bytes.
+            max_size: Refuse a file larger than this many bytes (default
+                ``FILES_READ_MAX_SIZE``); checked on the size the server
+                reports and again on the bytes received, so a file that grows
+                while it is read is refused too.
 
         Raises:
             DoorError: Missing, refused, or larger than ``max_size``.
@@ -292,15 +318,17 @@ class NodeFiles:
         body, _ = self._call('fs_open', path=path, mode='r')
         handle, size = body.get('handle'), int(body.get('size') or 0)
         try:
-            if max_size is not None and size > max_size:
+            if size > max_size:
                 raise DoorError(f'{path} is {size} bytes, more than the {max_size} allowed')
             chunks, offset = [], 0
             while True:
                 _, chunk = self._call('fs_read', handle=handle, offset=offset, length=_chunk)
                 if not chunk:
                     break
-                chunks.append(bytes(chunk))
                 offset += len(chunk)
+                if offset > max_size:
+                    raise DoorError(f'{path} is more than the {max_size} bytes allowed')
+                chunks.append(bytes(chunk))
             return b''.join(chunks)
         finally:
             self._call('fs_close', handle=handle, mode='r')

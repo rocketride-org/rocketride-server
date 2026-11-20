@@ -119,6 +119,43 @@ async def test_a_lock_is_a_lease_one_token_holds(store, clock):
     assert await store.try_lock('k', 'c', 10) is True
 
 
+async def test_a_write_under_a_lapsed_lease_is_refused(store, clock):
+    # A reads under its lease, then stalls past it; B takes the key and writes
+    assert await store.try_lock('k', 'a', 10) is True
+    await store.put('k', '0', None, token='a')
+    clock[0] += 11
+    assert await store.try_lock('k', 'b', 10) is True
+    await store.put('k', '1', None, token='b')
+    # A's stale write, delete and increment never land
+    with pytest.raises(StateError, match='lock on this key was lost'):
+        await store.put('k', '1', None, token='a')
+    with pytest.raises(StateError, match='lock on this key was lost'):
+        await store.delete('k', token='a')
+    with pytest.raises(StateError, match='lock on this key was lost'):
+        await store.incr('k', 1, None, token='a')
+    assert await store.get('k') == '1'
+    # A lapsed lease nobody took is lost too; a write naming no lock is not fenced
+    assert await store.unlock('k', 'b') is True
+    with pytest.raises(StateError, match='lock on this key was lost'):
+        await store.put('k', '2', None, token='b')
+    await store.put('k', '3', None)
+    assert await store.get('k') == '3'
+
+
+async def test_abandoned_locks_are_reclaimed_and_live_ones_never_evicted(store, clock):
+    for index in range(4):
+        assert await store.try_lock(f'k{index}', 'a', 5 if index == 0 else 60) is True
+    with pytest.raises(StateError, match='maximum of 4 locks'):
+        await store.try_lock('k4', 'a', 60)
+    # The holder of k0 never unlocked; its lapsed lease makes room
+    clock[0] += 6
+    assert await store.try_lock('k4', 'a', 60) is True
+    # Full again with live leases only: a new key is refused, no live lease is evicted
+    with pytest.raises(StateError, match='maximum of 4 locks'):
+        await store.try_lock('k0', 'b', 60)
+    assert await store.try_lock('k1', 'b', 60) is False
+
+
 async def test_the_store_is_bounded_and_refuses_rather_than_evicting_a_live_value(store, clock):
     for index in range(4):
         await store.put(f'k{index}', '1', 5 if index == 0 else None)

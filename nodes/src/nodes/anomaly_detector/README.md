@@ -45,9 +45,10 @@ Start with the profile whose kind of change you need to detect, then point
 are conservative starting points; every method needs a warm-up period before
 it can identify an outlier.
 
-Every setting except **Series field** is a per-call parameter: a pipeline that
-exposes it lets each call choose the method, sensitivity, window size,
-thresholds, metric field and series without starting another run. A call that
+Every setting is a per-call parameter: a pipeline that exposes it lets each
+call choose the method, sensitivity, window size, thresholds, metric field,
+series and series field without starting another run; the configured values
+are the defaults. A call that
 switches the method scores against the same history, so one series can be
 watched with z-score and IQR alike.
 

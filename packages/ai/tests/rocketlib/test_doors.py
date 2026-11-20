@@ -71,28 +71,28 @@ def channel():
 
 def test_a_request_carries_the_binding_and_the_key_only(channel):
     recorder = channel(({'found': True, 'value': [1, 2]}, None), ({}, None))
-    state = NodeState(41)
+    state = NodeState('cid-41')
     assert state.get('series:cpu') == [1, 2]
     state.put('series:cpu', [1, 2, 3], ttl=60)
     assert recorder.requests == [
-        ('state.get', {'traceId': 41, 'key': 'series:cpu'}, None),
-        ('state.put', {'traceId': 41, 'key': 'series:cpu', 'value': [1, 2, 3], 'ttl': 60}, None),
+        ('state.get', {'correlationId': 'cid-41', 'key': 'series:cpu'}, None),
+        ('state.put', {'correlationId': 'cid-41', 'key': 'series:cpu', 'value': [1, 2, 3], 'ttl': 60}, None),
     ]
 
 
 def test_absent_is_the_default_and_a_stored_null_is_null(channel):
     channel(({'found': False}, None), ({'found': True, 'value': None}, None))
-    state = NodeState(1)
+    state = NodeState('cid')
     assert state.get('k', 'fallback') == 'fallback'
     assert state.get('k', 'fallback') is None
 
 
 def test_incr_and_delete(channel):
     recorder = channel(({'value': 5}, None), ({'deleted': True}, None))
-    state = NodeState(1)
+    state = NodeState('cid')
     assert state.incr('n', 5) == 5
     assert state.delete('n') is True
-    assert recorder.requests[0] == ('state.incr', {'traceId': 1, 'key': 'n', 'amount': 5, 'ttl': None}, None)
+    assert recorder.requests[0] == ('state.incr', {'correlationId': 'cid', 'key': 'n', 'amount': 5, 'ttl': None}, None)
 
 
 def test_lock_retries_until_free_and_releases_with_its_token(channel, monkeypatch):
@@ -103,9 +103,30 @@ def test_lock_retries_until_free_and_releases_with_its_token(channel, monkeypatc
         ({'acquired': True, 'token': 't1'}, None),
         ({'released': True}, None),
     )
-    with NodeState(1).lock('k'):
+    with NodeState('cid').lock('k'):
         assert [r[0] for r in recorder.requests] == ['state.lock'] * 3
-    assert recorder.requests[-1] == ('state.unlock', {'traceId': 1, 'key': 'k', 'token': 't1'}, None)
+    assert recorder.requests[-1] == ('state.unlock', {'correlationId': 'cid', 'key': 'k', 'token': 't1'}, None)
+
+
+def test_writes_to_a_held_key_are_fenced_by_its_lease(channel):
+    recorder = channel(
+        ({'acquired': True, 'token': 't1'}, None),
+        ({}, None),
+        ({'value': 1}, None),
+        ({}, None),
+        ({'released': True}, None),
+        ({}, None),
+    )
+    state = NodeState('cid')
+    with state.lock('k'):
+        state.put('k', 1)
+        state.incr('k')
+        state.put('other', 2)
+    state.put('k', 3)
+    sent = {(r[0], r[1]['key'], r[1].get('token')) for r in recorder.requests if r[0] != 'state.lock'}
+    assert ('state.put', 'k', 't1') in sent and ('state.incr', 'k', 't1') in sent
+    # Another key, and the key after the block, name no lease
+    assert ('state.put', 'other', None) in sent and ('state.put', 'k', None) in sent
 
 
 def test_lock_gives_up_after_its_timeout(channel, monkeypatch):
@@ -114,20 +135,20 @@ def test_lock_gives_up_after_its_timeout(channel, monkeypatch):
     monkeypatch.setattr(doors.time, 'sleep', lambda seconds: now.__setitem__(0, now[0] + seconds))
     channel(*[({'acquired': False}, None)] * 100)
     with pytest.raises(DoorError, match='held by another binding'):
-        with NodeState(1).lock('k', timeout=1.0):
+        with NodeState('cid').lock('k', timeout=1.0):
             pass
 
 
 def test_a_refusal_is_a_door_error_with_the_servers_reason(channel):
     channel(RuntimeError('state.get: this binding belongs to no control the server can name'))
     with pytest.raises(DoorError, match='belongs to no control'):
-        NodeState(1).get('k')
+        NodeState('cid').get('k')
 
 
 def test_no_channel_outside_the_engine():
     setNodeChannel(None)
     with pytest.raises(DoorError, match='no data channel'):
-        NodeState(1).get('k')
+        NodeState('cid').get('k')
 
 
 # ==== self.files =================================================================
@@ -141,21 +162,40 @@ def test_read_pulls_chunks_and_closes(channel):
         ({'size': 0}, b''),
         ({}, None),
     )
-    assert NodeFiles(9).read('a.txt') == b'abcdef'
+    assert NodeFiles('cid').read('a.txt') == b'abcdef'
     assert [r[0] for r in recorder.requests] == ['fs_open', 'fs_read', 'fs_read', 'fs_read', 'fs_close']
-    assert all(r[1]['traceId'] == 9 for r in recorder.requests)
+    assert all(r[1]['correlationId'] == 'cid' for r in recorder.requests)
 
 
 def test_read_refuses_a_file_over_max_size_and_still_closes(channel):
     recorder = channel(({'handle': 'h', 'size': 100}, None), ({}, None))
     with pytest.raises(DoorError, match='more than the 10 allowed'):
-        NodeFiles(9).read('big.bin', max_size=10)
+        NodeFiles('cid').read('big.bin', max_size=10)
+    assert recorder.requests[-1][0] == 'fs_close'
+
+
+def test_read_is_bounded_by_default(channel):
+    recorder = channel(({'handle': 'h', 'size': doors.FILES_READ_MAX_SIZE + 1}, None), ({}, None))
+    with pytest.raises(DoorError, match='more than the'):
+        NodeFiles('cid').read('huge.bin')
+    assert recorder.requests[-1][0] == 'fs_close'
+
+
+def test_read_counts_the_bytes_it_receives_too(channel):
+    # The server said 2 bytes; the file grew while it was read
+    recorder = channel(
+        ({'handle': 'h', 'size': 2}, None),
+        ({'size': 4}, b'abcd'),
+        ({}, None),
+    )
+    with pytest.raises(DoorError, match='more than the 3 bytes allowed'):
+        NodeFiles('cid').read('growing.txt', max_size=3)
     assert recorder.requests[-1][0] == 'fs_close'
 
 
 def test_write_splits_at_the_channel_chunk(channel):
     recorder = channel(({'handle': 'h'}, None), ({'bytesWritten': 4}, None), ({'bytesWritten': 2}, None), ({}, None))
-    NodeFiles(9).write('a.txt', b'abcdef')
+    NodeFiles('cid').write('a.txt', b'abcdef')
     assert [(r[0], r[2]) for r in recorder.requests] == [
         ('fs_open', None),
         ('fs_write', b'abcd'),
@@ -166,7 +206,7 @@ def test_write_splits_at_the_channel_chunk(channel):
 
 def test_get_url_defaults_to_a_short_expiry(channel):
     recorder = channel(({'url': 'https://x/task/fetch?t=1'}, None))
-    assert NodeFiles(9).get_url('a.txt') == 'https://x/task/fetch?t=1'
+    assert NodeFiles('cid').get_url('a.txt') == 'https://x/task/fetch?t=1'
     assert recorder.requests[0][1]['expires_in'] == doors.FILES_URL_EXPIRES_IN
 
 
@@ -174,20 +214,35 @@ def test_get_url_defaults_to_a_short_expiry(channel):
 
 
 class _Instance(IInstanceBase):
-    """An instance the way the engine builds one: its binding's engine object."""
+    """An instance the way the engine builds one: a pipe that serves one binding at a time."""
 
-    def __init__(self, trace_id):
-        self.instance = SimpleNamespace(traceId=trace_id)
+    def __init__(self, caller):
+        self.instance = SimpleNamespace(traceId=17, caller=caller)
+        # The engine's one write, before beginInstance()
+        self._caller = caller
 
 
-def test_the_doors_bind_to_the_instances_binding_at_first_use(channel):
+def test_the_doors_name_the_binding_frozen_at_bind(channel):
     recorder = channel(({'found': False}, None), ({'found': False}, None))
-    inst = _Instance(17)
+    inst = _Instance({'correlationId': 'cid-a', 'userId': 'alice'})
+    # putPipe() and a new binding on the same pipe: the shared pipe now serves
+    # someone else, before this instance ever touched a door
+    inst.instance.traceId = 99
+    inst.instance.caller = {'correlationId': 'cid-b', 'userId': 'bob'}
     state = inst.state
     assert inst.state is state
-    # A worker thread that keeps the door stays on this binding
-    inst.instance.traceId = 99
     state.get('k')
     inst.state.get('k')
-    assert [r[1]['traceId'] for r in recorder.requests] == [17, 17]
+    assert [r[1]['correlationId'] for r in recorder.requests] == ['cid-a', 'cid-a']
     assert inst.files is inst.files
+
+
+def test_a_binding_without_a_caller_is_engine_level_work(channel):
+    recorder = channel(({'found': False}, None))
+
+    class _Unbound(IInstanceBase):
+        def __init__(self):
+            self.instance = SimpleNamespace(traceId=5, caller=None)
+
+    _Unbound().state.get('k')
+    assert recorder.requests[0][1]['correlationId'] == ''

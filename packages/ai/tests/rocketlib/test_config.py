@@ -464,6 +464,53 @@ class TestSelectorParams:
         with pytest.raises(ConfigError, match=r'"rules\[0\]" expects object'):
             view.overlay({'rules': ['cpu']})
 
+    @staticmethod
+    def _with_nested_items() -> ConfigView:
+        """DETECTOR plus an array of arrays and an object item holding a group."""
+        schema = copy.deepcopy(DETECTOR)
+        cell = {'name': 'cell', 'path': 'grid[].row[].cell', 'type': 'integer', 'minimum': 0}
+        schema['properties'].append(
+            {
+                'name': 'grid',
+                'path': 'grid',
+                'type': 'array',
+                'default': [],
+                'item': {'name': 'row', 'path': 'grid[].row', 'type': 'array', 'item': cell},
+            }
+        )
+        rules = next(prop for prop in schema['properties'] if prop.get('name') == 'rules')
+        rules['item']['properties'].append(
+            {
+                'name': 'limits',
+                'properties': [
+                    {'name': 'max', 'path': 'rules[].rule.limits.max', 'type': 'integer', 'minimum': 0},
+                ],
+            }
+        )
+        schema['params'].append({'field': 'grid', 'type': 'array', 'default': [], 'tool': True})
+        return resolveConfig(schema, {})
+
+    def test_nested_array_items_are_validated(self):
+        view = self._with_nested_items()
+        assert view.overlay({'grid': [[1, 2]]}).grid == [[1, 2]]
+        with pytest.raises(ConfigError, match=r'"grid\[0\]" expects array'):
+            view.overlay({'grid': ['bad']})
+        with pytest.raises(ConfigError, match=r'"grid\[0\]\[0\]" expects integer'):
+            view.overlay({'grid': [['bad']]})
+        with pytest.raises(ConfigError, match=r'"grid\[0\]\[1\]" must be >= 0'):
+            view.overlay({'grid': [[1, -1]]})
+
+    def test_grouped_fields_inside_object_items_are_validated(self):
+        view = self._with_nested_items()
+        rows = [{'field': 'cpu', 'limits': {'max': 3}}, {'field': 'mem'}]
+        assert view.overlay({'rules': rows}).rules == rows
+        with pytest.raises(ConfigError, match=r'"rules\[0\].limits" expects object'):
+            view.overlay({'rules': [{'field': 'cpu', 'limits': 3}]})
+        with pytest.raises(ConfigError, match=r'"rules\[0\].limits.max" must be >= 0'):
+            view.overlay({'rules': [{'field': 'cpu', 'limits': {'max': -1}}]})
+        with pytest.raises(ConfigError, match=r'"rules\[0\].limits" has no field "min"'):
+            view.overlay({'rules': [{'field': 'cpu', 'limits': {'min': 1}}]})
+
     def test_leaf_path_resolves_any_branch(self, view):
         assert view.leaf_path('iqr.sensitivity') == 'iqr.sensitivity'
         assert view.leaf_path('windowSize') == 'z_score.windowSize'

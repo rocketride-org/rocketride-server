@@ -421,18 +421,36 @@ def _validate_value(key: str, value: Any, descriptor: Dict[str, Any], problems: 
             problems.append(f'"{key}" must have at least {descriptor["minItems"]} items')
         if 'maxItems' in descriptor and len(value) > descriptor['maxItems']:
             problems.append(f'"{key}" must have at most {descriptor["maxItems"]} items')
-        # Each element against the item schema: a scalar item directly, an
-        # item that is a group of resolved fields as an object of them
+        # Each element against the item schema: a scalar or array item
+        # directly (an array item recurses into its own item), an item that
+        # is a group of resolved fields as an object of them
         item = descriptor.get('item') or descriptor.get('items')
         if not isinstance(item, dict):
             return
-        fields = item.get('properties')
-        if isinstance(fields, list) and fields and all(isinstance(child, dict) for child in fields):
+        fields = _group_fields(item)
+        if fields is not None:
             for index, element in enumerate(value):
                 _validate_object(f'{key}[{index}]', element, fields, problems)
-        elif item.get('type') not in (None, 'array', 'object'):
+        elif item.get('type') not in (None, 'object'):
             for index, element in enumerate(value):
                 _validate_value(f'{key}[{index}]', element, item, problems)
+
+
+def _thawed(value: Any) -> Any:
+    """A plain copy of a parameter value: read-only mappings become dicts, tuples lists, at every depth."""
+    if isinstance(value, Mapping):
+        return {str(name): _thawed(member) for name, member in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thawed(member) for member in value]
+    return value
+
+
+def _group_fields(descriptor: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """The resolved fields of a descriptor that is a group of them, else None."""
+    fields = descriptor.get('properties')
+    if isinstance(fields, list) and fields and all(isinstance(child, dict) for child in fields):
+        return fields
+    return None
 
 
 def _validate_object(key: str, value: Any, fields: List[Dict[str, Any]], problems: List[str]) -> None:
@@ -440,7 +458,9 @@ def _validate_object(key: str, value: Any, fields: List[Dict[str, Any]], problem
     Check one array element whose item is a group of fields, appending any problem to ``problems``.
 
     Step 1: the element is an object. Step 2: it names no field the item does
-    not declare. Step 3: every declared field validates (required included).
+    not declare. Step 3: every declared field validates (required included);
+    a field that is itself a group is an object of its own fields, checked the
+    same way (an absent one as an empty object, so its required fields count).
     """
     if not isinstance(value, dict):
         problems.append(f'"{key}" expects object, got {type(value).__name__} {value!r}')
@@ -450,7 +470,12 @@ def _validate_object(key: str, value: Any, fields: List[Dict[str, Any]], problem
         if name not in declared:
             problems.append(f'"{key}" has no field "{name}"; declared: {sorted(declared)}')
     for name, child in declared.items():
-        _validate_value(f'{key}.{name}', value.get(name), child, problems)
+        grouped = _group_fields(child)
+        if grouped is not None:
+            member = value.get(name)
+            _validate_object(f'{key}.{name}', {} if member is None else member, grouped, problems)
+        else:
+            _validate_value(f'{key}.{name}', value.get(name), child, problems)
 
 
 # ==== Overlay support ========================================================
@@ -786,6 +811,9 @@ class ConfigView(Mapping):
         values_by_path: Dict[str, Any] = {}
         target_of: Dict[str, str] = {}
         for target, value in params.items():
+            # A frozen caller's value arrives as read-only views; the view
+            # keeps a plain private copy
+            value = _thawed(value)
             path = self.leaf_path(str(target))
             if path is None:
                 problems[str(target)] = 'is not a config key of this node'

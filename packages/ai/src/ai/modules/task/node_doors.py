@@ -24,8 +24,8 @@
 The server side of a node's ``self.state`` and ``self.files`` (plan 5.7).
 
 The engine subprocess asks over its data channel (``state.*`` and ``fs_*``
-channel commands) carrying ONLY the binding (the bare ``traceId``) and the
-node's own key or path. Identity is decided HERE: the engine the request came
+channel commands) carrying ONLY the binding (the server-minted
+``correlationId`` its frozen caller carries) and the node's own key or path. Identity is decided HERE: the engine the request came
 from is the connection's, never the request's, and ``TaskEngine.binding_control``
 names the control that owns the binding from the server's own records. That
 control's org, owner and address prefix every state key; its owner tree roots
@@ -40,14 +40,14 @@ and nothing else.
   the holder needs.
 - ``fs_open`` / ``fs_read`` / ``fs_write`` / ``fs_close`` and the whole-path
   operations, with the same arguments ``rrext_store`` takes from a client.
-  Handles belong to (engine, owner) and close with the engine.
+  Handles belong to (engine, owner root) and close with the engine.
 """
 
 import json
 import secrets
 from typing import TYPE_CHECKING, Any, Dict, Optional, Set
 
-from ai.account.file_store import SYSTEM_TREES, normalize_path
+from ai.account.file_store import SYSTEM_TREES, normalize_path, storage_root_for
 from ai.account.state_store import StateError, encode_value, state_key, state_store
 from ai.account.store import StorageError, Store
 from ai.constants import CONST_CHANNEL_CHUNK, CONST_STATE_MAX_LEASE_SECONDS, CONST_STATE_MAX_TTL_SECONDS
@@ -82,7 +82,7 @@ def _control(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'Ta
 
     Args:
         task: The engine the request came from (the connection's).
-        arguments: The request; only ``traceId`` is read for identity.
+        arguments: The request; only ``correlationId`` is read for identity.
         command: The command, named in a refusal.
 
     Returns:
@@ -91,7 +91,7 @@ def _control(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'Ta
     Raises:
         ChannelRefused: The binding has no owner the server can name.
     """
-    control = task.binding_control(arguments.get('traceId'))
+    control = task.binding_control(arguments.get('correlationId'))
     if control is None:
         raise ChannelRefused(
             f'{command}: this binding belongs to no control the server can name; '
@@ -130,13 +130,21 @@ async def _state_get(task: 'TaskEngine', arguments: Dict[str, Any], data: Option
     return ChannelReply(body={'found': True, 'value': json.loads(text)})
 
 
+def _token(arguments: Dict[str, Any], command: str) -> Optional[str]:
+    """The lock token a write under ``state.lock`` names (it is fenced by it), or None."""
+    token = arguments.get('token')
+    if token is not None and (not isinstance(token, str) or not token):
+        raise ChannelRefused(f'{command}: token is the string state.lock returned')
+    return token
+
+
 async def _state_put(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Store a JSON value under the node's key."""
     control = _control(task, arguments, 'state.put')
     key = _key(control, arguments, 'state.put')
     ttl = _ttl(control, arguments, 'state.put')
     try:
-        await state_store().put(key, encode_value(arguments.get('value')), ttl)
+        await state_store().put(key, encode_value(arguments.get('value')), ttl, _token(arguments, 'state.put'))
     except StateError as e:
         raise ChannelRefused(f'state.put: {e}') from None
     return ChannelReply(body={})
@@ -145,7 +153,12 @@ async def _state_put(task: 'TaskEngine', arguments: Dict[str, Any], data: Option
 async def _state_delete(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Remove the node's key: ``{deleted}``."""
     control = _control(task, arguments, 'state.delete')
-    deleted = await state_store().delete(_key(control, arguments, 'state.delete'))
+    try:
+        deleted = await state_store().delete(
+            _key(control, arguments, 'state.delete'), _token(arguments, 'state.delete')
+        )
+    except StateError as e:
+        raise ChannelRefused(f'state.delete: {e}') from None
     return ChannelReply(body={'deleted': deleted})
 
 
@@ -158,7 +171,7 @@ async def _state_incr(task: 'TaskEngine', arguments: Dict[str, Any], data: Optio
     if isinstance(amount, bool) or not isinstance(amount, int):
         raise ChannelRefused('state.incr: amount is an integer')
     try:
-        value = await state_store().incr(key, amount, ttl)
+        value = await state_store().incr(key, amount, ttl, _token(arguments, 'state.incr'))
     except StateError as e:
         raise ChannelRefused(str(e)) from None
     return ChannelReply(body={'value': value})
@@ -172,7 +185,10 @@ async def _state_lock(task: 'TaskEngine', arguments: Dict[str, Any], data: Optio
     if isinstance(lease, bool) or not isinstance(lease, (int, float)) or lease <= 0:
         raise ChannelRefused('state.lock: lease is a positive number of seconds')
     token = secrets.token_hex(16)
-    acquired = await state_store().try_lock(key, token, min(float(lease), CONST_STATE_MAX_LEASE_SECONDS))
+    try:
+        acquired = await state_store().try_lock(key, token, min(float(lease), CONST_STATE_MAX_LEASE_SECONDS))
+    except StateError as e:
+        raise ChannelRefused(f'state.lock: {e}') from None
     return ChannelReply(body={'acquired': acquired, 'token': token if acquired else None})
 
 
@@ -188,7 +204,7 @@ async def _state_unlock(task: 'TaskEngine', arguments: Dict[str, Any], data: Opt
 
 def _files(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'FileStore':
     """
-    The file store of the binding's owner, its handles owned by (engine, owner).
+    The file store of the binding's owner, its handles owned by (engine, owner root).
 
     Args:
         task: The engine the request came from.
@@ -202,8 +218,12 @@ def _files(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'File
         ChannelRefused: No owner, or an owner with no tree to anchor in.
     """
     control = _control(task, arguments, command)
-    conn_id = f'engine:{task.engine_id}:{control.owner_id}'
     try:
+        # Handles belong to (engine, root): FileStore authorizes a handle by its
+        # connection id, so a handle opened under one project's root is never
+        # usable from another's, even for one team on one engine
+        root = storage_root_for(control.owner_type, control.userId, control.teamId, control.project_id or '')
+        conn_id = f'engine:{task.engine_id}:{root}'
         store = Store.file_store_for_caller(
             owner_kind=control.owner_type,
             user_id=control.userId,

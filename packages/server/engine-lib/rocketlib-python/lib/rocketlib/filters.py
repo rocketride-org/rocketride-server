@@ -216,7 +216,7 @@ class IEndpointBase:
         for that control. Work inside a binding uses the instance's own
         ``self.files``.
         """
-        return NodeFiles(0)
+        return NodeFiles('')
 
     def beginEndpoint(self) -> None:
         """
@@ -958,7 +958,8 @@ class Caller(NamedTuple):
 
     Read-only: assigning a field raises, and ``params``/``env`` are read-only
     mapping views (``params`` is per node id, each a read-only view of that
-    node's values by leaf path).
+    node's values by leaf path, read-only at every depth: an object value is
+    a read-only view and an array value a tuple).
     """
 
     controlId: str  #: The control the call came through (transient; never a storage key).
@@ -986,6 +987,21 @@ NO_CALLER = Caller(
     params=MappingProxyType({}),
     env=MappingProxyType({}),
 )
+
+
+def _frozen(value: Any) -> Any:
+    """
+    A read-only copy of a parameter value, at every depth.
+
+    Mappings become read-only views over private dicts and lists become
+    tuples, so no part of a caller's params can be changed through the
+    caller; ``ConfigView.overlay`` takes a plain copy back.
+    """
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(name): _frozen(member) for name, member in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_frozen(member) for member in value)
+    return copy.deepcopy(value)
 
 
 def freeze_caller(envelope: Any) -> Caller:
@@ -1023,11 +1039,7 @@ def freeze_caller(envelope: Any) -> Caller:
         traceLevel=text('traceLevel'),
         correlationId=text('correlationId'),
         params=MappingProxyType(
-            {
-                str(node): MappingProxyType(copy.deepcopy(dict(values)))
-                for node, values in params.items()
-                if isinstance(values, Mapping)
-            }
+            {str(node): _frozen(values) for node, values in params.items() if isinstance(values, Mapping)}
         ),
         env=MappingProxyType({str(name): '' if value is None else str(value) for name, value in env.items()}),
     )
@@ -1186,8 +1198,10 @@ class IInstanceBase:
     # ------------------------------------------------------------------
     # The storage doors (plan 5.7)
     #
-    # Each is bound to this instance's binding the first time it is used,
-    # so a worker thread that keeps using it stays on that binding.
+    # Each names this instance's OWN binding: the correlationId of the caller
+    # the engine froze into it at bind, never anything read off the shared
+    # pipe (which serves the next binding after putPipe()). The server ends
+    # that id with the binding, so an instance kept past it reaches nothing.
     # ------------------------------------------------------------------
 
     @property
@@ -1195,7 +1209,7 @@ class IInstanceBase:
         """Small JSON values that survive a call, owned by this binding's control (plan 5.7)."""
         door = self.__dict__.get(_STATE_KEY)
         if door is None:
-            door = NodeState(self.traceId)
+            door = NodeState(self.caller.correlationId)
             self.__dict__[_STATE_KEY] = door
         return door
 
@@ -1204,7 +1218,7 @@ class IInstanceBase:
         """The file store rooted at this binding's owner's tree (plan 5.7)."""
         door = self.__dict__.get(_FILES_KEY)
         if door is None:
-            door = NodeFiles(self.traceId)
+            door = NodeFiles(self.caller.correlationId)
             self.__dict__[_FILES_KEY] = door
         return door
 

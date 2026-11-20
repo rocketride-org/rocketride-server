@@ -38,9 +38,10 @@ harness builds the closest thing in one process:
   caller bound once, as the engine does;
 - both replicas reach ONE ``ReplicaServer``: the real server-side handlers of
   the node doors (``ai.modules.task.node_doors``) over one ``StateStore`` and
-  the file store, dispatched through the real channel handler. A request
-  carries only its binding's ``traceId``; the server names the owning control
-  from the claims it recorded, exactly as EaaS does from its trace owners.
+  one file store of its own (a fresh root per server), dispatched through the
+  real channel handler. A request carries only its binding's
+  ``correlationId``; the server names the owning control from the bindings it
+  admitted, exactly as EaaS does before it forwards a binding's first frame.
 
 ``run`` plays a list of ``Call``s on the given replicas in turn; a test plays
 the same list alternately on two replicas and on one reference replica of a
@@ -55,7 +56,9 @@ import asyncio
 import contextvars
 import importlib.util
 import itertools
+import shutil
 import sys
+import tempfile
 import types
 import uuid
 from dataclasses import dataclass, field
@@ -67,6 +70,8 @@ import rocketlib
 from rocketlib import APERR, Ec, IGlobalBase
 
 from ai.account.state_store import MemoryStateStore, install_state_store
+from ai.account.store import Store
+from ai.account.store_providers.filesystem import FilesystemStore
 from ai.constants import CONST_CHANNEL_CHUNK
 from ai.modules.task import node_doors  # noqa: F401  (registers the state.* and fs_* channel commands)
 from ai.modules.task.task_channel import CONST_CHANNEL_READ, ChannelStreams, handle
@@ -153,7 +158,7 @@ class _Client:
 
 
 class ReplicaEngine:
-    """The server's record of one replica's engine: its id, its streams, its claimed bindings."""
+    """The server's record of one replica's engine: its id, its streams, its admitted bindings."""
 
     def __init__(self, server: 'ReplicaServer', engine_id: int):
         """
@@ -167,52 +172,61 @@ class ReplicaEngine:
         self.streams = ChannelStreams()
         self._server = server
 
-    def binding_control(self, trace_id: Any) -> Optional[Owner]:
-        """The control that owns a binding of this engine: claimed bindings only, as on a shared engine."""
-        return self._server.owner_of(self.engine_id, trace_id)
+    def binding_control(self, correlation_id: Any) -> Optional[Owner]:
+        """The control that owns a binding of this engine: admitted bindings only, as on a shared engine."""
+        return self._server.owner_of(self.engine_id, correlation_id)
 
 
 class ReplicaServer:
     """
     The one server: the real node-door handlers over one in-process state store.
 
-    Use as a context manager: it installs its state store and the rocketlib
-    channel for the duration and removes them after.
+    Use as a context manager: it installs its state store, a file store over
+    a root of its own and the rocketlib channel for the duration, and removes
+    them after (the file store that was installed before comes back), so no
+    file one server's replicas wrote is there for another's.
     """
 
     def __init__(self) -> None:
-        """Start with an empty store and no claims."""
+        """Start with an empty store and no bindings."""
         self.state = MemoryStateStore()
-        self._owners: Dict[Tuple[int, int], Owner] = {}
+        self._owners: Dict[Tuple[int, str], Owner] = {}
         self._engines = itertools.count(1)
         self._current: contextvars.ContextVar = contextvars.ContextVar('replica_engine')
+        self._files_root: Optional[str] = None
+        self._previous_store: Optional[Store] = None
 
     def __enter__(self) -> 'ReplicaServer':
-        """Install the store and the channel."""
+        """Install the state store, a fresh file store and the channel."""
+        self._files_root = tempfile.mkdtemp(prefix='replica-files-')
+        self._previous_store = Store._instance
+        Store._instance = Store(FilesystemStore(f'filesystem://{self._files_root}'))
         install_state_store(self.state)
         rocketlib.setNodeChannel(self._request, CONST_CHANNEL_CHUNK)
         return self
 
     def __exit__(self, *exc: Any) -> None:
-        """Remove them."""
+        """Remove them, restoring the file store that was there before."""
         rocketlib.setNodeChannel(None)
         install_state_store(None)
+        Store._instance = self._previous_store
+        shutil.rmtree(self._files_root, ignore_errors=True)
 
     def engine(self) -> ReplicaEngine:
         """A new engine launch of this server."""
         return ReplicaEngine(self, next(self._engines))
 
-    def claim(self, engine: ReplicaEngine, trace_id: int, owner: Owner) -> None:
-        """Record that a binding belongs to a control (what cmd_data does at the open)."""
-        self._owners[(engine.engine_id, trace_id)] = owner
+    def admit(self, engine: ReplicaEngine, correlation_id: str, owner: Owner) -> None:
+        """Record that a binding belongs to a control (what EaaS does before the binding's first frame)."""
+        self._owners[(engine.engine_id, correlation_id)] = owner
 
-    def release(self, engine: ReplicaEngine, trace_id: int) -> None:
-        """Forget a binding at its close."""
-        self._owners.pop((engine.engine_id, trace_id), None)
+    def end(self, engine: ReplicaEngine, correlation_id: str) -> None:
+        """Forget a binding that ended."""
+        self._owners.pop((engine.engine_id, correlation_id), None)
 
-    def owner_of(self, engine_id: int, trace_id: Any) -> Optional[Owner]:
+    def owner_of(self, engine_id: int, correlation_id: Any) -> Optional[Owner]:
         """The control owning a binding, or None."""
-        return self._owners.get((engine_id, trace_id)) if isinstance(trace_id, int) else None
+        return self._owners.get((engine_id, correlation_id)) if isinstance(correlation_id, str) else None
 
     def serving(self, engine: ReplicaEngine) -> contextvars.Token:
         """Mark the engine whose node is making requests now."""
@@ -228,7 +242,7 @@ class ReplicaServer:
 
         Args:
             command: The channel command.
-            arguments: Its arguments (the binding's traceId among them).
+            arguments: Its arguments (the binding's correlationId among them).
             data: A binary payload.
 
         Returns:
@@ -362,7 +376,7 @@ class Replica:
 
     def call(self, call: Call) -> List[Tuple[str, Any]]:
         """
-        Run one call as one binding: a fresh instance, the caller bound once, the binding claimed.
+        Run one call as one binding: a fresh instance, the caller bound once, the binding admitted.
 
         Args:
             call: The request.
@@ -371,8 +385,9 @@ class Replica:
             What the node forwarded downstream, in order.
         """
         trace_id = next(self._traces)
+        correlation_id = uuid.uuid4().hex
         owner = call.owner
-        self.server.claim(self.engine, trace_id, owner)
+        self.server.admit(self.engine, correlation_id, owner)
         instance = self._instance_class()
         instance.IGlobal = self._global_for(owner)
         instance.IEndpoint = SimpleNamespace(endpoint=None)
@@ -388,7 +403,7 @@ class Replica:
             'params': {self.node_id: dict(call.params)},
             'env': {},
             'traceLevel': 'none',
-            'correlationId': uuid.uuid4().hex,
+            'correlationId': correlation_id,
         }
         token = self.server.serving(self.engine)
         try:
@@ -403,7 +418,7 @@ class Replica:
                 instance.endInstance()
         finally:
             self.server.done(token)
-            self.server.release(self.engine, trace_id)
+            self.server.end(self.engine, correlation_id)
         return instance.instance.outputs
 
     def end(self) -> None:
@@ -447,7 +462,26 @@ def run_alternating_and_alone(
     """
     with ReplicaServer() as server:
         pair = [Replica(server, node_dir, logical_type, node_id) for _ in range(2)]
-        alternating = run(calls, pair)
+        try:
+            alternating = run(calls, pair)
+        finally:
+            _end_all(pair)
     with ReplicaServer() as server:
-        reference = run(calls, [Replica(server, node_dir, logical_type, node_id)])
+        alone = [Replica(server, node_dir, logical_type, node_id)]
+        try:
+            reference = run(calls, alone)
+        finally:
+            _end_all(alone)
     return alternating, reference
+
+
+def _end_all(replicas: Sequence[Replica]) -> None:
+    """End every replica's IGlobals while its server is still installed, even when one end fails."""
+    failure: Optional[BaseException] = None
+    for replica in replicas:
+        try:
+            replica.end()
+        except BaseException as e:  # noqa: BLE001 - every replica ends; the first failure is raised after
+            failure = failure or e
+    if failure is not None:
+        raise failure
