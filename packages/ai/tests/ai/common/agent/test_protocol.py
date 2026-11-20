@@ -209,11 +209,22 @@ class TestSentinel:
             '{"type":"final","content":"old"}',
             '{"type":"final","content":"an "old" one"}',
             '{"type":"final","content":"old"} Done.',
+            '{"type":"final","content":"old","done":true}',
+            '{"type":"final","content":"an "old" one"} Done.',
         ],
     )
     def test_a_marker_after_a_final_envelope_that_already_closed_is_still_the_sentinel(self, before):
-        """Also when the answer after it ends the way an envelope does."""
+        """Also when the answer after it ends the way an envelope does, and when prose follows a broken envelope."""
         assert parse(before + '\nFINAL>>> {"company":"Acme"}').content == '{"company":"Acme"}'
+
+    def test_a_marker_line_after_a_closing_inside_the_content_is_read_as_the_sentinel(self):
+        """
+        The limit of the rule above. Unescaped content with its own quote and brace before a marker
+        line cannot be told from an envelope that closed there, so the marker keeps its meaning.
+        """
+        raw = '{"type":"final","content":"Example: {"k":"v"} is an object.\nFINAL>>> is the marker"}'
+
+        assert parse(raw).content == 'is the marker"}'
 
 
 # ---------------------------------------------------------------------------

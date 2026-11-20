@@ -54,6 +54,9 @@ _FINAL_ENVELOPE_OPEN = re.compile(r'^\s*\{\s*"type"\s*:\s*"final"\s*,\s*"content
 #: The end of a `final` envelope: the quote that closes the content, then the closing brace.
 _FINAL_ENVELOPE_CLOSE = re.compile(r'"\s*\}\s*$')
 
+#: The same quote and brace anywhere in a reply: where an envelope whose content is unescaped may have closed.
+_FINAL_ENVELOPE_CLOSING = re.compile(r'"\s*\}')
+
 #: The opening of a JSON envelope, optionally inside a markdown fence.
 _ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{')
 
@@ -345,10 +348,17 @@ def _inside_final_envelope(raw: str, at: int) -> bool:
 
     A ``FINAL>>>`` line there is the answer's own text: the content has literal line breaks and one
     of its lines starts with the marker. The envelope must still be open at `at`. One that closed
-    before it, parsed or salvageable, leaves the marker outside, where it is the sentinel.
+    before it leaves the marker outside, where it is the sentinel, whatever follows the closing.
+
+    Unescaped content can only be closed by a quote and a brace, so one anywhere before `at` means
+    the envelope may have closed there, and the marker keeps its meaning. The price is content that
+    has its own ``"}`` before a marker line: that line is read as the sentinel, as it always was.
     """
     before = raw[:at]
-    if isinstance(extract_first_json_object(before), dict) or salvage_final_content(before) is not None:
+    if isinstance(extract_first_json_object(before), dict):
+        return False
+    opening = _FINAL_ENVELOPE_OPEN.match(before)
+    if opening and _FINAL_ENVELOPE_CLOSING.search(before, opening.end()):
         return False
     return salvage_final_content(raw) is not None
 
