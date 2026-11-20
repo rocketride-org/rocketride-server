@@ -1,7 +1,7 @@
 # MIT License
 # Copyright (c) 2026 Aparavi Software AG
 
-"""Explicitly imported unit fixtures; live tests retain the SDK client fixture."""
+"""Explicitly imported Redis unit fixtures scoped to tests that request them."""
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock

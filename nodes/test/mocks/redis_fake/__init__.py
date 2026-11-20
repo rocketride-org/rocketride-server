@@ -8,8 +8,8 @@
 Provides a minimal in-process Redis substitute used by ``memory_persistent`` and
 ``tool_redis`` tests to exercise Redis code paths without a running
 Redis server. Mirrors a small surface of redis-py: strings, hashes, sets, lists,
-TTL bookkeeping, bounded reads, scans, pipelines, and cleanup. Actual expiry
-and concurrency semantics are verified against a live server, not this fake.
+TTL bookkeeping, bounded reads, scans, pipelines, and cleanup. This fake does
+not verify actual expiry timing or concurrency semantics.
 
 Each ``FakeRedis`` instance is independent — there is no shared
 process-level storage — so tests must not rely on cross-instance state.

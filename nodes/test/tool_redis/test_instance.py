@@ -166,10 +166,11 @@ def test_scan_accepts_pydantic_arguments(tool, client):
     client.scan.assert_called_once_with(cursor=0, match='rr:test:*', count=1)
 
 
-def test_scan_rejects_failed_model_conversion(tool, client):
+@pytest.mark.parametrize('error_type', [ValueError, RuntimeError])
+def test_scan_rejects_failed_model_conversion(tool, client, error_type):
     class InvalidInput:
         def model_dump(self):
-            raise ValueError('credential:secret')
+            raise error_type('credential:secret')
 
     result = tool.redis_scan(InvalidInput())
     assert result['error_code'] == 'invalid_input'
