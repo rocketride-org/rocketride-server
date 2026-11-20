@@ -518,13 +518,16 @@ def alias_flow(
     again with what the body carries back; an exception handler starts from
     every state the ``try`` body passed through, and ``finally`` is scanned
     with those exceptional states as well as the normal exits, while only the
-    normal exits flow past the ``try``; a plain rebinding on the
-    straight line ends the alias. Nested function and class bodies do not run
+    normal exits flow past the ``try`` and an exception leaving it carries the
+    state its ``finally`` left; a plain rebinding on the straight line ends
+    the alias. Nested function and class bodies do not run
     here. ``trace``, when given, receives the set after every statement.
 
     Limits (a static pass, not an interpreter): only plain names alias; an
     alias stored in an attribute, a container or passed through a call is not
-    followed, and an exception is assumed possible after any statement.
+    followed, and an exception is assumed possible after any statement (in a
+    ``finally``, after each of its own statements: one raised by its first
+    statement before that statement binds is not modelled).
     """
     aliases = set(aliases)
 
@@ -566,14 +569,18 @@ def alias_flow(
             raised: List[Set[str]] = list(points)
             outs = [alias_flow(stmt.orelse, after, is_source, scan, raised)]
             outs += [alias_flow(h.body, set(anywhere), is_source, scan, raised) for h in stmt.handlers]
-            if trace is not None:
-                trace.extend(raised)
             normal = set().union(*outs)
 
-            # finally runs on every exit: scan it with the normal and the exceptional states alike;
-            # what flows past the try comes from the normal continuations only (an exit by
-            # exception never reaches the next statement)
-            alias_flow(stmt.finalbody, set().union(normal, *raised), is_source, scan, trace)
+            # finally runs on every exit: scan it with the normal and the exceptional states alike (one
+            # pass over their union is exact: every transfer is a per-name gen/kill). An exception
+            # leaves the try only after finally has run over it, so the enclosing trace gets the
+            # states finally passes through and ends in, never the states before it. What flows past
+            # the try comes from the normal continuations only (an exit by exception never reaches
+            # the next statement).
+            leaving: List[Set[str]] = []
+            ended = alias_flow(stmt.finalbody, set().union(normal, *raised), is_source, scan, leaving)
+            if trace is not None:
+                trace.extend(leaving + [ended])
             aliases = walk(stmt.finalbody, normal)
         elif isinstance(stmt, ast.Match):
             scan(stmt.subject, aliases)

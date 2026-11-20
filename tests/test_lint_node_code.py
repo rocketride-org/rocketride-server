@@ -692,6 +692,44 @@ def test_an_exception_handler_sees_an_alias_from_inside_the_try(tmp_path):
     ) == [('param-in-global', "self.edge = cfg.get('maxEdge')"), ('param-in-global', "self.after = cfg.get('maxEdge')")]
 
 
+def test_an_exception_leaving_through_finally_carries_the_state_finally_left(tmp_path):
+    # The inner finally rebinds cfg before the exception reaches the outer handler: no alias there
+    assert (
+        _param_reads(
+            tmp_path,
+            [
+                'cfg = {}',
+                'try:',
+                '    try:',
+                '        cfg = self.config',
+                '        self.prepare()',
+                '    finally:',
+                '        cfg = {}',
+                'except RuntimeError:',
+                "    self.edge = cfg.get('maxEdge')",
+            ],
+        )
+        == []
+    )
+
+
+def test_an_exception_leaving_through_a_finally_that_keeps_the_alias_still_carries_it(tmp_path):
+    assert _param_reads(
+        tmp_path,
+        [
+            'cfg = {}',
+            'try:',
+            '    try:',
+            '        cfg = self.config',
+            '        self.prepare()',
+            '    finally:',
+            '        self.cleanup()',
+            'except RuntimeError:',
+            "    self.edge = cfg.get('maxEdge')",
+        ],
+    ) == [('param-in-global', "self.edge = cfg.get('maxEdge')")]
+
+
 def test_the_successful_path_still_applies_the_final_rebinding(tmp_path):
     assert (
         _param_reads(
