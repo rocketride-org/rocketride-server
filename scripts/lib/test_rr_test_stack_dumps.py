@@ -529,7 +529,10 @@ def test_lock_take_times_and_req_from_caller_frame(tmp_path, monkeypatch):
     first, second, third = _takes(dumper, path)
     assert first['req'] == '/abs/req.txt'
     assert second['req'] == '-' and third['req'] == '-'
-    assert float(first['held']) >= 0.2 and float(first['waited']) < 0.2
+    # ``held`` is monotonic time, which ticks every 15.625 ms on Windows with Python 3.12:
+    # a 0.2 s sleep can measure one tick short (0.1875 s).
+    tick = time.get_clock_info('monotonic').resolution
+    assert float(first['held']) >= 0.2 - tick and float(first['waited']) < 0.2
     assert before - 1 <= float(first['ws']) <= float(first['acq']) <= float(first['rel']) <= time.time() + 1
 
 
