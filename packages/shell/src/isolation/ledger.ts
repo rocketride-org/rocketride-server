@@ -174,8 +174,13 @@ export function createLedger(deps: { now(): number; random(n: number): Uint8Arra
 				return liveRuns().reduce((n, e) => n + e.pipeIds.size, 0);
 			case 'fsHandles':
 				return fsByHandle.size;
-			case 'monitorKeys':
-				return [...monitors.values()].reduce((n, types) => n + types.size, 0) + [...directMonitors.values()].reduce((n, d) => n + d.types.length, 0);
+			case 'monitorKeys': {
+				// Only monitors of runs still inside their grace period count: `live()` drops an expired run (and its monitors).
+				let n = 0;
+				for (const [handle, types] of monitors) if (live(runsByHandle.get(handle)) !== undefined) n += types.size;
+				for (const d of [...directMonitors.values()]) if (live(runsByHandle.get(d.handle)) !== undefined) n += d.types.length;
+				return n;
+			}
 		}
 	};
 
