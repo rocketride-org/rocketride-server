@@ -757,6 +757,45 @@ describe('createFsPrefs — two owners of one file never revert each other (DA-R
 		assert.deepEqual(world.stored().owners['team-B'].prefs, { h: 'B' });
 	});
 
+	it('two accessors of different owners writing at once do not both read before either writes (the read-merge-write is serialised per file)', async () => {
+		let file: unknown = { version: PREFS_FILE_VERSION, owners: {} };
+		const events: string[] = [];
+		let gated = false;
+		const pending: Array<() => void> = [];
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: true }),
+			fsReadJson: async <T,>() => {
+				if (gated) {
+					events.push('read:wait');
+					await new Promise<void>((resolve) => pending.push(resolve));
+				}
+				events.push('read');
+				return JSON.parse(JSON.stringify(file)) as T;
+			},
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { events.push('write'); file = JSON.parse(JSON.stringify(obj)); },
+		};
+		const a = createFsPrefs(options(fs, { owner: 'team-A' }).opts);
+		const b = createFsPrefs(options(fs, { owner: 'team-B' }).opts);
+		await a.load();
+		await b.load();
+		a.setPref('h', 'A');
+		b.setPref('h', 'B');
+		gated = true;
+		events.length = 0;
+		const done = Promise.all([a.flush(), b.flush()]);
+		await settle();
+		assert.equal(pending.length, 1, 'only the first accessor has read: the second waits for the first to finish writing');
+		pending.shift()?.();
+		await settle();
+		pending.shift()?.();
+		await done;
+		assert.deepEqual(events.filter((e) => e !== 'read:wait'), ['read', 'write', 'read', 'write'], 'the second read came after the first write');
+		const stored = file as { owners: Record<string, { prefs: unknown }> };
+		assert.deepEqual(stored.owners['team-A'].prefs, { h: 'A' });
+		assert.deepEqual(stored.owners['team-B'].prefs, { h: 'B' });
+	});
+
 	it('R2-5: malformed entries do not count toward the owner cap and never push a well-formed owner out', async () => {
 		const owners: Record<string, unknown> = {};
 		for (let i = 0; i < 7; i += 1) owners[`junk-${i}`] = `bad-${i}`;
