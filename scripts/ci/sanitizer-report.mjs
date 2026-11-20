@@ -14,22 +14,29 @@
  * groups equal reports, and writes a Markdown summary to $GITHUB_STEP_SUMMARY
  * (to stdout when it is not set).
  *
- * Reports of the same kind at the same location form one group. The location
- * is the one the report names itself (its summary line) when that is in our
- * code (OWN_CODE_DIRS); else the first frame in our code of the stack where
- * the error happened; else the named one unless it is in the sanitizer
- * runtime; else the first frame of that stack outside the runtime. The
- * binary's name is never part of it, so one defect in code that several
- * programs link (engtest, nodetest) is one group.
+ * Reports of the same sanitizer and kind at the same location form one group.
+ * The location is the one the report names itself when that is in our code
+ * (OWN_CODE_DIRS), else the first frame in our code of the stack where the error
+ * happened, else the first frame outside the sanitizer runtime. The binary's
+ * name is never part of it.
+ *
+ * Only the entries of KNOWN_THIRD_PARTY do not fail the job; every other report
+ * fails it, wherever its stack stops. An entry matches a complete
+ * AddressSanitizer report by its header, plus the function and the library of
+ * the first frame outside the sanitizer runtime in the freeing stack and in the
+ * `allocated by` stack. All reports of an entry form one group, listed with the
+ * entry's reason and link. An entry that matched no report is named in a note.
+ * A report block ends at its `SUMMARY:` line; any other output after it is
+ * reported on its own, so a known report never excuses what follows it.
  *
  * Usage: node scripts/ci/sanitizer-report.mjs <log dir>
  *
- * Exits 0 when there is no report, 1 when there is at least one, and 2 on a
- * usage error or when the directory does not exist. A file that holds only
- * sanitizer warnings gives reports of kind `warning`. A file with any other
- * output but no recognizable report counts as one report of kind
- * `other-output`, so a truncated report or a sanitizer's own failure is never
- * dropped. Both kinds count like errors.
+ * Exits 0 when there is no report or every report is known third-party, 1 when
+ * there is any other report, and 2 on a usage error or when the directory does
+ * not exist. A file that holds only sanitizer warnings gives reports of kind
+ * `warning`. A file with any other output but no recognizable report counts as
+ * one report of kind `other-output`, so a truncated report or a sanitizer's own
+ * failure is never dropped. Both kinds count like errors.
  */
 
 import { promises as fs, realpathSync } from 'node:fs';
@@ -55,14 +62,47 @@ const RUNTIME_FUNCTIONS = (
 	'strchr strrchr strstr strspn strcspn strpbrk strdup strndup'
 ).split(' ');
 
-const ERROR_RE = /^==\d+==ERROR: (\w*Sanitizer): (.*)$/;
+const KNOWN_ISSUE = 'https://github.com/rocketride-org/rocketride-server/issues/3338';
+/**
+ * Third-party errors that do not fail the job. A report matches an entry when
+ * it is a complete AddressSanitizer report whose header contains `header`, the
+ * first frame outside the sanitizer runtime in the freeing stack matches
+ * `freedBy`, and the same frame of the `allocated by` stack matches `allocatedBy`.
+ * A frame is matched as one normalized line, `in <function> (<module path>)`,
+ * without offsets or build ids, so a pattern tests the function and the library.
+ */
+export const KNOWN_THIRD_PARTY = [
+	{
+		id: 'libcxxabi-exception-free',
+		sanitizer: 'AddressSanitizer',
+		header: 'alloc-dealloc-mismatch (operator new vs free)',
+		// A std exception destructor; they share one address, so the symbolizer may name any of them
+		freedBy: /^in std::(?:__1::)?\w+::~\w+\(\) \((?:[^()]*\/)?libc\+\+abi\.so[\d.]*\)$/,
+		// The constructor that allocates the message of a std::runtime_error or std::logic_error
+		allocatedBy:
+			/^in std::(?:__1::)?(?:(?:runtime|logic)_error::(?:runtime|logic)_error\(|__libcpp_refstring::).* \((?:[^()]*\/)?libc\+\+\.so[\d.]*\)$/,
+		reason:
+			'libc++abi frees the message of a caught exception with its own free, ' +
+			'but the message came from the ASan operator new; ASan of clang 18 cannot suppress it by stack.',
+		link: KNOWN_ISSUE,
+	},
+];
+
+const ERROR_RE = /^==\d+==ERROR: (\w*Sanitizer)(?::| )\s*(.*)$/;
 const WARNING_RE = /^==\d+==WARNING: (.*)$/;
 const PID_LINE_RE = /^==\d+==/;
 const UBSAN_RE = /^(?:(.*?): )?runtime error: (.*)$/;
 const SUMMARY_RE = /^SUMMARY: (\w*Sanitizer): (\S+)(.*)$/;
 const FRAME_RE = /^\s*#\d+ 0x[0-9a-f]+ (.*)$/;
-// The binary a frame is in, with the offset into it: ` (/x/dist/server/engtest+0x2701032)`
-const MODULE_RE = /\s*\([^()]*\+0x[0-9a-f]+\)/g;
+// The module a frame is in, with the offset into it: ` (/x/dist/server/engtest+0x2701032)`
+const MODULE_RE = /\s*\(([^()]*)\+0x[0-9a-f]+\)/g;
+const ALLOCATED_RE = /^allocated by thread T\d+ here:/;
+// What a sanitizer prints around a report, outside its block: the rest of a fatal report and the next one's lead-in
+const EPILOGUE_RE =
+	/^\s*$|^=+$|^==\d+==(?:HINT|ABORTING)|^Shadow byte|^(?:=>| {2})0x[0-9a-f]+:|^ {2}[A-Z][A-Za-z ]*:\s+[0-9a-f]{2}/;
+// `Thread T5 created by T0 here:`, which ASan prints after the report of a crash, then the frames of the creator
+const THREAD_RE = /^Thread T\d+\b.*(?:here:|unknown thread)$/;
+const DEADLY_SIGNAL_RE = /^\w*Sanitizer:DEADLYSIGNAL/;
 // `in <function> <file:line>`, the order of a frame; the file is optional
 const FRAME_PLACE_RE = /^in (.+?)(?: (\S+:\d+(?::\d+)?))?$/;
 // Frames in the sanitizer runtime, by its path or its internal function names
@@ -115,12 +155,32 @@ function isRuntime(text) {
 	return RUNTIME_PATH_RE.test(text) || RUNTIME_NAME_RE.test(text);
 }
 
-/** The frames of the first stack in a report: the stack where the error happened. */
-function firstStack(lines) {
-	const start = lines.findIndex((line) => FRAME_RE.test(line));
+/** The first frame outside the sanitizer runtime as a line `in <function> (<module path>)`; '' when none. */
+function leadFrame(stack) {
+	const frame = stack.find((line) => !isRuntime(line));
+	return frame ? normalize(frame) : '';
+}
+
+/** The KNOWN_THIRD_PARTY entry a complete report matches, or null. */
+function matchKnown(sanitizer, header, freed, allocated) {
+	return (
+		KNOWN_THIRD_PARTY.find(
+			(entry) =>
+				entry.sanitizer === sanitizer &&
+				header.includes(entry.header) &&
+				entry.freedBy.test(freed) &&
+				entry.allocatedBy.test(allocated)
+		)?.id ?? null
+	);
+}
+
+/** The frames of the stack that starts at the first line from `start` on that is a frame. */
+function framesFrom(lines, start) {
 	if (start < 0) return [];
+	const first = lines.findIndex((line, index) => index >= start && FRAME_RE.test(line));
+	if (first < 0) return [];
 	const frames = [];
-	for (const line of lines.slice(start)) {
+	for (const line of lines.slice(first)) {
 		const frame = line.match(FRAME_RE);
 		if (!frame) break;
 		frames.push(frame[1]);
@@ -153,27 +213,38 @@ function excerpt(lines) {
 	return head;
 }
 
-/** Turn the lines of one report into its sanitizer, kind and location. */
+/** Turn the lines of one report into its sanitizer, kind, known entry and location. */
 function toReport({ error, lines }, file, root) {
 	const summary = lines.map((line) => line.match(SUMMARY_RE)).find(Boolean);
-	const report = { file, lines: excerpt(lines) };
-	const stack = firstStack(lines);
+	const stack = framesFrom(lines, 0);
+	const finish = (sanitizer, kind, named, header) => {
+		const freed = leadFrame(stack);
+		const allocated = leadFrame(framesFrom(lines, lines.findIndex((line) => ALLOCATED_RE.test(line))));
+		// Only a block that reached its SUMMARY line is complete enough to match
+		const known = summary ? matchKnown(sanitizer, header, freed, allocated) : null;
+		return {
+			file,
+			lines: excerpt(lines),
+			sanitizer,
+			kind,
+			known,
+			location: known ?? locate(named, stack, root),
+		};
+	};
 	if (!error) {
 		const named = summary ? summary[3] : (lines[0].match(UBSAN_RE)[1] ?? '');
-		return {
-			...report,
-			sanitizer: 'UndefinedBehaviorSanitizer',
-			kind: summary ? summary[2] : 'runtime-error',
-			location: locate(named, stack, root),
-		};
+		return finish('UndefinedBehaviorSanitizer', summary ? summary[2] : 'runtime-error', named, lines[0]);
 	}
 	const sanitizer = error[1];
 	// A leak summary only counts bytes, so the allocating frame tells leaks apart
-	if (sanitizer === 'LeakSanitizer') {
-		return { ...report, sanitizer, kind: 'memory-leak', location: locate('', stack, root) };
-	}
+	if (sanitizer === 'LeakSanitizer') return finish(sanitizer, 'memory-leak', '', error[2]);
 	const kind = summary ? summary[2] : error[2].split(' ')[0];
-	return { ...report, sanitizer, kind, location: locate(summary ? summary[3] : '', stack, root) };
+	return finish(sanitizer, kind, summary ? summary[3] : '', error[2]);
+}
+
+/** A report for output that is not a sanitizer error: a warning or other output. */
+function unknownReport(kind, lines, location, file) {
+	return { file, lines: excerpt(lines), sanitizer: 'unknown', kind, known: null, location };
 }
 
 /**
@@ -188,55 +259,67 @@ function warningReports(lines, file, root) {
 		if (WARNING_RE.test(line)) blocks.push([line]);
 		else blocks.at(-1).push(line);
 	}
-	return blocks.map((block) => ({
-		file,
-		lines: excerpt(block),
-		sanitizer: 'unknown',
-		kind: 'warning',
-		// Sizes and descriptors in a warning differ between processes
-		location: normalize(block[0].match(WARNING_RE)[1], root).replace(/\b\d+\b/g, '<n>'),
-	}));
+	// Sizes and descriptors in a warning differ between processes
+	return blocks.map((block) =>
+		unknownReport('warning', block, normalize(block[0].match(WARNING_RE)[1], root).replace(/\b\d+\b/g, '<n>'), file)
+	);
 }
 
 /**
  * Split the text of one log file into reports.
  *
- * A report starts at an `==PID==ERROR: <Name>Sanitizer:` line or at a
- * `<location>: runtime error:` line and runs until the next one.
+ * A report starts at an `==PID==ERROR: <Name>Sanitizer` line or at a
+ * `<location>: runtime error:` line and ends at its `SUMMARY:` line, or at the
+ * next report when it has none. Other output outside a report, apart from what
+ * a sanitizer prints around one, is one more report.
  */
 export function parseLog(text, file, root = '') {
-	const lines = text.split(/\r?\n/);
 	const blocks = [];
-	for (const line of lines) {
+	const loose = [];
+	let open = null;
+	let trailer = false;
+	for (const line of text.split(/\r?\n/)) {
 		const error = line.match(ERROR_RE);
-		if (error || UBSAN_RE.test(line)) blocks.push({ error, lines: [line] });
-		else if (blocks.length) blocks.at(-1).lines.push(line);
+		const inTrailer = trailer;
+		trailer = false;
+		if (error || UBSAN_RE.test(line)) {
+			open = { error, lines: [line] };
+			blocks.push(open);
+		} else if (open) {
+			open.lines.push(line);
+			if (SUMMARY_RE.test(line)) open = null;
+		} else if (blocks.length && (THREAD_RE.test(line) || (inTrailer && FRAME_RE.test(line)))) {
+			// Epilogue: the thread trailer of the report before it; with no report before it, it fails as other output
+			trailer = true;
+		} else if (!EPILOGUE_RE.test(line)) {
+			loose.push(line);
+		}
 	}
 	const reports = blocks.map((block) => toReport(block, file, root));
-	if (reports.length || !text.trim()) return reports;
-	const meaningful = lines.filter((line) => line.trim() && !/^=+$/.test(line.trim()));
-	return (
-		warningReports(meaningful, file, root) ?? [
-			{
-				file,
-				lines: excerpt(meaningful),
-				sanitizer: 'unknown',
-				kind: 'other-output',
-				location: normalize(meaningful[0] ?? '', root),
-			},
-		]
-	);
+	// The lead-in of a fatal signal belongs to the failing report that follows it; next to only known
+	// reports, or alone, it is a crash whose report never came, so it stays and fails
+	const failing = reports.some((report) => !report.known);
+	const other = failing ? loose.filter((line) => !DEADLY_SIGNAL_RE.test(line)) : loose;
+	if (other.length) {
+		const single = unknownReport('other-output', other, normalize(other[0], root), file);
+		reports.push(...(warningReports(other, file, root) ?? [single]));
+	}
+	return reports;
 }
 
-/** Group reports by sanitizer, kind and location; the largest groups come first. */
+/**
+ * Group reports by sanitizer, kind and location; the largest groups
+ * come first. The location of a known report is its entry's id, so all reports
+ * of an entry form one group.
+ */
 export function groupReports(reports) {
 	const groups = new Map();
 	for (const report of reports) {
 		const key = [report.sanitizer, report.kind, report.location].join('\n');
 		let group = groups.get(key);
 		if (!group) {
-			const { sanitizer, kind, location } = report;
-			group = { sanitizer, kind, location, count: 0, files: new Set(), example: report };
+			const { sanitizer, kind, location, known } = report;
+			group = { sanitizer, kind, location, known, count: 0, files: new Set(), example: report };
 			groups.set(key, group);
 		}
 		group.count += 1;
@@ -245,6 +328,11 @@ export function groupReports(reports) {
 	return [...groups.values()].sort(
 		(a, b) => b.count - a.count || a.kind.localeCompare(b.kind) || a.location.localeCompare(b.location)
 	);
+}
+
+/** The KNOWN_THIRD_PARTY entries that no group matched. */
+export function unmatchedKnown(groups) {
+	return KNOWN_THIRD_PARTY.filter((entry) => !groups.some((group) => group.known === entry.id));
 }
 
 function byteLength(text) {
@@ -273,19 +361,34 @@ function exampleBlock(number, group) {
 	return `<details><summary>${title}</summary>\n\n${marks}text\n${body}\n${marks}\n\n</details>\n\n`;
 }
 
+/** The text after the table: each known entry that matched, with its reason and link. */
+function knownSection(groups) {
+	const lines = groups
+		.filter((group) => group.known)
+		.map((group) => {
+			const entry = KNOWN_THIRD_PARTY.find(({ id }) => id === group.known);
+			return `- ${cell(entry.id)}: ${group.count} report(s). ${entry.reason} ${entry.link}\n`;
+		});
+	return lines.length ? `\n### Known third-party\n\n${lines.join('')}` : '';
+}
+
 /**
  * Render the groups as Markdown of at most `limit` bytes: a table of every
- * group that fits, then an example report per group while there is room.
+ * group that fits, the known third-party entries, then an example
+ * report per group while there is room.
  */
 export function renderSummary(groups, { limit = SUMMARY_LIMIT } = {}) {
-	if (!groups.length) return '## Sanitizer reports\n\nNo sanitizer reports.\n';
+	const tail = knownSection(groups);
+	if (!groups.length) return `## Sanitizer reports\n\nNo sanitizer reports.\n${tail}`;
 	const total = groups.reduce((sum, group) => sum + group.count, 0);
 	const warnings = groups.filter((group) => group.kind === 'warning').reduce((sum, group) => sum + group.count, 0);
+	const known = groups.filter((group) => group.known).reduce((sum, group) => sum + group.count, 0);
 	const fileCount = new Set(groups.flatMap((group) => [...group.files])).size;
 	const parts = [
 		'## Sanitizer reports\n\n',
 		`${total} report(s) in ${groups.length} group(s), from ${fileCount} file(s). ` +
 			'Reports of the same kind at the same location form one group.\n\n',
+		known ? `${known} report(s) are known third-party errors (see below); they do not fail this step.\n\n` : '',
 		warnings
 			? `${warnings} report(s) are sanitizer warnings (kind \`warning\`), not errors; ` +
 				'they still fail this step.\n\n'
@@ -293,7 +396,7 @@ export function renderSummary(groups, { limit = SUMMARY_LIMIT } = {}) {
 		'| # | Reports | Sanitizer | Kind | Location | Files | Example file |\n',
 		'| ---: | ---: | --- | --- | --- | ---: | --- |\n',
 	];
-	const budget = limit - NOTE_ROOM;
+	const budget = limit - NOTE_ROOM - byteLength(tail);
 	let size = byteLength(parts.join(''));
 	const add = (text) => {
 		if (size + byteLength(text) > budget) return false;
@@ -306,10 +409,12 @@ export function renderSummary(groups, { limit = SUMMARY_LIMIT } = {}) {
 	for (const group of groups) {
 		const row =
 			`| ${rows + 1} | ${group.count} | ${group.sanitizer} | ${cell(group.kind)} | ` +
-			`${cell(group.location || '(unknown)')} | ${group.files.size} | ${cell(group.example.file)} |\n`;
+			`${cell(group.location || '(unknown)')} | ${group.files.size} | ` +
+			`${cell(group.example.file)} |\n`;
 		if (!add(row)) break;
 		rows += 1;
 	}
+	parts.push(tail);
 	let examples = 0;
 	if (add('\n### Examples\n\n')) {
 		for (const group of groups.slice(0, rows)) {
@@ -341,7 +446,7 @@ async function collectReports(dir, root = '') {
 }
 
 /**
- * Report on the log directory in `args[0]`; resolves to the exit code.
+ * Report on the log directory in `args[0]`; resolves to the exit code (0 when every report is known third-party).
  *
  * Paths under $GITHUB_WORKSPACE are shown relative to it.
  */
@@ -364,16 +469,26 @@ export async function main(args, { env = process.env, stdout = process.stdout, s
 		await fs.appendFile(env.GITHUB_STEP_SUMMARY, markdown);
 		if (!reports.length) stdout.write(`No sanitizer reports in ${dir}.\n`);
 		for (const group of groups) {
-			stdout.write(`${group.count}\t${group.sanitizer}\t${group.kind}\t${group.location}\n`);
+			const { count, sanitizer, kind, location } = group;
+			stdout.write(`${count}\t${sanitizer}\t${kind}\t${location}\n`);
 		}
 	} else {
 		stdout.write(markdown);
 	}
-	if (!reports.length) return 0;
-	const warnings = reports.filter((report) => report.kind === 'warning').length;
+	for (const entry of unmatchedKnown(groups)) {
+		const note =
+			`known third-party entry ${entry.id} matched no report (the tests may not have run); ` +
+			'remove it from KNOWN_THIRD_PARTY if the toolchain was fixed.';
+		stdout.write(env.GITHUB_STEP_SUMMARY ? `::notice::${note}\n` : `note: ${note}\n`);
+	}
+	const failing = reports.filter((report) => !report.known);
+	if (!failing.length) return 0;
+	const failingGroups = groups.filter((group) => !group.known).length;
+	const warnings = failing.filter((report) => report.kind === 'warning').length;
+	const known = reports.length - failing.length;
 	const counted =
-		`${reports.length} sanitizer report(s)${warnings ? ` (${warnings} warning(s))` : ''} ` +
-		`in ${groups.length} group(s)`;
+		`${failing.length} sanitizer report(s)${warnings ? ` (${warnings} warning(s))` : ''} ` +
+		`in ${failingGroups} group(s)${known ? `, not counting ${known} known third-party report(s)` : ''}`;
 	if (env.GITHUB_STEP_SUMMARY) {
 		// _sanitize.yaml uploads the log directory as the `sanitizer-reports` artifact
 		stderr.write(`::error::${counted}: see the job summary; the sanitizer-reports artifact has the files.\n`);
