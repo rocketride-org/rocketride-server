@@ -304,15 +304,28 @@ Text IPythonGlobalBase::componentName() noexcept {
 ///		(plan 5.6.4) and an OWNED python copy of the control's
 ///		configuration. Nothing in it points into engine memory, so a
 ///		reference a node keeps past the idle sweep stays valid. Called
-///		with the GIL held
+///		with the GIL held.
+///
+///		physicalType is the FACTORY the engine built the node with, the
+///		service definition's `node` ("python" here), as config.node
+///		documents it; the pipe stack's physicalType is the name the
+///		node's factory is registered under (its provider), which is not
+///		that
 //-------------------------------------------------------------------------
 GlobalContext IPythonGlobalBase::makeContext(const Text &controlId,
                                             const json::Value &connConfig) {
+    // Step 1: the factory kind from the service definition, else the stack's
+    Text physicalType = pipeType.physicalType;
+    auto service = IServices::getServiceDefinition(pipeType.logicalType);
+    if (service && (*service)->physicalType)
+        physicalType = _ts(_cast<TextView>((*service)->physicalType));
+
+    // Step 2: the record, every field an owned copy
     return GlobalContext{controlId,
                          pipeType.id,
                          componentName(),
                          pipeType.logicalType,
-                         pipeType.physicalType,
+                         physicalType,
                          pipeType.capabilities,
                          engine::python::pyjson::jsonToDict(connConfig)};
 }
