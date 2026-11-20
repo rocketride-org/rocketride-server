@@ -138,7 +138,8 @@ class AccountInfo(BaseModel):
     endpoints: Optional[list[str]] = None
 
     # Apps on the user's desktop — full manifest entries with appStatus + onDesktop.
-    # OSS: all apps with appStatus="free", onDesktop=True.
+    # OSS: every reachable app with appStatus="free"; onDesktop from the user's
+    # stored desktop list (account/desktop.py), seeded with the inventory.
     # SaaS: populated from app_users table, enriched with full manifest + billing info.
     apps: list[AppManifestEntry] = []
 

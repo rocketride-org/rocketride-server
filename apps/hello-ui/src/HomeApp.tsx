@@ -29,8 +29,11 @@
 // greeting, rotating quote, app-card grid with the version switcher).
 //
 // Modes (driven by identity prop):
-//   identity === null  → logged-out: shows apps + Sign In button
-//   identity !== null  → logged-in: shows apps + Sign Out button
+//   identity === null  → logged-out: the server inventory + Sign In button
+//   identity !== null  → logged-in: the user's DESKTOP (what they added,
+//                         seeded with the inventory on the first sign-in)
+//                         plus the shell's CatalogPicker to add more, and
+//                         the Sign Out button
 // =============================================================================
 
 import React, { useMemo, type CSSProperties } from 'react';
@@ -44,15 +47,28 @@ import GitHubStars from './GitHubStars';
 //
 // Runtime shell access (hooks, connection manager, the shared desktop) flows
 // through the single curated contract accessor rather than named value
-// imports from shell. DesktopView postdates older shell contracts: `shell` is
-// a shared module with `import: null`, so against a pre-v7 host the member is
-// simply undefined — probe it guarded (an unguarded destructure of a missing
-// member is the exact pattern that once took this page down in production).
+// imports from shell. DesktopView and CatalogPicker postdate older shell
+// contracts: `shell` is a shared module with `import: null`, so against an
+// older host the member is simply undefined — probe it guarded (an unguarded
+// destructure of a missing member is the exact pattern that once took this
+// page down in production).
 const shellApi = getShellApi();
-const { useWorkspace, ConnectionManager } = shellApi;
+const { useWorkspace, useSubscriptions, ConnectionManager } = shellApi;
 const DesktopView: React.FC<DesktopViewProps> | null =
 	typeof (shellApi as { DesktopView?: unknown }).DesktopView === 'function'
 		? (shellApi as unknown as { DesktopView: React.FC<DesktopViewProps> }).DesktopView
+		: null;
+
+/** The picker's props as this page uses them (the shell's ICatalogPickerProps is wider). */
+interface CatalogPickerProps {
+	/** Shell-compatibility filter sent to the catalog. */
+	shell?: string;
+	/** App ids never shown (this launcher itself). */
+	excludeIds?: string[];
+}
+const CatalogPicker: React.FC<CatalogPickerProps> | null =
+	typeof (shellApi as { CatalogPicker?: unknown }).CatalogPicker === 'function'
+		? (shellApi as unknown as { CatalogPicker: React.FC<CatalogPickerProps> }).CatalogPicker
 		: null;
 
 // =============================================================================
@@ -105,6 +121,11 @@ const styles = {
 		padding: '60px 40px 80px',
 		minHeight: 'calc(100% - 68px)',
 		boxSizing: 'border-box' as const,
+	} as CSSProperties,
+
+	/** The catalog picker under the desktop grid (signed in only). */
+	catalog: {
+		marginTop: 64,
 	} as CSSProperties,
 
 	/** Fallback row (pre-v7 host without DesktopView). */
@@ -268,6 +289,7 @@ const ThemeToggle: React.FC<{ theme: string; onSetTheme: (id: string) => void }>
 const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 	const cm = ConnectionManager.getInstance();
 	const { appManifest, prefs, setTheme } = useWorkspace();
+	const { desktopApps } = useSubscriptions();
 
 	// The unauthenticated home owns its look (mirrors saas home-ui's
 	// applyThemeMode ownership): re-assert the anonymous default — the
@@ -283,21 +305,22 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 		if (prefs.theme !== target) setTheme(target);
 	}, [identity, prefs.theme, setTheme]);
 
-	// The desktop rule (one rule, both editions): show what is ON THE
-	// DESKTOP. OSS reports every server app onDesktop (there is no desktop
-	// concept — the server inventory IS the desktop), SaaS reports the
-	// user's entitlements; a probe-only entry (logged out) carries no flag
-	// and stays visible as the landing grid. Self is filtered — a launcher,
-	// not launchable.
+	// The desktop rule (one rule, both editions): signed in, show what is ON
+	// THE DESKTOP — the live identity's apps with onDesktop set (the user's
+	// stored list on OSS, seeded with the inventory on the first sign-in;
+	// the entitlements on SaaS), refreshed by the server after every add or
+	// remove. Signed out, the probe-only inventory (its entries carry no
+	// flag) stays visible as the landing grid. Self is filtered — a
+	// launcher, not launchable.
 	const apps = useMemo(
-		() => appManifest
-			.filter((a) => a.id !== 'rocketride.hello' && a.onDesktop !== false)
+		() => (identity ? desktopApps.filter((a) => a.onDesktop) : appManifest)
+			.filter((a) => a.id !== 'rocketride.hello')
 			.sort((a, b) => a.name.localeCompare(b.name)),
-		[appManifest],
+		[identity, desktopApps, appManifest],
 	);
 
 	/** Launch an app by switching to it in the workspace (fallback path). */
-	const handleLaunch = (app: AppManifestEntry) => {
+	const handleLaunch = (app: Pick<AppManifestEntry, 'id'>) => {
 		cm.emit('shell:switchApp', { appId: app.id });
 	};
 
@@ -357,6 +380,7 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 						apps={apps}
 						greetingOverride={!identity ? 'Welcome to RocketRide' : undefined}
 						showQuote={!!identity}
+						emptyMessage={identity ? 'No apps on your desktop yet. Add some from the catalog below.' : undefined}
 					/>
 				) : (
 					// Degraded fallback for a pre-v7 host: a minimal name+launch
@@ -369,6 +393,14 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 								<button style={styles.fallbackBtn} onClick={() => handleLaunch(app)}>Open</button>
 							</div>
 						))}
+					</div>
+				)}
+
+				{/* The catalog — signed in only: add apps to the desktop above
+				    (Open / Add tiles over the same verbs SaaS home-ui uses). */}
+				{identity && CatalogPicker && (
+					<div style={styles.catalog}>
+						<CatalogPicker shell="oss" excludeIds={['rocketride.hello']} />
 					</div>
 				)}
 			</div>

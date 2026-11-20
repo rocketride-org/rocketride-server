@@ -688,6 +688,72 @@ class AccountBase(ABC):
             org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
         )
 
+    # =========================================================================
+    # DESKTOP — the per-user desktop list (OSS default; SaaS overrides via
+    # ``app_handler`` over its ``app_desktop`` table)
+    # =========================================================================
+
+    # Cache slot for the lazily-created OSS desktop backend — declared here so
+    # the attribute is part of the documented class state.
+    _desktop_backend_instance = None
+
+    def _desktop_backend(self):
+        """The lazily-created file backend holding the OSS desktop lists."""
+        if self._desktop_backend_instance is None:
+            from .desktop import FileDesktopBackend
+            from .store import Store
+
+            self._desktop_backend_instance = FileDesktopBackend(Store.instance().raw_store())
+        return self._desktop_backend_instance
+
+    async def desktop_app_ids(self, user_id: str, org_id: str, inventory: list) -> list:
+        """
+        The user's desktop app ids, seeding the list on the first read.
+
+        A user with no stored desktop gets ``inventory`` — every app the
+        caller can reach today — written as their first desktop, so an
+        existing user's first sign-in after the upgrade shows the same tiles
+        as before (plan 9.1, B41). Later reads return the stored list as is,
+        whether or not an id is still reachable.
+
+        Args:
+            user_id:   The user.
+            org_id:    The organization.
+            inventory: The reachable app ids, used only as the first desktop.
+
+        Returns:
+            The desktop app ids in stored order.
+        """
+        backend = self._desktop_backend()
+        ids = await backend.read(org_id, user_id)
+        if ids is None:
+            ids = [app_id for app_id in inventory if app_id]
+            await backend.write(org_id, user_id, ids)
+        return ids
+
+    async def decorate_desktop(self, user_id: str, org_id: str, apps: list) -> list:
+        """
+        Stamp ``appStatus`` and the real ``onDesktop`` on manifest entries.
+
+        The ONE decoration every OSS surface uses — the login assembly,
+        ``rrext_app`` list/get, ``rrext_public_catalog`` and the account push
+        — so the handshake and the catalog can never disagree. There is no
+        billing on a standalone server, so everything reachable is ``free``.
+
+        Args:
+            user_id: The user.
+            org_id:  The organization.
+            apps:    Manifest entries (mutated in place and returned).
+
+        Returns:
+            ``apps``, decorated.
+        """
+        desktop = set(await self.desktop_app_ids(user_id, org_id, [a.get('id') for a in apps]))
+        for entry in apps:
+            entry['appStatus'] = 'free'
+            entry['onDesktop'] = entry.get('id') in desktop
+        return apps
+
     async def deployments_deploy(
         self, org_id: str, team_id: str, project_id: str, version: int, actor: dict, billing_team_id: str = ''
     ) -> dict:
@@ -920,19 +986,17 @@ class AccountBase(ABC):
 
     async def handle_app(self, conn, request):
         """
-        Dispatch an app-family DAP command to the app/marketplace handler.
+        Dispatch an app-family DAP command to the app/catalog handler.
 
-        The marketplace READ surface (``rrext_app`` list/get) is served on
-        BOTH editions with one shape, so clients never branch per edition:
-        this base implementation answers from the same scope walk the login
-        assembly uses, decorated exactly as OSS login decorates
-        (``appStatus: 'free'``, ``onDesktop: True`` — the catalog and the
-        handshake can never disagree). The desktop WRITES (``desktop_add`` /
-        ``desktop_remove``) are acknowledged as no-ops: OSS has no desktop
-        concept — every app the operator brought onto the server is
-        implicitly on it, so adding is vacuously satisfied and removing is
-        impossible (the tile stays; a UI should not offer Remove where every
-        entry is on the desktop). The rest of the marketplace
+        The catalog READ surface (``rrext_app`` list/get) is served on BOTH
+        editions with one shape, so clients never branch per edition: this
+        base implementation answers from the same scope walk the login
+        assembly uses, decorated by ``decorate_desktop`` exactly as OSS login
+        decorates (``appStatus: 'free'``, ``onDesktop`` from the user's
+        stored desktop — the catalog and the handshake can never disagree).
+        The desktop WRITES (``desktop_add`` / ``desktop_remove``) change the
+        per-user desktop list and push the refreshed identity to the user's
+        connections, as SaaS does (plan 9.1, B41). The rest of the catalog
         (``list_mine``/``admin_*``/``pricing_*`` — developer rails, the
         review ladder, Stripe) is genuinely SaaS-only and raises
         NotImplementedError. ``rrext_deploy_app`` is
@@ -976,28 +1040,33 @@ class AccountBase(ABC):
 
             return await handle_deploy_app(conn, request)
 
-        # ── rrext_app: the marketplace surface, OSS emulation ────────────────
+        # ── rrext_app: the catalog surface, OSS ──────────────────────────────
         args = request.get('arguments', {}) or {}
+        info = getattr(conn, '_account_info', None)
+        user_id = getattr(info, 'userId', None) if info else None
+        org_id = self._org_id_of(info)
 
         if sub in ('list', 'get'):
             # The caller's reachable set — the SAME walk the login assembly
             # uses (public + the local team/user rails when authenticated;
             # public only when anonymous), so the picker sees @me/@team rows.
-            info = getattr(conn, '_account_info', None)
-            if info and getattr(info, 'userId', None):
+            if user_id:
                 # AccountInfo carries ONE org (models.py); the walk wants a
                 # list. The OSS override ignores it (registry-only), so this
                 # exists for signature fidelity, not behaviour.
                 org = getattr(info, 'organization', None)
                 orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
-                apps = await self.get_apps_for_user(info.userId, orgs)
+                apps = await self.get_apps_for_user(user_id, orgs)
+                # OSS decoration — the login assembly's, so the catalog and
+                # the handshake agree by construction.
+                await self.decorate_desktop(user_id, org_id, apps)
             else:
+                # Anonymous: nothing is on a desktop and every action needs a
+                # sign-in first (the SaaS catalog's anonymous shape).
                 apps = await self.get_public_apps()
-            # OSS decoration — identical to the login assembly's, so the
-            # catalog and the handshake agree by construction.
-            for entry in apps:
-                entry['appStatus'] = 'free'
-                entry['onDesktop'] = True
+                for entry in apps:
+                    entry['appStatus'] = 'auth'
+                    entry['onDesktop'] = False
             # Shell-compatibility narrowing, shape parity with SaaS.
             shell = args.get('shell')
             if shell:
@@ -1013,24 +1082,51 @@ class AccountBase(ABC):
                 return conn.build_response(request, body={'app': entry, 'prices': []})
             return conn.build_response(request, body={'apps': apps})
 
-        if sub == 'desktop_add':
-            # Vacuously satisfied: everything on an OSS server is on the
-            # desktop already. Acknowledged so shared surfaces need no
-            # edition branch; nothing changes, so no account push follows.
-            app_id = args.get('appId', '')
-            if not app_id:
-                return conn.build_error(request, 'appId is required')
-            return conn.build_response(request, body={'added': True, 'appId': app_id})
+        if sub in ('desktop_add', 'desktop_remove'):
+            # The desktop writes: change the user's stored list, then push the
+            # refreshed identity to every connection of the user (the SaaS
+            # handler's shape — ``push_account_update`` after the row change).
+            from .manifest_push import push_account
 
-        if sub == 'desktop_remove':
-            # Accepted without error by decision (2026-10-19): the desktop IS
-            # the server inventory on OSS — nothing can leave it.
             app_id = args.get('appId', '')
             if not app_id:
                 return conn.build_error(request, 'appId is required')
+            if not user_id:
+                return conn.build_error(request, 'Authentication required')
+            # The gate: anything the caller's reachable catalog returns is
+            # installable (publish visibility IS the access rule).
+            org = getattr(info, 'organization', None)
+            orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
+            reachable = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
+            desktop = await self.desktop_app_ids(user_id, org_id, reachable)
+            if sub == 'desktop_add':
+                if app_id not in reachable:
+                    return conn.build_error(request, 'App not found')
+                if app_id not in desktop:
+                    await self._desktop_backend().write(org_id, user_id, [*desktop, app_id])
+                await push_account(conn._server, user_id)
+                return conn.build_response(request, body={'added': True, 'appId': app_id})
+            if app_id in desktop:
+                await self._desktop_backend().write(org_id, user_id, [a for a in desktop if a != app_id])
+            await push_account(conn._server, user_id)
             return conn.build_response(request, body={'removed': True, 'appId': app_id})
 
-        raise NotImplementedError('App marketplace administration requires SaaS mode')
+        raise NotImplementedError('App catalog administration requires SaaS mode')
+
+    @staticmethod
+    def _org_id_of(info) -> str:
+        """
+        The organization id a session's desktop belongs to.
+
+        Args:
+            info: The connection's ``AccountInfo`` (or None when anonymous).
+
+        Returns:
+            The org id; ``'local'`` when the session carries none (OSS).
+        """
+        org = getattr(info, 'organization', None) if info else None
+        org_id = org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)
+        return str(org_id or 'local')
 
     async def handle_public(self, conn, request):
         """
@@ -1041,19 +1137,33 @@ class AccountBase(ABC):
         ``PublicCommands``; this method handles ``rrext_public_catalog``
         and any future public commands that need account-layer logic.
 
-        OSS returns the static apps.json catalog.
-        SaaS queries the marketplace DB with pagination and optional
+        OSS answers from the public publish rung, decorated for an
+        authenticated caller with ``appStatus`` and the real ``onDesktop``
+        (``decorate_desktop``) so the catalog picker needs no reconciliation;
+        anonymous callers see ``appStatus: 'auth'`` and nothing on a desktop.
+        SaaS queries the catalog DB with pagination and optional
         subscription overlay for authenticated callers.
 
         Args:
             conn:    ``TaskConn`` instance.
             request: Raw DAP request dict.
         """
-        # Default OSS implementation: return public apps from static manifest
         args = request.get('arguments') or {}
         offset = args.get('offset', 0)
         limit = min(args.get('limit', 20), 100)
         apps = await self.get_public_apps()
+        info = getattr(conn, '_account_info', None)
+        user_id = getattr(info, 'userId', None) if info else None
+        if user_id:
+            await self.decorate_desktop(user_id, self._org_id_of(info), apps)
+        else:
+            for entry in apps:
+                entry['appStatus'] = 'auth'
+                entry['onDesktop'] = False
+        # Shell-compatibility narrowing, shape parity with SaaS.
+        shell = args.get('shell')
+        if shell:
+            apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
 
         # Basic client-side pagination for OSS
         total = len(apps)
