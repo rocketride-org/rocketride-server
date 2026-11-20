@@ -1121,10 +1121,21 @@ class AccountBase(ABC):
             raise ValueError('capabilities.json is not available on this server')
         if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
             raise ValueError(f'capabilities must be a list of {sorted(known)}')
-        entry = await self._deployment_backend().set_approved_capabilities(org_id, app_id, version, list(caps))
-        await self.deployments_history_append(
-            org_id, app_id, 'capabilities', actor, version=version, data={'capabilities': list(caps)}
-        )
+        backend = self._deployment_backend()
+        previous = await self.approved_capabilities(org_id, app_id, version)
+        entry = await backend.set_approved_capabilities(org_id, app_id, version, list(caps))
+        try:
+            await self.deployments_history_append(
+                org_id, app_id, 'capabilities', actor, version=version, data={'capabilities': list(caps)}
+            )
+        except BaseException:
+            # A grant with no audit entry must not stay in effect: put the earlier grant back
+            # (best effort), then report the failure so the caller does not think it applied.
+            try:
+                await backend.set_approved_capabilities(org_id, app_id, version, list(previous))
+            except Exception:
+                pass
+            raise
         return entry
 
     async def approved_capabilities(self, org_id: str, app_id: str, version: int) -> list:

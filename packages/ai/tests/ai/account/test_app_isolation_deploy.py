@@ -519,3 +519,32 @@ async def test_capabilities_accepts_known_names_and_absent(capabilities_file, de
     # a request is not a grant: nothing in the stored metadata approves it
     assert 'approvedCapabilities' not in deploy_registry.publish_calls[0]['metadata']
     assert 'approvedCapabilities' not in deploy_registry.publish_calls[0]['metadata']['manifest']
+
+
+@pytest.mark.asyncio
+async def test_a_grant_whose_audit_entry_fails_is_rolled_back(monkeypatch):
+    """A capability grant is committed with its history entry: if the audit write fails the grant does not stay."""
+    from ai.account.base import AccountBase
+
+    ao = _ao()
+    monkeypatch.setattr(ao, 'known_capabilities', lambda: frozenset({'core', 'pipelines.run'}))
+    granted = []
+
+    class _Backend:
+        async def set_approved_capabilities(self, org_id, app_id, version, caps):
+            granted.append(list(caps))
+            return {'version': version, 'metadata': {'approvedCapabilities': list(caps)}}
+
+    class _Account:
+        def _deployment_backend(self):
+            return _Backend()
+
+        async def approved_capabilities(self, org_id, app_id, version):
+            return ['core']
+
+        async def deployments_history_append(self, *args, **kwargs):
+            raise RuntimeError('audit store down')
+
+    with pytest.raises(RuntimeError, match='audit store down'):
+        await AccountBase.set_approved_capabilities(_Account(), 'org', 'acme.app', 1, ['core', 'pipelines.run'], {'id': 'admin'})
+    assert granted == [['core', 'pipelines.run'], ['core']], 'the earlier grant is put back after the failed audit write'
