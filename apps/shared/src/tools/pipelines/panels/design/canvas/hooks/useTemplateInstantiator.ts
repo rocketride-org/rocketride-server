@@ -38,7 +38,7 @@
  *   3. Once ready, recomputes edges, updates internals, and calls fitView
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Node, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
 
 import { useFlowGraph } from '../context/FlowGraphContext';
@@ -66,6 +66,14 @@ export function useTemplateInstantiator() {
 	// IDs of nodes waiting for measurement before post-ready work
 	const [pendingIds, setPendingIds] = useState<string[]>([]);
 
+	// The pendingIds batch the post-ready work already ran for. The effect's
+	// setPendingIds([]) is a Default-lane update, but its onContentChanged
+	// makes the docs store re-render at Sync lane first, so the effect re-runs
+	// with the same stale batch and a new currentProject. Without this latch
+	// each pass emits again, and the store echo loops until React throws
+	// "Maximum update depth exceeded" (first node added to a new pipeline).
+	const handledIdsRef = useRef<string[] | null>(null);
+
 	// -----------------------------------------------------------------
 	// Post-ready: once isFlowReady is true and we have pending nodes,
 	// update internals, notify host, and fitView. Handles both the
@@ -81,6 +89,10 @@ export function useTemplateInstantiator() {
 			return node?.measured?.width != null;
 		});
 		if (!allMeasured) return;
+
+		// step: run once per batch; a starved re-render sees the same array
+		if (handledIdsRef.current === pendingIds) return;
+		handledIdsRef.current = pendingIds;
 
 		updateNodeInternals(pendingIds);
 		setPendingIds([]);
