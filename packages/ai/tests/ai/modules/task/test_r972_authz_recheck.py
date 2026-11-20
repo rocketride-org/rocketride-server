@@ -606,3 +606,59 @@ async def test_r972_1b_debugger_events_skip_unauthenticated_connections(monkeypa
         await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
 
         assert events(debugger, 'stopped') == []
+
+
+@pytest.mark.asyncio
+async def test_push_rebuild_failure_spares_a_newer_identity(monkeypatch):
+    """A failed rebuild clears the verification stamp only while the connection
+    still holds the identity that failed; a reauth that installed another
+    identity keeps its own stamp.
+    """
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    newer = identity('admin', ADMIN)
+
+    async def fail_after_reauth(user_id, auth, capabilities=None):
+        conn._account_info = newer
+        conn._authz_verified_at = clock.now
+        raise RuntimeError('database unavailable')
+
+    account._service.get_authentication_result = fail_after_reauth
+    old = conn._account_info
+    await server._push_rebuilt(account, conn, old, 'test')
+
+    assert conn._account_info is newer
+    assert conn._authz_verified_at == clock.now
+
+
+@pytest.mark.asyncio
+async def test_push_overlapping_refreshes_install_the_newest(monkeypatch):
+    """Two overlapping refreshes on one connection run one after the other, and
+    the later one rebuilds from the identity the first installed, so the older
+    rebuild never ends up as the final identity.
+    """
+    account, server, clock = _setup(monkeypatch, {'u': (True, frozenset({'sys.view'}))})
+    conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+    release = asyncio.Event()
+    started = []
+    perms = [frozenset({'sys.view'}), frozenset({'sys.view', 'sys.admin'})]
+
+    async def rebuild(user_id, auth, capabilities=None):
+        n = len(started)
+        started.append(n)
+        if n == 0:
+            await release.wait()
+        return identity(user_id, perms[n], auth=auth)
+
+    account._service.get_authentication_result = rebuild
+    first = asyncio.create_task(server.push_account_update('u'))
+    await asyncio.sleep(0)
+    second = asyncio.create_task(server.push_account_update('u'))
+    await asyncio.sleep(0)
+    assert started == [0]  # the second waits for the first
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert started == [0, 1]
+    assert conn._account_info.sysPermissions == ['sys.admin', 'sys.view']
+    assert [e['event'] for e in conn.sent].count('apaext_account') == 2
