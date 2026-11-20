@@ -82,9 +82,10 @@ class DatabaseUnavailableError(RuntimeError):
 # PostgreSQL SQLSTATE classes and codes that mean the server cannot take the
 # request right now rather than that the statement is wrong:
 # 08 connection exception, 53 insufficient resources (too many connections),
-# 57P01 admin_shutdown, 57P02 crash_shutdown, 57P03 cannot_connect_now.
+# 57P01 admin_shutdown, 57P02 crash_shutdown, 57P03 cannot_connect_now,
+# 57P05 idle_session_timeout (the server ended an idle session).
 _UNAVAILABLE_SQLSTATE_CLASSES = frozenset({'08', '53'})
-_UNAVAILABLE_SQLSTATES = frozenset({'57P01', '57P02', '57P03'})
+_UNAVAILABLE_SQLSTATES = frozenset({'57P01', '57P02', '57P03', '57P05'})
 
 # MySQL / MariaDB server error numbers (PyMySQL puts them in ``args[0]``) that mean
 # the server is going away: 1053 ER_SERVER_SHUTDOWN. The disconnects SQLAlchemy
@@ -137,6 +138,28 @@ def is_connection_failure(exc: BaseException) -> bool:
     if args and isinstance(args[0], int) and args[0] in _UNAVAILABLE_MYSQL_ERRNOS:
         return True
     return False
+
+
+def is_database_outage(exc: BaseException, *, connected: bool) -> bool:
+    """Return True when ``exc`` from a statement run on ``read_only_connection`` means the database is unreachable.
+
+    Shared by ``_validateQuery`` and ``_executeSQLQuery`` so the two classify a
+    failure identically: the one that was a rejection at EXPLAIN time cannot be an
+    outage a moment later, and the reverse.
+
+    Before the ``read_only_connection`` block is entered, the manager both opens
+    the connection and runs its read-only setup statements. Only a failure to open
+    it (no statement attached) is an outage by itself; a setup statement that
+    fails is judged like any other statement, and the ``RuntimeError`` of a
+    dialect with no read-only mode is a configuration fault, so both are not
+    outages. Once the block is entered, only ``is_connection_failure`` decides.
+
+    Args:
+        exc: The exception the statement raised.
+        connected: Whether the ``with read_only_connection()`` block was entered.
+    """
+    opening_failed = not connected and getattr(exc, 'statement', None) is None and not isinstance(exc, RuntimeError)
+    return opening_failed or is_connection_failure(exc)
 
 
 # Everything a driver or SQLAlchemy appends to its primary message that can
@@ -1005,8 +1028,7 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             # statement that fails is judged like any other statement, and the
             # RuntimeError of a dialect with no read-only mode is a configuration
             # fault, so both keep the rejection path.
-            opening_failed = not connected and getattr(e, 'statement', None) is None and not isinstance(e, RuntimeError)
-            if opening_failed or is_connection_failure(e):
+            if is_database_outage(e, connected=connected):
                 error(f'Database unavailable during EXPLAIN validation: {e}')
                 raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             warning(f'EXPLAIN validation failed for the generated query: {e}')

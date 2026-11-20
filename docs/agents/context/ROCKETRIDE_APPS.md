@@ -1000,7 +1000,16 @@ the write had happened. The natural-language tools (`get_sql`, `get_data`,
 return `valid: false` with an `error`. Check `valid` on every result before
 using it; a result with `valid: false` and an `error` is a failed read, not an
 empty one. A result with `valid: false` and an `answer` instead means the
-question was not a database query.
+question was not a database query. Every one of these tools returns `valid`,
+on a successful read as well as on a failure, including the ArangoDB
+`get_data`.
+
+A pipeline's `questions` lane treats the two failures differently. A database
+that cannot be reached, or that drops the connection while the query runs,
+fails the step. A generated query that a database which is up refuses (a row
+cast failure, a statement timeout) is reported as `Query execution failed` on
+the `text` and `answers` lanes, so an app that reads those lanes must handle
+that error as well as a failed step.
 
 ### Data in the RocketRide cloud databases
 

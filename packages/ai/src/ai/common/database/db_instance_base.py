@@ -53,7 +53,7 @@ from ai.common.table import Table
 from ai.common.utils import parse_bool
 from rocketlib.types import IInvokeLLM
 
-from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase, DatabaseUnavailableError
+from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase, DatabaseUnavailableError, is_database_outage
 from .sql_safety import is_sql_safe
 
 
@@ -177,7 +177,7 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
-# What get_data reports when _executeSQLQuery raises DatabaseLaneError
+# What get_data and the question lanes report when _executeSQLQuery raises DatabaseLaneError
 _QUERY_EXECUTION_FAILED = 'Query execution failed'
 
 
@@ -186,12 +186,17 @@ class MissingLlmError(ValueError):
 
 
 class DatabaseLaneError(RuntimeError):
-    """A pipeline lane statement failed against the database.
+    """A statement failed against a database that is reachable.
 
-    Raised by the lane handlers (``writeQuestions``, ``writeTable``,
-    ``writeAnswers``) instead of returning normally, so the engine marks the step
-    and the task failed. The message is deliberately generic: the lane caller is
-    an upstream node or a person who never wrote the statement, and the driver's
+    Raised by ``_executeSQLQuery`` when the database ran the generated SELECT and
+    refused it (a row cast failure, a statement timeout, ClickHouse 241), and by
+    the write lanes (``writeTable``, ``writeAnswers``) when an insert fails, so the
+    write fails the step instead of returning as though the rows were saved.
+    ``writeQuestions`` turns the read case into a ``Query execution failed`` report
+    on the lanes (#2963); ``get_data`` turns it into ``valid: False``. A database
+    that cannot be reached is ``DatabaseUnavailableError`` instead, and always
+    fails the step. The message is deliberately generic: the lane caller is an
+    upstream node or a person who never wrote the statement, and the driver's
     sentence can carry a host name, a port or a fragment of the statement. The
     full exception is in the engine log, written by ``error()`` before this is
     raised.
@@ -351,8 +356,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             result = self._executeSQLQuery(sql_query)
         except DatabaseLaneError:
             # The tool contract is an explicit `valid: False` result, not an
-            # exception. The lane handlers rely on the raise instead.
+            # exception, for a refused query and for an outage alike. The lane
+            # handlers raise (an outage) or report on the lanes (a refusal) instead.
             return {'valid': False, 'error': _QUERY_EXECUTION_FAILED, 'sql': sql_query, 'rows': []}
+        except DatabaseUnavailableError as e:
+            return {'valid': False, 'error': str(e), 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
         return {'valid': True, 'rows': rows, 'sql': sql_query, 'row_limit': limit}
@@ -1016,10 +1024,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     def _executeSQLQuery(self, query: str) -> list[dict]:
         """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts.
 
-        There is no failure return value: a database failure raises
-        ``DatabaseLaneError``. This used to return ``None``, and the lane handler
-        then emitted the string ``"None"`` as the answer, which reads downstream
-        as a successful, empty result.
+        There is no failure return value: a database failure raises. This used to
+        return ``None``, and the lane handler then emitted the string ``"None"`` as
+        the answer, which reads downstream as a successful, empty result.
 
         Args:
             query: The generated SQL.
@@ -1028,18 +1035,26 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             One dict per row.
 
         Raises:
-            DatabaseLaneError: The database refused or failed the query (the cause is in the engine log).
+            DatabaseLaneError: The database is reachable and refused or failed the query (the cause is in the engine log).
+            DatabaseUnavailableError: The database could not be reached, or dropped the connection mid-query.
             Exception: Any error that is not a database failure, such as the RuntimeError of a dialect without a
                 read-only mode.
         """
+        connected = False
         try:
             with self.IGlobal.read_only_connection() as conn:
+                connected = True
                 result = conn.execute(text(query))
                 rows = result.fetchall()
                 column_names = result.keys()
                 return [dict(zip(column_names, row)) for row in rows]
 
         except Exception as e:
+            # An outage, whether the connection could not be opened or dropped mid-query,
+            # is not a verdict on the SQL: it fails the step, same as in `_validateQuery`.
+            if is_database_outage(e, connected=connected):
+                error(f'Database unavailable while executing SQL query: {type(e).__name__}: {e}')
+                raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
             # Not only SQLAlchemyError: the clickhouse+native:// connector raises its own DatabaseException,
             # including when readonly=1 refuses a write
             if not _isDbFailure(e):
@@ -1159,14 +1174,21 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
-            # A database failure raises DatabaseLaneError (logged by `_executeSQLQuery`)
-            result = self._executeSQLQuery(sql_query) if executed else sql_query
+            if executed:
+                try:
+                    result = self._executeSQLQuery(sql_query)
+                except DatabaseLaneError:
+                    # The database ran the statement and refused it (the cause is in the log):
+                    # report it on the lanes as before (#2963), not as a failed step.
+                    raise _QuestionFailed(_QUERY_EXECUTION_FAILED) from None
+            else:
+                result = sql_query
 
-        except (DatabaseLaneError, DatabaseUnavailableError):
-            # `_executeSQLQuery` / `_validateQuery` have logged the cause. Fail the step: emitting
-            # anything here, an error object included, lets the pipeline carry on as if the question
-            # had been answered. This must stay ahead of the catch-all below, which would otherwise
-            # turn the outage into an error on the lanes and return normally.
+        except DatabaseUnavailableError:
+            # `_executeSQLQuery` / `_validateQuery` have logged the cause. An outage says nothing about
+            # the question: fail the step, because emitting anything here, an error object included,
+            # lets the pipeline carry on as if it had been answered. This must stay ahead of the
+            # catch-all below, which would otherwise turn the outage into an error on the lanes.
             raise
         except Exception as e:
             # The caller needs to know the question failed, not only the log: on the
@@ -1221,6 +1243,17 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             answer.setAnswer(self._formatResultAsMarkdown(result) if executed and result else str(result))
             self.instance.writeAnswers(answer)
 
+    def _writeOutcome(self) -> str:
+        """Return what a failed batch insert says about the rows already written.
+
+        A transactional database rolls the whole batch back. ClickHouse is not
+        transactional (``_sessionsAreTransactions`` is False), so the runs of the
+        batch that finished before the failing one are already stored.
+        """
+        if self._sessionsAreTransactions():
+            return 'no rows were saved'
+        return 'rows from earlier runs of the batch may already be saved'
+
     def writeTable(self, markdown: str) -> None:
         """Handle incoming markdown table data — parse and insert into the database."""
         if not markdown or not markdown.strip():
@@ -1247,7 +1280,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # that were never written.
             error(f'Error inserting table data: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
-                f'{self._db_display_name()} table write failed; no rows were saved (details are in the engine log)'
+                f'{self._db_display_name()} table write failed; {self._writeOutcome()} (details are in the engine log)'
             ) from None
 
     def writeAnswers(self, answer: Answer) -> None:
@@ -1264,7 +1297,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # Fail the step, same as `writeTable`.
             error(f'Error in writeAnswers: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
-                f'{self._db_display_name()} answers write failed; no rows were saved (details are in the engine log)'
+                f'{self._db_display_name()} answers write failed; {self._writeOutcome()} (details are in the engine log)'
             ) from None
 
     # ------------------------------------------------------------------
@@ -1403,8 +1436,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         # names with case-insensitive matching. Nothing here refuses a row: the
         # node decides only what it must not BIND, and the database decides
         # what it will accept. Every run of the batch shares one
-        # `engine.begin()` below, so a row the database refuses rolls the whole
-        # batch back and leaves no row of it behind.
+        # `engine.begin()` below, so on a transactional database a row it refuses
+        # rolls the whole batch back and leaves no row of it behind. ClickHouse has
+        # no transactions: runs that finished before the failing one stay written.
         insert_values = []
         for item in items:
             if not isinstance(item, dict):
@@ -1486,7 +1520,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # gathered: a generated id follows insertion order, and reordering
             # the batch would hand the caller ids in an order their rows never
             # had. Every run shares one engine.begin(), so the batch stays
-            # all-or-nothing exactly as a single executemany was.
+            # all-or-nothing exactly as a single executemany was (on a transactional database;
+            # ClickHouse commits each run as it goes).
             runs: List[List[Dict[str, Any]]] = []
             previous_keys = None
             for values in insert_values:
@@ -1514,7 +1549,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 debug(f"Inserted {len(insert_values)} records into '{self.IGlobal.table}' in {len(runs)} run(s).")
             except Exception as e:
                 # The context manager has already rolled back every run of the
-                # batch; nothing of it is written. The full exception --
+                # batch on a transactional database; on ClickHouse, which has no
+                # transactions, the runs before the failing one stay written. The full exception --
                 # statement echo and bound values included -- goes to the server
                 # log, and the caller gets the driver's own sentence through the
                 # same formatter the `execute` tool uses. That matters more now
