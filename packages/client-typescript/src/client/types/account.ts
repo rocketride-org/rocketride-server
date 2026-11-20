@@ -256,6 +256,9 @@ export interface CreateKeyResult {
 	/**
 	 * The expiry the server actually granted, as an ISO timestamp, or null when
 	 * the key does not expire. It can be earlier than the requested one.
+	 * A timestamp without an offset ('2027-02-03T10:00:00') is UTC: the SDK
+	 * passes the server's value through unchanged, and `Date.parse` would read
+	 * it as local time, so parse it as UTC (append 'Z') before comparing.
 	 * Absent when the server did not report it (an older server), so callers
 	 * must not read a missing value as "never expires".
 	 */
