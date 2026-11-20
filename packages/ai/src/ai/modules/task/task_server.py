@@ -1201,6 +1201,24 @@ class TaskServer(DAPBase):
         Returns:
             bool: True when a fresh identity was installed and pushed.
         """
+        generation = conn._auth_generation
+        lock = conn.__dict__.get('_rebuild_lock')
+        if lock is None:
+            lock = conn._rebuild_lock = asyncio.Lock()
+        # One rebuild per connection at a time: each captures the identity it
+        # starts from, reads, and installs under the lock, so a later membership
+        # update is never discarded because an earlier rebuild finished first.
+        async with lock:
+            # Deauth, revoke or a re-auth since the caller chose this
+            # connection: the identity it chose is gone.
+            if conn._auth_generation != generation or not getattr(conn, '_authenticated', False):
+                return False
+            return await self._rebuild_and_install(account, conn, conn._account_info, label, generation)
+
+    async def _rebuild_and_install(
+        self, account: Any, conn: TaskConn, info: AccountInfo, label: str, generation: int
+    ) -> bool:
+        """The body of ``_push_rebuilt``, run under the connection's rebuild lock."""
         subject = authority_subject(info)
         authz = self._authz
         t0 = authz.clock() if authz is not None else None
@@ -1234,7 +1252,7 @@ class TaskServer(DAPBase):
             await conn.revoke(info, f'{label}: authority narrowed', pushed=fresh)
             return False
         # Never install over a deauth or a newer auth that landed during the rebuild
-        if conn._account_info is not info or not getattr(conn, '_authenticated', False):
+        if conn._auth_generation != generation or not getattr(conn, '_authenticated', False):
             return False
 
         try:
@@ -1790,9 +1808,14 @@ class TaskServer(DAPBase):
         """The ``AccountInfo.auth`` of the connection that supplied a pipeline.
 
         ``''`` for the trusted in-process deploy dispatch, which holds none.
-        ``None`` when the connection carries no account info to read. Used only
+        ``None`` when the connection carries no account info to read, or is
+        no longer authenticated (deauthed or revoked). Used only
         as an argument to the database authorization; callers must not keep it.
         """
+        # A deauthenticated or revoked connection has no identity left: never
+        # present it as the trusted deploy dispatch (``''``).
+        if getattr(conn, '_authenticated', None) is False:
+            return None
         info = getattr(conn, '_account_info', None)
         if info is None:
             return None

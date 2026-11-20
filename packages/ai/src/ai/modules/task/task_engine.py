@@ -2772,13 +2772,25 @@ class Task(DAPBase):
         Args:
             conn: Connection to detach
         """
-        if self._debugger != conn:
-            return
+        if self.release_debugger(conn):
+            self.debug_message('Debugger detached from task')
+
+    def release_debugger(self, conn: TaskConn) -> bool:
+        """
+        Synchronously clear ``conn`` as the attached debugger, if it is one.
+
+        Used by ``detach_task`` and by a connection dropping its authority
+        (deauth, revoke), so no attachment outlives the identity that made it.
+
+        Returns:
+            True when ``conn`` was the attached debugger and is now detached.
+        """
+        if self._debugger is None or self._debugger != conn:
+            return False
 
         self._debugger = None
         self._status.debuggerAttached = False
-
-        self.debug_message('Debugger detached from task')
+        return True
 
     def _accumulate_analytics(
         self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]

@@ -256,6 +256,9 @@ class TaskConn(
     # When this connection's platform authority was last verified, on the
     # live re-check's monotonic clock (``TaskServer._authz``); 0 = never.
     _authz_verified_at: float = 0.0
+    # Bumped by every successful auth and every authority drop, so work begun
+    # under one identity (an in-flight rebuild) can tell the identity changed.
+    _auth_generation: int = 0
     # When the last ``[AUTHZ] denied`` warning for this connection was logged
     _authz_denied_logged_at: float = float('-inf')
 
@@ -466,6 +469,7 @@ class TaskConn(
 
         self._account_info = result
         self._authenticated = True
+        self._auth_generation += 1
         self._authz_verified_at = t0
         self._server.release_unauthed_slot(self._client_ip)
 
@@ -523,10 +527,19 @@ class TaskConn(
         unauthenticated, drops every event subscription and installs the bare
         identity ``AccountInfo(waitlisted=True)``. The bare identity has an
         empty ``userId`` and no organization, so no user push, org push or
-        org/user-scoped server event can match or rebuild it.
+        org/user-scoped server event can match or rebuild it. Also detaches
+        this connection as debugger from every task, so a later
+        re-authentication on the same socket inherits no attachment.
         """
         self._server.acquire_unauthed_slot(self._client_ip)
         self._authenticated = False
+        self._auth_generation += 1
+        controls = getattr(self._server, '_task_control', None)
+        if isinstance(controls, dict):
+            for control in list(controls.values()):
+                release = getattr(getattr(control, 'task', None), 'release_debugger', None)
+                if callable(release):
+                    release(self)
         monitors = getattr(self, '_monitors', None)
         if monitors is not None:
             monitors.clear()

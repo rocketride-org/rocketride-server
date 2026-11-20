@@ -358,3 +358,72 @@ async def test_r972_1a_push_never_installs_over_a_deauth(monkeypatch, perms):
     assert conn._account_info.userId == ''
     assert conn._account_info.sysPermissions == []
     assert events(conn, 'apaext_account') == []
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_deauth_detaches_the_debugger(monkeypatch):
+    """A deauthed socket is no longer any task's debugger, so a later
+    re-authentication on it receives none of that task's debugger events.
+    """
+    from unittest.mock import MagicMock
+
+    from ai.modules.task.task_engine import Task
+
+    account = FakeAccount({'u': (True, frozenset())})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+    other = make_conn(server, identity('v'), connection_id=2)
+    task = Task.__new__(Task)
+    task._status = MagicMock()
+    task._debugger = conn
+    server._task_control = {'t': MagicMock(task=task)}
+
+    conn._drop_authority()
+
+    assert task._debugger is None
+    assert task._status.debuggerAttached is False
+    assert conn._auth_generation == 1
+
+    task._debugger = other
+    other._drop_authority()
+    assert task._debugger is None
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_deauth_connection_presents_no_credential(monkeypatch):
+    """A deauthed connection is not the trusted deploy dispatch: it presents None, not ''."""
+    account = FakeAccount({'u': (True, frozenset())})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u', auth='pk_task'))
+    assert task_server_module.TaskServer._presenting_credential(conn) == 'pk_task'
+
+    conn._drop_authority()
+
+    assert task_server_module.TaskServer._presenting_credential(conn) is None
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_overlapping_rebuilds_keep_the_later_membership_update(monkeypatch):
+    """Two rebuilds started from the same identity: the later read is installed,
+    not discarded because the earlier one finished first.
+    """
+    account = FakeAccount({'u': (True, frozenset())})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+    reads = []
+
+    async def slow_rebuild(user_id, auth, capabilities=None):
+        reads.append(user_id)
+        perms = account.rows[user_id][1]
+        if len(reads) == 1:
+            # The membership update lands right after the first read.
+            account.rows['u'] = (True, frozenset({'sys.view'}))
+        await asyncio.sleep(0)
+        return identity(user_id, perms, auth=auth)
+
+    account._service.get_authentication_result = slow_rebuild
+
+    await asyncio.gather(server.push_account_update('u'), server.push_account_update('u'))
+
+    assert len(reads) == 2
+    assert conn._account_info.sysPermissions == ['sys.view']

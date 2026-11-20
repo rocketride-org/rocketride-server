@@ -273,11 +273,16 @@ async def test_r972_1b_push_install_stamps_verification(monkeypatch):
     account, server, clock = _setup(monkeypatch, {'u': (True, frozenset({'sys.view'}))})
     conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
     conn.on_launch = AsyncMock(return_value=None)
+    before_rebuild = clock.now
+    # The clock moves while the rebuild is awaited: the stamp must be the read
+    # taken BEFORE the rebuild, not the clock at install time.
+    account.during_rebuild = lambda: setattr(clock, 'now', clock.now + 5)
 
     await server.push_account_update('u')
 
+    assert clock.now == before_rebuild + 5
     assert conn._account_info.sysPermissions == ['sys.view']
-    assert conn._authz_verified_at == clock.now
+    assert conn._authz_verified_at == before_rebuild
     assert await _dispatched(conn) is True
 
 
