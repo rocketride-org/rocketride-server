@@ -81,6 +81,11 @@ TEST_DB_NAME = urllib.parse.urlparse(TEST_DSN).path.lstrip('/')
 # RR_REQUIRE_DB_TESTS (set by CI once its DB containers are healthy) turns
 # every skip in this module into a hard failure: a broken container or missing
 # dependency must never let the safety-control tests silently go green.
+# Same condition as ``ai.common.database.connect_retry.PING_WATCHDOG_SUPPORTED``: the ping watchdog
+# duplicates the socket with ``os.dup``, which Windows cannot do, so no watchdog is installed there.
+# Mirrored here because this module loads the sources by path and must evaluate it at collection time.
+PING_WATCHDOG_SUPPORTED = os.name != 'nt'
+
 _DB_TESTS_REQUIRED = bool(os.environ.get('RR_REQUIRE_DB_TESTS'))
 
 if _DB_TESTS_REQUIRED:
@@ -797,6 +802,9 @@ class TestRocketrideSqlE2E:
 
         return listener.getsockname()[1], stall, stop
 
+    @pytest.mark.skipif(
+        not PING_WATCHDOG_SUPPORTED, reason='Windows cannot duplicate a socket, so the ping watchdog is not installed'
+    )
     def test_a_stalled_pooler_is_bounded_for_the_ping_and_the_reconnect(self, rr_env, monkeypatch, sql_table):
         """The reviewer's stalled-pooler case: a pooled connection to a peer that stopped answering.
 
