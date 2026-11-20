@@ -42,6 +42,9 @@ public:
     //	Factory info
     //-----------------------------------------------------------------
     _const auto FactoryType = "Monitor";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = Monitor;
     struct FactoryArgs {
         Text type;
     };
