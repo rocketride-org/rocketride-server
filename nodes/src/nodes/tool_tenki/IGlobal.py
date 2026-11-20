@@ -158,7 +158,7 @@ def _is_ip_address(host: str) -> bool:
 
 def _allowed_domains(raw) -> list[str]:
     """The outbound allowlist, lowercase and without a trailing dot as Tenki stores it; any refused entry raises."""
-    domains, refused, positions, addresses = [], [], [], []
+    domains, refused, positions, addresses, address_positions = [], [], [], [], []
     for position, name in enumerate(_names(raw, 'allow_domains'), 1):
         domain = name.lower().rstrip('.')
         # ASCII is checked before lowercasing could make it so (the Kelvin sign lowercases to "k").
@@ -166,8 +166,9 @@ def _allowed_domains(raw) -> list[str]:
             # An entry with an "@" may be a URL that carries credentials: say where it is, not what it says.
             refused.append(f'entry {position} (not shown: it may hold a credential)' if '@' in name else name)
             positions.append(str(position))
-        elif _is_ip_address(domain):
+        elif _is_ip_address(domain.removeprefix('*.')):  # the wildcard label hides an address from inet_aton
             addresses.append(domain)  # passes the label rule and the API takes it, but never matches any traffic
+            address_positions.append(str(position))
         elif domain not in domains:
             domains.append(domain)
     # One error names every kind of refusal, every rule before any entry: the engine cuts a startup error at its
@@ -182,9 +183,12 @@ def _allowed_domains(raw) -> list[str]:
         )
         lists.append(f'Refused: {", ".join(refused)}')
     if addresses:
+        one = len(address_positions) == 1
         rules.append(
-            f"{'It also lists' if refused else 'tenki.allow_domains lists'} an IP address, which the sandbox's "
-            'egress filter never matches: it matches hostnames only, so list the hostname instead.'
+            f'{"It also lists" if refused else "tenki.allow_domains lists"} '
+            f'{"an IP address" if one else "IP addresses"} ({"entry" if one else "entries"} '
+            f"{', '.join(address_positions)}), which the sandbox's egress filter never matches: it matches "
+            'hostnames only, so list the hostname instead.'
         )
         lists.append(f'{"IP addresses" if refused else "Refused"}: {", ".join(addresses)}')
     if rules:
