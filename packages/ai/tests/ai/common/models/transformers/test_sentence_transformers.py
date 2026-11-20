@@ -2,8 +2,11 @@
 Unit tests for ai.common.models.transformers.sentence_transformers.
 
 Focus areas:
-- Per-model serialization of the GPU forward pass inside
-  SentenceTransformerLoader.inference()
+- Per-model serialization of the forward pass inside
+  SentenceTransformerLoader.inference() for the model server, direct calls,
+  other devices and --modelserver
+- The local facade on the CPU taking places in device_budget('cpu'), with up
+  to LOCAL_CPU_CALLS forwards of a stock BERT encoder at once
 
 The tests drive the real inference() body and stub only the forward pass, so
 the lock under test is the one that ships. torch is not installed in every
@@ -17,6 +20,7 @@ Run from project root:
 
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+import functools
 import gc
 import sys
 import threading
@@ -26,6 +30,7 @@ import types
 import numpy as np
 import pytest
 
+import ai.common.models.device_budget as budget_module
 import ai.common.models.transformers.sentence_transformers as sentence_transformers_module
 
 SentenceTransformerLoader = sentence_transformers_module.SentenceTransformerLoader
@@ -297,7 +302,7 @@ def test_inference_serializes_via_model_obj_unwrap(fake_torch):
 # -----------------------------------------------------------------------------
 
 
-def test_encode_local_serializes_shared_model(monkeypatch, fake_torch):
+def test_encode_local_serializes_shared_model(monkeypatch, fake_torch, map_in_threads):
     """encode() serializes the shared model through the loader's lock."""
     recorder = _ForwardRecorder()
     model = _local_encoder(monkeypatch, recorder)
@@ -306,8 +311,7 @@ def test_encode_local_serializes_shared_model(monkeypatch, fake_torch):
         sentences = [f'search_document: worker-{worker_idx}-item-{i}' for i in range(4)]
         return model.encode(sentences, batch_size=2)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        results = list(executor.map(run_encode, range(8)))
+    results = map_in_threads(run_encode, range(8), workers=4)
 
     assert recorder.max_active == 1
     for result in results:
@@ -405,3 +409,390 @@ def test_take_lock_wait_resets_between_calls(fake_torch):
     first = SentenceTransformerLoader.take_lock_wait()
     assert first >= 0.0
     assert SentenceTransformerLoader.take_lock_wait() == 0.0
+
+
+# -----------------------------------------------------------------------------
+# Local CPU path: places in device_budget('cpu')
+# -----------------------------------------------------------------------------
+
+
+@pytest.fixture
+def qualified_cpu(monkeypatch, fake_torch):
+    """Every model qualifies for LOCAL_CPU_CALLS, so admission is tested apart from the check."""
+    monkeypatch.setattr(
+        SentenceTransformerLoader, '_local_cpu_forward_calls', classmethod(lambda cls, model: cls.LOCAL_CPU_CALLS)
+    )
+
+
+@pytest.fixture
+def cpu_pool(monkeypatch):
+    """Install a CPU guard with the slots a test asks for as the process-wide one, whatever this machine's cores."""
+
+    def install(slots):
+        budget = budget_module.DeviceBudget('cpu', slots=slots)
+        monkeypatch.setitem(budget_module._budgets, 'cpu', budget)
+        return budget
+
+    return install
+
+
+@pytest.mark.parametrize('qualified', [True, False])
+def test_the_local_facade_takes_a_cpu_place_for_its_model(monkeypatch, fake_torch, qualified):
+    """The facade's forward enters ``device_budget('cpu')`` naming its model, with LOCAL_CPU_CALLS if it qualifies, else 1."""
+    if qualified:
+        monkeypatch.setattr(
+            SentenceTransformerLoader, '_local_cpu_forward_calls', classmethod(lambda cls, model: cls.LOCAL_CPU_CALLS)
+        )
+    reserved = []
+
+    def guard(device):
+        return types.SimpleNamespace(
+            reserve=lambda cost_mb, model=None, calls=1: (
+                reserved.append((device, cost_mb, model, calls)) or contextlib.nullcontext()
+            )
+        )
+
+    monkeypatch.setattr(sentence_transformers_module, 'device_budget', guard)
+    encoder = _local_encoder(monkeypatch, _ForwardRecorder(delay=0))
+    encoder.encode(['one', 'two'], batch_size=1)
+    calls = SentenceTransformerLoader.LOCAL_CPU_CALLS if qualified else 1
+    assert [(device, cost, n) for device, cost, _, n in reserved] == [('cpu', None, calls)] * 2
+    assert all(model is encoder._model for _, _, model, _ in reserved)
+
+
+@pytest.mark.parametrize('slots', [1, 2, 3])
+def test_local_cpu_forwards_overlap_up_to_the_slots(monkeypatch, qualified_cpu, cpu_pool, map_in_threads, slots):
+    """Through encode(), up to the pool's slots forwards of a qualified model run at once; with one, never two."""
+    cpu_pool(slots)
+    recorder = _ForwardRecorder(meet=threading.Barrier(slots, timeout=5))
+    encoder = _local_encoder(monkeypatch, recorder)
+    results = map_in_threads(lambda i: encoder.encode([f'document {i}']), range(4 * slots), workers=8)
+    assert recorder.calls == 4 * slots
+    assert recorder.max_active == slots
+    assert all(result.shape == (1, recorder.hidden_size) for result in results)
+
+
+@pytest.mark.parametrize('case', ['server', 'cuda', 'mps', 'direct', 'modelserver'])
+def test_other_paths_keep_the_model_lock(monkeypatch, qualified_cpu, map_in_threads, case):
+    """A server wrapper, another device, a direct loader call and ``--modelserver`` keep the lock and skip the pool."""
+    monkeypatch.setattr(sentence_transformers_module, 'device_budget', lambda device: pytest.fail('took a CPU place'))
+    if case == 'modelserver':
+        monkeypatch.setattr(sys, 'argv', [*sys.argv, '--modelserver=5590'])
+    device = {'cuda': 'cuda:0', 'mps': 'mps'}.get(case, 'cpu')
+    recorder = _ForwardRecorder()
+    model = _make_model(recorder)
+    if case == 'server':
+        model = types.SimpleNamespace(model_obj=model, metadata={'device': device})
+
+    # a direct loader call passes no keyword, so a default that took the CPU path would show
+    kwargs = {} if case == 'direct' else {'_local_cpu': True}
+
+    def run(_):
+        return SentenceTransformerLoader.inference(model, _make_preprocessed(), {'device': device}, **kwargs)
+
+    map_in_threads(run, range(8), workers=4)
+    assert recorder.calls == 8
+    assert recorder.max_active == 1
+
+
+def test_a_local_cpu_forward_runs_beside_an_ocr_call_with_one_slot(qualified_cpu, cpu_pool, map_in_threads):
+    """With one slot an OCR call (no model named) and an embedding forward still meet: each has its own first slot."""
+    cpu_pool(1)
+    meet = threading.Barrier(2, timeout=5)
+    model = _make_model(_ForwardRecorder(delay=0, meet=meet))
+
+    def ocr():
+        with budget_module.device_budget('cpu').reserve(None):
+            meet.wait()
+
+    def forward():
+        SentenceTransformerLoader.inference(model, _make_preprocessed(), {'device': 'cpu'}, _local_cpu=True)
+
+    map_in_threads(lambda call: call(), [forward, ocr], workers=2)
+
+
+def test_waiting_for_a_cpu_place_is_queue_wait(qualified_cpu, cpu_pool, map_in_threads):
+    """The third forward on two slots reports its wait for a place as queue wait."""
+    cpu_pool(2)
+    model = _make_model(_ForwardRecorder(delay=0.5))
+    meet = threading.Barrier(3, timeout=5)
+
+    def run(_):
+        SentenceTransformerLoader.take_lock_wait()
+        meet.wait()
+        SentenceTransformerLoader.inference(model, _make_preprocessed(), {'device': 'cpu'}, _local_cpu=True)
+        return SentenceTransformerLoader.take_lock_wait()
+
+    waits = map_in_threads(run, range(3), workers=3)
+    assert max(waits) >= 25, f'expected a measurable queue wait, got {waits}'
+
+
+@pytest.mark.parametrize('path', ['slots', 'slots_and_lock', 'lock'])
+def test_an_uncontended_forward_is_not_queue_wait(monkeypatch, fake_torch, cpu_pool, map_in_threads, path):
+    """A slow forward with nothing to wait for reports no queue wait: the wait ends before the forward starts.
+
+    Args:
+        path: ``'slots'``: a qualified model on the local CPU path; ``'slots_and_lock'``: a model
+            at one call there, which also takes its lock; ``'lock'``: a direct loader call.
+    """
+    cpu_pool(2)
+    calls = SentenceTransformerLoader.LOCAL_CPU_CALLS if path == 'slots' else 1
+    monkeypatch.setattr(SentenceTransformerLoader, '_local_cpu_forward_calls', classmethod(lambda cls, model: calls))
+    model = _make_model(_ForwardRecorder(delay=0.2))
+    kwargs = {} if path == 'lock' else {'_local_cpu': True}
+
+    def run(_):
+        SentenceTransformerLoader.take_lock_wait()
+        SentenceTransformerLoader.inference(model, _make_preprocessed(), {'device': 'cpu'}, **kwargs)
+        return SentenceTransformerLoader.take_lock_wait()
+
+    [wait] = map_in_threads(run, [0], workers=1)
+    assert wait < 100, f'a 200 ms forward with nothing to wait for was billed {wait:.0f} ms of queue wait'
+
+
+def test_a_one_call_model_never_overlaps_a_direct_call(monkeypatch, fake_torch, cpu_pool, map_in_threads):
+    """A model at one call holds its lock inside its CPU place, so a forward through the lock alone cannot overlap it."""
+    cpu_pool(4)
+    monkeypatch.setattr(SentenceTransformerLoader, '_local_cpu_forward_calls', classmethod(lambda cls, model: 1))
+    recorder = _ForwardRecorder(delay=0.3)
+    model = _make_model(recorder)
+    start = threading.Barrier(2, timeout=5)
+
+    def run(local):
+        start.wait()
+        # the lock path passes no keyword, as a direct loader call does
+        kwargs = {'_local_cpu': True} if local else {}
+        return SentenceTransformerLoader.inference(model, _make_preprocessed(), {'device': 'cpu'}, **kwargs)
+
+    map_in_threads(run, [True, False], workers=2)
+    assert recorder.calls == 2
+    assert recorder.max_active == 1
+
+
+def test_the_check_runs_once_per_model(monkeypatch, fake_torch, cpu_pool):
+    """A model is checked at its first local CPU forward only, and its entry goes when it is collected."""
+    cpu_pool(2)
+    checks = []
+    monkeypatch.setattr(
+        SentenceTransformerLoader,
+        '_local_cpu_forward_calls',
+        classmethod(lambda cls, model: checks.append(id(model)) or cls.LOCAL_CPU_CALLS),
+    )
+    model, other = _make_model(_ForwardRecorder(delay=0)), _make_model(_ForwardRecorder(delay=0))
+    for m in (model, model, other, model):
+        SentenceTransformerLoader.inference(m, _make_preprocessed(), {'device': 'cpu'}, _local_cpu=True)
+    assert checks == [id(model), id(other)]
+    model_id = id(model)
+    del model, m
+    gc.collect()
+    assert model_id not in SentenceTransformerLoader._model_calls
+
+
+def _defined_in(namespace):
+    """Build a ``forward`` that the check sees as defined in the module named ``namespace``.
+
+    Args:
+        namespace: The module name its globals carry, which is what the check reads.
+
+    Returns:
+        A function that takes any arguments and returns None.
+    """
+
+    def forward(self, *args, **kwargs):
+        return None
+
+    return types.FunctionType(forward.__code__, {'__name__': namespace}, 'forward')
+
+
+def _submodule(module='torch.nn.modules.linear', training=False, forward=None):
+    """Build a submodule as the check reads it: its class's module and forward, its mode and its hooks.
+
+    Args:
+        module: The module its class comes from.
+        training: Whether it is in training mode.
+        forward: Its class's ``forward``; by default one defined in torch, as a subclass of a torch
+            module inherits it.
+
+    Returns:
+        The submodule.
+    """
+    forward = forward or _defined_in('torch.nn.modules.linear')
+    sub = type('Linear', (), {'__module__': module, 'forward': forward})()
+    sub.training = training
+    sub._forward_hooks = {}
+    sub._forward_pre_hooks = {}
+    return sub
+
+
+@pytest.fixture
+def native_bert(monkeypatch, fake_torch):
+    """A stand-in for a loaded stock BertModel, so the check runs without torch or model files."""
+    fp32 = object()
+    monkeypatch.setattr(_FakeTorch, 'float32', fp32, raising=False)
+
+    class BertModel:
+        __module__ = 'transformers.models.bert.modeling_bert'
+        forward = _defined_in('transformers.models.bert.modeling_bert')
+
+        def __init__(self):
+            self.training = False
+            self.config = types.SimpleNamespace(
+                is_decoder=False, add_cross_attention=False, _attn_implementation='sdpa'
+            )
+            self._forward_hooks = {}
+            self._forward_pre_hooks = {}
+            self.weight = types.SimpleNamespace(
+                device=types.SimpleNamespace(type='cpu'), dtype=fp32, is_floating_point=lambda: True
+            )
+            self.extra_modules = [_submodule(), _submodule(module='transformers.activations')]
+
+        def modules(self):
+            return iter([self, *self.extra_modules])
+
+        def parameters(self):
+            return iter([self.weight])
+
+        def buffers(self):
+            return iter([])
+
+    module = types.ModuleType(BertModel.__module__)
+    module.BertModel = BertModel
+    monkeypatch.setitem(sys.modules, BertModel.__module__, module)
+    return _make_model(BertModel())
+
+
+def test_a_stock_bert_encoder_qualifies(native_bert):
+    """A stock BertModel encoder in evaluation mode with float32 CPU tensors gets LOCAL_CPU_CALLS."""
+    calls = SentenceTransformerLoader._local_cpu_forward_calls(native_bert)
+    assert calls == SentenceTransformerLoader.LOCAL_CPU_CALLS
+
+
+@pytest.mark.parametrize(
+    'change',
+    [
+        'decoder',
+        'cross_attention',
+        'training_submodule',
+        'hook',
+        'pre_hook',
+        'forward',
+        'float16',
+        'device',
+        'custom',
+        'max_norm',
+        'global_hook',
+        'global_pre_hook',
+        'attention',
+        'activations_sibling',
+        'class_forward',
+        'class_wrapper',
+        'spoofed_module',
+    ],
+)
+def test_anything_but_a_stock_encoder_keeps_one_call(monkeypatch, native_bert, change):
+    """What the loaded model does, not its name or the machine, decides: each change keeps one forward at a time.
+
+    Args:
+        monkeypatch: The test's monkeypatch fixture.
+        change: What differs from a stock encoder.
+    """
+    transformer = native_bert[0].auto_model
+    global_hooks = {'global_hook': '_global_forward_hooks', 'global_pre_hook': '_global_forward_pre_hooks'}
+    if change in global_hooks:
+        hooks = {'_global_forward_hooks': {}, '_global_forward_pre_hooks': {}}
+        hooks[global_hooks[change]][0] = lambda *args: None
+        modules = types.SimpleNamespace(module=types.SimpleNamespace(**hooks))
+        monkeypatch.setattr(_FakeNN, 'modules', modules, raising=False)
+    if change == 'decoder':
+        transformer.config.is_decoder = True
+    elif change == 'cross_attention':
+        transformer.config.add_cross_attention = True
+    elif change == 'training_submodule':
+        transformer.extra_modules.append(_submodule(training=True))
+    elif change == 'hook':
+        transformer._forward_hooks[0] = lambda *args: None
+    elif change == 'pre_hook':
+        transformer._forward_pre_hooks[0] = lambda *args: None
+    elif change == 'forward':
+        transformer.forward = lambda **inputs: None
+    elif change == 'float16':
+        transformer.weight.dtype = object()  # any dtype but float32
+    elif change == 'device':
+        transformer.weight.device.type = 'cuda'
+    elif change == 'custom':
+        transformer.extra_modules.append(_submodule(module='custom_layers'))
+    elif change == 'max_norm':
+        embedding = _submodule(module='torch.nn.modules.sparse')
+        embedding.max_norm = 1.0  # renormalises its weight in place during forward
+        transformer.extra_modules.append(embedding)
+    elif change == 'attention':
+        transformer.config._attn_implementation = 'flash_attention_2'
+    elif change == 'activations_sibling':
+        transformer.extra_modules.append(_submodule(module='transformers.activations_tf'))
+    elif change == 'class_forward':
+        # a plain function set on the class, as BertIntermediate.forward = ... would be
+        monkeypatch.setattr(type(transformer), 'forward', lambda self, **inputs: None)
+    elif change == 'class_wrapper':
+        # functools.wraps copies the stock forward's name and __module__, not where the wrapper is defined
+        layer = type(transformer.extra_modules[0])
+        stock = layer.forward
+
+        @functools.wraps(stock)
+        def wrapped(self, *args, **kwargs):
+            return stock(self, *args, **kwargs)
+
+        monkeypatch.setattr(layer, 'forward', wrapped)
+    elif change == 'spoofed_module':
+        # the class claims a torch module, but its forward is defined here
+        transformer.extra_modules.append(
+            _submodule(module='torch.nn.modules.spoof', forward=lambda self, *args, **kwargs: None)
+        )
+    assert SentenceTransformerLoader._local_cpu_forward_calls(native_bert) == 1
+
+
+def test_a_model_that_cannot_be_weak_referenced_keeps_one_call(native_bert):
+    """A qualified model whose entry can never be dropped stays at one call, so an object given its id inherits no more."""
+    model = list(native_bert)  # a plain list cannot be weak-referenced
+    assert SentenceTransformerLoader._local_cpu_forward_calls(model) == SentenceTransformerLoader.LOCAL_CPU_CALLS
+    try:
+        assert SentenceTransformerLoader._local_cpu_calls(model) == 1
+        assert SentenceTransformerLoader._model_calls[id(model)] == 1
+    finally:
+        SentenceTransformerLoader._drop_model_lock(id(model))
+
+
+def test_a_custom_bert_class_keeps_one_call(native_bert):
+    """A subclass with BERT's API is not the stock class, so it proves nothing about its forward."""
+
+    class CustomBert(type(native_bert[0].auto_model)):
+        pass
+
+    native_bert[0].auto_model = CustomBert()
+    assert SentenceTransformerLoader._local_cpu_forward_calls(native_bert) == 1
+
+
+def test_a_failed_check_keeps_one_call_with_a_warning(monkeypatch, native_bert):
+    """A check that cannot read the model gives one call at a time and a warning, never a failed forward."""
+    del native_bert[0].auto_model.config.add_cross_attention
+    warnings = []
+    monkeypatch.setattr(
+        sentence_transformers_module,
+        'logger',
+        types.SimpleNamespace(warning=lambda *args: warnings.append(args), info=lambda *args: None),
+    )
+    assert SentenceTransformerLoader._local_cpu_calls(native_bert) == 1
+    assert len(warnings) == 1
+
+
+def test_a_qualified_model_is_logged_once_with_the_transformers_version(monkeypatch, native_bert):
+    """The first check of a qualified model logs its calls and the transformers version, once."""
+    infos = []
+    monkeypatch.setattr(
+        sentence_transformers_module,
+        'logger',
+        types.SimpleNamespace(info=lambda *args: infos.append(args), warning=lambda *args: None),
+    )
+    monkeypatch.setitem(sys.modules, 'transformers', types.SimpleNamespace(__version__='9.9.9'))
+    for _ in range(2):
+        assert SentenceTransformerLoader._local_cpu_calls(native_bert) == SentenceTransformerLoader.LOCAL_CPU_CALLS
+    assert [args[1:] for args in infos] == [(SentenceTransformerLoader.LOCAL_CPU_CALLS, '9.9.9')]

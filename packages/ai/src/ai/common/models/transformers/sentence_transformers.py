@@ -10,8 +10,10 @@ This module provides:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
+import sys
 import threading
 import time
 import weakref
@@ -22,7 +24,8 @@ if TYPE_CHECKING:
 
 from ai.web.metrics import metrics
 from ai.common.utils.cuda_utils import model_gpu_gb
-from ..base import BaseLoader, get_model_server_address, ModelClient
+from ..base import BaseLoader, get_model_server_address, is_model_server_enabled, ModelClient
+from ..device_budget import device_budget
 
 logger = logging.getLogger('rocketlib.models.sentence_transformers')
 
@@ -46,12 +49,23 @@ class SentenceTransformerLoader(BaseLoader):
     _REQUIREMENTS_FILE = os.path.join(os.path.dirname(__file__), 'requirements_sentence_transformers.txt')
     _DEFAULTS: dict = {}  # SentenceTransformers typically only vary by model_name
 
-    # Per-model locks for thread safety. A single torch module cannot run
+    # Forwards of one qualified model that may run at once on the local CPU,
+    # within the process-wide slots of device_budget('cpu').
+    LOCAL_CPU_CALLS = 4
+
+    # Per-model locks for thread safety. A torch module is not known to run
     # concurrent forward passes safely, so the forward call in inference() is
-    # serialized per model instance. Tokenization, tensor transfer, pooling and
-    # postprocess all stay outside the lock and are free to overlap.
+    # serialized per model instance. On the local facade's CPU path the forward
+    # first takes a place in device_budget('cpu'). A stock BERT encoder, whose
+    # forward only reads the module, then skips its lock and may run up to
+    # LOCAL_CPU_CALLS forwards at once (_model_calls, checked once per model).
+    # Any other model takes its lock inside the place, so its forwards never
+    # overlap, whichever path they come from. Tokenization, tensor transfer,
+    # pooling and postprocess all stay outside the gate and are free to overlap.
     _model_locks: Dict[int, threading.Lock] = {}
-    _locks_lock = threading.Lock()
+    _model_calls: Dict[int, int] = {}
+    # A model's weakref finalizer can run during an allocation inside this registry.
+    _locks_lock = threading.RLock()
 
     # Per-thread carrier for time spent waiting on a model lock. inference()
     # records it here so the local encode path can bill contention as queue
@@ -83,10 +97,105 @@ class SentenceTransformerLoader(BaseLoader):
             return lock
 
     @classmethod
+    def _local_cpu_calls(cls, model: Any) -> int:
+        """How many forwards of a model may run at once on the local CPU path, checked once per model.
+
+        Kept in ``_model_calls`` like the lock registry. Any error while checking the model
+        gives 1, with a warning: the check must not fail a forward that runs one at a time
+        today. A model that cannot be weak-referenced gives 1 too: its entry is never dropped,
+        so a later object given its id inherits the entry.
+        """
+        model_id = id(model)
+        with cls._locks_lock:
+            calls = cls._model_calls.get(model_id)
+            if calls is None:
+                try:
+                    calls = cls._local_cpu_forward_calls(model)
+                except Exception as e:
+                    logger.warning('Cannot check the model for concurrent CPU forwards (%s); one at a time', e)
+                    calls = 1
+                try:
+                    weakref.finalize(model, cls._drop_model_lock, model_id)
+                except TypeError:
+                    # the model cannot be weak-referenced, so its entry would never be dropped: one call
+                    calls = 1
+                cls._model_calls[model_id] = calls
+                if calls > 1:
+                    version = getattr(sys.modules.get('transformers'), '__version__', 'unknown')
+                    logger.info('Up to %d CPU forwards of this model at once (transformers %s)', calls, version)
+            return calls
+
+    @classmethod
+    def _local_cpu_forward_calls(cls, model: Any) -> int:
+        """Choose from the loaded implementation, never a machine or model name.
+
+        Only a stock Hugging Face ``BertModel`` encoder qualifies: in evaluation mode, built
+        from torch and BERT modules only, with no ``forward`` set on an instance and no class
+        ``forward`` defined outside torch and transformers, no forward hooks (its own or global)
+        and no ``max_norm`` embedding, with eager or SDPA attention or no attention setting at all,
+        and with CPU tensors, float32 where floating. Its forward then only reads the module.
+        The check assumes the loaded model is not trained, moved or changed afterwards.
+
+        Args:
+            model: The loaded SentenceTransformer.
+
+        Returns:
+            ``LOCAL_CPU_CALLS`` if the model qualifies, else 1.
+        """
+        transformer = model[0].auto_model
+        # Avoid importing another model backend for custom implementations.
+        if (
+            type(transformer).__module__ != 'transformers.models.bert.modeling_bert'
+            or type(transformer).__name__ != 'BertModel'
+        ):
+            return 1
+
+        from transformers.models.bert.modeling_bert import BertModel
+        from ai.common.torch import torch
+
+        if (
+            type(transformer) is not BertModel
+            or transformer.config.is_decoder
+            or transformer.config.add_cross_attention
+            or getattr(transformer.config, '_attn_implementation', None) not in (None, 'eager', 'sdpa')
+        ):
+            return 1
+        # Hooks registered for every module (kept in torch.nn.modules.module) run in this forward too.
+        registry = getattr(getattr(torch.nn, 'modules', None), 'module', None)
+        if getattr(registry, '_global_forward_hooks', None) or getattr(registry, '_global_forward_pre_hooks', None):
+            return 1
+        for module in transformer.modules():
+            origin = type(module).__module__
+            # The namespace the class's forward was defined in. A functools.wraps wrapper copies
+            # __module__ but not this, so a forward that other code defined and set on a class
+            # shows here, as does the own forward of a class that only claims a torch module.
+            forward = getattr(type(module), 'forward', None)
+            defined_in = getattr(forward, '__globals__', {}).get('__name__', '')
+            if (
+                module.training
+                or not (
+                    origin == 'transformers.activations'
+                    or origin.startswith(('torch.nn.', 'transformers.models.bert.'))
+                )
+                or 'forward' in module.__dict__
+                or not defined_in.startswith(('torch.', 'transformers.'))
+                or module._forward_hooks
+                or module._forward_pre_hooks
+                # an Embedding with max_norm renormalises its weight in place during forward
+                or getattr(module, 'max_norm', None) is not None
+            ):
+                return 1
+        for tensor in (*transformer.parameters(), *transformer.buffers()):
+            if tensor.device.type != 'cpu' or (tensor.is_floating_point() and tensor.dtype != torch.float32):
+                return 1
+        return cls.LOCAL_CPU_CALLS
+
+    @classmethod
     def _drop_model_lock(cls, model_id: int) -> None:
-        """Remove a retired model's lock entry."""
+        """Remove a retired model's lock and CPU calls entries."""
         with cls._locks_lock:
             cls._model_locks.pop(model_id, None)
+            cls._model_calls.pop(model_id, None)
 
     @classmethod
     def _add_lock_wait(cls, wait_ms: float) -> None:
@@ -217,15 +326,22 @@ class SentenceTransformerLoader(BaseLoader):
         preprocessed: Dict[str, Any],
         metadata: Optional[Dict] = None,
         stream: Optional[Any] = None,
+        *,
+        _local_cpu: bool = False,
     ) -> Any:
         """
-        Run inference on GPU.
+        Run inference on the model's device.
 
         Args:
             model: The SentenceTransformer model or ModelInstanceWrapper
             preprocessed: Output from preprocess()
             metadata: Optional metadata dict
             stream: Optional CUDA stream
+            _local_cpu: Set by the local facade (``SentenceTransformer``). It has no effect on a
+                model server wrapper (an object with ``model_obj``), on a device other than the
+                CPU, or with ``--modelserver``, where the forward keeps the model's lock. Otherwise
+                the forward takes a place in ``device_budget('cpu')``, and a model that runs one
+                forward at a time also takes its lock inside that place.
 
         Returns:
             Embedding tensor
@@ -246,23 +362,33 @@ class SentenceTransformerLoader(BaseLoader):
         # Serialize the forward pass per model instance. Callers that share one
         # model across threads (local wrapper and model server alike) would
         # otherwise interleave forward passes on the same module and read back
-        # embeddings computed for another thread's batch.
-        model_lock = SentenceTransformerLoader._get_model_lock(actual_model)
+        # embeddings computed for another thread's batch. The local facade on
+        # the CPU first takes a place in the process-wide CPU slots, with as
+        # many calls at once as the model qualifies for. A stock BERT encoder
+        # (more than one call) takes no lock. Any other model (one call) also
+        # takes its lock inside the place, so a forward that reaches it another
+        # way (a direct loader call) cannot overlap. With --modelserver
+        # device_budget() admits every call, so a facade forced onto the local
+        # CPU keeps the lock.
+        if _local_cpu and not hasattr(model, 'model_obj') and device == 'cpu' and not is_model_server_enabled():
+            calls = SentenceTransformerLoader._local_cpu_calls(actual_model)
+            gates = [device_budget('cpu').reserve(None, model=actual_model, calls=calls)]
+            if calls == 1:
+                gates.append(SentenceTransformerLoader._get_model_lock(actual_model))
+        else:
+            gates = [SentenceTransformerLoader._get_model_lock(actual_model)]
 
         with torch.no_grad():
             # Transfer touches only this thread's tensors, so it stays unlocked.
             inputs_gpu = {k: v.to(device) for k, v in encoded.items()}
 
-            # Only the forward call shares mutable module state.
+            # Only the forward call shares mutable module state; the wait ends once every gate is entered.
             t_wait = time.perf_counter()
-            model_lock.acquire()
-            wait_ms = (time.perf_counter() - t_wait) * 1000
-            try:
+            with contextlib.ExitStack() as entered:
+                for gate in gates:
+                    entered.enter_context(gate)
+                SentenceTransformerLoader._add_lock_wait((time.perf_counter() - t_wait) * 1000)
                 outputs = transformer_model(**inputs_gpu)
-            finally:
-                model_lock.release()
-
-            SentenceTransformerLoader._add_lock_wait(wait_ms)
 
             # Pooling and normalization read this thread's own output tensors
             # and are safe to overlap with another thread's forward pass.
@@ -477,7 +603,7 @@ class SentenceTransformer:
             # forward pass is contention, not compute, so it is billed as
             # queue wait instead of inflating gpu_compute.
             t0 = time.perf_counter()
-            raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata)
+            raw_output = SentenceTransformerLoader.inference(self._model, preprocessed, self._metadata, _local_cpu=True)
             elapsed = (time.perf_counter() - t0) * 1000
             wait = SentenceTransformerLoader.take_lock_wait()
             t_gpu += max(elapsed - wait, 0.0)

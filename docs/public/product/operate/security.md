@@ -45,9 +45,9 @@ inherit the engine's full environment, only an allowlist:
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
 - what nodes and the task itself use directly: `RR_STORE_URL`,
   `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
-  `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
-  the API-key fallbacks individual node pages document (such as
-  `OPENAI_API_KEY`)
+  `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `RR_CPU_INFERENCE_SLOTS`,
+  `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and the API-key fallbacks individual node
+  pages document (such as `OPENAI_API_KEY`)
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.

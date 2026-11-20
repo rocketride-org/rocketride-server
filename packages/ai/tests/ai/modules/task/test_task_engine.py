@@ -1402,6 +1402,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             'RR_SIGNING_KEY': 'sign',
             'RR_OAUTH_BROKER_URL': 'https://broker.example',
             'RR_PROC_PRIVATE': '1',
+            'RR_CPU_INFERENCE_SLOTS': '2',
             'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
             'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
             'NOTION_API_KEY': 'notion',
@@ -1429,6 +1430,7 @@ def test_filter_subprocess_env_is_an_allowlist():
         'RR_SIGNING_KEY': 'sign',
         'RR_OAUTH_BROKER_URL': 'https://broker.example',
         'RR_PROC_PRIVATE': '1',  # tasks must see the opt-in to act on it
+        'RR_CPU_INFERENCE_SLOTS': '2',  # and the CPU slots setting to use it
         'AWS_ROLE_ARN': 'arn:aws:iam::1:role/engine',
         'MEDIA_TOOLKIT_FFMPEG': '/opt/ffmpeg',
         'NOTION_API_KEY': 'notion',
