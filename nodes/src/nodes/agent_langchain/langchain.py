@@ -37,6 +37,10 @@ from ai.common.schema import Question
 from ai.common.utils import langchain_messages_to_transcript, normalize_bound_tools
 from ai.common.utils import safe_str
 
+# The finish reason on the message the model wrapper gives when the model never followed
+# the protocol, so the run reports an error instead of a finished answer.
+_UNPARSEABLE = 'unparseable'
+
 
 # ────────────────────────────────────────────────────────────────────────────────
 # FRAMEWORK WRAPPER BUILDERS — DRIVER-PRIVATE MODULE HELPERS
@@ -103,7 +107,8 @@ def _build_langchain_llm(agent_base: AgentBase, context: AgentContext) -> Any:
                 generations=[
                     ChatGeneration(
                         message=AIMessage(
-                            content='[agent_langchain] The language model produced unparseable output after 3 attempts. The task may be incomplete.'
+                            content='[agent_langchain] The language model produced unparseable output after 3 attempts. The task may be incomplete.',
+                            response_metadata={'finish_reason': _UNPARSEABLE},
                         )
                     )
                 ]
@@ -306,12 +311,16 @@ class LangChainDriver(AgentBase):
             raise RuntimeError('LangChain agent {} failed: {}: {}'.format(stage, type(e).__name__, safe_str(e))) from e
 
         final_text = ''
+        # LangGraph raises at its recursion limit, so a graph that returned finished on its own.
+        stop_reason = 'done'
         try:
             msgs = state.get('messages') if isinstance(state, dict) else None
             if isinstance(msgs, list) and msgs:
                 last = msgs[-1]
                 if isinstance(last, AIMessage):
                     final_text = safe_str(getattr(last, 'content', ''))
+                    if last.response_metadata.get('finish_reason') == _UNPARSEABLE:
+                        stop_reason = 'error'
                 else:
                     final_text = safe_str(getattr(last, 'content', last))
             else:
@@ -319,9 +328,8 @@ class LangChainDriver(AgentBase):
         except Exception:
             final_text = safe_str(state)
 
-        # LangGraph raises at its recursion limit, so a graph that returned finished on its own.
         if isinstance(state, dict):
-            state = {**state, 'stop_reason': 'done'}
+            state = {**state, 'stop_reason': stop_reason}
         return safe_str(final_text), state
 
 

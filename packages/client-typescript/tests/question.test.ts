@@ -108,6 +108,16 @@ describe('Question turn mode', () => {
 		expect(answer.agentStopReason).toBe('max_steps');
 	});
 
+	it.each([
+		[undefined, undefined],
+		[['ready'], 'unknown'],
+		['max_tokens', 'unknown'],
+	])('reads a stop_reason of %j as %j', (stop_reason, expected) => {
+		const answer = Answer.fromResult({ answers: ['C = 42'], stop_reason } as never);
+
+		expect(answer.agentStopReason).toBe(expected);
+	});
+
 	it('names the key when the result has no entry under it', () => {
 		expect(() => Answer.fromResult({} as never)).toThrow("no 'answers' entry in the result");
 		expect(() => Answer.fromResult({ answers: [] } as never)).toThrow("no 'answers' entry in the result");

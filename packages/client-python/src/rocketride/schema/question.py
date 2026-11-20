@@ -53,7 +53,7 @@ Advanced Usage:
 import json
 import textwrap
 from enum import Enum
-from typing import Annotated, Literal, Union, List, Dict, Optional, Any
+from typing import Annotated, Literal, Union, List, Dict, Optional, Any, get_args
 from pydantic import BaseModel, Field, TypeAdapter, field_validator, model_serializer, model_validator
 from .doc import Doc
 from .doc_filter import DocFilter
@@ -142,9 +142,10 @@ StopReason = Literal['end_turn', 'tool_use', 'max_tokens', 'stop_sequence', 'ref
 
 # Why an agent run stopped. Only `done` means the answer is the agent's finished one:
 # `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
-# planning) answer with a best effort from the work so far, `error` (the run failed,
-# or its answer was refused) answers with the error message or a best effort, and
-# `unknown` means the agent did not say how its run ended.
+# planning) answer with a best effort from the work so far, though the LlamaIndex
+# agent's `max_steps` answer only says that it stopped. `error` (the run failed, or its
+# answer was refused) answers with the error message or a best effort, and `unknown`
+# means the agent did not say how its run ended.
 AgentStopReason = Literal['done', 'max_steps', 'empty_plan', 'error', 'unknown']
 
 
@@ -198,7 +199,9 @@ class Answer(BaseModel):
     message: Optional[AssistantMessage] = None
     stopReason: Optional[StopReason] = None
     error: Optional[AnswerError] = None
-    # Set by an agent: why its run stopped. A result carries it as `stop_reason`.
+    # Why the agent run behind the answer stopped. From `fromResult` it is the result's
+    # `stop_reason`, which covers the whole result: when several agents answered, it is the
+    # first reason other than `done` and may belong to another agent's answer.
     agentStopReason: Optional[AgentStopReason] = None
 
     @field_validator('answer', mode='before')
@@ -240,7 +243,8 @@ class Answer(BaseModel):
         Returns:
             Answer: With `message` and `stopReason` set, or `error` set. A text entry
             (an engine that predates turn mode answers as text) gives a text Answer.
-            `agentStopReason` is the result's `stop_reason`, when an agent wrote one.
+            `agentStopReason` is the result's `stop_reason`, when an agent wrote one, and
+            `unknown` when it is not a reason this client knows.
 
         Raises:
             ValueError: If `result` has no entry under `key` (a blocked guardrail, or a wrong key).
@@ -254,7 +258,9 @@ class Answer(BaseModel):
         else:
             answer = cls()
             answer.setAnswer(entry)
-        answer.agentStopReason = result.get('stop_reason')
+        reason = result.get('stop_reason')
+        if reason is not None:
+            answer.agentStopReason = reason if reason in get_args(AgentStopReason) else 'unknown'
         return answer
 
     def parsePython(self, value: str) -> Any:

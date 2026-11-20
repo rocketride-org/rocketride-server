@@ -84,7 +84,8 @@ When an agent answered, `response['stop_reason']` says why its run stopped. Only
 is a finished answer:
 
 - `max_steps`: the agent ran out of steps (`max_waves` on the Wave agent) and answered
-  with a best effort from the work so far.
+  with a best effort from the work so far. The LlamaIndex agent's answer only says that
+  it stopped.
 - `empty_plan`: the Wave agent's model stopped planning without finishing, and the answer
   is a best effort too.
 - `error`: the run failed or its answer was refused. The answer is the error message,

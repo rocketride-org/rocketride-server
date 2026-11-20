@@ -139,8 +139,9 @@ AGENT_TOOL_OUTPUT_SCHEMA: Dict[str, Any] = {
                     'enum': list(get_args(AgentStopReason)),
                     'description': (
                         'Why the run stopped. Only done is a finished answer: max_steps and empty_plan '
-                        'are a best effort from the work so far, error is the error message or a best '
-                        'effort, and unknown means the agent did not say how its run ended'
+                        'are a best effort from the work so far (from LlamaIndex, max_steps only says it stopped), '
+                        'error is the error message or a best effort, and unknown means the agent did not '
+                        'say how its run ended'
                     ),
                 },
             },

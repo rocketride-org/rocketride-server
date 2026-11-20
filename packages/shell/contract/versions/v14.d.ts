@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV14 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-19T23:53:28.263Z
-// Source commit: 38d416a0bbcc7467f45e7218e900890a4b66c012
+// Generated:     2026-11-20T19:31:46.023Z
+// Source commit: f191288bc4061b8323d45c944acfa1bd82693a56
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -648,9 +648,10 @@ export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence
 /**
  * Why an agent run stopped. Only `done` means the answer is the agent's finished one:
  * `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
- * planning) answer with a best effort from the work so far, `error` (the run failed,
- * or its answer was refused) answers with the error message or a best effort, and
- * `unknown` means the agent did not say how its run ended.
+ * planning) answer with a best effort from the work so far, though the LlamaIndex
+ * agent's `max_steps` answer only says that it stopped. `error` (the run failed, or its
+ * answer was refused) answers with the error message or a best effort, and `unknown`
+ * means the agent did not say how its run ended.
  */
 export type AgentStopReason = "done" | "max_steps" | "empty_plan" | "error" | "unknown";
 /**
@@ -724,13 +725,18 @@ export declare class Answer {
     error?: AnswerError;
     /** Token usage of the turn. */
     tokens?: Record<string, unknown>;
-    /** Set by an agent: why its run stopped. A result carries it as `stop_reason`. */
+    /**
+     * Why the agent run behind the answer stopped. From `Answer.fromResult` it is the result's
+     * `stop_reason`, which covers the whole result: when several agents answered, it is the
+     * first reason other than `done` and may belong to another agent's answer.
+     */
     agentStopReason?: AgentStopReason;
     constructor(expectJson?: boolean);
     /**
      * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
      * A text entry, which an engine that predates turn mode returns, gives a text Answer.
-     * `agentStopReason` is the result's `stop_reason`, when an agent wrote one.
+     * `agentStopReason` is the result's `stop_reason`, when an agent wrote one, and `unknown`
+     * when it is not a reason this client knows.
      */
     static fromResult(result: PIPELINE_RESULT, key?: string): Answer;
     /** The calls in this turn, in the order the model made them. Empty for a text answer. */

@@ -111,8 +111,11 @@ class LlamaIndexDriver(AgentBase):
 
             try:
                 step = parser.parse(raw)
-            except Exception:
-                # Unparseable output means the model answered directly; strip scaffolding.
+            except Exception as e:
+                # The parser reads any reply with an `Action:` as a tool call, so this one was a broken call.
+                if 'Action:' in raw:
+                    raise ValueError(f'The model made a tool call that could not be parsed: {e}') from e
+                # Other unparseable output means the model answered directly; strip scaffolding.
                 return _clean_answer(raw), {'steps': stack, 'stop_reason': 'done'}
 
             if step.is_done:

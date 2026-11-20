@@ -1,18 +1,18 @@
 /**
  * MIT License
- * 
+ *
  * Copyright (c) 2026 Aparavi Software AG
- * 
+ *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
  * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
- * 
+ *
  * The above copyright notice and this permission notice shall be included in all
  * copies or substantial portions of the Software.
- * 
+ *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
@@ -89,11 +89,15 @@ export type StopReason = 'end_turn' | 'tool_use' | 'max_tokens' | 'stop_sequence
 /**
  * Why an agent run stopped. Only `done` means the answer is the agent's finished one:
  * `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
- * planning) answer with a best effort from the work so far, `error` (the run failed,
- * or its answer was refused) answers with the error message or a best effort, and
- * `unknown` means the agent did not say how its run ended.
+ * planning) answer with a best effort from the work so far, though the LlamaIndex
+ * agent's `max_steps` answer only says that it stopped. `error` (the run failed, or its
+ * answer was refused) answers with the error message or a best effort, and `unknown`
+ * means the agent did not say how its run ended.
  */
 export type AgentStopReason = 'done' | 'max_steps' | 'empty_plan' | 'error' | 'unknown';
+
+/** Every `AgentStopReason`, so a value read off the wire can be checked against them. */
+const AGENT_STOP_REASONS: Record<AgentStopReason, true> = { done: true, max_steps: true, empty_plan: true, error: true, unknown: true };
 
 /**
  * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
@@ -174,7 +178,11 @@ export class Answer {
 	error?: AnswerError;
 	/** Token usage of the turn. */
 	tokens?: Record<string, unknown>;
-	/** Set by an agent: why its run stopped. A result carries it as `stop_reason`. */
+	/**
+	 * Why the agent run behind the answer stopped. From `Answer.fromResult` it is the result's
+	 * `stop_reason`, which covers the whole result: when several agents answered, it is the
+	 * first reason other than `done` and may belong to another agent's answer.
+	 */
 	agentStopReason?: AgentStopReason;
 
 	constructor(expectJson = false) {
@@ -184,7 +192,8 @@ export class Answer {
 	/**
 	 * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
 	 * A text entry, which an engine that predates turn mode returns, gives a text Answer.
-	 * `agentStopReason` is the result's `stop_reason`, when an agent wrote one.
+	 * `agentStopReason` is the result's `stop_reason`, when an agent wrote one, and `unknown`
+	 * when it is not a reason this client knows.
 	 */
 	static fromResult(result: PIPELINE_RESULT, key = 'answers'): Answer {
 		const entries = (result[key] ?? []) as unknown[];
@@ -193,7 +202,10 @@ export class Answer {
 			throw new Error(`no '${key}' entry in the result`);
 		}
 		const answer = new Answer();
-		answer.agentStopReason = result.stop_reason;
+		const reason: unknown = result.stop_reason;
+		if (reason != null) {
+			answer.agentStopReason = typeof reason === 'string' && Object.prototype.hasOwnProperty.call(AGENT_STOP_REASONS, reason) ? (reason as AgentStopReason) : 'unknown';
+		}
 		if (typeof entry === 'string') {
 			answer.setAnswer(entry);
 			return answer;
@@ -340,13 +352,15 @@ export class Question {
 	/** Tools the model may call. Turn mode only. */
 	tools: Tool[] = [];
 
-	constructor(options: {
-		type?: QuestionType;
-		filter?: DocFilter;
-		expectJson?: boolean;
-		cachePrefix?: boolean;
-		role?: string;
-	} = {}) {
+	constructor(
+		options: {
+			type?: QuestionType;
+			filter?: DocFilter;
+			expectJson?: boolean;
+			cachePrefix?: boolean;
+			role?: string;
+		} = {}
+	) {
 		this.type = options.type || QuestionType.QUESTION;
 		this.filter = options.filter || {
 			fullTables: false,
@@ -356,7 +370,7 @@ export class Question {
 			useQuickRank: false,
 			useGroupRank: false,
 			followUpQuestions: 5,
-			context: false
+			context: false,
 		};
 		this.expectJson = options.expectJson || false;
 		this.cachePrefix = options.cachePrefix || false;
@@ -369,7 +383,7 @@ export class Question {
 	addInstruction(title: string, instruction: string): void {
 		this.instructions.push({
 			subtitle: title,
-			instructions: instruction
+			instructions: instruction,
 		});
 	}
 
@@ -377,13 +391,11 @@ export class Question {
 	 * Add an example to show the AI the kind of response you want.
 	 */
 	addExample(given: string, result: string | object | unknown[]): void {
-		const resultString = typeof result === 'object'
-			? JSON.stringify(result)
-			: String(result);
+		const resultString = typeof result === 'object' ? JSON.stringify(result) : String(result);
 
 		this.examples.push({
 			given,
-			result: resultString
+			result: resultString,
 		});
 	}
 
@@ -509,7 +521,7 @@ export class Question {
 				this.documents.push({
 					type: 'Document',
 					page_content: item,
-					metadata: { objectId: '', chunkId: 0 }
+					metadata: { objectId: '', chunkId: 0 },
 				});
 			} else {
 				this.documents.push(item);
@@ -582,12 +594,12 @@ export class Question {
 		if (this.instructions.length === 0) {
 			addPromptInstruction({
 				subtitle: 'Answer the following questions',
-				instructions: 'Answer the following questions.'
+				instructions: 'Answer the following questions.',
 			});
 			if (this.documents.length > 0) {
 				addPromptInstruction({
 					subtitle: 'Documents',
-					instructions: 'Use the provided documents as context for your answer.'
+					instructions: 'Use the provided documents as context for your answer.',
 				});
 			}
 		}
@@ -608,7 +620,7 @@ export class Question {
                     - Ensure your answer is strictly valid JSON format.
                     - Double check the JSON response to ensure it is valid.
                     - Enclose the json with \`\`\`\`json\` and \` \`\`\` \` tags.
-                    `
+                    `,
 			});
 
 			if (hasPreviousJsonFailed) {
@@ -617,7 +629,7 @@ export class Question {
 					instructions: `
                         - Your previous response returned invalid JSON.
                         - Examine your JSON and ensure it is complete and follows the JSON standards.
-                        `
+                        `,
 				});
 			}
 		}
@@ -626,7 +638,7 @@ export class Question {
 		if (this.examples.length > 0) {
 			addPromptInstruction({
 				subtitle: 'Examples',
-				instructions: ''
+				instructions: '',
 			});
 			for (const example of this.examples) {
 				addPromptExample(example);
@@ -705,7 +717,7 @@ export class Question {
 			filter: data.filter as DocFilter,
 			expectJson: data.expectJson as boolean,
 			cachePrefix: data.cachePrefix as boolean,
-			role: data.role as string
+			role: data.role as string,
 		});
 
 		question.instructions = (data.instructions || []) as QuestionInstruction[];

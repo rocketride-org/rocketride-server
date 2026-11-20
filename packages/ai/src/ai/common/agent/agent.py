@@ -359,8 +359,8 @@ class AgentBase(ABC):
         - raw: framework-native output object/state for trace/debugging
 
         `raw` is a dict whose `stop_reason` says why the run stopped: `done` once
-        the framework reports the run finished, `max_steps` for a best effort
-        after running out of steps. A run whose `raw` gives no recognized reason
+        the framework reports the run finished, `max_steps` after running
+        out of steps. A run whose `raw` gives no recognized reason
         reports `unknown`.
         """
         raise NotImplementedError

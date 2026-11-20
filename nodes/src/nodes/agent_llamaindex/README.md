@@ -137,8 +137,9 @@ through LlamaIndex — connected tools are wrapped as metadata-only
 
 The loop runs up to **10 iterations**. If no final answer arrives within that
 budget the node returns `"Agent stopped after reaching the maximum number of
-reasoning steps."` Output that can't be parsed as a ReAct step is treated as a
-direct answer (a leading `Thought:` is stripped so scaffolding doesn't leak to
+reasoning steps."` A tool call that can't be parsed (a reply with `Action:`)
+fails the run with `error`. Other output that can't be parsed as a ReAct step is
+treated as a direct answer (a leading `Thought:` is stripped so scaffolding doesn't leak to
 the reader). A tool call that raises isn't fatal — the error is fed back to the
 model as the observation (`{tool, error, type}`) so it can recover.
 
