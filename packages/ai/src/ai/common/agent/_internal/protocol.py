@@ -61,6 +61,9 @@ _ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{')
 #: needed most when the envelope is too broken to parse.
 _ATTEMPTED_TYPE = re.compile(r'"type"\s*:\s*"(tool_calls?|final)"')
 
+#: The digits of a ``\uXXXX`` escape. ``int(x, 16)`` alone also takes a sign, a space and an underscore.
+_HEX4 = re.compile(r'[0-9A-Fa-f]{4}')
+
 _TOOL_CALL_SHAPE = '{"type":"tool_call","name":"server.tool","args":{...}}'
 
 
@@ -177,6 +180,12 @@ def extract_first_json_object(raw: Any) -> Any:
     return None
 
 
+def _escape_code(body: str, at: int) -> Optional[int]:
+    """The code unit of a ``\\uXXXX`` escape whose digits start at `at`, or None when they are not four hex digits."""
+    digits = body[at : at + 4]
+    return int(digits, 16) if _HEX4.fullmatch(digits) else None
+
+
 def unescape_json_string_body(body: str) -> str:
     """
     Undo JSON string escaping, tolerating the escapes that broke the envelope.
@@ -205,32 +214,23 @@ def unescape_json_string_body(body: str) -> str:
         if nxt in simple:
             out.append(simple[nxt])
             i += 2
-        elif nxt == 'u' and i + 6 <= n:
-            try:
-                code = int(body[i + 2 : i + 6], 16)
-            except ValueError:
-                out.append(ch)
-                i += 1
-                continue
+        elif nxt == 'u' and (code := _escape_code(body, i + 2)) is not None:
             # A surrogate pair is one character spelled as two escapes, and JSON
             # has no other way to write an astral character such as an emoji.
             # Decoded apart they are two lone surrogates, which `str.encode`
             # refuses, so the salvaged answer would raise on its way out.
             low_start = i + 6
-            if 0xD800 <= code <= 0xDBFF and body[low_start : low_start + 2] == '\\u' and low_start + 6 <= n:
-                try:
-                    low = int(body[low_start + 2 : low_start + 6], 16)
-                except ValueError:
-                    low = -1
-                if 0xDC00 <= low <= 0xDFFF:
-                    out.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
-                    i = low_start + 6
-                    continue
+            low = _escape_code(body, low_start + 2) if body[low_start : low_start + 2] == '\\u' else None
+            if 0xD800 <= code <= 0xDBFF and low is not None and 0xDC00 <= low <= 0xDFFF:
+                out.append(chr(0x10000 + ((code - 0xD800) << 10) + (low - 0xDC00)))
+                i = low_start + 6
+                continue
             out.append(chr(code))
             i += 6
         else:
-            # Not an escape we know. A lone backslash is far likelier to be part
-            # of the answer (a Windows path, a LaTeX fragment) than a mistake.
+            # Not an escape we know, a `\u` without four hex digits included. A
+            # lone backslash is far likelier to be part of the answer (a Windows
+            # path, a LaTeX fragment) than a mistake.
             out.append(ch)
             i += 1
     return ''.join(out)
@@ -339,6 +339,20 @@ def _tool_call(entry: Any) -> Optional[Dict[str, Any]]:
     return {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
 
 
+def _inside_final_envelope(raw: str, at: int) -> bool:
+    """
+    Whether position `at` lies in the content of a `final` envelope that closes at the end of the reply.
+
+    A ``FINAL>>>`` line there is the answer's own text: the content has literal line breaks and one
+    of its lines starts with the marker. The envelope must still be open at `at`. One that closed
+    before it, parsed or salvageable, leaves the marker outside, where it is the sentinel.
+    """
+    before = raw[:at]
+    if isinstance(extract_first_json_object(before), dict) or salvage_final_content(before) is not None:
+        return False
+    return salvage_final_content(raw) is not None
+
+
 def parse_tool_call_envelope(raw: Any, *, parallel: bool = False) -> Optional[ModelTurn]:
     """
     Parse one model reply into a ``ModelTurn``.
@@ -361,6 +375,10 @@ def parse_tool_call_envelope(raw: Any, *, parallel: bool = False) -> Optional[Mo
     the claim. The first object counts, as it does when a JSON `final` is
     stacked onto a call, and whether or not prose comes before the call.
 
+    Nor is a ``FINAL>>>`` line inside the content of a `final` envelope that
+    closes at the end of the reply: there it is the answer's own text
+    (``_inside_final_envelope``).
+
     Args:
         raw: The model's reply.
         parallel: Accept the ``tool_calls`` form, which carries several calls in
@@ -374,7 +392,7 @@ def parse_tool_call_envelope(raw: Any, *, parallel: bool = False) -> Optional[Mo
         return None
 
     marker = _SENTINEL_LINE.search(raw)
-    if marker and _attempted_tool_call(raw[: marker.start()]):
+    if marker and (_attempted_tool_call(raw[: marker.start()]) or _inside_final_envelope(raw, marker.start())):
         marker = None
     if marker:
         # Delivered as written: only the separator comes off, never the answer's own whitespace.
@@ -429,7 +447,8 @@ def _diagnose(raw: Any, parallel: bool) -> Tuple[str, str]:
     if not text:
         return 'was empty.', ''
     marker = _SENTINEL_LINE.search(text)
-    if marker and not text[marker.end() :].strip():
+    # A marker stacked onto a tool call is not read by the parser, so it is not what went wrong either.
+    if marker and not _attempted_tool_call(text[: marker.start()]) and not text[marker.end() :].strip():
         return f'ended at {FINAL_SENTINEL} with no answer after it.', f'Write the answer after {FINAL_SENTINEL}.'
 
     attempted = _attempted_kind(text)

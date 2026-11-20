@@ -193,6 +193,28 @@ class TestSentinel:
         """Only an attempt at a tool-call envelope before the marker keeps the marker from being read."""
         assert parse(before + '\nFINAL>>> Done.').content == 'Done.'
 
+    def test_a_marker_line_inside_a_final_envelope_is_the_answers_own_text(self):
+        """
+        The content has literal line breaks and one of its lines starts with the marker. The envelope
+        is still open there and closes at the end of the reply, so its content is the answer. Reading
+        the sentinel first lost the text before it and delivered the envelope's closing with the rest.
+        """
+        raw = '{"type":"final","content":"Example:\nFINAL>>> sample"}'
+
+        assert parse(raw).content == 'Example:\nFINAL>>> sample'
+
+    @pytest.mark.parametrize(
+        'before',
+        [
+            '{"type":"final","content":"old"}',
+            '{"type":"final","content":"an "old" one"}',
+            '{"type":"final","content":"old"} Done.',
+        ],
+    )
+    def test_a_marker_after_a_final_envelope_that_already_closed_is_still_the_sentinel(self, before):
+        """Also when the answer after it ends the way an envelope does."""
+        assert parse(before + '\nFINAL>>> {"company":"Acme"}').content == '{"company":"Acme"}'
+
 
 # ---------------------------------------------------------------------------
 # JSON envelopes
@@ -413,6 +435,23 @@ class TestSalvage:
         """A lone backslash is far likelier to be a Windows path than a mistake."""
         assert protocol.unescape_json_string_body('C:\\Users\\x') == 'C:\\Users\\x'
 
+    @pytest.mark.parametrize(
+        'body', ['bad \\u-001 here', 'bad \\u+1f4 here', 'bad \\u 041 here', 'bad \\u1_00 here', 'cut \\u00']
+    )
+    def test_unescaping_takes_only_four_hex_digits_as_a_unicode_escape(self, body):
+        """`int(x, 16)` also takes a sign, a space and an underscore: one raised, the others decoded a character nobody wrote."""
+        assert protocol.unescape_json_string_body(body) == body
+
+    def test_unescaping_keeps_a_high_surrogate_apart_from_a_malformed_low_one(self):
+        assert protocol.unescape_json_string_body('\\uD83D\\u+E00') == chr(0xD83D) + '\\u+E00'
+
+    def test_a_malformed_unicode_escape_does_not_end_the_turn(self):
+        """It raised out of the parser, so the turn failed on the first reply with no retry."""
+        ask, feedback = scripted('{"type":"final","content":"a "b" \\u-001 c"}')
+
+        assert protocol.run_model_turn(ask).content == 'a "b" \\u-001 c'
+        assert len(feedback) == 1
+
 
 # ---------------------------------------------------------------------------
 # The retry hint
@@ -456,6 +495,16 @@ class TestRetryHint:
         assert 'SAME tool call again' in hint
         assert 'do not answer in prose' in hint
         assert FINAL_SENTINEL not in hint
+
+    def test_a_broken_tool_call_with_a_bare_marker_after_it_is_told_to_repair_the_call(self):
+        """The parser does not read a marker stacked onto a call, so the hint must not ask for an answer after it."""
+        hint = protocol.parse_failure_hint(BROKEN_TOOL_CALL + '\n' + FINAL_SENTINEL)
+
+        assert 'not valid JSON' in hint
+        assert hint.endswith(
+            'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.'
+        )
+        assert 'Write the answer after' not in hint
 
     def test_a_broken_tool_call_stays_one_when_final_is_named_first(self):
         """A "type":"final" inside the arguments, ahead of the envelope's own type, does not turn the call into an answer."""
