@@ -32,7 +32,10 @@
  * Before flipping back on: any saved devToolPins list that lacks
  * builtin.agent (strips arranged while this was off, and lists the VS Code
  * host writes, which never include it) makes isEnabled() in
- * core/chrome/useToolStrip.tsx treat Agent as disabled. Add a one-time rule
- * there (missing builtin.agent = enabled) in the same change.
+ * core/chrome/useToolStrip.tsx treat Agent as disabled. Ship a ONE-TIME
+ * migration in the same change: add builtin.agent back to existing lists
+ * once and record that it ran. Not a permanent "missing = enabled" rule:
+ * removing the id is the only way to disable a builtin, so that rule would
+ * make the Agent impossible to turn off.
  */
 export const AGENT_ENABLED = false;

@@ -703,6 +703,9 @@ const RocketEditorContent: React.FC<{
 	// tool opened it through DevToolProps.documents).
 	{
 		const tool = parseToolDocUri(uri);
+		// The agent is gated off: anything that still opens tool:agent… gets a
+		// plain message instead of a DevToolMount stuck on "Loading agent…".
+		if (tool && !AGENT_ENABLED && tool.appId === 'agent') return <div style={styles.welcome}>The Agent isn't available yet.</div>;
 		if (tool) return renderToolDocument(tool.appId, tool.docKey || undefined);
 	}
 	// A dev tool's details page (README + Install/Remove).
