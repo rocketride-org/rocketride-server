@@ -24,14 +24,18 @@
 // Lazy host for the consent banner (the port of HomeApp's banner host): the
 // banner mounts only once the page has settled — the consent decision is not
 // worth a frame of the first paint — or at once when the footer's "Privacy
-// settings" link asks for it. Renders nothing when telemetry is off (no key:
-// OSS, or a privacy signal) or when the consent source is the embedding
-// host's setting (VS Code — the editor's telemetry switch is the one switch).
+// settings" link asks for it. Renders nothing when there is no key (OSS) or
+// when the consent source is the embedding host's setting (VS Code — the
+// editor's telemetry switch is the one switch). Under a privacy signal
+// (telemetry off) it mounts only on that explicit request: the banner then
+// states the signal is honoured, with Opt in disabled — nothing is captured
+// and nothing is ever shown unasked (shouldMountConsentBanner).
 // =============================================================================
 
 import React, { useEffect, useState } from 'react';
+import { privacySignalOn } from 'rocketride/analytics';
 import { ConsentBanner } from './ConsentBanner';
-import { onOpenConsentBanner } from './consentUi';
+import { subscribeConsentHost, shouldMountConsentBanner } from './consentUi';
 import { onIdleAfterLoad } from './settle';
 import { telemetryConfig } from './config';
 import { telemetryEnabled } from './host';
@@ -44,6 +48,7 @@ type Props = {
 /** Mounts the banner after settle, or immediately on a "Privacy settings" request. */
 export const ConsentBannerHost: React.FC<Props> = ({ signedOut }) => {
 	const [isReady, setIsReady] = useState(false);
+	const [isRequested, setIsRequested] = useState(false);
 	useEffect(() => {
 		let disposed = false;
 		onIdleAfterLoad(() => {
@@ -51,18 +56,27 @@ export const ConsentBannerHost: React.FC<Props> = ({ signedOut }) => {
 				setIsReady(true);
 			}
 		});
-		const off = onOpenConsentBanner(() => {
+		// Also fires at once for a request made before this effect subscribed.
+		const off = subscribeConsentHost(() => {
 			// The banner takes the pending request itself once mounted.
-			setIsReady(true);
+			if (!disposed) {
+				setIsReady(true);
+				setIsRequested(true);
+			}
 		});
 		return () => {
 			disposed = true;
 			off();
 		};
 	}, []);
-	// Keyless, privacy-signaled, or host-governed (VS Code): no banner, ever.
-	if (!telemetryEnabled() || telemetryConfig()?.consentSource !== 'stored' || !isReady) {
-		return null;
-	}
-	return <ConsentBanner signedOut={signedOut} />;
+	const config = telemetryConfig();
+	const mount = shouldMountConsentBanner({
+		hasKey: !!config?.key,
+		storedConsent: config?.consentSource === 'stored',
+		telemetryLive: telemetryEnabled(),
+		privacySignal: privacySignalOn(),
+		settled: isReady,
+		requested: isRequested,
+	});
+	return mount ? <ConsentBanner signedOut={signedOut} /> : null;
 };
