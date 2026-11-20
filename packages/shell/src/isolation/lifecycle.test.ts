@@ -65,6 +65,7 @@ test('G4-F4 teardownAll refuses new requests and terminates a run that answers l
 	const A = t.open(ENTRY_A);
 	const engine = t.cm.engine;
 	await startRun(A);
+	const runsBefore = engine.runs.length;
 	const releaseExec = engine.hold('execute');
 	const pending = clientRequest(A, execMsg());
 	await settle();
@@ -83,7 +84,9 @@ test('G4-F4 teardownAll refuses new requests and terminates a run that answers l
 	releaseTerm();
 	await tearing;
 	await settle();
-	const late = engine.runs.at(-1)!;
+	// The SECOND execute must really have started (else runs.at(-1) would be the first run, which teardown ends anyway).
+	assert.equal(engine.runs.length, runsBefore + 1, 'the held execute started a run after its release');
+	const late = engine.runs[runsBefore];
 	assert.ok(terminated(t).includes(late.token), 'the late run is terminated, not forgotten');
 	assert.equal((await clientRequest(A, dap('rrext_ping'))).ok, true, 'requests work again after teardown');
 });

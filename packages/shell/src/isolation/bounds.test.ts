@@ -103,8 +103,8 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		const reached = engine.messagesFor('execute').length;
 		release();
 		const results = await Promise.all(calls);
-		assert.ok(reached <= 8, `at most 8 executes may reach the engine at once, ${reached} did`);
-		assert.ok(results.filter((r) => r.ok).length <= 8, 'at most 8 runs start');
+		assert.equal(reached, 8, `exactly 8 executes (the limit, no fewer) reach the engine at once, ${reached} did`);
+		assert.equal(results.filter((r) => r.ok).length, 8, 'the 8 admitted runs start');
 		assert.ok(results.filter((r) => denialOf(r)?.code === 'quota').length >= 24, `the rest are quota denials, got ${brief(results.map((r) => denialOf(r)?.code ?? 'ok'))}`);
 	});
 	await tt.test('pipes', async (st) => {
@@ -119,7 +119,7 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		const reached = engine.messagesFor('rrext_process').length;
 		release();
 		await Promise.all(calls);
-		assert.ok(reached <= 16, `at most 16 pipe opens may reach the engine, ${reached} did`);
+		assert.equal(reached, 16, `exactly 16 pipe opens (the limit) reach the engine, ${reached} did`);
 	});
 	await tt.test('store handles', async (st) => {
 		const t = makeRoot();
@@ -134,7 +134,7 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		const reached = engine.messagesFor('rrext_store', since).length;
 		release();
 		await Promise.all(calls);
-		assert.ok(reached <= 12, `at most 12 more store handles may reach the engine, ${reached} did`);
+		assert.equal(reached, 12, `exactly 12 more store handles (the limit) reach the engine, ${reached} did`);
 	});
 	await tt.test('monitor keys', async (st) => {
 		const t = makeRoot();
@@ -155,7 +155,7 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		await settle();
 		open();
 		await Promise.all(calls);
-		assert.ok(reached <= 16, `at most 16 monitor keys may reach the engine, ${reached} did`);
+		assert.equal(reached, 16, `exactly 16 monitor keys (the limit) reach the engine, ${reached} did`);
 	});
 });
 
