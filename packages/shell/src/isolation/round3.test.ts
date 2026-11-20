@@ -377,3 +377,18 @@ test('R-gate a request waiting on the API key is not sent once its realm detache
 		assert.equal(t.cm.engine.received.length, before, 'nothing is sent for the earlier session\'s run');
 	});
 });
+
+test('R-ledger an expired run no longer counts its monitor keys against the quota', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const first = await startRun(A);
+	const second = await startRun(A, 'chat_2');
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: first.token }, types });
+	await assertDeniedOp(A.request('client.addMonitor', { key: { token: second.token }, types: ['extra'] }), 'quota', 'a 17th monitor key while the first run lives');
+	t.cm.engine.setStatus({ completed: true });
+	assert.equal((await clientRequest(A, dap('rrext_get_task_status', { token: first.token }))).ok, true, 'the completing status is delivered');
+	t.clock.advance(121_000);
+	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: second.token }, types: ['extra'] }))).ok, true, 'the expired run holds no monitor slots');
+});
