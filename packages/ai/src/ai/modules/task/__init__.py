@@ -3,7 +3,7 @@ from ai.web import WebServer
 from .task_server import TaskServer
 from .task_scheduler import TaskScheduler
 from .run_log import sweep_spool_root
-from .fetch import handle_fetch, handle_fetch_dir
+from .fetch import handle_fetch, handle_fetch_dir, warn_if_signing_key_is_ephemeral
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -20,6 +20,10 @@ def initModule(server: WebServer, config: Dict[str, Any]):
         - PUT `/pipe/process`: Calls `pipe_Process` to handle pipe processing requests.
 
     """
+    # Reject a configured weak capability-signing key before registering
+    # routes or starting workers (#1176).
+    warn_if_signing_key_is_ephemeral()
+
     # Run-log startup hygiene: delete stale spool directories from any
     # previous process. Recovery is store-side only, so leftover spool state
     # is never salvaged — this just prevents disk leaks on hosts whose

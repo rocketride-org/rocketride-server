@@ -66,7 +66,7 @@ from ai.web import oauth_resource
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.routing import BaseRoute, compile_path
-from rocketlib import debug, warning
+from rocketlib import debug, warning, args as startup_args
 from rocketride import CONST_WS_PING_INTERVAL, CONST_WS_PING_TIMEOUT
 from ai.constants import CONST_DEFAULT_WEB_PORT, CONST_DEFAULT_WEB_HOST, CONST_WEB_WS_MAX_SIZE
 from ai.web import exception, error, Result
@@ -215,6 +215,9 @@ class WebServer:
         # environment from the engine (task_engine.filter_subprocess_env) and
         # must not pull the excluded names back in from the file.
         if kwargs.get('load_env', True):
+            from .env_policy import validate_hosted_env_file
+
+            validate_hosted_env_file(exec_dir + '/.env', startup_args())
             load_dotenv(dotenv_path=exec_dir + '/.env')
 
         # Authenticators, given an authorization string, return a structure of the decode key info
@@ -492,10 +495,9 @@ class WebServer:
             # RR_BASE_URL will be set lazily by get_port() once resolved.
 
         # RR_SIGNING_KEY (the FileStore URL-signing secret) is deliberately
-        # NOT provisioned here: the operator sets it in .env/.config like
-        # every other deployment secret, and when unset the readers fall
-        # back to CONST_DEFAULT_SIGNING_KEY (a self-describing development
-        # value) so a fresh install works out of the box.
+        # NOT provisioned here: the operator sets it in .env like every other
+        # deployment secret, and when unset the engine signs with a random
+        # per-process key (file_store.fetch_signing_key).
 
         # Setup the Uvicorn configuration
         config = uvicorn.Config(
