@@ -91,6 +91,10 @@ interface INodeHeaderProps {
 	documentation?: string;
 	/** When false the settings icon turns red to indicate invalid configuration. */
 	formDataValid?: boolean;
+	/** What the red gear says on hover: the converter's refusal for a node it
+	 *  could not map, or "connect to convert" while no server can be asked
+	 *  (plan §5.6.8). */
+	formDataMessage?: string;
 	/** If set, the node belongs to a group and an "ungroup" option is added. */
 	parentId?: string;
 	/** Optional click handler for the header row. */
@@ -119,7 +123,7 @@ interface INodeHeaderProps {
  * @param props - Node identity, metadata, and an optional click handler.
  * @returns The fully rendered header bar element.
  */
-export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick, isExperimental, paramCount }: INodeHeaderProps): ReactElement {
+export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title, description, documentation, formDataValid, formDataMessage, parentId: _parentId, handleClick, classType, errorCount, warningCount, onBadgeClick, isExperimental, paramCount }: INodeHeaderProps): ReactElement {
 	// ========================================================================
 	// FlowContext state and actions
 	// ========================================================================
@@ -260,7 +264,8 @@ export default function NodeHeader({ id, hideEdit = false, nodeType, icon, title
 			{/* Settings gear and overflow menu */}
 			<div style={styles.boxEdit}>
 				<ConditionalRender condition={showEdit}>
-					<button aria-label="Edit node" style={{ ...styles.editButton, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} onClick={() => onEditNode()}>
+					{/* The red gear's hover text is the converter's word on this node (plan §5.6.8). */}
+					<button aria-label="Edit node" title={formDataValid === false ? formDataMessage : undefined} style={{ ...styles.editButton, background: 'none', border: 'none', cursor: 'pointer', display: 'inline-flex', alignItems: 'center' }} onClick={() => onEditNode()}>
 						<Settings
 							size={16}
 							style={{

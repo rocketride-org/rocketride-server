@@ -128,6 +128,12 @@ export interface IFlowProviderProps {
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
+
+	/** Nodes with keys their schema does not declare changed (see FlowProjectProvider). */
+	onUnknownConfigKeys?: (nodeIds: string[]) => void;
+
+	/** The red gear's hover text per node id (see FlowProjectProvider). */
+	configMessages?: Record<string, string>;
 }
 
 // =============================================================================
@@ -146,7 +152,7 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, onUnknownConfigKeys, configMessages }: IFlowProviderProps): ReactElement {
 	return (
 		<FlowPreferencesProvider projectId={projectId} isReadonly={isReadonly}>
 			<FlowProjectProvider
@@ -187,6 +193,8 @@ export function FlowProvider({ children, project, projectId, isReadonly, taskSta
 				onOpenCloudSetup={onOpenCloudSetup}
 				onExport={onExport}
 				envKeys={envKeys}
+				onUnknownConfigKeys={onUnknownConfigKeys}
+				configMessages={configMessages}
 			>
 				<FlowGraphProvider>{children}</FlowGraphProvider>
 			</FlowProjectProvider>

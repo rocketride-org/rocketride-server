@@ -199,6 +199,15 @@ export interface IFlowProjectContext {
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
+
+	/** The canvas found nodes whose stored config carries keys their schema
+	 *  does not declare (the pre-format-switch shape, plan §5.6.8); called
+	 *  with the current list whenever it changes, [] once none remain. */
+	onUnknownConfigKeys?: (nodeIds: string[]) => void;
+
+	/** What the red gear says per node id: the converter's refusal, or
+	 *  "connect to convert" while no server can be asked (plan §5.6.8). */
+	configMessages?: Record<string, string>;
 }
 
 const FlowProjectContext = createContext<IFlowProjectContext | null>(null);
@@ -276,6 +285,15 @@ export interface IFlowProjectProviderProps {
 
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
+
+	/** The canvas found nodes whose stored config carries keys their schema
+	 *  does not declare (the pre-format-switch shape, plan §5.6.8); called
+	 *  with the current list whenever it changes, [] once none remain. */
+	onUnknownConfigKeys?: (nodeIds: string[]) => void;
+
+	/** What the red gear says per node id: the converter's refusal, or
+	 *  "connect to convert" while no server can be asked (plan §5.6.8). */
+	configMessages?: Record<string, string>;
 }
 
 // =============================================================================
@@ -289,7 +307,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, onUnknownConfigKeys, configMessages }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -429,6 +447,8 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		onOpenCloudSetup,
 		onExport,
 		envKeys,
+		onUnknownConfigKeys,
+		configMessages,
 	}), [
 		currentProject, toolchainState, patchToolchainState, toggleDevMode,
 		isPipelineRunning, isReadonly, taskStatuses, componentPipeCounts, totalPipes,
@@ -438,6 +458,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		onOpenLink, googlePickerDeveloperKey, googlePickerClientId,
 		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected,
 		cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys,
+		onUnknownConfigKeys, configMessages,
 	]);
 
 	return <FlowProjectContext.Provider value={value}>{children}</FlowProjectContext.Provider>;

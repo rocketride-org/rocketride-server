@@ -47,6 +47,10 @@ export interface IConfigProblem {
 	path: string;
 	/** The human-readable message, in the server's wording. */
 	message: string;
+	/** The stored key has no place in the schema at all — the shape a
+	 *  pre-format-switch config (plan B20) shows up in, which the editor
+	 *  hands to the server's converter (§5.6.8) rather than the author. */
+	unknownKey?: true;
 }
 
 // =============================================================================
@@ -253,6 +257,6 @@ function walkStored(node: unknown, prefix: string, byPath: Map<string, ILeafEntr
 			continue;
 		}
 		if (!prefix && (EDITOR_OWNED_KEYS.has(key) || ENGINE_OWNED_KEYS.has(key))) continue;
-		problems.push({ path, message: `unknown config key "${path}"` });
+		problems.push({ path, message: `unknown config key "${path}"`, unknownKey: true });
 	}
 }
