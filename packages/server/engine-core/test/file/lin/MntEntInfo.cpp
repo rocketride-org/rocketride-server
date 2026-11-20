@@ -32,3 +32,23 @@ TEST_CASE("file::MntEntInfo") {
         REQUIRE(isOnRemovableDrive("/Volumes/UNTITLED"));
     }
 }
+
+/// The mount cache is read from the first mount table that can be opened.
+/// A missing table, such as /etc/mtab in some minimal containers, must not
+/// leave the cache empty when a later table can be read.
+TEST_CASE("file::refreshMounting falls back to the next mount table") {
+    // With only a missing table there is nothing to read
+    REQUIRE(refreshMounting({"/nonexistent/mtab"})->mapping.empty());
+
+    // A missing table followed by the kernel's own fills the cache from it
+    auto cache = refreshMounting({"/nonexistent/mtab", "/proc/self/mounts"});
+    struct stat root{};
+    REQUIRE(::stat("/", &root) == 0);
+    REQUIRE(cache->mapping.count(root.st_dev) == 1);
+    REQUIRE(std::any_of(cache->items.begin(), cache->items.end(),
+                        [](const MntEntInfo &info) {
+                            return std::find(info.types.begin(),
+                                             info.types.end(),
+                                             FsType::Proc) != info.types.end();
+                        }));
+}
