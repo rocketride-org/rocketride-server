@@ -782,6 +782,13 @@ def _refuse_unsafe_specs(table: Any, where: str, base: str = '.', _seen: Optiona
     for name, spec in table.items():
         if isinstance(spec, dict):
             _refuse_unsafe_specs(spec, where, base, seen)
+        elif not (spec is None or isinstance(spec, (str, int, float, bool))):
+            # pnpm specs are strings. A list (or any other container) is never
+            # stringified: str() would expand every shared alias in it.
+            raise BuildFailure(
+                'materialize',
+                f'{where}: dependency {str(name)!r} must be a version string or a nested table',
+            )
         elif _unsafe_spec(spec, base):
             raise BuildFailure(
                 'materialize',

@@ -233,7 +233,10 @@ def test_lockfile_parser_is_tolerant():
 # =============================================================================
 
 
-def _app_source_zip(with_lock: bool = False, lock_text: str = '') -> bytes:
+_SCAFFOLD_SHELL_DEP = {'shell': 'file:../../.rocketride/shell/shell.tgz'}
+
+
+def _app_source_zip(with_lock: bool = False, lock_text: str = '', scaffold_shell: bool = False) -> bytes:
     """A workspace-relative source pack for apps/brandy-ui (the client's shape)."""
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, 'w') as archive:
@@ -244,7 +247,7 @@ def _app_source_zip(with_lock: bool = False, lock_text: str = '') -> bytes:
                     'name': 'brandy-ui',
                     'version': '1.0.0',
                     'appManifest': {'id': 'acme.brandy', 'name': 'Brandy', 'icon': 'icon.svg'},
-                    'dependencies': {'react': '^18.2.0'},
+                    'dependencies': {'react': '^18.2.0', **(_SCAFFOLD_SHELL_DEP if scaffold_shell else {})},
                 }
             ),
         )
@@ -519,6 +522,35 @@ async def test_job_typecheck_waiver_skips_the_verify_phase(monkeypatch, build_st
     log_text = (home / 'build.log').read_text(encoding='utf-8')
     assert 'skipped by appManifest.typecheck: false' in log_text
     assert (home / 'dist' / 'remoteEntry.js').is_file()
+
+
+@pytest.mark.asyncio
+async def test_job_builds_a_scaffolded_shell_spec_end_to_end(monkeypatch, build_store, toolchain):
+    """An app scaffolded with shell: file:../../.rocketride/shell/shell.tgz,
+    with a packed lockfile carrying the same specifier, runs through
+    materialize, both lockfile checks, install, typecheck and bundle.
+    """
+    lock = (
+        "lockfileVersion: '9.0'\n"
+        'importers:\n'
+        '  apps/brandy-ui:\n'
+        '    dependencies:\n'
+        '      react: {specifier: ^18.2.0, version: 18.2.0}\n'
+        "      shell: {specifier: 'file:../../.rocketride/shell/shell.tgz', version: 'file:.rocketride/shell/shell.tgz'}\n"
+    )
+    rail = _FakeRail(
+        _app_source_zip(with_lock=True, lock_text=lock, scaffold_shell=True), {'status': 'queued', 'attempt': 0}
+    )
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    final = rail.stamps[-1]
+    assert final['status'] != 'failed', final
+    assert any(any('tsc' in str(a) for a in c['argv']) for c in fake.calls)
+    assert any('build' in c['argv'] for c in fake.calls)
 
 
 @pytest.mark.asyncio
@@ -1457,6 +1489,21 @@ def test_workspace_yaml_alias_heavy_catalog_is_walked_quickly():
     lines += ['catalog:', '  top: *l24']
     started = time.monotonic()
     _patched_workspace_yaml('\n'.join(lines) + '\n', 'apps/x', [])
+    assert time.monotonic() - started < 2.0
+
+
+@pytest.mark.parametrize('table', ['catalog', 'overrides'])
+def test_workspace_yaml_alias_inside_a_list_is_refused_quickly(table):
+    import time
+
+    lines = ['packages:', '  - "apps/*"', 'x-anchors:']
+    lines.append('  l0: &l0 {a: "^1.0.0", b: "^1.0.0"}')
+    for i in range(1, 25):
+        lines.append(f'  l{i}: &l{i} {{a: *l{i - 1}, b: *l{i - 1}}}')
+    lines += [f'{table}:', '  top: [*l24]']
+    started = time.monotonic()
+    with pytest.raises(BuildFailure):
+        _patched_workspace_yaml('\n'.join(lines) + '\n', 'apps/x', [])
     assert time.monotonic() - started < 2.0
 
 
