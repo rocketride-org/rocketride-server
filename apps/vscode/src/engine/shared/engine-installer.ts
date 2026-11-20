@@ -38,7 +38,7 @@ import * as lockfile from 'proper-lockfile';
 import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
-import { commitStagedRelease, missingNodeArchive, nodeArchiveOf } from './node-archive';
+import { commitStagedRelease, missingNodeArchive, nodeArchiveOf, renameRetrying } from './node-archive';
 
 // =============================================================================
 // TYPES
@@ -434,7 +434,7 @@ export class EngineInstaller {
 		const staging = path.join(nodesDir, `${archive}.download`);
 		try {
 			await this.downloadNodeArchive(release, archive, staging, progress, token, githubToken);
-			fs.renameSync(staging, path.join(nodesDir, archive));
+			await renameRetrying(staging, path.join(nodesDir, archive));
 		} finally {
 			fs.rmSync(staging, { force: true });
 		}
