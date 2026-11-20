@@ -413,6 +413,24 @@ def _is_saas() -> bool:
     return 'saas' in getattr(account, 'capabilities', ())
 
 
+def _seat_check_applies() -> bool:
+    """
+    True when the account's live ``authorize_app_use`` check must run.
+
+    The hook is part of the app-isolation contract: a SaaS overlay is only
+    required to implement it (startup check d) when ``RR_APP_ISOLATION`` is not
+    ``off``. With isolation off, serving is gated by the entitled-version walk
+    alone, as before, so an overlay that has no override keeps serving. An
+    unreadable isolation configuration fails closed.
+    """
+    from .app_origin import current_config
+
+    try:
+        return current_config().mode != 'off'
+    except RuntimeError:
+        return True
+
+
 def _app_field(entry, name: str):
     """One field off a catalog entry (dict or pydantic model)."""
     return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
@@ -584,6 +602,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
 
     info = None
     auth_failed = False
+    seat_check = False
     if _is_saas():
         if token:
             try:
@@ -595,7 +614,8 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
             info = None
         # A cached publish/version map is not a cached paid seat. Re-check
         # live membership and seat allocation even on a warm asset request.
-        if want is not None and not await account.authorize_app_use(info, app_id, want):
+        seat_check = _seat_check_applies()
+        if seat_check and want is not None and not await account.authorize_app_use(info, app_id, want):
             return {}
 
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
@@ -608,7 +628,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
         # key's current floor answers stale to keep the miss path from
         # becoming a per-request walk.
         if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
-            if _is_saas() and want is None:
+            if _is_saas() and want is None and seat_check:
                 return {
                     version: path
                     for version, path in hit['dirs'].items()

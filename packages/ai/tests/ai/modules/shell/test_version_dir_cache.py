@@ -112,6 +112,7 @@ def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
         return {1: 'app.x/v1/dist'}
 
     monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(shell_mod, '_seat_check_applies', lambda: True)
     monkeypatch.setattr(account, 'authenticate', authenticate)
     monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
     monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
@@ -137,6 +138,7 @@ def test_warm_full_map_filters_every_concrete_version(monkeypatch):
         return {1: 'free/dist', 2: 'paid/dist'}
 
     monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(shell_mod, '_seat_check_applies', lambda: True)
     monkeypatch.setattr(account, 'authenticate', authenticate)
     monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
     monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
@@ -144,6 +146,43 @@ def test_warm_full_map_filters_every_concrete_version(monkeypatch):
     allowed.remove(2)
     assert _dirs() == {1: 'free/dist'}
     assert _dirs(want=2) == {}
+
+
+def test_saas_without_an_authorize_override_keeps_serving_when_isolation_is_off(monkeypatch):
+    """With RR_APP_ISOLATION off the live seat hook is not consulted.
+
+    The base ``authorize_app_use`` denies every SaaS call; a SaaS overlay
+    that has not implemented it yet must keep serving until isolation is on
+    (startup check d then requires the override).
+    """
+    from ai.account import account
+    from ai.account.base import AccountBase
+
+    _setup(monkeypatch, [])
+    monkeypatch.delenv('RR_APP_ISOLATION', raising=False)
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'app.x/v1/dist'}
+
+    legacy = SimpleNamespace(capabilities=('saas',))
+    assert asyncio.run(AccountBase.authorize_app_use(legacy, None, 'app.x', 1)) is False  # the base denies
+
+    async def inherited(info, app_id, version=None):
+        return await AccountBase.authorize_app_use(legacy, info, app_id, version)
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', inherited)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs(want=1) == {1: 'app.x/v1/dist'}
+    assert _dirs() == {1: 'app.x/v1/dist'}
+
+    monkeypatch.setenv('RR_APP_ISOLATION', 'enforce')  # on: the hook is consulted and denies
+    shell_mod._version_dir_cache.clear()
+    assert _dirs(want=1) == {}
 
 
 # =============================================================================
