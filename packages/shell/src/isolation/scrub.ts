@@ -53,7 +53,7 @@
 
 import type { DAPMessage } from 'rocketride';
 import type { IBoundedSet, IdentityKind, IIdentityIds, IKnownProjects } from './aliases';
-import { isEngineShaped, isHighEntropy, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS, userAliasOf } from './aliases';
+import { isEngineShaped, isHighEntropy, isSightableId, KNOWN_LIMIT, MINTED_PROJECT_RE, PROJECT_KEYS, REMOVED_KEYS, setOwn, USER_KEYS, userAliasOf } from './aliases';
 import { deny } from './denial';
 import type { IGatedRequest } from './gate';
 import type { ILedger, IRunEntry } from './ledger';
@@ -501,7 +501,7 @@ function scrubText(pass: IPass, text: string): string {
 function learnFrom(ctx: IScrubContext, body: Record<string, unknown>): void {
 	const pipeline = isPlainObject(body.pipeline) ? body.pipeline : undefined;
 	for (const id of [body.project_id, body.projectId, pipeline?.project_id]) {
-		if (typeof id !== 'string' || id === '' || ctx.ownedByAnyRealm(id)) continue;
+		if (typeof id !== 'string' || !isSightableId(id) || ctx.ownedByAnyRealm(id)) continue;
 		if (ctx.ledger.runs().some((r) => r.projectAlias === id) || [...ctx.aliases.values()].includes(id)) continue;
 		ctx.sighted.add(id);
 	}

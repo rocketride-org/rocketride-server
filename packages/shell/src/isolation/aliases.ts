@@ -73,6 +73,19 @@ export function isEngineShaped(id: string): boolean {
 	return UUID_RE.test(id) || MINTED_PROJECT_RE.test(id);
 }
 
+/** The longest project id the per-realm sighted set will learn. */
+export const SIGHTED_ID_MAX = 256;
+
+/**
+ * Whether a project id seen in an engine answer may be learnt: printable, non-space ASCII, at most
+ * {@link SIGHTED_ID_MAX} characters. The engine echoes whatever project id a caller supplied, so
+ * anything else (control characters, spaces, megabyte strings) would only displace real ids in the
+ * bounded set or bloat the matcher built from it.
+ */
+export function isSightableId(id: string): boolean {
+	return id.length > 0 && id.length <= SIGHTED_ID_MAX && /^[\x21-\x7e]+$/.test(id);
+}
+
 /** The grant's user alias, when it has the alias shape; anything else counts as anonymous (DA F7, R2 LOW). */
 export function userAliasOf(grant: IRealmGrant): string | undefined {
 	const id = grant.frame?.identity?.userId;

@@ -932,6 +932,6 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			}
 		},
 
-		__stats: () => ({ eventsDropped, knownProjects: known.size(), apiKeys: apiKeys.size }),
+		__stats: () => ({ eventsDropped, knownProjects: known.size(), apiKeys: apiKeys.size, sighted: [...realms.values()].reduce((n, st) => n + st.scrub.sighted.size(), 0) }),
 	};
 }

@@ -30,7 +30,7 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import test from 'node:test';
-import { createKnownProjects } from './aliases';
+import { createKnownProjects, isSightableId } from './aliases';
 import { ENTRY_A, GRANT_A, RE, makeRoot, refAppKey } from './__test__/fixtures';
 import { assertNoReal, call, engineErrorText, expectOk, lastRun } from './__test__/n1';
 import { settle } from './__test__/realm';
@@ -160,4 +160,27 @@ test('T105 knownProjects: foreign ids are aliased wherever they appear, short id
 		assert.equal(message, `bad ${run.projectId} ${run.id} ${run.token}`, 'project id, task id and tk_ in an engine error: the same alias, task-id alias and handle');
 		assertNoReal(A, t.cm);
 	});
+});
+
+test('isSightableId accepts ordinary project ids and refuses malformed ones before they are learnt', () => {
+	for (const ok of [randomUUID(), `rrapp.${'a'.repeat(25)}.${randomUUID()}`, 'rag-example', 'unseen-project-0123456789', 'a'.repeat(256)]) assert.equal(isSightableId(ok), true, ok);
+	for (const bad of ['', 'a'.repeat(257), 'has space-0123456789', 'line\nbreak-0123456789', 'tab\t0123456789abcdef', 'nul\u0000-0123456789abcd', 'ünïcode-0123456789abcdef', 'x'.repeat(1_000_000)]) assert.equal(isSightableId(bad), false, bad.slice(0, 24));
+});
+
+test('a malformed project id in an engine answer is not learnt into the realm sighted set', async () => {
+	const t = makeRoot();
+	try {
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const run = await startRun(A);
+		t.cm.engine.setStatus({ project_id: 'a'.repeat(5000) });
+		expectOk(await status(A, run.token), 'status echoing a 5000-character project id');
+		t.cm.engine.setStatus({ project_id: 'with space and newline\n0123456789' });
+		expectOk(await status(A, run.token), 'status echoing a project id with spaces');
+		assert.equal(t.root.__stats!().sighted, 0, 'neither was learnt');
+		t.cm.engine.setStatus({ project_id: 'unseen-project-0123456789' });
+		expectOk(await status(A, run.token), 'status echoing an ordinary unseen project id');
+		assert.equal(t.root.__stats!().sighted, 1, 'control: an ordinary one is learnt');
+	} finally {
+		t.cleanup();
+	}
 });
