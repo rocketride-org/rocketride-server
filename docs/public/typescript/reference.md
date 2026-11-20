@@ -310,12 +310,13 @@ constructor(expectJson?: boolean)  // default false
 | `error` | field | `{ code, message }` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
 | `toolCalls` | getter | The calls in `message`, in order. Empty for a text answer. |
 | `tokens` | field | Turn token usage, set by `fromResult`. |
+| `agentStopReason` | field | Why the agent run that answered stopped: `done`, `max_steps`, `empty_plan`, `error` or `unknown`. `fromResult` sets it from the result's `stop_reason`. |
 
 ## Types
 
 - **DAPMessage**: `{ type, seq, command?, arguments?, body?, success?, message?, request_seq?, event?, token?, data?, trace? }`.
 - **TASK_STATUS**: Task status with `completedCount`, `totalCount`, `completed`, `state`, `exitCode`, and many more fields.
-- **PIPELINE_RESULT**: `{ name, path, objectId, result_types?, [key: string]: any }`.
+- **PIPELINE_RESULT**: `{ name, path, objectId, result_types?, stop_reason?, [key: string]: any }`. `stop_reason` says why the agent run that answered stopped; only `done` is a finished answer.
 - **PipelineConfig**: Pipeline definition with `name`, `description`, `version`, `components`, `source`, `project_id`.
 - **UPLOAD_RESULT**: Per-file result with e.g. `action` (`'complete'` \| `'error'`), `filepath`, `error?`, `result?`, `upload_time?`.
 - **SignupProperties**: Version 1 analytics context with experiment, variant, UUID assignment/exposure, message revision and a 30-minute exposure window; never an authorization claim. <!-- language-specific -->

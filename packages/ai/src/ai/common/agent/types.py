@@ -8,7 +8,9 @@ Defines the type contracts shared by all agent framework drivers:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol, TypedDict
+from typing import Any, Dict, List, Optional, Protocol, TypedDict, get_args
+
+from ai.common.schema import AgentStopReason
 
 
 AGENT_TOOL_CALLS_TYPE = 'RocketRide.agent.tool_calls.v1'
@@ -68,7 +70,7 @@ class AgentMeta(TypedDict, total=False):
     state_ref: str
     started_at: str
     ended_at: str
-    stop_reason: str
+    stop_reason: AgentStopReason
 
 
 class AgentStackEntry(TypedDict, total=False):
@@ -134,10 +136,16 @@ AGENT_TOOL_OUTPUT_SCHEMA: Dict[str, Any] = {
                 'ended_at': {'type': 'string'},
                 'stop_reason': {
                     'type': 'string',
-                    'description': 'Why the run stopped (e.g. done, max_waves, error), when the agent reports it',
+                    'enum': list(get_args(AgentStopReason)),
+                    'description': (
+                        'Why the run stopped. Only done is a finished answer: max_steps and empty_plan '
+                        'are a best effort from the work so far (from LlamaIndex, max_steps only says it stopped), '
+                        'error is the error message or a best effort, and unknown means the agent did not '
+                        'say how its run ended'
+                    ),
                 },
             },
-            'required': ['framework', 'agent_id', 'run_id', 'started_at', 'ended_at'],
+            'required': ['framework', 'agent_id', 'run_id', 'started_at', 'ended_at', 'stop_reason'],
         },
         'stack': {'type': 'array', 'items': {'type': 'object'}, 'description': 'Run trace stack'},
     },

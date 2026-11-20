@@ -272,11 +272,12 @@ From `rocketride.schema`. Parses chat response content — see
 | `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
 | `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
 | `error` | field | `AnswerError(code, message)` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
+| `agentStopReason` | field | Why the agent run that answered stopped: `done`, `max_steps`, `empty_plan`, `error` or `unknown`. `fromResult` sets it from the result's `stop_reason`. |
 | `toolCalls` | `toolCalls(self) -> List[ToolCallBlock]` | The calls in `message`, in order. Empty for a text answer. |
 
 ## Types
 
-- **PIPELINE_RESULT**: TypedDict with `name`, `path`, `objectId`, optional `result_types`, and dynamic fields.
+- **PIPELINE_RESULT**: TypedDict with `name`, `path`, `objectId`, optional `result_types`, optional `stop_reason` (why the agent run that answered stopped; only `done` is a finished answer), and dynamic fields.
 - **UPLOAD_RESULT**: Per-file result with `action`, `filepath`, `error?`, `result?`, `upload_time?`, etc.
 - **TASK_STATUS**: Task status with `completedCount`, `totalCount`, `completed`, `state`, `exitCode`, and many more fields.
 - **ConnectResult**: Identity payload returned by `connect()`/`login()` — `userToken`, `userId`, `displayName`, organizations, apps, teams (all optional).

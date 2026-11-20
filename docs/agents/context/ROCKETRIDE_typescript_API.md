@@ -1103,6 +1103,7 @@ interface PIPELINE_RESULT {
 	path: string;                            // file path context (often empty for direct sends)
 	objectId: string;                        // object identifier (UUID)
 	result_types?: Record<string, string>;   // field name -> data type (e.g. { answers: 'answers' })
+	stop_reason?: AgentStopReason;           // when an agent answered: only 'done' is a finished answer
 	[key: string]: any;                      // dynamic fields per result_types (text, answers, ...)
 }
 ```

@@ -213,6 +213,7 @@ def test_guard_answer_is_emitted_on_the_answers_lane():
 
     # Even a tripped guard still emits exactly one answer downstream.
     assert len(ii.instance.written) == 1
+    assert ii.instance.written[0].agentStopReason == 'error'
 
 
 # ---------------------------------------------------------------------------
@@ -238,6 +239,7 @@ def test_a_run_that_raises_before_any_status_still_reports_why_it_stopped():
 
     assert payload['meta']['stop_reason'] == 'error'
     assert 'is not a connected tool' in payload['content']
+    assert ii.instance.written[0].agentStopReason == 'error', 'the error text must not pass for an answer'
     assert ii.instance.sse, 'the run sent no status at all'
     assert ii.instance.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})
 
@@ -527,19 +529,45 @@ def test_guard_answer_has_no_token_and_stops_with_error():
     assert 'tk_secret_token' not in repr(payload)
 
 
-def test_stop_reason_from_the_trace_reaches_the_meta():
-    """A parent agent can tell a forced answer (max_waves) from a finished one."""
-    driver = _make_driver(lambda self, ctx, q: ('best effort', {'stop_reason': 'max_waves'}), require_tool_call=False)
+def test_a_best_effort_answer_says_why_the_run_stopped():
+    """A parent agent reads the meta; a client reads the answer the run wrote (#3356)."""
+    ii = _FakeIInstance()
+    driver = _make_driver(lambda self, ctx, q: ('best effort', {'stop_reason': 'max_steps'}), require_tool_call=False)
 
-    payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
+    payload = driver.run_agent(ii, _FakeQuestion())
 
-    assert payload['meta']['stop_reason'] == 'max_waves'
+    assert payload['meta']['stop_reason'] == 'max_steps'
+    assert ii.instance.written[0].agentStopReason == 'max_steps'
 
 
-@pytest.mark.parametrize('raw', [None, 'text trace', {'waves': []}, {'stop_reason': 3}])
-def test_no_stop_reason_when_the_trace_has_none(raw):
+# Only a driver that saw its run finish may say `done` (#3361 review).
+@pytest.mark.parametrize(
+    'raw',
+    [
+        None,
+        'text trace',
+        {},
+        {'messages': []},
+        {'stop_reason': 3},
+        {'stop_reason': 'max_tokens'},
+        {'stop_reason': 'max_waves'},
+    ],
+)
+def test_a_run_that_returns_without_a_known_reason_is_not_called_finished(raw):
+    ii = _FakeIInstance()
     driver = _make_driver(lambda self, ctx, q: ('ok', raw), require_tool_call=False)
 
-    payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
+    payload = driver.run_agent(ii, _FakeQuestion())
 
-    assert 'stop_reason' not in payload['meta']
+    assert payload['meta']['stop_reason'] == 'unknown'
+    assert ii.instance.written[0].agentStopReason == 'unknown'
+
+
+def test_a_run_whose_driver_saw_it_finish_reports_done():
+    ii = _FakeIInstance()
+    driver = _make_driver(lambda self, ctx, q: ('ok', {'stop_reason': 'done'}), require_tool_call=False)
+
+    payload = driver.run_agent(ii, _FakeQuestion())
+
+    assert payload['meta']['stop_reason'] == 'done'
+    assert ii.instance.written[0].agentStopReason == 'done'
