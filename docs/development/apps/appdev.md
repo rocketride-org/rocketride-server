@@ -286,6 +286,15 @@ unavailable hook or failed eligibility query denies access. A SaaS overlay that
 has not overridden the hook inherits the base one: it keeps serving while app
 isolation is off (the default) and fails closed once isolation is on.
 
+Rollout note: while app isolation is on, main-origin bundle responses are sent
+with `Cache-Control: private, no-cache`, so every reuse revalidates. While it is
+off (the default) they are sent with `private, max-age=3600`. A browser that
+cached a bundle before isolation was enabled therefore keeps reusing it, without
+contacting the server, for up to one hour after the cutover. The server cannot
+revoke those entries. Operators enabling isolation should expect that window;
+waiting an hour, a hard refresh, or publishing a new version (a new version URL)
+ends it.
+
 A SaaS account must override this hook alongside the isolation account methods
 before an engine can start with app isolation enabled. Frame-token asset
 requests supply the user and organization ids from their authenticated claims;

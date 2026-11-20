@@ -43,6 +43,8 @@ import ai.account.app_deploy as app_deploy_mod
 import ai.modules.shell.shell as shell_mod
 from ai.modules.task import deploy_events
 
+from . import isolation_support as sup
+
 
 # =============================================================================
 # HELPERS
@@ -146,9 +148,14 @@ def test_saas_overlay_without_the_override_still_serves_assets_while_isolation_i
     assert _dirs(want=1) == {1: 'app.x/v1/dist'}
     assert _dirs() == {1: 'app.x/v1/dist'}
 
-    monkeypatch.setenv('RR_APP_ISOLATION', 'enforce')
-    assert _dirs(want=1) == {}
-    assert _dirs() == {}
+    # Isolation on with a complete valid configuration (not merely a mode name).
+    for env in (
+        sup.valid_env(RR_APP_ISOLATION='enforce'),
+        sup.valid_env(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='app.x'),
+    ):
+        sup.apply_env(monkeypatch, env)
+        assert _dirs(want=1) == {}
+        assert _dirs() == {}
 
 
 def test_warm_full_map_filters_every_concrete_version(monkeypatch):
@@ -173,6 +180,39 @@ def test_warm_full_map_filters_every_concrete_version(monkeypatch):
     assert _dirs() == {1: 'free/dist', 2: 'paid/dist'}
     allowed.remove(2)
     assert _dirs() == {1: 'free/dist'}
+    assert _dirs(want=2) == {}
+
+
+def test_raising_or_non_true_seat_hook_denies_on_a_warm_map_instead_of_a_500(monkeypatch):
+    """The main-origin resolver guards the hook like the isolated-origin path does."""
+    from ai.account import account
+
+    _setup(monkeypatch, [])
+    mode = {'verdict': True}
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        if mode['verdict'] == 'raise':
+            raise RuntimeError('commerce backend down')
+        return mode['verdict']
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'free/dist', 2: 'paid/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs() == {1: 'free/dist', 2: 'paid/dist'}  # warms the map
+
+    mode['verdict'] = 'raise'
+    assert _dirs() == {}  # warm-map filter: denied, not an exception
+    assert _dirs(want=1) == {}  # want check: denied, not an exception
+
+    mode['verdict'] = 'yes'  # truthy but not True
+    assert _dirs() == {}
     assert _dirs(want=2) == {}
 
 

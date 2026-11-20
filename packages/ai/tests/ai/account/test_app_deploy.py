@@ -59,6 +59,7 @@ from ai.account.app_deploy import (
     resolve_app_pins,
 )
 from ai.account.store import Store
+from tests.ai.modules.shell import isolation_support as sup
 
 
 # =============================================================================
@@ -1456,11 +1457,15 @@ async def test_saas_overlay_without_a_commerce_gate_serves_until_isolation_is_on
     # Isolation off (the default): an overlay without the override must not deny every app.
     assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is True
     assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
-    # Isolation on: the base fails closed (startup check d requires the override).
-    monkeypatch.setenv('RR_APP_ISOLATION', 'enforce')
+    # Isolation on with a COMPLETE valid configuration: the base fails closed
+    # (startup check d requires the override), in both enforcing modes.
+    sup.apply_env(monkeypatch, sup.valid_env(RR_APP_ISOLATION='enforce'))
     assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
     assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
-    # An unreadable isolation configuration also fails closed.
+    sup.apply_env(monkeypatch, sup.valid_env(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='acme.brandy'))
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
+    assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+    # An unreadable isolation configuration is a separate fail-closed path.
     monkeypatch.setenv('RR_APP_ISOLATION', 'bogus')
     assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
 

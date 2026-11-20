@@ -594,7 +594,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     grants, and revocation still converges on the hard expiry as before.
     """
     from ai.account import account
-    from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
+    from ai.account.app_deploy import _use_allowed, entitled_version_dirs, open_version_dirs
 
     info = None
     auth_failed = False
@@ -609,7 +609,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
             info = None
         # A cached publish/version map is not a cached paid seat. Re-check
         # live membership and seat allocation even on a warm asset request.
-        if want is not None and not await account.authorize_app_use(info, app_id, want):
+        if want is not None and not await _use_allowed(account, info, app_id, want):
             return {}
 
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
@@ -626,7 +626,7 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
                 return {
                     version: path
                     for version, path in hit['dirs'].items()
-                    if await account.authorize_app_use(info, app_id, version)
+                    if await _use_allowed(account, info, app_id, version)
                 }
             return hit['dirs']
 
