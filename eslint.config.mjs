@@ -260,6 +260,9 @@ export default tseslint.config(
 				paths: [
 					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
 					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
+					{ name: 'shell/src/modules', message: "The shell surface is barrel-only: the React checkout barrel is not extension-host-safe; import from 'shell', or the checkoutScope/checkoutDispatch/types leaves." },
+					{ name: 'shell/src/modules/checkout', message: "The shell surface is barrel-only: the React checkout barrel is not extension-host-safe; import from 'shell', or the checkoutScope/checkoutDispatch/types leaves." },
+					{ name: 'shell/src/modules/checkout/index', message: "The shell surface is barrel-only: the React checkout barrel is not extension-host-safe; import from 'shell', or the checkoutScope/checkoutDispatch/types leaves." },
 				],
 				patterns: [
 					// gitignore semantics: a file under an excluded dir cannot be
