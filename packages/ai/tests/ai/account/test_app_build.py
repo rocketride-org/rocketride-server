@@ -1378,6 +1378,12 @@ def test_workspace_yaml_recursive_alias_is_a_build_failure_not_a_crash():
         _patched_workspace_yaml(source, 'apps/x', [])
 
 
+def test_workspace_yaml_deeply_nested_catalog_is_a_build_failure_not_a_crash():
+    source = 'packages: ["apps/*"]\ncatalog:\n  a: ' + '[' * 400 + ']' * 400 + '\n'
+    with pytest.raises(BuildFailure, match='nested'):
+        _patched_workspace_yaml(source, 'apps/x', [])
+
+
 def test_workspace_yaml_ordinary_aliases_and_catalogs_still_load():
     source = 'packages:\n  - "apps/*"\ncatalog: &base\n  react: ^18.2.0\ncatalogs:\n  next: *base\n'
     out = _patched_workspace_yaml(source, 'apps/x', [])

@@ -727,34 +727,37 @@ def _patched_workspace_yaml(
 
 
 _YAML_NODE_BUDGET = 100_000
+_YAML_MAX_DEPTH = 64
 
 
 def _refuse_yaml_cycles(data: Any, where: str) -> None:
-    """Raise BuildFailure for a recursive or exponentially aliased YAML graph.
+    """Raise BuildFailure for a recursive, too-deep or exponentially aliased YAML graph.
 
     ``yaml.safe_load`` happily builds a mapping that contains itself (``&a`` /
     ``*a``); walking or dumping it then raises RecursionError, which would be
     retried as an infrastructure fault. Ordinary aliases and merge keys that
     share a node without a cycle still load. The walk is iterative and counts
-    every visit, so an alias fan-out bomb is bounded too.
+    every visit and caps nesting depth (_YAML_MAX_DEPTH), so an alias fan-out
+    bomb and a deeply nested acyclic table are bounded too (the final dump
+    would otherwise raise RecursionError).
     """
     visits = 0
     path: set = set()
-    stack: List[Tuple[Any, bool]] = [(data, False)]
+    stack: List[Tuple[Any, bool, int]] = [(data, False, 0)]
     while stack:
-        node, leaving = stack.pop()
+        node, leaving, depth = stack.pop()
         if leaving:
             path.discard(id(node))
             continue
         if not isinstance(node, (dict, list)):
             continue
         visits += 1
-        if id(node) in path or visits > _YAML_NODE_BUDGET:
-            raise BuildFailure('materialize', f'{where} has a recursive or oversized alias structure')
+        if id(node) in path or visits > _YAML_NODE_BUDGET or depth > _YAML_MAX_DEPTH:
+            raise BuildFailure('materialize', f'{where} has a recursive, oversized or too deeply nested structure')
         path.add(id(node))
-        stack.append((node, True))
+        stack.append((node, True, depth))
         children = list(node.keys()) + list(node.values()) if isinstance(node, dict) else list(node)
-        stack.extend((child, False) for child in children)
+        stack.extend((child, False, depth + 1) for child in children)
 
 
 def _unsafe_spec(spec: Any, base: str = '') -> bool:
@@ -770,7 +773,8 @@ def _unsafe_spec(spec: Any, base: str = '') -> bool:
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
     that starts with ``.``, ``/``, ``~`` or a drive letter, or ends in
     ``.tgz``/``.tar``/``.tar.gz``, as a local path) — is refused when it is
-    absolute or has a ``..`` segment, since it would pull developer-chosen
+    absolute, a drive or home path, or resolves (from the declaring importer's
+    directory) above the workspace root, since it would pull developer-chosen
     directories (the toolchain env, other jobs' scratch, pod files) into
     the install.
     """
