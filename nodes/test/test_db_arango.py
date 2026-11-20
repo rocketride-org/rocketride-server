@@ -690,6 +690,7 @@ class TestGetData:
             instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users LIMIT 5 RETURN u'}),
         )
         out = inst.get_data({'question': 'show users'})
+        assert out['valid'] is True
         assert out['rows'] == [{'name': 'Alice'}]
         assert out['aql'] == 'FOR u IN users LIMIT 5 RETURN u'
         assert out['row_limit'] == 250
@@ -724,6 +725,7 @@ class TestGetData:
             instance=_FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN nope RETURN u'}),
         )
         out = inst.get_data({'question': 'show'})
+        assert out['valid'] is False
         assert out['rows'] == []
         assert 'collection not found' in out['error']
 
@@ -939,6 +941,40 @@ class TestLanesFailClosed:
 
         with pytest.raises(ArangoUnavailableError):
             ig._validate_query('FOR u IN users RETURN u')
+
+    @pytest.mark.parametrize('http_code', [401, 502, 504])
+    def test_validate_query_raises_for_an_auth_failure_or_a_gateway_error(self, http_code):
+        failure = ArangoError('server said no')
+        failure.http_code = http_code
+
+        def _raise(_aql):
+            raise failure
+
+        ig = IGlobal.__new__(IGlobal)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=_raise))
+
+        with pytest.raises(ArangoUnavailableError):
+            ig._validate_query('FOR u IN users RETURN u')
+
+    def test_an_auth_failure_during_explain_fails_the_step_without_a_repair_loop(self):
+        """HTTP 401 is the credentials, not the AQL: one LLM attempt, then the step fails with nothing on the lanes."""
+        denied = ArangoError('not authorized')
+        denied.http_code = 401
+
+        def explain(_aql):
+            raise denied
+
+        ig = _fake_ig(max_validation_attempts=5)
+        ig._validate_query = lambda aql: IGlobal._validate_query(ig, aql)
+        ig.db = SimpleNamespace(aql=SimpleNamespace(explain=explain))
+        fake = _FakeInstance(invoke_answer={'isValid': 'true', 'query': 'FOR u IN users RETURN u'})
+        inst = _make_instance(ig=ig, instance=fake)
+
+        with pytest.raises(ArangoUnavailableError):
+            inst.writeQuestions(self._question(_QTYPE.QUESTION))
+
+        assert len(fake.invoked) == 1
+        assert not (fake.texts or fake.tables or fake.answers)
 
     def test_validate_query_keeps_other_http_errors_as_rejections(self):
         rejected = ArangoError('bad AQL')
