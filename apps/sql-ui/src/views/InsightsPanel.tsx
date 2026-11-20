@@ -41,6 +41,7 @@ import { RULE_LABELS, runSchemaChecks } from '../schema/quality';
 import type { Finding } from '../schema/quality';
 import { requestTableRecord } from '../navigation';
 import { DatabaseIcon } from '../icons';
+import { useSqlEnv } from '../sqlEnv';
 
 // =============================================================================
 // TYPES
@@ -135,6 +136,8 @@ const styles = {
  * @returns The panel element.
  */
 export const InsightsPanel: React.FC<InsightsPanelProps> = ({ endpoint, snapshot }) => {
+	// Grid layouts: the env's (session-only copies in a dev-tool frame).
+	const env = useSqlEnv();
 	const graph = useMemo(() => buildRelationGraph(snapshot.schema), [snapshot.schema]);
 	const shape = useMemo(() => orientation(graph), [graph]);
 	const findings = useMemo(
@@ -297,6 +300,7 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({ endpoint, snapshot
 						columns={columns}
 						data={rows}
 						tableId="sql-insights-findings"
+						persistence={env.gridPersistence}
 						paginate={false}
 						height="100%"
 						onRowClick={(row) => requestTableRecord(endpoint.key, row.table)}

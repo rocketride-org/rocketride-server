@@ -1694,14 +1694,18 @@ class Task(DAPBase):
             Response from pipeline's data processing system
 
         Raises:
-            RuntimeError: If task is terminating or connection fails
+            TaskError: TASK_STOPPED if the task is terminating (also during a
+                restart); the request was not sent.
+            RuntimeError: If the connection fails
         """
         # Reset idle timer - task is actively processing data
         self.reset_idle_timer()
 
-        # Prevent operations during termination
+        # Prevent operations during termination. The request never reaches the
+        # pipeline, and a restart passes through this state before the task is
+        # running again, so callers get the same code a stopped task gives.
         if self._is_terminating:
-            raise RuntimeError('Task is terminating, cannot process data requests')
+            raise TaskError(TaskError.STOPPED, 'Task is terminating, cannot process data requests')
 
         if self._channel_signalled:
             # Outside the lock: the dial the signal started runs under the lock
@@ -1713,6 +1717,9 @@ class Task(DAPBase):
             if not self._data_client:
                 # No token: the run never started or was torn down while we waited for the lock
                 if not self._data_token:
+                    # Termination clears the token while we wait: same code as a stopped task
+                    if self._is_terminating:
+                        raise TaskError(TaskError.STOPPED, 'Task is terminating, cannot process data requests')
                     raise RuntimeError('Task is not running, cannot open the data channel')
                 self._data_client = await self._dial()
                 self._data_connected.set()

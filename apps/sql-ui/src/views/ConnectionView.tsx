@@ -32,7 +32,6 @@ import { commonStyles } from 'shell';
 import type { SqlEndpoint } from '../connect';
 import { refreshSchema, useSchema } from '../schema/schemaStore';
 import { useSqlEnv } from '../sqlEnv';
-import { HistoryPrefsBridge } from '../history/historyStore';
 import { runSchemaChecks } from '../schema/quality';
 import { useTableRecordRequest } from '../navigation';
 import { SqlPageNavProvider } from '../pageNav';
@@ -276,11 +275,6 @@ export const ConnectionView: React.FC<ConnectionViewProps> = ({ endpoint }) => {
 
 	return (
 		<div style={styles.root}>
-			{/* Query history is persisted through workspace preferences, and
-			    those may only be written while SQL Explorer is on screen. An
-			    open workbench keeps that channel alive, so a run recorded from
-			    any query document on this connection is actually saved. */}
-			<HistoryPrefsBridge />
 
 			{/* Page strip at the very top of the document's content. */}
 			<TabControl menu={menu} activeId={activePage} onSelect={selectPage} />

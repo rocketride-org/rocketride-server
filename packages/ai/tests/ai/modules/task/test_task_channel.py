@@ -19,6 +19,7 @@ import tenacity
 
 from ai.modules.task import task_engine
 from ai.modules.task.task_engine import Task
+from ai.modules.task.types import TaskError
 
 
 def _engine(client=None):
@@ -414,6 +415,37 @@ async def test_send_data_dials_itself_when_the_signalled_dial_never_connected(mo
     assert response == {'success': True}
     t._dial.assert_awaited_once()
     assert t._data_client is client
+
+
+async def test_send_data_raises_stopped_when_termination_clears_the_token_during_the_lock_wait():
+    t = _engine()
+    t._channel_signalled = False
+
+    await t._data_lock.acquire()
+    pending = asyncio.ensure_future(Task._send_data(t, {'command': 'x', 'arguments': {}}))
+    await _settle()
+    assert not pending.done(), 'the request waits for the lock'
+
+    # Termination begins and clears the token while the request waits.
+    t._is_terminating = True
+    t._data_token = None
+    t._data_lock.release()
+
+    with pytest.raises(TaskError) as raised:
+        await pending
+    # A TaskError is a RuntimeError subclass; what matters is the code the SQL session retries on.
+    assert type(raised.value) is TaskError
+    assert raised.value.code == TaskError.STOPPED
+
+
+async def test_send_data_without_a_token_and_not_terminating_is_still_a_plain_runtime_error():
+    t = _engine()
+    t._channel_signalled = False
+    t._data_token = None
+
+    with pytest.raises(RuntimeError) as raised:
+        await Task._send_data(t, {'command': 'x', 'arguments': {}})
+    assert type(raised.value) is RuntimeError
 
 
 async def test_send_data_uses_the_connection_the_signal_opened():

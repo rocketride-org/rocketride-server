@@ -32,6 +32,12 @@
 // separator in CODE: inside a string literal, a quoted identifier, a line or
 // block comment, or a PostgreSQL dollar-quoted body it is ordinary text.
 //
+// Two lexical rules that decide what a server RUNS, so a statement gate can
+// rely on them: MySQL runs the text inside `/*! ... */` and `/*!NNNNN ... */`,
+// and MariaDB inside `/*M! ... */` and `/*M!NNNNNN ... */` (only the markers
+// are comment), and PostgreSQL ends a `--` comment at a bare carriage return
+// as well as at a line feed.
+//
 // NOT SUPPORTED — and deliberately so: MySQL's `DELIMITER` directive. A buffer
 // that changes the statement terminator mid-file would need the scanner to
 // interpret a client-side command, and a half-working implementation is worse
@@ -83,16 +89,30 @@ export interface KeywordSite {
 
 /** The lexical traits that differ between the dialects the app speaks. */
 interface ScanTraits {
-	/** `#` starts a line comment (MySQL only; ClickHouse has `--` and `/* *\/`). */
+	/** `#` starts a line comment (MySQL; ClickHouse too, see {@link ScanTraits.hashNeedsSpaceOrBang}). */
 	hashComments: boolean;
+	/** `#` is a comment only when a space or `!` follows it (ClickHouse: "--, #! or # "). */
+	hashNeedsSpaceOrBang: boolean;
 	/** `--` only starts a comment when whitespace follows (MySQL only). */
 	dashCommentsNeedSpace: boolean;
-	/** `/* *\/` blocks nest (PostgreSQL only). */
+	/** `/* *\/` blocks nest (PostgreSQL, ClickHouse). */
 	nestedBlockComments: boolean;
-	/** `$tag$ ... $tag$` bodies are recognised (PostgreSQL only). */
+	/** `//` starts a line comment (ClickHouse). */
+	slashComments: boolean;
+	/** `$tag$ ... $tag$` bodies are recognised (PostgreSQL; ClickHouse's heredocs). */
 	dollarQuotes: boolean;
+	/** A dollar quote opens only when its closing tag follows (ClickHouse: an unclosed `$tag$` is not a heredoc). */
+	dollarQuoteNeedsClose: boolean;
 	/** A backslash escapes the next character inside a string literal. */
 	backslashEscapes: boolean;
+	/**
+	 * `/*! ... *\/` and `/*!NNNNN ... *\/` hold CODE that the server runs
+	 * (MySQL's executable comments): only the markers are comment. MySQL, and
+	 * `unknown` (where reading them as code is the safe side).
+	 */
+	executableComments: boolean;
+	/** A bare carriage return ends a `--` comment too (PostgreSQL's lexer: newline is [\n\r]). */
+	crEndsLineComment: boolean;
 }
 
 /** What a stretch of the buffer is, lexically. */
@@ -115,23 +135,31 @@ interface Region {
 /**
  * Resolve the lexical traits of a dialect.
  *
- * ClickHouse takes `--` and block comments but NOT `#`, and it treats a
- * backslash inside a string literal as an escape. MySQL is the only dialect
- * here that requires whitespace after `--` before it means a comment. PostgreSQL is the only
- * dialect here with nested block comments and dollar-quoted bodies, and the
- * only one where a plain `'...'` literal does NOT honour backslash escapes
- * (`standard_conforming_strings`); its `E'...'` form is detected separately.
+ * ClickHouse takes `--` and `//` line comments, nested block comments, and
+ * `#` only as `# ` or `#!` ("SQL-style comments start with --, #! or # ");
+ * its heredocs are `$tag$ ... $tag$` bodies that need their closing tag; and
+ * it treats a backslash inside a string literal as an escape (Lexer.cpp).
+ * MySQL is the only dialect here that requires whitespace after `--` before
+ * it means a comment. PostgreSQL nests block comments too, and is the only
+ * dialect here where a plain `'...'` literal does NOT honour backslash
+ * escapes (`standard_conforming_strings`); its `E'...'` form is detected
+ * separately.
  *
  * @param dialect - The engine dialect.
  * @returns The traits the scanner applies.
  */
 function traitsFor(dialect: SqlDialect): ScanTraits {
 	return {
-		hashComments: dialect === 'mysql',
+		hashComments: dialect === 'mysql' || dialect === 'clickhouse',
+		hashNeedsSpaceOrBang: dialect === 'clickhouse',
 		dashCommentsNeedSpace: dialect === 'mysql',
-		nestedBlockComments: dialect === 'postgres',
-		dollarQuotes: dialect === 'postgres',
+		nestedBlockComments: dialect === 'postgres' || dialect === 'clickhouse',
+		slashComments: dialect === 'clickhouse',
+		dollarQuotes: dialect === 'postgres' || dialect === 'clickhouse',
+		dollarQuoteNeedsClose: dialect === 'clickhouse',
 		backslashEscapes: dialect === 'mysql' || dialect === 'clickhouse',
+		executableComments: dialect === 'mysql' || dialect === 'unknown',
+		crEndsLineComment: dialect === 'postgres',
 	};
 }
 
@@ -259,12 +287,26 @@ function continuesIdentifier(sql: string, open: number): boolean {
  *
  * @param sql - The buffer.
  * @param open - Offset of the first comment character.
+ * @param crEnds - Whether a bare `\r` is a line break too (PostgreSQL).
  * @returns The offset of the line break, or the buffer length.
  */
-function skipLineComment(sql: string, open: number): number {
+function skipLineComment(sql: string, open: number, crEnds = false): number {
 	const nl = sql.indexOf('\n', open);
-	return nl < 0 ? sql.length : nl;
+	const end = nl < 0 ? sql.length : nl;
+	if (!crEnds) return end;
+	const cr = sql.indexOf('\r', open);
+	return cr >= 0 && cr < end ? cr : end;
 }
+
+/**
+ * The opening marker of an executable comment: MySQL's `/*!` and MariaDB's
+ * `/*M!`, optionally with the version they need (`/*!50110`, `/*M!100000`;
+ * five or six digits). What follows, up to the closing `*\/`, is code the
+ * server runs. A MariaDB server reports itself as 'mysql', and MySQL skips
+ * `/*M!` bodies, so reading them as code is right on MariaDB and only the
+ * safe side (a lost retry) on MySQL.
+ */
+const EXECUTABLE_COMMENT_OPEN = /^\/\*M?!(?:\d{6}|\d{5})?/;
 
 /**
  * Skip a block comment, honouring nesting when the dialect supports it.
@@ -309,21 +351,24 @@ function skipBlockComment(sql: string, open: number, nested: boolean): number {
 const DOLLAR_TAG = /^\$([A-Za-z_\u0080-\uffff][A-Za-z0-9_\u0080-\uffff]*)?\$/;
 
 /**
- * Skip a PostgreSQL dollar-quoted body. Returns `open` unchanged when the `$`
- * does not open one (a positional parameter such as `$1`, or a stray `$`), so
- * the caller can treat it as ordinary code.
+ * Skip a PostgreSQL dollar-quoted body (or a ClickHouse heredoc). Returns
+ * `open` unchanged when the `$` does not open one (a positional parameter
+ * such as `$1`, a stray `$`, or, where a close is required, a tag nothing
+ * closes), so the caller can treat it as ordinary code.
  *
  * @param sql - The buffer.
  * @param open - Offset of the `$`.
+ * @param needsClose - An unclosed tag opens nothing (ClickHouse); otherwise it runs to the end (PostgreSQL).
  * @returns The offset one past the closing tag, or `open` when this is not a
  *          dollar quote.
  */
-function skipDollarQuoted(sql: string, open: number): number {
+function skipDollarQuoted(sql: string, open: number, needsClose = false): number {
 	const match = DOLLAR_TAG.exec(sql.slice(open, open + 130));
 	if (!match) return open;
 	const tag = match[0];
 	const close = sql.indexOf(tag, open + tag.length);
-	return close < 0 ? sql.length : close + tag.length;
+	if (close < 0) return needsClose ? open : sql.length;
+	return close + tag.length;
 }
 
 /**
@@ -341,6 +386,8 @@ function scanRegions(sql: string, traits: ScanTraits): Region[] {
 	const n = sql.length;
 	let codeStart = 0;
 	let i = 0;
+	/** Inside a MySQL executable comment: its closing `*\/` (in code) is a marker. */
+	let executable = false;
 
 	while (i < n) {
 		const ch = sql[i];
@@ -357,16 +404,31 @@ function scanRegions(sql: string, traits: ScanTraits): Region[] {
 			end = skipDelimited(sql, i, '`', false);
 			kind = 'string';
 		} else if (ch === '-' && sql[i + 1] === '-' && opensDashComment(sql, i, traits)) {
+			end = skipLineComment(sql, i, traits.crEndsLineComment);
+			kind = 'comment';
+		} else if (traits.hashComments && ch === '#' && (!traits.hashNeedsSpaceOrBang || sql[i + 1] === ' ' || sql[i + 1] === '!')) {
 			end = skipLineComment(sql, i);
 			kind = 'comment';
-		} else if (traits.hashComments && ch === '#') {
+		} else if (traits.slashComments && ch === '/' && sql[i + 1] === '/') {
 			end = skipLineComment(sql, i);
 			kind = 'comment';
+		} else if (executable && ch === '*' && sql[i + 1] === '/') {
+			// The end of an executable comment: only the marker is comment.
+			end = i + 2;
+			kind = 'comment';
+			executable = false;
 		} else if (ch === '/' && sql[i + 1] === '*') {
-			end = skipBlockComment(sql, i, traits.nestedBlockComments);
+			const marker = traits.executableComments && !executable ? EXECUTABLE_COMMENT_OPEN.exec(sql.slice(i, i + 10)) : null;
+			if (marker) {
+				// MySQL runs what follows: only the marker is comment.
+				end = i + marker[0].length;
+				executable = true;
+			} else {
+				end = skipBlockComment(sql, i, traits.nestedBlockComments);
+			}
 			kind = 'comment';
 		} else if (traits.dollarQuotes && ch === '$' && !continuesIdentifier(sql, i)) {
-			const closed = skipDollarQuoted(sql, i);
+			const closed = skipDollarQuoted(sql, i, traits.dollarQuoteNeedsClose);
 			if (closed > i) {
 				end = closed;
 				kind = 'string';
@@ -441,6 +503,26 @@ function maskNonCode(sql: string, traits: ScanTraits): string {
 	let out = '';
 	for (const region of regions) {
 		out += region.kind === 'code' ? sql.slice(region.start, region.end) : ' '.repeat(region.end - region.start);
+	}
+	return out;
+}
+
+/**
+ * Like {@link codeOnly}, but a string literal or a quoted identifier becomes a
+ * run of `0`s of the same length instead of blanks, so text that ends in one
+ * still reads as ending in an operand. Comments are blanked as in `codeOnly`,
+ * and offsets are preserved.
+ *
+ * @param sql - The statement.
+ * @param dialect - The engine dialect.
+ * @returns The masked text.
+ */
+export function codeWithOperands(sql: string, dialect: SqlDialect = 'unknown'): string {
+	let out = '';
+	for (const region of scanRegions(sql, traitsFor(dialect))) {
+		const length = region.end - region.start;
+		if (region.kind === 'code') out += sql.slice(region.start, region.end);
+		else out += (region.kind === 'string' ? '0' : ' ').repeat(length);
 	}
 	return out;
 }
