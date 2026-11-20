@@ -48,6 +48,16 @@ const AUTH_POPUP_TTL_MS = 30 * 60 * 1000;
 /** URL parameters the IdP puts on the return leg. */
 const RETURN_LEG_PARAMS = ['code', 'error', 'state'];
 
+/**
+ * Whether the URL carries any IdP return-leg parameter (`code`, `error` or `state`).
+ *
+ * @param params - The page's query parameters.
+ * @returns True on the return leg, including an error return.
+ */
+export function hasReturnLegParams(params: URLSearchParams): boolean {
+	return RETURN_LEG_PARAMS.some((name) => params.has(name));
+}
+
 /** The Storage calls these helpers use (sessionStorage in the browser). */
 type RoleStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
@@ -115,7 +125,7 @@ function resolveEnv(env: AuthPopupEnv): Required<AuthPopupEnv> {
 export function isAuthPopupWindow(windowName: string, params: URLSearchParams, env: AuthPopupEnv = {}): boolean {
 	if (windowName === 'rrauth' || params.get('rrauth') === '1') return true;
 	const { storage, topLevel, now } = resolveEnv(env);
-	if (!storage || !topLevel || !RETURN_LEG_PARAMS.some((name) => params.has(name))) return false;
+	if (!storage || !topLevel || !hasReturnLegParams(params)) return false;
 	try {
 		const value = storage.getItem(AUTH_POPUP_KEY);
 		storage.removeItem(AUTH_POPUP_KEY);

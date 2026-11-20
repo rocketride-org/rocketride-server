@@ -412,6 +412,31 @@ Error IFilterTest::putPipe(ServicePipe pipe) noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Ends the filters below the pipe head, bottom-up, as the endpoint's
+///		end does. The endpoint's end would also end the head, which then
+///		has no endpoint and no filter below it, so nothing sent through
+///		the pipe could reach the ended filters. They stay alive in the
+///		endpoint's stacks until disconnect(), which ends them again: a
+///		filter's end must allow that
+///	@param[in] pipe
+///		The pipe whose filters to end
+//-------------------------------------------------------------------------
+Error IFilterTest::endFilters(ServicePipe pipe) noexcept {
+    // Collect the filters first: an end releases the filter's link down
+    std::vector<ServiceInstance> filters;
+    for (auto filter = pipe->pDown; filter; filter = filter->pDown)
+        filters.push_back(filter);
+
+    Error ccode;
+    while (!filters.empty()) {
+        ccode = filters.back()->endFilterInstance() || ccode;
+        filters.pop_back();
+    }
+    return ccode;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This function will disconnect and destory the filter. The
 ///		destructor does this automatically
 //-------------------------------------------------------------------------
