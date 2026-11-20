@@ -5,7 +5,7 @@ import types
 import pytest
 
 from ai.common.models.ocr import doctr, easyocr, surya, trocr
-from ai.common.models.ocr.utils import raise_on_error
+from ai.common.models.extract import raise_on_error
 
 _OOM = 'CUDA out of memory. Tried to allocate 932.00 MiB'
 

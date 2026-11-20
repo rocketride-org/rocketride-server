@@ -101,8 +101,16 @@ class AVIReader(ABC):
             # getTimestamp()) still reads the stream position of this chunk's start
             self._bytes_read += len(data)
 
-        # Signal callback we are done
-        self.onData(None)
+        # Signal callback we are done. A failure here (audio_transcribe's final
+        # flush, a video reader's last buffered frames) is captured like any
+        # chunk's, so stop() re-raises it on the pipe thread instead of it dying
+        # on this thread
+        try:
+            self.onData(None)
+        except Exception as e:
+            rocketlib_error(f'[Reader] Error in {self._name} data callback: {e}')
+            if self._error is None:
+                self._error = e
 
     def _info_process(self):
         """Read decoded buffer from FFmpeg's stderr and call the callback."""
