@@ -638,16 +638,19 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// dot-free segment (B5): `draft.docBrain` would otherwise compose the
 	// registry name `acme.docBrain` and show another pipeline's state.
 	const hostReadonly = host.isReadonly === true;
+	// The store review ladder (plan 10.1): every server but OSS reviews store
+	// versions; OSS has no reviewer, so its pipes are born 'ready' and nothing
+	// is submitted or withdrawn there. Re-read on reconnect (a new server).
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const hasReviewLadder = useMemo(() => !(ConnectionManager.getInstance().getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss'), [isConnected]);
 	const review = useMemo<IReviewHost | undefined>(() => {
 		if (hostReadonly || !projectId || !isShortId(projectId)) return undefined;
-		const cm = ConnectionManager.getInstance();
-		const hasReviewLadder = !(cm.getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss');
-		return createBusAppBuilderHost({ bus: cm, appId: projectId, hasReviewLadder });
+		return createBusAppBuilderHost({ bus: ConnectionManager.getInstance(), appId: projectId, hasReviewLadder });
 		// isConnected is a deliberate dep, as on fetchDeployLifecycle: a
 		// reconnect mints a new adapter identity, and the Requirements ladder
 		// and the Review thread (both keyed on it) re-pull.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [hostReadonly, projectId, isConnected]);
+	}, [hostReadonly, projectId, hasReviewLadder, isConnected]);
 
 	/** Fetch one immutable artifact (the version cards' record drawer). */
 	const fetchDeployArtifact = useCallback((version: number): Promise<IProject | undefined> => {
@@ -874,6 +877,25 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 									await deploymentActions.deleteVersion(projectIdRef.current, version);
 									void fetchDeployLifecycle();
 								},
+								// Store review (plan 10.1): the App Builder's verbs on the
+								// pipe's registry name, offered only where the server
+								// reviews, as the App Builder's host does.
+								...(hasReviewLadder
+									? {
+											submitForReview: async (version: number) => {
+												await deploymentActions.submitForReview(projectIdRef.current, version);
+												void fetchDeployLifecycle();
+											},
+											withdrawReview: async (version: number) => {
+												await deploymentActions.withdrawReview(projectIdRef.current, version);
+												void fetchDeployLifecycle();
+											},
+										}
+									: {}),
+								// Any session's change to this pipe's registry (a
+								// verdict, a publish) re-fetches the page: the review
+								// adapter's signal, keyed by the registry name.
+								...(review?.subscribeDeployChanged ? { subscribeDeployChanged: review.subscribeDeployChanged } : {}),
 								setSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
 									await deploymentActions.setSchedule(projectIdRef.current, teamId, sourceId, cron, ttl);
 									void fetchDeployLifecycle();

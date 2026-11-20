@@ -37,7 +37,7 @@ export type { ITeamDeploymentRecordPanelProps, ITeamDeploymentRecordData } from 
 export type { IDeploymentRecordPanelProps, IDeploymentRecordData } from './DeploymentRecordPanel';
 export { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 export type { ISchedulePanelProps } from './SchedulePanel';
-export type { DeployTeamRef, DeployVersionCard, TeamDeployment, TeamDeploymentSchedule, TeamDeploymentRow, TeamDeploymentSource, DeployHistoryRow, DeployScheduleRow } from './types';
+export type { DeployTeamRef, DeployVersionCard, DeploymentRung, TeamDeployment, TeamDeploymentSchedule, TeamDeploymentRow, TeamDeploymentSource, DeployHistoryRow, DeployScheduleRow } from './types';
 
 // =============================================================================
 // THE CAPABILITY
@@ -76,6 +76,17 @@ export interface IPipelineDeploy {
 	 *  the number is never reused). The card offers it only on rows the
 	 *  server marks `deletable`; the server refuses by name otherwise. */
 	deleteVersion?: (version: number) => Promise<void>;
+	/** Submit one deployed version for store review ('private' → 'submit',
+	 *  plan 10.1). Present only where the server runs the review ladder; the
+	 *  card offers it on the newest version that did not fail, while a draft. */
+	submitForReview?: (version: number) => Promise<void>;
+	/** Withdraw a pending review ('submit' → 'private'). Present with
+	 *  {@link submitForReview}; the card offers it on a version in review. */
+	withdrawReview?: (version: number) => Promise<void>;
+	/** Subscribe to this pipeline's deployment changes from ANY session (a
+	 *  reviewer's verdict, a teammate's publish); the page re-fetches on each.
+	 *  Returns the unsubscribe. */
+	subscribeDeployChanged?: (listener: () => void) => () => void;
 	/** Set/clear one source's schedule on a team deployment (where-live pill). */
 	setSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
 	/** Pause/resume ONE source's schedule, preserving cron/ttl. */
@@ -141,6 +152,7 @@ export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipeline
 			return {
 				teamId: dep.teamId,
 				teamName: dep.teamName,
+				rung: dep.rung,
 				version: dep.version,
 				state: dep.state,
 				deployedAt: dep.deployedAt,
@@ -174,6 +186,9 @@ export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipeline
 			{...(deploy.setDisabled ? { onSetDisabled: deploy.setDisabled } : {})}
 			{...(deploy.remove ? { onRemove: deploy.remove } : {})}
 			{...(deploy.deleteVersion ? { onDeleteVersion: deploy.deleteVersion } : {})}
+			{...(deploy.submitForReview ? { onSubmitForReview: deploy.submitForReview } : {})}
+			{...(deploy.withdrawReview ? { onWithdrawReview: deploy.withdrawReview } : {})}
+			{...(deploy.subscribeDeployChanged ? { subscribeDeployChanged: deploy.subscribeDeployChanged } : {})}
 			{...(deploy.setSchedule ? { onSetSchedule: deploy.setSchedule } : {})}
 			{...(deploy.setSchedulePaused ? { onSetSchedulePaused: deploy.setSchedulePaused } : {})}
 			{...(deploy.fetchArtifact ? { fetchArtifact: deploy.fetchArtifact, servicesJson, handleValidatePipeline, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})}

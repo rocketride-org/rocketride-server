@@ -4,29 +4,35 @@
 // =============================================================================
 
 /**
- * DeployPanel — the file view's DEPLOY page (mockup v5, screen B).
+ * DeployPanel — the file view's DEPLOY page (mockups 2.13 and 2.14).
  *
  * The publish + promotion surface for one project: the version strip from
- * the org registry (Publish card + one card per immutable version with team
- * badges showing where it is live), the "where live" grid (one row per team
- * deployment), and the merged audit history — both grids are the stock
- * CardDataGrid per the style guide (it replaced the in-house DataTable).
+ * the org registry (Deploy card + one card per immutable version with its
+ * review badge, the audiences it is live on, and its verbs), and "Where this
+ * project is live": one row per rung that holds a publication (Me, each
+ * team, the store), each with its sources.
+ *
+ * The version cards and the Publish dialog are the App Builder's own pieces
+ * (shared/components/deploy): the same badge, the same Publish to… / Submit
+ * for review / Withdraw rules, the same audience dialog. A pipe walks the
+ * app's review ladder (plan 10.1); where the server has no reviewer the host
+ * offers no review verb and versions are born 'ready'.
  *
  * CAPABILITY-FED like SourcePanel: the panel OWNS its data lifecycle. The
  * host supplies one composite `fetchLifecycle` closure (the fetchTimeline
- * precedent) — the panel fetches on mount and silently re-fetches after
- * every mutation. LIVE data (`deployments`, `teams`) flows in as props (the
- * liveEvents precedent) because the host already polls/pushes it for the
- * sidebar and badges.
+ * precedent) — the panel fetches on mount, silently re-fetches after every
+ * mutation, and re-fetches on the host's deployment-change signal (any
+ * session's publish, a reviewer's verdict). LIVE data (`deployments`,
+ * `teams`) flows in as props (the liveEvents precedent).
  *
  * Cardinality-driven collapsing (never an edition check): with exactly one
- * deployable team the "Publish to…" picker becomes a plain Publish button,
- * badges reduce to a single DEPLOYED marker, and the where-live grid is
- * hidden (its one row is already on the strip).
+ * deployable audience the "Publish to…" picker becomes a plain Publish
+ * button and badges reduce to a single DEPLOYED marker.
  *
  * Every pointer move (deploy/rollback) is confirmed before it runs — it
- * changes what an environment executes. Publishing is gated on a SAVED,
+ * changes what an audience is served. Publishing is gated on a SAVED,
  * clean document: the host passes `canPublish` + the reason when blocked.
+ * No process or engine state is drawn anywhere: a row means serving.
  */
 
 import React, { useCallback, useEffect, useMemo, useState, CSSProperties } from 'react';
@@ -38,7 +44,9 @@ import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
 import { formatTime, formatDayTime } from 'shell';
 import { buttonize } from 'shared/utils/buttonize';
-import { DeleteVersionMark } from 'shared/components/deploy';
+import { DeleteVersionMark, PublishToDialog, ServingStateWord, VersionCardActions, VersionStateBadge, newestSubmittableOf, versionCardActionsOf } from 'shared/components/deploy';
+import { pinStatusOf, versionBadgeOf } from '../../../appdev/servingStatus';
+import { publishTargetsOf, rowOfTarget, servingOf, whereLiveRungsOf } from './whereLive';
 import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 import { VersionRecordPanel } from './VersionRecordPanel';
 import type { IVersionRecordPanelProps } from './VersionRecordPanel';
@@ -97,6 +105,16 @@ export interface IDeployPanelProps {
 	    rows the server marks `deletable`; the server refuses by name otherwise
 	    and the refusal shows under the strip. */
 	onDeleteVersion?: (version: number) => Promise<void>;
+	/** Submit one deployed version for store review (private → submit). Its
+	    presence means the server reviews: the card offers it on the newest
+	    version that did not fail, while a draft. */
+	onSubmitForReview?: (version: number) => Promise<void>;
+	/** Withdraw a pending review (submit → private); the card offers it on a
+	    version in review. */
+	onWithdrawReview?: (version: number) => Promise<void>;
+	/** Subscribe to this pipeline's deployment changes from any session; the
+	    panel re-fetches on each. Returns the unsubscribe. */
+	subscribeDeployChanged?: (listener: () => void) => () => void;
 	/** Set/clear one source's schedule (the where-live pill opens the stock
 	    SchedulePanel editor; cron null clears). */
 	onSetSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
@@ -185,12 +203,6 @@ const S = {
 		color: 'var(--rr-color-success)',
 		border: '1px solid color-mix(in srgb, var(--rr-color-success) 40%, transparent)',
 	} as CSSProperties,
-	// Follows the bottom-pinned badge row (which carries the auto margin).
-	rowButtons: {
-		display: 'flex',
-		gap: 6,
-		paddingTop: 9,
-	} as CSSProperties,
 	publishCard: (enabled: boolean): CSSProperties => ({
 		minWidth: 148,
 		border: '1.5px dashed var(--rr-border-hover)',
@@ -216,17 +228,6 @@ const S = {
 		gap: 10,
 		paddingBottom: 8,
 	} as CSSProperties,
-	pickerRow: (enabled: boolean): CSSProperties => ({
-		display: 'flex',
-		alignItems: 'center',
-		gap: 10,
-		padding: '9px 12px',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 6,
-		marginBottom: 8,
-		cursor: enabled ? 'pointer' : 'default',
-		opacity: enabled ? 1 : 0.55,
-	}),
 	commentInput: {
 		...commonStyles.inputField,
 		width: '100%',
@@ -253,6 +254,12 @@ const S = {
 		fontWeight: 700,
 		fontSize: 13.5,
 	} as CSSProperties,
+	// The rung's handle beside its label ('@me', '@team/Staging', '@public').
+	liveHandle: {
+		...commonStyles.fontMono,
+		fontSize: 11,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
 	liveVersion: {
 		fontSize: 11.5,
 		fontWeight: 700,
@@ -262,42 +269,10 @@ const S = {
 		borderRadius: 10,
 		padding: '1px 8px',
 	} as CSSProperties,
-	liveState: (state: TeamDeploymentRow['state'], clickable: boolean): CSSProperties => ({
-		fontSize: 11.5,
-		fontWeight: 600,
-		color: state === 'errored' ? 'var(--rr-color-error)' : state === 'enabled' ? 'var(--rr-color-success)' : 'var(--rr-text-secondary)',
-		cursor: clickable ? 'pointer' : 'inherit',
-	}),
 	liveDeployedAt: {
 		marginLeft: 'auto',
 		fontSize: 11.5,
 		color: 'var(--rr-text-secondary)',
-	} as CSSProperties,
-	// Per-team soft-remove on the where-live group header.
-	liveRemoveBtn: {
-		padding: '2px 9px',
-		fontSize: 11,
-		fontWeight: 600,
-		background: 'transparent',
-		color: 'var(--rr-text-secondary)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 4,
-		cursor: 'pointer',
-		whiteSpace: 'nowrap',
-	} as CSSProperties,
-	// Running badge — the live-run indicator on group headers + source rows
-	// (the schedule-pill grammar, always in its armed/green form).
-	liveRunning: {
-		display: 'inline-flex',
-		alignItems: 'center',
-		gap: 6,
-		borderRadius: 14,
-		padding: '2px 10px',
-		fontSize: 11.5,
-		fontWeight: 600,
-		border: '1px solid color-mix(in srgb, var(--rr-color-success) 40%, transparent)',
-		background: 'color-mix(in srgb, var(--rr-color-success) 10%, transparent)',
-		color: 'var(--rr-color-success)',
 	} as CSSProperties,
 	liveSourceRow: (clickable: boolean): CSSProperties => ({
 		display: 'flex',
@@ -350,7 +325,7 @@ function shortSha(sha: string): string {
  * The DEPLOY-page lifecycle surface: version strip, where-live grid,
  * merged history grid. See the module docstring for the collapsing rules.
  */
-export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onRemove, onDeleteVersion, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
+export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onRemove, onDeleteVersion, onSubmitForReview, onWithdrawReview, subscribeDeployChanged, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
 	// --- Panel-owned registry data (fetched, never passed in) -----------------
 
 	const [versions, setVersions] = useState<DeployVersionCard[]>([]);
@@ -375,16 +350,26 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 		void refresh();
 	}, [refresh]);
 
-	// Deploy targets = teams the caller controls. ONE target collapses the
-	// picker into a direct Deploy button (mockup screen C).
+	// Deployment changes of this pipeline from ANY session (a reviewer's
+	// verdict, a teammate's publish): re-fetch so the version states and the
+	// where-live rows never go stale, as the App Builder's DEPLOY view does.
+	useEffect(() => subscribeDeployChanged?.(() => void refresh()), [subscribeDeployChanged, refresh]);
+
+	// Deploy targets = the audiences the caller controls ('@me' first). ONE
+	// target collapses the picker into a direct Publish button.
 	const controlTeams = useMemo(() => teams.filter((t) => t.canControl), [teams]);
 	const singleTarget = controlTeams.length === 1 ? controlTeams[0] : null;
 	const multiTeam = teams.length > 1;
 
-	// Soft-removed deployments never render: the where-live grid and the
-	// badges share this filter so a removed row can't be re-enabled by its
-	// (still clickable) state dot.
-	const liveDeployments = useMemo(() => deployments.filter((dep) => dep.state !== 'removed'), [deployments]);
+	// The where-live rows: one per rung holding a publication, in rung order
+	// (Me, teams, the store). Soft-removed deployments never render: the
+	// where-live table and the badges share this list.
+	const rungs = useMemo(() => whereLiveRungsOf(deployments, teams), [deployments, teams]);
+	const liveDeployments = useMemo(() => rungs.map((rung) => rung.row), [rungs]);
+
+	// Latest-only review: Submit appears solely on the newest version that
+	// did not fail (the server enforces the same rule).
+	const newestSubmittable = newestSubmittableOf(versions);
 
 	// version -> live teams (for the env badges on each card).
 	const liveByVersion = useMemo(() => {
@@ -458,9 +443,11 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 		setPendingDeploy(null);
 	};
 
-	/** Stage a pointer move for confirmation (deploy and rollback alike). */
+	/** Stage a pointer move for confirmation (deploy and rollback alike). The
+	    audience's current row is found by rung: the caller's own space is
+	    addressed '@me' while its row carries the raw `user~{uid}` slot. */
 	const stageDeploy = (version: number, team: DeployTeamRef): void => {
-		const current = deployments.find((dep) => dep.teamId === team.id && dep.state !== 'removed');
+		const current = rowOfTarget(liveDeployments, team.id);
 		setPickerVersion(null);
 		setPendingDeploy({ version, team, ...(current ? { fromVersion: current.version } : {}) });
 	};
@@ -497,6 +484,11 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 					})()}
 				{versions.map((v, index) => {
 					const live = liveByVersion.get(v.version) ?? [];
+					// Only legal moves render (the App Builder's rules): a pipe
+					// never builds, so its bytes can serve once deployed.
+					const legal = versionCardActionsOf({ version: v.version, state: v.state, servable: true }, newestSubmittable, { publish: controlTeams.length > 0, submit: Boolean(onSubmitForReview), withdraw: Boolean(onWithdrawReview) });
+					// One audience only: its Publish disappears once the version serves there.
+					const actions = singleTarget && rowOfTarget(liveDeployments, singleTarget.id)?.version === v.version ? { ...legal, publish: false } : legal;
 					return (
 						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}), ...(fetchArtifact ? { cursor: 'pointer' } : {}) }} title={fetchArtifact ? 'View this version' : undefined} {...buttonize(() => openVersionDrawer(v), Boolean(fetchArtifact))}>
 							{/* The delete mark (plan 2.3): present ONLY while the server
@@ -517,6 +509,10 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 								) : null}
 							</div>
 							<div style={S.envTags}>
+								{/* The review state first (draft, in review, ready,
+								    rejected, failed): the App Builder's badge. A pipe
+								    never builds, so there is no build word. */}
+								<VersionStateBadge badge={versionBadgeOf(v.state, '')} />
 								{/* Badge click opens the deployment record panel — the
 								    badge IS the deployment, same gesture as its
 								    where-live row. */}
@@ -535,23 +531,21 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 									</span>
 								))}
 							</div>
-							{controlTeams.length > 0 && (
-								// Nested real buttons: keep both event paths from
-								// bubbling into the card's buttonized activation.
-								<div style={S.rowButtons} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-									{singleTarget ? (
-										live.some((dep) => dep.teamId === singleTarget.id) ? null : (
-											<Button variant="secondary" small disabled={busy} onClick={() => stageDeploy(v.version, singleTarget)}>
-												Publish
-											</Button>
-										)
-									) : (
-										<Button variant="secondary" small disabled={busy} onClick={() => setPickerVersion(v.version)}>
-											Publish to&hellip;
-										</Button>
-									)}
-								</div>
-							)}
+							{/* The card's verbs, the App Builder's row: Publish to…
+							    (or the one-audience Publish, gone once the version
+							    serves there), Submit for review, Withdraw. */}
+							<VersionCardActions
+								actions={actions}
+								publishLabel={singleTarget ? 'Publish' : 'Publish to…'}
+								onPublish={() => (singleTarget ? stageDeploy(v.version, singleTarget) : setPickerVersion(v.version))}
+								onSubmit={() => {
+									if (onSubmitForReview) void run(() => onSubmitForReview(v.version));
+								}}
+								onWithdraw={() => {
+									if (onWithdrawReview) void run(() => onWithdrawReview(v.version));
+								}}
+								disabled={busy}
+							/>
 						</div>
 					);
 				})}
@@ -559,54 +553,51 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 			</div>
 			{error && !publishOpen && pickerVersion === null && !pendingDeploy && <div style={S.errorText}>{error}</div>}
 
-			{/* ── Where live (grouped panel: team header + per-source rows) ── */}
-			{liveDeployments.length > 0 && (
+			{/* ── Where live (one row per rung: header + per-source rows) ── */}
+			{rungs.length > 0 && (
 				<div style={S.gridWrap}>
 					<Card header="Where this project is live" noBodyPadding>
 						<div>
-							{liveDeployments.map((dep) => (
+							{rungs.map(({ row: dep, label, handle, scheduleEditable }) => (
 								<React.Fragment key={dep.teamId}>
-									{/* Group header — the deployment; click opens its record. */}
-									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the team deployment' : undefined} {...buttonize(() => onOpenDeployment?.(dep.teamId), Boolean(onOpenDeployment))}>
-										<span style={S.liveTeam}>{dep.teamName}</span>
+									{/* Rung header — the publication; click opens its record. */}
+									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the deployment' : undefined} {...buttonize(() => onOpenDeployment?.(dep.teamId), Boolean(onOpenDeployment))}>
+										<span style={S.liveTeam}>{label}</span>
+										{handle ? <span style={S.liveHandle}>{handle}</span> : null}
 										<span style={S.liveVersion}>v{dep.version}</span>
 										{/* A row means serving (decided 2026-11-16): a serving row
 										    carries no state word and no process state. A deployment
 										    the server holds in another state (an operator's disable,
-										    an error) says so in plain words; Unpublish is the one
-										    user verb, the enable/disable toggle is gone. */}
-										{dep.state !== 'enabled' && <span style={S.liveState(dep.state, false)}>{dep.state}</span>}
+										    an error) says so, in the App Builder's words; Unpublish
+										    is the one user verb, the enable/disable toggle is gone. */}
+										<ServingStateWord status={pinStatusOf(servingOf(dep))} />
 										<span style={S.liveDeployedAt}>{dep.deployedAt ? `published ${formatDayTime(dep.deployedAt)}` : ''}</span>
 										{onRemove && (
-											<button
-												style={S.liveRemoveBtn}
-												disabled={busy}
-												onClick={(e) => {
-													// The header row opens the record; Remove must not.
-													e.stopPropagation();
-													setRemoveTeam({ teamId: dep.teamId, teamName: dep.teamName });
-												}}
-												// Enter/Space on the button also bubble a keydown to
-												// the buttonized header (which activates on those
-												// keys); stop it so removing never also opens the
-												// deployment record.
-												onKeyDown={(e) => e.stopPropagation()}
-											>
-												Unpublish
-											</button>
+											// The header row opens the record; Unpublish must not,
+											// by click or by Enter/Space.
+											<span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+												<Button variant="secondary" small disabled={busy} onClick={() => setRemoveTeam({ teamId: dep.teamId, teamName: label })}>
+													Unpublish
+												</Button>
+											</span>
 										)}
 									</div>
-									{/* Source rows — schedule pill + last run, drawer-pill grammar. */}
+									{/* Source rows — schedule pill + last run, drawer-pill grammar.
+									    Only a team rung's sources take a schedule (mockup 2.15);
+									    @me and @public sources are on demand. */}
 									{dep.sources.map((src) => (
 										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} {...buttonize(() => onOpenDeployment?.(dep.teamId, src.sourceId), Boolean(onOpenDeployment))}>
 											<span style={S.liveSourceName}>{src.sourceName}</span>
 											<span
-												style={S.livePill(Boolean(src.cron) && !src.paused, Boolean(onSetSchedule))}
-												title={onSetSchedule ? 'Edit schedule' : undefined}
-												{...buttonize((e) => {
-													e.stopPropagation();
-													setEditSchedule({ teamId: dep.teamId, teamName: dep.teamName, source: src });
-												}, Boolean(onSetSchedule))}
+												style={S.livePill(Boolean(src.cron) && !src.paused, scheduleEditable && Boolean(onSetSchedule))}
+												title={scheduleEditable && onSetSchedule ? 'Edit schedule' : undefined}
+												{...buttonize(
+													(e) => {
+														e.stopPropagation();
+														setEditSchedule({ teamId: dep.teamId, teamName: label, source: src });
+													},
+													scheduleEditable && Boolean(onSetSchedule)
+												)}
 											>
 												{src.cron ? `${describeCron(src.cron)}${src.ttl ? ` · ${describeTtl(src.ttl)}` : ''}${src.paused ? ' · paused' : ''}` : 'on demand'}
 											</span>
@@ -702,30 +693,20 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 				</Modal>
 			)}
 
-			{/* ── Deploy-to team picker ─────────────────────────────────── */}
+			{/* ── Publish-to audience picker (the App Builder's dialog) ─── */}
 			{pickerVersion !== null && (
-				<Modal
+				<PublishToDialog
 					title={`Publish v${pickerVersion} to…`}
-					onClose={closeDialogs}
-					footer={
-						<Button variant="secondary" disabled={busy} onClick={closeDialogs}>
-							Cancel
-						</Button>
-					}
-				>
-					<div style={{ fontSize: 12.5, color: 'var(--rr-text-secondary)', marginBottom: 10 }}>Points the chosen team at v{pickerVersion}. Choosing a team already on a newer version is a rollback: same gesture, one mental model.</div>
-					{controlTeams.map((team) => {
-						const current = deployments.find((dep) => dep.teamId === team.id && dep.state !== 'removed');
-						const isCurrent = current?.version === pickerVersion;
-						return (
-							<div key={team.id} style={S.pickerRow(!busy && !isCurrent)} {...buttonize(() => stageDeploy(pickerVersion, team), !busy && !isCurrent)}>
-								<span style={{ fontWeight: 600 }}>{team.name}</span>
-								<span style={{ ...commonStyles.textMuted, fontSize: 11.5, marginLeft: 'auto' }}>{current ? (isCurrent ? `already on v${current.version}` : current.version > pickerVersion ? `rollback from v${current.version}` : `upgrade from v${current.version}`) : 'not published yet'}</span>
-							</div>
-						);
-					})}
-					{error && <div style={S.errorText}>{error}</div>}
-				</Modal>
+					hint={`Points the chosen audience at v${pickerVersion}. Choosing an audience already on a newer version is a rollback: same gesture, one mental model.`}
+					targets={publishTargetsOf(controlTeams, liveDeployments, pickerVersion)}
+					onChoose={(id) => {
+						const team = controlTeams.find((t) => t.id === id);
+						if (team) stageDeploy(pickerVersion, team);
+					}}
+					onCancel={closeDialogs}
+					busy={busy}
+					{...(error ? { error } : {})}
+				/>
 			)}
 
 			{/* ── Pointer-move confirmation (deploy and rollback alike) ───

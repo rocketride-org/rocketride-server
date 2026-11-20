@@ -6,7 +6,8 @@
 /**
  * Serving-state wording for App Builder (#2461) — one place that turns the
  * server's per-pin serving truth into the words and tones the DEPLOY and
- * DASHBOARD views render, so both say the same thing.
+ * DASHBOARD views render, so both say the same thing. The pipeline DEPLOY
+ * page phrases its where-live rows and version badges here too.
  *
  * The server decides serving with the SAME gate that builds what a browser
  * is actually handed (binding enabled, deployment serveable for the rung,
@@ -34,6 +35,9 @@ export const STATE_BADGE: Record<NonNullable<AppVersionInfo['state']>, { variant
 /** Why an audience is not served, in words: server reason -> phrase + tone. */
 const REASONS: Record<string, { phrase: string; tone: ServingTone; standalone: boolean }> = {
 	disabled: { phrase: 'disabled', tone: 'muted', standalone: true },
+	// A pipeline's team deployment that was serving and broke: the one badge
+	// the pipeline where-live table carries (mockup 2.13).
+	errored: { phrase: 'errored', tone: 'error', standalone: true },
 	building: { phrase: 'still building', tone: 'warn', standalone: false },
 	'in-review': { phrase: 'in review', tone: 'warn', standalone: true },
 	'not-approved': { phrase: 'not approved', tone: 'warn', standalone: true },
@@ -51,7 +55,7 @@ function isServing(pin: RungPin): boolean {
 }
 
 /** The short reason phrase for a non-serving pin ("still building"). */
-function reasonPhraseOf(pin: RungPin): string {
+function reasonPhraseOf(pin: Pick<RungPin, 'reason'>): string {
 	const reason = pin.reason ?? '';
 	return REASONS[reason]?.phrase ?? (reason || 'unknown');
 }
@@ -64,11 +68,12 @@ function versionLabelOf(pin: RungPin): string {
 /**
  * The where-live row's state word and tone.
  *
- * @param pin - One where-live pin.
+ * @param pin - One where-live pin's serving facts (an app pin, or a
+ *              pipeline deployment's state phrased as one).
  * @returns 'serving' (ok), or why the audience is not served; an older
  *          server's pin keeps the review-gate wording.
  */
-export function pinStatusOf(pin: RungPin): { word: string; tone: ServingTone } {
+export function pinStatusOf(pin: Pick<RungPin, 'serving' | 'reason' | 'state'>): { word: string; tone: ServingTone } {
 	if (pin.serving === undefined) {
 		return pin.state === 'pending' ? { word: 'in review', tone: 'warn' } : { word: pin.state, tone: 'ok' };
 	}

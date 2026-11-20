@@ -39,10 +39,10 @@
 
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Button, ConfirmDialog, EmptyState, InputField, Modal, StatusBadge } from 'shell';
-import { DeleteVersionMark } from 'shared/components/deploy';
+import { DeleteVersionMark, PublishToDialog, ServingStateWord, VersionCardActions, VersionStateBadge, newestSubmittableOf, storeTargetOf, versionCardActionsOf } from 'shared/components/deploy';
+import type { IPublishTarget } from 'shared/components/deploy';
 import type { AppSummary, AppVersionInfo, BuildStatusTick, IAppBuilderHost, RungPin } from '../../../../types';
 import { pinStatusOf, versionBadgeOf } from '../../../../servingStatus';
-import type { ServingTone } from '../../../../servingStatus';
 
 // =============================================================================
 // TYPES
@@ -101,12 +101,6 @@ const styles: Record<string, React.CSSProperties> = {
 		letterSpacing: 0,
 		color: 'var(--rr-text-disabled)',
 		marginLeft: 8,
-	},
-	// The failed badge is a DOOR (click opens the build log) — cursor and
-	// title carry the affordance; the badge itself stays the stock chip.
-	failedBadgeWrap: {
-		cursor: 'pointer',
-		display: 'inline-flex',
 	},
 	// The build-log viewer body (inside the stock Modal).
 	logPre: {
@@ -180,13 +174,6 @@ const styles: Record<string, React.CSSProperties> = {
 		paddingTop: 9,
 		minHeight: 20,
 	},
-	cardAction: {
-		paddingTop: 10,
-		display: 'flex',
-		gap: 6,
-		flexWrap: 'wrap',
-		alignItems: 'center',
-	},
 	publishCard: {
 		minWidth: 225,
 		maxWidth: 250,
@@ -216,17 +203,6 @@ const styles: Record<string, React.CSSProperties> = {
 	publishHint: {
 		fontSize: 11,
 		color: 'var(--rr-text-disabled)',
-	},
-	miniBtn: {
-		padding: '4px 11px',
-		fontSize: 11.5,
-		background: 'var(--rr-bg-paper)',
-		border: '1px solid var(--rr-border-hover)',
-		borderRadius: 4,
-		color: 'var(--rr-color-secondary)',
-		fontWeight: 600,
-		cursor: 'pointer',
-		whiteSpace: 'nowrap',
 	},
 	livePanel: {
 		margin: '20px 26px 30px',
@@ -288,31 +264,6 @@ const styles: Record<string, React.CSSProperties> = {
 		color: 'var(--rr-text-secondary)',
 		fontSize: 12,
 	},
-	// Pipe-pattern state text on where-live rows: a colored dot + word.
-	liveStateOk: {
-		fontSize: 11.5,
-		fontWeight: 600,
-		color: 'var(--rr-color-success)',
-		whiteSpace: 'nowrap',
-	},
-	liveStateWarn: {
-		fontSize: 11.5,
-		fontWeight: 600,
-		color: 'var(--rr-color-warning)',
-		whiteSpace: 'nowrap',
-	},
-	liveStateError: {
-		fontSize: 11.5,
-		fontWeight: 600,
-		color: 'var(--rr-color-error)',
-		whiteSpace: 'nowrap',
-	},
-	liveStateMuted: {
-		fontSize: 11.5,
-		fontWeight: 600,
-		color: 'var(--rr-text-disabled)',
-		whiteSpace: 'nowrap',
-	},
 	liveWhen: {
 		fontSize: 11.5,
 		color: 'var(--rr-text-disabled)',
@@ -338,51 +289,6 @@ const styles: Record<string, React.CSSProperties> = {
 		border: '1px solid transparent',
 		borderRadius: 4,
 		cursor: 'pointer',
-		whiteSpace: 'nowrap',
-	},
-	// "Publish v<N> to…" audience rows (the pipe deploy dialog's picker
-	// pattern): full-width row buttons, current pin state right-aligned.
-	pubRow: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 10,
-		width: '100%',
-		padding: '10px 14px',
-		marginBottom: 8,
-		fontSize: 12.5,
-		fontWeight: 600,
-		textAlign: 'left',
-		background: 'var(--rr-bg-input)',
-		color: 'var(--rr-text-primary)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 6,
-		cursor: 'pointer',
-	},
-	// An audience the version's review state does not allow (Public before
-	// 'ready') — visible so the ladder is learnable, disabled so the server
-	// never has to bounce it.
-	pubRowOff: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 10,
-		width: '100%',
-		padding: '10px 14px',
-		marginBottom: 8,
-		fontSize: 12.5,
-		fontWeight: 600,
-		textAlign: 'left',
-		background: 'var(--rr-bg-input)',
-		color: 'var(--rr-text-secondary)',
-		border: '1px solid var(--rr-border)',
-		borderRadius: 6,
-		cursor: 'not-allowed',
-		opacity: 0.55,
-	},
-	pubRowState: {
-		marginLeft: 'auto',
-		fontSize: 11.5,
-		fontWeight: 400,
-		color: 'var(--rr-text-secondary)',
 		whiteSpace: 'nowrap',
 	},
 	// Per-pin soft-remove on the where-live rows.
@@ -446,24 +352,6 @@ function chipLabelOf(pin: RungPin): string {
 	const name = pin.handle.startsWith('@team/') ? pin.handle.slice('@team/'.length) : pin.handle;
 	return name.toUpperCase();
 }
-
-/** Where-live row text style by serving tone. */
-const LIVE_STATE_STYLE: Record<ServingTone, 'liveStateOk' | 'liveStateWarn' | 'liveStateError' | 'liveStateMuted'> = {
-	ok: 'liveStateOk',
-	warn: 'liveStateWarn',
-	error: 'liveStateError',
-	muted: 'liveStateMuted',
-};
-
-/** A where-live row's state: what a browser in this audience actually gets
- * (#2461) — serving, or why not, from the server's own serving gate. */
-const LiveState: React.FC<{ pin: RungPin }> = ({ pin }) => {
-	const status = pinStatusOf(pin);
-	// A row means serving (decided 2026-11-16): the serving state carries no
-	// word; only a reason the row is NOT serving is drawn.
-	if (status.tone === 'ok') return null;
-	return <span style={styles[LIVE_STATE_STYLE[status.tone]]}>&#9679; {status.word}</span>;
-};
 
 /**
  * The version's effective server-build word: the live ticker wins while the
@@ -789,6 +677,21 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 		[pins, pinsFailed]
 	);
 
+	/** The "Publish v<N> to…" rows and the move each one stages: Me, each
+	 * team, then the store. The move's target is the WIRE form the publish
+	 * contract takes (@team/<id>); its handle the NAME form the pins carry. */
+	const publishMovesOf = useCallback(
+		(v: AppVersionInfo): Array<{ row: IPublishTarget; move: { target: string; handle: string; label: string } }> => [
+			{ row: { id: '@me', label: 'Me', note: pinStateOf('@me', v) }, move: { target: '@me', handle: '@me', label: 'Me' } },
+			...(teams ?? []).map((t) => ({ row: { id: `@team/${t.id}`, label: t.name, note: pinStateOf(`@team/${t.name}`, v) }, move: { target: `@team/${t.id}`, handle: `@team/${t.name}`, label: t.name } })),
+			// Without a review ladder on the host (OSS — the server accepts
+			// any servable version on @public) the store row is as open as the
+			// internal rows; with one, only 'ready' unlocks it.
+			{ row: storeTargetOf({ label: 'Public: the app store', state: v.state, needsApproval: Boolean(host.submitForReview), note: pinStateOf('@public', v) }), move: { target: '@public', handle: '@public', label: 'the app store' } },
+		],
+		[host, teams, pinStateOf]
+	);
+
 	/** Submit a deployed version for public store review (private → submit). */
 	const onSubmit = useCallback(
 		async (version: number): Promise<void> => {
@@ -825,7 +728,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	// Latest-only review: Submit renders solely on the newest non-'failed'
 	// version (the server enforces the same rule) — review tracks current
 	// work; older code that should ship is deployed again.
-	const newestSubmittable = (versions ?? []).reduce((max, x) => (x.state !== 'failed' && x.registryVersion > max ? x.registryVersion : max), 0);
+	const newestSubmittable = newestSubmittableOf((versions ?? []).map((x) => ({ version: x.registryVersion, ...(x.state ? { state: x.state } : {}) })));
 
 	return (
 		<div style={styles.wrap}>
@@ -918,25 +821,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 										    live word ('uploaded' → 'installing' → …), never a green
 										    "ready" (#2461); a failed build is a DOOR to the build log
 										    — the why. Otherwise the review state. */}
-										{badge?.opensBuildLog ? (
-											<span
-												style={styles.failedBadgeWrap}
-												role="button"
-												tabIndex={0}
-												title="Show the build log"
-												onClick={() => openBuildLog(v)}
-												onKeyDown={(e) => {
-													if (e.key === 'Enter' || e.key === ' ') {
-														e.preventDefault();
-														openBuildLog(v);
-													}
-												}}
-											>
-												<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
-											</span>
-										) : badge ? (
-											<StatusBadge variant={badge.variant}>{badge.label}</StatusBadge>
-										) : null}
+										<VersionStateBadge badge={badge} onOpenBuildLog={() => openBuildLog(v)} />
 										{/* Audience chips NAME who serves this version (the pipe
 										    card's pattern) — derived from the where-live pins. An
 										    audience pinned here but NOT served (disabled, still in
@@ -949,31 +834,15 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 												</StatusBadge>
 											))}
 									</div>
-									{(host.publish || host.submitForReview) && !readOnly && (
-										<div style={styles.cardAction}>
-											{/* One primary action, like the pipe card's "Deploy to…" —
-											    only legal moves render: publishing and review both
-											    require a SERVABLE build (the server refuses otherwise),
-											    internal publishing is open to any non-'failed' version,
-											    and Submit exists solely on 'private' (the private→submit
-											    edge; rejected/failed are terminal). */}
-											{host.publish && servable && v.state !== 'failed' && (
-												<button style={styles.miniBtn} onClick={() => openPublish(v)}>
-													Publish to…
-												</button>
-											)}
-											{host.submitForReview && servable && v.state === 'private' && v.registryVersion === newestSubmittable && (
-												<button style={styles.miniBtn} onClick={() => void onSubmit(v.registryVersion)}>
-													Submit for review
-												</button>
-											)}
-											{host.withdrawReview && v.state === 'submit' && (
-												<button style={styles.miniBtn} onClick={() => void onWithdraw(v.registryVersion)}>
-													Withdraw
-												</button>
-											)}
-										</div>
-									)}
+									{/* The card's verbs, the pipeline card's row — only legal
+									    moves render: publishing and review both require a
+									    SERVABLE build (the server refuses otherwise), internal
+									    publishing is open to any non-'failed' version, Submit
+									    exists solely on the newest 'private' draft (the
+									    private→submit edge; rejected/failed are terminal), and
+									    Withdraw on a version in review. A read-only host offers
+									    no verbs at all. */}
+									{!readOnly && <VersionCardActions actions={versionCardActionsOf({ version: v.registryVersion, ...(v.state ? { state: v.state } : {}), servable }, newestSubmittable, { publish: Boolean(host.publish), submit: Boolean(host.submitForReview), withdraw: Boolean(host.withdrawReview) })} onPublish={() => openPublish(v)} onSubmit={() => void onSubmit(v.registryVersion)} onWithdraw={() => void onWithdraw(v.registryVersion)} />}
 								</div>
 							);
 						})}
@@ -998,7 +867,10 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 											v{p.registryVersion}
 											{p.version ? <span style={styles.versionPill}>{p.version}</span> : null}
 										</span>
-										<LiveState pin={p} />
+										{/* What a browser in this audience actually gets (#2461):
+										    a row means serving, so only a reason it is NOT
+										    serving is drawn, from the server's own serving gate. */}
+										<ServingStateWord status={pinStatusOf(p)} />
 										<span style={styles.liveAudience}>
 											{p.audience}
 											{p.pendingVersion ? ` · v${p.pendingVersion} in review` : ''}
@@ -1064,47 +936,25 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				</Modal>
 			)}
 
-			{/* ── "Publish v<N> to…" audience dialog (the pipe deploy dialog's
-			    picker pattern: one row per audience, current state on the
+			{/* ── "Publish v<N> to…" audience dialog (the dialog both DEPLOY
+			    screens open: one row per audience, current state on the
 			    right, choosing a row IS the action) ─────────────────────── */}
-			{publishFor && (
-				<Modal
-					title={`Publish v${publishFor.registryVersion}${publishFor.version ? ` (${publishFor.version})` : ''} to…`}
-					onClose={() => setPublishFor(null)}
-					footer={
-						<Button variant="secondary" onClick={() => setPublishFor(null)}>
-							Cancel
-						</Button>
-					}
-				>
-					<div style={styles.dialogHint}>
-						{host.submitForReview
-							? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.'
-							: 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
-					</div>
-					<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@me', handle: '@me', label: 'Me' })}>
-						Me<span style={styles.pubRowState}>{pinStateOf('@me', publishFor)}</span>
-					</button>
-					{(teams ?? []).map((t) => (
-						<button key={t.id} style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: `@team/${t.id}`, handle: `@team/${t.name}`, label: t.name })}>
-							{t.name}
-							<span style={styles.pubRowState}>{pinStateOf(`@team/${t.name}`, publishFor)}</span>
-						</button>
-					))}
-					{/* Without a review ladder on the host (OSS — the server accepts
-					    any servable version on @public) the store row is as open as
-					    the internal rows; with one, only 'ready' unlocks it. */}
-					{(host.submitForReview ? publishFor.state === 'ready' : publishFor.state !== 'failed') ? (
-						<button style={styles.pubRow} onClick={() => setPendingPublish({ version: publishFor, target: '@public', handle: '@public', label: 'the app store' })}>
-							Public: the app store<span style={styles.pubRowState}>{pinStateOf('@public', publishFor)}</span>
-						</button>
-					) : (
-						<button style={styles.pubRowOff} disabled title="The store needs an approved ('ready') version; submit it for review first">
-							Public: the app store<span style={styles.pubRowState}>needs review approval</span>
-						</button>
-					)}
-				</Modal>
-			)}
+			{publishFor &&
+				(() => {
+					const moves = publishMovesOf(publishFor);
+					return (
+						<PublishToDialog
+							title={`Publish v${publishFor.registryVersion}${publishFor.version ? ` (${publishFor.version})` : ''} to…`}
+							hint={host.submitForReview ? 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Internal audiences serve instantly; the store gates every version on review.' : 'Points the chosen audience at this version: first publish, update, promote, and rollback are all this one pointer move. Every audience serves instantly on this server, the store included.'}
+							targets={moves.map((m) => m.row)}
+							onChoose={(id) => {
+								const chosen = moves.find((m) => m.row.id === id);
+								if (chosen) setPendingPublish({ version: publishFor, ...chosen.move });
+							}}
+							onCancel={() => setPublishFor(null)}
+						/>
+					);
+				})()}
 
 			{/* ── Publish confirmation — every pointer move is confirmed, as on
 			      pipelines: it changes what an audience gets. ────────────── */}

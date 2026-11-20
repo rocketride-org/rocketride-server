@@ -43,6 +43,27 @@ export function mapVersionCards(rows: DeployArtifact[]): DeployVersionCardDTO[] 
 }
 
 /**
+ * Joins each version card with its review state from the version rail
+ * (`client.listDeployments`: the read the App Builder's DEPLOY view and the
+ * pipeline's PACKAGE › Review make; `rrext_deploy_app` reads pipe artifacts
+ * since C.17). A card the rail does not name keeps no state, so it shows no
+ * badge and offers no review verb: never a guessed 'draft'.
+ *
+ * @param cards - The version cards, newest first.
+ * @param rail - The rail rows (`registryVersion` + `state`).
+ * @returns The cards, each with its state when the rail names one.
+ */
+export function withReviewStates(cards: DeployVersionCardDTO[], rail: ReadonlyArray<{ registryVersion: number; state?: string }>): DeployVersionCardDTO[] {
+	const states = new Map(rail.map((row) => [row.registryVersion, row.state ?? '']));
+	return cards.map((card) => {
+		const state = states.get(card.version);
+		// A state the server adds later passes through: the badge shows its
+		// raw name, muted (versionBadgeOf), as on the App Builder's cards.
+		return state ? { ...card, state: state as DeployVersionCardDTO['state'] } : card;
+	});
+}
+
+/**
  * Maps audit-trail rows into history rows with resolved team names.
  *
  * @param rows - `client.deploy.history()` rows, newest first.
@@ -67,6 +88,22 @@ export function mapHistoryRows(rows: DeployHistoryEntry[], teams: DeployTeamRefD
 // =============================================================================
 
 /**
+ * Which rung a publication row's slot is, from the caller's side. Slots
+ * follow the one audience grammar (plan 10.1): `user~{uid}` for a personal
+ * space, a team id, or `~public` for the store.
+ *
+ * @param slot - The row's `teamId` (its audience slot).
+ * @param ownUserId - The caller's user id ('' when unknown).
+ * @returns 'me' (the caller's own space), 'personal' (another user's),
+ *          'public', or 'team'.
+ */
+export function rungOfSlot(slot: string, ownUserId = ''): TeamDeploymentRowDTO['rung'] {
+	if (slot === '~public') return 'public';
+	if (slot.startsWith('user~')) return ownUserId && slot === `user~${ownUserId}` ? 'me' : 'personal';
+	return 'team';
+}
+
+/**
  * Maps deployment rows into the file view's "where live" facts for ONE
  * project — removed rows are hidden. RAW facts only: source names are
  * resolved by the shared ProjectView against the pipeline it holds.
@@ -89,6 +126,7 @@ export function mapTeamDeploymentRows(deployments: Deployment[], registryId: str
 				return {
 					teamId: dep.teamId as string,
 					teamName: teamNameOf(teams, dep.teamId as string, ownUserId),
+					rung: rungOfSlot(dep.teamId as string, ownUserId),
 					version: dep.version ?? 0,
 					// A record without a state stamp is a live pointer — 'enabled'
 					// is the only default inside the state vocabulary.

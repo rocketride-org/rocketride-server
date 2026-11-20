@@ -45,6 +45,9 @@ export interface DeployVersionCardDTO {
 	/** Whether `deploy delete` would take this version right now — the
 	 *  server's own check, carried on every versions row. */
 	deletable?: boolean;
+	/** The version's review state, joined from the version rail; absent
+	 *  when the rail could not be read. */
+	state?: 'private' | 'submit' | 'ready' | 'rejected' | 'failed';
 }
 
 /** Per-source schedule facts (keyed by sourceId on the row). */
@@ -65,6 +68,10 @@ export interface TeamDeploymentScheduleDTO {
 export interface TeamDeploymentRowDTO {
 	teamId: string;
 	teamName: string;
+	/** The rung the row's slot is, from the caller's side: 'me' (their own
+	 *  `user~{uid}`), 'personal' (another user's, org admins only), 'team',
+	 *  or 'public' (`~public`). */
+	rung: 'me' | 'personal' | 'team' | 'public';
 	version: number;
 	state: 'enabled' | 'disabled' | 'errored' | 'removed';
 	/** Unix seconds of the pointer move (the header's deployed-at). */
