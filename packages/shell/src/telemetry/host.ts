@@ -20,10 +20,13 @@ import { createReporter, type Reporter, type SendOptions } from 'rocketride/anal
 import { isEmbeddedDevShell } from '../util/devGate';
 import { setTelemetryConfig, telemetryConfig, type TelemetryConfig } from './config';
 import { getConsentState, watchConsentStorage } from './consentState';
+import { ATTRIBUTED_TAG } from './consent';
 import { classifyTraffic, isTestHost } from './traffic';
 import { privacySignalOn } from 'rocketride/analytics';
 import { newJourneyKey } from './bridge';
 import { SdkQueue } from './sdkQueue';
+// mode.ts imports posthog-js for types only, so this keeps the SDK chunk lazy.
+import { clearSiteStorage } from './mode';
 import type * as Transport from './transport';
 
 /** The lazily loaded transport chunk; null until its import resolves (or forever, keyless). */
@@ -103,12 +106,25 @@ export function initTelemetryHost(config: TelemetryConfig): void {
 	// page load of the tab would otherwise sit in sessionStorage with nothing
 	// to drain them. (An embedded preview's queue has no storage, so this
 	// never touches the host tab's hold.)
-	if (!config.key || typeof window === 'undefined') {
+	if (typeof window === 'undefined') {
 		queue.clearHold();
 		enabled = false;
 		return;
 	}
+	// The signal check runs before the keyless one: a visit after the server
+	// dropped its key must still remove what PostHog stored while it had one.
 	if (privacySignalOn()) {
+		queue.clearHold();
+		// A privacy signal also removes whatever PostHog stored on an earlier
+		// visit (as home-ui's init did before the port). An embedded preview
+		// shares the host tab's storage and leaves it to the host.
+		if (!isEmbeddedDevShell()) {
+			clearSiteStorage();
+		}
+		enabled = false;
+		return;
+	}
+	if (!config.key) {
 		queue.clearHold();
 		enabled = false;
 		return;
@@ -256,12 +272,92 @@ function startSdk(unloading = false): void {
 	queue.start(unloading);
 }
 
+/** The `app` stamp's shape (events.contract.json stampedProperties.app.pattern). */
+const APP_STAMP_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+
+/** Stamps no app may use: they belong to the shell itself. */
+const RESERVED_APP_STAMPS: ReadonlySet<string> = new Set(['shell']);
+
+/**
+ * Whether a stamp is reserved for the shell, in any letter case.
+ *
+ * @param stamp - A candidate stamp.
+ * @returns True when the stamp belongs to the shell.
+ */
+function isReservedStamp(stamp: string): boolean {
+	return RESERVED_APP_STAMPS.has(stamp.toLowerCase());
+}
+
+/** The reporter an app whose own id is reserved gets: it never sends. */
+const NOOP_REPORTER: Reporter = () => {};
+
+/**
+ * Whether an app id is first-party. The SaaS server keeps the `rocketride` and
+ * `rocketride.*` namespace to RocketRide's own publisher, so only those
+ * descriptors are trusted to choose a telemetry alias. On a self-hosted (OSS)
+ * server every local app is published under `rocketride`, so all of them
+ * count as first-party there; that server's operator owns every app anyway.
+ *
+ * @param appId - The descriptor id.
+ * @returns True for `rocketride` and `rocketride.*`.
+ */
+function isFirstPartyApp(appId: string): boolean {
+	return appId === 'rocketride' || appId.startsWith('rocketride.');
+}
+
+/**
+ * The `app` value an app's events are stamped with. The descriptor comes from
+ * the app's own bundle, so its `telemetryId` alias is honoured only when all
+ * of these hold, and otherwise the descriptor id is used:
+ * - the app is first-party (`rocketride` or `rocketride.*`);
+ * - the alias is a string matching the contract's stamp pattern;
+ * - the alias is not a reserved stamp ('shell');
+ * - the alias is not the id of another registered app.
+ *
+ * @param appId - The descriptor id.
+ * @param telemetryId - The descriptor's optional `telemetryId`.
+ * @param registeredIds - Ids of every registered app; an alias equal to one of
+ *   them (other than appId itself) is rejected.
+ * @returns The value to bind the app's reporter to.
+ */
+export function telemetryAppStamp(appId: string, telemetryId?: unknown, registeredIds?: Iterable<string>): string {
+	if (!isFirstPartyApp(appId) || typeof telemetryId !== 'string' || !APP_STAMP_PATTERN.test(telemetryId) || isReservedStamp(telemetryId)) {
+		return appId;
+	}
+	if (telemetryId !== appId && registeredIds) {
+		for (const id of registeredIds) {
+			if (id === telemetryId) {
+				return appId;
+			}
+		}
+	}
+	return telemetryId;
+}
+
+/**
+ * The reporter an app's TelemetryProvider is bound to: the reporter for the
+ * stamp telemetryAppStamp picks from the descriptor. Reporters are cached by
+ * stamp, so the same app always gets the same reporter. An app whose own id is
+ * a reserved stamp (an app published as 'shell') gets a reporter that never
+ * sends, so it can never be handed the shell's own reporter.
+ *
+ * @param appId - The active app's descriptor id.
+ * @param descriptor - The app's descriptor (only `telemetryId` is read).
+ * @param registeredIds - Ids of every registered app, for the collision check.
+ * @returns The app's bound reporter.
+ */
+export function appReporter(appId: string, descriptor?: { telemetryId?: unknown }, registeredIds?: Iterable<string>): Reporter {
+	const stamp = telemetryAppStamp(appId, descriptor?.telemetryId, registeredIds);
+	return isReservedStamp(stamp) ? NOOP_REPORTER : getReporter(stamp);
+}
+
 /**
  * The bound reporter for one app: minted on first ask, stable from then on.
  * Keyless or disabled, the sink simply never delivers — the reporter shape is
  * the same, so apps need no branches.
  *
- * @param appId - The emitting app's id (the descriptor's).
+ * @param appId - The emitting app's stamp: the descriptor's telemetryId, else
+ *   its id (see telemetryAppStamp); 'shell' for the shell's own events.
  * @returns The app's `report(event, props?, options?)`.
  */
 export function getReporter(appId: string): Reporter {
@@ -276,11 +372,34 @@ export function getReporter(appId: string): Reporter {
 			if (telemetryConfig()?.consentSource === 'host' && hostTelemetryEnabled !== true) {
 				return;
 			}
-			queue.capture(event, props ?? {}, toCaptureOptions(options));
+			queue.capture(event, attributionProps(props), toCaptureOptions(options));
 		});
 		reporters.set(appId, reporter);
 	}
 	return reporter;
+}
+
+/**
+ * True only while getConsentedCapture's report is calling the app's reporter,
+ * so the sink tags exactly those events with ATTRIBUTED_TAG.
+ */
+let attributing = false;
+
+/**
+ * An app's props as the queue gets them: ATTRIBUTED_TAG removed from what the
+ * caller passed (no app can set it by hand) and added back only for an event
+ * sent through getConsentedCapture's report.
+ *
+ * @param props - The props the reporter was called with (already app-stamped).
+ * @returns A new props object.
+ */
+function attributionProps(props?: Record<string, unknown>): Record<string, unknown> {
+	const out: Record<string, unknown> = { ...(props ?? {}) };
+	delete out[ATTRIBUTED_TAG];
+	if (attributing) {
+		out[ATTRIBUTED_TAG] = true;
+	}
+	return out;
 }
 
 /** The shell's own reporter (shell screens: the waitlist page, auth facts). */
@@ -305,7 +424,9 @@ export function registerSuperProperties(props: Record<string, unknown>): void {
 	if (enabled === false) {
 		return;
 	}
-	queue.register(props);
+	const own: Record<string, unknown> = { ...props };
+	delete own[ATTRIBUTED_TAG]; // a super property would tag every event: only getConsentedCapture's report tags
+	queue.register(own);
 }
 
 /**
@@ -394,9 +515,13 @@ export function trackConsentShown(): void {
 
 /**
  * A report bound to one consented session: it sends through the app's own
- * reporter (sanitised, app-stamped, consent-routed) and returns whether the
- * event went out. It refuses, returning false, once the moment the capture was
- * taken in has passed: consent withdrawn, the SDK gone, or the session rotated.
+ * reporter (sanitised, app-stamped, consent-routed) and returns whether it was
+ * handed to the transport. It refuses, returning false, once the moment the
+ * capture was taken in has passed: consent withdrawn, the SDK gone, or the
+ * session rotated. True does not mean delivered: the event can still be queued,
+ * or dropped at send time by the consent gate (attributionGate). Events sent
+ * through this report are tagged (ATTRIBUTED_TAG) and only they are gated:
+ * the same event sent through the plain reporter is not.
  */
 export type ConsentedReporter = (event: string, props?: Record<string, unknown>, options?: SendOptions) => boolean;
 
@@ -438,7 +563,13 @@ export function getConsentedCapture(report: Reporter): ConsentedCapture | null {
 			if (transport?.consentedSession()?.sessionId !== sessionId) {
 				return false;
 			}
-			report(event, props, options);
+			const outer = attributing;
+			attributing = true;
+			try {
+				report(event, props, options);
+			} finally {
+				attributing = outer;
+			}
 			return true;
 		},
 		sessionId,

@@ -125,7 +125,7 @@ Visit the [Releases page](https://github.com/rocketride-org/rocketride-server/re
 2. The stable release, `server-v{version}`.
 3. The prerelease, `server-v{version}-prerelease`.
 
-The first manifest whose full `server.buildHash` and `vcpkg.version` match the local ones wins. Anything missing falls through to the next, then to compiling. `--suffix=NAME` tries only `server-v{version}-NAME`, and `--nodownload` tries nothing.
+The first manifest whose full `server.buildHash` and `vcpkg.version` match the local ones wins. Anything missing falls through to the next, then to compiling. `--suffix=NAME` tries only `server-v{version}-NAME`. `--nodownload` tries nothing, and neither does a `--cmake-config` other than `Release`: the published engines are all `Release`.
 
 The `engine-cache` job in `prerelease.yaml` publishes the engines each develop and stage run just compiled (`scripts/release/engine-cache-publish.mjs`) and keeps the 16 most recently used hashes: a hash's last upload or the last download a run saw, recorded in each asset's label. The release is an internal CI cache: a prerelease, never "latest", and not something to install from. Only pushes to this repository's `develop` and `stage`, or a manual dispatch, publish to it. Pull request CI never does.
 

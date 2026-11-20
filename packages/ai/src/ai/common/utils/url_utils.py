@@ -2,31 +2,23 @@
 
 from __future__ import annotations
 
-import ipaddress
-import socket
-from urllib.parse import urlparse
+from .pinned_http import resolve_public_addresses
 
 
 def validate_public_url(raw_url: str) -> str:
     """Return ``raw_url`` if it points at a public host; raise ``ValueError`` otherwise.
 
-    Rejects non-http(s) URLs and hosts that resolve to any non-global address
-    (private, loopback, link-local, reserved, multicast, unspecified, or
-    shared/CGNAT 100.64.0.0/10). Use this before following or returning URLs
-    supplied by third-party APIs to prevent SSRF.
+    Rejects non-http(s) URLs, URLs with userinfo or an invalid port, and hosts
+    that resolve to any non-public address. The address rules are those of
+    :func:`ai.common.utils.pinned_http.is_public_address` (non-global ranges
+    including shared/CGNAT 100.64.0.0/10, multicast, and IPv6 forms that embed
+    a private IPv4 address: mapped, 6to4, Teredo, NAT64), so this check and
+    the pinned client cannot drift apart. Use this before following or
+    returning URLs supplied by third-party APIs to prevent SSRF.
+
+    This check alone leaves a DNS-rebinding gap if the URL is then fetched by
+    a client that resolves the host again; to fetch, use
+    ``resolve_public_addresses`` + ``pinned_session`` instead.
     """
-    parsed = urlparse(raw_url)
-    if parsed.scheme not in ('http', 'https') or not parsed.hostname:
-        raise ValueError(f'Invalid URL: {raw_url}')
-    try:
-        addrinfo = socket.getaddrinfo(parsed.hostname, None, type=socket.SOCK_STREAM)
-    except socket.gaierror as e:
-        raise ValueError(f'Unresolved URL host: {parsed.hostname}') from e
-    for _, _, _, _, sockaddr in addrinfo:
-        ip = ipaddress.ip_address(sockaddr[0])
-        # ``is_global`` is False for every reserved range (private, loopback,
-        # link-local, reserved, multicast, unspecified) *and* shared/CGNAT
-        # space (100.64.0.0/10), which the individual flags miss.
-        if not ip.is_global:
-            raise ValueError(f'Blocked non-public URL host: {parsed.hostname}')
+    resolve_public_addresses(raw_url)
     return raw_url
