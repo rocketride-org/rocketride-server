@@ -108,6 +108,17 @@ public:
     Error putPipe(store::ServicePipe pipe) noexcept;
     Error disconnect() noexcept;
 
+    //-----------------------------------------------------------------
+    /// @details
+    ///		Ends the filters below the pipe head, bottom-up, as the
+    ///		endpoint's end does, but keeps the head, the endpoint and the
+    ///		tag buffer: a test can still send an open or tags through the
+    ///		pipe into the ended filters. disconnect() ends them again
+    ///	@param[in]	pipe
+    ///		The pipe whose filters to end
+    //-----------------------------------------------------------------
+    Error endFilters(store::ServicePipe pipe) noexcept;
+
     const Entry &getEntry() const noexcept { return m_entry; }
 
     //-----------------------------------------------------------------
