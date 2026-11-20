@@ -285,7 +285,9 @@ class AppHostMiddleware:
         if not is_canonical_app_id(app_id) or not hmac.compare_digest(label_of(app_id), label):
             return _not_found()
         dirs = await public_version_dirs(app_id, version)
-        return await _read_dist(dirs.get(version), rest, _PUBLIC_CACHE, etag=True, if_none_match=(headers or {}).get('if-none-match', ''))
+        return await _read_dist(
+            dirs.get(version), rest, _PUBLIC_CACHE, etag=True, if_none_match=(headers or {}).get('if-none-match', '')
+        )
 
 
 async def _read_dist(

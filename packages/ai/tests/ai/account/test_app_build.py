@@ -1458,10 +1458,14 @@ def test_a_sibling_package_dependency_passes_the_manifest_check(tmp_path):
     app, shared = ws / 'apps' / 'x', ws / 'apps' / 'shared'
     app.mkdir(parents=True)
     shared.mkdir(parents=True)
-    (app / 'package.json').write_text(json.dumps({'name': 'x', 'dependencies': {'shared': 'file:../shared'}}), encoding='utf-8')
+    (app / 'package.json').write_text(
+        json.dumps({'name': 'x', 'dependencies': {'shared': 'file:../shared'}}), encoding='utf-8'
+    )
     (shared / 'package.json').write_text(json.dumps({'name': 'shared'}), encoding='utf-8')
     app_build._neutralize_tool_configs(str(ws), str(app))
-    (app / 'package.json').write_text(json.dumps({'name': 'x', 'dependencies': {'out': 'file:../../../elsewhere'}}), encoding='utf-8')
+    (app / 'package.json').write_text(
+        json.dumps({'name': 'x', 'dependencies': {'out': 'file:../../../elsewhere'}}), encoding='utf-8'
+    )
     with pytest.raises(app_build.BuildFailure):
         app_build._neutralize_tool_configs(str(ws), str(app))
 

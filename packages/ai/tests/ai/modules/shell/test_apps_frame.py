@@ -413,7 +413,9 @@ def test_e8_404_isolated_any_client(file, headers, world):
 def test_e8_resolution_probe_does_not_advertise_an_isolated_entry(world):
     """The ``/apps/<appId>`` probe names a main-origin remoteEntry.js only where that URL would serve."""
     isolated = world.client.get(f'/apps/{THIRD}', headers=COOKIE)
-    assert isolated.status_code != 200, 'an isolated app has no main-origin entry to advertise (the probe falls through to the static tree)'
+    assert isolated.status_code != 200, (
+        'an isolated app has no main-origin entry to advertise (the probe falls through to the static tree)'
+    )
     assert 'remoteEntry.js' not in isolated.text
     first_party = world.client.get(f'/apps/{FIRST}', headers=COOKIE)
     assert first_party.status_code == 200

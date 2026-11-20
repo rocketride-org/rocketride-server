@@ -144,7 +144,9 @@ def test_a_token_that_stops_authenticating_does_not_reuse_its_warm_map(monkeypat
     monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
     monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
     assert _dirs(want=1) == {1: 'private/dist'}
-    assert _dirs(want=1) == {1: 'public/dist'}, 'the warm entitled map is not reused once the token stops authenticating'
+    assert _dirs(want=1) == {1: 'public/dist'}, (
+        'the warm entitled map is not reused once the token stops authenticating'
+    )
     assert walks[-1] is None
 
 

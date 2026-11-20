@@ -546,5 +546,9 @@ async def test_a_grant_whose_audit_entry_fails_is_rolled_back(monkeypatch):
             raise RuntimeError('audit store down')
 
     with pytest.raises(RuntimeError, match='audit store down'):
-        await AccountBase.set_approved_capabilities(_Account(), 'org', 'acme.app', 1, ['core', 'pipelines.run'], {'id': 'admin'})
-    assert granted == [['core', 'pipelines.run'], ['core']], 'the earlier grant is put back after the failed audit write'
+        await AccountBase.set_approved_capabilities(
+            _Account(), 'org', 'acme.app', 1, ['core', 'pipelines.run'], {'id': 'admin'}
+        )
+    assert granted == [['core', 'pipelines.run'], ['core']], (
+        'the earlier grant is put back after the failed audit write'
+    )

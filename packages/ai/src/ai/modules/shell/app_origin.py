@@ -699,7 +699,9 @@ def _remember(cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, 
     return entry
 
 
-def _remember_since(generation: int, cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, **values: Any) -> dict:
+def _remember_since(
+    generation: int, cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, **values: Any
+) -> dict:
     """``_remember``, unless ``drop_app`` ran after ``generation`` was read (then the answer is returned, not stored)."""
     if generation != _drop_generation:
         return {**values, 'expiry': time.time() + ttl, 'appId': app_id}

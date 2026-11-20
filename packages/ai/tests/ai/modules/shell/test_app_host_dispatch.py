@@ -596,7 +596,9 @@ def test_a_token_serves_only_the_deployment_it_was_minted_for(served_app):
     real = dirs[1]
     mint = sup.need(ao, 'mint_frame_token')
     bound = mint(served_app.APP, 1, 'u1', 'org-1', config=served_app.config, dist_dir=real)
-    elsewhere = mint(served_app.APP, 1, 'u1', 'org-1', config=served_app.config, dist_dir='orgs/other-org/files/apps/x/v1/dist')
+    elsewhere = mint(
+        served_app.APP, 1, 'u1', 'org-1', config=served_app.config, dist_dir='orgs/other-org/files/apps/x/v1/dist'
+    )
     assert served_app.get_bundle(token=bound).status_code == 200
     assert served_app.get_bundle(token=elsewhere).status_code == 404
 
