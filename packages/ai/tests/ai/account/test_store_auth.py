@@ -776,6 +776,22 @@ class TestFetchSigningKeyStaysInTheEngine:
         assert key not in str(error.value)
         assert not started
 
+    def test_warning_about_an_ephemeral_key_never_raises_and_validation_is_separate(self, monkeypatch):
+        """The warn function only warns: refusing a weak key is ``validate_signing_key``'s job."""
+        from ai.modules.task import fetch
+
+        _set_signing_key(monkeypatch, 'weak-secret')
+        fetch.warn_if_signing_key_is_ephemeral()  # a configured key is not ephemeral: nothing to say, nothing raised
+        with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32'):
+            fetch.validate_signing_key()
+        monkeypatch.delenv('RR_SIGNING_KEY', raising=False)
+        monkeypatch.setenv('RR_STORE_URL', 'filesystem:///tmp/x')
+        warned = []
+        monkeypatch.setattr(fetch, 'warning', warned.append)
+        fetch.warn_if_signing_key_is_ephemeral()
+        assert len(warned) == 1 and 'RR_SIGNING_KEY is not set' in warned[0]
+        fetch.validate_signing_key()  # unset is valid: the process signs with its own key
+
     @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
     def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
         _set_signing_key(monkeypatch, key)

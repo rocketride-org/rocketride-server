@@ -41,18 +41,26 @@ from fastapi.responses import FileResponse, JSONResponse
 from rocketlib import warning
 
 
-def warn_if_signing_key_is_ephemeral() -> None:
-    """Validate the signing key and warn when fetch URLs will not survive a restart.
+def validate_signing_key() -> None:
+    """Refuse a configured weak RR_SIGNING_KEY (#1176).
 
-    Only the filesystem store backend signs /task/fetch URLs; S3 and Azure
-    presign. With RR_SIGNING_KEY unset the key is random per process, so a URL
-    stops verifying when the engine restarts, and on every other replica.
-    A configured weak key refuses task-module initialization before any
-    worker or public route is registered.
+    Raises:
+        ValueError: The configured key has fewer than the minimum UTF-8 bytes
+            (the value is never included in the message). An unset key is fine
+            here: the process then signs with its own random key.
     """
     from ai.account.file_store import fetch_signing_key
 
     fetch_signing_key()
+
+
+def warn_if_signing_key_is_ephemeral() -> None:
+    """Warn when fetch URLs will not survive a restart. Never raises.
+
+    Only the filesystem store backend signs /task/fetch URLs; S3 and Azure
+    presign. With RR_SIGNING_KEY unset the key is random per process, so a URL
+    stops verifying when the engine restarts, and on every other replica.
+    """
     store_url = (os.environ.get('RR_STORE_URL') or '').lower()
     if os.environ.get('RR_SIGNING_KEY') or (store_url and not store_url.startswith('filesystem://')):
         return
