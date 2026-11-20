@@ -710,6 +710,43 @@ def test_the_successful_path_still_applies_the_final_rebinding(tmp_path):
     )
 
 
+def test_a_finally_block_sees_an_alias_an_exception_leaves(tmp_path):
+    assert _param_reads(
+        tmp_path,
+        [
+            'cfg = {}',
+            'try:',
+            '    cfg = self.config',
+            '    if self.enabled:',
+            '        raise RuntimeError()',
+            '    cfg = {}',
+            'finally:',
+            "    self.edge = cfg.get('maxEdge')",
+        ],
+    ) == [('param-in-global', "self.edge = cfg.get('maxEdge')")]
+
+
+def test_an_exceptional_state_creates_no_finding_after_the_try(tmp_path):
+    # Leaving by exception never reaches the next statement: only the normal exit (cfg = {}) flows on
+    assert (
+        _param_reads(
+            tmp_path,
+            [
+                'cfg = {}',
+                'try:',
+                '    cfg = self.config',
+                '    if self.enabled:',
+                '        raise RuntimeError()',
+                '    cfg = {}',
+                'finally:',
+                '    self.done = True',
+                "self.after = cfg.get('maxEdge')",
+            ],
+        )
+        == []
+    )
+
+
 def test_an_annotated_alias_is_an_alias_and_a_bare_annotation_is_not(tmp_path):
     assert _param_reads(
         tmp_path,

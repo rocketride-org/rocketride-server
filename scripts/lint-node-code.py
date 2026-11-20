@@ -516,7 +516,9 @@ def alias_flow(
     merged by union (a name aliases after the join if it may on any path); a
     loop is walked as zero or more passes, and a ``while`` condition is scanned
     again with what the body carries back; an exception handler starts from
-    every state the ``try`` body passed through; a plain rebinding on the
+    every state the ``try`` body passed through, and ``finally`` is scanned
+    with those exceptional states as well as the normal exits, while only the
+    normal exits flow past the ``try``; a plain rebinding on the
     straight line ends the alias. Nested function and class bodies do not run
     here. ``trace``, when given, receives the set after every statement.
 
@@ -558,12 +560,21 @@ def alias_flow(
             # A handler may start from any point the body reached, not only its entry or end
             points: List[Set[str]] = [set(aliases)]
             after = alias_flow(stmt.body, aliases, is_source, scan, points)
-            if trace is not None:
-                trace.extend(points)
             anywhere = set().union(after, *points)
-            outs = [walk(stmt.orelse, after)]
-            outs += [walk(h.body, anywhere) for h in stmt.handlers]
-            aliases = walk(stmt.finalbody, set().union(*outs))
+
+            # The else arm and the handlers can raise too: their points are exceptional states as well
+            raised: List[Set[str]] = list(points)
+            outs = [alias_flow(stmt.orelse, after, is_source, scan, raised)]
+            outs += [alias_flow(h.body, set(anywhere), is_source, scan, raised) for h in stmt.handlers]
+            if trace is not None:
+                trace.extend(raised)
+            normal = set().union(*outs)
+
+            # finally runs on every exit: scan it with the normal and the exceptional states alike;
+            # what flows past the try comes from the normal continuations only (an exit by
+            # exception never reaches the next statement)
+            alias_flow(stmt.finalbody, set().union(normal, *raised), is_source, scan, trace)
+            aliases = walk(stmt.finalbody, normal)
         elif isinstance(stmt, ast.Match):
             scan(stmt.subject, aliases)
             outs = [aliases] + [walk(case.body, aliases) for case in stmt.cases]
