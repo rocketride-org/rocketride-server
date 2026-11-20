@@ -113,7 +113,9 @@ jobs:
       - name: Check every server names the node archive's digests
         if: matrix.type == 'server' && (inputs.prerelease || steps.tag_check.outputs.exists == 'false')
         run: |
-          [ -f release-assets/index.json ] || exit 0
+          [ -f release-assets/index.json ] || { echo "::error::release-assets has no node index (index.json)"; exit 1; }
+          archive=$(jq -r .archive release-assets/index.json)
+          [ -f "release-assets/$archive" ] || { echo "::error::the node index names $archive, which is not in release-assets"; exit 1; }
           shopt -s nullglob
           digests() { jq -S '{archive, nodes: (.nodes | map_values(.sha256))}'; }
           want=$(digests < release-assets/index.json)
