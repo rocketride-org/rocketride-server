@@ -8,16 +8,18 @@
  *
  * Four shapes, all coloured from --rr-* tokens so they track every theme:
  *   - error   → an in-thread error Banner (isError messages)
- *   - user    → a filled brand bubble, right-aligned
- *   - status  → a compact dotted "thinking" row
+ *   - user    → a filled brand bubble, right-aligned; a queued one (sent while a
+ *               turn runs) is faded, with a "Queued" caption and Edit and Remove
+ *   - status  → a compact dotted "thinking" row (line breaks in its text show)
  *   - bot/sys → a bordered assistant bubble with sanitized markdown, left-aligned
  *               (chart-bearing answers break out of the bubble to full width)
  */
 
 import React, { type CSSProperties } from 'react';
-import type { ChatMessage } from '../types';
+import type { ChatMessage, ChatTurnView } from '../types';
 import { MarkdownRenderer } from './MarkdownRenderer';
 import { Banner } from '../../banner/Banner';
+import { Button } from '../../button/Button';
 
 // =============================================================================
 // STYLES
@@ -59,6 +61,31 @@ const styles = {
 		opacity: 0.7,
 		marginTop: 4,
 		textAlign: 'right',
+	} as CSSProperties,
+
+	// ── Queued user bubble ───────────────────────────────────────────────────────
+	queuedRow: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'flex-end',
+		marginBottom: 12,
+	} as CSSProperties,
+
+	queuedBubble: {
+		opacity: 0.6,
+	} as CSSProperties,
+
+	queuedControls: {
+		display: 'flex',
+		alignItems: 'center',
+		gap: 4,
+		marginTop: 4,
+	} as CSSProperties,
+
+	queuedCaption: {
+		fontSize: 11,
+		color: 'var(--rr-text-caption)',
+		fontStyle: 'italic',
 	} as CSSProperties,
 
 	// ── Assistant bubble (bot / system) ──────────────────────────────────────────
@@ -129,6 +156,19 @@ const styles = {
 		fontStyle: 'italic',
 	} as CSSProperties,
 
+	// A multi-line status row keeps its line breaks, with the dot level with the first line, not the middle.
+	statusRowMulti: {
+		alignItems: 'flex-start',
+	} as CSSProperties,
+
+	statusDotMulti: {
+		marginTop: 4,
+	} as CSSProperties,
+
+	statusTextMulti: {
+		whiteSpace: 'pre-wrap',
+	} as CSSProperties,
+
 	resultKey: {
 		fontSize: 10,
 		color: 'var(--rr-text-caption)',
@@ -143,6 +183,8 @@ const styles = {
 
 export interface MessageBubbleProps {
 	message: ChatMessage;
+	/** Turn controls: Edit and Remove on a queued message. */
+	turn?: ChatTurnView;
 }
 
 /**
@@ -151,7 +193,7 @@ export interface MessageBubbleProps {
  * @param props - the {@link ChatMessage} to render.
  * @returns The message element.
  */
-export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
+export const MessageBubble: React.FC<MessageBubbleProps> = ({ message, turn }) => {
 	// Failed sends/responses surface in-thread as an error Banner (stock component).
 	if (message.isError) {
 		return (
@@ -161,24 +203,44 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
 		);
 	}
 
-	// Status / thinking messages render as a compact dotted row.
+	// Status / thinking messages render as a compact dotted row. A row whose
+	// text has line breaks keeps them (pre-wrap).
 	if (message.sender === 'status') {
+		const multi = message.text.includes('\n');
 		return (
-			<div style={styles.statusRow}>
-				<span style={styles.statusDot} />
-				<span style={styles.statusText}>{message.text}</span>
+			<div style={multi ? { ...styles.statusRow, ...styles.statusRowMulti } : styles.statusRow}>
+				<span style={multi ? { ...styles.statusDot, ...styles.statusDotMulti } : styles.statusDot} />
+				<span style={multi ? { ...styles.statusText, ...styles.statusTextMulti } : styles.statusText}>{message.text}</span>
 			</div>
 		);
 	}
 
-	// User messages render as a filled, right-aligned brand bubble.
+	// User messages render as a filled, right-aligned brand bubble; a queued one
+	// is faded, with its caption and controls under it.
 	if (message.sender === 'user') {
+		const bubble = (
+			<div style={message.queued ? { ...styles.userBubble, ...styles.queuedBubble } : styles.userBubble}>
+				<p style={styles.userText}>{message.text}</p>
+				{message.meta && <div style={styles.userMeta}>{message.meta}</div>}
+				<div style={styles.userTimestamp}>{message.timestamp}</div>
+			</div>
+		);
+		if (!message.queued) return <div style={styles.userRow}>{bubble}</div>;
 		return (
-			<div style={styles.userRow}>
-				<div style={styles.userBubble}>
-					<p style={styles.userText}>{message.text}</p>
-					{message.meta && <div style={styles.userMeta}>{message.meta}</div>}
-					<div style={styles.userTimestamp}>{message.timestamp}</div>
+			<div style={styles.queuedRow}>
+				{bubble}
+				<div style={styles.queuedControls}>
+					<span style={styles.queuedCaption}>Queued</span>
+					{turn && (
+						<>
+							<Button variant="ghost" small onClick={() => turn.editQueued(message.id)}>
+								Edit
+							</Button>
+							<Button variant="ghost" small onClick={() => turn.removeQueued(message.id)}>
+								Remove
+							</Button>
+						</>
+					)}
 				</div>
 			</div>
 		);

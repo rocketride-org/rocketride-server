@@ -26,30 +26,42 @@
 //
 // The editor surface behind an `agent:<sessionId>` document: the standard
 // shell chat (ChatView + useChatMessages) composed over one AgentSession.
-// The session owns identity and persistence; the chat hook owns the message
-// UI state (typing indicator, ids, timestamps); this provider is the thin
-// seam between them:
+// The conversation owns the live chat: the session holds its TurnController
+// (rows, queue, waiting cards, Stop) and its unsent draft, so every tab of
+// the conversation, and a tab a layout change draws again, shows the same
+// chat and its running turn. This provider is the thin seam:
 //
-//   send  → useChatMessages → session.execute (the injected request
-//           transport, wrapping the agent() stub) → bot rows render
-//   after → session.save(hook messages) persists the conversation and the
-//           catalog row (announced on the shell bus; the sidebar re-lists)
+//   send  → useChatMessages → session.request (execute, wrapping the agent()
+//           transport) → bot rows render
+//   idle  → the session persists the conversation and the catalog row
+//           (announced on the shell bus; the sidebar re-lists)
+//
+// Each turn's bot row carries the card of how it ended (session.decorate); its links and buttons, Undo
+// included, come back through onCardAction.
 //
 // A brand-new conversation renders a welcome panel of example prompts in
 // place of the empty thread — clicking one sends it as the first request.
 //
-// The session is loaded once per mount; Documents keeps open tabs mounted,
-// so switching tabs never reloads, and reopening a closed tab re-reads disk.
+// Beside the composer, ApprovalModeSwitch sets the approval mode for every agent chat (the Settings setting),
+// and ModelPicker sets this conversation's model.
+//
+// An open conversation's session is loaded once and shared by its tabs. Only
+// a real close (its last tab, or a team switch, from the host's onChatClosed)
+// stops a running turn; reopening then re-reads disk.
 // =============================================================================
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CSSProperties } from 'react';
-import { ChatView, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
+import { Button, ChatView, ConnectionManager, getClient, useChatMessages, useShellConnection, useWorkspace, commonStyles } from 'shell';
 import type { DevToolProps } from 'shell';
-import type { TextResult } from 'shell';
+import type { ChatCardAction } from 'shell/src/components/chat/types';
+import { AgentWatchSlot } from '../../components/agent-watch/AgentWatchSlot';
 import { AgentSession } from '../../modules/agent/agent';
+import { findAgentHost, type ApprovalControls, type ApprovalMode } from '../../modules/agent/host';
+import { readModelOffers } from '../../modules/agent/modelEngine';
 import { buttonize } from '../../utils/buttonize';
 import { AgentIcon } from './AgentIcon';
+import { ModelPicker } from './ModelPicker';
 
 // =============================================================================
 // EXAMPLE PROMPTS
@@ -161,6 +173,39 @@ const styles: Record<string, CSSProperties> = {
 const CARD_HOVER_BG = 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))';
 
 // =============================================================================
+// APPROVAL MODE SWITCH
+// =============================================================================
+
+/** What the switch says in each mode, and what it explains on hover. Don't ask says plainly that nothing judges the risk instead of the user. */
+const MODES: Readonly<Record<ApprovalMode, { label: string; hint: string }>> = {
+	ask: { label: 'Ask first', hint: 'The agent waits for your OK before it publishes, changes a deployment or schedule, deletes a file, or clicks and types in your app. Click to stop asking.' },
+	auto: { label: "Don't ask (still blocks account and billing)", hint: "The agent does those without asking. Nothing checks them for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked. Click to ask first." },
+};
+
+/**
+ * The chat's switch for the agent's approval mode. One click flips it for
+ * every agent chat. Switching to Don't ask while a card waits approves that
+ * card, since the run hears the setting change.
+ *
+ * @param props.controls - The host's approval handle for UI code.
+ */
+const ApprovalModeSwitch: React.FC<{ controls: ApprovalControls }> = ({ controls }) => {
+	const { mode } = useSyncExternalStore(controls.subscribe, controls.read);
+	const { label, hint } = MODES[mode];
+	return (
+		<Button variant="ghost" small pressed={mode === 'auto'} title={hint} onClick={() => controls.setMode(mode === 'ask' ? 'auto' : 'ask')}>
+			{label}
+		</Button>
+	);
+};
+
+/** Opens the Variables overlay, from a card or the model picker. */
+const openVariables = (): void => ConnectionManager.getInstance().emit('shell:openOverlay', { id: 'environment' });
+
+/** What the model picker shows. */
+const readOffers = () => readModelOffers(getClient);
+
+// =============================================================================
 // COMPONENT
 // =============================================================================
 
@@ -188,11 +233,12 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 		AgentSession.configure(activeAppId);
 	}, [activeAppId]);
 
-	// step: load the session once per mount (reopen = re-read from disk)
-	const [session, setSession] = useState<AgentSession | null>(null);
+	// step: a conversation already open (another tab of it, or this tab before a layout change drew it
+	// again) shows at once, on the same session; else it loads once and every tab gets that instance
+	const [session, setSession] = useState<AgentSession | null>(() => (sessionId ? AgentSession.loaded(sessionId) : null));
 	const [loadError, setLoadError] = useState<string | null>(null);
 	useEffect(() => {
-		if (!sessionId) return;
+		if (!sessionId || session) return;
 		let disposed = false;
 		setLoadError(null);
 		AgentSession.getSession(sessionId)
@@ -206,7 +252,7 @@ export const AgentConversationTool: React.FC<DevToolProps> = ({ docKey }) => {
 		return () => {
 			disposed = true;
 		};
-	}, [sessionId]);
+	}, [sessionId, session]);
 
 	if (!sessionId) return <div style={styles.root}><div style={styles.loading}>No session selected.</div></div>;
 	if (session) return <AgentConversation session={session} isConnected={isConnected} />;
@@ -243,28 +289,53 @@ const ExampleCard: React.FC<{ heading: string; prompt: string; disabled?: boolea
  * @param props.isConnected - Shell connection state (gates the composer).
  */
 const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean }> = ({ session, isConnected }) => {
-	/** The injected chat transport: one request through the agent session. */
-	const request = useCallback((text: string): Promise<TextResult[]> => session.execute(text), [session]);
+	const [ends, setEnds] = useState(0);
+	// step: the conversation's chat, not this tab's: every tab runs session.request on the one controller the
+	// session holds, so a layout change that draws this tab again keeps the turn and the draft
+	const { messages, isTyping, sendMessage, addSystemMessage, turn: controls, controller } = useChatMessages({ controller: session.chat, initialMessages: session.messages, request: session.request });
+	// step: the first tab's chat becomes the conversation's; adopt redraws this tab, which then passes it back
+	useEffect(() => session.adopt(controller), [session, controller]);
+	// a host that serves no approval settings gets no switch
+	const approvals = findAgentHost()?.approvals?.controls;
+	// a host that opens no app pages gives no live view
+	const watch = useMemo(() => findAgentHost()?.watchFor?.(session.sessionId) ?? null, [session]);
+	// step: each turn's bot row with the card of how it ended; a turn that ends or a card press changes the session, not the rows, so `ends` redraws
+	const shown = useMemo(() => {
+		void ends;
+		return session.decorate(messages);
+	}, [session, messages, ends]);
+	// step: a turn's end, Undo becoming ready or running, and the chat's adoption change the cards, not the rows
+	useEffect(() => session.subscribe(() => setEnds((n) => n + 1)), [session]);
 
-	const { messages, isTyping, sendMessage } = useChatMessages({ initialMessages: session.messages, request });
-
-	// step: persist after each completed exchange (bot reply landed). The
-	// ref dodges saving on mount when a restored conversation ends idle.
-	const lastSavedCount = useRef(messages.length);
-	useEffect(() => {
-		if (isTyping || messages.length === lastSavedCount.current) return;
-		lastSavedCount.current = messages.length;
-		session.save(messages).catch((err) => {
-			console.log('[AgentConversation] session save failed', err);
-		});
-	}, [isTyping, messages, session]);
-
-	/** Composer submit — the hook's built-in API path is bypassed by `request`. */
+	/**
+	 * Composer submit. A key is redacted before the row is made; while an Undo runs, the message waits for it,
+	 * so the turn it opens reads Undo's note.
+	 */
 	const handleSend = useCallback(
 		(text: string) => {
-			void sendMessage(text, null, '');
+			const screened = session.screen(text);
+			session.afterUndo(() => {
+				void sendMessage(screened.text, null, '');
+				if (screened.note && isTyping) addSystemMessage(screened.note);
+			});
 		},
-		[sendMessage]
+		[session, sendMessage, addSystemMessage, isTyping]
+	);
+
+	/** A press on a turn's card: a file opens in its editor, Open Variables opens the overlay, a choice or Continue is sent as the reply, and Undo adds a note row saying what it did. */
+	const handleCardAction = useCallback(
+		(messageId: number, action: ChatCardAction) => {
+			const done = session.cardAction(messageId, action, {
+				openFile: (path) => {
+					void findAgentHost()?.openFile?.(path);
+				},
+				openVariables,
+				send: handleSend,
+				note: addSystemMessage,
+			});
+			if (done) setEnds((n) => n + 1);
+		},
+		[session, handleSend, addSystemMessage]
 	);
 
 	// The welcome panel shown in place of an empty thread: what the agent is
@@ -286,9 +357,18 @@ const AgentConversation: React.FC<{ session: AgentSession; isConnected: boolean 
 		</div>
 	);
 
+	// step: the connection also redraws the picker, since nothing can be read before it
+	const beforeComposer = (
+		<>
+			{approvals && <ApprovalModeSwitch controls={approvals} />}
+			<ModelPicker session={session} disabled={isTyping} offers={readOffers} refreshKey={`${ends}:${isConnected}`} onOpenVariables={openVariables} />
+		</>
+	);
+
 	return (
 		<div style={styles.root}>
-			<ChatView messages={messages} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} />
+			{watch && <AgentWatchSlot place={watch} variant="strip" />}
+			<ChatView messages={shown} isTyping={isTyping} isConnected={isConnected} onSend={handleSend} placeholder="Reply to the agent..." emptySlot={welcome} leadingInputSlot={beforeComposer} turn={controls} onCardAction={handleCardAction} />
 		</div>
 	);
 };

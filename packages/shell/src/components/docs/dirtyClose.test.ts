@@ -236,3 +236,48 @@ test('restore prunes documents and editors nothing can reach', () => {
 	assert.ok(s.documents['live.txt'], 'reachable document kept');
 	assert.equal(s.documents['live.txt']?.editorCount, 1, 'count rebuilt from real references');
 });
+
+test('a save that throws abandons the close: the document stays open and dirty', async () => {
+	const { docs, vfs, asked } = withPolicy('save', { 'a.txt': 'original' });
+	await openDirty(docs, 'a.txt');
+	// The app's adapter rejects a save it could not land (a refused or failed write).
+	vfs.write = async () => {
+		throw new Error('the file changed on the server');
+	};
+
+	const closed = await docs.requestCloseEditor(editorIds(docs)[0]!);
+
+	assert.equal(asked.length, 1);
+	assert.equal(closed, false, 'the close is abandoned, not rejected');
+	assert.equal(docs.getState().documents['a.txt']?.dirty, true, 'the unsaved content is still there');
+	assert.equal(editorIds(docs).length, 1, 'the tab stays open');
+});
+
+test('saveDocument leaves typing that lands while its write is in flight unsaved, and a document opened again meanwhile too', async () => {
+	for (const reopen of [false, true]) {
+		const { docs, vfs } = withPolicy('save', { 'a.txt': 'original' });
+		await openDirty(docs, 'a.txt');
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => (release = resolve));
+		const write = vfs.write;
+		vfs.write = async (path: string, content: unknown) => {
+			await gate;
+			return write(path, content);
+		};
+
+		const saving = docs.saveDocument('a.txt');
+		if (reopen) {
+			// The user closes the last tab, opens the file again and types once.
+			docs.closeEditor(editorIds(docs)[0]!);
+			await docs.openDocument('a.txt');
+		}
+		docs.updateContent('a.txt', 'typed during the write');
+		release();
+		await saving;
+
+		const doc = docs.getState().documents['a.txt'];
+		assert.equal(vfs.files['a.txt'], 'edited', 'the write landed');
+		assert.equal(doc?.content, 'typed during the write');
+		assert.equal(doc?.dirty, true, reopen ? 'the new document keeps its typing unsaved' : 'the typing was not written');
+	}
+});

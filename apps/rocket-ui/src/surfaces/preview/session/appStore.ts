@@ -37,7 +37,9 @@
 
 import { PROJECT_DIR } from 'rocketride';
 import type { RocketRideClient } from 'shell';
-import { getStagedWorkspace, getWorkspaceVfs, toScopedStorePath } from '../../workspace/vfs/workspace';
+import { getWorkspace, getWorkspaceVfs, toScopedStorePath } from '../../workspace/vfs/workspace';
+import type { Workspace, WorkspaceScope } from '../../workspace/vfs/workspace';
+import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
 import { renderTemplate } from 'shared/tools/appdev';
 import type { FrameOptions, PackageJsonLike, TemplateName } from 'shared/tools/appdev';
 
@@ -61,12 +63,13 @@ const MAX_PREVIEW_BYTES = 512 * 1024;
  *
  * @param folder - The app's folder name under .appdev (e.g. 'brandy-ui').
  * @param rel - App-folder-relative POSIX path ('' = the folder itself).
+ * @param scope - The workspace scope the app lives in (default: the active one).
  * @returns The full store path.
  */
-export function appPath(folder: string, rel = ''): string {
+export function appPath(folder: string, rel = '', scope?: WorkspaceScope): string {
 	// step: through the workspace scope — the raw reads must hit the SAME
 	// tree (user or team) the view translates into.
-	return toScopedStorePath(rel ? `${PROJECT_DIR}/${APPDEV_DIR}/${folder}/${rel}` : `${PROJECT_DIR}/${APPDEV_DIR}/${folder}`);
+	return toScopedStorePath(rel ? `${PROJECT_DIR}/${APPDEV_DIR}/${folder}/${rel}` : `${PROJECT_DIR}/${APPDEV_DIR}/${folder}`, scope);
 }
 
 /**
@@ -109,12 +112,13 @@ export interface StoredApp {
  * Lists the folder names under .appdev ([] when the directory does not
  * exist yet — nothing has been scaffolded).
  *
+ * @param view - The workspace view to list (default: the current one).
  * @returns Folder names, unsorted.
  */
-export async function listAppFolders(): Promise<string[]> {
+export async function listAppFolders(view: IWorkspaceFileSystem = getWorkspaceVfs()): Promise<string[]> {
 	try {
 		// step: through the workspace VIEW so staged (uncommitted) apps list too
-		const entries = await getWorkspaceVfs().list('apps');
+		const entries = await view.list('apps');
 		return entries.filter((e) => e.type === 'dir').map((e) => e.name);
 	} catch (err) {
 		// Named, not swallowed: an empty MY APPS with a healthy workspace is
@@ -168,11 +172,12 @@ export async function scanApps(): Promise<StoredApp[]> {
  * Reads and parses an app folder's package.json.
  *
  * @param folder - The app's folder name under .appdev.
+ * @param view - The workspace view to read (default: the current one; a dev session passes its own).
  * @returns The parsed package.json object.
  */
-export async function readAppPackage(folder: string): Promise<PackageJsonLike> {
+export async function readAppPackage(folder: string, view: IWorkspaceFileSystem = getWorkspaceVfs()): Promise<PackageJsonLike> {
 	// step: through the workspace VIEW — staged manifest edits are visible
-	return JSON.parse(String(await getWorkspaceVfs().read(`apps/${folder}/package.json`))) as PackageJsonLike;
+	return JSON.parse(String(await view.read(`apps/${folder}/package.json`))) as PackageJsonLike;
 }
 
 /**
@@ -184,9 +189,10 @@ export async function readAppPackage(folder: string): Promise<PackageJsonLike> {
  * @param pkg - The parsed package.json object to persist.
  * @param origin - The writer's identity for the onFsChange notification
  *                 (a dev-session id; omitted = the backend default).
+ * @param view - The workspace view to write (default: the current one; a caller that read the package first passes the view it read from).
  */
-export async function writeAppPackage(folder: string, pkg: PackageJsonLike, origin?: string): Promise<void> {
-	await getWorkspaceVfs().write(`apps/${folder}/package.json`, `${JSON.stringify(pkg, null, '\t')}\n`, origin);
+export async function writeAppPackage(folder: string, pkg: PackageJsonLike, origin?: string, view: IWorkspaceFileSystem = getWorkspaceVfs()): Promise<void> {
+	await view.write(`apps/${folder}/package.json`, `${JSON.stringify(pkg, null, '\t')}\n`, origin);
 }
 
 // =============================================================================
@@ -201,10 +207,11 @@ export async function writeAppPackage(folder: string, pkg: PackageJsonLike, orig
  *
  * @param folder - The app's folder name under .appdev.
  * @param relPath - App-folder-relative path from the manifest.
+ * @param view - The workspace view to read (default: the current one; a dev session passes its own).
  * @returns The file text.
  */
-export async function readAppText(folder: string, relPath: string): Promise<string> {
-	const text = String(await getWorkspaceVfs().read(`apps/${folder}/${safeRel(relPath)}`));
+export async function readAppText(folder: string, relPath: string, view: IWorkspaceFileSystem = getWorkspaceVfs()): Promise<string> {
+	const text = String(await view.read(`apps/${folder}/${safeRel(relPath)}`));
 	if (text.length > MAX_PREVIEW_BYTES) throw new Error('File is over the 512KB preview limit.');
 	return text;
 }
@@ -231,14 +238,15 @@ const IMAGE_MEDIA_TYPES: Record<string, string> = {
  * @param client - The connected RocketRide client.
  * @param folder - The app's folder name under .appdev.
  * @param relPath - App-folder-relative path from the manifest.
+ * @param scope - The workspace scope the app lives in (default: the active one; a dev session passes its own).
  * @returns The data: URI, or null for unreadable/unsupported/oversized files.
  */
-export async function readAppImageDataUri(client: RocketRideClient, folder: string, relPath: string): Promise<string | null> {
+export async function readAppImageDataUri(client: RocketRideClient, folder: string, relPath: string, scope?: WorkspaceScope): Promise<string | null> {
 	const rel = safeRel(relPath);
 	const ext = rel.split('.').pop()?.toLowerCase() ?? '';
 	const mime = IMAGE_MEDIA_TYPES[ext];
 	if (!mime) return null;
-	const [entry] = await client.fsReadMany([appPath(folder, rel)]);
+	const [entry] = await client.fsReadMany([appPath(folder, rel, scope)]);
 	if (!entry?.ok || !entry.data || entry.data.byteLength > MAX_PREVIEW_BYTES) return null;
 	// step: base64-encode in chunks — String.fromCharCode(...whole) overflows
 	// the argument limit on large files.
@@ -293,15 +301,16 @@ export interface ScaffoldRequest {
  * toolchain).
  *
  * @param req - The scaffold inputs.
+ * @param ws - The workspace to scaffold into (default: the current one; the agent passes its own, so a team switch mid-run cannot move the scaffold).
  * @returns The created app's id and folder name.
  */
-export async function scaffoldApp(req: ScaffoldRequest): Promise<{ appId: string; folder: string }> {
+export async function scaffoldApp(req: ScaffoldRequest, ws: Workspace = getWorkspace()): Promise<{ appId: string; folder: string }> {
 	const appId = `${req.publisher}.${req.appName}`;
 	const folder = `${req.appName}-ui`;
 
 	// step: refuse a live collision (the form checks too, but the scan can
 	// be stale by the time Create lands)
-	const existing = await listAppFolders();
+	const existing = await listAppFolders(ws.view);
 	if (existing.includes(folder)) throw new Error(`Folder "${APPDEV_DIR}/${folder}" already exists.`);
 
 	// step: render the shared template set — identical files to the VSCode
@@ -317,13 +326,12 @@ export async function scaffoldApp(req: ScaffoldRequest): Promise<{ appId: string
 
 	// step: write every file through the view (nested store paths create
 	// parents implicitly; the backend announces each write)
-	const view = getWorkspaceVfs();
 	for (const file of files) {
-		await view.write(`apps/${folder}/${file.path}`, file.content, 'scaffold');
+		await ws.view.write(`apps/${folder}/${file.path}`, file.content, 'scaffold');
 	}
 	// step: one checkpoint per scaffold — in manual mode the whole scaffold
 	// becomes a single reviewable/rollbackable unit (no-op in auto mode)
-	await getStagedWorkspace().checkpoint(`Scaffold ${appId}`);
+	await ws.view.checkpoint(`Scaffold ${appId}`);
 
 	return { appId, folder };
 }

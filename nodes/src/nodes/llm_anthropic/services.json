@@ -289,6 +289,39 @@
 				},
 				"apikey": ""
 			},
+			"claude-opus-5-5": {
+				"title": "Claude Opus 5.5",
+				"model": "claude-opus-5-5",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-sonnet-5-5": {
+				"title": "Claude Sonnet 5.5",
+				"model": "claude-sonnet-5-5",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
+			"claude-haiku-5-5": {
+				"title": "Claude Haiku 5.5",
+				"model": "claude-haiku-5-5",
+				"modelSource": "manual",
+				"modelTotalTokens": 1000000,
+				"modelOutputTokens": 128000,
+				"capabilities": {
+					"reasoning": true
+				},
+				"apikey": ""
+			},
 			"claude-opus-5": {
 				"title": "Claude Opus 5",
 				"model": "claude-opus-5",
@@ -530,6 +563,24 @@
 					]
 				},
 				{
+					"value": "claude-opus-5-5",
+					"properties": [
+						"anthropic.claude-opus-5-5"
+					]
+				},
+				{
+					"value": "claude-sonnet-5-5",
+					"properties": [
+						"anthropic.claude-sonnet-5-5"
+					]
+				},
+				{
+					"value": "claude-haiku-5-5",
+					"properties": [
+						"anthropic.claude-haiku-5-5"
+					]
+				},
+				{
 					"value": "claude-opus-5",
 					"properties": [
 						"anthropic.claude-opus-5"
@@ -646,6 +697,30 @@
 		},
 		"anthropic.claude-sonnet-latest": {
 			"object": "claude-sonnet-latest",
+			"properties": [
+				"llm.cloud.apikey",
+				"extendedThinking",
+				"llm.cloud.modelSource"
+			]
+		},
+		"anthropic.claude-opus-5-5": {
+			"object": "claude-opus-5-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"extendedThinking",
+				"llm.cloud.modelSource"
+			]
+		},
+		"anthropic.claude-sonnet-5-5": {
+			"object": "claude-sonnet-5-5",
+			"properties": [
+				"llm.cloud.apikey",
+				"extendedThinking",
+				"llm.cloud.modelSource"
+			]
+		},
+		"anthropic.claude-haiku-5-5": {
+			"object": "claude-haiku-5-5",
 			"properties": [
 				"llm.cloud.apikey",
 				"extendedThinking",

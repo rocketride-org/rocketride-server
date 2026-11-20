@@ -34,18 +34,20 @@
  *   - `IWorkspaceFileSystem` (this file) — the consumer VIEW contract:
  *     everything UI and tooling need on top of a backend — the cached tree
  *     inventory, content cache, editor overlays, and change subscription.
- *   - Two view implementations exist: the shell's `CachedVfs` (satisfies
- *     this interface structurally; a plain cached mirror of its backend)
- *     and `StagedFileSystem` (staged layers with commit/rollback over
- *     another view).
+ *   - Two view implementations exist: the shell's `CachedVfs` (a plain
+ *     cached mirror of its backend; it satisfies `IWorkspaceBaseView`) and
+ *     `StagedFileSystem` (staged layers with commit/rollback over a base
+ *     view, and the keeper of path versions).
  *   - `scopedFileSystem` is a prefix lens, view -> view.
  *
  * Consumers type against THIS interface, never the CachedVfs class — nominal
  * class typing would shut out the staged view, lenses, and test doubles.
- * Member signatures deliberately match CachedVfs's public surface verbatim.
+ * Member signatures deliberately match CachedVfs's public surface verbatim,
+ * except the path versions.
  */
 
 import type { IVirtualFileSystem, VfsEntry, VfsOverlay } from 'shell';
+import type { ChangeKind } from 'shell/src/workspace/workspaceFs';
 
 export type { IVirtualFileSystem, VfsEntry, VfsOverlay } from 'shell';
 
@@ -110,7 +112,8 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	upsert(path: string, type: 'file' | 'dir'): void;
 
 	/**
-	 * Seeds the content cache without a backend read. Does not notify.
+	 * Seeds the content cache without a backend read. Does not notify. The
+	 * staged view records the path only (see StagedFileSystem.prime).
 	 *
 	 * @param path - The path to seed.
 	 * @param content - The content to cache.
@@ -143,6 +146,12 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 	peekBase(path: string): Promise<unknown>;
 
 	/**
+	 * Throws when the view refuses changes to a path. Views without a rule
+	 * omit it.
+	 */
+	assertWritable?(path: string): void;
+
+	/**
 	 * Registers a live editor buffer over a path. Reads prefer a DIRTY
 	 * overlay's content; isDirty/dirtyPaths report it.
 	 *
@@ -173,4 +182,50 @@ export interface IWorkspaceFileSystem extends IVirtualFileSystem {
 
 	/** Fires the change tick manually (public by design, like CachedVfs). */
 	notify(): void;
+
+	// ── Path versions ────────────────────────────────────────────────────
+
+	/** Writes one file; with `expect`, refused with StaleWriteError unless the path is at that version at the call. */
+	write(path: string, content: unknown, origin?: string, expect?: number): Promise<void>;
+
+	/** Deletes a path. With `anchor` (the SHA-256 of the stored copy the delete is based on), refused with StaleWriteError unless the path holds that copy in the delete's turn. */
+	delete(path: string, origin?: string, anchor?: string): Promise<void>;
+
+	/**
+	 * The path's version in this view. A mutation counts when it is called,
+	 * not when it lands, so a writer that read before it is already stale. So
+	 * does a server copy a read takes in after an invalidate, when it differs
+	 * from the copy the invalidate dropped.
+	 */
+	version(path: string): number;
+
+	/**
+	 * read() plus the version the content belongs to, taken at the call, or
+	 * the one after when the read itself took in a changed server copy. The
+	 * read waits for the path's pending mutations, so the content is never
+	 * older than the version.
+	 *
+	 * @param opts.stored - Never an editor's unsaved buffer: what an editor reloads.
+	 */
+	readVersioned(path: string, opts?: { stored?: boolean }): Promise<{ content: unknown; version: number }>;
+
+	/** The origin of the last mutation of a path ('editor', 'agent', ...), when known. */
+	lastWriter(path: string): string | undefined;
+
+	// ── Staged changes (views that stage; others omit them) ─────────────
+
+	/**
+	 * How each staged path differs from what the server stores. A view that
+	 * writes through stages nothing, so its map is empty.
+	 */
+	changedPaths?(): Map<string, ChangeKind>;
+
+	/**
+	 * Drops one path's staged changes, so the next read sees the server's
+	 * copy again. The server is not touched.
+	 */
+	discardPath?(path: string): Promise<void>;
 }
+
+/** The view a StagedFileSystem decorates: the contract without the path versions. CachedVfs satisfies it. */
+export type IWorkspaceBaseView = Omit<IWorkspaceFileSystem, 'version' | 'readVersioned' | 'lastWriter'>;

@@ -44,9 +44,11 @@
 // VS Code resolves against the workspace folder.
 // =============================================================================
 
-import type { AppConfiguration } from 'shell/src/components/workspace/types';
+import type { AppConfiguration, SettingSchema } from 'shell/src/components/workspace/types';
 import type { SettingsContribution } from 'shell/src/components/workspace/settingsContributions';
 import { BUILTIN_PIN_PREFIX } from 'shell/src/workspace/devToolPins';
+import type { Grant } from '../modules/agent/grants';
+import { DEFAULT_MODEL_SETTING } from '../modules/agent/model';
 
 /** The settings-nav group every DEV TOOL's section folds under. */
 export const TOOL_SETTINGS_GROUP = { id: 'rocket-builder', label: 'Rocket Builder' } as const;
@@ -58,6 +60,85 @@ export const TOOL_SETTINGS_GROUP = { id: 'rocket-builder', label: 'Rocket Builde
  * already holds the product's prefs on both hosts (devToolPins et al.).
  */
 export const TOOL_SETTINGS_OWNER = 'rocketride.pipeBuilder';
+
+/**
+ * The setting behind each "Always allow" grant: its key, its place on the settings page, and what it
+ * says. Typed by Grant, so a new grant doesn't compile until it has a row, and the rows and the keys
+ * rocket-ui reads (APPROVAL_SETTING_KEYS) both come from here.
+ */
+const GRANT_SETTINGS: Readonly<Record<Grant, { readonly key: string; readonly order: number; readonly description: string }>> = {
+	schedules: {
+		key: 'rocketride.pipeBuilder.agentAllowScheduleChanges',
+		order: 11,
+		description: 'Let the agent set, pause and resume deployment schedules without asking. Always allow on a card turns this on.',
+	},
+	deploymentToggles: {
+		key: 'rocketride.pipeBuilder.agentAllowDeploymentToggles',
+		order: 12,
+		description: 'Let the agent turn deployments on and off without asking. Always allow on a card turns this on. Removing a deployment always asks.',
+	},
+	appUse: {
+		key: 'rocketride.pipeBuilder.agentAllowAppUse',
+		order: 13,
+		description: 'Let the agent click and type in its own copy of your apps without asking. Always allow on a card turns this on.',
+	},
+	fileDeletes: {
+		key: 'rocketride.pipeBuilder.agentAllowFileDeletes',
+		order: 14,
+		description: 'Let the agent delete files and folders in your workspace without asking. Always allow on a card turns this on.',
+	},
+	appDeploys: {
+		key: 'rocketride.pipeBuilder.agentAllowAppDeploys',
+		order: 15,
+		description: 'Let the agent upload and build new versions of your apps without asking. Always allow on a card turns this on. Publishing an app always asks.',
+	},
+	runStops: {
+		key: 'rocketride.pipeBuilder.agentAllowRunStops',
+		order: 16,
+		description: 'Let the agent stop pipeline runs its chat started without asking. Always allow on a card turns this on. Stopping any other run always asks.',
+	},
+	runRestarts: {
+		key: 'rocketride.pipeBuilder.agentAllowRunRestarts',
+		order: 17,
+		description: 'Let the agent restart pipeline runs its chat started without asking. Always allow on a card turns this on. Restarting any other run always asks.',
+	},
+	profilingStarts: {
+		key: 'rocketride.pipeBuilder.agentAllowProfilingStarts',
+		order: 18,
+		description: 'Let the agent start profiling the server without asking. Always allow on a card turns this on.',
+	},
+	profilingStops: {
+		key: 'rocketride.pipeBuilder.agentAllowProfilingStops',
+		order: 19,
+		description: 'Let the agent stop profiling the server without asking. Always allow on a card turns this on.',
+	},
+	templateSaves: {
+		key: 'rocketride.pipeBuilder.agentAllowTemplateSaves',
+		order: 20,
+		description: 'Let the agent save pipeline templates without asking, replacing any with the same id. Always allow on a card turns this on.',
+	},
+	templateDeletes: {
+		key: 'rocketride.pipeBuilder.agentAllowTemplateDeletes',
+		order: 21,
+		description: 'Let the agent delete pipeline templates without asking. Always allow on a card turns this on.',
+	},
+	logSaves: {
+		key: 'rocketride.pipeBuilder.agentAllowLogSaves',
+		order: 22,
+		description: 'Let the agent save run logs to your store without asking. Always allow on a card turns this on. Deleting a saved log always asks.',
+	},
+	sqlQueries: {
+		key: 'rocketride.pipeBuilder.agentAllowSqlQueries',
+		order: 23,
+		description: 'Let the agent run SQL on the databases of pipelines it runs without asking, including SQL that changes data. Always allow on a card turns this on.',
+	},
+};
+
+/** The keys of the agent's approval settings: the mode, and each grant's. rocket-ui's settings feed reads them by these. */
+export const APPROVAL_SETTING_KEYS: Readonly<Record<'mode' | Grant, string>> = {
+	mode: 'rocketride.pipeBuilder.agentApproval',
+	...(Object.fromEntries(Object.entries(GRANT_SETTINGS).map(([grant, row]) => [grant, row.key])) as Record<Grant, string>),
+};
 
 /** The pipelines tool's settings (section "Pipelines" under Rocket Builder). */
 export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
@@ -115,6 +196,38 @@ export const PIPELINES_TOOL_SETTINGS: AppConfiguration = {
 			// Staging is the cloud workspace's mechanism — VS Code files are native.
 			shells: ['saas', 'oss'],
 			description: 'Write saved changes straight to your workspace on the server. Turn this off to review, diff, and commit changes yourself - saves (yours and the agent\'s) stay local until you commit them. Cloud workspaces only.',
+		},
+		// The agent's settings: it runs in the cloud builder only (its tool's manifest `shells`).
+		[APPROVAL_SETTING_KEYS.mode]: {
+			type: 'string',
+			enum: ['ask', 'auto'],
+			enumDescriptions: ['Ask first: the agent waits for your OK before it publishes or deploys, submits for review, changes a deployment or a schedule, stops or restarts a pipeline run, saves or deletes a template or a run log, runs SQL, profiles the server, changes your dev team, deletes a file, or clicks or types in your app.', "Don't ask: the agent does those without asking, except that it won't stop or restart a pipeline run its chat didn't start. Nothing judges the risk for you in this mode; it simply doesn't ask. Account, team and billing changes stay blocked."],
+			default: 'ask',
+			order: 8,
+			shells: ['saas', 'oss'],
+			description: 'Whether the agent asks before outward actions, deletes, and clicks or types in your apps, in every agent chat. In Ask first, each Always allow switch below turns off one kind of card. Account, team, member and billing changes are refused in both modes.',
+		},
+		'rocketride.pipeBuilder.agentStepLimit': {
+			type: 'number',
+			default: 60,
+			order: 9,
+			shells: ['saas', 'oss'],
+			description: 'The most steps the agent takes in one turn. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. 0 means no limit.',
+		},
+		'rocketride.pipeBuilder.agentCostLimit': {
+			type: 'number',
+			default: 2,
+			order: 10,
+			shells: ['saas', 'oss'],
+			description: "The most one agent turn's model cost may reach, in US dollars, from the provider's token counts. At the limit it pauses and asks; Continue starts a new turn with a fresh budget. A request that comes back without counts is held at its likely size, so a turn can pass the limit by at most part of one request. 0 means no limit, and a model with no known price is counted at an assumed rate.",
+		},
+		...Object.fromEntries(Object.values(GRANT_SETTINGS).map(({ key, order, description }): [string, SettingSchema] => [key, { type: 'boolean', default: false, order, shells: ['saas', 'oss'], description }])),
+		'rocketride.pipeBuilder.agentDefaultModel': {
+			type: 'string',
+			default: DEFAULT_MODEL_SETTING,
+			order: 24,
+			shells: ['saas', 'oss'],
+			description: 'The model a new agent chat starts with, as provider/model. The picker beside the chat box sets it for that chat and updates this. Existing chats keep their own model.',
 		},
 	},
 };

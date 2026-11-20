@@ -91,7 +91,9 @@ export interface IPipelineEditorHost {
 	save(): void;
 	/** Awaited save for the publish flow — MUST reject on failure so a
 	 *  failed save aborts the publish (a host whose publish path saves
-	 *  internally resolves immediately). */
+	 *  internally resolves immediately). A save the user dropped while it
+	 *  waited its turn rejects with SaveDroppedError: the publish stops, and
+	 *  the panel shows no failure for it. */
 	saveDocument(): Promise<void>;
 	/** Publishes the SAVED document to the registry. */
 	publish(comment: string, deployTo?: string): Promise<void>;

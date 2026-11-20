@@ -32,7 +32,7 @@
 
 
 /** File extensions the design loop loads as text into Monaco models. */
-const TEXT_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'mts', 'cts', 'json', 'css', 'scss', 'less', 'md', 'svg', 'html', 'txt', 'rrapp', 'gitignore', 'yaml', 'yml']);
+const TEXT_EXTENSIONS = new Set(['ts', 'tsx', 'js', 'jsx', 'mts', 'cts', 'json', 'css', 'scss', 'less', 'md', 'svg', 'html', 'txt', 'rrapp', 'pipe', 'gitignore', 'yaml', 'yml']);
 
 /**
  * Whether a file participates in the design loop as text.

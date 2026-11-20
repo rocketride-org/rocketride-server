@@ -15,6 +15,10 @@
  * hands back an empty style fragment for any name and leaves every other
  * export undefined, matching what the tests already tolerate. Loaded via
  * `--require` before tsx starts resolving test files.
+ *
+ * Two more exports let a test save an agent session: a getClient() that
+ * returns `globalThis.__shellTestClient`, and a ConnectionManager whose bus
+ * drops the file-change events a save announces.
  */
 
 const Module = require('module');
@@ -22,6 +26,8 @@ const Module = require('module');
 const stub = {
 	// Any style-fragment lookup yields an empty, spreadable object.
 	commonStyles: new Proxy({}, { get: () => ({}) }),
+	getClient: () => globalThis.__shellTestClient,
+	ConnectionManager: { getInstance: () => ({ emit: () => undefined }) },
 };
 
 // step: intercept CJS loads of the platform specifiers before tsx resolves them

@@ -1,0 +1,311 @@
+// MIT License
+//
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// =============================================================================
+// AGENT HOST — what rocket-ui hands the agent at startup
+// =============================================================================
+
+/**
+ * The agent lives in shared code and cannot import rocket-ui, so rocket-ui builds its AgentHost
+ * here and installs it right after the workspace is created.
+ */
+
+import { scopedPrefs, type PrefsStore, type RocketRideClient } from 'shell';
+import { DEFAULT_MODEL, modelSetting, parseModelChoice, type ModelChoice } from 'shared/modules/agent/model';
+import { DEFAULT_LIMITS, GRANTS, grantsFrom, type AgentDevSession, type AgentHost, type AgentLimits, type ApprovalControls, type ApprovalPrefs, type ApprovalSettings } from 'shared/modules/agent/host';
+import { messageOf } from 'shared/modules/agent/toolkits/common';
+import type { AgentReport } from 'shared/modules/agent/turn';
+import type { AppBuilderStage, FrameOptions } from 'shared/tools/appdev';
+import { STAGE_PREF_KEY } from 'shared/tools/appdev/views/builder/AppBuilderScreen';
+import { APPROVAL_SETTING_KEYS } from 'shared/tools/toolSettings';
+import { getDocs } from '../docs';
+import { appPrefsStore } from '../surfaces/devtools/devToolPins';
+import { scaffoldApp } from '../surfaces/preview/session/appStore';
+import { findDevSession, type WebDevSession } from '../surfaces/preview/session/devSession';
+import { packAppSource } from '../surfaces/preview/session/pack';
+import { openWorkspaceFile } from '../surfaces/workspace/vfs/openWorkspaceFile';
+import { getWorkspace, type Workspace } from '../surfaces/workspace/vfs/workspace';
+import { openAppPage } from './appPage';
+import { editorControl } from './editorControls';
+import { bootHiddenPreview } from './hiddenPreview';
+import { showBeside } from './userView';
+import { watchPlace } from './watch';
+
+// =============================================================================
+// SCAFFOLD DEFAULTS
+// =============================================================================
+
+/** The frame the New App wizard starts with (NewAppForm's initial options): full screen. */
+const WIZARD_FRAME: FrameOptions = { sidebar: false, statusFooter: false, docTabs: false };
+
+/** Why an app page does not open once another team's workspace is current. */
+const PAGE_TEAM_CHANGED = 'the team changed while the preview was starting';
+
+/** Why a view does not open once another team's workspace is current. */
+const VIEW_TEAM_CHANGED = 'the team changed before the view opened';
+
+/**
+ * The App Builder's UI prefs for one app, as AppBuilderProvider scopes them: the app's own partition,
+ * under `appdev`. Through the realm's hub, so the write reaches the manager, which republishes it to the
+ * builder's own mirror.
+ */
+function builderPrefs(appId: string): PrefsStore {
+	return scopedPrefs(appPrefsStore(appId), 'appdev');
+}
+
+// =============================================================================
+// DEV SESSIONS
+// =============================================================================
+
+/** Narrows a dev session to what the agent may use: the user's, a hidden one, or use_app's page lent to a check. */
+export function agentDevSession(session: WebDevSession): AgentDevSession {
+	return {
+		appId: session.appId,
+		get previewAttached() {
+			return session.previewAttached;
+		},
+		rebuild: () => session.rebuild(),
+		subscribeConsole: (l) => session.subscribeConsole(l),
+		subscribeErrors: (l) => session.subscribeErrors(l),
+		subscribeWatch: (l) => session.subscribeWatch(l),
+	};
+}
+
+// =============================================================================
+// APPROVALS — the user's settings behind the agent's approvals
+// =============================================================================
+
+/** The settings behind the agent's approvals, from shared/tools/toolSettings.ts, where their rows are declared, so a key can't drift from its row. */
+const APPROVAL_KEYS = APPROVAL_SETTING_KEYS;
+
+/** Writes one setting: the workspace's updateSetting. */
+type SettingWriter = (key: string, value: string | boolean) => void;
+
+/**
+ * The agent's approval settings: anything but 'auto' reads as Ask, and anything but true as no
+ * grant, so a missing or garbled value fails safe.
+ */
+function approvalPrefsOf(settings: Readonly<Record<string, unknown>>): ApprovalPrefs {
+	return {
+		mode: settings[APPROVAL_KEYS.mode] === 'auto' ? 'auto' : 'ask',
+		grants: grantsFrom((grant) => settings[APPROVAL_KEYS[grant]] === true),
+	};
+}
+
+/** Whether two settings agree on the mode and on every grant in GRANTS, so a new grant turned on is never missed as no change. */
+function samePrefs(a: ApprovalPrefs, b: ApprovalPrefs): boolean {
+	return a.mode === b.mode && GRANTS.every((grant) => a.grants[grant] === b.grants[grant]);
+}
+
+/**
+ * The user's approval settings for every agent chat in the page. A write goes to the workspace's
+ * settings and comes back through RocketApp's next push, so the workspace is the one source.
+ */
+class ApprovalFeed {
+	private prefs: ApprovalPrefs = approvalPrefsOf({});
+	private write: SettingWriter | null = null;
+	private readonly listeners = new Set<() => void>();
+
+	/** What a run gets: it reads, hears changes and grants, with no way to set the mode. */
+	readonly run: ApprovalSettings = {
+		read: () => this.prefs,
+		subscribe: (listener) => {
+			this.listeners.add(listener);
+			return () => {
+				this.listeners.delete(listener);
+			};
+		},
+		grant: (kind) => this.write?.(APPROVAL_KEYS[kind], true),
+	};
+
+	/** What the chat's mode switch gets. */
+	readonly controls: ApprovalControls = { ...this.run, setMode: (mode) => this.write?.(APPROVAL_KEYS.mode, mode) };
+
+	/** Takes the settings as they now stand; unchanged settings tell no one, so RocketApp may push on every change. */
+	push(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
+		this.write = write;
+		const next = approvalPrefsOf(settings);
+		if (samePrefs(next, this.prefs)) return;
+		this.prefs = next;
+		for (const listener of [...this.listeners]) listener();
+	}
+}
+
+/** The page's one feed: every host built here hands out the same one. */
+const approvalFeed = new ApprovalFeed();
+
+// =============================================================================
+// LIMITS — how far one agent turn goes before it pauses
+// =============================================================================
+
+/** The settings behind a turn's limits, as shared/tools/toolSettings.ts declares them. */
+const LIMIT_KEYS: Readonly<Record<keyof AgentLimits, string>> = {
+	steps: 'rocketride.pipeBuilder.agentStepLimit',
+	costUsd: 'rocketride.pipeBuilder.agentCostLimit',
+};
+
+/** One limit (0 means off); a missing, negative or garbled value reads as the default, so it fails safe. */
+function limitOf(settings: Readonly<Record<string, unknown>>, key: keyof AgentLimits): number {
+	const value = settings[LIMIT_KEYS[key]];
+	return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : DEFAULT_LIMITS[key];
+}
+
+/** The limits as the settings now stand; a turn reads them when it starts. */
+let limits: AgentLimits = DEFAULT_LIMITS;
+
+// =============================================================================
+// THE LAST MODEL — what a new agent chat starts with
+// =============================================================================
+
+/** The setting behind it, as shared/tools/toolSettings.ts declares it. */
+const MODEL_KEY = 'rocketride.pipeBuilder.agentDefaultModel';
+
+/** The last pick as the settings now stand; a missing or garbled value reads as the default. */
+let lastModel: ModelChoice = DEFAULT_MODEL;
+
+/** Writes the last pick; it comes back through RocketApp's next push, so the workspace is the one source. */
+let writeSetting: SettingWriter | null = null;
+
+/**
+ * Pushes the workspace settings into the agent's approvals, limits and last model.
+ * RocketApp calls it on every settings change.
+ */
+export function feedApprovalSettings(settings: Readonly<Record<string, unknown>>, write: SettingWriter): void {
+	approvalFeed.push(settings, write);
+	limits = { steps: Math.floor(limitOf(settings, 'steps')), costUsd: limitOf(settings, 'costUsd') };
+	lastModel = parseModelChoice(settings[MODEL_KEY]) ?? DEFAULT_MODEL;
+	writeSetting = write;
+}
+
+// =============================================================================
+// THE HOST
+// =============================================================================
+
+/**
+ * Builds the agent host over one of rocket-ui's workspaces. Call after
+ * createWorkspace() settles. A run keeps the host it started with, so after a
+ * team switch its reads, writes, scaffolds and deploys stay in its own team.
+ *
+ * @param client - The connected client; it supplies the publisher and packs deploys.
+ * @param ws - The workspace the host is bound to: its view and its scope.
+ * @param report - The reporter RocketApp got from useReport(). RocketApp renders inside the shell's
+ *   TelemetryProvider, so this is the real one; the agent's sidebar renders outside it and would get
+ *   the do-nothing one. The shell keeps one reporter per app for the page's life.
+ * @returns The host to install with setAgentHost().
+ */
+export function createRocketAgentHost(client: RocketRideClient, ws: Workspace, report: AgentReport): AgentHost {
+	// step: after a team switch, a run must not reach the new team's dev sessions, even where app ids match
+	const current = (): boolean => {
+		try {
+			return getWorkspace().view === ws.view;
+		} catch {
+			return false;
+		}
+	};
+	return {
+		vfs: ws.view,
+		scopeKey: ws.scopeKey,
+		scopeName: (scopeKey) => (scopeKey.startsWith('team-') ? client.getAccountInfo()?.organization?.teams?.find((team) => team.id === scopeKey.slice('team-'.length))?.name : undefined),
+		// step: the New App wizard's publisher and starting frame
+		scaffoldApp: ({ appName, displayName, template }) =>
+			scaffoldApp(
+				{
+					appName,
+					displayName,
+					publisher: client.getAccountInfo()?.organization?.developerId || 'local',
+					frame: WIZARD_FRAME,
+					template,
+				},
+				ws
+			),
+		packApp: (folder) => packAppSource(client, folder, ws),
+		devSession: (appId) => {
+			if (!current()) return null;
+			const session = findDevSession(appId);
+			return session ? agentDevSession(session) : null;
+		},
+		// step: the user's attached preview when there is one, else a hidden one that lives only for the check
+		leasePreview: async (app, signal) => {
+			if (!current()) return { ok: false, why: 'the team changed while the check was starting' };
+			const open = findDevSession(app.id);
+			if (open?.previewAttached) return { ok: true, session: agentDevSession(open), release: () => {} };
+			try {
+				const hidden = await bootHiddenPreview(client, app, { signal });
+				return { ok: true, session: agentDevSession(hidden.session), release: hidden.dispose };
+			} catch (err) {
+				return { ok: false, why: messageOf(err) };
+			}
+		},
+		// step: always the agent's own hidden copy, in this host's team only
+		openAppPage: (app, opts) => (current() ? openAppPage(client, app, opts) : Promise.reject(new Error(PAGE_TEAM_CHANGED))),
+		// step: the chat's live view of those copies; UI only, a run never reads it
+		watchFor: (conversationId) => watchPlace({ kind: 'chat', conversationId }),
+		// step: the user's own builder or canvas beside this turn's chat, in this host's team only. A builder
+		// goes to Design first through its stage pref: one opening reads it, an open one follows it live
+		showView: async (view, { conversationId }) => {
+			if (!current()) throw new Error(VIEW_TEAM_CHANGED);
+			const docs = getDocs();
+			if (!docs) throw new Error('the editor area is not open');
+			if (view.kind === 'app') builderPrefs(view.app.id).set(STAGE_PREF_KEY, 'design' satisfies AppBuilderStage);
+			await showBeside(docs, view, conversationId);
+		},
+		// step: a conversation's chat is gone when its last tab closes or this team's editor area goes. A tab a
+		// layout change draws again keeps its document in Documents, so that is no close (the canvas tells the
+		// same apart, canvasDocument.ts). Documents notifies on destroy() before it drops its listeners
+		onChatClosed: (conversationId, closed) => {
+			const docs = getDocs();
+			if (!docs) {
+				closed();
+				return () => undefined;
+			}
+			const uri = `tool:agent/${conversationId}`;
+			let stop = (): void => undefined;
+			const check = (): void => {
+				if (docs.destroyed !== true && docs.getState().documents[uri]) return;
+				stop();
+				closed();
+			};
+			stop = docs.subscribe(check);
+			// the tab closed while the session loaded
+			check();
+			return stop;
+		},
+		approvals: { run: approvalFeed.run, controls: approvalFeed.controls },
+		limits: { read: () => limits },
+		lastModel: { read: () => lastModel, write: (choice) => writeSetting?.(MODEL_KEY, modelSetting(choice)) },
+		// step: while another team's workspace is current an old run finds no editor, so it opens no
+		// dialog, and an answer given after a switch saves and discards nothing
+		editor: (path) => {
+			if (!current()) return null;
+			const control = editorControl(ws.view, path);
+			if (!control) return null;
+			const whileCurrent = async (act: () => Promise<void>): Promise<void> => {
+				if (!current()) throw new Error('the team changed while the question was open');
+				await act();
+			};
+			return { save: (stored) => whileCurrent(() => control.save(stored)), discard: () => whileCurrent(control.discard) };
+		},
+		// step: a file link on a turn's card opens the file the way the Explorer does, in this host's team only
+		openFile: async (path) => current() && openWorkspaceFile(path),
+		report,
+	};
+}

@@ -994,12 +994,14 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 
 	const incomingVersion = currentProject?.docRevision ?? 0;
 	const incomingProjectId = currentProject?.project_id;
+	// A stored pipeline changed under the canvas (the agent's write) keeps its docRevision, so the content triggers a reload too.
+	const incomingComponents = currentProject?.components;
+	const incomingSig = useMemo(() => projectContentSig({ components: incomingComponents }), [incomingComponents]);
 
 	useEffect(() => {
 		if (!currentProject) return;
 
 		const projectChanged = incomingProjectId !== lastLoadedProjectId.current;
-		const incomingSig = projectContentSig(currentProject);
 
 		// Skip echoes of our own content. We compare component CONTENT rather than
 		// docRevision: rapid edits produce several in-flight versions whose echoes
@@ -1041,7 +1043,7 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 				: `${unconfigured} nodes need configuration. Look for the red gear`);
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [incomingVersion, incomingProjectId]);
+	}, [incomingVersion, incomingProjectId, incomingSig]);
 
 	// --- Re-validate nodes when servicesJson arrives (may be empty on first load) ---
 	useEffect(() => {

@@ -571,7 +571,7 @@ your backfill and crash-recovery source.
    `types: ["TASK", "SUMMARY", "FLOW", "OUTPUT", "SSE"]`.
 4. For every inbound `event` message, switch on `event` and write to your DB:
    - `apaevt_task` → `pipeline_runs` (insert on `begin`, update on `end`,
-     reconcile from `running` snapshot at startup).
+     reconcile from `running` snapshot at startup), keyed
      by `(project_id, source, startTime)`.
    - `apaevt_flow` → append to `pipeline_run_traces` keyed by
      `(project_id, source, id /*pipe*/, op, seq)`. Store `trace.data`,
@@ -597,8 +597,9 @@ your backfill and crash-recovery source.
   miss live events for that window. The next `apaevt_task` `running` snapshot
   is your live crash-recovery handle; the recorded run streams (§8) can
   backfill the missed window.
-- There is no `event_id` / global ordering key. Use the DAP envelope `seq`
-  (per-connection monotonic) plus your own ingest timestamp.
+- Live events carry no `event_id` or global ordering key. Use the DAP envelope
+  `seq` (per-connection monotonic) plus your own ingest timestamp. Recorded
+  streams carry `logSeq` (§8.2).
 - `apaevt_flow` `trace` is a free-form dict; schema varies by node and trace
   level. Store as JSONB, do not flatten.
 - `errors` and `warnings` arrays in `TASK_STATUS` are capped at 1000 entries

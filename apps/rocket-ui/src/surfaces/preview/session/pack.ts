@@ -39,7 +39,7 @@
 import { zipSync } from 'fflate';
 import type { RocketRideClient } from 'shell';
 import { appPath } from './appStore';
-import { getStagedWorkspace, getWorkspaceVfs } from '../../workspace/vfs/workspace';
+import { getWorkspace, type Workspace } from '../../workspace/vfs/workspace';
 
 /** The server's receipt cap on zipped bytes (mirrors _ZIP_MAX_ZIPPED). */
 const MAX_ZIP_BYTES = 50 * 1024 * 1024;
@@ -53,12 +53,13 @@ const SKIP_DIRS = new Set(['node_modules', 'dist', 'build', '.git']);
  *
  * @param client - The connected RocketRide client.
  * @param folder - The app's folder name under .appdev.
+ * @param ws - The workspace the app lives in (default: the current one; the agent passes its own).
  * @returns The zip bytes, ready for client.deploy.add.
  */
-export async function packAppSource(client: RocketRideClient, folder: string): Promise<Uint8Array> {
+export async function packAppSource(client: RocketRideClient, folder: string, ws: Workspace = getWorkspace()): Promise<Uint8Array> {
 	// step: walk through the workspace VIEW (identical to the base once the
 	// commit-first gate below holds; one inventory path either way)
-	const view = getWorkspaceVfs();
+	const view = ws.view;
 	const paths: string[] = [];
 	const walk = async (rel: string): Promise<void> => {
 		const entries = await view.list(rel ? `apps/${folder}/${rel}` : `apps/${folder}`);
@@ -80,7 +81,7 @@ export async function packAppSource(client: RocketRideClient, folder: string): P
 	// the view and the base agree, so the whole tree bulk-reads from the
 	// store in one path (binaries included; the raw batch is the documented
 	// binary escape hatch — the view contract is text-only).
-	const pendingCount = [...getStagedWorkspace().changedPaths().keys()]
+	const pendingCount = [...view.changedPaths().keys()]
 		.filter((vp) => vp === `apps/${folder}` || vp.startsWith(`apps/${folder}/`)).length;
 	if (pendingCount > 0) {
 		throw new Error(`${pendingCount} uncommitted change(s) in this app — commit them first (status bar: Commit all), then deploy.`);
@@ -88,7 +89,7 @@ export async function packAppSource(client: RocketRideClient, folder: string): P
 	const tree: Record<string, Uint8Array> = {};
 	for (let i = 0; i < paths.length; i += 256) {
 		const chunk = paths.slice(i, i + 256);
-		const results = await client.fsReadMany(chunk.map((p) => appPath(folder, p)));
+		const results = await client.fsReadMany(chunk.map((p) => appPath(folder, p, ws.scope)));
 		results.forEach((entry, idx) => {
 			if (entry.ok && entry.data) tree[chunk[idx]] = entry.data;
 			else throw new Error(`Cannot read ${chunk[idx]}: ${entry.error ?? 'unreadable'}.`);

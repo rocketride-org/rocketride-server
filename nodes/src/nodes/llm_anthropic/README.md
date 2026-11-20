@@ -70,10 +70,13 @@ Default: **Claude Sonnet 4.6** (`claude-sonnet-4-6`).
 | Anthropic: Claude Opus 4.8 | `claude-opus-4-8` | 1,000,000 | 128,000 |
 
 <details>
-<summary><strong>View 16 more models</strong></summary>
+<summary><strong>View 19 more models</strong></summary>
 
 | Profile | Model ID | Context tokens | Output tokens |
 | ------- | -------- | -------------- | ------------- |
+| Claude Opus 5.5 | `claude-opus-5-5` | 1,000,000 | 128,000 |
+| Claude Sonnet 5.5 | `claude-sonnet-5-5` | 1,000,000 | 128,000 |
+| Claude Haiku 5.5 | `claude-haiku-5-5` | 1,000,000 | 128,000 |
 | `custom` | _(user-specified)_ | 200,000 (editable) | — |
 | Claude Opus 4.6 | `claude-opus-4-6` | 1,000,000 | 128,000 |
 | Claude Haiku 4.5 | `claude-haiku-4-5` | 200,000 | 64,000 |

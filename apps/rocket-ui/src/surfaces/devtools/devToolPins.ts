@@ -77,7 +77,7 @@ export function toToolTab(entry: Pick<AppManifestEntry, 'id' | 'name' | 'icon' |
 // The REALM's hub owns one mirrored store per partition; this is the ACTIVE
 // APP's — the toolbar is app state, kept in that app's workspace file, not
 // in global.json (which is for what the shell itself is).
-function appPrefsStore(appId: string): PrefsStore {
+export function appPrefsStore(appId: string): PrefsStore {
 	return realmPrefsHub(ConnectionManager.getInstance()).partition(appPartition(appId));
 }
 

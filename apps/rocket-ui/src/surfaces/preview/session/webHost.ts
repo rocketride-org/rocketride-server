@@ -43,6 +43,8 @@ import { ConnectionManager } from 'shell';
 import type { RocketRideClient, PrefsStore } from 'shell';
 import { createBusAppBuilderHost, projectListing, applyListing, probePackage, runListingPreflight } from 'shared/tools/appdev';
 import type { IAppBuilderHost } from 'shared/tools/appdev';
+import { watchPlace } from '../../../agent/watch';
+import { getWorkspace } from '../../workspace/vfs/workspace';
 import { appFileExists, readAppImageDataUri, readAppPackage, readAppText, writeAppPackage } from './appStore';
 import { packAppSource } from './pack';
 import type { WebDevSession } from './devSession';
@@ -108,6 +110,8 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 		subscribeErrors: session ? (listener) => session.subscribeErrors(listener) : undefined,
 		subscribeWatch: session ? (listener) => session.subscribeWatch(listener) : undefined,
 		reloadPreview: onReloadPreview,
+		// The agent's copy of this app while it uses it, over the Design preview: the same store as the chat's live view.
+		agentWatch: watchPlace({ kind: 'design', appId }),
 		getPreviewUrl: () => previewUrl,
 		// Inherit Auth (parity with the VS Code panel): presence of this
 		// member is what makes the shared DesignView render the checkbox.
@@ -122,6 +126,7 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 		// synchronous off the mirror, as getPref's contract requires.
 		getPref: (key: string) => prefs.get(key),
 		setPref: (key: string, value: unknown) => prefs.set(key, value),
+		subscribePrefs: (listener: () => void) => prefs.subscribe(listener),
 
 		// ── Deploy — the one SDK member that stays host-specific here:
 		// DEPLOY = pack the STORE-VFS source, upload bytes; the server builds
@@ -144,9 +149,11 @@ export function createWebAppBuilderHost(o: WebHostOptions): IAppBuilderHost {
 			}
 		},
 		saveListing: async (draft) => {
-			const pkg = await readAppPackage(folder);
+			// step: a read that ends after a team switch still writes in the workspace the save started in
+			const view = getWorkspace().view;
+			const pkg = await readAppPackage(folder, view);
 			applyListing(pkg, draft);
-			await writeAppPackage(folder, pkg);
+			await writeAppPackage(folder, pkg, undefined, view);
 		},
 		runPreflight: async () => {
 			// The SHARED tiered bar (one implementation for every host), fed

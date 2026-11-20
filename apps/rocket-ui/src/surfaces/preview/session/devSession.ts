@@ -60,7 +60,7 @@ import type { editor as MonacoEditorNs } from 'monaco-editor';
 import { ConnectionManager } from 'shell';
 import type { IWorkspaceFileSystem } from 'shared/modules/vfs/vfsTypes';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
-import { getWorkspaceVfs, storePathToVirtual } from '../../workspace/vfs/workspace';
+import { getWorkspace, storePathToVirtual, type Workspace } from '../../workspace/vfs/workspace';
 import type { RocketRideClient, ShellNotification } from 'shell';
 import type { ConsoleRow, AppErrorRow, WatchStatus } from 'shared/tools/appdev';
 import { loadMonaco, setupAppTypescript, emitModel, detectLanguage } from 'shared/components/monaco';
@@ -108,14 +108,22 @@ function feedTime(): string {
  *
  * Bounded by the number of distinct files opened this page-session (one
  * entry per URI+version; a new version overwrites via the versioned key,
- * and superseded entries are pruned in emitOne). The whole map dies with
- * the page.
+ * and superseded entries are pruned in emitOne). A URI's entries also go
+ * when its model is disposed: a new model at that URI starts again at
+ * version 1, and must not get the old content's output. The whole map dies
+ * with the page.
  */
 const sharedEmitCache = new Map<string, { js: string; map?: string }>();
 
 /** The shared-cache key for one model at one version. */
 function emitKey(uri: string, version: number): string {
 	return `${uri}@${version}`;
+}
+
+function dropEmits(uri: string): void {
+	for (const k of sharedEmitCache.keys()) {
+		if (k.startsWith(`${uri}@`)) sharedEmitCache.delete(k);
+	}
 }
 
 // =============================================================================
@@ -153,6 +161,31 @@ function releaseTsSetup(): void {
 }
 
 // =============================================================================
+// OPEN SESSIONS — the open apps' dev sessions, found by app id
+// =============================================================================
+
+// Every open session is in this set, so code outside the App Builder document (the agent) can reach an
+// app's session. Split panels each hold one; lookups prefer the one with a preview attached.
+
+/** The open sessions, in creation order. */
+const sessions = new Set<WebDevSession>();
+
+/**
+ * The open session for an app, preferring one with a preview attached.
+ *
+ * @returns The session, or null when no session for the app is open.
+ */
+export function findDevSession(appId: string): WebDevSession | null {
+	let first: WebDevSession | null = null;
+	for (const session of sessions) {
+		if (session.appId !== appId) continue;
+		if (session.previewAttached) return session;
+		first ??= session;
+	}
+	return first;
+}
+
+// =============================================================================
 // SESSION
 // =============================================================================
 
@@ -178,6 +211,16 @@ interface DevRegistrationMeta {
 
 /** Icon size cap (chars) — mirrors the server dev overlay's discipline. */
 const ICON_MAX_CHARS = 128 * 1024;
+
+/** What settled() saw when it resolved. */
+export interface SettleState {
+	/** The watch status then: `error` means the latest build failed. */
+	readonly watch: WatchStatus;
+	/** Whether the shell had loaded the latest link's descriptor (React commits next). */
+	readonly loaded: boolean;
+	/** True when the wait ended before the session settled: the limit ran out, the signal aborted or the session was disposed. */
+	readonly timedOut: boolean;
+}
 
 export class WebDevSession {
 	/** Workspace-manifest registration meta; refreshed with each deps settle. */
@@ -211,11 +254,11 @@ export class WebDevSession {
 			try {
 				const rel = m.icon.replace(/^\.\//, '');
 				if (rel.toLowerCase().endsWith('.svg')) {
-					const svg = await readAppText(this.folder, rel);
+					const svg = await readAppText(this.folder, rel, this.workspace.view);
 					const uri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 					if (uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				} else {
-					const uri = await readAppImageDataUri(this.client, this.folder, rel);
+					const uri = await readAppImageDataUri(this.client, this.folder, rel, this.workspace.scope);
 					if (uri && uri.length <= ICON_MAX_CHARS) meta.icon = uri;
 				}
 			} catch {
@@ -226,10 +269,13 @@ export class WebDevSession {
 	}
 
 	private readonly client: RocketRideClient;
-	private readonly appId: string;
+	/** The app this session serves (findDevSession looks sessions up by it). */
+	public readonly appId: string;
 	private readonly folder: string;
 	private readonly appName: string;
 	private readonly moduleId: string;
+	/** The workspace the session opened in; reads and lock writes that end after a team switch stay in it. */
+	private readonly workspace: Workspace;
 	/**
 	 * The scope-registry key for links and shims: per SESSION, not per app —
 	 * split panels run two sessions of one app in SEPARATE preview realms,
@@ -251,8 +297,8 @@ export class WebDevSession {
 
 	// ── Models ───────────────────────────────────────────────────────────
 	private readonly models = new Map<string, MonacoEditorNs.ITextModel>();
-	/** THIS session's content listeners — an adopted model outlives the session. */
-	private readonly modelListeners: Array<{ dispose: () => void }> = [];
+	/** THIS session's content listener on each of its models — an adopted model outlives the session. */
+	private readonly modelListeners = new Map<string, { dispose: () => void }>();
 
 	// ── Build state ──────────────────────────────────────────────────────
 	private lastLink: LinkResult | null = null;
@@ -260,6 +306,19 @@ export class WebDevSession {
 	private building = false;
 	private buildQueued = false;
 	private mounted = false;
+
+	// ── Settling (settled()) ─────────────────────────────────────────────
+	/** File changes being adopted: up in onFsChange, down when the adoption ends. Covers the gap between a write and `building`. */
+	private adopting = 0;
+	/** Links injected into the preview. */
+	private linked = 0;
+	/** The newest link whose loader the shell has called and whose import has finished. */
+	private loadedLink = 0;
+	/** The preview document the latest link went into. A reload replaces it with one that shows nothing until the shell re-attaches. */
+	private linkedDocument: Document | null = null;
+	/** Code changes shown in the preview: every link and every hot swap. */
+	private revisions = 0;
+	private readonly settleWaiters = new Set<() => void>();
 
 	// ── Preview target ───────────────────────────────────────────────────
 	private previewWindow: Window | null = null;
@@ -285,8 +344,10 @@ export class WebDevSession {
 	 * @param appId - The app id.
 	 * @param folder - The .appdev folder name.
 	 * @param appName - Display name (registerLocalApp meta).
+	 * @param opts - `hidden`: an agent's preview, which never joins the open sessions, so findDevSession
+	 *   only ever returns the user's own.
 	 */
-	constructor(client: RocketRideClient, appId: string, folder: string, appName: string) {
+	constructor(client: RocketRideClient, appId: string, folder: string, appName: string, opts: { hidden?: boolean } = {}) {
 		this.client = client;
 		this.appId = appId;
 		this.folder = folder;
@@ -295,7 +356,10 @@ export class WebDevSession {
 		this.scopeKey = `${appId}#${this.sessionId}`;
 		// step: a prefix lens over the ONE shared staged workspace view —
 		// editor overlays, staged state, and agent writes all converge there
-		this.vfs = scopedFileSystem(getWorkspaceVfs(), `apps/${folder}`);
+		this.workspace = getWorkspace();
+		this.vfs = scopedFileSystem(this.workspace.view, `apps/${folder}`);
+		// step: join the open sessions (findDevSession); dispose() leaves
+		if (!opts.hidden) sessions.add(this);
 	}
 
 	// =========================================================================
@@ -311,6 +375,8 @@ export class WebDevSession {
 	 * session; never again.
 	 */
 	async open(): Promise<void> {
+		// step: what the bus says while the tree loads; null once the models exist and changes go straight through
+		let held: Array<{ uri: string; origin: string }> | null = [];
 		try {
 			console.log('[appdev] session open: loading editor...');
 			const monaco = await loadMonaco();
@@ -330,6 +396,15 @@ export class WebDevSession {
 				.catch((err) => {
 					this.pushConsole('warn', `[types] platform types unavailable: ${err instanceof Error ? err.message : String(err)}`);
 				});
+
+			// step: join the notification bus BEFORE the tree is read, holding each
+			// change until the models exist: a write landing mid-read is then either
+			// in the read or adopted after it, never lost
+			this.unsubscribeNotify = ConnectionManager.getInstance().on('shell:notify', (n: ShellNotification) => {
+				if (n.kind !== 'onFsChange') return;
+				if (held) held.push({ uri: n.uri, origin: n.origin });
+				else this.onFsChange(n.uri, n.origin);
+			});
 
 			// step: inventory the whole tree (ALL files — binaries included),
 			// then bulk-load just the TEXT files into models
@@ -353,12 +428,15 @@ export class WebDevSession {
 			this.vfs.notify();
 			this.setWatch({ state: 'idle' });
 
-			// step: join the notification bus AFTER the tree is loaded — an
-			// onFsChange landing mid-load would race the model sweep above
-			this.unsubscribeNotify = ConnectionManager.getInstance().on('shell:notify', (n: ShellNotification) => {
-				if (n.kind === 'onFsChange') this.onFsChange(n.uri, n.origin);
-			});
+			// step: adopt what landed during the load. Adopting re-reads the file and
+			// leaves a model that already matches alone, so a change the read saw costs a read
+			const early = held;
+			held = null;
+			for (const n of early) this.onFsChange(n.uri, n.origin);
 		} catch (err) {
+			// a failed open keeps no subscription
+			this.unsubscribeNotify?.();
+			this.unsubscribeNotify = null;
 			const stack = err instanceof Error ? (err.stack ?? err.message) : String(err);
 			console.error('[appdev] session open FAILED:', stack);
 			const message = err instanceof Error ? err.message : String(err);
@@ -394,6 +472,73 @@ export class WebDevSession {
 		await this.rebuild();
 	}
 
+	/** Whether a preview realm is attached to a live session, so builds inject and the console and errors feeds are live. */
+	get previewAttached(): boolean {
+		// step: previewWindow is never cleared, so a removed iframe or closed debug tab shows only as .closed
+		return this.previewWindow !== null && !this.previewWindow.closed && !this.disposed;
+	}
+
+	/** How many code changes the preview has shown (links and hot swaps). An app page compares it around an action to tell that a file change rebuilt the app under it. */
+	get revision(): number {
+		return this.revisions;
+	}
+
+	/**
+	 * Resolves when the preview shows the latest work: no file change is being adopted, no build runs or
+	 * waits, and the shell has loaded the latest link's descriptor. A hot swap needs no load. A failed
+	 * build loads nothing, so it settles at once with watch `error`.
+	 *
+	 * Reliable right after an agent write: the write queues its change notification before its promise
+	 * resolves, and onFsChange counts the adoption, so the count is up before a later call can ask. The
+	 * first read after a boot waits here too: the shell calls the loader only after it connects, so
+	 * `loaded` stays false while it shows its loading screen. So does a read after the page reloads,
+	 * until the new shell re-attaches and the session links the app into it.
+	 *
+	 * @param opts - `limitMs` caps the wait; `signal` ends it early. Either way it resolves, with `timedOut`.
+	 */
+	settled(opts: { signal?: AbortSignal; limitMs: number }): Promise<SettleState> {
+		return new Promise((resolve) => {
+			const check = (): void => {
+				if (this.disposed) finish(true);
+				else if (this.isSettled()) finish(false);
+			};
+			const giveUp = (): void => finish(true);
+			const timer = setTimeout(giveUp, opts.limitMs);
+			// a waiter leaves the set exactly once, so whichever ending comes first is the one that resolves
+			const finish = (timedOut: boolean): void => {
+				if (!this.settleWaiters.delete(check)) return;
+				clearTimeout(timer);
+				opts.signal?.removeEventListener('abort', giveUp);
+				resolve({ watch: this.watchStatus, loaded: this.showsLatestLink(), timedOut });
+			};
+			this.settleWaiters.add(check);
+			opts.signal?.addEventListener('abort', giveUp, { once: true });
+			check();
+			if (opts.signal?.aborted) giveUp();
+		});
+	}
+
+	/** Nothing being adopted, nothing building or queued, and the latest link loaded (or the build failed, which loads nothing). */
+	private isSettled(): boolean {
+		return this.adopting === 0 && !this.building && !this.buildQueued && (this.showsLatestLink() || this.watchStatus.state === 'error');
+	}
+
+	/** Whether the shell has loaded the latest link, in the document the preview shows now. */
+	private showsLatestLink(): boolean {
+		if (this.loadedLink !== this.linked) return false;
+		try {
+			return this.previewWindow?.document === this.linkedDocument;
+		} catch {
+			// a page that went to another origin keeps its document to itself
+			return false;
+		}
+	}
+
+	/** Re-checks the settle waiters; called wherever a settle condition may have changed. */
+	private poke(): void {
+		for (const waiter of [...this.settleWaiters]) waiter();
+	}
+
 	/**
 	 * Routes a preview postMessage (console/error forwarding) into the feeds.
 	 *
@@ -412,27 +557,18 @@ export class WebDevSession {
 	/** Tears the session down (models, overlays, blobs, type libs, feeds). */
 	dispose(): void {
 		this.disposed = true;
+		sessions.delete(this);
+		// step: a disposed session never settles, so its waiters end now as timed out
+		this.poke();
 		this.unsubscribeNotify?.();
 		this.unsubscribeNotify = null;
 		if (this.lastLink) revokeLink(this.lastLink.blobUrls);
 		this.ata?.dispose();
 		this.ata = null;
-		for (const listener of this.modelListeners) listener.dispose();
-		this.modelListeners.length = 0;
 		// step: release — not dispose — the shared state; a model (and the TS
 		// setup) dies only with its LAST session, so a split panel of the same
 		// app keeps its editors and type libs when the other panel closes
-		for (const model of this.models.values()) {
-			const key = model.uri.toString();
-			const remaining = (modelRefs.get(key) ?? 1) - 1;
-			if (remaining <= 0) {
-				modelRefs.delete(key);
-				model.dispose();
-			} else {
-				modelRefs.set(key, remaining);
-			}
-		}
-		this.models.clear();
+		for (const path of [...this.models.keys()]) this.releaseModel(path);
 		if (this.tsHandle) {
 			releaseTsSetup();
 			this.tsHandle = null;
@@ -466,11 +602,51 @@ export class WebDevSession {
 		this.models.set(path, model);
 		const isSource = /\.(ts|tsx)$/.test(path);
 		if (isSource) this.ata?.enqueue(path, () => model.getValue());
-		this.modelListeners.push(model.onDidChangeContent(() => {
-			// step: acquisition follows the keystrokes (debounced in the engine)
-			if (isSource) this.ata?.enqueue(path, () => model.getValue());
-		}));
+		this.modelListeners.set(
+			path,
+			model.onDidChangeContent(() => {
+				// step: acquisition follows the keystrokes (debounced in the engine)
+				if (isSource) this.ata?.enqueue(path, () => model.getValue());
+			})
+		);
 		return model;
+	}
+
+	/**
+	 * Lets go of one file's model. The last session to let go disposes it, so
+	 * Monaco's TypeScript worker drops its markers.
+	 *
+	 * @param path - The project-relative file path.
+	 */
+	private releaseModel(path: string): void {
+		const model = this.models.get(path);
+		if (!model) return;
+		this.models.delete(path);
+		this.modelListeners.get(path)?.dispose();
+		this.modelListeners.delete(path);
+		const key = model.uri.toString();
+		const remaining = (modelRefs.get(key) ?? 1) - 1;
+		if (remaining <= 0) {
+			modelRefs.delete(key);
+			dropEmits(key);
+			model.dispose();
+		} else {
+			modelRefs.set(key, remaining);
+		}
+	}
+
+	/**
+	 * Whether the view confirms a file is gone. A failed check counts as not
+	 * deleted.
+	 *
+	 * @param path - The project-relative file path.
+	 */
+	private async isDeleted(path: string): Promise<boolean> {
+		try {
+			return (await this.vfs.stat(path)) === null;
+		} catch {
+			return false;
+		}
 	}
 
 	// =========================================================================
@@ -491,7 +667,11 @@ export class WebDevSession {
 		const virtual = storePathToVirtual(uri);
 		const prefix = `apps/${this.folder}/`;
 		if (!virtual || !virtual.startsWith(prefix)) return;
-		void this.adoptExternalChange(virtual.slice(prefix.length));
+		this.adopting++;
+		void this.adoptExternalChange(virtual.slice(prefix.length)).finally(() => {
+			this.adopting--;
+			this.poke();
+		});
 	}
 
 	/**
@@ -538,8 +718,9 @@ export class WebDevSession {
 				this.vfs.notify();
 			}
 		} catch {
-			// Unreadable (deleted mid-flight, transient store error) — the
-			// rebuild below still runs from the models we have.
+			// Unreadable: deleted, or a transient store error. Only a confirmed deletion lets go of the model;
+			// otherwise the rebuild below runs from the models we have.
+			if (await this.isDeleted(path)) this.releaseModel(path);
 		}
 
 		// step: re-render an attached preview from the updated truth. The hot
@@ -571,6 +752,7 @@ export class WebDevSession {
 			} while (this.buildQueued && !this.disposed);
 		} finally {
 			this.building = false;
+			this.poke();
 		}
 	}
 
@@ -590,11 +772,12 @@ export class WebDevSession {
 		if (cached) return cached;
 		const output = await emitModel(monaco, model.uri);
 		if (!output.js) return null;
+		// a model released while its emit ran (its file deleted, maybe made again at
+		// the same path and version) must not put its output back in the cache
+		if (this.models.get(path) !== model) return { js: output.js, map: output.map };
 		// step: drop this URI's prior-version entry before storing the new one —
 		// the versioned key would otherwise leave the superseded emit resident
-		for (const k of sharedEmitCache.keys()) {
-			if (k.startsWith(`${uri}@`)) sharedEmitCache.delete(k);
-		}
+		dropEmits(uri);
 		const entry = { js: output.js, map: output.map };
 		sharedEmitCache.set(key, entry);
 		return entry;
@@ -635,13 +818,14 @@ export class WebDevSession {
 			// refresh the registration meta from the SAME fresh read: in dev
 			// the workspace manifest is the truth for name/icon/settings too
 			if (!this.deps) {
-				const pkg = await readAppPackage(this.folder).catch(() => ({}));
-				this.deps = await prepareDependencies(this.folder, this.scopeKey, pkg, scope);
+				const pkg = await readAppPackage(this.folder, this.workspace.view).catch(() => ({}));
+				this.deps = await prepareDependencies(this.folder, this.scopeKey, pkg, scope, this.workspace.view);
 				for (const problem of this.deps.problems) this.pushError(`[deps] ${problem}`);
 				await this.refreshRegistrationMeta(pkg as Record<string, unknown>);
 			}
 
-			// step: emit + instrument every source module; css rides verbatim
+			// step: emit + instrument every source module; css rides verbatim; a
+			// .pipe is JSON, linked as its default export as deployed builds do
 			const linkInputs = new Map<string, LinkModule>();
 			for (const [path, model] of this.models) {
 				if (/\.(ts|tsx)$/.test(path) && !path.endsWith('.d.ts')) {
@@ -654,6 +838,8 @@ export class WebDevSession {
 					}
 				} else if (path.endsWith('.css')) {
 					linkInputs.set(path, { js: model.getValue() });
+				} else if (path.endsWith('.pipe')) {
+					linkInputs.set(path, { js: `export default ${model.getValue()};` });
 				}
 			}
 			if (!linkInputs.has(ENTRY_PATH)) {
@@ -683,12 +869,21 @@ export class WebDevSession {
 			// meta carries the WORKSPACE manifest (refreshed whenever deps
 			// resettle) so the preview shell's chrome and Settings track it
 			const entryUrl = result.entryUrl;
+			// step: settled() waits for the shell to call this link's loader; a failed import counts as loaded
+			// too, or a crashing app would hold every read for the whole limit
+			const link = ++this.linked;
+			this.linkedDocument = win.document;
+			const loaded = (): void => {
+				this.loadedLink = Math.max(this.loadedLink, link);
+				this.poke();
+			};
 			api.registerLocalApp(
 				this.appId,
-				() => import(/* webpackIgnore: true */ entryUrl).then((m: { default?: unknown }) => m.default ?? m),
+				() => import(/* webpackIgnore: true */ entryUrl).then((m: { default?: unknown }) => m.default ?? m).finally(loaded),
 				this.registrationMeta ?? { name: this.appName, moduleId: this.moduleId },
 			);
 			api.invalidateApp(this.appId);
+			this.revisions++;
 			this.mounted = true;
 
 			// step: retire the previous graph after the swap settles
@@ -739,6 +934,7 @@ export class WebDevSession {
 			}
 			await import(/* webpackIgnore: true */ result.entryUrl);
 			refresh.performRefresh();
+			this.revisions++;
 			this.setWatch({ state: 'ok', durationMs: 0, target: 'hot refresh' });
 			setTimeout(() => revokeLink(result.blobUrls), 5000);
 			return true;
@@ -823,6 +1019,7 @@ export class WebDevSession {
 	private setWatch(status: WatchStatus): void {
 		this.watchStatus = status;
 		for (const listener of this.watchListeners) listener(status);
+		this.poke();
 	}
 
 	/** Console feed subscription (replays the backlog). */
