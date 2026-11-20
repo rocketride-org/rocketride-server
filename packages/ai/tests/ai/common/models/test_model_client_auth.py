@@ -104,13 +104,16 @@ async def test_no_token_leaves_the_handshake_unchanged(monkeypatch, connect):
     assert 'extra_headers' not in kwargs
 
 
-async def test_reconnect_reads_the_current_token(monkeypatch, connect):
-    """A reconnect (new transport) sends the token in force at that moment."""
+async def test_each_new_transport_is_built_with_the_bearer_header(monkeypatch, connect):
+    """Every transport the client builds carries the header, including after a reset.
+
+    The token is read when a transport is built; this does not claim a live
+    rotation, which needs an engine restart.
+    """
+    monkeypatch.setenv(TOKEN_ENV, 'tok')
     client = ModelClient('wss://model.example.test:443')
-    monkeypatch.setenv(TOKEN_ENV, 'old')
     await _attach_once(client)
-    monkeypatch.setenv(TOKEN_ENV, 'new')
     await _attach_once(client)
 
     sent = [c.kwargs.get('additional_headers') for c in connect.call_args_list]
-    assert sent == [{'Authorization': 'Bearer old'}, {'Authorization': 'Bearer new'}]
+    assert sent == [{'Authorization': 'Bearer tok'}] * 2

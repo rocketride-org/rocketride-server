@@ -256,8 +256,9 @@ def get_model_server_auth_headers() -> Dict[str, str]:
     """
     Handshake headers that authenticate this engine to the model server.
 
-    Reads ``RR_MODEL_SERVER_AUTH_TOKEN`` at call time, so a reconnect picks up
-    a rotated value.
+    Reads ``RR_MODEL_SERVER_AUTH_TOKEN`` from the environment on each call. The
+    engine process sets it once at startup, so changing the variable later only
+    reaches an engine that is restarted.
 
     Returns:
         ``{'Authorization': 'Bearer <token>'}`` when the token is set, else ``{}``.
@@ -333,7 +334,7 @@ class ModelClient(RocketRideClient):
         """Open the /models socket, sending the model server's shared secret on the handshake."""
         # The SDK builds a header-less transport when none exists; build it here
         # with the bearer header instead. on_disconnected clears the transport, so
-        # every reconnect comes back through here and reads the current token.
+        # a reconnect comes back through here and builds a new one the same way.
         if self._transport is None:
             headers = get_model_server_auth_headers()
             if headers:
