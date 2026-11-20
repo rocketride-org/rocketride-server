@@ -410,6 +410,16 @@ def test_e8_404_isolated_any_client(file, headers, world):
     assert world.reads == [], 'the bytes must not even be read from the store'
 
 
+def test_e8_resolution_probe_does_not_advertise_an_isolated_entry(world):
+    """The ``/apps/<appId>`` probe names a main-origin remoteEntry.js only where that URL would serve."""
+    isolated = world.client.get(f'/apps/{THIRD}', headers=COOKIE)
+    assert isolated.status_code != 200, 'an isolated app has no main-origin entry to advertise (the probe falls through to the static tree)'
+    assert 'remoteEntry.js' not in isolated.text
+    first_party = world.client.get(f'/apps/{FIRST}', headers=COOKIE)
+    assert first_party.status_code == 200
+    assert first_party.json()['entry'] == f'/apps/{FIRST}/v1/remoteEntry.js'
+
+
 def test_e8_first_party_still_served(world):
     """T35: a first-party app (not isolated) keeps serving from the main origin."""
     resp = world.client.get(f'/apps/{FIRST}/v1/remoteEntry.js', headers=COOKIE)
@@ -658,3 +668,12 @@ def test_a_frame_token_is_bound_to_the_deployment_its_grant_describes(world):
     claims = sup.need(_ao(), 'verify_frame_token')(token, label_for(THIRD), config=world.config())
     assert isinstance(claims['d'], str) and claims['d'], 'the token carries the deployment it opens'
     assert claims['d'] in asyncio.run(_ao().token_version_dirs('u1', 'org-1', THIRD)).values()
+
+
+def test_apps_frame_deeply_nested_body_is_a_bad_request_not_a_500(world):
+    """A body under the 4 KiB cap that nests deeper than the JSON parser allows answers 400 ``bad_request``."""
+    raw = b'[' * 1500 + b']' * 1500
+    assert len(raw) < 4096
+    resp = world.post(raw=raw, headers={'content-type': 'application/json'})
+    assert resp.status_code == 400
+    assert resp.json()['error'] == 'bad_request'

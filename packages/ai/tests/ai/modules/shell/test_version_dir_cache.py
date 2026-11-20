@@ -121,6 +121,33 @@ def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
     assert calls == ['app.x']  # denial happened before using the warm map
 
 
+def test_a_token_that_stops_authenticating_does_not_reuse_its_warm_map(monkeypatch):
+    """authenticate() answering an error tuple is a different identity: no warm entitled map, public walk only."""
+    from ai.account import account
+
+    _setup(monkeypatch, [])
+    answers = [SimpleNamespace(userId='u1', organization={'id': 'o'}), (401, 'token expired')]
+    walks: list = []
+
+    async def authenticate(token):
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    async def authorize_app_use(info, app_id, version=None):
+        return True
+
+    async def entitled_version_dirs(info, app_id):
+        walks.append(info)
+        return {1: 'private/dist'} if info is not None else {1: 'public/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs(want=1) == {1: 'private/dist'}
+    assert _dirs(want=1) == {1: 'public/dist'}, 'the warm entitled map is not reused once the token stops authenticating'
+    assert walks[-1] is None
+
+
 def test_warm_full_map_filters_every_concrete_version(monkeypatch):
     from ai.account import account
 

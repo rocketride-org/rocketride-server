@@ -482,7 +482,8 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
     would serve, and the probe must say so. The same holds for a version
     the caller cannot actually fetch (unbuilt or unentitled) — the answer
     is resolved against the SAME servable map ``_serve_versioned`` uses, so
-    the probe can never advertise an entry URL that would 404.
+    the probe can never advertise an entry URL that would 404 (an isolated
+    app's main-origin entry included: it is not advertised).
 
     When authentication itself fails, the caller is answered as anonymous.
     """
@@ -498,6 +499,12 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
             return None
         version = int(registry_version)
         if version not in await _version_dirs_for(token, app_id, want=version):
+            return None
+        # An isolated app's bundle never serves on the main origin (E8: that URL answers
+        # 404): the probe must not advertise it. Skipped, and nothing asked, under `off`.
+        from .app_origin import isolated_for
+
+        if await isolated_for(token, app_id):
             return None
         return {
             'appId': app_id,
@@ -608,6 +615,11 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
                 info = None
         if info is not None and not hasattr(info, 'userId'):
             info = None
+        # A token that no longer authenticates (authenticate() answered an error tuple, or
+        # raised) is not the identity the warm map was resolved for: it answers as anonymous,
+        # from a fresh public walk that is not cached under the token.
+        if token and info is None:
+            auth_failed = True
         # A cached publish/version map is not a cached paid seat. Re-check
         # live membership and seat allocation even on a warm asset request.
         if want is not None and not await account.authorize_app_use(info, app_id, want):
@@ -834,7 +846,8 @@ async def apps_frame(request: Request):
             return _frame_error(413, 'too_large')
     try:
         body = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):
+        # A body of a few thousand nested brackets fits under the size cap and overflows the parser.
         return _frame_error(400, 'bad_request')
     app_id = body.get('appId') if isinstance(body, dict) else None
     version = body.get('version') if isinstance(body, dict) else None
