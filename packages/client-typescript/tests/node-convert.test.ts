@@ -37,7 +37,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
-import { executeNodeConvert, reportOverwrites } from '../src/cli/commands/node';
+import { executeNodeConvert, finalMode, reportOverwrites } from '../src/cli/commands/node';
 import { conversionText, convertDefinition, isOldFormat, loadJson } from '../src/cli/node_convert';
 import { Output } from '../src/cli/output';
 
@@ -259,5 +259,52 @@ describe('rocketride node convert, review rules', () => {
 		// The failed file is untouched and no temporary file is left beside it
 		expect(fs.readFileSync(second, 'utf8')).toBe(fs.readFileSync(path.join(FIXTURES, 'tool_gcs.old.json'), 'utf8'));
 		expect(fs.readdirSync(path.dirname(second))).toEqual(['services.json']);
+	});
+});
+
+// =============================================================================
+// FILE MODES (PR #3393, round 2)
+// =============================================================================
+
+describe('rocketride node convert, file modes', () => {
+	/** POSIX-only: Windows files carry no mode bits to preserve. */
+	const posixIt = process.platform === 'win32' ? it.skip : it;
+
+	/** The process umask, read without changing it. */
+	const umask = (): number => {
+		const mask = process.umask(0);
+		process.umask(mask);
+		return mask;
+	};
+
+	/** A copy of a fixture's old input in the scratch directory. */
+	const stageOne = (name: string): string => {
+		const target = path.join(workDir, 'services.json');
+		fs.copyFileSync(path.join(FIXTURES, `${name}.old.json`), target);
+		return target;
+	};
+
+	it('gives a new file 0644 under the umask', () => {
+		expect(finalMode(path.join(workDir, 'new.json'))).toBe(0o644 & ~umask());
+	});
+
+	it('gives an existing file its own mode', () => {
+		const target = stageOne('tool_gcs');
+		expect(finalMode(target)).toBe(fs.statSync(target).mode & 0o7777);
+	});
+
+	for (const mode of [0o600, 0o644, 0o640]) {
+		posixIt(`keeps a ${mode.toString(8)} definition at ${mode.toString(8)} when converting in place`, async () => {
+			const target = stageOne('tool_gcs');
+			fs.chmodSync(target, mode);
+			expect(await executeNodeConvert([target], {}, new Output(undefined))).toBe(0);
+			expect(fs.statSync(target).mode & 0o7777).toBe(mode);
+		});
+	}
+
+	posixIt('gives a new --out file 0644 under the umask', async () => {
+		const target = path.join(workDir, 'out', 'services.json');
+		expect(await executeNodeConvert([path.join(FIXTURES, 'tool_gcs.old.json')], { out: target }, new Output(undefined))).toBe(0);
+		expect(fs.statSync(target).mode & 0o7777).toBe(0o644 & ~umask());
 	});
 });

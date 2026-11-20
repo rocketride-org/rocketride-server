@@ -36,6 +36,8 @@ import asyncio
 import importlib
 import importlib.util
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -353,3 +355,41 @@ def test_a_failed_write_leaves_the_original_and_no_temporary(tmp_path, monkeypat
     assert asyncio.run(run_node(_args([str(target)]))) == 1
     assert target.read_text(encoding='utf-8') == original
     assert [p.name for p in target.parent.iterdir()] == ['services.json']
+
+
+# ============================================================================
+# File modes (PR #3393, round 2)
+# ============================================================================
+
+POSIX_ONLY = pytest.mark.skipif(os.name != 'posix', reason='Windows files carry no POSIX mode bits to preserve')
+
+
+def _umask() -> int:
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+def test_final_mode_of_a_new_file_is_0644_under_the_umask(tmp_path):
+    assert node_command._final_mode(str(tmp_path / 'new.json')) == 0o644 & ~_umask()
+
+
+def test_final_mode_of_an_existing_file_is_its_own(tmp_path):
+    (target,) = _stage(tmp_path, ['tool_gcs'])
+    assert node_command._final_mode(str(target)) == stat.S_IMODE(os.stat(target).st_mode)
+
+
+@POSIX_ONLY
+@pytest.mark.parametrize('mode', [0o600, 0o644, 0o640])
+def test_in_place_conversion_keeps_the_definition_mode(tmp_path, mode):
+    (target,) = _stage(tmp_path, ['tool_gcs'])
+    os.chmod(target, mode)
+    assert asyncio.run(run_node(_args([str(target)]))) == 0
+    assert stat.S_IMODE(os.stat(target).st_mode) == mode
+
+
+@POSIX_ONLY
+def test_a_new_out_file_gets_0644_under_the_umask(tmp_path):
+    target = tmp_path / 'out' / 'services.json'
+    assert asyncio.run(run_node(_args([str(FIXTURES / 'tool_gcs.old.json')], out=str(target)))) == 0
+    assert stat.S_IMODE(os.stat(target).st_mode) == 0o644 & ~_umask()

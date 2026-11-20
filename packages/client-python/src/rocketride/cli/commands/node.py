@@ -31,6 +31,7 @@ with the TypeScript CLI's ``src/cli/commands/node.ts``.
 """
 
 import os
+import stat
 import tempfile
 from typing import List, Optional
 
@@ -58,6 +59,26 @@ def _report_overwrites(args) -> Optional[str]:
     return next((target for target in targets if _same_file(report, target)), None)
 
 
+#: The mode of a new definition, before the umask: what an editor would create.
+NEW_FILE_MODE = 0o644
+
+
+def _final_mode(target: str) -> int:
+    """
+    The permission bits the written definition must end with.
+
+    An existing destination keeps its own bits (an owner-only definition stays
+    owner-only, a shared one stays shared); a new one gets ``NEW_FILE_MODE``
+    under the process umask.
+    """
+    try:
+        return stat.S_IMODE(os.stat(target).st_mode)
+    except FileNotFoundError:
+        mask = os.umask(0)
+        os.umask(mask)
+        return NEW_FILE_MODE & ~mask
+
+
 def _write_atomic(target: str, text: str) -> None:
     """
     Replace ``target`` with ``text`` only once the new content is complete.
@@ -65,6 +86,9 @@ def _write_atomic(target: str, text: str) -> None:
     The text goes to a temporary file in the target's directory first, then
     replaces the target in one rename, so a failed write (a full disk) leaves
     the original definition intact. The temporary file is removed on failure.
+    ``mkstemp`` creates it owner-only, so nobody else reads it while it is
+    written; before the rename it takes the destination's mode bits (POSIX
+    only: Windows has no such bits to carry).
     """
     directory = os.path.dirname(os.path.abspath(target))
     os.makedirs(directory, exist_ok=True)
@@ -72,6 +96,8 @@ def _write_atomic(target: str, text: str) -> None:
     try:
         with os.fdopen(handle, 'w', encoding='utf-8', newline='\n') as stream:
             stream.write(text)
+        if os.name == 'posix':
+            os.chmod(temporary, _final_mode(target))
         os.replace(temporary, target)
     except BaseException:
         try:

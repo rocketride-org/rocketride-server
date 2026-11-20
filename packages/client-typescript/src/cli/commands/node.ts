@@ -77,11 +77,36 @@ export function reportOverwrites(files: string[], options: NodeConvertOptions): 
 	return targets.find((target) => sameFile(report, target)) ?? null;
 }
 
+/** The mode of a new definition, before the umask: what an editor would create. */
+const NEW_FILE_MODE = 0o644;
+
+/**
+ * The permission bits the written definition must end with: an existing
+ * destination keeps its own (an owner-only definition stays owner-only, a
+ * shared one stays shared); a new one gets `NEW_FILE_MODE` under the umask.
+ *
+ * @param target - The destination.
+ * @returns The mode bits.
+ */
+export function finalMode(target: string): number {
+	try {
+		return fs.statSync(target).mode & 0o7777;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+		const mask = process.umask(0);
+		process.umask(mask);
+		return NEW_FILE_MODE & ~mask;
+	}
+}
+
 /**
  * Replace `target` with `text` only once the new content is complete: the
  * text goes to a temporary file in the target's directory first, then
  * replaces the target in one rename, so a failed write (a full disk) leaves
  * the original definition intact. The temporary file is removed on failure.
+ * It is created owner-only, so nobody else reads it while it is written, and
+ * before the rename it takes the destination's mode bits (POSIX only: Windows
+ * has no such bits to carry).
  *
  * @param target - The file to replace.
  * @param text - Its new content.
@@ -91,7 +116,8 @@ function writeAtomic(target: string, text: string): void {
 	fs.mkdirSync(directory, { recursive: true });
 	const temporary = path.join(directory, `.${path.basename(target)}.${process.pid}.${Date.now()}.tmp`);
 	try {
-		fs.writeFileSync(temporary, text, { encoding: 'utf8', flag: 'wx' });
+		fs.writeFileSync(temporary, text, { encoding: 'utf8', flag: 'wx', mode: 0o600 });
+		if (process.platform !== 'win32') fs.chmodSync(temporary, finalMode(target));
 		fs.renameSync(temporary, target);
 	} catch (error) {
 		fs.rmSync(temporary, { force: true });
