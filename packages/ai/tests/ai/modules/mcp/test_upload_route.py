@@ -789,3 +789,188 @@ async def test_a_body_read_failure_after_a_fresh_launch_or_removal_carries_no_li
         monkeypatch, lambda tasks: tasks.remove(ADDRESS), body=body, content_type=content_type
     )
     assert status == 400 and 'upload_url' not in answer
+
+
+# --- the run's liveness at upload time: one status lookup on the control id ---
+
+# The SDK's form of permission_denied: ``call`` raises the server's message as a RuntimeError
+_GONE = RuntimeError('Access denied: not your control, or it no longer exists')
+
+
+async def _drive_liveness(status, *, tasks=None, nonce=None, between=None, lookup=None):
+    """Redeem a nonce for run c1 against a caller whose status lookup answers ``status``.
+
+    ``status`` is a scripted ``FakeEngineClient`` status (a body, or an
+    exception to raise); ``lookup`` replaces the lookup outright;
+    ``between(tasks)`` runs inside the lookup (the window a fresh launch or a
+    terminate can land in). Returns ``(code, body, client, tasks, nonce)``.
+    """
+    import json as _json
+
+    from starlette.requests import Request
+
+    from ai.modules.mcp import identity
+
+    from .conftest import FakeEngineClient
+
+    if tasks is None:
+        tasks = TaskRegistry()
+        tasks.add(ADDRESS, instance='c1')
+    nonce = nonce or tasks.issue_upload_nonce(ADDRESS, 'rr_x')
+    client = FakeEngineClient(task_statuses=[status])
+    scripted = lookup or client.get_task_status
+
+    async def _status(token):
+        if between is not None:
+            between(tasks)
+        return await scripted(token)
+
+    client.get_task_status = _status
+
+    def factory():
+        identity.REQUEST_CLIENTS.get().append(client)
+        return client
+
+    pending = [{'type': 'http.request', 'body': b'hello', 'more_body': False}]
+
+    async def receive():
+        return pending.pop(0)
+
+    scope = {
+        'type': 'http',
+        'method': 'POST',
+        'path': f'/mcp/upload/{nonce}',
+        'headers': [(b'content-type', b'text/plain')],
+        'query_string': b'',
+        'path_params': {'nonce': nonce},
+    }
+    response = await apps.handle_upload(Request(scope, receive), factory, tasks, 'http://mcp.test')
+    return response.status_code, _json.loads(response.body), client, tasks, nonce
+
+
+def test_registry_restores_a_redeemed_nonce_only_for_the_run_still_tracked():
+    tasks = TaskRegistry()
+    tasks.add(ADDRESS, instance='c1')
+    nonce = tasks.issue_upload_nonce(ADDRESS, 'rr_a')
+    bound = tasks.consume_upload_nonce(nonce)
+    assert tasks.restore_upload_nonce(nonce, bound) is True
+    assert tasks.consume_upload_nonce(nonce) == bound  # the same link, redeemable again
+
+    tasks.add(ADDRESS, instance='c2')  # a fresh launch took the address over
+    assert tasks.restore_upload_nonce(nonce, bound) is False
+    tasks.remove(ADDRESS)
+    assert tasks.restore_upload_nonce(nonce, bound) is False
+    assert tasks.has_upload_nonce(nonce) is False
+
+
+def test_registry_drops_only_the_refused_runs_nonces():
+    tasks = TaskRegistry()
+    tasks.add(ADDRESS, instance='c1')
+    tasks.add('other.proj.src', instance='c9')
+    mine = tasks.issue_upload_nonce(ADDRESS, None)
+    other = tasks.issue_upload_nonce('other.proj.src', None)
+    tasks.drop_run_upload_nonces(ADDRESS, 'c0')  # not the tracked run: nothing goes
+    assert tasks.has_upload_nonce(mine)
+    tasks.drop_run_upload_nonces(ADDRESS, 'c1')
+    assert not tasks.has_upload_nonce(mine) and tasks.has_upload_nonce(other)
+    assert tasks.get(ADDRESS) is not None  # the advisory entry stays
+
+
+@pytest.mark.asyncio
+async def test_a_live_control_is_forwarded_after_one_status_lookup():
+    code, body, client, _, _ = await _drive_liveness({'state': 3, 'controlId': 'c1'})
+    assert code == 200 and body['status'] == 'OK'
+    assert client.get_task_status_calls == ['c1']  # ONE lookup, on the control id, never the address
+    assert [s['token'] for s in client.sent] == ['c1']
+    assert body['upload_url'].startswith('http://mcp.test/mcp/upload/')
+    assert client.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_a_control_gone_outside_mcp_is_404_drops_the_runs_nonces_and_forwards_nothing():
+    tasks = TaskRegistry()
+    tasks.add(ADDRESS, instance='c1')
+    tasks.add('other.proj.src', instance='c9')
+    sibling = tasks.issue_upload_nonce(ADDRESS, 'rr_x')  # an unused link for the same run
+    other = tasks.issue_upload_nonce('other.proj.src', 'rr_y')
+
+    code, body, client, tasks, nonce = await _drive_liveness(_GONE, tasks=tasks)
+
+    assert code == 404 and body['status'] == 'Error'
+    assert 'upload_url' not in body
+    assert 'ended or was restarted' in body['error']['error']
+    assert client.get_task_status_calls == ['c1'] and client.sent == []
+    assert not tasks.has_upload_nonce(nonce) and not tasks.has_upload_nonce(sibling)
+    assert tasks.has_upload_nonce(other)
+    assert client.close_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'failure',
+    [
+        ConnectionError('Connection closed'),
+        RuntimeError('Server is not connected'),
+        TimeoutError('Connection time out'),
+    ],
+    ids=['connection', 'not-connected', 'timeout'],
+)
+async def test_a_status_call_that_gets_no_answer_is_503_and_keeps_the_nonce(failure):
+    code, body, client, tasks, nonce = await _drive_liveness(failure)
+    assert code == 503 and body['status'] == 'Error'
+    assert 'retry the same upload_url' in body['error']['error']
+    assert body['upload_url'] == f'http://mcp.test/mcp/upload/{nonce}'  # the SAME link: nothing spent
+    assert client.sent == []
+    assert tasks.has_upload_nonce(nonce)
+
+    # the retry, with the engine answering, lands
+    code, body, client, tasks, _ = await _drive_liveness({'state': 3}, tasks=tasks, nonce=nonce)
+    assert code == 200 and [s['token'] for s in client.sent] == ['c1']
+
+
+@pytest.mark.asyncio
+async def test_a_hung_status_call_is_cut_off_as_no_answer(monkeypatch):
+    import asyncio
+
+    monkeypatch.setattr(apps, 'LIVENESS_TIMEOUT_SECONDS', 0.01)
+
+    async def _hang(token):
+        await asyncio.sleep(5)
+
+    code, body, client, tasks, nonce = await _drive_liveness({'state': 3}, lookup=_hang)
+    assert code == 503 and body['upload_url'] == f'http://mcp.test/mcp/upload/{nonce}'
+    assert client.sent == [] and tasks.has_upload_nonce(nonce)
+
+
+@pytest.mark.asyncio
+async def test_no_answer_after_the_tracker_let_the_run_go_is_404_with_no_link():
+    failure = ConnectionError('Connection closed')
+    code, body, _, tasks, nonce = await _drive_liveness(failure, between=lambda tasks: tasks.remove(ADDRESS))
+    assert code == 404 and 'upload_url' not in body
+    assert not tasks.has_upload_nonce(nonce)
+
+
+@pytest.mark.asyncio
+async def test_a_refusal_after_a_fresh_launch_keeps_the_new_runs_nonces():
+    """The engine refused c1, but a fresh launch (c2) took the address over
+    during the lookup: c2's links are not the refused run's and survive.
+    """
+    fresh = {}
+
+    def _relaunch(tasks):
+        tasks.add(ADDRESS, instance='c2')
+        fresh['nonce'] = tasks.issue_upload_nonce(ADDRESS, 'rr_new')
+
+    code, body, _, tasks, _ = await _drive_liveness(_GONE, between=_relaunch)
+    assert code == 404 and 'upload_url' not in body
+    assert tasks.has_upload_nonce(fresh['nonce'])
+
+
+@pytest.mark.asyncio
+async def test_the_route_looks_up_the_runs_control_id_end_to_end(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        resp = await _upload(app, started['upload_url'])
+    assert resp.status_code == 200, resp.text
+    assert built[-1].get_task_status_calls == [started['address']]

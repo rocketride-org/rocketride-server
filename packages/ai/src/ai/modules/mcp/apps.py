@@ -16,7 +16,10 @@ platform credential, so the request carries none -- the one-time nonce
 it against the session's task tracker and forwards the bytes INTO that task
 over the caller's own engine client (open -> write -> close on the caller's
 control, which is what the SDK's ``send`` is), so ``spend.check`` bills the
-caller exactly as a DAP call would. This is the ONE HTTP door the DAP-only
+caller exactly as a DAP call would. Before it forwards, the route asks the
+engine ONCE whether the control id the nonce names is still live
+(``get_task_status``), since a run restarted or terminated outside MCP never
+reaches the tracker. This is the ONE HTTP door the DAP-only
 rule admits (plan 3.5), scoped to the MCP app surface; identical on OSS.
 """
 
@@ -36,6 +39,7 @@ from starlette.requests import Request
 from ai.web.response import ResultError, ResultSuccess, error, formatException
 
 from . import identity
+from .errors import HARD_EXC_NAMES
 from .registry import TaskRegistry
 
 logger = logging.getLogger(__name__)
@@ -158,9 +162,18 @@ _REFUSED_QUERY_NAMES = frozenset({'auth', 'token'})
 # own, so the value is this module's.
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
+# Wall-clock budget for the one liveness lookup the route makes before it
+# forwards (the SDK's request carries no deadline of its own). A lookup that
+# runs past it is a status call that got no answer: 503, nonce kept.
+LIVENESS_TIMEOUT_SECONDS = 5
+
 
 class UploadTooLarge(Exception):
     """The request body exceeds ``MAX_UPLOAD_BYTES`` (answered 413)."""
+
+
+class LivenessUnknown(Exception):
+    """The status lookup got no answer from the engine (answered 503, nonce kept)."""
 
 
 def upload_url(base_url: str, nonce: str) -> str:
@@ -223,7 +236,8 @@ def _refusal(mcp_origin: str, status: int, error_body: Dict[str, Any], nonce: Op
     """An error envelope that still leaves the widget a link to retry with.
 
     ``nonce`` is the one live for the run: the unspent one when the request
-    was refused before any read (a declared length over the cap), a fresh one
+    was refused before any read (a declared length over the cap) or put back
+    after a status lookup that got no answer (503), a fresh one
     when the request spent its nonce (a body cut off mid-stream, a body that
     could not be read); ``None`` when the run has left the tracker or a fresh
     launch replaced it, and there is nothing further to authorize.
@@ -258,6 +272,52 @@ def _declared_too_large(request: Request) -> bool:
         return int(request.headers.get('content-length') or 0) > MAX_UPLOAD_BYTES
     except ValueError:  # a malformed header is left to the body counter
         return False
+
+
+def _is_unanswered(exc: BaseException) -> bool:
+    """True when ``exc`` means the status call never got the engine's answer.
+
+    The module's hard-failure classes (``errors.HARD_EXC_NAMES``: connection,
+    authentication, timeout) plus the two SDK ``RuntimeError`` forms raised
+    BEFORE any response arrives: ``Server is not connected`` and ``Request
+    failed: ...``. Every other exception is the engine's own refusal, which
+    the SDK's ``call`` raises as a ``RuntimeError`` carrying the server's
+    message.
+    """
+    if isinstance(exc, (ConnectionError, TimeoutError)) or type(exc).__name__ in HARD_EXC_NAMES:
+        return True
+    message = str(exc).lower()
+    return isinstance(exc, RuntimeError) and ('not connected' in message or message.startswith('request failed:'))
+
+
+async def _control_is_live(client: Any, control_id: str) -> bool:
+    """Ask the engine, once, whether it still serves ``control_id`` to this caller.
+
+    ``rrext_get_task_status`` resolves the id through the same
+    ``TaskServer.control_by_id`` gate the data OPEN does: an answer means the
+    open will find the control; a restarted run (its successor has a new id),
+    a terminated one, a foreign id and an unknown id are all refused
+    ``permission_denied`` (plan 3.8), which here reads "gone". The body is
+    not interpreted: a dormant control is still the caller's and its next
+    request starts it.
+
+    Args:
+        client: The caller's engine client (``engine_factory()``).
+        control_id: The control id the redeemed nonce was minted for.
+
+    Returns:
+        bool: True when the engine answered the status; False when it refused.
+
+    Raises:
+        LivenessUnknown: the lookup got no answer (transport, timeout).
+    """
+    try:
+        await asyncio.wait_for(client.get_task_status(control_id), timeout=LIVENESS_TIMEOUT_SECONDS)
+    except Exception as exc:  # noqa: BLE001 - classified: no answer vs the engine's refusal
+        if _is_unanswered(exc):
+            raise LivenessUnknown(str(exc) or type(exc).__name__) from exc
+        return False
+    return True
 
 
 def _allocate_keys(keys: List[str]) -> List[str]:
@@ -380,6 +440,11 @@ async def handle_upload(
        upload is the caller's on the wire and in the ledger. The client is
        closed when the request ends, exactly as ``handle_mcp`` closes its
        per-request clients.
+    3b. Confirm the run is still live: ONE ``get_task_status`` on the control
+       id the nonce names, over that client (``_control_is_live``). A refusal
+       (the run was restarted or terminated outside MCP) answers 404 with no
+       link and drops that run's remaining nonces; no answer (transport,
+       timeout) answers 503 and puts the nonce back, so the same link retries.
     4. Forward the parts (open -> write -> close per object, via ``send``);
        a body that passes the cap while streaming in is answered 413 and a
        body that cannot be read 400 -- both with the next link while the run
@@ -433,6 +498,24 @@ async def handle_upload(
     clients_token = identity.REQUEST_CLIENTS.set(bucket)
     try:
         client = engine_factory()
+
+        # 3b. the run outside the tracker's sight: one status lookup, no poll
+        try:
+            live = await _control_is_live(client, instance)
+        except LivenessUnknown as exc:
+            # a flaky status call spends no link: the same nonce retries
+            if not tasks.restore_upload_nonce(nonce, bound):
+                return unknown  # the tracker let the run go meanwhile; the nonce died with it
+            message = f'could not confirm the run is still live ({exc}); retry the same upload_url'
+            return _refusal(mcp_origin, 503, {'error': message}, nonce)
+        if not live:
+            tasks.drop_run_upload_nonces(address, instance)
+            return error(
+                'the run this upload_url was minted for has ended or was restarted; '
+                'call run_dropper_pipe again for a fresh upload_url',
+                httpStatus=404,
+            )
+
         try:
             data = await _forward_upload(client, instance, request)
         except UploadTooLarge:
