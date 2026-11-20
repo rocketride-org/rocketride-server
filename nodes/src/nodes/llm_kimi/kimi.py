@@ -45,7 +45,7 @@ class Chat(ChatBase):
         Args:
             provider (str): Provider name
             connConfig (Dict[str, Any]): Node configuration
-            bag (Dict[str, Any]): Bag to store data
+            bag (Dict[str, Any]): The endpoint bag (read-only; the chat lives on the IGlobal)
         """
         # Init the base
         super().__init__(provider, connConfig, bag)
@@ -79,6 +79,3 @@ class Chat(ChatBase):
             temperature=temperature,
             max_tokens=self._modelOutputTokens,
         )
-
-        # Save our chat class into the bag
-        bag['chat'] = self

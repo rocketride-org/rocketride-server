@@ -419,8 +419,10 @@ class _StubRecognizer:
 
 
 def _ner():
-    """Build a ner instance with a stub recognizer."""
-    return _build('ner', types.SimpleNamespace(recognizer=_StubRecognizer()))
+    """Build a ner instance with a stub recognizer, begun as the engine begins every binding."""
+    inst, fake = _build('ner', types.SimpleNamespace(recognizer=_StubRecognizer()))
+    inst.beginInstance()
+    return inst, fake
 
 
 def test_ner_text_delivered_once():

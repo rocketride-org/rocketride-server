@@ -18,6 +18,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_filesystem'
+_PROCESS_HOOKS = (
+    Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'process_hooks.py'
+)
 
 
 def _load_services(name='services.tool.json'):
@@ -172,6 +175,14 @@ def _install_stubs():
         m.require_dict = require_dict
         m.require_str = require_str
         m.optional_str = optional_str
+
+        # The debugger hook is the real one: stdlib plus rocketlib.warning (stubbed above)
+        spec = importlib.util.spec_from_file_location('ai.common.utils.process_hooks', _PROCESS_HOOKS)
+        hooks = importlib.util.module_from_spec(spec)
+        sys.modules['ai.common.utils.process_hooks'] = hooks
+        spec.loader.exec_module(hooks)
+        m.process_hooks = hooks
+        m.register_debugger_thread = hooks.register_debugger_thread
         sys.modules['ai.common.utils'] = m
     if 'ai.common.schema' not in sys.modules:
         m = types.ModuleType('ai.common.schema')

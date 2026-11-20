@@ -23,7 +23,12 @@
 
 from rocketlib import IGlobalBase
 
+from ai.common.utils import LoaderCache
+
 from .embedding import Embedding
+
+#: The image models every control of this engine shares, keyed by model name.
+_MODELS = LoaderCache()
 
 
 class IGlobal(IGlobalBase):
@@ -50,13 +55,14 @@ class IGlobal(IGlobalBase):
             declares no requirements of its own: a requirements.txt naming
             accelerate made every cloud run download a CUDA torch it never used.
         """
-        self.embedding = Embedding(self.config.model)
+        model = self.config.model
+        self.embedding = _MODELS.get(model, lambda: Embedding(model))
 
     def endGlobal(self):
         """
         Clean up resources and references when the global lifecycle ends.
 
-        Clears the embedding reference so the underlying model or processing
-        resources held by the embedding instance can be released.
+        Drops this control's reference; the model stays in the module-scope
+        loader cache for the next control that names it.
         """
         self.embedding = None

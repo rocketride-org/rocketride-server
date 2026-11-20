@@ -34,7 +34,7 @@ class IGlobal(IGlobalBase):
         from .langchain import PreProcessor
 
         bag = self.IEndpoint.endpoint.bag
-        self.preprocessor = PreProcessor(self.glb.logicalType, self.config, bag)
+        self.preprocessor = PreProcessor(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         # Destroy the preprocessor

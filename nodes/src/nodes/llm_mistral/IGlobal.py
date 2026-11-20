@@ -49,7 +49,7 @@ class IGlobal(IGlobalBase):
         config = self.config
 
         # Initialize the Mistral chat interface with configuration
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        self._chat = Chat(self.config.node.provider, config, bag)
 
     def endGlobal(self):
         """Clean up the global instance when the node shuts down."""

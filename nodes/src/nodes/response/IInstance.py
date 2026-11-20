@@ -109,7 +109,7 @@ class IInstance(IInstanceBase):
                         dest[key] = value
             return dest
 
-        if self.instance.currentObject.hasComponentId and self.IGlobal.glb.logicalType == 'response_hash':
+        if self.instance.currentObject.hasComponentId and self.IGlobal.config.node.provider == 'response_hash':
             key = self._getkey('hash')
 
             if key not in self.instance.currentObject.response:

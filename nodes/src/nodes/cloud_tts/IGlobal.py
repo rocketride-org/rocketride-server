@@ -89,7 +89,7 @@ class IGlobal(IGlobalBase):
         (a ${ROCKETRIDE_TTS_*_APIKEY} reference resolved per call). Then installs
         the lightweight HTTP dependency.
         """
-        self._engine = _resolve_engine(self.glb.logicalType)
+        self._engine = _resolve_engine(self.config.node.provider)
 
         cfg = self.config
         self._model = cfg.model

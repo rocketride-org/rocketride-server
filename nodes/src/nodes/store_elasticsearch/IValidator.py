@@ -169,7 +169,7 @@ class IValidator(IValidatorBase):
         config = self.config
         if syntaxOnly:
             return
-        logical_type = self.glb.logicalType
+        logical_type = self.config.node.provider
         if resolve_backend(logical_type) == BACKEND_OPENSEARCH:
             # An unfilled password is reported as such, and the ping does not send it
             if config['auth'] == 'basic' and warn_if_credential_unresolved(

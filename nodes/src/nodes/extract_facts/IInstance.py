@@ -56,9 +56,13 @@ class IInstance(IInstanceBase):
     table_id: int = 0
 
     # Final reconciled facts, populated in closing().
-    facts: List[Dict[str, Any]] = []
+    facts: List[Dict[str, Any]]
 
     # -- lifecycle ------------------------------------------------------------
+
+    def beginInstance(self):
+        """Start this binding with its own empty accumulator."""
+        self.facts = []
 
     def open(self, obj: Entry):
         """

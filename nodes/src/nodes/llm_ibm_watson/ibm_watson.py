@@ -108,7 +108,7 @@ class Chat(ChatBase):
                 - location: IBM Watson location/region
                 - model: IBM Watson model ID
                 - project_id: IBM Watson project ID
-            bag (Dict[str, Any]): Shared state bag for storing chat instance
+            bag (Dict[str, Any]): The endpoint bag (read-only; the chat lives on the IGlobal)
 
         Raises:
             ValueError: If required configuration is missing or invalid
@@ -138,9 +138,6 @@ class Chat(ChatBase):
         params = TextChatParameters(temperature=1)
 
         self._llm = ModelInference(model_id=model_id, credentials=credentials, project_id=project_id, params=params)
-
-        # Save our chat class into the bag
-        bag['chat'] = self
 
     def _chat(self, prompt: str) -> str:
         """

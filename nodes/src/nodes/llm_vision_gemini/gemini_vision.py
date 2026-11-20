@@ -71,7 +71,6 @@ class Chat(ChatBase):
             raise ValueError(f'Failed to initialize Google AI client: {e!s}') from e
 
         self._modelTotalTokens = config.get('modelTotalTokens', 1048576)
-        bag['chat'] = self
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""

@@ -135,6 +135,6 @@ class IValidator(IValidatorBase):
         if syntaxOnly:
             return
         # An unfilled reference is reported as such; the probe must not send the placeholder as the password
-        if warn_if_credential_unresolved(self.glb.logicalType, 'password', config['password']):
+        if warn_if_credential_unresolved(self.config.node.provider, 'password', config['password']):
             return
         probe_connection(config)

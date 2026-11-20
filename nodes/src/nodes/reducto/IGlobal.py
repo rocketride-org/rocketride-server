@@ -50,7 +50,7 @@ class IGlobal(IGlobalBase):
 
         # Initialize the parser with the resolved configuration
         debug('Reducto Global: Initializing parser')
-        self.parser = Parser(self.glb.logicalType, self.config, bag)
+        self.parser = Parser(self.config.node.provider, self.config, bag)
 
     def ensureDependencies(self):
         """Ensure the dependencies are installed."""
@@ -62,8 +62,6 @@ class IGlobal(IGlobalBase):
     def endGlobal(self):
         """Clean up resources when global configuration is being destroyed."""
         debug('Reducto Global: Starting global cleanup')
-        # Clean up resources and keep bag in sync
-        if hasattr(self.IEndpoint.endpoint, 'bag') and 'reducto' in self.IEndpoint.endpoint.bag:
-            del self.IEndpoint.endpoint.bag['reducto']
+        # Release this control's parser
         self.parser = None
         debug('Reducto Global: Cleanup completed')

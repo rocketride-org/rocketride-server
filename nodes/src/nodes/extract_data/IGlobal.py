@@ -26,7 +26,7 @@ from rocketlib import IGlobalBase, warning
 
 
 class IGlobal(IGlobalBase):
-    fields: List = []
+    fields: List
 
     def beginGlobal(self) -> None:
         """Keep the well-formed field definitions from the resolved config."""

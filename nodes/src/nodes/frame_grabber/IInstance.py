@@ -58,7 +58,7 @@ class IInstance(IInstanceBase):
     # chunk ids come from this rather than from a frame's position in its own video.
     _frame_ordinal: int = 0
 
-    _start_times: list = []
+    _start_times: list
 
     def beginInstance(self):  # pylint: disable=C0103
         """
@@ -78,6 +78,9 @@ class IInstance(IInstanceBase):
         # Full source-video descriptor, parsed from the stream descriptor on BEGIN.
         # Drives both the watermark label and the per-frame source provenance.
         self._source_descriptor = None
+
+        # This binding's frame start times; open() resets them per object
+        self._start_times = []
 
         # Create the reader
         self._reader = VideoFrameExtractor(

@@ -49,7 +49,7 @@ class ExaSearch(ChatBase):
         Args:
             provider: The provider name.
             config: The resolved node config (apikey, type, numResults, includeHighlights, highlightChars).
-            bag: The bag to store the node instance.
+            bag: The endpoint bag (read-only; the backend lives on the IGlobal).
         """
         super().__init__(provider, config, bag)
         self._apikey = config['apikey'].strip()
@@ -57,7 +57,6 @@ class ExaSearch(ChatBase):
         self._num_results = int(config['numResults'])
         self._include_highlights = bool(config['includeHighlights'])
         self._highlight_chars = int(config['highlightChars'])
-        bag['search_exa'] = self
 
     def getTokens(self, value: str) -> int:
         """Estimate token usage for the given text using a word-based heuristic."""

@@ -13,6 +13,7 @@ import numpy as np
 
 from rocketlib import IGlobalBase
 from ai.common.models.base import ModelClient, get_model_server_address
+from ai.common.utils import LoaderCache
 
 
 _KOKORO_REPO_ID = 'hexgrad/Kokoro-82M'
@@ -20,6 +21,10 @@ _KOKORO_LOADER_TYPE = 'kokoro'
 _KOKORO_SAMPLE_RATE = 24000
 _INT16_MAX = 32767
 _WAV_MIME = 'audio/wav'
+
+#: The local Kokoro pipelines every control of this engine shares, keyed by
+#: (repo, language): the weights depend on nothing else; the voice is per call.
+_PIPELINES = LoaderCache()
 
 
 class IGlobal(IGlobalBase):
@@ -60,10 +65,14 @@ class IGlobal(IGlobalBase):
 
             depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
 
-            self._ensure_spacy_en_model()
-            from kokoro import KPipeline
+            self._pipeline = _PIPELINES.get((_KOKORO_REPO_ID, self._lang), self._load_pipeline)
 
-            self._pipeline = KPipeline(lang_code=self._lang)
+    def _load_pipeline(self) -> Any:
+        """Build the local ``KPipeline`` for this control's language (once per process, via the cache)."""
+        self._ensure_spacy_en_model()
+        from kokoro import KPipeline
+
+        return KPipeline(lang_code=self._lang)
 
     @staticmethod
     def _ensure_spacy_en_model() -> None:
@@ -149,7 +158,7 @@ class IGlobal(IGlobalBase):
             raise
 
     def endGlobal(self):
-        """Release the local pipeline and disconnect the remote client, if any."""
+        """Drop the local pipeline (it stays in the loader cache) and disconnect the remote client, if any."""
         self._pipeline = None
         client = self._remote_client
         if client is not None:

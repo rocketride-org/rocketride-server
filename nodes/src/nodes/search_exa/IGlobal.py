@@ -53,9 +53,8 @@ class IGlobal(IGlobalBase):
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
-        self.search = ExaSearch(self.glb.logicalType, self.config, self.IEndpoint.endpoint.bag)
+        self.search = ExaSearch(self.config.node.provider, self.config, self.IEndpoint.endpoint.bag)
 
     def endGlobal(self) -> None:
-        """Release shared runtime state for this node instance."""
-        self.IEndpoint.endpoint.bag.pop('search_exa', None)
+        """Release this control's Exa backend."""
         self.search = None

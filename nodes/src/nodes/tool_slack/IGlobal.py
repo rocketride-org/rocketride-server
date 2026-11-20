@@ -81,7 +81,7 @@ class IGlobal(IGlobalBase):
             raise ValueError(f'tool_slack: {problem}')
         try:
             self._slack = SlackClient(
-                self.glb.logicalType,
+                self.config.node.provider,
                 {'token': token, 'webhookUrl': webhook_url},
                 self.IEndpoint.endpoint.bag,
             )

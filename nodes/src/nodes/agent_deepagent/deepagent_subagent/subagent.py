@@ -60,11 +60,11 @@ class DeepAgentSubagentDriver(DeepAgentDriver):
         """
         from rocketlib.types import IInvokeDeepagent
 
-        pipe_type = pSelf.instance.pipeType
-        node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
+        node = self._iGlobal.config.node
+        node_id = node.id
 
         return IInvokeDeepagent.DescribeResponse(
-            name=node_id or str(self._iGlobal.glb.logicalType),
+            name=node_id or node.provider,
             description=self._description,
             system_prompt=self._system_prompt,
             instructions=list(self._instructions or []),

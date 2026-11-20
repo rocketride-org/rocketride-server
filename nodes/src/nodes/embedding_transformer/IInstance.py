@@ -36,8 +36,12 @@ class IInstance(IInstanceBase):
 
     IGlobal: IGlobal  # Reference to a global context providing embedding functionality
 
-    documents: List[Doc] = []
+    documents: List[Doc]
     maxDocuments: int = 64
+
+    def beginInstance(self):
+        """Start this binding with its own empty accumulator."""
+        self.documents = []
 
     def open(self, obj: Entry):
         """

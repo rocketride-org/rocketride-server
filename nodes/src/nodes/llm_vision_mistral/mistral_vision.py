@@ -82,8 +82,6 @@ class Chat(ChatBase):
             raise ValueError(f'Failed to initialize Mistral AI client: {str(e)}')
         # Get model-specific token limit
         self._modelTotalTokens = self._getModelTokens(config.get('modelTotalTokens', None))
-        # Save our chat class into the bag
-        bag['chat'] = self
 
     def _getModelTokens(self, configured_tokens: int | None) -> int:
         """Get the maximum token count for the specified vision model."""

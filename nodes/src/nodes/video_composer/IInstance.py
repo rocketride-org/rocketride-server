@@ -26,34 +26,22 @@
 # For larger workloads, revisit with PyAV (Option 2) or object store (Option 3).
 
 import base64
-import logging
 import subprocess
 from typing import ClassVar
 
-from rocketlib import IInstanceBase, AVI_ACTION, Entry
+from rocketlib import IInstanceBase, AVI_ACTION, Entry, debug
 
 from .IGlobal import IGlobal
 
-_logger = logging.getLogger(__name__)
-
-
-def _log(msg: str) -> None:
-    _logger.debug(msg)
-
-
-_PLOG = '/tmp/brandy_pipeline.log'
-
-
-def _plog(msg: str) -> None:
-    import datetime
-
-    line = f'[{datetime.datetime.now().isoformat(timespec="milliseconds")}] [video_composer] {msg}\n'
-    try:
-        with open(_PLOG, 'a') as f:
-            f.write(line)
-    except OSError as e:
-        # Read-only FS / disk full / permissions must not crash the pipeline.
-        _logger.debug(f'_plog disabled due to file I/O error: {e}')
+# Maps MIME type to the FFmpeg image2pipe input codec name
+_MIME_CODEC: dict[str, str] = {
+    'image/png': 'png',
+    'image/jpeg': 'mjpeg',
+    'image/jpg': 'mjpeg',
+    'image/webp': 'webp',
+    'image/bmp': 'bmp',
+    'image/tiff': 'tiff',
+}
 
 
 class IInstance(IInstanceBase):
@@ -68,16 +56,6 @@ class IInstance(IInstanceBase):
     """
 
     IGlobal: IGlobal
-
-    # Maps MIME type to the FFmpeg image2pipe input codec name
-    _MIME_CODEC: ClassVar[dict[str, str]] = {
-        'image/png': 'png',
-        'image/jpeg': 'mjpeg',
-        'image/jpg': 'mjpeg',
-        'image/webp': 'webp',
-        'image/bmp': 'bmp',
-        'image/tiff': 'tiff',
-    }
 
     def beginInstance(self):
         """Initialise per-instance state and load encoding settings from IGlobal.config."""
@@ -109,27 +87,23 @@ class IInstance(IInstanceBase):
         self._frames = []
         self._image_buf = bytearray()
         self._filename = (obj.name if obj.hasName else None) or 'output.mp4'
-        _log('open: in-memory frame buffer initialised')
-        _plog(f'open: filename={self._filename!r} obj.hasName={obj.hasName}')
+        debug(f'video_composer open: filename={self._filename!r} obj.hasName={obj.hasName}')
 
     def close(self):
         """Encode accumulated frames to MP4 and stream the result; no-op if no frames."""
         frame_count = len(self._frames)
-        _log(f'close: frame_count={frame_count}')
-        _plog(f'close: frame_count={frame_count} filename={self._filename!r}')
+        debug(f'video_composer close: frame_count={frame_count} filename={self._filename!r}')
         if frame_count == 0:
-            _plog('close: no frames -- skipping encode')
+            debug('video_composer close: no frames, skipping encode')
             self._cleanup()
             return
 
         mp4_bytes = self._encode_video()
         if mp4_bytes:
-            _log(f'close: encoded ok size={len(mp4_bytes)} bytes, streaming')
-            _plog(f'close: encoded ok size={len(mp4_bytes)} bytes -- sending SSE')
+            debug(f'video_composer close: encoded ok size={len(mp4_bytes)} bytes, streaming')
             self._output_video(mp4_bytes)
         else:
-            _log('close: encode failed')
-            _plog('close: ENCODE FAILED')
+            debug('video_composer close: encode failed')
 
         self._cleanup()
 
@@ -173,13 +147,13 @@ class IInstance(IInstanceBase):
     def _encode_video(self) -> bytes | None:
         # Validate config values before building the subprocess command.
         if self._codec not in self._ALLOWED_CODECS:
-            _log(f'_encode_video: unsupported codec={self._codec!r}')
+            debug(f'video_composer _encode_video: unsupported codec={self._codec!r}')
             return None
         if not (0 <= self._crf <= 51):
-            _log(f'_encode_video: crf={self._crf} out of range [0, 51]')
+            debug(f'video_composer _encode_video: crf={self._crf} out of range [0, 51]')
             return None
         if not (0 < self._fps <= 240):
-            _log(f'_encode_video: fps={self._fps} out of valid range (0, 240]')
+            debug(f'video_composer _encode_video: fps={self._fps} out of valid range (0, 240]')
             return None
 
         try:
@@ -192,7 +166,7 @@ class IInstance(IInstanceBase):
             except AttributeError:
                 ffmpeg = 'ffmpeg'
 
-        input_codec = self._MIME_CODEC.get(self._image_mime, 'png')
+        input_codec = _MIME_CODEC.get(self._image_mime, 'png')
 
         cmd = [
             ffmpeg,
@@ -221,7 +195,9 @@ class IInstance(IInstanceBase):
         ]
 
         stdin_data = b''.join(self._frames)
-        _log(f'_encode_video: frame_count={len(self._frames)} input_codec={input_codec} cmd={" ".join(cmd)}')
+        debug(
+            f'video_composer _encode_video: frame_count={len(self._frames)} input_codec={input_codec} cmd={" ".join(cmd)}'
+        )
         try:
             proc = subprocess.Popen(
                 cmd,
@@ -230,21 +206,21 @@ class IInstance(IInstanceBase):
                 stderr=subprocess.PIPE,
             )
             stdout, stderr = proc.communicate(input=stdin_data, timeout=300)
-            _log(f'_encode_video: returncode={proc.returncode}')
+            debug(f'video_composer _encode_video: returncode={proc.returncode}')
             if proc.returncode != 0:
-                _log(f'_encode_video: stderr={stderr.decode(errors="replace")[-500:]}')
+                debug(f'video_composer _encode_video: stderr={stderr.decode(errors="replace")[-500:]}')
                 return None
             return stdout
         except subprocess.TimeoutExpired as e:
-            _log(f'_encode_video: timed out: {e}')
+            debug(f'video_composer _encode_video: timed out: {e}')
             proc.kill()
             proc.wait()
             return None
         except OSError as e:
-            _log(f'_encode_video: ffmpeg not found or not executable: {e}')
+            debug(f'video_composer _encode_video: ffmpeg not found or not executable: {e}')
             return None
         except subprocess.SubprocessError as e:
-            _log(f'_encode_video: subprocess error: {e}')
+            debug(f'video_composer _encode_video: subprocess error: {e}')
             return None
 
     # ------------------------------------------------------------------
@@ -272,12 +248,12 @@ class IInstance(IInstanceBase):
                 )
             except Exception as e:
                 # A transport hiccup on one SSE send shouldn't abort the whole stream.
-                _log(f'_output_video: sendSSE failed at chunk {chunk_index}: {e}')
+                debug(f'video_composer _output_video: sendSSE failed at chunk {chunk_index}: {e}')
             offset += chunk_size
             chunk_index += 1
         self.instance.writeVideo(AVI_ACTION.END, 'video/mp4', b'')
         self.instance.sendSSE('video_complete', filename=self._filename)
-        _plog(f'output_video: done -- sent {total_chunks} SSE chunks filename={self._filename!r}')
+        debug(f'video_composer output_video: done, sent {total_chunks} SSE chunks filename={self._filename!r}')
 
     # ------------------------------------------------------------------
     # Cleanup

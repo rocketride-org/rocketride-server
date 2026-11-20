@@ -281,6 +281,14 @@ function makeRunPytestAction(options = {}) {
 				testsDir: path.join(PROJECT_ROOT, 'tests', 'test_validate_node_readme.py'),
 				execOpts: { task, cwd: PROJECT_ROOT, env: testEnv },
 			});
+
+			// The node-code lint (plan 4.3): its rule fixtures, and every catalog
+			// node linted clean. Static, so it needs neither the server nor mocks.
+			await runPytest({
+				engine: ENGINE,
+				testsDir: path.join(PROJECT_ROOT, 'tests', 'test_lint_node_code.py'),
+				execOpts: { task, cwd: PROJECT_ROOT, env: testEnv },
+			});
 		},
 	};
 }

@@ -272,14 +272,14 @@ def _render_ready_instance():
 
     inst = _sink_instance(_fs())
     inst.IEndpoint = types.SimpleNamespace(renderStoreObject=lambda e, i: None)
-    return inst, sys.modules['tool_filesystem.IInstance']
+    return inst, sys.modules['ai.common.utils.process_hooks']
 
 
 def test_render_registers_thread_with_pydevd_once(monkeypatch):
-    inst, mod = _render_ready_instance()
+    inst, hooks = _render_ready_instance()
     fake_pydevd = MagicMock()
     monkeypatch.setitem(sys.modules, 'pydevd', fake_pydevd)
-    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    monkeypatch.setattr(hooks, '_DEBUGGER_THREADS', set())
 
     inst.renderObject(types.SimpleNamespace(name='a.txt'))
     fake_pydevd.settrace.assert_called_once_with(suspend=False)
@@ -288,20 +288,20 @@ def test_render_registers_thread_with_pydevd_once(monkeypatch):
 
 
 def test_render_without_pydevd_is_a_noop(monkeypatch):
-    inst, mod = _render_ready_instance()
+    inst, hooks = _render_ready_instance()
     monkeypatch.delitem(sys.modules, 'pydevd', raising=False)
-    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    monkeypatch.setattr(hooks, '_DEBUGGER_THREADS', set())
     assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
 
 
 def test_render_survives_pydevd_settrace_failure(monkeypatch):
     # A broken debugger must not fail the render; and the thread must not be
     # retried on every object (one warning, not a warning per file).
-    inst, mod = _render_ready_instance()
+    inst, hooks = _render_ready_instance()
     fake_pydevd = MagicMock()
     fake_pydevd.settrace.side_effect = RuntimeError('adapter gone')
     monkeypatch.setitem(sys.modules, 'pydevd', fake_pydevd)
-    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    monkeypatch.setattr(hooks, '_DEBUGGER_THREADS', set())
 
     assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
     inst.renderObject(types.SimpleNamespace(name='b.txt'))

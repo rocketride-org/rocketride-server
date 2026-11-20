@@ -42,7 +42,7 @@ class IGlobal(IGlobalBase):
         config = self.config
 
         # Get a chat to interface
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        self._chat = Chat(self.config.node.provider, config, bag)
 
     def endGlobal(self):
         """Clean up the global chat instance."""

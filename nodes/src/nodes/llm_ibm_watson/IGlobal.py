@@ -42,7 +42,7 @@ class IGlobal(IGlobalBase):
         bag = self.IEndpoint.endpoint.bag
 
         # Get a chat to interface, on the resolved config view
-        self._chat = Chat(self.glb.logicalType, self.config, bag)
+        self._chat = Chat(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         self._chat = None

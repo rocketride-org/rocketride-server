@@ -77,9 +77,6 @@ class Chat(ChatBase):
             max_tokens=self._modelOutputTokens,
         )
 
-        # Save our chat class into the bag
-        bag['chat'] = self
-
     def is_retryable_error(self, error):
         """
         Determine if the error is retryable.

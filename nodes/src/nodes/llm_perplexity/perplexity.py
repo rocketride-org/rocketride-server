@@ -79,9 +79,6 @@ class Chat(ChatBase):
             max_tokens=self._modelOutputTokens,
         )
 
-        # Store in bag for pipeline access
-        bag['chat'] = self
-
     def _getModelTokens(self, model: str) -> int:
         """
         Get the maximum token count for the specified model.

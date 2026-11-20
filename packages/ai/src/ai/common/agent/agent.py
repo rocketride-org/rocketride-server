@@ -78,7 +78,7 @@ class AgentBase(ABC):
         self._iGlobal = iGlobal
 
         # Get the logical type (nodeId) of our invoker
-        self._node_id = self._iGlobal.glb.logicalType
+        self._node_id = self._iGlobal.config.node.provider
 
         # The resolver's view of the node's config: defaults applied, the active
         # branch flattened, keys read by path.
@@ -511,9 +511,10 @@ class AgentBase(ABC):
     def _agent_id(self, pSelf: Any) -> str:
         """Return the logical agent identifier used in answer metadata."""
         try:
-            glb = getattr(pSelf, 'IGlobal', None)
-            if glb and getattr(glb, 'glb', None) and getattr(glb.glb, 'logicalType', None):
-                return str(glb.glb.logicalType)
+            iglobal = getattr(pSelf, 'IGlobal', None)
+            provider = iglobal.config.node.provider if iglobal is not None else ''
+            if provider:
+                return str(provider)
         except Exception:
             pass
         return self.__class__.__name__

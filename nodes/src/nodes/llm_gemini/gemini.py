@@ -90,7 +90,7 @@ class Chat(ChatBase):
             connConfig (Dict[str, Any]): Connection configuration containing API credentials
                 Expected keys:
                 - apikey: Google GenAI API key
-            bag (Dict[str, Any]): Shared state bag for storing chat instance
+            bag (Dict[str, Any]): The endpoint bag (read-only; the chat lives on the IGlobal)
 
         Raises:
             KeyError: If required configuration keys are missing
@@ -107,9 +107,6 @@ class Chat(ChatBase):
 
         # Initialize the Google GenAI client — key format validation is delegated to the library
         self._client = genai.Client(api_key=api_key)
-
-        # Store chat instance in shared bag for access by other components
-        bag['chat'] = self
 
         """
         Note: For future refactor, we can consolidate Vertex AI support.

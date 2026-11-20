@@ -72,7 +72,7 @@ class IGlobal(IGlobalBase):
         bag = self.IEndpoint.endpoint.bag
         # The resolved config: defaults applied, the active branch flattened
         config = self.config
-        self.backend = resolve_backend(self.glb.logicalType)
+        self.backend = resolve_backend(self.config.node.provider)
         debug(f'Index search backend: {self.backend}')
 
         if self.backend == BACKEND_ELASTICSEARCH:
@@ -85,7 +85,7 @@ class IGlobal(IGlobalBase):
         from .elasticsearch_store import Store
 
         self.store = None
-        self.store = Store(self.glb.logicalType, config, bag)
+        self.store = Store(self.config.node.provider, config, bag)
         self.mode = config['mode']
         debug(f'Elasticsearch mode: {self.mode}')
         self._load_search_flags(config)
@@ -99,7 +99,7 @@ class IGlobal(IGlobalBase):
         password = config['password'] if use_auth else None
         if use_auth:
             # An unfilled password names the missing variable instead of reaching the server.
-            check_credential_resolved(self.glb.logicalType, 'password', password)
+            check_credential_resolved(self.config.node.provider, 'password', password)
 
         self.host = normalize_opensearch_host(config['host'], use_auth)
         self.collection = (config['collection'] or '').strip()

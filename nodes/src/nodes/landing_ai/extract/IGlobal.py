@@ -42,7 +42,7 @@ class IGlobal(IGlobalBase):
 
         from .extract import Extractor
 
-        self._extractor = Extractor(self.glb.logicalType, self.config)
+        self._extractor = Extractor(self.config.node.provider, self.config)
         debug('Landing.ai Extract Global: extractor initialized')
 
     def extractor(self):

@@ -47,7 +47,7 @@ class IGlobal(IGlobalBase):
         ${ROCKETRIDE_EMBEDDING_OPENAI_APIKEY} reference resolved per call).
         """
         bag = self.IEndpoint.endpoint.bag
-        self.embedding = OpenAIEmbeddingWrapper(self.glb.logicalType, self.config, bag)
+        self.embedding = OpenAIEmbeddingWrapper(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         # Destroy the embedding module

@@ -29,6 +29,9 @@ RocketRide model server's transformers pipeline support.
 """
 
 from typing import Any, Dict, List, Mapping
+
+from rocketlib import debug, error
+
 from ai.common.models.transformers import pipeline
 
 
@@ -58,9 +61,10 @@ class NERRecognizer:
         # or fall back to local execution
         self.ner_pipeline = pipeline(task='ner', model=self.model_name, aggregation_strategy=self.aggregation_strategy)
 
-        print(f'[NER] Initialized with model: {self.model_name}')
-        print(f'[NER] Aggregation strategy: {self.aggregation_strategy}')
-        print(f'[NER] Minimum confidence: {self.min_confidence}')
+        debug(
+            f'ner: initialized with model {self.model_name}, aggregation {self.aggregation_strategy}, '
+            f'minimum confidence {self.min_confidence}'
+        )
 
     def extract_entities(self, text: str) -> List[Dict[str, Any]]:
         """
@@ -116,7 +120,7 @@ class NERRecognizer:
             return formatted_entities
 
         except Exception as e:
-            print(f'[NER] Error extracting entities: {str(e)}')
+            error(f'ner: error extracting entities: {e}')
             return []
 
     def get_entity_summary(self, entities: List[Dict[str, Any]]) -> Dict[str, List[str]]:

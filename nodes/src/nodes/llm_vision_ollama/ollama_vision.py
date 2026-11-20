@@ -52,8 +52,6 @@ class Chat(ChatBase):
         self._system_prompt = config['systemPrompt'] or ''
         self._prompt = config['prompt']
 
-        bag['chat'] = self
-
     def _format_user_error(self, error_msg: str) -> str:
         """Convert API error messages to user-friendly format."""
         error_lower = error_msg.lower()

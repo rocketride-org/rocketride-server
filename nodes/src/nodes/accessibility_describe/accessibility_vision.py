@@ -101,7 +101,6 @@ class Chat(ChatBase):
             raise ValueError(f'Failed to initialize Google AI client: {e!s}') from e
 
         self._modelTotalTokens = config.modelTotalTokens
-        bag['chat'] = self
 
     @property
     def prompt(self) -> str:

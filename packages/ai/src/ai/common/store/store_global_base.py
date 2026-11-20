@@ -107,7 +107,7 @@ class StoreGlobalBase(IGlobalBase, ABC):
         Sent as is, the server's "unauthorized" reply would not say which variable is missing.
         """
         for field, value in self._credentials(config):
-            check_credential_resolved(self.glb.logicalType, field, value)
+            check_credential_resolved(self.config.node.provider, field, value)
 
     # ------------------------------------------------------------------
     # Lifecycle - identical across vector stores
@@ -138,7 +138,7 @@ class StoreGlobalBase(IGlobalBase, ABC):
         self._check_credentials(config)
 
         # Open the driver's store on the resolved view: the control's own
-        self.store = self._open_store(self.glb.logicalType, config, bag)
+        self.store = self._open_store(self.config.node.provider, config, bag)
 
     def endGlobal(self) -> None:
         """Drop the store."""

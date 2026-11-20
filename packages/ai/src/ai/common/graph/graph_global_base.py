@@ -206,18 +206,18 @@ class GraphGlobalBase(IGlobalBase, ABC):
         try:
             self.graph_schema = self._reflect_schema()
         except Exception as e:
-            warning(f'{self.glb.logicalType}: schema reflection failed, continuing without it: {e}')
+            warning(f'{self.config.node.provider}: schema reflection failed, continuing without it: {e}')
             self.graph_schema = {'nodes': {}, 'relationships': []}
         labels = len(self.graph_schema.get('nodes', {}))
         rels = len(self.graph_schema.get('relationships', []))
-        debug(f'{self.glb.logicalType}: connected; schema has {labels} label(s), {rels} relationship type(s)')
+        debug(f'{self.config.node.provider}: connected; schema has {labels} label(s), {rels} relationship type(s)')
 
     def endGlobal(self) -> None:
         """Close the driver, swallowing teardown errors."""
         try:
             self._close_driver()
         except Exception as e:
-            warning(f'{self.glb.logicalType}: error closing driver: {e}')
+            warning(f'{self.config.node.provider}: error closing driver: {e}')
 
     def validateConfig(self) -> None:
         """Save-time validation: probe the server so the user sees errors immediately."""

@@ -84,8 +84,7 @@ class CrewSubagent(CrewBase):
         """
         from rocketlib.types import IInvokeCrew
 
-        pipe_type = pSelf.instance.pipeType
-        node_id = str(pipe_type.get('id') if isinstance(pipe_type, dict) else getattr(pipe_type, 'id', '')) or ''
+        node_id = self._iGlobal.config.node.id
         return IInvokeCrew.DescribeResponse(
             role=self._role,
             task_description=self._task_description,

@@ -162,13 +162,11 @@ class FaceDetector:
     def _build_detector(self):
         """Construct the MediaPipe Tasks FaceDetector."""
         # MediaPipe's vision package imports drawing_utils -> matplotlib.pyplot at
-        # import time, which aborts the embedded engine (SIGABRT, pybind11 error on
-        # matplotlib.ft2font). pyplot is only used by a plotting helper we never
-        # call, so stub it before importing mediapipe.
-        import sys
-        import types
+        # import time, which aborts the embedded engine: stub it before importing
+        # mediapipe (see stub_matplotlib_pyplot).
+        from ai.common.utils import stub_matplotlib_pyplot
 
-        sys.modules.setdefault('matplotlib.pyplot', types.ModuleType('matplotlib.pyplot'))
+        stub_matplotlib_pyplot()
 
         try:
             # mediapipe pulls matplotlib, which aborts the engine's FreeType when the

@@ -43,7 +43,7 @@ class IGlobal(IGlobalBase):
 
         bag = self.IEndpoint.endpoint.bag
         config = self.config
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        self._chat = Chat(self.config.node.provider, config, bag)
 
     def endGlobal(self):
         """Clean up the global chat instance."""

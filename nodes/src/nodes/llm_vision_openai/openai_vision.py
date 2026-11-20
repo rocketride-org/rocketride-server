@@ -64,7 +64,6 @@ class Chat(ChatBase):
 
         self._api_key = api_key
         self._modelTotalTokens = config.get('modelTotalTokens', 128000)
-        bag['chat'] = self
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""

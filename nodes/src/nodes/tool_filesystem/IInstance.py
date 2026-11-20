@@ -45,7 +45,6 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
-import sys
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -57,7 +56,7 @@ if TYPE_CHECKING:
     from rocketlib import Entry
 
 from ai.common.avi.descriptor import descriptor_from_payload
-from ai.common.utils import optional_str, require_dict, require_str
+from ai.common.utils import optional_str, register_debugger_thread, require_dict, require_str
 
 from .IGlobal import IGlobal, OnConflict
 
@@ -72,6 +71,19 @@ MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
 # giving up. Bounds the probe loop so a store that keeps reporting a path as
 # existing (e.g. a directory, or heavy concurrent writes) can't spin forever.
 MAX_COLLISION_SUFFIX = 100
+
+
+# Map each @tool_function name to the IGlobal allow-flag that gates it.
+# Used by ``_collect_tool_methods`` to hide disabled tools from the agent
+# at ``tool.query`` discovery time (not just at invocation).
+_ALLOW_FLAG_BY_TOOL = {
+    'read_file': 'allow_read',
+    'write_file': 'allow_write',
+    'delete_file': 'allow_delete',
+    'list_directory': 'allow_list',
+    'create_directory': 'allow_mkdir',
+    'stat_file': 'allow_stat',
+}
 
 
 class IInstance(IInstanceBase):
@@ -255,18 +267,6 @@ class IInstance(IInstanceBase):
     # Internal helpers
     # ------------------------------------------------------------------
 
-    # Map each @tool_function name to the IGlobal allow-flag that gates it.
-    # Used by ``_collect_tool_methods`` to hide disabled tools from the agent
-    # at ``tool.query`` discovery time (not just at invocation).
-    _ALLOW_FLAG_BY_TOOL = {
-        'read_file': 'allow_read',
-        'write_file': 'allow_write',
-        'delete_file': 'allow_delete',
-        'list_directory': 'allow_list',
-        'create_directory': 'allow_mkdir',
-        'stat_file': 'allow_stat',
-    }
-
     def _collect_tool_methods(self):
         """Filter out tool methods whose allow-flag is disabled.
 
@@ -286,7 +286,7 @@ class IInstance(IInstanceBase):
         if self.IGlobal.file_store is None:
             return False
 
-        flag = self._ALLOW_FLAG_BY_TOOL.get(name)
+        flag = _ALLOW_FLAG_BY_TOOL.get(name)
         if flag is None:
             return True
         return bool(getattr(self.IGlobal, flag, False))
@@ -316,7 +316,7 @@ class IInstance(IInstanceBase):
         """
         args = require_dict(args) if args is not None else {}
         self._check_ready()
-        flag_attr = self._ALLOW_FLAG_BY_TOOL.get(tool_name)
+        flag_attr = _ALLOW_FLAG_BY_TOOL.get(tool_name)
         if flag_attr is None:
             raise RuntimeError(f'no allow-flag mapping for tool {tool_name!r}')
         if not getattr(self.IGlobal, flag_attr, False):
@@ -501,7 +501,7 @@ class IInstance(IInstanceBase):
         (it is only invoked on pipeline-source pipes), but guard anyway so a
         non-source endpoint falls through to the engine default.
         """
-        _register_debugger_thread()
+        register_debugger_thread()
         render = getattr(self.IEndpoint, 'renderStoreObject', None)
         if render is None:
             return
@@ -801,39 +801,6 @@ def _ext_from_mime(mime: str | None) -> str:
     if not subtype or subtype.startswith('vnd.'):
         return ''
     return f'.{subtype}'
-
-
-# Thread idents already registered with a loaded debugger (see
-# ``_register_debugger_thread``). Failed registrations are recorded too, so a
-# broken debugger produces one warning instead of one per rendered object.
-_DEBUGGER_THREADS: set[int] = set()
-
-
-def _register_debugger_thread() -> None:
-    """Register an engine-spawned thread with pydevd before traced code runs.
-
-    The designer launches dev-mode tasks under debugpy, and ``renderObject``
-    executes on the engine's C++ ThreadedQueue thread — a thread pydevd never
-    saw get created. When line instrumentation fires on such an unregistered
-    foreign thread, pydevd livelocks on its internal lock and the render
-    wedges mid-object (objects stuck PROCESSING in the designer trace).
-    Registering through the official ``settrace`` API happens outside the
-    instrumentation callback, making the thread known to the debugger first.
-
-    No-op when no debugger is loaded (task mode) — ``pydevd`` is only in
-    ``sys.modules`` when debugpy/pydevd attached to this process.
-    """
-    pydevd = sys.modules.get('pydevd')
-    if pydevd is None:
-        return
-    ident = threading.get_ident()
-    if ident in _DEBUGGER_THREADS:
-        return
-    _DEBUGGER_THREADS.add(ident)
-    try:
-        pydevd.settrace(suspend=False)
-    except Exception as e:
-        warning(f'tool_filesystem: pydevd thread registration failed (continuing untraced): {e}')
 
 
 _STREAM_LOOP: asyncio.AbstractEventLoop | None = None

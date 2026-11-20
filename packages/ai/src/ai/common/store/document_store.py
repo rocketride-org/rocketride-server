@@ -805,7 +805,7 @@ class VectorStoreToolMixin:
         """Return the label this node's tool messages carry (not the tools' address).
 
         Reads ``self.IGlobal.serverName`` (set from the node config). Falls
-        back to the provider name (``self.IGlobal.glb.logicalType``) and
+        back to the provider name (``self.IGlobal.config.node.provider``) and
         finally to ``'vectordb'`` if neither is available. The returned value
         is stripped of leading/trailing whitespace and ``'.'`` characters to
         guarantee a clean ``<server>.<tool>`` in those messages.
