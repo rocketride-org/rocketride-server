@@ -236,11 +236,30 @@ export interface CreateKeyParams {
 	/** Array of permission strings to grant to this key. Empty for full PAT. */
 	permissions: string[];
 
-	/** Optional ISO timestamp for key expiration. Omit for no expiry. */
+	/**
+	 * Optional ISO timestamp for key expiration. Omit to ask for no expiry.
+	 * The server may grant an EARLIER expiry than requested (a key created
+	 * over a sign-in session expires with that session's bound); the granted
+	 * value is in {@link CreateKeyResult.expiresAt}.
+	 */
 	expiresAt?: string;
 
 	/** Optional team UUID to scope this key to. Omit for all teams. */
 	teamId?: string;
+}
+
+/** Result of creating an API key. */
+export interface CreateKeyResult {
+	/** The raw key string. Shown once; it cannot be retrieved later. */
+	key: string;
+
+	/**
+	 * The expiry the server actually granted, as an ISO timestamp, or null when
+	 * the key does not expire. It can be earlier than the requested one.
+	 * Absent when the server did not report it (an older server), so callers
+	 * must not read a missing value as "never expires".
+	 */
+	expiresAt?: string | null;
 }
 
 /** Parameters for inviting a new member to an organization. */
