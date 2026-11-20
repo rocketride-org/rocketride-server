@@ -183,14 +183,19 @@ def _allowed_domains(raw) -> list[str]:
         )
         lists.append(f'Refused: {", ".join(refused)}')
     if addresses:
-        one = len(address_positions) == 1
+        if refused:
+            opening, label = 'It also lists', 'IP addresses'
+        else:
+            opening, label = 'tenki.allow_domains lists', 'Refused'
+        if len(addresses) > 1:
+            noun, entry = 'IP addresses', 'entries'
+        else:
+            noun, entry = 'an IP address', 'entry'
         rules.append(
-            f'{"It also lists" if refused else "tenki.allow_domains lists"} '
-            f'{"an IP address" if one else "IP addresses"} ({"entry" if one else "entries"} '
-            f"{', '.join(address_positions)}), which the sandbox's egress filter never matches: it matches "
-            'hostnames only, so list the hostname instead.'
+            f"{opening} {noun} ({entry} {', '.join(address_positions)}), which the sandbox's egress filter never "
+            'matches: it matches hostnames only, so list the hostname instead.'
         )
-        lists.append(f'{"IP addresses" if refused else "Refused"}: {", ".join(addresses)}')
+        lists.append(f'{label}: {", ".join(addresses)}')
     if rules:
         raise ValueError(f'{" ".join(rules)} {"; ".join(lists)}')
     if len(domains) > _MAX_DOMAINS:
