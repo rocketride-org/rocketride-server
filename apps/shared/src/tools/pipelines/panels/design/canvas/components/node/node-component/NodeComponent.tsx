@@ -56,6 +56,7 @@ import { useFlowProject } from '../../../context/FlowProjectContext';
 import { useFlowPreferences } from '../../../context/FlowPreferencesContext';
 import ConditionalRender from '../../ConditionalRender';
 import { INodeData, IService, IServiceCatalog, IServiceLane, INodeLayout, IServiceCapabilities, ITaskState } from '../../../types';
+import { openToolNotesFor } from 'shared/tools/pipelines/components/pipeline-actions/openTool';
 
 import NodeTop from './top';
 import NodeHeader from './header';
@@ -117,7 +118,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	const { nodes, edges, parameters } = useFlowGraph();
 	const { taskStatuses, componentPipeCounts, totalPipes, servicesJson } = useFlowProject();
 	const { setQuickAddState } = useFlowGraph();
-	const { onOpenStatus, onOpenLink, serverHost, onCreateEndpointKey } = useFlowProject();
+	const { onOpenStatus, onOpenLink, onOpenTool, serverHost, onCreateEndpointKey } = useFlowProject();
 	const { isLocked } = useFlowPreferences();
 
 	// =========================================================================
@@ -204,8 +205,11 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	/** Any lane key (including _ prefixed hidden lanes) means lanes render. */
 	const hasLanes = Object.keys(lanes ?? {}).length > 0;
 
-	/** Status section is visible when running OR when completed status should persist. */
-	const hasStatus = isSourceNode ? !!(taskStatus && taskStatus.state !== ITaskState.NONE) : !!(componentPipeCounts && id in componentPipeCounts && (totalPipes ?? 0) > 0);
+	/** This node's front-end buttons (plan 3.6): its `open-tool` notes, found across every running source's status. */
+	const openTools = useMemo(() => openToolNotesFor(taskStatuses, id), [taskStatuses, id]);
+
+	/** Status section is visible when running OR when completed status should persist, OR when the node has a button. */
+	const hasStatus = isSourceNode ? !!(taskStatus && taskStatus.state !== ITaskState.NONE) : !!(componentPipeCounts && id in componentPipeCounts && (totalPipes ?? 0) > 0) || openTools.length > 0;
 
 	// Bottom cap color:
 	//   - If the node has lanes, status, OR invoke source diamonds, use canvas bg
@@ -235,7 +239,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 
 			{/* Pipeline execution status — persists after completion for source nodes */}
 			<ConditionalRender condition={hasStatus}>
-				<NodeStatus componentProvider={id} isSourceNode={isSourceNode} taskStatus={taskStatus} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenStatus={onOpenStatus} onOpenLink={onOpenLink} serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey} displayName={displayTitle} />
+				<NodeStatus componentProvider={id} isSourceNode={isSourceNode} taskStatus={taskStatus} componentPipeCounts={componentPipeCounts} totalPipes={totalPipes} onOpenStatus={onOpenStatus} onOpenLink={onOpenLink} serverHost={serverHost} onOpenTool={onOpenTool} openTools={openTools} onCreateEndpointKey={onCreateEndpointKey} displayName={displayTitle} />
 			</ConditionalRender>
 
 			{/* Spacer to reserve vertical space for invoke source labels */}

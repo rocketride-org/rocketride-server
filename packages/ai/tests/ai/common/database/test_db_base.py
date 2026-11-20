@@ -708,6 +708,52 @@ def _sql_instance(fake_global):
     return inst
 
 
+# ---------------------------------------------------------------------------
+# The open-tool note (plan 3.6): the node's Explore button
+# ---------------------------------------------------------------------------
+
+
+def _open_tool_global(node_id='postgres_1'):
+    """A stub IGlobal carrying only the identity record the note reads."""
+    return SimpleNamespace(config=SimpleNamespace(node=SimpleNamespace(id=node_id)))
+
+
+def test_begin_instance_publishes_the_open_tool_note_once_per_control(monkeypatch):
+    """The first binding of a control publishes rocketride.sql for this node;
+    later bindings of the same control (new instances, same IGlobal) stay quiet.
+    """
+    import json
+
+    from ai.common.database import db_instance_base
+
+    sent = []
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda key, payload: sent.append((key, json.loads(payload))))
+    glb = _open_tool_global('postgres_1')
+    _sql_instance(glb).beginInstance()
+    _sql_instance(glb).beginInstance()
+    assert sent == [
+        (
+            'usr',
+            [{'button-text': 'Explore', 'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}],
+        )
+    ]
+    # Another control (its own IGlobal) announces its own node
+    other = _open_tool_global('mysql_1')
+    _sql_instance(other).beginInstance()
+    assert sent[1][1][0]['nodeId'] == 'mysql_1'
+
+
+def test_begin_instance_without_an_identity_publishes_nothing(monkeypatch):
+    """A global with no identity record (a bare fixture) costs no note and no error."""
+    from ai.common.database import db_instance_base
+
+    sent = []
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda *a: sent.append(a))
+    _sql_instance(_FakeGlobal()).beginInstance()
+    _sql_instance(_open_tool_global('')).beginInstance()
+    assert sent == []
+
+
 def test_build_sql_query_marks_invalid_after_explain_exhaustion():
     """Every EXPLAIN attempt failing must flip isValid to False, not leave the LLM's 'true'.
 

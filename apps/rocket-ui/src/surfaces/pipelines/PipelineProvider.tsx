@@ -40,7 +40,7 @@
 
 import React, { useCallback, useMemo, useRef, useState, CSSProperties, useEffect } from 'react';
 import { commonStyles } from 'shell';
-import { getClient, useShellConnection, useWorkspace, useSubscriptions, ConnectionManager, ConfirmDialog, SaveFileDialog } from 'shell';
+import { getClient, useShellConnection, useWorkspace, useSubscriptions, ConnectionManager, ConfirmDialog, SaveFileDialog, toolDocUri } from 'shell';
 import { getDocs } from '../../docs';
 import type { PipelineConfig } from 'shell';
 // Project module is imported via subpath (not the 'shared' barrel) so the
@@ -48,6 +48,8 @@ import type { PipelineConfig } from 'shell';
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import { openToolDocKey, openToolTitle } from 'shared/tools/pipelines/components/pipeline-actions/openTool';
+import { assertExternalUrl } from 'shared/ops/hostOps';
 import { isShortId, pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewPipelineForm';
 import type { TraceLevel, ViewState } from 'shared/tools/pipelines';
@@ -437,10 +439,21 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 
 	// --- The host seam ---------------------------------------------------------
 
-	const handleOpenLink = useCallback((url: string, displayName?: string) => {
-		const docs = getDocs();
-		if (!docs) return;
-		docs.openStaticDocument(`webview:${url}`, displayName || 'Webview');
+	/** Docs links open in the browser (one scheme allowlist with host.openExternal);
+	 *  a node's front end never goes through here — that is `openTool`. */
+	const handleOpenLink = useCallback((url: string) => {
+		try {
+			window.open(assertExternalUrl(url), '_blank', 'noopener');
+		} catch (e) {
+			console.log('[PipelineProvider] openLink refused', url, e);
+		}
+	}, []);
+
+	/** The node's front end (plan 3.6): the app's tool document bound to the
+	 *  running control's address and the node, `tool:<appId>/<address>/<nodeId>`.
+	 *  Opening an already-open document focuses it. */
+	const handleOpenTool = useCallback((appId: string, address: string, nodeId: string) => {
+		getDocs()?.openStaticDocument(toolDocUri(appId, openToolDocKey(address, nodeId)), openToolTitle(address, nodeId));
 	}, []);
 
 	const documentTitle = useMemo(() => {
@@ -587,6 +600,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			isSubscribed,
 			promptSubscribe,
 			openLink: handleOpenLink,
+			openTool: handleOpenTool,
 			createEndpointKey: handleCreateEndpointKey,
 			// The shell identity already carries the org's developer id here;
 			// only the claim needs the host (plan §2.1).
@@ -602,7 +616,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			openFile: handleOpenFile,
 			exportDocument: handleExport,
 		}),
-		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleReadFile, handleReadImageDataUri, handleWriteFile, handleOpenFile, handleExport]
+		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleOpenTool, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleReadFile, handleReadImageDataUri, handleWriteFile, handleOpenFile, handleExport]
 	);
 
 	// --- Render --------------------------------------------------------------

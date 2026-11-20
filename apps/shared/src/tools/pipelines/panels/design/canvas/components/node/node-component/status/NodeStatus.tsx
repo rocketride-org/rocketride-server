@@ -19,6 +19,8 @@
 
 import React, { ReactElement } from 'react';
 import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import type { OpenToolHandler } from 'shared/tools/pipelines/components/pipeline-actions/PipelineActions';
+import type { IOpenToolNote } from 'shared/tools/pipelines/components/pipeline-actions/openTool';
 
 import { ITaskStatus, ITaskState } from '../../../../types';
 import { PipelineActions } from 'shared/tools/pipelines/components/pipeline-actions';
@@ -68,17 +70,21 @@ interface INodeStatusProps {
 	totalPipes?: number;
 	/** Callback to open the status page for this source node. */
 	onOpenStatus?: (nodeId: string) => void;
-	/** Callback to open a URL externally (for pipeline action buttons). */
+	/** Callback to open a docs URL in the browser (the endpoint modal's links). */
 	onOpenLink?: (url: string, displayName?: string) => void;
+	/** Opens the node's front end for its `open-tool` note (plan 3.6). */
+	onOpenTool?: OpenToolHandler;
+	/** This node's front-end buttons, resolved across every running source's status (a database node has no status of its own). */
+	openTools?: IOpenToolNote[];
 	/** Server host URL for replacing {host} placeholders in endpoint URLs. */
 	serverHost?: string;
 	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
 	onCreateEndpointKey?: EndpointKeyMinter;
-	/** Display name for the source node (used as the tab title when opening links). */
+	/** Display name for the source node (the endpoint modal's title). */
 	displayName?: string;
 }
 
-export default function NodeStatus({ componentProvider, isSourceNode, taskStatus, componentPipeCounts, totalPipes, onOpenStatus, onOpenLink, serverHost, onCreateEndpointKey, displayName }: INodeStatusProps): ReactElement | null {
+export default function NodeStatus({ componentProvider, isSourceNode, taskStatus, componentPipeCounts, totalPipes, onOpenStatus, onOpenLink, onOpenTool, openTools, serverHost, onCreateEndpointKey, displayName }: INodeStatusProps): ReactElement | null {
 	// ========================================================================
 	// Source node: persistent mini dashboard
 	// ========================================================================
@@ -106,7 +112,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 			</a>
 		) : null;
 
-		const pipelineActions = <PipelineActions notes={taskStatus.notes} host={serverHost} onOpenLink={onOpenLink} onCreateEndpointKey={onCreateEndpointKey} displayName={displayName} />;
+		const pipelineActions = <PipelineActions notes={taskStatus.notes} tools={openTools} host={serverHost} onOpenLink={onOpenLink} onOpenTool={onOpenTool} onCreateEndpointKey={onCreateEndpointKey} displayName={displayName} />;
 
 		// ── Starting / Initializing ──────────────────────────────────────
 		if (isRunning && (taskStatus.state === ITaskState.STARTING || taskStatus.state === ITaskState.INITIALIZING)) {
@@ -211,27 +217,33 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 	}
 
 	// ========================================================================
-	// Non-source node: Pipes progress bar
+	// Non-source node: Pipes progress bar + the node's front-end button
 	// ========================================================================
-	if (!componentPipeCounts || !(componentProvider in componentPipeCounts)) return null;
-	const pipesInComponent = componentPipeCounts[componentProvider];
-	if (!totalPipes || totalPipes === 0) return null;
-
-	const progressPercentage = totalPipes > 0 ? (pipesInComponent / totalPipes) * 100 : 0;
+	// A node a front end talks to (a database node's Explore) has no status
+	// of its own: its button comes from the `open-tool` note the running
+	// engine published, looked up by node id across the sources' statuses.
+	const tools = openTools ?? [];
+	const hasPipes = !!componentPipeCounts && componentProvider in componentPipeCounts && !!totalPipes && totalPipes > 0;
+	if (!hasPipes && tools.length === 0) return null;
+	const pipesInComponent = hasPipes ? componentPipeCounts![componentProvider] : 0;
+	const progressPercentage = hasPipes ? (pipesInComponent / totalPipes!) * 100 : 0;
 
 	return (
 		<div style={styles.footer}>
-			<div style={styles.pipesFooter}>
-				<span style={styles.pipesLabel}>Pipes</span>
-				<div style={styles.progressBarContainer}>
-					<div style={{ height: 3, borderRadius: 2, marginTop: 5, backgroundColor: 'var(--rr-border)', overflow: 'hidden' }}>
-						<div style={{ width: `${progressPercentage}%`, height: '100%', backgroundColor: 'var(--rr-success)', borderRadius: 2, transition: 'width 0.1s ease-in-out' }} />
+			{hasPipes && (
+				<div style={styles.pipesFooter}>
+					<span style={styles.pipesLabel}>Pipes</span>
+					<div style={styles.progressBarContainer}>
+						<div style={{ height: 3, borderRadius: 2, marginTop: 5, backgroundColor: 'var(--rr-border)', overflow: 'hidden' }}>
+							<div style={{ width: `${progressPercentage}%`, height: '100%', backgroundColor: 'var(--rr-success)', borderRadius: 2, transition: 'width 0.1s ease-in-out' }} />
+						</div>
 					</div>
+					<span style={styles.pipesCount}>
+						{pipesInComponent}/{totalPipes}
+					</span>
 				</div>
-				<span style={styles.pipesCount}>
-					{pipesInComponent}/{totalPipes}
-				</span>
-			</div>
+			)}
+			{tools.length > 0 && <PipelineActions tools={tools} onOpenTool={onOpenTool} displayName={displayName} />}
 		</div>
 	);
 }

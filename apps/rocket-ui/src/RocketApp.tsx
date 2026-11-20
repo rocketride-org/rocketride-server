@@ -44,7 +44,6 @@ import { createWorkspace, getWorkspace, resolveWorkspaceScope } from './surfaces
 import { ModeSwitchBlockedError } from 'shared/modules/vfs/commitPolicy';
 import { createProjectVfs } from './surfaces/workspace/projectVfs';
 import PipelineProvider from './surfaces/pipelines/PipelineProvider';
-import WebviewProvider from './surfaces/pages/WebviewProvider';
 import SidebarProvider from './surfaces/sidebar/SidebarProvider';
 import WorkspaceExplorerProvider from './surfaces/workspace/WorkspaceExplorerProvider';
 import ScmProvider from './surfaces/workspace/ScmProvider';
@@ -326,7 +325,7 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		// strictly better than a permanent "No content" pane, and this pass is
 		// what lets persisted-state compat retire on a schedule.
 		{
-			const LIVE_PREFIXES = ['tool:', 'toolreadme:', 'file:', 'diff:', 'intro:', 'html:', 'webview:', 'pipeline:'];
+			const LIVE_PREFIXES = ['tool:', 'toolreadme:', 'file:', 'diff:', 'intro:', 'html:', 'pipeline:'];
 			const state = docs.getState();
 			for (const editor of Object.values(state.editors)) {
 				const uri = editor?.documentUri;
@@ -706,7 +705,6 @@ const RocketEditorContent: React.FC<{
 	if (uri.startsWith('file:')) return <FileProvider path={uri.slice('file:'.length)} />;
 	// Source Control's unified diff of one pending change.
 	if (uri.startsWith('diff:')) return <DiffProvider path={uri.slice('diff:'.length)} />;
-	if (uri.startsWith('webview:')) return <WebviewProvider uri={uri} />;
 
 	// Content is the pipeline object directly — no parsing needed
 	const pipeline = content as any;

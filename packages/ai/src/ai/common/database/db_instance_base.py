@@ -43,7 +43,7 @@ from typing import Any, Dict, List
 import json
 import threading
 
-from rocketlib import IInstanceBase, debug, error, warning, tool_function
+from rocketlib import IInstanceBase, debug, error, monitorOther, warning, tool_function
 from sqlalchemy import MetaData, Table as SQLTable, insert, text
 from sqlalchemy.exc import NoSuchTableError, SQLAlchemyError
 
@@ -243,6 +243,46 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'recover with rollback, or rollback to savepoint <name>, before sending more work on that '
             'session. On PostgreSQL the transaction stays aborted until you do, and commit is refused.'
         )
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def beginInstance(self) -> None:
+        """Announce this node's front end once per control (plan 3.6).
+
+        An instance lives one binding, so the note is published on the
+        control's FIRST binding and guarded on the control's IGlobal: the
+        engine merges notes by node, and a second message from the same node
+        would only replace the first.
+        """
+        self._announceOpenTool()
+
+    def _announceOpenTool(self) -> None:
+        """Publish the ``open-tool`` status note that is this node's Explore button.
+
+        The note names the app that talks to a database node (``rocketride.sql``)
+        and this node's component id; ``{address}`` is filled per control by
+        the server. No URL, no credential. Losing the note costs a button,
+        never a query, so any failure is logged and swallowed.
+        """
+        glb = self.IGlobal
+        if glb is None or getattr(glb, 'open_tool_announced', False):
+            return
+        glb.open_tool_announced = True
+        try:
+            node_id = glb.config.node.id
+            if not node_id:
+                return
+            note = {
+                'button-text': 'Explore',
+                'open-tool': 'rocketride.sql',
+                'nodeId': node_id,
+                'address': '{address}',
+            }
+            monitorOther('usr', json.dumps([note]))
+        except Exception as e:
+            debug(f'Could not publish the open-tool note: {e}')
 
     # ------------------------------------------------------------------
     # Reflection lock

@@ -49,4 +49,4 @@ export {
 	applySavedConnections, subscribeSavedConnections, getSavedConnections, getSavedConnectionsStatus,
 } from './savedConnections';
 export type { SavedSqlConnection, PipelineBoundConnection, DirectConnection, SavedConnectionsStatus } from './savedConnections';
-export { resolveEndpoint, endpointForConnection, releaseDirectEndpoint, endpointKeyForConnection, isDirectEndpointKey } from './resolver';
+export { resolveEndpoint, endpointForConnection, endpointForOpenTool, releaseDirectEndpoint, endpointKeyForConnection, isDirectEndpointKey } from './resolver';

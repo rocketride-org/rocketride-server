@@ -41,6 +41,7 @@
 
 import { createContext, ReactElement, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import type { OpenToolHandler } from 'shared/tools/pipelines/components/pipeline-actions/PipelineActions';
 
 import { IProject, IToolchainState, IValidatePipelinePayload, IValidateResponse, IServiceCatalog, ITaskStatus, ITaskState, DEFAULT_TOOLCHAIN_STATE } from '../types';
 
@@ -175,6 +176,8 @@ export interface IFlowProjectContext {
 	serverHost?: string;
 	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
 	onCreateEndpointKey?: EndpointKeyMinter;
+	/** Opens a node's front end for its `open-tool` note (plan 3.6). */
+	onOpenTool?: OpenToolHandler;
 
 	/** Whether the host is connected to the server. Controls run/stop button availability. */
 	isConnected?: boolean;
@@ -261,6 +264,8 @@ export interface IFlowProjectProviderProps {
 	serverHost?: string;
 	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
 	onCreateEndpointKey?: EndpointKeyMinter;
+	/** Opens a node's front end for its `open-tool` note (plan 3.6). */
+	onOpenTool?: OpenToolHandler;
 	isConnected?: boolean;
 	cloudConnectionConfigured?: boolean;
 	isSubscribed?: boolean;
@@ -289,7 +294,7 @@ export interface IFlowProjectProviderProps {
  * The host application passes props that are tunneled through this context
  * so deeply nested components can access them without prop drilling.
  */
-export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
+export function FlowProjectProvider({ children, project: currentProject, isReadonly = false, taskStatuses, componentPipeCounts, totalPipes, servicesJson: rawServicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, onOpenTool, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProjectProviderProps): ReactElement {
 	// --- Toolchain state ---------------------------------------------------
 
 	const [toolchainState, setToolchainState] = useState<IToolchainState>(DEFAULT_TOOLCHAIN_STATE);
@@ -419,6 +424,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		onOpenStatus,
 		serverHost,
 		onCreateEndpointKey,
+		onOpenTool,
 		isConnected,
 		cloudConnectionConfigured,
 		isSubscribed,
@@ -436,7 +442,7 @@ export function FlowProjectProvider({ children, project: currentProject, isReado
 		handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo,
 		oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens,
 		onOpenLink, googlePickerDeveloperKey, googlePickerClientId,
-		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected,
+		onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, onOpenTool, isConnected,
 		cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys,
 	]);
 

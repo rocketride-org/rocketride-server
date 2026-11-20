@@ -552,6 +552,78 @@ def engine_sharing(pipeline: Dict[str, Any], source: Optional[str] = None) -> Op
     return 'users' if content.shareable else 'owner'
 
 
+# ==== Status notes ============================================================
+
+
+def _note_node_id(note: Any) -> Optional[str]:
+    """The ``nodeId`` a note is keyed on, or None for an unkeyed note."""
+    if isinstance(note, dict):
+        node_id = note.get('nodeId')
+        if isinstance(node_id, str) and node_id:
+            return node_id
+    return None
+
+
+def merge_status_notes(existing: List[Any], incoming: List[Any]) -> List[Any]:
+    """
+    Fold one ``apaevt_status_user`` message into the engine's notes.
+
+    The notes slot is engine-wide and every node writes it, so a message is
+    merged BY NODE rather than replacing the list (plan 3.6: a database node's
+    ``open-tool`` note lives beside the source's). A note carrying ``nodeId``
+    replaces only the earlier note of that node, in place; a new node's note
+    is appended. Notes without a ``nodeId`` keep the old replace semantics:
+    an unkeyed note in the message replaces every earlier unkeyed note, so a
+    source that publishes one note keeps publishing exactly that note. An
+    empty message clears everything (a source's shutdown).
+
+    Args:
+        existing: The notes stored so far (not modified).
+        incoming: The message's notes, as emitted (placeholders intact).
+
+    Returns:
+        The merged list, a new object.
+    """
+    if not incoming:
+        return []
+    # One note per node from the message: the first of a node wins
+    keyed: Dict[str, Any] = {}
+    unkeyed: List[Any] = []
+    for note in incoming:
+        key = _note_node_id(note)
+        if key is None:
+            unkeyed.append(note)
+        else:
+            keyed.setdefault(key, note)
+    merged: List[Any] = []
+    placed: set = set()
+    unkeyed_placed = False
+    # Step 1: walk the earlier notes in order, swapping each replaced note
+    # for its replacement where it stands (the unkeyed block takes the slot
+    # of the first earlier unkeyed note)
+    for note in existing:
+        key = _note_node_id(note)
+        if key is None:
+            if not unkeyed:
+                merged.append(note)
+            elif not unkeyed_placed:
+                merged.extend(unkeyed)
+                unkeyed_placed = True
+        elif key in keyed:
+            if key not in placed:
+                merged.append(keyed[key])
+                placed.add(key)
+        else:
+            merged.append(note)
+    # Step 2: whatever the message brought that replaced nothing
+    if unkeyed and not unkeyed_placed:
+        merged.extend(unkeyed)
+    for key, note in keyed.items():
+        if key not in placed:
+            merged.append(note)
+    return merged
+
+
 class TaskEngine(DAPBase):
     """
     Pipeline task execution and lifecycle management system.
@@ -2702,8 +2774,10 @@ class TaskEngine(DAPBase):
             # and one engine may serve several controls (a private engine of
             # one owner with two addresses of identical content; a shared one
             # scrubs notes altogether). TaskControl.project_status expands
-            # them with each holder's own address (plan 7.5).
-            self._status.notes = list(notes) if notes else []
+            # them with each holder's own address (plan 7.5). Every node
+            # writes this one slot, so a message merges by nodeId
+            # (merge_status_notes) instead of replacing the list.
+            self._status.notes = merge_status_notes(self._status.notes or [], list(notes) if notes else [])
 
         # Handle info data from >INF* output
         elif event_type == 'apaevt_status_info':

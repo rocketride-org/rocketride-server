@@ -41,6 +41,7 @@
 
 import { ReactElement, ReactNode } from 'react';
 import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import type { OpenToolHandler } from 'shared/tools/pipelines/components/pipeline-actions/PipelineActions';
 
 import { IProject, IValidatePipelinePayload, IValidateResponse, ITaskStatus } from '../types';
 
@@ -109,6 +110,8 @@ export interface IFlowProviderProps {
 	serverHost?: string;
 	/** Mints the owner's scoped key for one endpoint address (the endpoint modal's Create API key; plan 2.4). */
 	onCreateEndpointKey?: EndpointKeyMinter;
+	/** Opens a node's front end for its `open-tool` note (plan 3.6). */
+	onOpenTool?: OpenToolHandler;
 
 	/** Whether the host is connected to the server. */
 	isConnected?: boolean;
@@ -146,7 +149,7 @@ export interface IFlowProviderProps {
  * </ReactFlowProvider>
  * ```
  */
-export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProviderProps): ReactElement {
+export function FlowProvider({ children, project, projectId, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, onOpenTool, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys }: IFlowProviderProps): ReactElement {
 	return (
 		<FlowPreferencesProvider projectId={projectId} isReadonly={isReadonly}>
 			<FlowProjectProvider
@@ -176,7 +179,7 @@ export function FlowProvider({ children, project, projectId, isReadonly, taskSta
 				onRunPipeline={onRunPipeline}
 				onStopPipeline={onStopPipeline}
 				onOpenStatus={onOpenStatus}
-				serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey}
+				serverHost={serverHost} onCreateEndpointKey={onCreateEndpointKey} onOpenTool={onOpenTool}
 				isConnected={isConnected}
 				cloudConnectionConfigured={cloudConnectionConfigured}
 				isSubscribed={isSubscribed}
