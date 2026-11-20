@@ -259,6 +259,39 @@ def test_execute_sql_query_lets_a_non_database_error_raised_on_connect_through(e
     assert not isinstance(raised.value, DatabaseUnavailableError)
 
 
+@pytest.mark.parametrize('exc', [TypeError('bug'), KeyError('bug'), ValueError('bug'), AttributeError('bug')])
+def test_validate_query_lets_a_non_database_error_raised_on_connect_through(exc):
+    """Same rule as ``_executeSQLQuery``: a bug while opening the connection is not an EXPLAIN rejection."""
+    inst = _make(_healthy_engine())
+
+    @contextlib.contextmanager
+    def broken_connection():
+        raise exc
+        yield  # pragma: no cover
+
+    inst.IGlobal.read_only_connection = broken_connection
+
+    with pytest.raises(type(exc)) as raised:
+        inst.IGlobal._validateQuery('SELECT 1')
+
+    assert not isinstance(raised.value, DatabaseUnavailableError)
+
+
+def test_validate_query_keeps_the_rejection_path_for_a_dialect_without_a_read_only_mode():
+    inst = _make(_healthy_engine())
+
+    @contextlib.contextmanager
+    def no_read_only_mode():
+        raise RuntimeError('no read-only mode')
+        yield  # pragma: no cover
+
+    inst.IGlobal.read_only_connection = no_read_only_mode
+
+    ok, message = inst.IGlobal._validateQuery('SELECT 1')
+
+    assert ok is False and 'no read-only mode' in message
+
+
 def test_a_query_the_database_refuses_is_reported_on_the_lanes_not_as_a_failed_step():
     """#2963 behaviour: the step completes and the lanes carry ``Query execution failed``."""
     inst = _make(_healthy_engine(), ('text', 'answers'))

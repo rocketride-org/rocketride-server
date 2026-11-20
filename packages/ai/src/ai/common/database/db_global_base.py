@@ -145,6 +145,11 @@ def is_connection_failure(exc: BaseException) -> bool:
     return False
 
 
+def is_database_or_transport_failure(exc: BaseException) -> bool:
+    """Whether ``exc`` is a database or transport failure, as opposed to a bug such as a ``TypeError``."""
+    return isinstance(exc, (SQLAlchemyError, OSError)) or getattr(exc, 'orig', None) is not None
+
+
 def is_database_outage(exc: BaseException, *, connected: bool) -> bool:
     """Return True when ``exc`` from a statement run on ``read_only_connection`` means the database is unreachable.
 
@@ -167,10 +172,9 @@ def is_database_outage(exc: BaseException, *, connected: bool) -> bool:
     # Only a database or transport failure counts: a TypeError or KeyError raised
     # while the connection is being opened is a bug, and must propagate as itself
     # rather than read as "the database is unavailable".
-    is_db_or_transport = isinstance(exc, (SQLAlchemyError, OSError)) or getattr(exc, 'orig', None) is not None
     opening_failed = (
         not connected
-        and is_db_or_transport
+        and is_database_or_transport_failure(exc)
         and getattr(exc, 'statement', None) is None
         and not isinstance(exc, RuntimeError)
     )
@@ -1003,7 +1007,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         evaluated part of the query while planning it could not write.
         Returns ``(True, '')`` on success or ``(False, error_message)`` when the
         database rejects the statement. Raises ``DatabaseUnavailableError`` when the
-        database cannot be reached: that is not a property of the SQL.
+        database cannot be reached: that is not a property of the SQL. An error raised
+        while the connection is opened that is neither a database nor a transport failure
+        (a ``TypeError`` and the like) propagates unchanged.
 
         ``EXPLAIN`` is standard SQL supported by MySQL and PostgreSQL; both
         engines raise an exception for syntactically or semantically invalid
@@ -1046,6 +1052,11 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             if is_database_outage(e, connected=connected):
                 error(f'Database unavailable during EXPLAIN validation: {e}')
                 raise DatabaseUnavailableError('Database is unavailable (details are in the engine log)') from None
+            # Same rule as `_executeSQLQuery`: a bug raised while the connection is being
+            # opened (not a database or transport failure, not the dialect's RuntimeError)
+            # propagates as itself instead of being fed to the LLM repair loop as a rejection.
+            if not connected and not isinstance(e, RuntimeError) and not is_database_or_transport_failure(e):
+                raise
             warning(f'EXPLAIN validation failed for the generated query: {e}')
             return False, self._format_db_error(e)
 
