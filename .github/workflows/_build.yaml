@@ -337,7 +337,7 @@ jobs:
         if: inputs.codeql == false && inputs.test && matrix.platform == 'windows'
         shell: bash
         run: |
-          if [ "$(dist/server/engine.exe -c "import sys; print('new' if sys.version_info >= (3, 13) else 'old')")" = new ]; then
+          if [ "$(dist/server/engine.exe -c "import sys; print('new' if sys.version_info >= (3, 13) else 'old', end='')")" = new ]; then
             echo "::warning title=WMI hook no longer needed::The engine runs Python 3.13 or later, which has the _wmi fix (python/cpython#134313). Remove this step, the removal step before Package and scripts/ci/*rr_ci_skip_wmi*."
             exit 0
           fi
