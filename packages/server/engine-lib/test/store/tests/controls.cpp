@@ -57,7 +57,7 @@ import types
 from rocketlib import IGlobalBase, IInstanceBase, IJson
 
 log = []              # ('begin' | 'end', controlId, label), in order
-seen = []             # (IGlobal.glb.controlId, IGlobal.label, _caller controlId)
+seen = []             # (IGlobal.glb.controlId, IGlobal.label, self.caller.controlId)
 raise_on_end = set()  # control ids whose endGlobal raises
 state = {'begin_delay': 0.0,  # seconds beginGlobal sleeps: widens the build window
          'stash': False}      # stash glb.connConfig and self.config at MODULE scope
@@ -85,8 +85,7 @@ class IGlobal(IGlobalBase):
 
 class IInstance(IInstanceBase):
     def beginInstance(self):
-        caller = self._caller or {}
-        seen.append((self.IGlobal.glb.controlId, self.IGlobal.label, caller.get('controlId')))
+        seen.append((self.IGlobal.glb.controlId, self.IGlobal.label, self.caller.controlId))
 
 
 def _module(name, **attrs):
