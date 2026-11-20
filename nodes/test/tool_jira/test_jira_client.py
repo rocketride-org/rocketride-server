@@ -112,8 +112,27 @@ def test_request_sends_basic_auth_to_the_v3_api(fake_requests):
     assert jc.request('GET', '/myself', auth=AUTH) == {'ok': True}
     call = fake_requests.request.call_args
     assert call.args == ('GET', 'https://acme.atlassian.net/rest/api/3/myself')
-    assert call.kwargs['headers']['Authorization'] == 'Basic bWVAZXhhbXBsZS5jb206dG9r'  # me@example.com:tok
+    assert call.kwargs['auth'] == (b'me@example.com', b'tok')
+    assert 'Authorization' not in call.kwargs['headers']
     assert 'Content-Type' not in call.kwargs['headers']
+
+
+def test_netrc_does_not_replace_the_configured_credentials(monkeypatch, tmp_path):
+    # requests lets a .netrc entry replace a hand-set Authorization header, but not auth=
+    netrc = tmp_path / 'netrc'
+    netrc.write_text('machine acme.atlassian.net login other@example.com password other\n')
+    monkeypatch.setenv('NETRC', str(netrc))
+    sent = {}
+
+    def send(self, req, **kwargs):
+        sent['auth'] = req.headers['Authorization']
+        resp = requests.Response()
+        resp.status_code, resp._content, resp.request = 200, b'{}', req
+        return resp
+
+    monkeypatch.setattr(requests.adapters.HTTPAdapter, 'send', send)
+    jc.request('GET', '/myself', auth=AUTH)
+    assert sent['auth'] == 'Basic bWVAZXhhbXBsZS5jb206dG9r'  # me@example.com:tok
 
 
 def test_empty_success_body_is_an_empty_dict(fake_requests):

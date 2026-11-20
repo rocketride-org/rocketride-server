@@ -44,7 +44,6 @@ No engine imports: the node's IInstance adapts ``JiraAPIError`` into its
 
 from __future__ import annotations
 
-import base64
 import re
 import time
 from typing import Any, Dict, Iterable, List, NamedTuple, Optional
@@ -115,11 +114,6 @@ def normalize_site_url(site_url: str) -> str:
     return f'https://{host}'
 
 
-def _auth_header(auth: Auth) -> str:
-    pair = f'{auth.email}:{auth.api_token}'.encode()
-    return 'Basic ' + base64.b64encode(pair).decode('ascii')
-
-
 def _error_messages(resp) -> List[str]:
     """Jira's ``errorMessages`` and per-field ``errors``, verbatim, so an agent can fix its own JQL."""
     try:
@@ -167,14 +161,21 @@ def request(
 
     is_read = method.upper() == 'GET' if read is None else read
     url = f'{auth.site_url}{API_PATH}{path}'
-    headers = {'Authorization': _auth_header(auth), 'Accept': 'application/json'}
+    headers = {'Accept': 'application/json'}
     if json_body is not None:
         headers['Content-Type'] = 'application/json'
     rate_retries = server_retries = 0
     while True:
         try:
+            # auth=, not an Authorization header: requests lets a ~/.netrc entry for the host replace the header
             resp = requests.request(
-                method, url, headers=headers, json=json_body, params=params, timeout=DEFAULT_TIMEOUT
+                method,
+                url,
+                auth=(auth.email.encode(), auth.api_token.encode()),
+                headers=headers,
+                json=json_body,
+                params=params,
+                timeout=DEFAULT_TIMEOUT,
             )
         except requests.exceptions.RequestException as exc:
             if is_read and server_retries < READ_SERVER_ERROR_RETRIES:
