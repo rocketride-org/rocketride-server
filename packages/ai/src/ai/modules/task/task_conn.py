@@ -467,6 +467,9 @@ class TaskConn(
             await self.send(self.build_error(request, 'Connection revoked'))
             return
 
+        # A new identity on this socket (also a direct re-auth with no deauth in
+        # between) must attach as debugger again: release any attachment first.
+        self._release_debugger_everywhere()
         self._account_info = result
         self._authenticated = True
         self._auth_generation += 1
@@ -518,6 +521,15 @@ class TaskConn(
 
         return self.build_response(request, body={})
 
+    def _release_debugger_everywhere(self) -> None:
+        """Detach this connection as debugger from every task, so no attachment outlives the identity that made it."""
+        controls = getattr(self._server, '_task_control', None)
+        if isinstance(controls, dict):
+            for control in list(controls.values()):
+                release = getattr(getattr(control, 'task', None), 'release_debugger', None)
+                if callable(release):
+                    release(self)
+
     def _drop_authority(self) -> None:
         """
         Synchronously strip this connection's authority (deauth and revoke).
@@ -528,18 +540,13 @@ class TaskConn(
         identity ``AccountInfo(waitlisted=True)``. The bare identity has an
         empty ``userId`` and no organization, so no user push, org push or
         org/user-scoped server event can match or rebuild it. Also detaches
-        this connection as debugger from every task, so a later
-        re-authentication on the same socket inherits no attachment.
+        this connection as debugger from every task (``_release_debugger_everywhere``);
+        a direct re-auth releases it the same way.
         """
         self._server.acquire_unauthed_slot(self._client_ip)
         self._authenticated = False
         self._auth_generation += 1
-        controls = getattr(self._server, '_task_control', None)
-        if isinstance(controls, dict):
-            for control in list(controls.values()):
-                release = getattr(getattr(control, 'task', None), 'release_debugger', None)
-                if callable(release):
-                    release(self)
+        self._release_debugger_everywhere()
         monitors = getattr(self, '_monitors', None)
         if monitors is not None:
             monitors.clear()

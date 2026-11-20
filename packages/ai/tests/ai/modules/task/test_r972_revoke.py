@@ -427,3 +427,37 @@ async def test_r972_1a_overlapping_rebuilds_keep_the_later_membership_update(mon
 
     assert len(reads) == 2
     assert conn._account_info.sysPermissions == ['sys.view']
+
+
+@pytest.mark.asyncio
+async def test_r972_1a_direct_reauth_detaches_the_debugger(monkeypatch):
+    """Auth on an already-authenticated socket (no deauth between) installs a new
+    identity that must attach as debugger again.
+    """
+    from unittest.mock import AsyncMock, MagicMock
+
+    from ai.modules.task.task_conn import TaskConn
+    from ai.modules.task.task_engine import Task
+
+    account = FakeAccount({'u': (True, frozenset()), 'v': (True, frozenset())})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+    task = Task.__new__(Task)
+    task._status = MagicMock()
+    task._debugger = conn
+    server._task_control = {'t': MagicMock(task=task)}
+    server._server = MagicMock()
+    server._server.authenticate_credential = AsyncMock(return_value=identity('v', auth='pk_other'))
+    server.release_unauthed_slot = MagicMock()
+    server.broadcast_server_event = AsyncMock()
+    conn._auth_attempts = 0
+    conn._revoked = False
+    conn._client_info = {}
+    conn.build_response = MagicMock(return_value={})
+    conn.build_error = MagicMock(return_value={})
+
+    await TaskConn.on_auth(conn, {'arguments': {'auth': 'pk_other'}})
+
+    assert conn._account_info.userId == 'v'
+    assert task._debugger is None
+    assert task._status.debuggerAttached is False

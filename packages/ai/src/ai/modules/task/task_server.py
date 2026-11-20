@@ -1184,7 +1184,10 @@ class TaskServer(DAPBase):
         """
         Rebuild one connection's identity and push it (#972, F1).
 
-        ``info`` is the identity the rebuild starts from. For a connection
+        The rebuild starts from the identity the connection holds when it
+        acquires its per-connection lock, and installs only while the
+        connection's ``_auth_generation`` is unchanged. ``info`` is only the
+        callers' pk_/tk_ pre-filter value and is not read here. For a connection
         holding platform authority (``authority_subject``) a failed rebuild
         never keeps the old identity: a narrower result (waitlisted, or a
         cached ``sysPermissions`` element missing) or ``ValueError`` (user not
@@ -1192,8 +1195,8 @@ class TaskServer(DAPBase):
         there is no live re-check; with one (``_authz``) the connection is
         marked unverified, so the gate refuses it at once, and the next sweep
         decides. For every connection, a good result replaces the identity
-        only if the connection is still authenticated and still holds
-        ``info`` (a deauth or newer auth during the rebuild wins), and stamps
+        only if the connection is still authenticated and its auth
+        generation is unchanged (a deauth or newer auth during the rebuild wins), and stamps
         it verified as of the clock read before the rebuild. Other
         connections keep today's behaviour otherwise: log on error, replace
         on success. The notice send is bounded by NOTICE_SEND_TIMEOUT.
