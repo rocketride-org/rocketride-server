@@ -45,7 +45,7 @@ import type { GridColumnDefinition } from '../../../components/data-grid/default
 import { commonStyles } from '../../../themes/styles';
 import type { ApiKeyRecord, TeamRecord } from '../types';
 import { S, PermGrid, PermPill, ExpiryOpts, parseWireDate, relativeTime } from './shared';
-import { revealedKeyExpiry } from '../keyExpiry';
+import { revealedKeyExpiry, utcDay } from '../keyExpiry';
 
 // =============================================================================
 // STYLES
@@ -360,12 +360,13 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				rrDefault: true,
 				rrDescription: 'UTC instant after which the key stops authenticating; empty means the key never expires.',
 				headerSort: true,
-				// parseWireDate applies the platform contract (zone-less wire
-				// datetimes ARE UTC) — a bare new Date(iso) would misparse them
-				// as local and could show the wrong calendar day.
+				// utcDay applies the platform contract (zone-less wire datetimes
+				// ARE UTC) and shows the UTC day, as both CLIs do — a bare
+				// new Date(iso) would misparse them as local and could show the
+				// wrong calendar day.
 				formatter: (cell: CellComponent) => {
 					const iso = cell.getValue() as string | null;
-					return iso ? `Exp. ${parseWireDate(iso).toLocaleDateString()}` : 'No expiry';
+					return iso ? `Exp. ${utcDay(iso)}` : 'No expiry';
 				},
 			},
 			{ title: 'Created', field: 'createdAt', rrType: 'date', rrDefaultSort: 'desc', rrDescription: 'UTC creation time of the key; the grid sorts newest-first on it by default.', headerSort: true, formatter: autoFormatter },
@@ -507,7 +508,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 						<LabelValue label="Team Scope">{teamScope(viewedKey) || 'Session'}</LabelValue>
 						<LabelValue label="Created">{viewedKey.createdAt ? parseWireDate(viewedKey.createdAt).toLocaleString() : '--'}</LabelValue>
 						<LabelValue label="Last Used">{viewedKey.lastUsedAt ? `Used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}</LabelValue>
-						<LabelValue label="Expires">{viewedKey.expiresAt ? parseWireDate(viewedKey.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
+						<LabelValue label="Expires">{viewedKey.expiresAt ? utcDay(viewedKey.expiresAt) : 'No expiry'}</LabelValue>
 					</Section>
 					{(viewedKey.permissions?.length ?? 0) > 0 && (
 						<Section label="Permissions">
@@ -581,7 +582,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 							</div>
 							<Section label="Details">
 								<LabelValue label="Expires">
-									{revealed.expiresAt ? `${parseWireDate(revealed.expiresAt).toLocaleDateString()}${revealed.bounded ? ' (bounded by your sign-in session)' : ''}` : 'No expiry'}
+									{revealed.expiresAt ? `${utcDay(revealed.expiresAt)}${revealed.bounded ? ' (bounded by your sign-in session)' : ''}` : 'No expiry'}
 								</LabelValue>
 							</Section>
 						</>

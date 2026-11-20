@@ -18,7 +18,10 @@ export interface RevealedKeyExpiry {
 /**
  * Milliseconds of a server timestamp. The server sends naive UTC (no offset),
  * which `Date.parse` would read as local time; the same rule as
- * `parseWireDate` in ./components/shared.
+ * `parseWireDate` in ./components/shared. This file is deliberately import-free
+ * so `node:test` can load it without the shell's React/TSX graph, which is why
+ * the zone rule is repeated here instead of imported from shared.tsx; keep the
+ * two in step.
  */
 function wireMillis(iso: string): number {
 	const trimmed = iso.trim();
@@ -46,4 +49,17 @@ export function revealedKeyExpiry(requested: string | undefined, granted: string
 	// cap even 30 seconds earlier (a sign-in just before a 90-day request) is marked.
 	const bounded = requested === undefined || wireMillis(granted) < wireMillis(requested) - 1_000;
 	return { expiresAt: granted, bounded };
+}
+
+/**
+ * The UTC calendar day ('YYYY-MM-DD') of a server timestamp, the same day both
+ * CLIs print, so every surface agrees whatever the viewer's time zone. An
+ * unreadable value is returned as it came.
+ *
+ * @param iso - A server timestamp (zoned, or zone-less UTC).
+ * @returns The UTC day, or `iso` when it does not parse.
+ */
+export function utcDay(iso: string): string {
+	const ms = wireMillis(iso);
+	return Number.isNaN(ms) ? iso : new Date(ms).toISOString().slice(0, 10);
 }

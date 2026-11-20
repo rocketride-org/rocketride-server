@@ -11,7 +11,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { revealedKeyExpiry } from './keyExpiry';
+import { revealedKeyExpiry, utcDay } from './keyExpiry';
 
 test('a "never expires" request capped by the server shows the granted date, marked as bounded', () => {
 	assert.deepEqual(revealedKeyExpiry(undefined, '2027-02-03T10:00:00'), { expiresAt: '2027-02-03T10:00:00', bounded: true });
@@ -31,4 +31,11 @@ test('a key the server says does not expire shows no expiry', () => {
 test('an older server that does not report the expiry falls back to the requested value', () => {
 	assert.deepEqual(revealedKeyExpiry(undefined, undefined), { expiresAt: null, bounded: false });
 	assert.deepEqual(revealedKeyExpiry('2027-01-01T00:00:00.000Z', undefined), { expiresAt: '2027-01-01T00:00:00.000Z', bounded: false });
+});
+
+test('the expiry day is the UTC day, not the viewer\'s local day', () => {
+	assert.equal(utcDay('2027-02-03T02:00:00'), '2027-02-03');
+	assert.equal(utcDay('2027-02-03T02:00:00Z'), '2027-02-03');
+	assert.equal(utcDay('2027-02-03T23:30:00-05:00'), '2027-02-04');
+	assert.equal(utcDay('not a date'), 'not a date');
 });
