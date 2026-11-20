@@ -60,7 +60,12 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import DBAPIError, InterfaceError as SAInterfaceError, SQLAlchemyError, TimeoutError as SAPoolTimeoutError
+from sqlalchemy.exc import (
+    DBAPIError,
+    InterfaceError as SAInterfaceError,
+    SQLAlchemyError,
+    TimeoutError as SAPoolTimeoutError,
+)
 
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
