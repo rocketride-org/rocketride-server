@@ -11,37 +11,44 @@ sidebar_position: 12
 
 ## **Overview**
 
-`rocketride.analytics` is the one shared event-report function, bare bones by
-design. Apps call ``report(event, props)`` with any string event name and a
-free-form props dict. There is no central event list: **each app owns its own
-taxonomy**. What the shared layer guarantees is that every reported event
-carries an ``app`` property identifying the emitting app (``home-ui``,
-``rocket-ui``, …), so downstream analytics can always segment by app. The
+``rocketride.analytics`` mints bound per-app event reporters, bare bones by
+design. A host creates one reporter per app with ``create_reporter(app, sink)``
+and hands it over; the app calls ``report(event, props, options)`` with any
+string event name and a free-form props dict. There is no central event list:
+**each app owns its own taxonomy**. What the shared layer guarantees is that
+every reported event carries an ``app`` property identifying the emitting app,
+**fixed at creation** — there is no module-global "current app" state, so a
+late event from a backgrounded app still names its true emitter. The
 TypeScript mirror lives at ``rocketride/analytics`` in the TypeScript SDK.
 
 ## **Import**
 
 ```python
-from rocketride.analytics import init_report, report
+from rocketride.analytics import create_reporter
 ```
 
 ## **API**
 
 ```python
-# Once, at app init: wire the emitting app id + transport. The sink is
-# whatever callable your app uses to ship events (HTTP, queue, logger, ...).
-init_report('rocket-ui', lambda event, props: my_sink.send(event, props))
+# The HOST mints one reporter per app. The sink is whatever callable ships
+# events (HTTP, queue, logger, ...).
+report = create_reporter('rocket-ui', lambda event, props, options: my_sink.send(event, props))
 
-# Anywhere after that:
+# The app just calls it:
 report('pipeline:run', {'node_count': 4})
-# → sink receives ('pipeline:run', {'app': 'rocket-ui', 'node_count': 4})
+# → sink receives ('pipeline:run', {'app': 'rocket-ui', 'node_count': 4}, None)
 ```
 
-- ``init_report(app, sink)`` — stores the app id and transport. Call once per app.
-- ``report(event, props=None)`` — forwards to the sink with ``app`` stamped into
-  the props. Enforcement is string-ish only: a non-string or empty event name is
-  a silent no-op, and nothing else is validated. Before ``init_report`` runs it
-  is a safe no-op. It never raises — telemetry must never break the app.
+- ``create_reporter(app, sink)`` — returns the app's bound ``report``. The
+  ``app`` stamp is closed over for the reporter's lifetime and is stamped
+  last, so caller props can never overwrite it.
+- ``report(event, props=None, options=None)`` — forwards to the sink with
+  ``app`` stamped into the props. ``options`` is a free-form delivery-hint
+  dict mirroring the TypeScript ``SendOptions`` (``transport``, ``timestamp``,
+  ``uuid``); sinks that don't understand it ignore it. Enforcement is
+  string-ish only: a non-string or empty event name is a silent no-op, and
+  nothing else is validated. It never raises — telemetry must never break the
+  app.
 
 ## **Event Names**
 
@@ -54,7 +61,9 @@ list next to its call sites.
 ## **What This Module Is Not**
 
 It is not a taxonomy and not a transport. There is no event-name ``Literal``
-union, no typed property shapes, and no network I/O — the sink an app injects
-does the sending. An earlier revision centralised a strict cross-app event
-taxonomy here; that was removed in favour of per-app taxonomies and this loose
-core.
+union, no typed property shapes, and no network I/O — the sink a host injects
+does the sending. Earlier revisions centralised a strict cross-app taxonomy
+and, later, a module-global ``init_report(app, sink)``; both were removed —
+the taxonomy in favour of per-app ownership, the global in favour of bound
+reporters whose ``app`` stamp cannot be re-pointed by whichever app
+initialised last.

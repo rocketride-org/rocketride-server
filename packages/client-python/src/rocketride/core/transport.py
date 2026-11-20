@@ -80,6 +80,7 @@ class TransportBase(ABC):
         self._on_caller_receive = None
         self._on_caller_connected = None
         self._on_caller_disconnected = None
+        self._on_caller_closing = None
 
         self._connected = False
 
@@ -139,6 +140,11 @@ class TransportBase(ABC):
         if callback := self._on_caller_disconnected:
             await callback(reason, has_error)
 
+    async def _transport_closing(self) -> None:
+        """Notify that the socket stopped receiving, before in-flight handlers are drained."""
+        if callback := self._on_caller_closing:
+            await callback()
+
     def bind(
         self,
         *,
@@ -147,6 +153,7 @@ class TransportBase(ABC):
         on_receive: Optional[Callable[[Dict[str, Any]], Awaitable[None]]] = None,
         on_connected: Optional[Callable[[Optional[str]], Awaitable[None]]] = None,
         on_disconnected: Optional[Callable[[Optional[str], bool], Awaitable[None]]] = None,
+        on_closing: Optional[Callable[[], Awaitable[None]]] = None,
     ) -> None:
         """
         Bind callback functions to the transport.
@@ -160,6 +167,8 @@ class TransportBase(ABC):
             on_receive: Async callback for received and parsed messages
             on_connected: Async callback for connection established events
             on_disconnected: Async callback for connection closed events
+            on_closing: Async callback as soon as the socket stops receiving, before
+                in-flight handlers are drained and ``on_disconnected`` runs
 
         Example:
             transport = WebSocketTransport("http://localhost:8080")
@@ -188,6 +197,8 @@ class TransportBase(ABC):
             self._on_caller_connected = on_connected
         if on_disconnected is not None:
             self._on_caller_disconnected = on_disconnected
+        if on_closing is not None:
+            self._on_caller_closing = on_closing
 
     def get_connection_info(self) -> Optional[str]:
         """Return connection info for the "connected" callback (e.g. URI). Default none."""

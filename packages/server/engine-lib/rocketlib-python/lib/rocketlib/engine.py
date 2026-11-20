@@ -271,14 +271,24 @@ def expand(value: str) -> str:
 expand = engLib.expand  # noqa
 
 
-def validatePipeline(config: dict) -> dict:
+def validatePipeline(config: dict, custom: list = []) -> dict:
     """
-    Validate the pipeline configuration.
+    Validate the pipeline configuration, with the caller's custom service definitions if any.
     """
     pass
 
 
 globals()['validatePipeline'] = engLib.validatePipeline  # noqa
+
+
+def resolveSecureParameters(pipeline: dict) -> dict:
+    """
+    Replace the secure parameter tokens in a pipeline with the values they hold.
+    """
+    pass
+
+
+globals()['resolveSecureParameters'] = engLib.resolveSecureParameters  # noqa
 
 
 def getServiceDefinition(logicalType: str) -> Dict:
@@ -291,9 +301,9 @@ def getServiceDefinition(logicalType: str) -> Dict:
 getServiceDefinition = engLib.getServiceDefinition  # noqa
 
 
-def getServiceDefinitions() -> Dict:
+def getServiceDefinitions(custom: list = []) -> Dict:
     """
-    Return a service definition given a logical name.
+    Return every service schema, plus the caller's custom service definitions if any.
     """
     ...
 

@@ -30,9 +30,7 @@
 // =============================================================================
 
 import { useSyncExternalStore } from 'react';
-import type { RocketRideClient } from 'shell';
-import { discoverSqlEndpoints } from './discovery';
-import type { ISqlEndpoint } from './types';
+import type { SqlEndpoint } from './types';
 
 // =============================================================================
 // STATE
@@ -42,18 +40,18 @@ import type { ISqlEndpoint } from './types';
 export type EndpointStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 /** The store's snapshot shape consumed by React. */
-export interface IEndpointState {
+export interface EndpointState {
 	/** Discovery lifecycle state. */
 	status: EndpointStatus;
 	/** The discovered endpoints (empty until the first refresh completes). */
-	endpoints: ISqlEndpoint[];
+	endpoints: SqlEndpoint[];
 	/** Failure detail when status is 'error'. */
 	error: string | null;
 }
 
 // ── Module-level state ───────────────────────────────────────────────────────
 
-let state: IEndpointState = { status: 'idle', endpoints: [], error: null };
+let state: EndpointState = { status: 'idle', endpoints: [], error: null };
 const listeners = new Set<() => void>();
 
 // Monotonic refresh counter so an outdated in-flight discovery never
@@ -65,7 +63,7 @@ let refreshSeq = 0;
  *
  * @param next - The new snapshot.
  */
-function setState(next: IEndpointState): void {
+function setState(next: EndpointState): void {
 	state = next;
 	listeners.forEach((fn) => fn());
 }
@@ -78,13 +76,15 @@ function setState(next: IEndpointState): void {
  * Run (or re-run) endpoint discovery. Concurrent calls are safe: only the
  * most recent call's result is applied.
  *
- * @param client - The shell's RocketRide client.
+ * @param discover - Runs the discovery (the caller's SqlEnv provides it —
+ *                   locally over the realm's client, remotely as a
+ *                   controller op).
  */
-export async function refreshEndpoints(client: RocketRideClient): Promise<void> {
+export async function refreshEndpoints(discover: () => Promise<SqlEndpoint[]>): Promise<void> {
 	const seq = ++refreshSeq;
 	setState({ ...state, status: 'loading', error: null });
 	try {
-		const endpoints = await discoverSqlEndpoints(client);
+		const endpoints = await discover();
 		if (seq !== refreshSeq) return;
 		setState({ status: 'ready', endpoints, error: null });
 	} catch (err) {
@@ -104,7 +104,7 @@ export async function refreshEndpoints(client: RocketRideClient): Promise<void> 
  *
  * @returns The current endpoint state snapshot.
  */
-export function useSqlEndpoints(): IEndpointState {
+export function useSqlEndpoints(): EndpointState {
 	return useSyncExternalStore(
 		(cb) => { listeners.add(cb); return () => listeners.delete(cb); },
 		() => state,

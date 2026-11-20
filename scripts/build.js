@@ -37,8 +37,9 @@ async function handleTermination(signal) {
 	process.exit(130); // Standard exit code for SIGINT
 }
 
-// Release is the default, Debug is not supported
-const CMAKE_CONFIGS = ['Release', 'RelWithDebInfo'];
+// Release is the default, Debug is not supported. Sanitize (ASan + UBSan) is
+// Linux-only: only the Linux clang flags file defines it
+const CMAKE_CONFIGS = ['Release', 'RelWithDebInfo', 'Sanitize'];
 
 function parseArgs(args) {
 	const requests = [];
@@ -128,6 +129,12 @@ function parseArgs(args) {
 				console.error(`Unknown --cmake-config=${value}, expected one of: ${CMAKE_CONFIGS.join(', ')}`);
 				process.exit(1);
 			}
+			// Elsewhere CMake would accept the unknown build type and build
+			// with no sanitizers at all
+			if (value === 'Sanitize' && process.platform !== 'linux') {
+				console.error(`--cmake-config=Sanitize is Linux-only (this platform: ${process.platform})`);
+				process.exit(1);
+			}
 			options.cmakeConfig = value;
 		} else if (arg.startsWith('--taskserver=')) {
 			options.taskserver = arg.substring('--taskserver='.length);
@@ -171,10 +178,12 @@ function parseArgs(args) {
 			// contract is current without writing a new version.
 			options.check = true;
 		} else if (arg === '--reseed') {
-			// saas:seed --reseed: fleet bump — roll a NEW version of every
-			// platform app. Deliberately NOT the global --force flag: that
-			// one forces full rebuilds (C++ recompile included) of every
-			// step in the dependency chain.
+			// saas:seed --reseed: re-seed the platform apps whose BUILT BUNDLE
+			// changed (absent apps seed with or without the flag; an app whose
+			// public rung serves a rails deploy is its author's and is never
+			// replaced — admin_reseed is the per-app override). Deliberately
+			// NOT the global --force flag: that one forces full rebuilds
+			// (C++ recompile included) of every step in the dependency chain.
 			options.reseed = true;
 		} else if (arg === '--rebuild-cache') {
 			// test-integrity: nuke <engine-cache>/{constraints.txt,requirements.hash}
@@ -275,6 +284,8 @@ Options:
   --arch=arm|intel    Target architecture (macOS cross-compile)
   --autoinstall       Install missing tools (pnpm; on Windows/Linux, VS/C++ when compiling engine)
   --catch="args"      Pass arguments to Catch2 tests (aptest/engtest)
+  --cmake-config=TYPE C++ build type (default: Release); repeat it on every call
+                      (TYPE: Release|RelWithDebInfo|Sanitize; Sanitize = ASan + UBSan, Linux only)
   --force, -f         Force rebuild (ignore cache/state)
   --hash=HASH         Set build hash
   --help, -h          Show this help message

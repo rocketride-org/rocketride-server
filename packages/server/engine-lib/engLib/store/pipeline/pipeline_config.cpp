@@ -469,7 +469,7 @@ Error PipelineConfig::decryptSection(json::Value &section,
     auto encryptedValues = crypto::base64Decode(token);
     if (!encryptedValues) return encryptedValues.ccode();
 
-    auto decryptedValues = crypto::engineDecrypt(*encryptedValues);
+    auto decryptedValues = crypto::paramTokenDecrypt(*encryptedValues);
     if (!decryptedValues) return decryptedValues.ccode();
 
     auto secureValues = json::parse(decryptedValues->toTextView());
@@ -493,6 +493,44 @@ Error PipelineConfig::decryptSection(json::Value &section,
         // Update the parameter with decrypted secure value if necessary
         if (overwrite || !section.isMember(name))
             section[name] = (*secureValues)[name];
+    }
+
+    return {};
+}
+
+/**
+ * @brief Replaces the secure parameter tokens in the pipeline with the values
+ * they hold.
+ *
+ * Decrypts every component the way decrypt() does, keeping parameter values
+ * that are already set, then removes the "secureParameters" sections. The
+ * pipeline then carries plain parameter values, so a process that runs it
+ * does not need the key the tokens were encrypted with.
+ *
+ * @return An Error object.
+ */
+Error PipelineConfig::resolveSecureParameters() noexcept {
+    if (!m_root.isObject() || !m_root.isMember("pipeline") ||
+        !m_root["pipeline"].isObject())
+        return APERR(Ec::InvalidParam, "'pipeline' is missing or invalid");
+
+    if (!m_root["pipeline"].isMember("components")) return {};
+    if (!components().isArray())
+        return APERR(Ec::InvalidParam,
+                     "'pipeline.components' must be an array");
+
+    for (auto &component : components()) {
+        // Check the structure first so decrypting never reads a malformed
+        // section
+        if (auto ccode = validateComponent(component)) return ccode;
+        if (auto ccode = decryptComponent(component)) return ccode;
+
+        auto &config = component["config"];
+        Text profileName = config.lookup<Text>("profile");
+        if (profileName && config.isMember(profileName))
+            config[profileName].removeMember("secureParameters");
+        if (config.isMember("parameters"))
+            config["parameters"].removeMember("secureParameters");
     }
 
     return {};
@@ -583,7 +621,8 @@ Error PipelineConfig::encryptSection(IServices::ServiceDefinitionPtr def,
     // If we have secure parameters, encrypt them and add to the config
     if (secureNames) {
         // Encrypt the secure values
-        auto encryptedValues = crypto::engineEncrypt(secureValues.stringify());
+        auto encryptedValues =
+            crypto::paramTokenEncrypt(secureValues.stringify());
         if (!encryptedValues) return encryptedValues.ccode();
 
         // Convert the encrypted values to a base64 token

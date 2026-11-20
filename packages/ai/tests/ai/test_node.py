@@ -35,6 +35,7 @@ import asyncio
 import sys
 import threading
 import time
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -193,7 +194,10 @@ def test_setup_calls_use_data_on_the_constructed_server(monkeypatch):
 
     node._setup_shared_web_server()
 
-    server_instance.use.assert_called_once_with('data')
+    # No --data_token_sha256 on this argv, so the module fails closed
+    name, config = server_instance.use.call_args.args
+    assert name == 'data'
+    assert config['token_sha256'] is None
 
 
 def test_setup_schedules_serve_on_server_loop(monkeypatch):
@@ -469,7 +473,10 @@ def test_setup_reports_when_the_listener_never_comes_up(monkeypatch):
 
 def test_setup_is_quiet_when_the_listener_comes_up(monkeypatch):
     """A healthy startup logs nothing — the control for the test above."""
-    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345'])
+    # Healthy includes the engine's token hash
+    monkeypatch.setattr(
+        sys, 'argv', ['node.py', '--data_host=127.0.0.1', '--data_port=12345', f'--data_token_sha256={"a" * 64}']
+    )
     monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.5)
 
     server_instance = MagicMock(name='WebServer-instance')
@@ -592,3 +599,153 @@ def test_run_refuses_when_the_task_could_not_be_made_private(monkeypatch):
     with pytest.raises(node.TaskNotPrivateError, match='could not make the task process private'):
         node.run()
     assert started == []
+
+
+# ---------------------------------------------------------------------------
+# _setup_shared_web_server — the data-channel token and the standard endpoints
+# ---------------------------------------------------------------------------
+
+
+def _capture_use(monkeypatch, argv):
+    """Run ``_setup`` with ``argv`` and return the fake server and warnings.
+
+    Args:
+        monkeypatch: pytest fixture.
+        argv: The process argv to simulate.
+
+    Returns:
+        tuple: ``(server_instance, warnings, web_server_kwargs)``.
+    """
+    monkeypatch.setattr(sys, 'argv', argv)
+
+    server_instance = MagicMock(name='WebServer-instance')
+    warnings = []
+    captured = {}
+
+    def fake_web_server(config=None, on_startup=None, **kwargs):
+        """Stand in for WebServer: keep its keyword arguments and fire the startup callback."""
+        captured.update(kwargs)
+        _fire_startup_callback_async(on_startup)
+        return server_instance
+
+    monkeypatch.setattr('ai.web.WebServer', fake_web_server)
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: MagicMock())
+    monkeypatch.setattr(node, 'warning', warnings.append)
+
+    node._setup_shared_web_server()
+    return server_instance, warnings, captured
+
+
+HASH = 'a' * 64
+
+
+def test_setup_turns_off_the_standard_endpoints(monkeypatch):
+    """The task's server never serves /use, /ping, /shutdown or /auth/callback."""
+    _, _, kwargs = _capture_use(monkeypatch, ['node.py', '--data_port=12345'])
+
+    assert kwargs['standardEndpoints'] is False
+
+
+def test_setup_hands_the_token_hash_to_the_data_module(monkeypatch):
+    """The hash the engine put on argv is what /task/data checks against."""
+    server, warnings, _ = _capture_use(
+        monkeypatch, ['node.py', '/tmp/task-1.json', '--autoterm', '--data_port=12345', f'--data_token_sha256={HASH}']
+    )
+
+    assert server.use.call_args.args[1]['token_sha256'] == HASH
+    assert warnings == []
+
+
+def test_setup_keeps_the_engines_hash_over_a_later_one(monkeypatch):
+    """Pipeline args come after the engine's flags; a second hash cannot replace the first."""
+    argv = ['node.py', f'--data_token_sha256={HASH}', '--data_port=12345', '--data_token_sha256', 'b' * 64]
+
+    server, _, _ = _capture_use(monkeypatch, argv)
+
+    assert server.use.call_args.args[1]['token_sha256'] == HASH
+
+
+def test_setup_does_not_take_an_abbreviated_flag(monkeypatch):
+    """``--data_token=...`` is not read as ``--data_token_sha256``."""
+    server, warnings, _ = _capture_use(monkeypatch, ['node.py', '--data_port=12345', f'--data_token={HASH}'])
+
+    assert server.use.call_args.args[1]['token_sha256'] is None
+    assert len(warnings) == 1
+
+
+@pytest.mark.parametrize('argv_tail', [[], ['--data_token_sha256=']], ids=['absent', 'empty'])
+def test_setup_without_a_hash_fails_closed(monkeypatch, argv_tail):
+    """No hash: /task/data gets None, which refuses every connection, and says so."""
+    server, warnings, _ = _capture_use(monkeypatch, ['node.py', '--data_port=12345', *argv_tail])
+
+    assert server.use.call_args.args[1]['token_sha256'] is None
+    assert len(warnings) == 1
+
+
+# ---------------------------------------------------------------------------
+# Channel signals and the HTTP authenticator
+# ---------------------------------------------------------------------------
+
+
+def _capture_signals(monkeypatch):
+    """Record ``monitorOther`` calls instead of writing to the engine's stdout."""
+    import rocketlib
+
+    calls = []
+    monkeypatch.setattr(rocketlib, 'monitorOther', lambda *args: calls.append(args), raising=False)
+    return calls
+
+
+def test_channel_signal_goes_through_the_monitor(monkeypatch):
+    calls = _capture_signals(monkeypatch)
+    node._channel_signal('1')
+    node._channel_signal('1', 'abcd')
+    node._channel_signal('2')
+    assert calls == [('CHN', '1'), ('CHN', '1*abcd'), ('CHN', '2')]
+
+
+def test_announce_sends_ready_then_startup_over_only_with_a_listener(monkeypatch):
+    calls = _capture_signals(monkeypatch)
+    node._announce_channel(SimpleNamespace(server=SimpleNamespace(started=True)))
+    assert calls == [('CHN', '1'), ('CHN', '2')]
+
+    calls.clear()
+    node._announce_channel(SimpleNamespace(server=SimpleNamespace(started=False)))
+    node._announce_channel(None)
+    assert calls == []
+
+
+async def test_http_authenticator_accepts_only_the_channel_token():
+    import hashlib
+
+    authenticate = node._channel_authenticator(hashlib.sha256(b'run-token').hexdigest())
+    assert (await authenticate('run-token')).userId == 'task'
+    with pytest.raises(PermissionError):
+        await authenticate('engine-key')
+    with pytest.raises(PermissionError):
+        await node._channel_authenticator(None)('run-token')
+
+
+def test_setup_installs_the_authenticator_and_the_close_signal(monkeypatch):
+    calls = _capture_signals(monkeypatch)
+    monkeypatch.setattr(sys, 'argv', ['node.py', '--data_port=12345', '--data_token_sha256=' + 'ab' * 32])
+
+    class FakeServer:
+        def __init__(self, **kwargs):
+            self.use = MagicMock()
+            self.add_authenticator = MagicMock()
+            self.serve = MagicMock()
+            self.server = SimpleNamespace(started=True)
+
+    created = []
+    monkeypatch.setattr('ai.web.WebServer', lambda **kw: created.append(FakeServer(**kw)) or created[-1])
+    monkeypatch.setattr('asyncio.run_coroutine_threadsafe', lambda coro, loop: MagicMock())
+    monkeypatch.setattr(node, '_SHARED_SERVER_STARTUP_TIMEOUT_SECONDS', 0.05)
+
+    node._setup_shared_web_server()
+
+    server = created[0]
+    server.add_authenticator.assert_called_once()
+    config = server.use.call_args.args[1]
+    config['on_closed']('0123abcd')
+    assert calls == [('CHN', '1*0123abcd')]

@@ -22,9 +22,10 @@ A complete guide for developers building micro-frontend applications for the Roc
 10. [The Virtual File System (IVirtualFileSystem)](#the-virtual-file-system-ivirtualfilesystem)
 11. [DocExplorer: File Tree Component](#docexplorer-file-tree-component)
 12. [DocTabs: Tab Bar Component](#doctabs-tab-bar-component)
-13. [Cross-App Component Loading](#cross-app-component-loading)
-14. [Theming](#theming)
-15. [Build Configuration](#build-configuration)
+13. [DesktopView: The Shared Desktop Page](#desktopview-the-shared-desktop-page)
+14. [Cross-App Component Loading](#cross-app-component-loading)
+15. [Theming](#theming)
+16. [Build Configuration](#build-configuration)
 
 ---
 
@@ -219,6 +220,8 @@ interface AppManifest {
   readme?: string;
   /** Categories for filtering (e.g. ['tools', 'ai']). */
   categories?: string[];
+  /** Shell editions the app serves ('saas' | 'oss' | 'vscode'). Absent: every shell. */
+  shells?: string[];
   /** When false, the app runs without authentication. Default: true. */
   authenticated?: boolean;
   /** When false, the shell header (app name/icon in the sidebar) is hidden. Default: true. */
@@ -233,8 +236,258 @@ interface AppManifest {
   appStatus?: string;
   /** Whether the app is available on the desktop (non-cloud) platform. */
   onDesktop?: boolean;
+  /** Platform apps only: public pages on the app origin (see Public pages). */
+  publicPages?: PublicPage[];
+  /** Platform apps only, honored from the app owning '/': the site's title, blurb, docs link, redirects, image, feeds and organization. */
+  site?: {
+    title?: string;
+    blurb?: string;
+    docsUrl?: string;
+    /** The snapshot, in the build output, served with a 404 on paths nothing serves: 'pages/404.html'. */
+    notFound?: string;
+    /** Old URLs answered with a 301 to one of your pages, query string kept. */
+    redirects?: { from: string; to: string }[];
+    /** The link-preview image of pages that declare none (same forms as a page's image). */
+    image?: string;
+    /** Atom feeds of the dated pages under a prefix: { path: '/blog/feed.xml', prefix: '/blog/', title: 'Blog' }. */
+    feeds?: { path: string; prefix: string; title: string }[];
+    /** The organization the site belongs to: its Organization JSON-LD, with the @id `${url}#organization`. */
+    organization?: { name: string; url: string; logo?: string; description?: string; sameAs?: string[] };
+  };
 }
 ```
+
+### Public pages (platform apps)
+
+The server builds the app origin's public page map from the `publicPages`
+and `site` sections of published platform apps' manifests. A build can ship
+both sections in `app-manifest.json` at the root of its output, next to the
+page snapshots; the server reads that file in preference to the registered
+manifest. Both sections are optional and append-only: fields are never
+repurposed or removed, and the server ignores keys it does not know, so an
+older server accepts a newer manifest.
+
+```typescript
+interface PublicPage {
+  /** One exact path: '/pricing'. */
+  path: string;
+  /** The page title (at most 300 characters). */
+  title: string;
+  /** The page description (at most 1000 characters). */
+  description?: string;
+  /** Default true. false marks the page unlisted: not meant to be advertised or indexed. */
+  listed?: boolean;
+  /** The document crawlers get, inside the app's build output, e.g. 'pages/pricing.html'. */
+  snapshot?: string;
+  /** Server data the page names: 'plans' (this app's plans), 'plans:<appId>' or 'app:<appId>'. */
+  data?: string[];
+  /** The link-preview image: an https URL, a root path, or a path in the build output ('og/pricing.png'). */
+  image?: string;
+  /** When the page was first published, 'YYYY-MM-DD' or an RFC 3339 date-time: makes it an article. */
+  published?: string;
+  /** When the page last changed, in the same forms; never earlier than published. */
+  modified?: string;
+  /** At most 5 authors, each a name (at most 300 characters) and an optional https URL. */
+  authors?: { name: string; url?: string }[];
+}
+```
+
+Rules, enforced when a version is published to the public store rung (the
+publish fails with a message naming the field):
+
+- Only platform apps (ids in the `rocketride` developer namespace) may declare
+  `publicPages`, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
+  `rocketride.home`) may declare pages. `site` goes with the `/` page: a
+  platform app that declares `site` without declaring `/` is refused, and a
+  third-party app's `site` is ignored, since it can never take effect.
+- `path` is absolute and lowercase, with no query, fragment, trailing slash,
+  empty or dot segment. Each segment uses only `a-z`, `0-9`, `-`, `.`, `_` and
+  `~`, so `/café` and `/caf%C3%A9` are refused. Wildcard pages are not
+  supported.
+- Paths under a root route the engine serves itself (`/api`, `/apps`, `/auth`,
+  `/mcp`, `/shell`, `/status`, `/task`, `/.well-known` and the rest of the
+  engine's routes) or the three crawler files (`/sitemap.xml`, `/robots.txt`,
+  `/llms.txt`) are rejected, as is a path a server route already serves, or one
+  another published platform app already claims (first claim wins; unpublishing
+  releases it).
+- Each `data` entry is `plans`, `plans:<appId>` or `app:<appId>`, and a page
+  names each source (`plans`, `app`) at most once.
+- `snapshot` and `site.notFound` must be a relative `.html` path that exists
+  in the built version, at most 2 MiB.
+- `image` and `site.image` are an `https://` URL, a root path (`/apps/...`,
+  never `//`) or a relative path inside the build output, with no empty or dot
+  segment, at most 2048 characters.
+- `published` and `modified` are a real date (`2026-11-09`) or an RFC 3339
+  date-time with an offset (`2026-11-09T10:00:00Z`, at most `±23:59`) that
+  stays within years 1 to 9999 in UTC. A date alone means midnight UTC, and
+  `modified` may not be earlier than `published`.
+- `authors` holds at most 5 entries, each with a non-empty `name` and, if
+  given, an `https://` `url`.
+- No text or URL field may hold a lone surrogate (U+D800 to U+DFFF, half of a
+  UTF-16 pair, as a string cut through an emoji leaves), which UTF-8 cannot
+  carry.
+- `site.docsUrl` must be an `https://` URL, with `<`, `>`, `"`, `'` and
+  `` ` `` percent-encoded.
+- `site.redirects` (at most 100): each `from` is one exact path in the `path`
+  grammar, except that a trailing slash is allowed (`/master-saas-agreement/`);
+  it may not be reserved, and neither it nor its slash twin (`/x` and `/x/`)
+  may be a server route or a page any published app serves; it appears once.
+  List both forms of an old URL to redirect both. Each `to` is the exact path
+  of one of the manifest's own pages.
+- `site.feeds` (at most 5): each `path` is one exact path in the `path` grammar
+  ending in `.xml`; it may not be reserved, and neither it nor its slash twin
+  may be a page any published app serves, a redirect's `from` or a server
+  route; it appears once. `prefix` is a page path ending in `/` (`/blog/`, or
+  `/` for every page), and `title` a non-empty string of at most 300
+  characters.
+- `site.organization` needs a non-empty `name` (at most 300 characters) and an
+  `https://` `url`; `logo` is an `https://` URL, `description` at most 1000
+  characters, and `sameAs` a list of at most 20 `https://` URLs.
+
+Until a published platform app contributes a valid page, the page map holds
+the server's built-in page list instead. A published app whose storage cannot
+be read keeps the pages of its last readable build while the server runs;
+after a restart it has none until its storage can be read again. Kept pages
+still compete with other apps' claims under the same first-claim rule.
+
+A server without `RR_APP_URL` is not the public site: its `/robots.txt`
+disallows all crawling and `/sitemap.xml` and `/llms.txt` answer `404`, so
+search engines do not index its pages. Set `RR_APP_URL` to the public origin
+to make published pages indexable; a server that serves published pages
+without it logs a warning once.
+
+The server answers `GET` and `HEAD` on each page with the shell's document
+(the route's prerendered capture when the shell build carries one, else
+`index.html`), its head carrying the page's `title`, `description`, a
+canonical URL on `RR_APP_URL`, and `noindex` for an unlisted page.
+Crawlers (search, AI and link-preview bots, by user agent) get the page's
+`snapshot` instead, read from the production version's build output, with the
+same head. A page without a snapshot, or whose snapshot cannot be read or
+rendered, serves crawlers the shell's document; so does a stored snapshot over
+2 MiB, which the server never reads.
+
+Every page's head, for people and crawlers alike (link-preview fetchers do
+not always say they are bots), also carries `og:site_name` (`site.title`),
+`og:type` and a Twitter card. A page with `published` is an `article`, with
+`article:published_time` and `article:modified_time` (`modified`, else
+`published`); any other page is a `website`. `og:image` is the page's `image`,
+else `site.image`, and asks for the large card (`summary_large_image`, else
+`summary`). A snapshot's own hand-written `og:type`, `og:site_name`,
+`og:image`, `twitter:card`, `article:published_time` and
+`article:modified_time` tags are removed (as are its title, description,
+canonical, robots, `og:title`, `og:description` and `og:url`), so the page's
+`image` and `site.image` are the only source of `og:image`. A snapshot's own
+`twitter:image` and `twitter:image:alt` are removed too, so X/Twitter falls back
+to that `og:image`. An `https://` image is used as declared; a root path is made
+absolute with `RR_APP_URL`; a relative path is a file of the declaring app's
+build output, served from its production version
+(`<RR_APP_URL>/apps/<appId>/v<N>/<path>`). Without `RR_APP_URL` only an
+`https://` image is used.
+
+Crawlers also get a `BlogPosting` (JSON-LD) for each page with `published`:
+its `headline` (the title without a trailing ` | <site.title>`),
+`description`, `datePublished`, `dateModified`, `image`, `mainEntityOfPage`
+(the canonical URL), each author as a `Person`, and the site's organization
+as `publisher`, also the `author` of a page without authors. That
+organization is a reference to the `site.organization` node by its `@id`
+when one is declared, else an organization named after `site.title`, on the
+`RR_APP_URL` origin. Crawlers get the `site.organization` node (an
+`Organization` with the declared fields and the `@id`
+`<url>#organization`) on `/` and on every page with `published`, so the
+reference resolves on the page itself; `/` also carries a `WebSite` node for
+the `RR_APP_URL` origin, published by that organization.
+
+A snapshot is a template with exactly three kinds of tag, each on one line:
+`{{name}}` and `{{a.b}}` insert a value, HTML-escaped; `{{#name}}...{{/name}}`
+repeats its content for each item of a list, enters an object, and renders
+nothing for an absent, empty or false value. Sections nest at most 16 deep.
+There is no `{{.}}`: a list item that is not an object adds no names, so a tag
+inside its section reads the enclosing values (`{{b}}` inside `{{#a}}` over
+`["x"]` renders the outer `b`).
+Any other tag renders nothing, as does a tag naming a value the server does
+not provide; a `{{` that does not form a tag stays as text. Escaping makes a
+value safe in HTML text and in quoted attributes that are not URLs; it does not
+make a value safe in a URL attribute (`href`, `src`), an event handler,
+`style`, `<script>` or an unquoted attribute, so only server-derived URLs such
+as `{{assets}}` belong there. `{{assets}}` is the URL of the version's build
+output, `/apps/<appId>/v<N>`, so a snapshot references its images as
+`{{assets}}/seo-assets/logo.svg`, served from the same version it was read
+from. The shell's own document is never treated as a template.
+
+A page's `data` entries add server data to its snapshot, each under its source
+name whatever its argument:
+
+- `plans` and `plans:<appId>`: `{{#plans}}...{{/plans}}` iterates the plans of
+  the declaring app or of the named app, each
+  `{id, name, price, currency, period, features[]}`, with `price` a decimal
+  string such as `29` or `29.50` (the server accepts a string, an integer or a
+  decimal, never a float) and `currency` an upper-case code such as `USD`.
+- `app:<appId>`: `{{#app}}...{{/app}}` holds `{name, description, url}`. `url` is
+  the app's subdomain URL; it is empty until subdomain routing ships, so put a
+  link to it inside `{{#url}}...{{/url}}`, which renders only when it is set.
+  Name and description are store text, safe only where escaping makes them
+  safe.
+
+A named app contributes only while anonymous store visitors can see it: its
+public listing is live, it requires no permissions, and its manifest does not
+say `public: false`. Otherwise `plans` is empty and `app` is absent. Crawlers
+also get JSON-LD built from the same data: a `SoftwareApplication` for `app`,
+and a `Product` with an `Offer` for each plan whose price is a plain decimal
+number (ASCII digits) and whose currency is a three-letter ISO 4217 code. A
+price change (`invalidate('plans')` from the billing layer) or a deployment
+change of an app a page names takes effect on the next crawl; other servers
+pick it up within five minutes. A crawler response that carries this data is
+sent `public` with a `max-age` of what remains of those five minutes, so no
+cache keeps it longer; one rendered while that data changed is sent
+`private, no-cache`. Other rendered snapshots are `public, max-age=3600`, and
+every page response carries `Vary: User-Agent`. When the data cannot be read,
+crawlers get the page without it.
+
+`/sitemap.xml` and `/llms.txt` list the listed pages, and `/llms.txt` takes
+its heading, blurb and docs link from `site`; redirects never appear in
+either. Each sitemap entry's `<lastmod>` is the date of the page's `modified`,
+else `published`; a page with neither has no `<lastmod>`, since a deploy is
+not a content change. In
+`/llms.txt`, a page whose parent path (`/blog` for `/blog/x`) is a listed page
+is listed in that parent's section, headed by the parent's title without a
+trailing ` | <site.title>`, with dated pages newest first and the rest by
+path; every other page is under `## Pages`, by path.
+
+A server with `RR_INDEXNOW_KEY` (8 to 128 letters, digits and `-`) and an
+`https://` `RR_APP_URL` serves the key at `/<key>.txt` and, whenever the page
+map changes, submits to IndexNow, which shares them with Bing and the other
+participating search engines, the listed pages that are new or whose content
+changed (a field of the page, or its snapshot's bytes; a new version alone
+is no change) and the pages that were listed and are now gone or unlisted.
+Without both settings it serves no key file and submits nothing. The pages
+of an app missing from the page map altogether (unpublished, made
+non-public, or skipped for a moment because its storage could not be read)
+are not submitted as removed: a transient storage error must not look like
+a removal.
+
+Each feed in `site.feeds` answers `GET` and `HEAD` on its `path` with an Atom
+1.0 document (`application/atom+xml`): the listed pages strictly under its
+`prefix` that declare `published`, newest first, at most 50. An entry carries
+the page's canonical URL, its title without a trailing ` | <site.title>`,
+`published`, `updated` (`modified`, else `published`; a date alone is
+midnight UTC), its description as the summary and its authors; the feed's
+own author is `site.title`. Like the sitemap, a feed answers `404` without
+`RR_APP_URL`. The prefix page and every page under it link to the feed from
+their head (`<link rel="alternate" type="application/atom+xml">`).
+
+`GET` and `HEAD` on a redirect's `from` answer `301` with
+`Location: <to>?<query>`, and on `/x/` answer `301` to `/x` when `/x` is a
+page (query kept). Any path that is neither a page, a redirect nor a server
+route answers `404`. A browser or crawler (a `GET` or `HEAD` that accepts
+HTML) gets the server's not-found page with it, which links home and to
+sign-in; paths under `/api`, `/task`, `/mcp` and `/.well-known`, and API
+clients, get the plain `404`. With `site.notFound` declared, a `GET` or `HEAD`
+on such a path (outside those prefixes) answers `404` with a page titled
+`Page not found | <site.title>`, `noindex`, no canonical URL and
+`Cache-Control: private, no-cache`: crawlers get the `site.notFound` snapshot,
+rendered like a page's (`{{assets}}` included), and people get the shell's
+`index.html`, so your app renders its own not-found view. Without
+`site.notFound`, the server's own not-found page serves instead.
 
 ### Settings
 
@@ -264,7 +517,9 @@ Each property is a `SettingSchema` (`type`, `default`, `description`, `enum`, `r
 Settings are:
 - Rendered in the shell's Settings overlay (grouped by app)
 - Persisted to `.workspace/settings.json`
-- Available to your app via `useShellApiConfig()`, access as `config['mycompany.myApp.apiKey']`
+- Available to your app via `useWorkspace().settings`, access as `settings['mycompany.myApp.apiKey']` (effective values: declared defaults overlaid with the user's overrides)
+
+The shell contributes its own **General** section (keys under `rocketride.general.*`), which always appears first in the Settings overlay. Its keys are reserved — an app redeclaring one is ignored. `rocketride.general.sidebar` (`default` | `vscode` | `cursor` | `rocketride`, default `default`) picks the sidebar layout for every app: `default` defers to each app's declared `sidebarMode`, any other choice overrides it. `vscode`/`cursor` take effect only on apps that declare `sidebarViews`; apps with a classic `sidebar` node keep the classic column.
 
 ---
 
@@ -279,18 +534,32 @@ interface AppDescriptor {
   icon?: React.ReactNode;                  // Icon in app switcher
   branding: ShellBrandingConfig;           // Sidebar header branding
 
-  /** The app's ONE mount point — rendered raw in the client area. */
+  /** The app's ONE mount point — rendered raw in the client area. Required. */
   app: React.ComponentType<ShellAppProps>;
+
+  /** How the app would like the shell sidebar to open when it activates. */
+  sidebar?: 'expanded' | 'collapsed';
 
   /** Optional cross-app component catalog. Never mounted by the shell. */
   components?: {
     [key: string]: React.ComponentType<any>;
   };
+
+  /** Dev-tool mounts — see "Dev Tools" below. Optional; hosted workbenches
+      mount these directly instead of booting the full `app`. */
+  devToolFrame?: React.ComponentType<DevToolProps>;
+  devToolSidebar?: React.ComponentType<DevToolProps>;
+
+  /** First-party apps only: the `app` value stamped on telemetry instead of
+      `id`. See "Telemetry" below. */
+  telemetryId?: string;
 }
 ```
 
-- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`
+- **`app`** is the single component the shell mounts in the client area; the app composes its own layout inside (columns, sidebar, status bar) with `<AppLayout>`. It is **required** even for apps that are primarily dev tools — a tool with no meaningful full-screen form still declares a minimal mount
+- **`sidebar`** lets an app ask for the shell sidebar collapsed on activation; absent means no opinion
 - **`components`** entries (e.g. `Canvas`, `Toolbar`, `DataGrid`) are never mounted by the shell but are loadable by other apps via `useAppComponent()`
+- **`devToolFrame`** / **`devToolSidebar`** are the dev-tool mount points (see [Dev Tools](#dev-tools))
 
 ### ShellBrandingConfig
 
@@ -340,13 +609,29 @@ interface ShellAppProps {
 
 | Zone | Owner | Content |
 |------|-------|---------|
-| **Sidebar** | Your `app` component's layout (`AppLayout`) | App switcher header, your sidebar content, theme/account/settings footer |
+| **Sidebar** | Your `app` component's layout (`AppLayout`) | Classic column for a `sidebar` node; activity rail + panel when the app declares `sidebarViews` (app icon and name in the panel header, your content in the panel, account footer on the rail) |
 | **Client Area** | Your `app` component | Whatever your app renders |
 | **Debug Panel** | Shell (ALT+D toggle) | Live event log, postMessage traffic |
 | **Status Bar** | Shell | Connection status, app name, ready state |
 | **Overlays** | Shell | Account, Billing, Settings (triggered from sidebar footer) |
 
 If your app's layout renders no sidebar, the client area gets the full window width.
+
+**Sidebar chrome.** The chrome follows the declaration. A plain
+`sidebar={content}` node renders the classic single column (which iconifies
+when collapsed). Declaring `sidebarViews` (one entry per rail icon; see
+`SidebarViewContainer`) unlocks the VS Code-style frame instead: a fixed
+activity rail beside a resizable panel holding your content. There,
+collapsing closes the panel; the rail and account footer never disappear,
+and your content is never asked to render an iconified form of itself. An
+existing menu can be projected onto the rail with `viewsFromMenu(menu)` —
+an explicit opt-in, never applied automatically. `sidebarMode: 'rocketride'`
+opts a view-declaring app back into the classic column; compact (mobile)
+widths always render a drawer. The user's **General > Sidebar** setting
+(`rocketride.general.sidebar`) overrides `sidebarMode` whenever it is set to
+anything other than `default`; on `default` the app's declaration applies.
+The `vscode`/`cursor` choices apply only to apps that declare `sidebarViews`
+— a classic sidebar is never shoehorned onto the rail.
 
 ---
 
@@ -364,6 +649,43 @@ Import everything from `'rocketride/app-sdk'`:
 ```typescript
 import { useShellConnection, useShellApiConfig, useWorkspace, connectionManager } from 'rocketride/app-sdk';
 ```
+
+### Telemetry
+
+The shell owns the one product-telemetry transport (keys, consent, delivery).
+The platform serves these to it at runtime; your app never carries any of them.
+Your app receives a bound reporter and simply calls it:
+
+```typescript
+import { useReport } from 'shell';
+
+const report = useReport();
+report('chat:message_sent', { length: 42 });
+```
+
+The shell binds the reporter to your app. Every event is stamped with an `app`
+property, last, so your props cannot overwrite it. There is nothing to
+initialise or configure. The stamped value is your descriptor's `telemetryId`
+when the app is first-party (id `rocketride` or starting `rocketride.`) and the
+alias is valid. Otherwise it is your app's `id`. A valid alias matches
+`^[A-Za-z0-9._-]{1,128}$`, is not `shell` (reserved for the shell's own events)
+and is not another registered app's id. An alias that fails these checks falls
+back to the id with no warning. The alias is chosen once on the descriptor,
+never per event. Events the analytics SDK generates on its own (`$pageleave`,
+`$web_vitals`, `$autocapture`, `$exception` and the like) carry no `app`.
+`$host` and `$pathname` do not identify the app either, because the URL does
+not change on an app switch.
+
+Events sent through `getConsentedCapture(...).report` are tagged internally as
+attributed. A tagged event is dropped at send time unless consent is still
+accepted and no browser privacy signal (DNT or GPC) is on. Without consent (the
+cookieless instance) it is always dropped. Ordinary events are never dropped
+because of their property names, and an app cannot set the tag itself. Event
+names are your app's own taxonomy (`object:action` by convention); document
+them beside your call sites. `useConsent()` exposes the visitor's
+analytics-consent state read-only (plus `openSettings()` to the Privacy
+section) for apps that gate their own captures on it. With no telemetry
+configured on the server (self-hosted), every call is a silent no-op.
 
 ### Connection
 
@@ -483,7 +805,7 @@ useEffect(() => {
 | `shell:themeChange` | `{ tokens: Record<string, string> }` | Shell → Apps | Theme CSS tokens changed |
 | `shell:statusChange` | `{ message: string \| null }` | Shell → Apps | Transient status bar text changed |
 | `shell:event` | `{ event: unknown }` | Server → Apps | Raw server event forwarded from WebSocket |
-| `shell:telemetry` | `TelemetryFact` (`{ event: string; props: Record<string, unknown>; ts: number; id: string }`) | Shell → Apps | A product-telemetry fact the shell observed (`auth:complete`), for the active app to forward to its analytics; `auth:start` and facts raised while no app listened come from `drainTelemetry()` (see [Telemetry facts](#telemetry-facts)) |
+| `shell:telemetry` | `TelemetryFact` (`{ event: string; props: Record<string, unknown>; ts: number; id: string }`) | Shell → Apps | DEPRECATED, never emitted (the shell owns the telemetry transport). Typed only for frozen-floor compatibility; see [Telemetry facts](#telemetry-facts) |
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | Shell-internal | App list updated |
 | `shell:manifestRefresh` | `{ source: string }` | Shell-internal | App manifest re-fetched |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | Shell-internal | Open a shell overlay |
@@ -494,22 +816,9 @@ The events marked **Shell-internal** exist only in the shell package's internal 
 
 ### Telemetry facts
 
-The shell has no analytics SDK. It observes a few product facts itself (`auth:start` when it starts the OAuth redirect; `auth:complete` when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback, null when it is not known) and hands them to the active app, which forwards them to its own analytics. `auth:start` is always held, never delivered live: the full-page redirect follows at once, so the app's drain on the callback page hands it over. Any other fact raised while no app is subscribed to `shell:telemetry` (the callback resolves before the app mounts) is held too: up to 32 facts, for 30 minutes, kept in the tab's sessionStorage so it survives a page load that never mounts the forwarding app (an embedded App Builder preview keeps them in memory only). A sign-out or a rejected credential drops the held facts.
+The shell reports its own product facts on its own reporter, stamped with app `shell`. No app forwards them. They are `auth:start`, when it starts the OAuth redirect, and `auth:complete`, when the callback resolves an identity, with the account's new-user flag `is_new`, its waitlist state `waitlisted`, and `duration_ms`, the OAuth round trip in milliseconds from the redirect to the callback (null when it is not known). `auth:start` always carries `is_authed: false` and `auth:complete` always carries `is_authed: true`, whatever the state of the page load that sends them. The consent banner's `consent:shown`, `consent:decision` and `consent:handoff` events are the shell's too. A fact raised before the analytics SDK has started waits in the shell's queue, which is mirrored to the tab's sessionStorage, so it is replayed with its original time on the next page load (the OAuth callback, for `auth:start`) if this one ends first.
 
-An app that forwards them drains the held facts once at its analytics init, then subscribes for the rest. Forward each fact once, keyed by its `id`, with `ts` as its event time, and only the properties your own event contract defines:
-
-```typescript
-import { connectionManager, type TelemetryFact } from 'rocketride/app-sdk';
-
-const forward = (fact: TelemetryFact) => analytics.capture(fact.event, fact.props, { timestamp: new Date(fact.ts) });
-
-for (const fact of connectionManager.drainTelemetry?.() ?? []) forward(fact);
-connectionManager.on('shell:telemetry', forward);
-```
-
-`drainTelemetry()` hands each held fact over once and clears the hold; a fact delivered live through `shell:telemetry` is not held. Shells that predate the channel have no `drainTelemetry` (an app can be served by an older shell), hence the optional call.
-
-**The home app's `./telemetry` entry.** On the shell's own waitlist screen no app renders, so nothing would drain the facts (the waitlisted sign-up's `auth:complete` among them). There the shell loads the home app's exposed `./telemetry` module and calls its default export with no arguments, once per page load. The function must not render anything; it starts the home app's analytics, which drain and subscribe as above. A throw is ignored, and a home build without the entry is skipped. Only the home app exposes it; other apps keep `./AppDescriptor` as their single entry.
+`connectionManager.drainTelemetry()` and the `shell:telemetry` event are deprecated. Nothing feeds them any more: `drainTelemetry()` always returns an empty list and `shell:telemetry` is never emitted. They stay typed only for compatibility with the frozen v8/v9 floor. Do not subscribe to them or forward from them; your own events go through `useReport()` as described in [Telemetry](#telemetry).
 
 ### Extending the event map
 
@@ -830,6 +1139,106 @@ Features:
 
 ---
 
+## DesktopView: The Shared Desktop Page
+
+`DesktopView` renders the RocketRide desktop content — a time-aware greeting, a rotating quote, and the responsive app-card grid (launch, version switcher, remove/unsubscribe, subscription badges). It is the one desktop implementation shared by the OSS and SaaS home apps; a launcher app renders it and supplies only the app list and chrome (nav, footer, padding).
+
+```tsx
+import { DesktopView } from 'shell';     // or getShellApi().DesktopView
+
+<DesktopView
+	apps={apps}                            // AppManifestEntry[], pre-filtered/sorted
+	style={{ padding: '60px 40px 80px' }}  // host-owned spacing
+/>
+```
+
+Server interactions (version rails, session overrides, desktop remove, unsubscribe, subscription status) are built in — the component talks to the shell's connection itself. Optional props adjust behavior:
+
+| Prop | Purpose |
+|---|---|
+| `onLaunch` | Replace the default launch (`shell:switchApp`) |
+| `greetingName` / `greetingOverride` | Personalize or pin the greeting |
+| `showQuote` | Hide the rotating quote column (default shown) |
+| `allowRemove` | Disable the hover X + remove/unsubscribe popover |
+| `resolveIcon` | Theme-adaptive icon override per app |
+| `adapter` | Override the server operations (`DesktopAdapter`) |
+| `popoverBoundarySelector` | Host sticky-header selector for drop-list placement |
+| `emptyMessage` | Zero-apps text |
+
+Types: `DesktopViewProps`, `DesktopAdapter`, `DesktopQuote`, `DesktopVersionRow`, `DesktopVersionOverride`. Animations (card cascade, greeting reveal, icon fade) honor `prefers-reduced-motion`. Theming uses the standard `--rr-*` CSS variables.
+
+### Dev Tools
+
+An app can declare itself a **dev tool**: a UI that host workbenches (the VS Code extension, rocket-ui) mount directly as a component — no shell boot, no iframe. Declare the manifest category and the descriptor mount points:
+
+```jsonc
+// package.json → appManifest
+"categories": ["devTool"]
+```
+
+```ts
+// AppDescriptor
+const MY_TOOL: AppDescriptor = {
+	// ...existing fields
+	devToolFrame: MyToolSurface,      // the tool's main surface
+	devToolSidebar: MyToolSidebar,    // optional panel shown in the host's sidebar
+};
+```
+
+Both components receive `DevToolProps`:
+
+| Prop | Purpose |
+|---|---|
+| `channel` | The tool's ONE transport surface to its other mount (frame ↔ sidebar; the mounts may live in isolated documents — VS Code webviews). Three lanes: retained state topics, fire-and-forget events, correlated ops |
+| `documents` | On multi-document hosts: `open(docKey, title)` / `close(docKey)` |
+| `docKey` / `activeDocKey` | The document key a frame serves / the fronted document a sidebar follows |
+
+There is NO client prop — and none is needed. The realm model in three lines:
+
+1. Every surface runs in a **realm** (the shell page, each VS Code webview, each framework page) attached to the shell bus.
+2. Every realm's `useShellConnection().client` is a **real `RocketRideClient`**: the root realm's client owns the socket; every other realm holds a *realm client* whose requests ride the bus to that same socket. There is ONE socket per host process.
+3. A tool's sidebar mount (its **controller**) therefore owns *authority*, not transport: it coordinates the tool's genuinely shared state — refcounted resources, single-writer stores, one shared poller — through tool ops, while every mount makes its own engine calls on its own client.
+
+A tool's ops live in a `src/ops/` directory with a fixed three-file layout (see sql-ui and monitor-ui for the reference shape), re-exported by an `ops/index.ts` barrel:
+
+```ts
+// ops/types.ts — the tool's COORDINATION protocol, declared ONCE as maps
+// extending the shell's base maps (per tool; `host:*` keys are reserved).
+// Only shared state belongs here — plain engine calls go through the realm
+// client.
+import type { ToolOpMap, ToolOpSpec, ToolStateMap, ToolEventMap } from 'shell';
+
+export interface MyOps extends ToolOpMap {
+	'myTool.acquire': ToolOpSpec<{ id: string }, MyHandle>; // refcounted — ONE owner realm
+}
+export interface MyStateMap extends ToolStateMap { records: MyRecord[] }
+export interface MyEventMap extends ToolEventMap { save: MyRecord }
+
+// ops/server.ts — the implementations, served by the sidebar CONTROLLER mount.
+export function serveMyOps(channel: ToolChannel): () => void {
+	const ops = createToolOpServer<MyOps>(channel);
+	ops.serve('myTool.acquire', async ({ id }) => acquire(id));
+	return () => ops.dispose();
+}
+
+// ops/client.ts — the typed calls, used by FRAME mounts.
+export function createMyOpsClient(channel: ToolChannel) {
+	const call = createToolOpClient<MyOps>(channel);
+	return { acquire: (id: string) => call('myTool.acquire', { id }) };
+}
+
+// In the frame: engine work on the realm's own client; shared state via ops.
+const { client, isConnected } = useShellConnection();
+const rows = client ? await client.listTasks({}) : [];
+const handle = await createMyOpsClient(channel).acquire(id);
+```
+
+**Why two readiness hooks exist.** `useShellConnection().isConnected` is *this realm's* connection truth — the mirrored state of the one socket the realm client rides; gate engine calls on it. `useConnectionReady(channel)` reads the `host:connection` system topic — the **controller realm's** reachability, published by the host (never by a tool) and retained on the channel. Today both describe the same single socket; they stay distinct because hosts are growing *multiple connections* (the VS Code dev/deploy slots — see `host.envSlots`), where "my realm's client can reach the engine" and "the controller's connection is up" stop being the same question. Gate frame↔controller coordination on `useConnectionReady`, engine calls on your own realm's state. `useConnectionReady` is tri-state: `undefined` means no `host:connection` snapshot has arrived yet (unknown — render a waiting state, never a "disconnected" claim), `false` means the host said disconnected, `true` means ready; a plain `if (!ready)` guard treats the initial `undefined` like `false`, which is safe for gating but wrong for *displaying* a disconnect.
+
+There is no theme prop: dev-tool components are themed by the ambient `--rr-*` CSS custom properties of the document they mount into (the active shell theme in a browser; the editor-variable mapping in VS Code) — style exclusively with `var(--rr-*)` tokens. The tab icon hosts show comes from the manifest `icon`; the descriptor is loaded only when the tool is opened.
+
+---
+
 ## Cross-App Component Loading
 
 Apps can expose components for other apps to use, and load components from other apps at runtime via Module Federation.
@@ -926,7 +1335,7 @@ See the [Getting Started](#getting-started) section for the complete `rsbuild.co
 
 Key points:
 - The MF container `name` is derived automatically from `appManifest.id` in `package.json`
-- Always expose `./AppDescriptor` as the single MF entry point (the home app also exposes `./telemetry`, see [Telemetry facts](#telemetry-facts))
+- Always expose `./AppDescriptor` as the single MF entry point
 - `rocketride/app-sdk` must be a shared singleton so your app and the shell agree on one instance
 - React and react-dom must be shared singletons to avoid duplicate instances
 
@@ -937,24 +1346,36 @@ For the App Builder loop, see [App Builder](/guides/apps/app-builder).
 ### Optional signup attribution
 
 `ConnectionManager.startOAuth(register, context)` and `shell:loginRequest` accept optional
-`signupProperties` analytics metadata. The shell validates and holds it in tab storage under
-active analytics consent, consumes it once on the OAuth callback, and passes it in the PKCE
-credential through a resolver that rechecks consent, privacy signals and expiry immediately before
-the SDK sends authentication. The encoded `cd_` credential uses the wire key `signup_properties`.
-Native `auth:start` and `auth:complete` telemetry facts contain no signup attribution. It never appears in the identity provider URL. Missing, expired or invalid context
-does not stop sign-in. Embedded developer previews do not touch the host tab's storage.
+`signupProperties` analytics metadata. The shell validates it, carries it across the identity
+provider redirect in one of two ways below, consumes it once on the OAuth callback, and passes it in
+the PKCE credential through a resolver that rechecks consent, privacy signals and expiry immediately
+before the SDK sends authentication. The encoded `cd_` credential uses the wire key
+`signup_properties`. Native `auth:start` and `auth:complete` telemetry facts contain no signup
+attribution. Missing, expired or invalid context does not stop sign-in. Embedded developer previews
+do not touch the host tab's storage.
+
+A consented context is held in tab storage under active analytics consent and never appears in the
+identity provider URL. A cookieless context (`consent_state: 'undecided'`) is only for a visitor who
+has not chosen yet. Nothing is written to site storage for it: the shell sends it as the OAuth
+`state`, base64 JSON `{ v: 1, signup }`, and reads it back on the callback. That state is readable
+and unsigned, and like the rest of the authorize URL it stays in the browser's history and reaches
+the identity provider's request logs. PKCE prevents forged callbacks, so a forged state can only
+change attribution. A consented context is never accepted from the URL.
 
 Version 1 carries `experiment`, `experiment_revision`, `variant_id`, `assignment_id`, `exposure_id`,
-`landing_message_revision`, `exposed_at`, `expires_at`, `consent_version: 1`, and `schema_version: 1`.
-Times are milliseconds since epoch; expiry is fixed at 30 minutes after exposure. The account
-service validates its experiment/catalog separately. This context is untrusted analytics input
-and must never authorize access or establish account identity.
+`landing_message_revision`, `exposed_at`, `expires_at`, `consent_version: 1`, and `schema_version: 1`,
+plus `consent_state` on a cookieless context. Consumers must check `consent_state` before treating a
+context as consented. Times are milliseconds since epoch; expiry is fixed at 30 minutes after
+exposure. The account service validates its experiment/catalog separately. This context is
+untrusted analytics input and must never authorize access or establish account identity.
 
-The consent record is written by the SaaS consent banner in `rocketride-saas`, under
-`localStorage['rr_consent_v1']`. Its shared schema is
+The consent record is written by the shell's consent banner (`packages/shell/src/telemetry`),
+under `localStorage['rr_consent_v1']`. Its shared schema is
 `{ v: 1, choice: 'accepted' | 'rejected', at: number }`, where `at` is milliseconds since epoch.
-The shell accepts only `accepted` records up to 365 days old, with at most 60 seconds of future
-clock skew, and omits context under DNT or GPC. Missing, malformed or unavailable storage
-also omits context. Coordinate any change to this key or schema with both repositories.
+A record is valid up to 365 days old, with at most 60 seconds of future clock skew. A consented
+context needs a valid `accepted` record. A cookieless context needs no valid record at all (missing,
+malformed or expired reads as undecided), so accepting or rejecting on the banner drops it. DNT or GPC,
+or storage that cannot be read, omits either kind. Coordinate any change to this key or schema with
+both repositories.
 `CloudAuthProvider.signIn()` owns pending signup storage; `startOAuth()` passes validated context
-to it and stores context itself only on the legacy path without an auth provider.
+to it.

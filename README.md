@@ -1,12 +1,17 @@
 <div align="center">
 
 <a href="https://rocketride.org">
-  <img src="docs/public/assets/poster.png" alt="RocketRide: Open Source AI Pipeline Tool" width="100%">
+  <img src="docs/public/assets/poster.png" alt="RocketRide: Open Source AI Meta-Harness" width="100%">
 </a>
 
 <p>
-  <strong>RocketRide is the open source AIDE: the AI Development Environment.</strong><br/>
-  Build, deploy and harness production-ready AI solutions at light speed, all within your IDE or using the CLI in your terminal.
+  <strong>RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.</strong><br/>
+  Build, test and publish durable agents that scale in production.
+</p>
+
+<p>
+  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily?language=C%2B%2B" alt="rocketride-org/rocketride-server: C++ Repository Of The Day on Trendshift" width="250" height="55"/></a>&nbsp;&nbsp;
+  <a href="https://trendshift.io/repositories/37651?utm_source=trendshift-badge&amp;utm_medium=badge&amp;utm_campaign=badge-trendshift-37651" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/trendshift/repositories/37651/daily" alt="rocketride-org/rocketride-server: Repository Of The Day on Trendshift" width="250" height="55"/></a>
 </p>
 
 <p>
@@ -16,11 +21,11 @@
 </p>
 
 <p>
- Your code editor just became the AIDE. RocketRide turns the classic IDE you already use into a full <strong>AI Development Environment</strong>: one place to compose, debug, observe, and deploy AI runtimes using any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It's the harness for everything behind your AI applications, not just the agents, but the whole stack beneath them.</strong>
+ RocketRide gives you one place to compose, debug, observe, and deploy AI runtimes from the tools you already use: your IDE, your terminal or your coding agent. Use any model, any tool, any framework, with zero vendor lock-in. Equipped with deep observability and backed by a battle-tested, high-throughput C++ engine, what you build is production-ready the moment it runs. <strong>It harnesses the whole stack behind your AI applications, not only the agents.</strong>
 </p>
 
 <p>
- Under the hood, RocketRide is an open source data pipeline builder and runtime built for AI and ML workloads. With 100+ pipeline nodes spanning 15+ LLM providers, 9 vector databases, OCR, NER, and more, pipelines are defined as portable JSON, built visually in VS Code, and executed by a multithreaded C++ runtime. From real-time data processing to multimodal AI search, RocketRide runs entirely on your own infrastructure.
+ Under the hood, RocketRide is an open source meta-harness spanning the full AI Development Lifecycle (AIDLC): build, stage, test, release and maintain. With a rapidly growing node library including agents, models, vector/graph/SQL databases, OCR, tools, data stores, NER and more, it coordinates across agent harnesses while running on an enterprise-grade runtime. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 </p>
 
 <p>
@@ -29,6 +34,7 @@
   <a href="https://pypi.org/project/rocketride/">Python SDK</a> |
   <a href="https://www.npmjs.com/package/rocketride">TypeScript SDK</a> |
   <a href="https://docs.rocketride.org/connect/mcp/http">MCP Server</a> |
+  For coding agents: <a href="https://docs.rocketride.org/quickstart/coding-agents/">start page</a>, <a href="https://docs.rocketride.org/llms.txt">llms.txt</a> |
   <a href="https://marketplace.visualstudio.com/items?itemName=RocketRide.rocketride">VS Code Marketplace</a> |
   <a href="https://open-vsx.org/extension/RocketRide/rocketride">Open VSX Registry</a>
 </p>
@@ -69,9 +75,9 @@ _Drop pipelines into any Python or TypeScript app with a few lines of code, no i
 
 | Feature                           | Description                                                                                                                                                                                                                          |
 | :-------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Visual Pipeline Builder**       | Drag, connect, and configure nodes in VS Code, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
+| **Rocket Builder**                | Drag, connect, and configure nodes visually, no boilerplate. Real-time observability tracks token usage, LLM calls, latency, and execution. Pipelines are portable JSON, version-controllable, shareable, and runnable anywhere. |
 | **High-Performance C++ Runtime**  | Native multithreading purpose-built for the throughput demands of AI and data workloads. No bottlenecks, no compromises for production scale.                                                                                        |
-| **100+ Pipeline Nodes**           | 15+ LLM providers, 9 vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                    |
+| **Pipeline Nodes**                | LLM providers, vector databases, OCR, NER, PII anonymization, chunking strategies, embedding models, and more. All nodes are Python-extensible, build and publish your own.                                                          |
 | **Multi-Agent Workflows**         | Built-in CrewAI and LangChain support. Chain agents, share memory across pipeline runs, and manage multi-step reasoning at scale.                                                                                                    |
 | **Coding Agent Ready**            | RocketRide auto-detects your coding agent: Claude, Cursor, and more. Build, modify, and deploy pipelines through natural language.                                                                                                  |
 | **TypeScript, Python & MCP SDKs** | Integrate pipelines into native apps, expose them as callable tools for AI assistants, or build programmatic workflows into your existing codebase.                                                                                  |
@@ -181,8 +187,13 @@ _Whether you build web apps, integrate APIs, or run backend services, you alread
 
      ```bash
      docker pull ghcr.io/rocketride-org/rocketride-engine:latest
-     docker create --name rocketride-engine -p 5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     docker create --name rocketride-engine -p 127.0.0.1:5565:5565 ghcr.io/rocketride-org/rocketride-engine:latest
+     docker start rocketride-engine
      ```
+
+     The image is amd64 only. On Apple Silicon, add `--platform linux/amd64` to both `docker pull` and `docker create`.
+
+     Clients need a non-empty key, and an engine started without one accepts any value (for example `export ROCKETRIDE_APIKEY=rr_local`). To use the engine's built-in MCP server, start it with `-e ROCKETRIDE_APIKEY=rr_...` and send that same value; the [coding-agents start page](https://docs.rocketride.org/quickstart/coding-agents/) has the full MCP setup.
 
    - **Local Deployment** - Download your preferred runtime as a standalone process from the **Deploy** page in the `Connection Manager`.
 
@@ -284,7 +295,7 @@ Connecting takes two lines. Same portable pipeline JSON, now hosted for you:
 
 ```bash
 ROCKETRIDE_URI=https://api.rocketride.ai
-ROCKETRIDE_AUTH=your-api-token
+ROCKETRIDE_APIKEY=your-api-key
 ```
 
 <p align="center">
@@ -317,10 +328,11 @@ Docker, on-premises, or a local process in your IDE. Full control, full data res
 
 <br/>
 
-Point a client at your local engine in one line:
+Point a client at your local engine:
 
 ```bash
 ROCKETRIDE_URI=ws://localhost:5565
+ROCKETRIDE_APIKEY=rr_local
 ```
 
 <p align="center">

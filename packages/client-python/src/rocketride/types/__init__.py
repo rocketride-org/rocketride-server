@@ -146,6 +146,7 @@ from .account import (
     AccountOrgTeam,
     ApiKeyRecord,
     OrgDetail,
+    DeleteOrgPrecheck,
     MemberRecord,
     TeamRecord,
     TeamDetail,
@@ -154,6 +155,8 @@ from .account import (
     CreateKeyParams,
     CreateKeyResult,
     InviteMemberParams,
+    InvitedMember,
+    TeamAssignment,
     TeamMemberParams,
 )
 
@@ -296,6 +299,7 @@ __all__ = [
     'AccountOrgTeam',
     'ApiKeyRecord',
     'OrgDetail',
+    'DeleteOrgPrecheck',
     'MemberRecord',
     'TeamRecord',
     'TeamDetail',
@@ -304,6 +308,8 @@ __all__ = [
     'CreateKeyParams',
     'CreateKeyResult',
     'InviteMemberParams',
+    'InvitedMember',
+    'TeamAssignment',
     'TeamMemberParams',
     # Deploy types
     'AppVerifyCheck',

@@ -48,11 +48,94 @@ from depends import depends as _depends
 # requirements.txt before importing anything else from this module.
 _depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
+import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 
-from ..base import AccountBase
+from ..base import ENV_MASK, AccountBase, env_changes
+
+
+def _env_line(name: str, value: str) -> str:
+    """
+    A .env line that load_dotenv reads back as the same value.
+
+    Single quotes keep '#', spaces and double quotes literal; inside them a
+    backslash and a single quote are escaped. '${' is refused before this.
+    """
+    escaped = value.replace('\\', '\\\\').replace("'", "\\'")
+    return f"{name}='{escaped}'\n"
+
+
+def _env_changes(args: Dict[str, Any]) -> Tuple[Dict[str, Optional[str]], Optional[str]]:
+    """
+    The changes an ``update_env`` / ``set_env`` request asks for.
+
+    Args:
+        args: The request arguments: ``env`` (name to value) and ``delete`` (names).
+
+    Returns:
+        The changes (a name to its value, None to delete) and None, or an
+        empty dict and the error text when a name or value is refused.
+    """
+    try:
+        changes = env_changes(args)
+    except ValueError as e:
+        return {}, str(e)
+    # A .env line ends at a line break, the environment at a NUL, and
+    # load_dotenv expands '${', quoted or not
+    if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
+        return {}, (
+            "Environment values cannot contain a line break, NUL or '${' (the .env loader expands it); nothing was saved."
+        )
+    return changes, None
+
+
+def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dict[str, str], Optional[str]]:
+    """
+    The ROCKETRIDE_* environment once ``changes`` are merged into the stored one.
+
+    Args:
+        changes:   From ``_env_changes``: a value sets, None deletes, the mask keeps.
+        fold_case: True on Windows, where the environment lists every name
+                   upper-cased: a sent name then addresses the stored one.
+
+    Returns:
+        The merged names and values and None, or an empty dict and the error
+        text when the mask names nothing stored, one variable is sent under
+        two names that differ only in case (fold_case), or the locale cannot
+        hold a name or value.
+    """
+    env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+    if fold_case:
+        folded: Dict[str, List[str]] = {}
+        for k in changes:
+            folded.setdefault(k.upper(), []).append(k)
+        # Two sent names that differ only in case are one variable here, stored or new
+        twice = sorted(name for sent in folded.values() if len(sent) > 1 for name in sent)
+        if twice:
+            return {}, (
+                'One variable sent under more than one name: ' + ', '.join(twice) + '. Send it once; nothing was saved.'
+            )
+        changes = {(k.upper() if k.upper() in env else k): v for k, v in changes.items()}
+    unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
+    if unmasked:
+        return {}, 'No stored value to keep for: ' + ', '.join(unmasked) + '. Send a value; nothing was saved.'
+    for name, value in changes.items():
+        if value is None:
+            env.pop(name, None)
+        elif value != ENV_MASK:
+            env[name] = value
+
+    # A name or value the process environment cannot hold (a non-ASCII
+    # one under an ASCII locale) is refused before anything is written
+    try:
+        for name, value in env.items():
+            os.environ.encodekey(name)
+            os.environ.encodevalue(value)
+    except UnicodeError:
+        return {}, "A name or value cannot be held in this engine's environment (its locale); nothing was saved."
+    return env, None
 
 
 class Account(AccountBase):
@@ -167,12 +250,12 @@ class Account(AccountBase):
         Built-ins are seeded into the deployment registry at init
         (``_seed_builtin_apps``), so runtime assembly never consults
         apps.json: every app — seeded or user-published — resolves through
-        the ONE scope walk over the publish bindings, with the dev overlay
-        applied on top. OSS decoration: everything is free and on the
-        desktop.
+        the ONE scope walk over the publish bindings. Dev previews are
+        LOCAL-FIRST (client-side registration in the preview page) — no
+        server-side overlay exists. OSS decoration: everything is free and
+        on the desktop.
         """
         from ai.account.app_deploy import resolve_app_pins
-        from ai.account.dev_overlay import apply_overlay
 
         try:
             entries = await resolve_app_pins('local', 'local', ['local'])
@@ -188,7 +271,7 @@ class Account(AccountBase):
             entry['appStatus'] = 'free'
             entry['onDesktop'] = True
             apps.append(entry)
-        return apply_overlay('local', apps)
+        return apps
 
     # =========================================================================
     # INIT — seed built-ins into the registry (apps.json is the seed)
@@ -220,15 +303,24 @@ class Account(AccountBase):
         - seed rows current          -> no-op (binding self-heal only)
         - seed rows behind apps.json -> force: mint the NEXT version and
           repoint the public binding (append-only — older versions and any
-          session pins on them survive)
+          session pins on them survive). "Behind" is EITHER the manifest
+          version string moving OR the built bundle's digest differing from
+          the newest seed's recorded bundleSha256 — version strings lie when
+          an upgrade ships a rebuilt bundle without a bump, and the digest is
+          the truth. A seed row predating the digest field reads as changed
+          (one re-seed records it). Neither trigger fires while the public
+          rung serves a user's direct deploy: a release never repoints that.
         - rail rows but NO seed rows (a user deployed the id first) ->
           force: bind the public rung to a fresh SEED version, never to a
           user row
         """
         from ai.account.seed_apps import (
+            PUBLIC_AUDIENCE,
             SEED_COMMENT,
             SYSTEM_ACTOR,
+            bundle_digest,
             load_manifest_entries,
+            public_serves_user_deploy,
             seed_manifest_app,
         )
 
@@ -253,9 +345,24 @@ class Account(AccountBase):
                     if not seeds:
                         force = True
                     else:
-                        stored = (((seeds[0].get('metadata') or {}).get('manifest')) or {}).get('version')
+                        metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
+                        stored = ((metadata or {}).get('manifest') or {}).get('version')
                         shipped = entry.get('version')
-                        force = bool(shipped) and str(stored or '') != str(shipped)
+                        version_moved = bool(shipped) and str(stored or '') != str(shipped)
+                        # The digest trigger: an upgrade that rebuilt the
+                        # bundle without bumping the manifest version must
+                        # still march. No local bundle = nothing to compare
+                        # (never force); a seed row without a digest reads
+                        # as changed, so one re-seed records it.
+                        build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+                        local = bundle_digest(str(app_id))
+                        digest_changed = local is not None and build.get('bundleSha256') != local
+                        if version_moved or digest_changed:
+                            # Neither trigger may repoint a public rung that
+                            # serves someone's deliberate deploy (the same
+                            # guard bundle_changed honors).
+                            public = await self.publish_get('local', 'app', str(app_id), PUBLIC_AUDIENCE)
+                            force = not public_serves_user_deploy(rows, public)
                 # Step 2: run the shared seeder with that policy.
                 if await seed_manifest_app(self, 'local', entry, SYSTEM_ACTOR, force=force):
                     seeded += 1
@@ -307,6 +414,15 @@ class Account(AccountBase):
         self._saas_only()
 
     async def update_organization(self, org_id: str, name: str):
+        self._saas_only()
+
+    async def create_organization(self, **kw):
+        self._saas_only()
+
+    async def delete_org_precheck(self, org_id: str):
+        self._saas_only()
+
+    async def delete_organization(self, **kw):
         self._saas_only()
 
     async def list_org_members(self, org_id: str) -> List:
@@ -364,14 +480,14 @@ class Account(AccountBase):
 
         Registry-only: walks the public publish rung and hides entries whose
         seeded manifest declared ``public: false`` (the binding snapshot
-        carries the flag on the file backend). The dev overlay applies on
-        top so a register_dev'd bundle previews pre-auth too.
+        carries the flag on the file backend). Dev previews are LOCAL-FIRST
+        (the preview page registers the app client-side) — nothing applies
+        on top here.
 
         Returns:
             List of app manifest dicts.
         """
         from ai.account.app_deploy import resolve_app_pins
-        from ai.account.dev_overlay import apply_overlay
 
         try:
             # Snapshot 'public' flags live on the binding rows; the walk
@@ -382,7 +498,7 @@ class Account(AccountBase):
         except Exception as exc:
             debug(f'[oss] public app resolution failed: {exc}')
             entries = []
-        return apply_overlay('local', entries)
+        return entries
 
     async def get_apps_for_user(self, user_id: str, organizations: list) -> list:
         """
@@ -409,8 +525,10 @@ class Account(AccountBase):
         """
         Handle ``rrext_account_me`` for env subcommands only.
 
-        OSS supports ``get_env`` (reads ROCKETRIDE_* from os.environ) and
-        ``set_env`` (writes to os.environ + persists to .env file).
+        OSS supports ``get_env`` (the ROCKETRIDE_* names in os.environ, values
+        masked) and ``update_env`` (merges into os.environ and the .env file: a
+        value is set, None deletes, the mask keeps what is stored). ``set_env``
+        is the same merge, for clients that predate ``update_env``.
         All other account commands raise NotImplementedError.
 
         Args:
@@ -423,30 +541,35 @@ class Account(AccountBase):
 
         if command == 'rrext_account_me':
             if sub == 'get_env':
-                env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
+                env = {k: ENV_MASK for k in os.environ if k.startswith('ROCKETRIDE_')}
                 return conn.build_response(request, body={'env': env})
 
-            if sub == 'set_env':
-                # Only accept ROCKETRIDE_* keys — reject anything else
-                raw = args.get('env', {})
-                env = {k: v for k, v in raw.items() if k.startswith('ROCKETRIDE_')}
+            # The SDKs send update_env, which a server with the old full-replacement
+            # set_env refuses as unknown instead of wiping what it was not sent
+            if sub in ('set_env', 'update_env'):
+                changes, error = _env_changes(args)
+                if error:
+                    return conn.build_error(request, error)
+                env, error = _merged_env(changes, os.name == 'nt')
+                if error:
+                    return conn.build_error(request, error)
 
-                # Step 1: Remove existing ROCKETRIDE_* keys from os.environ
-                # so that deleted keys don't linger in memory.
-                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
-                    del os.environ[k]
-
-                # Step 2: Set the new values in os.environ so get_env
-                # reflects the change immediately without a restart.
-                os.environ.update(env)
-
-                # Step 3: Persist to .env file on disk.
-                # Use sys.executable (engine.exe path) — must match the
-                # load_dotenv path in server.py, which also uses sys.executable.
+                # Step 1: Persist to the .env file first, so a file that cannot be
+                # read or written leaves memory as it was. Use sys.executable
+                # (engine.exe path) — must match the load_dotenv path in server.py.
                 import sys
 
                 exec_dir = os.path.dirname(sys.executable)
-                self._write_env_file(os.path.join(exec_dir, '.env'), env)
+                try:
+                    self._write_env_file(os.path.join(exec_dir, '.env'), env)
+                except (OSError, UnicodeError) as e:
+                    return conn.build_error(request, f'The .env file could not be updated ({e}); nothing was saved.')
+
+                # Step 2: Replace the ROCKETRIDE_* keys in os.environ, so deleted
+                # keys don't linger and get_env reflects the change without a restart.
+                for k in [k for k in os.environ if k.startswith('ROCKETRIDE_')]:
+                    del os.environ[k]
+                os.environ.update(env)
                 return conn.build_response(request, body={'updated': True})
 
             if sub == 'env_keys':
@@ -470,14 +593,14 @@ class Account(AccountBase):
         lines: List[str] = []
         written_keys: set = set()
         try:
-            with open(path, 'r') as f:
+            with open(path, 'r', encoding='utf-8') as f:
                 for line in f:
                     stripped = line.strip()
                     if stripped and not stripped.startswith('#') and '=' in stripped:
                         key = stripped.split('=', 1)[0].strip()
                         if key.startswith('ROCKETRIDE_'):
                             if key in env:
-                                lines.append(f'{key}={env[key]}\n')
+                                lines.append(_env_line(key, env[key]))
                                 written_keys.add(key)
                             continue
                     lines.append(line)
@@ -486,9 +609,22 @@ class Account(AccountBase):
 
         for k, v in sorted(env.items()):
             if k not in written_keys:
-                lines.append(f'{k}={v}\n')
+                lines.append(_env_line(k, v))
 
-        with open(path, 'w') as f:
-            f.writelines(lines)
+        # A symlinked .env is swapped at its target, so the link survives
+        path = os.path.realpath(path)
+
+        # Written whole to a temporary file, then swapped in: a failed write
+        # leaves the old .env as it was
+        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix='.env.')
+        try:
+            with open(fd, 'w', encoding='utf-8') as f:
+                f.writelines(lines)
+            if os.path.exists(path):
+                os.chmod(tmp, os.stat(path).st_mode & 0o777)
+            os.replace(tmp, path)
+        except BaseException:
+            os.unlink(tmp)
+            raise
 
     # generate_token is inherited from AccountBase.

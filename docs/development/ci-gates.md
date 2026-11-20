@@ -8,15 +8,23 @@ machine. Sources of truth: `.github/workflows/ci.yml`, `.github/workflows/_build
 
 **`CI OK`** (job `ci-ok`) is the *only* job marked required in branch protection.
 It aggregates the results of `init`, `changes`, `build`, `helm-changes`,
-`helm-lint`, `ruff-check`, `gitleaks`, and `shell-contract`, and
+`helm-lint`, `ruff-check`, `eslint-scripts`, `gitleaks`, and `shell-contract`, and
 fails if any of them failed or was cancelled. Jobs that were correctly **skipped**
 do not fail it — which is the whole point: a docs-only PR skips the 90-minute
 three-platform build and still merges.
 
-One job is deliberately **outside** `ci-ok` and cannot block a merge:
+Two jobs are deliberately **outside** `ci-ok` and cannot block a merge:
 
 - `container-scan` — runs on push/schedule only, never on PRs. Adding it to the
   required list would block every merge, since it is always skipped on a PR.
+- `sanitize` — builds the engine, its C++ test programs and the C++ nodes with
+  ASan and UBSan (`.github/workflows/_sanitize.yaml`) and runs `server:test` and
+  `nodes:test` on them. It is opt-in: it runs on a PR that changes C++ code
+  (`cpp` below) and has the `ci:sanitize` label, and on manual runs, never on
+  push. The label is read when the PR is opened or pushed to, so add the label,
+  then push. It reports sanitizer errors in its job summary and fails on any,
+  but it does not block a merge until the known errors are fixed. Local
+  commands: [Sanitizer build](builder/reference.md#sanitizer-build-sanitize).
 
 The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
 in `.github/workflows/docs-schemas.yml`, which triggers on PRs into `develop`
@@ -30,14 +38,19 @@ this workflow; findings land in the Security tab.
 
 ## What decides which jobs run
 
-The `changes` job (`dorny/paths-filter`) computes a single boolean:
+The `changes` job (`dorny/paths-filter`) computes these booleans:
 
 | Filter | Paths |
 | --- | --- |
-| `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json` |
+| `code` | `packages/**`, `nodes/**`, `apps/**`, `scripts/**`, `builder`, `builder.cmd`, `.github/workflows/**`, `package.json`, `docker/**` |
+| `container` | `docker/**`, `nodes/scripts/tasks.js`, the `requirement*.txt` and `overrides.txt` files under `nodes/` and `packages/ai/`, `packages/server/engine-lib/rocketlib-python/lib/depends.py`, `packages/server/scripts/tasks.js`, `.github/workflows/_build.yaml` |
+| `cpp` | `packages/server/**`, the C/C++ sources and `CMakeLists.txt` files under `nodes/`, `packages/vcpkg/**`, the C++ build scripts (`scripts/build.js`, `scripts/compiler.js`, `scripts/compiler-unix.js`, `scripts/compiler-unix.sh`, `scripts/lib/cmake.js`, `scripts/lib/toolchain.js`, `nodes/scripts/node-build.js`, `nodes/scripts/tasks.js`), `packages/ai/src/ai/modules/task/task_engine.py`, `.github/workflows/_sanitize.yaml`, `scripts/ci/**` |
 
 `code == false` skips `build` (a `build-skip` job reports success under the same
 check names so branch protection stays satisfied) and skips `shell-contract`.
+`container == true` adds the node image test to the Linux build (outside pull
+requests it always runs). `cpp == true` lets a PR with the `ci:sanitize` label
+run `sanitize`.
 
 `helm-changes` is a separate filter on `deploy/helm/**` gating `helm-lint`.
 
@@ -101,8 +114,10 @@ macOS ARM64), each doing `./builder build` then `./builder test --verbose --sequ
 with 90-minute timeouts. The test step boots a local engine on `:5565` and
 connects a test client, so both sides need a matching `ROCKETRIDE_APIKEY` — CI
 uses the literal `MYAPIKEY`, the same placeholder as `.env.template`. Ubuntu also
-starts MinIO, Azurite, and Postgres (pgvector + Apache AGE, on `:55432`/`:55433`)
-for the storage and database node tests.
+starts moto (S3), Azurite, and Postgres (pgvector on `:55432`, Apache AGE 1.5.0 on
+`:55433` and 1.6.0 on `:55434`) for the storage tests and the live database node
+tests (`nodes/test/test_*_live.py`), then runs the graph suite once more against
+AGE 1.6.0.
 
 Per-module equivalents when you only touched one area:
 
@@ -127,7 +142,11 @@ node scripts/build.js shell:regen-derived && git diff --exit-code -- \
 ```
 
 `shell:check` fails on a removed or broken frozen export (via per-version tsc
-floors) and on an added export that was never `shell:freeze`d. The second step
+floors), on an added export that was never `shell:freeze`d, and on a changed
+body of an existing exported declaration (for example a new member on an
+interface) that was never frozen. Comments and whitespace are ignored. The
+inlined `RocketRideClient` class is exempt from the body comparison so additive
+SDK method changes don't fail every PR. The second step
 regenerates the floors from the immutable frozen versions and fails on any diff,
 so a floor cannot be hand-edited to launder a removed export past tsc.
 
@@ -159,13 +178,25 @@ helm template rocketride deploy/helm/rocketride \
 ./builder docs:validate
 ```
 
-Two deterministic checkers, run as a builder task rather than a bespoke CI
+Three deterministic checkers, run as a builder task rather than a bespoke CI
 job: node READMEs against [the node README schema](nodes/readme-schema.md),
-and client-doc parity against
-[the client README schema](clients/readme-schema.md). The task validates the
-nodes changed relative to the merge base with `develop` (blocking), checks
-client-doc parity (blocking), and validates the whole node corpus (`--all`,
-blocking). `docs:test` runs it first, so `./builder test` and the
+client-doc parity against
+[the client README schema](clients/readme-schema.md), and the CLI docs
+against the commands both CLIs register (`scripts/validate-cli-docs.py`). The
+task validates the nodes changed relative to the merge base with `develop`
+(blocking), checks client-doc parity (blocking), checks the CLI docs
+(blocking), and validates the whole node corpus (`--all`, blocking).
+
+The CLI check reads the Python CLI's parser and the TypeScript CLI's sources
+directly, so it needs `pnpm install` but no client build. It fails when
+`ROCKETRIDE_CLI.md` leaves out a command, when its table of commands and flags
+that only one package has is wrong, when a `rocketride <command> --flag`
+example in either CLI doc uses a flag the command lacks, or when the Commands
+table in `docs/public/product/connect/cli.mdx` misses a top-level command. It
+does not check flags named in prose or in `cli.mdx`'s "Key flags" tables. The
+`Doc schemas` workflow also runs on changes to either client SDK or to
+`client-common`, which the CLIs import, so a new command fails CI until the
+docs list it. `docs:test` runs it first, so `./builder test` and the
 `Docs site build` CI job both carry it. CodeRabbit reviews the *accuracy* of a
 node README; this task owns its *structure*.
 
@@ -175,9 +206,10 @@ Check a single node while you work:
 python3 scripts/validate-node-readme.py nodes/src/nodes/<node>
 ```
 
-The validator's own unit tests (`tests/test_validate_node_readme.py`) run inside
-`docs:validate` on every PR, alongside the two schema checks above.
-`./builder nodes:test` also runs this same file as part of the node contract
+The validators' own unit tests (`tests/test_validate_node_readme.py` and
+`tests/test_validate_cli_docs.py`) run inside `docs:validate` on every PR,
+alongside the checks above.
+`./builder nodes:test` also runs the node README tests as part of the node contract
 suite; that invocation stays in place, but `docs:validate` is what gates it on
 every doc-path PR.
 
@@ -215,7 +247,7 @@ ruff check && ruff format --check
 node scripts/build.js docs:check
 node scripts/build.js docs:test && node scripts/build.js docs:build   # if you touched docs
 ./builder build && ./builder test --sequential                        # if you touched code
-node scripts/build.js docs:validate                                # node README + client-doc schemas
+node scripts/build.js docs:validate                                # node README, client-doc, and CLI-doc checks
 ```
 
 ---

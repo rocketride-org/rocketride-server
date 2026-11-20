@@ -77,8 +77,8 @@ class ContextOptimizer:
        ``preconfig.profiles`` of every LLM node's service definition, read
        through the engine's own registry (``rocketlib.getServiceDefinitions``
        / ``getServiceDefinition``) so it works wherever the engine loaded the
-       nodes from: the source tree, an installed node store, or a
-       ``--node_path`` materialisation. The ``sync-models`` workflow keeps
+       nodes from: the source tree, an installed node store, or a directory
+       a run materialised. The ``sync-models`` workflow keeps
        those values in step with the providers;
     2. :attr:`MODEL_LIMITS`, a small hand-maintained fallback table (also used
        for the abbreviated aliases such as ``claude-sonnet``);
@@ -133,6 +133,8 @@ class ContextOptimizer:
         'claude-sonnet-4': 1000000,
         'claude-sonnet-4-5': 1000000,
         'claude-sonnet-4-6': 1000000,
+        # OpenRouter's `~anthropic/claude-haiku-latest`, matched by its bare name.
+        # Anthropic's own API has no such id, so no llm_* profile publishes it.
         'claude-haiku-latest': 200000,
         'claude-opus-latest': 1000000,
         'claude-sonnet-latest': 1000000,

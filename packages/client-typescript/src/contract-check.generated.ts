@@ -16,6 +16,7 @@
 
 import type * as LiveClientApi from './client/index.js';
 import type * as ClientApiV1_3 from '../contract/versions/v1.3';
+import type * as ClientApiV1_5 from '../contract/versions/v1.5';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v1.3';
 import type { DAPException as Current_DAPException } from './client/index.js';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v1.3';
@@ -298,10 +299,36 @@ import type { MonitorKey as Frozen_MonitorKey } from '../contract/versions/v1.3'
 import type { MonitorKey as Current_MonitorKey } from './client/index.js';
 import type { RocketRideClient as Frozen_RocketRideClient } from '../contract/versions/v1.3';
 import type { RocketRideClient as Current_RocketRideClient } from './client/index.js';
+import type { DeleteOrgPrecheck as Frozen_DeleteOrgPrecheck } from '../contract/versions/v1.5';
+import type { DeleteOrgPrecheck as Current_DeleteOrgPrecheck } from './client/index.js';
+import type { LogStreamIdentity as Frozen_LogStreamIdentity } from '../contract/versions/v1.5';
+import type { LogStreamIdentity as Current_LogStreamIdentity } from './client/index.js';
+import type { LogStreamEntry as Frozen_LogStreamEntry } from '../contract/versions/v1.5';
+import type { LogStreamEntry as Current_LogStreamEntry } from './client/index.js';
+import type { LogStreamsResult as Frozen_LogStreamsResult } from '../contract/versions/v1.5';
+import type { LogStreamsResult as Current_LogStreamsResult } from './client/index.js';
+import type { CProfileFunctionStats as Frozen_CProfileFunctionStats } from '../contract/versions/v1.5';
+import type { CProfileFunctionStats as Current_CProfileFunctionStats } from './client/index.js';
+import type { CProfileThreadInfo as Frozen_CProfileThreadInfo } from '../contract/versions/v1.5';
+import type { CProfileThreadInfo as Current_CProfileThreadInfo } from './client/index.js';
+import type { CProfileThreadsResponse as Frozen_CProfileThreadsResponse } from '../contract/versions/v1.5';
+import type { CProfileThreadsResponse as Current_CProfileThreadsResponse } from './client/index.js';
+import type { SignupProperties as Frozen_SignupProperties } from '../contract/versions/v1.5';
+import type { SignupProperties as Current_SignupProperties } from './client/index.js';
+import type { PkceCredential as Frozen_PkceCredential } from '../contract/versions/v1.5';
+import type { PkceCredential as Current_PkceCredential } from './client/index.js';
+import type { DrizzleDatabaseLike as Frozen_DrizzleDatabaseLike } from '../contract/versions/v1.5';
+import type { DrizzleDatabaseLike as Current_DrizzleDatabaseLike } from './client/index.js';
+import type { AppRailVersion as Frozen_AppRailVersion } from '../contract/versions/v1.5';
+import type { AppRailVersion as Current_AppRailVersion } from './client/index.js';
+import type { DeployTeamRef as Frozen_DeployTeamRef } from '../contract/versions/v1.5';
+import type { DeployTeamRef as Current_DeployTeamRef } from './client/index.js';
 
 // VALUE floors — the live surface must still satisfy every frozen floor.
 const _floor_v1_3: typeof ClientApiV1_3 = {} as typeof LiveClientApi;
 void _floor_v1_3;
+const _floor_v1_5: typeof ClientApiV1_5 = {} as typeof LiveClientApi;
+void _floor_v1_5;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
@@ -588,3 +615,27 @@ const _t_MonitorKey: Frozen_MonitorKey = {} as Current_MonitorKey;
 void _t_MonitorKey;
 const _t_RocketRideClient: Frozen_RocketRideClient = {} as Current_RocketRideClient;
 void _t_RocketRideClient;
+const _t_DeleteOrgPrecheck: Frozen_DeleteOrgPrecheck = {} as Current_DeleteOrgPrecheck;
+void _t_DeleteOrgPrecheck;
+const _t_LogStreamIdentity: Frozen_LogStreamIdentity = {} as Current_LogStreamIdentity;
+void _t_LogStreamIdentity;
+const _t_LogStreamEntry: Frozen_LogStreamEntry = {} as Current_LogStreamEntry;
+void _t_LogStreamEntry;
+const _t_LogStreamsResult: Frozen_LogStreamsResult = {} as Current_LogStreamsResult;
+void _t_LogStreamsResult;
+const _t_CProfileFunctionStats: Frozen_CProfileFunctionStats = {} as Current_CProfileFunctionStats;
+void _t_CProfileFunctionStats;
+const _t_CProfileThreadInfo: Frozen_CProfileThreadInfo = {} as Current_CProfileThreadInfo;
+void _t_CProfileThreadInfo;
+const _t_CProfileThreadsResponse: Frozen_CProfileThreadsResponse = {} as Current_CProfileThreadsResponse;
+void _t_CProfileThreadsResponse;
+const _t_SignupProperties: Frozen_SignupProperties = {} as Current_SignupProperties;
+void _t_SignupProperties;
+const _t_PkceCredential: Frozen_PkceCredential = {} as Current_PkceCredential;
+void _t_PkceCredential;
+const _t_DrizzleDatabaseLike: Frozen_DrizzleDatabaseLike = {} as Current_DrizzleDatabaseLike;
+void _t_DrizzleDatabaseLike;
+const _t_AppRailVersion: Frozen_AppRailVersion = {} as Current_AppRailVersion;
+void _t_AppRailVersion;
+const _t_DeployTeamRef: Frozen_DeployTeamRef = {} as Current_DeployTeamRef;
+void _t_DeployTeamRef;

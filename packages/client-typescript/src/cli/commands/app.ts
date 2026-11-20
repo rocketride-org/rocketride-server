@@ -485,14 +485,22 @@ export async function executeAppVerify(ref: string | undefined, options: AppVerb
 export interface AppDevOptions extends AppVerbOptions {
 	open?: boolean;
 	install?: boolean;
+	port?: number;
+	/** Commander's negatable --no-auth: false = do not hand the workspace
+	 *  credential to the preview — the tab opens signed out; the Log in
+	 *  button still works. Absent/true = hand it over when one exists. */
+	auth?: boolean;
 }
 
 /**
  * `app dev`: the App Builder's dev loop in the foreground — serve the app
- * with `rsbuild dev`, point your personal dev overlay at it, and print the
- * preview URL. The preview updates on every save (rsbuild HMR/live reload).
- * Ctrl+C stops the server and drops the overlay. Uses the DEVELOPMENT
- * connection — dev bundles never touch the deployment target.
+ * with `rsbuild dev` as the preview's front door (the generated proxy
+ * wrapper forwards everything but the app's own assets to the engine) and
+ * print the preview URL; the preview page self-registers the local bundle
+ * from that URL. Updates on every save (rsbuild HMR/live reload). Ctrl+C
+ * stops the server — nothing to unregister, the server holds no dev state.
+ * Uses the DEVELOPMENT connection — dev bundles never touch the deployment
+ * target.
  *
  * @param ref - The `[app]` argument.
  * @param options - Parsed command options.
@@ -506,22 +514,39 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 	const { app } = await findApp(workspaceRoot, ref);
 	if (!app) return out.fail(`"${ref}" has no working copy here to serve`, 'pass the app folder');
 
-	// step: one connection for the whole session — the overlay registration
-	// lives as long as it, and a reconnect re-registers the running server
-	let session: InstanceType<typeof DevSession> | null = null;
-	const client = await connectClient(options, undefined, {
-		persist: true,
-		onConnected: async () => {
-			await session?.reregister();
-		},
-	});
+	// step: validate the development connection once — the dev server will
+	// proxy the preview's traffic to this engine (local-first; no server-side
+	// registration exists, so no connection needs to outlive the check).
+	// CREDENTIAL-LESS runs are legitimate: the preview's logged-in/out state
+	// is the BROWSER's own session (proxied same-origin), never the CLI key —
+	// so without a key the preflight is skipped, not failed, and the user
+	// tests the logged-out condition or signs in from the preview itself.
+	if (options.apikey) {
+		const client = await connectClient(options);
+		await client.disconnect();
+	} else {
+		out.line('No credentials — skipping the connection check; the preview uses the browser\'s own sign-in.');
+	}
 
-	const previewUrl = devPreviewUrl(toHttpBase(String(options.uri)), app.id);
-	session = new DevSession({
+	const engineOrigin = toHttpBase(String(options.uri));
+	const session = new DevSession({
 		app,
 		workspaceRoot,
-		client,
+		engineOrigin,
 		install: options.install !== false,
+		// Terminal host: a tab opened on the bare origin gets the preview
+		// params via a 302 (panel hosts never set this — their wrapper stays
+		// byte-identical and they always navigate with the params present).
+		injectPreviewParams: true,
+		port: options.port,
+		// --no-auth binds the WHOLE session: the bare-origin front door
+		// redirects with the signed-out directive too, not just the
+		// printed URL.
+		signedOut: options.auth === false,
+		// The origin is the session identity: cookies and the registration
+		// are per-origin, so a silent bump strands open tabs and sign-ins.
+		onPortBump: (from, to) =>
+			out.warn(`Port ${from} is busy — serving on ${to}. Preview tabs and sign-ins on port ${from} must be reopened.`),
 		onLine: (line) => out.line(`  ${line}`),
 		onState: (state, detail) => {
 			if (state === 'installing') out.line('Installing workspace dependencies (pnpm install)...');
@@ -532,13 +557,33 @@ export async function executeAppDev(ref: string | undefined, options: AppDevOpti
 
 	out.line(`Starting the dev server for ${app.id} (${app.folder})...`);
 	const origin = await session.start();
+	// The preview rides the DEV SERVER's origin (it proxies the engine and
+	// serves the app's bundle); the page self-registers from its URL.
+	// rrauth wires the preview's Log in button through the dev relay; the
+	// workspace credential rides the #fragment so the tab opens signed in.
+	// The SIGNED form is printed and opened (same machine, same user as the
+	// plaintext .env); the --json result carries the credential-free form —
+	// script output gets piped into logs.
+	const previewUrl = devPreviewUrl(origin, app.id, { engineOrigin });
+	// --no-auth: open signed OUT — guaranteed: rrsignout=1 makes the shell
+	// clear any session the BROWSER remembers for this origin (a prior
+	// sign-in on the same port), not merely withhold the workspace key. The
+	// relay param still rides, so the Log in button works either way.
+	const handOver = !!options.apikey && options.auth !== false;
+	const previewUrlSigned = handOver
+		? devPreviewUrl(origin, app.id, { engineOrigin, token: options.apikey })
+		: options.auth === false
+			? devPreviewUrl(origin, app.id, { engineOrigin, signedOut: true })
+			: previewUrl;
 	out.line(`Dev server: ${origin}`);
-	out.line(`Preview:    ${previewUrl}`);
+	out.line(`Preview:    ${previewUrlSigned}`);
+	if (handOver) out.line('The preview URL carries your API key in its #fragment — the tab opens signed in; the fragment never reaches any server.');
+	else if (options.auth === false) out.line("--no-auth: no credentials handed over — the preview runs the app's own sign-in from scratch.");
 	out.line('Edit and save to update the preview. Press Ctrl+C to stop.');
 	out.result({ appId: app.id, devOrigin: origin, previewUrl });
-	if (options.open) openBrowser(previewUrl);
+	if (options.open) openBrowser(previewUrlSigned);
 
-	// step: run until Ctrl+C, then stop the tree and drop the overlay
+	// step: run until Ctrl+C, then stop the server tree
 	await new Promise<void>((resolve) => {
 		onInterrupt(() => {
 			out.line('Stopping the dev server...');
@@ -614,8 +659,10 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 	// serve, register, print the preview URL, stop on Ctrl+C.
 	const devCmd = appCmd
 		.command('dev [app]')
-		.description('Serve an app with live preview: rsbuild dev + your personal dev overlay (Ctrl+C stops)')
+		.description('Serve an app with live preview: rsbuild dev fronting the engine (local-first; Ctrl+C stops)')
 		.option('--open', 'Open the preview in your browser')
+		.option('--no-auth', 'Open the preview signed out (do not hand the workspace credential to the browser)')
+		.option('--port <port>', 'Dev-server port (default: the port pinned in the app\'s rsbuild config)', (v: string) => parseInt(v, 10))
 		.option('--no-install', 'Skip the workspace pnpm install')
 		.option(workspaceOption, 'Workspace root the app is found in and pnpm install runs at (default: current directory)')
 		.action(async (app, options) => {

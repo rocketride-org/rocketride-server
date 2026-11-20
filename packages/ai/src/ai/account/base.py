@@ -30,9 +30,95 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import json
 import os
+import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple
+from typing import Any, Dict, List, NamedTuple, Optional
+
+# What clients see in place of a stored environment value. A secret is
+# written once and never read back; sending the mask back keeps the value.
+# The SDKs export the same string as CONST_ENV_MASK.
+ENV_MASK = '••••••••'
+
+# The environment names accepted: a .env key ends at whitespace, '=' or '#',
+# a quote is stripped from it, and the process environment ends at a NUL
+ENV_NAME = re.compile(r'ROCKETRIDE_[^\s=#\'"\0]+')
+
+_NOT_STRINGS = 'Environment names and values must be strings; nothing was saved.'
+
+
+def _is_change(name: Any, value: Any) -> bool:
+    """A name with a value that sets (str), deletes (None) or keeps (ENV_MASK)."""
+    return isinstance(name, str) and (value is None or isinstance(value, str))
+
+
+def check_env_changes(changes: Dict[str, Optional[str]]) -> None:
+    """
+    Refuse a write of environment changes before anything is stored.
+
+    A value sets, None deletes, ENV_MASK keeps the stored value. Every name
+    begins with ROCKETRIDE_, and a name given a new value must also match
+    ENV_NAME; a delete or a kept mask skips that rule, so a name an older
+    server stored under the plain prefix can still be kept or deleted.
+
+    Args:
+        changes: Names to set, delete or keep.
+
+    Raises:
+        ValueError: Naming the refused names, never a value; nothing was saved.
+    """
+    if not all(_is_change(name, value) for name, value in changes.items()):
+        raise ValueError(_NOT_STRINGS)
+    rejected = sorted(
+        name
+        for name, value in changes.items()
+        if not name.startswith('ROCKETRIDE_') or (value not in (None, ENV_MASK) and not ENV_NAME.fullmatch(name))
+    )
+    if rejected:
+        # Names only: the values are secrets and must not reach a log or a client
+        raise ValueError(
+            'Unsupported environment variable name(s): '
+            + ', '.join(rejected)
+            + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL; nothing was saved."
+        )
+    # A key typed after the mask in an editor's field: storing it would hide it for good
+    typed_on_mask = sorted(
+        name for name, value in changes.items() if value not in (None, ENV_MASK) and value.startswith(ENV_MASK)
+    )
+    if typed_on_mask:
+        raise ValueError(
+            'The value of ' + ', '.join(typed_on_mask) + ' begins with the mask; replace it whole. Nothing was saved.'
+        )
+
+
+def env_changes(args: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    """
+    The changes an ``update_env`` / ``set_env`` request asks for, checked.
+
+    Args:
+        args: The request arguments: ``env`` (name to value) and ``delete`` (names).
+
+    Returns:
+        A name to its value, None to delete, ENV_MASK to keep.
+
+    Raises:
+        ValueError: The request is malformed, names one variable in both
+            ``env`` and ``delete``, or ``check_env_changes`` refuses it.
+    """
+    raw = args.get('env', {})
+    deleted = args.get('delete', [])
+    if not isinstance(raw, dict) or not isinstance(deleted, list):
+        raise ValueError('`env` must be an object and `delete` a list; nothing was saved.')
+    if not all(isinstance(name, str) for name in deleted):
+        raise ValueError(_NOT_STRINGS)
+    both = sorted(name for name in deleted if name in raw)
+    if both:
+        raise ValueError('Both set and deleted: ' + ', '.join(both) + '. Send one of the two; nothing was saved.')
+    changes: Dict[str, Optional[str]] = dict(raw)
+    changes.update({name: None for name in deleted})
+    check_env_changes(changes)
+    return changes
 
 
 class DbDecision(NamedTuple):
@@ -188,6 +274,18 @@ class AccountBase(ABC):
         """
         pass
 
+    def node_index(self) -> dict:
+        """The nodes this server serves: {contract, archive, nodes: {name: {sha256, size, services, icons}}}."""
+        from ai.common import node_release
+
+        return json.loads(node_release.read_index())
+
+    def node_package(self, name: str, sha256: str) -> bytes:
+        """The <name>.rrnode the index lists with that digest."""
+        from ai.common import node_release
+
+        return node_release.read_package(name, sha256)
+
     async def get_public_apps(self) -> list:
         """
         Return apps visible to unauthenticated users.
@@ -197,6 +295,31 @@ class AccountBase(ABC):
 
         Returns:
             List of app manifest dicts (same shape as apps.json entries).
+        """
+        return []
+
+    async def get_public_plans(self, app_id: str) -> List[Dict[str, Any]]:
+        """
+        Return one app's public subscription plans (the ``plans`` page data source).
+
+        Shape (append-only): ``[{id, name, price, currency, period, features[]}]``,
+        the prices the app's live pricing page shows, with ``price`` a decimal
+        string (``"29"``, ``"29.50"``). OSS has no billing and returns []. The
+        SaaS edition serves its plan table and calls
+        ``ai.modules.shell.data_sources.invalidate('plans')`` after every
+        price change.
+
+        Args:
+            app_id: The app whose plans to list.
+
+        Returns:
+            The app's plans in the shape above; [] for an app without plans.
+
+        Raises:
+            Exception: the plan store could not be read (an override's own
+                error, of any type). The page is then served without its data
+                and uncached, so the next crawl asks again; an app without
+                plans returns [] instead of raising.
         """
         return []
 
@@ -368,7 +491,9 @@ class AccountBase(ABC):
     # CLOUD DATABASE — env-gated broker call; raises when unconfigured
     # =========================================================================
 
-    async def authorize_db_target(self, identity: dict, target: dict | None = None) -> DbDecision:
+    async def authorize_db_target(
+        self, identity: dict, target: dict | None = None, *, credential: str | None = None
+    ) -> DbDecision:
         """
         Decide whether a run (or caller) may receive a cloud database DSN.
 
@@ -384,6 +509,15 @@ class AccountBase(ABC):
                 public_endpoint, path, task_id}``. Unused here.
             target: ``{scope, team_id, user_id}``, or None for the org
                 database.
+            credential: The ``AccountInfo.auth`` of the connection that started
+                or restarted the run: the one that supplied the pipeline, so a
+                restart carries the restarter's, not the original starter's.
+                ``''`` is the trusted in-process deploy dispatch, which holds
+                none. ``None`` means the engine had no connection identity to
+                read (or a caller that predates this argument). An
+                implementation may use it only to look up what that credential
+                is allowed to reach, per call. It is never stored, logged, or
+                added to ``identity``. Unused here.
 
         Returns:
             DbDecision(allowed, reason, audit, owner_id). A denial is falsy;
@@ -469,10 +603,33 @@ class AccountBase(ABC):
         else:
             raise ValueError(f'unknown database scope: {scope!r}')
         self._check_broker_url(broker_url)
+        # Tenant grant (rocketride-saas #975): the bearer token is shared and
+        # names no tenant, so the account signs what this call is for. Asked
+        # here, after the body is final, so the grant names exactly this body.
+        headers = self.db_broker_headers(body)
 
         import asyncio
 
-        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body)
+        return await asyncio.to_thread(self._call_db_broker, broker_url, broker_token, body, extra_headers=headers)
+
+    def db_broker_headers(self, body: dict) -> dict:
+        """
+        Extra headers for one broker call. Default: none.
+
+        The SaaS edition returns a short-lived tenant grant here
+        (``X-Datacore-Grant``), signed by its control plane, naming the one
+        tenant ``body`` names; the provisioner then serves that tenant and no
+        other. Called by ``resolve_db_dsn`` only after ``authorize_db_target``
+        allowed the target. They cannot replace ``Authorization`` or
+        ``Content-Type``.
+
+        Args:
+            body: The provisioner request body about to be sent.
+
+        Returns:
+            Header name -> value.
+        """
+        return {}
 
     @staticmethod
     def _check_broker_url(url: str) -> None:
@@ -500,7 +657,7 @@ class AccountBase(ABC):
         )
 
     @staticmethod
-    def _call_db_broker(url: str, token: str, body: dict) -> str:
+    def _call_db_broker(url: str, token: str, body: dict, *, extra_headers: dict | None = None) -> str:
         """Blocking POST of ``body`` to the provisioner; runs in a worker thread.
 
         Stdlib-only on purpose: the account layer has no async-HTTP dependency,
@@ -510,10 +667,18 @@ class AccountBase(ABC):
         import urllib.error
         import urllib.request
 
+        # urllib folds header names by case, so a lowercase 'authorization'
+        # from the account would otherwise replace the bearer token
+        extra = {
+            name: value
+            for name, value in (extra_headers or {}).items()
+            if name.lower() not in ('authorization', 'content-type')
+        }
         request = urllib.request.Request(
             url,
             data=json.dumps(body).encode('utf-8'),
             headers={
+                **extra,
                 'Authorization': f'Bearer {token}',
                 'Content-Type': 'application/json',
             },
@@ -525,6 +690,13 @@ class AccountBase(ABC):
         except urllib.error.HTTPError as e:
             # 4xx = unknown/invalid tenant per the broker contract; 5xx = broker fault.
             code, reason = e.code, e.reason
+            if code == 403 and not reason:
+                # HTTP/2 or a proxy can drop the reason phrase; aiohttp repeats
+                # it in the body ("403: tenant grant refused: <reason>").
+                try:
+                    reason = e.read(200).decode('utf-8', 'replace').strip()
+                except Exception:
+                    reason = ''
             e.close()
             if code == 409:
                 # The provisioner refuses a retained or dropping tenant: its
@@ -533,6 +705,12 @@ class AccountBase(ABC):
                 raise RuntimeError(
                     f'this RocketRide cloud database has been retired and cannot be used (HTTP 409: {reason})'
                 ) from e
+            if code == 403:
+                # A tenant grant the provisioner refused (rocketride-saas #975).
+                # Its reason is a fixed code (missing, bad_signature, expired,
+                # env_mismatch, ...), never the grant, and is what an operator
+                # needs to tell a key mismatch from clock skew.
+                raise RuntimeError(f'DB broker refused this database (HTTP 403: {reason})') from e
             raise RuntimeError(f'DB broker rejected provision for this account (HTTP {code})') from e
         except Exception as e:
             raise RuntimeError(f'DB broker unreachable: {e}') from e
@@ -841,16 +1019,29 @@ class AccountBase(ABC):
         """
         Dispatch an app-family DAP command to the app/marketplace handler.
 
-        The ``rrext_app`` marketplace surface (browse/install/admin/pricing)
-        requires SaaS — OSS raises NotImplementedError. ``rrext_deploy_app`` is
+        The marketplace READ surface (``rrext_app`` list/get) is served on
+        BOTH editions with one shape, so clients never branch per edition:
+        this base implementation answers from the same scope walk the login
+        assembly uses, decorated exactly as OSS login decorates
+        (``appStatus: 'free'``, ``onDesktop: True`` — the catalog and the
+        handshake can never disagree). The desktop WRITES (``desktop_add`` /
+        ``desktop_remove``) are acknowledged as no-ops: OSS has no desktop
+        concept — every app the operator brought onto the server is
+        implicitly on it, so adding is vacuously satisfied and removing is
+        impossible (the tile stays; a UI should not offer Remove where every
+        entry is on the desktop). The rest of the marketplace
+        (``list_mine``/``admin_*``/``pricing_*`` — developer rails, the
+        review ladder, Stripe) is genuinely SaaS-only and raises
+        NotImplementedError. ``rrext_deploy_app`` is
         app deploy control on the shared deployments registry and works on both
-        editions, with three subcommands special on OSS: ``register_dev`` (the
-        per-user dev overlay — platform infrastructure so local app development
-        works without SaaS), ``developer_status`` (answered from the session's
-        org — OSS carries the fixed ``rocketride`` namespace), and the
-        remaining ``developer_*`` verbs (developer-account / Stripe
-        registration — SaaS only). The SaaS implementation overrides this
-        method entirely and delegates to ``app_handler.handle()``.
+        editions, with two subcommands special on OSS: ``developer_status``
+        (answered from the session's org — OSS carries the fixed
+        ``rocketride`` namespace) and the remaining ``developer_*`` verbs
+        (developer-account / Stripe registration — SaaS only). Dev previews
+        are LOCAL-FIRST: the dev server proxies the engine and preview pages
+        register the app client-side, so the server holds no dev state.
+        The SaaS implementation overrides this method entirely and delegates
+        to ``app_handler.handle()``.
 
         Args:
             conn:    ``TaskConn`` instance.
@@ -859,11 +1050,6 @@ class AccountBase(ABC):
         command = request.get('command')
         sub = (request.get('arguments', {}) or {}).get('subcommand') or ''
         if command == 'rrext_deploy_app':
-            # Dev overlay: shared platform capability (not marketplace).
-            if sub == 'register_dev':
-                from ai.account.dev_overlay import handle_register_dev
-
-                return await handle_register_dev(conn, request)
             # Namespace status is readable on both editions — the session
             # already carries the org's developerId ('rocketride' on OSS), so
             # the App Builder's DEPLOY page can render without a SaaS lookup.
@@ -886,7 +1072,62 @@ class AccountBase(ABC):
             from ai.account.app_deploy import handle_deploy_app
 
             return await handle_deploy_app(conn, request)
-        raise NotImplementedError('App marketplace requires SaaS mode')
+
+        # ── rrext_app: the marketplace surface, OSS emulation ────────────────
+        args = request.get('arguments', {}) or {}
+
+        if sub in ('list', 'get'):
+            # The caller's reachable set — the SAME walk the login assembly
+            # uses (public + the local team/user rails when authenticated;
+            # public only when anonymous), so the picker sees @me/@team rows.
+            info = getattr(conn, '_account_info', None)
+            if info and getattr(info, 'userId', None):
+                # AccountInfo carries ONE org (models.py); the walk wants a
+                # list. The OSS override ignores it (registry-only), so this
+                # exists for signature fidelity, not behaviour.
+                org = getattr(info, 'organization', None)
+                orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
+                apps = await self.get_apps_for_user(info.userId, orgs)
+            else:
+                apps = await self.get_public_apps()
+            # OSS decoration — identical to the login assembly's, so the
+            # catalog and the handshake agree by construction.
+            for entry in apps:
+                entry['appStatus'] = 'free'
+                entry['onDesktop'] = True
+            # Shell-compatibility narrowing, shape parity with SaaS.
+            shell = args.get('shell')
+            if shell:
+                apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
+            if sub == 'get':
+                app_id = args.get('appId', '')
+                if not app_id:
+                    return conn.build_error(request, 'appId is required')
+                entry = next((a for a in apps if a.get('id') == app_id), None)
+                if entry is None:
+                    return conn.build_error(request, 'App not found')
+                # No pricing backend on OSS — an empty price list, not an error.
+                return conn.build_response(request, body={'app': entry, 'prices': []})
+            return conn.build_response(request, body={'apps': apps})
+
+        if sub == 'desktop_add':
+            # Vacuously satisfied: everything on an OSS server is on the
+            # desktop already. Acknowledged so shared surfaces need no
+            # edition branch; nothing changes, so no account push follows.
+            app_id = args.get('appId', '')
+            if not app_id:
+                return conn.build_error(request, 'appId is required')
+            return conn.build_response(request, body={'added': True, 'appId': app_id})
+
+        if sub == 'desktop_remove':
+            # Accepted without error by decision (2026-10-19): the desktop IS
+            # the server inventory on OSS — nothing can leave it.
+            app_id = args.get('appId', '')
+            if not app_id:
+                return conn.build_error(request, 'appId is required')
+            return conn.build_response(request, body={'removed': True, 'appId': app_id})
+
+        raise NotImplementedError('App marketplace administration requires SaaS mode')
 
     async def handle_public(self, conn, request):
         """

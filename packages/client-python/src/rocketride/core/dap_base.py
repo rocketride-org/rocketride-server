@@ -53,7 +53,6 @@ Features:
 import os
 import sys
 import traceback
-import inspect
 import logging
 from typing import Dict, Any, Optional, Union
 
@@ -167,6 +166,7 @@ class DAPBase:
             on_receive=self.on_receive,
             on_connected=self.on_connected,
             on_disconnected=self.on_disconnected,
+            on_closing=self.on_closing,
         )
 
     async def _call_method(self, message: Dict[str, Any], method_name: str, default_name: str):
@@ -387,6 +387,15 @@ class DAPBase:
             async def on_connected(self, connection_info):
                 self.debug_message(f"Connected to {connection_info}")
                 await self.send_initialize_request()
+        """
+        pass
+
+    async def on_closing(self) -> None:
+        """
+        Handle the socket stopping, before in-flight handlers are drained.
+
+        Override this to react at once to a closed connection; ``on_disconnected``
+        follows only after every running handler has finished.
         """
         pass
 
@@ -704,18 +713,11 @@ class DAPBase:
         }
 
         try:
-            # Get the call stack
-            stack = inspect.stack()
-
-            # stack[0] is current function, stack[1] is caller
-            caller = stack[1]
-
-            # Get filename and line number from caller frame
-            filename = os.path.basename(caller.filename)
-            lineno = caller.lineno
-
-            # Put it in the response
-            response['trace'] = {'file': filename, 'lineno': lineno}
+            # The caller's frame only: inspect.stack() reads every frame's source
+            # and, on its first call after new imports, maps every module in
+            # sys.modules, which blocks the event loop for seconds on a slow disk
+            caller = sys._getframe(1)
+            response['trace'] = {'file': os.path.basename(caller.f_code.co_filename), 'lineno': caller.f_lineno}
 
         except Exception:
             # It is not critical we add these

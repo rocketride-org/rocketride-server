@@ -29,10 +29,13 @@
  *                    smoke tests. Test files are co-located with their subject
  *                    and discovered recursively.
  *
- * Builds gate on the drift CHECK only (shared:check-gallery-tokens —
- * silent unless the committed map drifted, then the build fails naming
- * the remedy). shared:test runs under test targets, never as a build
- * step: a normal build must not stream unit-test output.
+ * Builds run shared:check-gallery-tokens, which is SELF-HEALING locally:
+ * a stale token map is regenerated in place and the build continues — a
+ * developer's build must never fail over a file a script can write. Under
+ * CI (process.env.CI) the same task runs the strict --check instead, so
+ * committed drift still fails the pipeline and names the remedy.
+ * shared:test runs under test targets, never as a build step: a normal
+ * build must not stream unit-test output.
  */
 const path = require('path');
 const { readdir } = require('node:fs/promises');
@@ -89,16 +92,25 @@ function makeTestAction() {
 
 /**
  * Regenerates the gallery token-usage map (write mode), or verifies the
- * committed map matches a fresh generation (check mode - fails on drift).
+ * committed map matches a fresh generation.
  *
- * @param {boolean} check - true = verify only, false = write the file.
+ * SELF-HEALING outside CI: check mode regenerates in place instead of
+ * failing — a local build must never die over a generated file a script
+ * can write (it broke two builds in one day before this). CI keeps the
+ * strict --check so committed drift still fails the pipeline.
+ *
+ * @param {boolean} check - true = gate (strict in CI, self-heal locally),
+ *                          false = always write the file.
  */
 function makeGenGalleryTokensAction(check) {
+	const strict = check && !!process.env.CI;
 	return {
-		description: check ? 'Verifying gallery token map' : 'Generating gallery token map',
+		description: strict
+			? 'Verifying gallery token map'
+			: check ? 'Refreshing gallery token map (self-healing)' : 'Generating gallery token map',
 		run: async (ctx, task) => {
 			const args = ['scripts/generate-gallery-tokens.mjs'];
-			if (check) args.push('--check');
+			if (strict) args.push('--check');
 			await execCommand('node', args, { task, cwd: APP_ROOT });
 		},
 	};

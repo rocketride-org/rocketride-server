@@ -32,7 +32,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { ISqlSchemaResponse, SqlDialect } from '../src/connect';
+import type { SqlSchemaResponse, SqlDialect } from '../src/connect';
 import type { RrType } from '../src/sql/resultTypes';
 import { inferColumnTypes, rrTypeFromSqlType, rrTypeFromValues } from '../src/sql/resultTypes';
 
@@ -221,7 +221,7 @@ describe('rrTypeFromValues', () => {
 // =============================================================================
 
 /** A two-table schema snapshot. */
-const SCHEMA: ISqlSchemaResponse = {
+const SCHEMA: SqlSchemaResponse = {
 	database: 'sample_shop',
 	tables: {
 		orders: {

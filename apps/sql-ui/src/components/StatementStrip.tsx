@@ -38,7 +38,7 @@ import React from 'react';
 import type { CSSProperties } from 'react';
 import { Button, StatusBadge } from 'shell';
 import type { StatusVariant } from 'shell';
-import type { IStatementRun } from '../sql/batch';
+import type { StatementRun } from '../sql/batch';
 import { formatRunLabel } from '../sql/batch';
 
 // =============================================================================
@@ -46,9 +46,9 @@ import { formatRunLabel } from '../sql/batch';
 // =============================================================================
 
 /** Props for the {@link StatementStrip} component. */
-export interface IStatementStripProps {
+export interface StatementStripProps {
 	/** The batch's statements, in order. */
-	runs: IStatementRun[];
+	runs: StatementRun[];
 	/** Index of the statement whose result the grid is showing. */
 	selected: number | null;
 	/** Fired with a statement index when the user picks one. */
@@ -91,7 +91,7 @@ const styles = {
  * @param run - The statement.
  * @returns The badge variant and text.
  */
-function badgeFor(run: IStatementRun): { variant: StatusVariant; text: string } {
+function badgeFor(run: StatementRun): { variant: StatusVariant; text: string } {
 	switch (run.outcome) {
 		case 'rows':
 			return { variant: 'success', text: 'rows' };
@@ -116,7 +116,7 @@ function badgeFor(run: IStatementRun): { variant: StatusVariant; text: string } 
  * @param run - The statement.
  * @returns The tooltip text.
  */
-function titleFor(run: IStatementRun): string {
+function titleFor(run: StatementRun): string {
 	// A statement rerun from the history drawer has no place in the buffer, so
 	// it gets no line reference rather than a made-up one.
 	const lines = run.startLine === undefined || run.endLine === undefined
@@ -137,10 +137,10 @@ function titleFor(run: IStatementRun): string {
  * Rendered only when a batch held more than one statement; for a single
  * statement the result meta line already carries everything this would say.
  *
- * @param props - {@link IStatementStripProps}.
+ * @param props - {@link StatementStripProps}.
  * @returns The strip element, or null for a batch of one.
  */
-export const StatementStrip: React.FC<IStatementStripProps> = ({ runs, selected, onSelect }) => {
+export const StatementStrip: React.FC<StatementStripProps> = ({ runs, selected, onSelect }) => {
 	if (runs.length < 2) return null;
 	return (
 		<ul style={styles.strip} role="list" aria-label="Statements in the last run">

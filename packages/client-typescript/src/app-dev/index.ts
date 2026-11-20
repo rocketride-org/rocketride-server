@@ -25,12 +25,13 @@
  * The app dev loop — `rocketride/app-dev` (Node.js only).
  *
  * `rsbuild dev` serves an app's Module Federation remote from its folder and
- * rebuilds on save. The developer's PERSONAL dev overlay
- * (`rrext_deploy_app.register_dev`) points the server's shell at that local
- * bundle — keyed by a per-host session nonce, so a preview opened with
- * `?rrsession=<nonce>` resolves THIS host's dev server even when another
- * editor serves the same app. The registration lives as long as the
- * registering connection (plus an idle TTL), so a host keeps its connection
+ * rebuilds on save — LOCAL-FIRST: the dev server is the preview's front
+ * door. A generated wrapper config (see proxyConfig.ts) mounts the compiled
+ * assets under `/apps/<id>/dev/` and proxies everything else (shell page,
+ * auth, task websocket) to the connected engine, so a tab opened on the dev
+ * server's own origin with `?appid=<id>&rrdev=1` self-registers the local
+ * bundle from its URL. The server holds no dev state; the registration
+ * lives exactly as long as the dev server
  * open for the whole session and re-registers after every rebuild.
  *
  * The scaffolded rsbuild config runs HMR with live reload against
@@ -44,33 +45,51 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { randomUUID } from 'crypto';
 import { spawn, type ChildProcess } from 'child_process';
-import { appIconDataUri } from '../app-pack/scan.js';
 import type { ScannedApp } from '../app-pack/scan.js';
 import { isTransientLockError, runRootInstall } from '../app-pack/vendor.js';
 import { materializeDevServerGuard } from './guard.js';
+import { writeProxyConfig, webOriginFor } from './proxyConfig.js';
 
 export { DEV_SERVER_GUARD_SOURCE, materializeDevServerGuard } from './guard.js';
+export { writeProxyConfig, webOriginFor } from './proxyConfig.js';
 
 // =============================================================================
 // SESSION + PREVIEW URL
 // =============================================================================
 
 /** This host process's dev-session nonce (stable for the process lifetime). */
-export const DEV_SESSION_NONCE = randomUUID();
-
 /**
- * The preview URL for an app's dev bundle: the server's shell, locked to the
- * app, with dev hooks on and routed to this host's overlay entry.
+ * The preview URL for a running dev session — the DEV SERVER's own origin
+ * with the URL-convention self-registration parameters. The origin is the
+ * session identity (two editors serving the same app are two origins), so
+ * no session nonce rides the URL.
  *
- * @param baseUrl - The server's web origin (http(s), no trailing slash needed).
+ * @param devOrigin - The dev server origin (http://localhost:<port>).
  * @param appId - The app id.
- * @param session - The registering host's nonce (default: this process's).
+ * @param opts - Optional sign-in wiring: `engineOrigin` adds the `rrauthorigin`
+ *               param (the registered web origin the shell's dev relay
+ *               signs in through); `token` appends the workspace credential
+ *               as a `#rrtoken=` FRAGMENT — never sent on the wire, consumed
+ *               and stripped by the shell's bootstrap, so the preview opens
+ *               already signed in; `signedOut` appends an EMPTY fragment
+ *               (`#rrtoken=`) — the definitive "signed out" (--no-auth's
+ *               GUARANTEE: the shell clears any session the browser
+ *               remembers for this origin and opens on the signed-out
+ *               page). No fragment at all leaves the tab's own state
+ *               alone.
  * @returns The URL to open in a browser (or an embedding panel).
  */
-export function devPreviewUrl(baseUrl: string, appId: string, session: string = DEV_SESSION_NONCE): string {
-	return `${baseUrl.replace(/\/+$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&rrsession=${encodeURIComponent(session)}`;
+export function devPreviewUrl(devOrigin: string, appId: string, opts: { engineOrigin?: string; token?: string; signedOut?: boolean } = {}): string {
+	// _ts busts the browser's cached index.html (same move as the VS Code
+	// panel's preview URL): the flavor picker AND the shell bundle hang off
+	// that document, and a stale cached copy silently runs last week's
+	// shell against this week's URL contract.
+	let url = `${devOrigin.replace(/\/+$/, '')}/?appid=${encodeURIComponent(appId)}&rrdev=1&_ts=${Date.now()}`;
+	if (opts.engineOrigin) url += `&rrauthorigin=${encodeURIComponent(webOriginFor(opts.engineOrigin))}`;
+	if (opts.token) url += `#rrtoken=${encodeURIComponent(opts.token)}`;
+	else if (opts.signedOut) url += '#rrtoken=';
+	return url;
 }
 
 // =============================================================================
@@ -128,6 +147,8 @@ export interface DevOutputSignal {
 	origin?: string;
 	/** Build lifecycle edge, when one appeared. */
 	event?: 'built' | 'failed' | 'building';
+	/** rsbuild auto-bumped off a busy port ("port X is in use, using port Y"). */
+	portBump?: { from: number; to: number };
 }
 
 /**
@@ -144,6 +165,10 @@ export function classifyDevOutput(lines: string[]): DevOutputSignal {
 	const signal: DevOutputSignal = {};
 	const origin = /Local:\s+(http:\/\/[\w.-]+:\d+)/.exec(lines.join('\n'));
 	if (origin) signal.origin = origin[1];
+	// The origin is the session identity (cookies, registration): a silent
+	// port bump strands open preview tabs, so the host gets to say so loudly.
+	const bump = /port (\d+) is in use, using port (\d+)/i.exec(lines.join('\n'));
+	if (bump) signal.portBump = { from: Number(bump[1]), to: Number(bump[2]) };
 	const compilerText = lines.filter((line) => !/^\s*\w+\s+\[browser\]/.test(line)).join('\n');
 	if (/built in\s+[\d.]+/i.test(compilerText)) signal.event = 'built';
 	else if (/build failed|error {3}/i.test(compilerText)) signal.event = 'failed';
@@ -166,9 +191,10 @@ export function classifyDevOutput(lines: string[]): DevOutputSignal {
  * @param options.guardPath - The guard script (default: the materialized SDK guard).
  * @returns The guard process (stdout/stderr carry rsbuild's output).
  */
-export function spawnDevServer(appFolder: string, options: { guardPath?: string } = {}): ChildProcess {
+export function spawnDevServer(appFolder: string, options: { guardPath?: string; configPath?: string } = {}): ChildProcess {
 	const invocation = resolveRsbuildInvocation(appFolder);
-	return spawn(process.execPath, [options.guardPath ?? materializeDevServerGuard(), String(process.pid), invocation.shell ? '1' : '0', invocation.cmd, ...invocation.args, 'dev'], {
+	const configArgs = options.configPath ? ['--config', options.configPath] : [];
+	return spawn(process.execPath, [options.guardPath ?? materializeDevServerGuard(), String(process.pid), invocation.shell ? '1' : '0', invocation.cmd, ...invocation.args, 'dev', ...configArgs], {
 		cwd: appFolder,
 		env: { ...process.env, NO_COLOR: '1' },
 		// Never allocate a console window for the guard or its tree
@@ -223,64 +249,6 @@ export async function stopDevServer(proc: ChildProcess, graceMs = 5000): Promise
 
 // =============================================================================
 // DEV OVERLAY
-// =============================================================================
-
-/** The client surface the overlay calls need. */
-export interface DevOverlayClient {
-	call(command: string, args: Record<string, unknown>): Promise<unknown>;
-}
-
-/** What one overlay registration announces. */
-export interface DevOverlayEntry {
-	/** MF container name (app id with dots/hyphens as underscores). */
-	moduleId: string;
-	/** The app id. */
-	appId: string;
-	/** The dev server origin (http://localhost:<port>). */
-	origin: string;
-	/** Display name, description, version, and icon data: URI — so a
-	    never-published app's desktop tile renders like a store tile. */
-	name?: string;
-	description?: string;
-	appVersion?: string;
-	icon?: string;
-	/** The registering host's nonce (default: this process's). */
-	session?: string;
-}
-
-/**
- * Points the caller's dev overlay at a dev server's remoteEntry.js. The URL
- * carries a per-registration cache buster: shells resolve the overlay to it
- * verbatim, and a constant URL let the browser serve a disk-cached container
- * from a previous (possibly dead) server until a hard refresh.
- *
- * @param client - A connected client.
- * @param entry - The registration.
- */
-export async function registerDevOverlay(client: DevOverlayClient, entry: DevOverlayEntry): Promise<void> {
-	await client.call('rrext_deploy_app', {
-		subcommand: 'register_dev',
-		moduleId: entry.moduleId,
-		url: `${entry.origin}/remoteEntry.js?t=${Date.now()}`,
-		appId: entry.appId,
-		session: entry.session ?? DEV_SESSION_NONCE,
-		name: entry.name ?? '',
-		description: entry.description ?? '',
-		appVersion: entry.appVersion ?? '',
-		icon: entry.icon ?? '',
-	});
-}
-
-/**
- * Drops the caller's dev overlay entry so shells return to the published
- * bundle.
- *
- * @param client - A connected client.
- * @param moduleId - The app's MF container name.
- */
-export async function unregisterDevOverlay(client: DevOverlayClient, moduleId: string): Promise<void> {
-	await client.call('rrext_deploy_app', { subcommand: 'register_dev', moduleId, unregister: true });
-}
 
 // =============================================================================
 // SINGLE-APP SESSION (terminal hosts)
@@ -295,6 +263,12 @@ export interface DevSessionHooks {
 	onLine?: (line: string, stream: 'stdout' | 'stderr') => void;
 	/** A state change, with the build time on 'ok' and a reason on 'error'. */
 	onState?: (state: DevState, detail?: { origin?: string; durationMs?: number; reason?: string }) => void;
+	/**
+	 * rsbuild auto-bumped off a busy port. The origin is the session identity
+	 * (browser sign-in, registration), so hosts should surface this loudly —
+	 * tabs and logins bound to the old port are stranded.
+	 */
+	onPortBump?: (from: number, to: number) => void;
 }
 
 /** Options for a {@link DevSession}. */
@@ -303,12 +277,19 @@ export interface DevSessionOptions extends DevSessionHooks {
 	app: ScannedApp;
 	/** The workspace root (where `pnpm install` runs). */
 	workspaceRoot: string;
-	/** A connected client for the overlay registration. */
-	client: DevOverlayClient;
+	/** The connected engine origin the dev server proxies to (http://host:port). */
+	engineOrigin: string;
 	/** Run the workspace install before starting (default true). */
 	install?: boolean;
 	/** Restart the server when the app's package.json changes (default true). */
 	watchPackageJson?: boolean;
+	/** Redirect the bare front door to the preview URL (terminal hosts; see WrapperOptions). */
+	injectPreviewParams?: boolean;
+	/** Dev-server port override — outranks the app config's pinned port. */
+	port?: number;
+	/** Launched signed out (--no-auth): the front-door redirect carries the
+	 *  empty `#rrtoken=` directive too (see WrapperOptions.signedOut). */
+	signedOut?: boolean;
 }
 
 /** A death inside this window after start counts toward the crash-loop guard. */
@@ -331,12 +312,15 @@ export class DevSession {
 	private startedAt = 0;
 	private strikes = 0;
 	private stopping = false;
-	private iconUri: string | undefined;
 	private pkgWatcher: fs.FSWatcher | null = null;
 	private pkgTimer: NodeJS.Timeout | undefined;
+	private pkgPollFile: string | null = null;
+	private pkgPollListener: ((cur: fs.Stats, prev: fs.Stats) => void) | null = null;
 	private restarts: Promise<void> = Promise.resolve();
 	private restartQueued = false;
 	private readiness: { resolve: (origin: string) => void; reject: (err: Error) => void } | null = null;
+	/** The generated proxy wrapper config passed to rsbuild via --config. */
+	private wrapperPath = '';
 
 	/**
 	 * @param options - See {@link DevSessionOptions}.
@@ -357,6 +341,14 @@ export class DevSession {
 	async start(): Promise<string> {
 		this.stopping = false;
 		if (this.options.install !== false) await this.install();
+		// The wrapper turns this app's dev server into the preview's front
+		// door (assets under /apps/<id>/dev/, everything else proxied to the
+		// engine). Regenerated per session — the engine origin may change.
+		this.wrapperPath = await writeProxyConfig(this.options.app.folder, this.options.app.id, this.options.engineOrigin, {
+			injectPreviewParams: this.options.injectPreviewParams,
+			port: this.options.port,
+			signedOut: this.options.signedOut,
+		});
 		const ready = new Promise<string>((resolve, reject) => {
 			this.readiness = { resolve, reject };
 		});
@@ -365,33 +357,32 @@ export class DevSession {
 		return ready;
 	}
 
-	/**
-	 * Re-announces the running server — call after the host reconnects (the
-	 * overlay registration expires with the connection that made it).
-	 */
-	async reregister(): Promise<void> {
-		if (this.origin) await this.register();
-	}
-
-	/** Stops the server (tree kill) and drops the overlay entry. */
+	/** Stops the server (tree kill). */
 	async stop(): Promise<void> {
 		this.stopping = true;
 		if (this.pkgTimer) clearTimeout(this.pkgTimer);
 		this.pkgWatcher?.close();
 		this.pkgWatcher = null;
+		// remove only this session's listener; another session may poll the same file
+		if (this.pkgPollFile && this.pkgPollListener) fs.unwatchFile(this.pkgPollFile, this.pkgPollListener);
+		this.pkgPollFile = null;
+		this.pkgPollListener = null;
 		// a restart in flight may be stopping the old server; let it finish
 		// (it will not spawn again once `stopping` is set)
 		await this.restarts;
 		const proc = this.proc;
 		this.proc = null;
 		if (proc) await stopDevServer(proc);
+		// step: the session-unique wrapper is this session's to remove — a
+		// concurrent session for the same folder owns a different file
+		if (this.wrapperPath) {
+			try { fs.rmSync(this.wrapperPath, { force: true }); } catch { /* best-effort */ }
+			this.wrapperPath = '';
+		}
 		this.readiness?.reject(new Error('dev session stopped'));
 		this.readiness = null;
-		try {
-			await unregisterDevOverlay(this.options.client, this.options.app.moduleId);
-		} catch {
-			// connection gone — the overlay's disconnect expiry covers it
-		}
+		// Nothing to unregister: the preview's registration lives in its tab
+		// and stops resolving the moment the dev server dies (local-first).
 		this.origin = '';
 		this.options.onState?.('stopped');
 	}
@@ -417,7 +408,7 @@ export class DevSession {
 
 	/** Spawns the guarded dev server and wires its output and exit. */
 	private spawn(): void {
-		const proc = spawnDevServer(this.options.app.folder);
+		const proc = spawnDevServer(this.options.app.folder, { configPath: this.wrapperPath });
 		this.proc = proc;
 		this.startedAt = Date.now();
 		this.buildStart = Date.now();
@@ -468,19 +459,16 @@ export class DevSession {
 			if (line.trim()) this.options.onLine?.(line, stream);
 		}
 		const signal = classifyDevOutput(lines);
+		if (signal.portBump) this.options.onPortBump?.(signal.portBump.from, signal.portBump.to);
 		if (signal.origin && !this.origin) {
 			this.origin = signal.origin;
 			this.readiness?.resolve(this.origin);
 			this.readiness = null;
-			void this.register();
 		}
 		if (signal.event === 'built') {
 			const durationMs = this.buildStart ? Date.now() - this.buildStart : undefined;
 			this.buildStart = undefined;
 			this.options.onState?.('ok', { origin: this.origin, durationMs });
-			// Re-register after every rebuild: a fresh cache-busted entry, and
-			// it keeps the overlay's idle TTL alive
-			void this.register();
 		} else if (signal.event === 'failed') {
 			this.buildStart = undefined;
 			this.options.onState?.('error', { origin: this.origin, reason: 'the app failed to compile (see the output above)' });
@@ -490,40 +478,69 @@ export class DevSession {
 		}
 	}
 
-	/** Points the overlay at the running server (failures are reported, not thrown). */
-	private async register(): Promise<void> {
-		if (!this.origin) return;
-		const app = this.options.app;
-		try {
-			if (this.iconUri === undefined) this.iconUri = (await appIconDataUri(app.icon)) ?? '';
-			await registerDevOverlay(this.options.client, {
-				moduleId: app.moduleId,
-				appId: app.id,
-				origin: this.origin,
-				name: app.name,
-				description: app.description,
-				appVersion: app.version,
-				icon: this.iconUri,
-			});
-		} catch (err) {
-			this.options.onLine?.(`register_dev failed: ${err instanceof Error ? err.message : String(err)}`, 'stderr');
-		}
-	}
-
 	/**
 	 * Restarts (reinstall + respawn) when the app's package.json changes.
 	 * Watches the folder, not the file: an editor's atomic save renames a new
 	 * file over package.json, and a file watch stays on the replaced inode.
+	 * On Windows, watches the folder's real path: a folder named through an
+	 * 8.3 short name (C:\Users\JOHNSM~1\...) makes libuv abort the whole
+	 * process on the first change event. If the real path cannot be resolved
+	 * (e.g. an SMB share that denies querying an ancestor), polls package.json
+	 * instead, which never touches the unsafe watch path.
 	 */
 	private watchPackageJson(): void {
+		const folder = this.options.app.folder;
+		const schedule = (): void => {
+			if (this.pkgTimer) clearTimeout(this.pkgTimer);
+			this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
+		};
+		const pkgFile = path.join(folder, 'package.json');
+		// mtime, ctime and size: a write that restores the mtime still moves the
+		// ctime. '' for a missing file (fs.watchFile reports it with zeroed stats).
+		const stampOf = (stats: fs.Stats): string => (stats.nlink > 0 ? `${stats.mtimeMs}:${stats.ctimeMs}:${stats.size}` : '');
+		const stamp = (): string => {
+			try {
+				return stampOf(fs.statSync(pkgFile));
+			} catch {
+				return '';
+			}
+		};
+		// poll the file's stats (no folder watcher, or the folder watcher failed)
+		const poll = (): void => {
+			this.pkgPollFile = pkgFile;
+			let missing = false;
+			this.pkgPollListener = (cur, prev) => {
+				const now = stampOf(cur);
+				// a file that comes back always restarts: when it returns, fs.watchFile
+				// compares it with the stats from before it went, and a restart made
+				// while it was missing could not install
+				if (now !== stampOf(prev) || (missing && now)) schedule();
+				missing = !now;
+			};
+			fs.watchFile(this.pkgPollFile, { interval: 1000 }, this.pkgPollListener);
+		};
 		try {
-			this.pkgWatcher = fs.watch(this.options.app.folder, (_event, filename) => {
+			const watched = process.platform === 'win32' ? fs.realpathSync.native(folder) : folder;
+			// package.json's stamp as of the last change the watcher reported
+			let seen = stamp();
+			const watcher = fs.watch(watched, (_event, filename) => {
 				if (filename?.toString() !== 'package.json') return;
-				if (this.pkgTimer) clearTimeout(this.pkgTimer);
-				this.pkgTimer = setTimeout(() => this.requestRestart(), 800);
+				seen = stamp();
+				schedule();
 			});
+			// a watcher error (folder removed, permissions changed) falls back to polling;
+			// polling takes the current stats as its baseline, so a change the watcher
+			// missed before failing is queued here
+			watcher.on('error', () => {
+				watcher.close();
+				if (this.pkgWatcher === watcher) this.pkgWatcher = null;
+				if (this.stopping || this.pkgPollFile) return;
+				if (stamp() !== seen) schedule();
+				poll();
+			});
+			this.pkgWatcher = watcher;
 		} catch {
-			// no watcher on this platform/filesystem — edits need a manual restart
+			poll();
 		}
 	}
 

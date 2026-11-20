@@ -97,7 +97,7 @@ Set the API key for the selected Pinecone profile. The runtime creates its clien
 
 ### Search and document lifecycle
 
-Semantic search requires an embedding and does not accept a non-zero offset. Keyword search adds a content filter to the metadata filters. Re-ingesting an object deletes its existing chunks before replacement chunks are upserted. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
+Semantic search requires an embedding and does not accept a non-zero offset. Keyword search adds a content filter to the metadata filters. A batch that holds an object's chunk 0 deletes that object's existing chunks before the new chunks are upserted, so a re-ingest replaces the object; a batch without chunk 0 adds its chunks to the stored ones, so an object written in several batches keeps them all. Rows get generated IDs, so a batch without chunk 0 that repeats a chunk number already stored keeps both copies; to change a chunk, write the object again from chunk 0. The store can mark chunks deleted or active, and its default filters exclude marked-deleted chunks.
 
 The node retrieves semantic results with the requested limit (or 25 when no
 limit is supplied). It runs the collection-existence and embedding-model checks

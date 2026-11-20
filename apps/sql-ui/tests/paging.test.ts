@@ -33,7 +33,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import type { IDataGridPageRequest } from 'shell';
-import type { ISqlSchemaTable } from '../src/connect';
+import type { SqlSchemaTable } from '../src/connect';
 import { buildPageStatements, quoteIdent } from '../src/sql/paging';
 
 // =============================================================================
@@ -41,7 +41,7 @@ import { buildPageStatements, quoteIdent } from '../src/sql/paging';
 // =============================================================================
 
 /** A table with one text column, one numeric column, and a primary key. */
-const TABLE: ISqlSchemaTable = {
+const TABLE: SqlSchemaTable = {
 	columns: [
 		{ column: 'id', type: 'BIGINT' },
 		{ column: 'code', type: 'VARCHAR(32)' },
@@ -51,7 +51,7 @@ const TABLE: ISqlSchemaTable = {
 };
 
 /** The same table without a primary key (ORDER BY has nothing to fall back to). */
-const TABLE_NO_PK: ISqlSchemaTable = { columns: TABLE.columns };
+const TABLE_NO_PK: SqlSchemaTable = { columns: TABLE.columns };
 
 /**
  * Build a page request with the given overrides over a page-1 default.
@@ -169,7 +169,7 @@ describe('buildPageStatements binds every user value', () => {
 	});
 
 	it('omits the search clause when no column is text-typed', () => {
-		const numeric: ISqlSchemaTable = { columns: [{ column: 'id', type: 'BIGINT' }] };
+		const numeric: SqlSchemaTable = { columns: [{ column: 'id', type: 'BIGINT' }] };
 		const { select, params } = buildPageStatements('postgres', 'orders', numeric, req({ search: 'ab' }));
 		assert.equal(select, 'SELECT * FROM "orders" LIMIT 50 OFFSET 0');
 		assert.deepEqual(params, []);

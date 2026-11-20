@@ -2,7 +2,7 @@ import importlib
 import json
 import threading
 from abc import abstractmethod, ABC
-from typing import List, Callable, Dict, Any, Optional, Tuple
+from typing import List, Callable, Dict, Any, Optional, Set, Tuple
 from rocketlib import IInstanceBase, tool_function, warning
 from ..schema import Doc, DocFilter, DocMetadata, Question, QuestionText, QuestionType, Answer
 
@@ -22,6 +22,12 @@ class DocumentStoreBase(ABC):
     which must be implemented in the actual providers, but some of the utility functions
     are implemented here but can be overridden
     """
+
+    _NO_DOC_EMBEDDING_MESSAGE = 'Documents have no embedding vectors. Configure embeddings before writing to the store.'
+    _NO_DOC_MODEL_MESSAGE = (
+        'Documents are missing an embedding model name. Check the embedding configuration '
+        'or supply vectors with their model name.'
+    )
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -88,8 +94,39 @@ class DocumentStoreBase(ABC):
     @abstractmethod
     def addChunks(self, chunks: List[Doc]) -> None:
         """
-        Write (or overwrite) documents into the store.
+        Write documents into the store.
+
+        A batch that holds an object's chunk 0 replaces that object: its stored
+        chunks are deleted first (see objectIdsToReplace). The chunks of an object
+        whose chunk 0 is not in the batch are added to the ones already stored.
+
+        Args:
+            chunks: The batch to write.
         """
+
+    @staticmethod
+    def objectIdsToReplace(chunks: List[Doc]) -> List[str]:
+        """
+        Return the object IDs whose stored chunks a write of these chunks replaces.
+
+        Only an object whose chunk 0 is in the batch starts over. A producer can
+        hand one object to the store in several batches (embedding_transformer
+        flushes every 64 chunks), and deleting the object on each of them would
+        keep only the last batch (#1986).
+
+        Args:
+            chunks: The batch about to be written.
+
+        Returns:
+            The object ID of each chunk 0 in the batch, each once, in batch order.
+        """
+        objectIds: List[str] = []
+        seen: Set[str] = set()
+        for chunk in chunks:
+            if chunk.metadata.chunkId == 0 and chunk.metadata.objectId not in seen:
+                seen.add(chunk.metadata.objectId)
+                objectIds.append(chunk.metadata.objectId)
+        return objectIds
 
     @abstractmethod
     def remove(self, objectIds: List[str]) -> None:
@@ -354,8 +391,14 @@ class DocumentStoreBase(ABC):
             # For each question
             for query in question.questions:
                 # Make sure we have the embeddings
+                if query.embedding is None or len(query.embedding) == 0:
+                    raise Exception(
+                        'Question has no embedding vector. Embed questions with the same model as the stored documents.'
+                    )
                 if not query.embedding_model:
-                    raise Exception('You must run your question through an embedding filter')
+                    raise Exception(
+                        'Question has no embedding model name. Embed questions with the same model as the stored documents.'
+                    )
 
                 # Do a find operation
                 docs = self.searchSemantic(query, question.filter)
@@ -471,7 +514,10 @@ class DocumentStoreBase(ABC):
 
             # The collection should contain exactly one control document, otherwise it's corrupted
             if len(doc) != 1:
-                raise Exception(f'Collection does not have control document, found {len(doc)}')
+                raise Exception(
+                    f'Collection setup record is missing or invalid (found {len(doc)}, expected 1). '
+                    'Choose a new collection or table name.'
+                )
 
             # Extract and store the vector size and model name from the control document
             self.vectorSize = doc[0].metadata.vectorSize
@@ -495,6 +541,14 @@ class DocumentStoreBase(ABC):
         with self.collectionLock:
             return self._checkCollectionExists()
 
+    @classmethod
+    def _checkDocumentEmbedding(cls, doc: Doc) -> None:
+        """Refuse a document whose embedding vector is missing or empty, or a vector without its model name."""
+        if doc.embedding is None or len(doc.embedding) == 0:
+            raise Exception(cls._NO_DOC_EMBEDDING_MESSAGE)
+        if not doc.embedding_model:
+            raise Exception(cls._NO_DOC_MODEL_MESSAGE)
+
     def createCollection(self, documents: List[Doc]):
         """
         Create a new collection if it does not already exist.
@@ -511,8 +565,7 @@ class DocumentStoreBase(ABC):
             if self._checkCollectionExists():
                 # Collection already exists, validate documents against existing collection
                 for doc in documents:
-                    if not doc.embedding_model:
-                        raise Exception('You must run your documents through an embedding filter')
+                    self._checkDocumentEmbedding(doc)
                     if doc.embedding_model != self.modelName:
                         raise Exception(
                             f'The collection uses {self.modelName} but the document was encoded with {doc.embedding_model}'
@@ -526,6 +579,11 @@ class DocumentStoreBase(ABC):
             # If no documents are provided, exit early
             if not len(documents):
                 return True
+
+            # Validate the entire batch before creating the collection or writing
+            # its setup record, which persists the first document's model name.
+            for doc in documents:
+                self._checkDocumentEmbedding(doc)
 
             # Use the first document as a reference for embedding model and vector size
             modelName = documents[0].embedding_model
@@ -576,8 +634,6 @@ class DocumentStoreBase(ABC):
 
             # Validate all provided documents against the newly created collection metadata
             for doc in documents:
-                if not doc.embedding_model:
-                    raise Exception('You must run your documents through an embedding filter')
                 if doc.embedding_model != modelName:
                     raise Exception(
                         f'The collection uses {modelName} but the document was encoded with {doc.embedding_model}'
@@ -1089,7 +1145,10 @@ class VectorStoreToolMixin:
                             },
                             'object_id': {
                                 'type': 'string',
-                                'description': 'Unique identifier for the document. Used for deduplication.',
+                                'description': (
+                                    'Identifier of the document the text belongs to. A call that includes the '
+                                    "document's chunk 0 replaces what is stored for it."
+                                ),
                             },
                             'metadata': {
                                 'type': 'object',
@@ -1140,8 +1199,12 @@ class VectorStoreToolMixin:
         },
         description=(
             'Add or update documents in the vector database. Each document requires content text and an '
-            'object ID for deduplication. Embeddings are computed automatically when an embedding provider '
-            'is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
+            'object ID. For each object ID, a call that includes chunk 0 replaces the chunks stored for it, '
+            'and a call without chunk 0 adds to them. Documents without metadata.chunkId are numbered 0, 1, '
+            '2 ... per object ID, so such a call replaces. A call without chunk 0 that repeats a stored chunk '
+            'number can store a second copy of it: to change one chunk, send the whole object from chunk 0. '
+            'Embeddings are computed automatically when an '
+            'embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed '
             '"embedding" (float array) and "embedding_model" (string) per document to skip auto-computation. '
             "Several documents with one object ID are stored as that document's chunks. "
             'Returns {"success": false, "error": "..."} when embeddings cannot be obtained.'
