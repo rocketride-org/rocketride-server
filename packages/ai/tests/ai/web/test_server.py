@@ -90,6 +90,21 @@ class TestDotenvLoading:
         load.assert_not_called()
 
 
+class TestHostedEnvRefusal:
+    """WebServer startup itself must enforce the hosted .env policy, not only the helper."""
+
+    @pytest.mark.parametrize('flag', ['--saas', '--hosted'])
+    def test_hosted_server_refuses_populated_env(self, monkeypatch, tmp_path, flag):
+        (tmp_path / '.env').write_text('RR_SIGNING_KEY=secret-do-not-print\n', encoding='utf-8')
+        monkeypatch.setattr(sys, 'executable', str(tmp_path / 'engine'))
+        monkeypatch.setattr('ai.web.server.startup_args', lambda: [flag])
+        load = MagicMock(name='load_dotenv')
+        monkeypatch.setattr('ai.web.server.load_dotenv', load)
+        with pytest.raises(RuntimeError, match='remove the install .env'):
+            WebServer(config={'host': '127.0.0.1', 'port': 0})
+        load.assert_not_called()
+
+
 @pytest.fixture
 def uvicorn_loggers_without_redactor():
     """Start with no RequestTargetRedactor on either uvicorn logger; restore the filter lists afterwards.
