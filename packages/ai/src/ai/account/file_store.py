@@ -1344,11 +1344,16 @@ class FileStore:
             arguments = {'path': path, 'expires_in': expires_in, 'download_name': download_name}
             reply = await asyncio.to_thread(task_channel.request_sync, 'store.url', arguments)
             return reply.body['url']
-        if self._task_process:
+        if self._task_process and not _configured_signing_key():
             # A task with no channel (no --data_port) would sign with its own
             # random key: a URL the engine refuses. Say so instead. The flag was
             # set when the view was built, so worker threads never read the
             # engine's current-task slot (main task thread only, task.cpp).
+            # A direct run whose own environment carries RR_SIGNING_KEY is the
+            # exception: the operator gave this process the key a server
+            # verifies with, and an engine-spawned task never inherits it
+            # (it is never passed to task subprocesses), so those runs keep
+            # their download URLs.
             raise RuntimeError('a fetch URL needs the engine, and this task has no channel to it')
 
         import time

@@ -863,6 +863,24 @@ class TestFetchSigningKeyStaysInTheEngine:
             await fs.get_url('reports/q1.csv')
 
     @pytest.mark.asyncio
+    async def test_a_direct_run_with_its_own_signing_key_keeps_its_download_urls(self, monkeypatch, store):
+        """No channel, but the operator put RR_SIGNING_KEY in this process: a server with that key verifies the URL."""
+        from ai.modules.data import channel
+        from ai.modules.task.fetch import handle_fetch
+
+        monkeypatch.setattr(channel.task_channel, 'available', False)
+        monkeypatch.setenv('RR_SIGNING_KEY', _SIGNING_KEY)
+        task_file = {'identity': {'userId': 'user-1'}, 'storage': {'root': 'users/user-1/files'}}
+        monkeypatch.setattr(Store, '_get_current_task', staticmethod(lambda: task_file))
+        fs = Store.engine_file_store()
+        await fs.write('reports/q1.csv', b'data')
+
+        url = await fs.get_url('reports/q1.csv')
+
+        assert '/task/fetch?token=' in url
+        assert (await handle_fetch(self._request(url))).status_code == 200
+
+    @pytest.mark.asyncio
     async def test_the_engine_signs_with_no_channel_and_no_task(self, store):
         # The engine side of store.url: a view not built from a task file signs locally
         fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1', root='users/user-1/files')
