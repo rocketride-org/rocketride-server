@@ -18,7 +18,7 @@ const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide 
 // Absolute base for llms.txt links. The llms.txt format specifies URLs, and an
 // agent that fetched the file on its own has no base to resolve against.
 // Mirrors `url` in docusaurus.config.ts.
-const SITE_URL = 'https://docs.rocketride.org';
+const SITE_URL = 'https://docs.rocketride.ai';
 
 // The page written for coding agents. llms.txt lists it first, ahead of the
 // spine sections, so an agent that reads only the top of the file lands on it.
