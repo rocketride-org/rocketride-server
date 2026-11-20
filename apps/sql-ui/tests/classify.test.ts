@@ -96,6 +96,35 @@ const KIND_CASES: IKindCase[] = [
 	// though FOR UPDATE only locks. Over-classifying costs a retry, not data.
 	{ sql: 'WITH a AS (SELECT 1) SELECT * FROM a FOR UPDATE', kind: 'write' },
 
+	// A SELECT that sends its rows elsewhere writes: a table, a file, variables.
+	{ sql: 'SELECT * INTO orders_backup FROM orders', kind: 'write', dialect: 'postgres' },
+	{ sql: '(SELECT * INTO t FROM a)', kind: 'write', dialect: 'postgres' },
+	{ sql: 'WITH r AS (SELECT 1) SELECT * INTO t FROM r', kind: 'write', dialect: 'postgres' },
+	{ sql: "SELECT * FROM orders INTO OUTFILE '/tmp/o.csv'", kind: 'write', dialect: 'mysql' },
+	{ sql: 'SELECT id INTO @last FROM orders', kind: 'write', dialect: 'mysql' },
+	{ sql: "SELECT * FROM events INTO OUTFILE 'e.csv'", kind: 'write', dialect: 'clickhouse' },
+	{ sql: 'EXPLAIN ANALYZE SELECT * INTO t FROM a', kind: 'write', dialect: 'postgres' },
+	// ANALYZE runs the statement, in every spelling (DA-R1 M4): PostgreSQL's
+	// option list (with a value, among other options, British spelling) and
+	// MySQL's documented synonyms DESCRIBE ANALYZE and DESC ANALYZE.
+	{ sql: 'EXPLAIN (ANALYZE) DELETE FROM t WHERE id = 1', kind: 'write', dialect: 'postgres' },
+	{ sql: 'EXPLAIN (ANALYZE true, BUFFERS) UPDATE t SET x = 1 WHERE id = 1', kind: 'write', dialect: 'postgres' },
+	{ sql: 'EXPLAIN (FORMAT JSON, ANALYZE) INSERT INTO t VALUES (1)', kind: 'write', dialect: 'postgres' },
+	{ sql: 'EXPLAIN ANALYSE DELETE FROM t WHERE id = 1', kind: 'write', dialect: 'postgres' },
+	{ sql: 'DESCRIBE ANALYZE DELETE t FROM t JOIN u ON t.id = u.id', kind: 'write', dialect: 'mysql' },
+	{ sql: 'DESC ANALYZE UPDATE t JOIN u ON t.id = u.id SET t.x = 0', kind: 'write', dialect: 'mysql' },
+	{ sql: 'desc analyze delete from t where id = 1', kind: 'write', dialect: 'mysql' },
+	{ sql: 'DESC ANALYZE DELETE FROM t WHERE id = 1', kind: 'write' },
+	{ sql: 'EXPLAIN ANALYZE FORMAT=TREE DELETE FROM t WHERE id = 1', kind: 'write', dialect: 'mysql' },
+	{ sql: 'DESC ANALYZE SELECT * FROM t', kind: 'read', dialect: 'mysql' },
+	{ sql: 'DESC orders', kind: 'read', dialect: 'mysql' },
+	{ sql: 'DESCRIBE analyze', kind: 'read', dialect: 'mysql' },
+	// Plain EXPLAIN only plans it; INTO in a literal, quoted name or longer word is no INTO.
+	{ sql: 'EXPLAIN SELECT * INTO t FROM a', kind: 'read', dialect: 'postgres' },
+	{ sql: "SELECT 'into' AS w", kind: 'read' },
+	{ sql: 'SELECT * FROM "into"', kind: 'read', dialect: 'postgres' },
+	{ sql: 'SELECT into_count FROM t', kind: 'read' },
+
 	// DDL.
 	{ sql: 'CREATE TABLE t (id INT)', kind: 'ddl' },
 	{ sql: 'ALTER TABLE t ADD COLUMN c INT', kind: 'ddl' },
@@ -115,6 +144,27 @@ const KIND_CASES: IKindCase[] = [
 	{ sql: 'SET GLOBAL autocommit = 0', kind: 'tx' },
 	{ sql: 'SET TRANSACTION ISOLATION LEVEL SERIALIZABLE', kind: 'tx' },
 	{ sql: 'SET SESSION TRANSACTION READ ONLY', kind: 'tx' },
+	// PostgreSQL's other spellings, and MySQL's XA and @@autocommit.
+	{ sql: 'ABORT', kind: 'tx', dialect: 'postgres' },
+	{ sql: 'ABORT', kind: 'tx' },
+	{ sql: 'END', kind: 'tx', dialect: 'postgres' },
+	{ sql: 'END TRANSACTION', kind: 'tx', dialect: 'postgres' },
+	{ sql: "PREPARE TRANSACTION 'x'", kind: 'tx', dialect: 'postgres' },
+	{ sql: "COMMIT PREPARED 'x'", kind: 'tx', dialect: 'postgres' },
+	{ sql: "ROLLBACK PREPARED 'x'", kind: 'tx', dialect: 'postgres' },
+	{ sql: "XA START 'x'", kind: 'tx', dialect: 'mysql' },
+	{ sql: "XA END 'x'", kind: 'tx', dialect: 'mysql' },
+	{ sql: "XA COMMIT 'x'", kind: 'tx' },
+	{ sql: 'SET @@autocommit = 0', kind: 'tx', dialect: 'mysql' },
+	{ sql: 'SET @@session.autocommit = 0', kind: 'tx', dialect: 'mysql' },
+	{ sql: 'SET @@GLOBAL.autocommit = 0', kind: 'tx' },
+	// A lone END closes a compound statement in MySQL, and a PL/pgSQL body split
+	// without its dollar quotes: not transaction control there.
+	{ sql: 'END', kind: 'other', dialect: 'mysql' },
+	{ sql: 'END', kind: 'other' },
+	// PREPARE of a statement is not two-phase commit; @@ of another variable is a variable.
+	{ sql: 'PREPARE stmt FROM \'SELECT 1\'', kind: 'other', dialect: 'mysql' },
+	{ sql: 'SET @@sql_mode = \'\'', kind: 'other', dialect: 'mysql' },
 
 	// Everything else.
 	{ sql: 'SET @x = 1', kind: 'other' },
@@ -289,8 +339,27 @@ describe('patternCheck — EXPLAIN', () => {
 		);
 	});
 
-	it('passes when the statement it would run is bounded', () => {
-		assert.equal(patternCheck('EXPLAIN ANALYZE DELETE FROM orders WHERE id = 1'), null);
+	it('flags it even when the statement it would run is bounded: EXPLAIN reads as a read, and this one writes (DA-R1 M4)', () => {
+		for (const [sql, dialect] of [
+			['EXPLAIN ANALYZE DELETE FROM orders WHERE id = 1', 'postgres'],
+			['EXPLAIN (ANALYZE) DELETE FROM orders WHERE id = 1', 'postgres'],
+			['EXPLAIN (ANALYZE true, BUFFERS) UPDATE orders SET x = 1 WHERE id = 1', 'postgres'],
+			['EXPLAIN ANALYZE INSERT INTO orders VALUES (1)', 'postgres'],
+			['DESCRIBE ANALYZE UPDATE t JOIN u ON t.id = u.id SET t.x = 0 WHERE u.y = 1', 'mysql'],
+			['DESC ANALYZE DELETE FROM orders WHERE id = 1', 'mysql'],
+			['DESC ANALYZE DELETE FROM orders WHERE id = 1', 'unknown'],
+		] as Array<[string, SqlDialect]>) {
+			assert.deepEqual(patternCheck(sql, dialect), { kind: 'EXPLAIN ANALYZE' }, `${dialect}: ${sql}`);
+		}
+	});
+
+	it('names the unbounded statement behind DESC ANALYZE, as behind EXPLAIN ANALYZE', () => {
+		assert.deepEqual(patternCheck('DESC ANALYZE DELETE t FROM t JOIN u ON t.id = u.id', 'mysql'), { kind: 'DELETE without WHERE' });
+	});
+
+	it('passes a plain DESCRIBE, and DESC ANALYZE of a read', () => {
+		assert.equal(patternCheck('DESCRIBE orders', 'mysql'), null);
+		assert.equal(patternCheck('DESC ANALYZE SELECT * FROM orders', 'mysql'), null);
 	});
 
 	it('passes a plain EXPLAIN, which runs nothing', () => {

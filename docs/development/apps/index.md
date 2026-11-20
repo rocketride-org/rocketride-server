@@ -11,6 +11,16 @@ in both setups and is documented once, publicly, at
 (source: `docs/public/product/guides/apps/index.md`). Only the project setup differs,
 and that difference is what this page covers.
 
+## Related contributor pages
+
+- [Explorer library](explorer-library.md): the shared code under
+  `apps/shared/src/explorer/` that SQL Explorer and Graph Explorer compile in
+  (discovery, tool sessions, history, the statement runner).
+- [App Builder](appdev.md): the VS Code surface for developing, previewing and
+  deploying apps.
+- [Webview protocol](webview-protocol.md): the messages the VS Code extension's
+  webviews exchange.
+
 ## Standalone vs monorepo
 
 | | Standalone | Monorepo |

@@ -33,6 +33,7 @@
 
 import { useSyncExternalStore } from 'react';
 import type { SqlSchemaResponse, SqlSession, SqlDialect } from '../connect';
+import { describeFailure } from '../sql/failure';
 
 // =============================================================================
 // STATE
@@ -52,6 +53,16 @@ export type SchemaStatus = 'idle' | 'loading' | 'ready' | 'error';
  * Any fresh refresh that actually answers clears the suspicion.
  */
 export type RefreshToolState = 'unknown' | 'available' | 'suspect' | 'unavailable';
+
+/**
+ * Whether the node will run statements, as far as this session knows.
+ *
+ * `unknown` until a statement (or the open-time probe) answers; controls stay
+ * enabled while it is unknown, so a probe still in flight never disables
+ * anything. `off` means the node refused with its `allow_execute` message, and
+ * since that gate covers reads too, it means the connection is schema only.
+ */
+export type ExecuteState = 'unknown' | 'on' | 'off';
 
 /** One connection's schema snapshot. */
 export interface SchemaState {
@@ -74,6 +85,8 @@ export interface SchemaState {
 	stale: boolean;
 	/** What this session knows about the node's `refresh_schema` tool. */
 	refreshTool: RefreshToolState;
+	/** Whether the node will run statements (see {@link ExecuteState}). */
+	executeState: ExecuteState;
 }
 
 /** The idle placeholder returned for connections with no snapshot yet. */
@@ -85,6 +98,7 @@ const IDLE_SCHEMA: SchemaState = {
 	refreshedAt: 0,
 	stale: false,
 	refreshTool: 'unknown',
+	executeState: 'unknown',
 };
 
 // ── Module-level state ───────────────────────────────────────────────────────
@@ -109,6 +123,13 @@ function setSnapshot(key: string, next: SchemaState): void {
 
 /** The refresh currently running for a connection, and how strong it is. */
 const inFlight = new Map<string, { promise: Promise<void>; fresh: boolean }>();
+
+// A change of signed-in account clears it all (clearSchemas, called from
+// identityScope.ts in the full app and from a frame's identity guard), reads
+// in flight included. Bumped by clearSchemas(): a refresh started under an
+// older generation belongs to a forgotten account, and its late answer is
+// dropped.
+let generation = 0;
 
 /**
  * Refresh one connection's schema snapshot (dialect + full reflection).
@@ -141,7 +162,10 @@ export function refreshSchema(session: SqlSession, opts?: { fresh?: boolean }): 
 	// Joining is only honest when the active refresh answers this caller too.
 	if (active && (!fresh || active.fresh)) return active.promise;
 
-	const run = (): Promise<void> => runRefresh(session, fresh);
+	// The generation this request was made in: a refresh queued behind the
+	// active one may only start after clearSchemas(), and must not then run.
+	const startedIn = generation;
+	const run = (): Promise<void> => runRefresh(session, fresh, startedIn);
 	const promise: Promise<void> = (active ? active.promise.then(run, run) : run()).finally(() => {
 		// Only the entry this call installed may be cleared: a later refresh
 		// that queued behind it owns the slot by then.
@@ -153,15 +177,25 @@ export function refreshSchema(session: SqlSession, opts?: { fresh?: boolean }): 
 
 /**
  * Perform one refresh. Never rejects: a failure lands in the snapshot's
- * error field, which is what every view reads.
+ * error field, which is what every view reads. Nothing is written once
+ * {@link clearSchemas} has run since the refresh was asked for: the answer
+ * belongs to the account that was signed in then.
  *
  * @param session - The connection's session.
  * @param fresh - Whether to ask the node to re-reflect the database.
+ * @param startedIn - The store generation the refresh was asked for in.
  */
-async function runRefresh(session: SqlSession, fresh: boolean): Promise<void> {
+async function runRefresh(session: SqlSession, fresh: boolean, startedIn: number): Promise<void> {
+	if (startedIn !== generation) return;
 	const endpoint = session.endpoint;
 	const current = snapshots[endpoint.key] ?? IDLE_SCHEMA;
-	setSnapshot(endpoint.key, { ...current, status: 'loading', error: null });
+	// The execute state is learned outside a refresh, so a refresh that took
+	// a while keeps whatever was learned meanwhile rather than its start copy.
+	const land = (next: SchemaState): void => {
+		if (startedIn !== generation) return;
+		setSnapshot(endpoint.key, { ...next, executeState: (snapshots[endpoint.key] ?? IDLE_SCHEMA).executeState });
+	};
+	land({ ...current, status: 'loading', error: null });
 
 	try {
 		// Dialect first (cheap), then the full reflection.
@@ -176,7 +210,7 @@ async function runRefresh(session: SqlSession, fresh: boolean): Promise<void> {
 		const attemptFresh = fresh && current.refreshTool !== 'unavailable';
 		const schema = attemptFresh ? await session.refreshSchema() : await session.getSchema();
 		if (schema.error) {
-			setSnapshot(endpoint.key, { ...current, status: 'error', dialect, error: schema.error });
+			land({ ...current, status: 'error', dialect, error: schema.error });
 			return;
 		}
 
@@ -190,7 +224,7 @@ async function runRefresh(session: SqlSession, fresh: boolean): Promise<void> {
 
 		// A plain read serves the task-start snapshot by construction; a fresh
 		// one is current only when the refresh tool actually answered.
-		setSnapshot(endpoint.key, {
+		land({
 			status: 'ready',
 			schema,
 			dialect,
@@ -198,9 +232,81 @@ async function runRefresh(session: SqlSession, fresh: boolean): Promise<void> {
 			refreshedAt: Date.now(),
 			stale: attemptFresh ? schema.stale === true : true,
 			refreshTool,
+			executeState: current.executeState,
 		});
 	} catch (err) {
-		setSnapshot(endpoint.key, { ...current, status: 'error', error: err instanceof Error ? err.message : String(err) });
+		land({ ...current, status: 'error', error: err instanceof Error ? err.message : String(err) });
+	}
+}
+
+// =============================================================================
+// EXECUTE STATE
+// =============================================================================
+
+/**
+ * What a statement failure says about whether the node runs statements.
+ *
+ * @param message - The failure text as the node reported it.
+ * @param current - The state before this failure.
+ * @returns `off` for the node's `allow_execute` refusal; `current` for any
+ *          other failure (a syntax error says nothing about the gate).
+ */
+export function executeStateFromFailure(message: string, current: ExecuteState): ExecuteState {
+	return describeFailure(message).allowExecuteOff ? 'off' : current;
+}
+
+/**
+ * Record a new execute state for a connection, if it is a change.
+ *
+ * @param key - The endpoint key.
+ * @param state - The state to record.
+ */
+function setExecuteState(key: string, state: ExecuteState): void {
+	const current = snapshots[key] ?? IDLE_SCHEMA;
+	if (current.executeState !== state) setSnapshot(key, { ...current, executeState: state });
+}
+
+/**
+ * A statement ran on this connection: the node's execute gate is open.
+ *
+ * @param key - The endpoint key.
+ */
+export function noteExecuteSuccess(key: string): void {
+	setExecuteState(key, 'on');
+}
+
+/**
+ * A statement failed on this connection; the state changes only when the
+ * failure is the node's `allow_execute` refusal.
+ *
+ * @param key - The endpoint key.
+ * @param message - The failure text as the node reported it.
+ */
+export function noteExecuteFailure(key: string, message: string): void {
+	const current = snapshots[key] ?? IDLE_SCHEMA;
+	setExecuteState(key, executeStateFromFailure(message, current.executeState));
+}
+
+/**
+ * Find out once, on open, whether the node runs statements: send `SELECT 1`.
+ *
+ * It goes straight through the session, not through the query runner, so it
+ * is never recorded in history. It is a read, so it opts in to the session's
+ * one retry. Any failure other than the `allow_execute` refusal (a task that
+ * is restarting, a timeout) leaves the state `unknown`, which keeps every
+ * control enabled. The answer of a probe that was running when
+ * {@link clearSchemas} ran belongs to a forgotten account and is dropped.
+ *
+ * @param session - The connection's session.
+ */
+export async function probeExecute(session: SqlSession): Promise<void> {
+	const key = session.endpoint.key;
+	const startedIn = generation;
+	try {
+		await session.execute('SELECT 1', { idempotent: true });
+		if (startedIn === generation) noteExecuteSuccess(key);
+	} catch (err) {
+		if (startedIn === generation) noteExecuteFailure(key, err instanceof Error ? err.message : String(err));
 	}
 }
 
@@ -228,8 +334,61 @@ function subscribe(cb: () => void): () => void {
  * @returns The snapshot for that connection.
  */
 export function useSchema(key: string | null): SchemaState {
-	return useSyncExternalStore(
-		subscribe,
-		() => (key ? snapshots[key] ?? IDLE_SCHEMA : IDLE_SCHEMA),
-	);
+	return useSyncExternalStore(subscribe, () => schemaSnapshot(key));
+}
+
+/**
+ * Subscribe to one connection's execute state.
+ *
+ * @param key - The endpoint key (null returns `unknown`).
+ * @returns The state for that connection.
+ */
+export function useExecuteState(key: string | null): ExecuteState {
+	return useSyncExternalStore(subscribe, () => schemaSnapshot(key).executeState);
+}
+
+/**
+ * How many times the store has been cleared. A view that probes once per open
+ * probes again when this moves: a clear forgets what the probe learned.
+ *
+ * @returns The current generation.
+ */
+export function schemaGeneration(): number {
+	return generation;
+}
+
+/**
+ * Subscribe to {@link schemaGeneration}.
+ *
+ * @returns The current generation.
+ */
+export function useSchemaGeneration(): number {
+	return useSyncExternalStore(subscribe, schemaGeneration);
+}
+
+/**
+ * Read one connection's schema snapshot outside React.
+ *
+ * @param key - The endpoint key (null returns the idle placeholder).
+ * @returns The snapshot for that connection.
+ */
+export function schemaSnapshot(key: string | null): SchemaState {
+	return key ? snapshots[key] ?? IDLE_SCHEMA : IDLE_SCHEMA;
+}
+
+// =============================================================================
+// CLEAR
+// =============================================================================
+
+/**
+ * Forget every connection's schema snapshot and refresh in flight. Called
+ * when the signed-in account changes or can no longer be vouched for: the
+ * snapshots describe the previous account's databases, and a refresh still
+ * running for it lands nowhere (see {@link runRefresh}).
+ */
+export function clearSchemas(): void {
+	generation += 1;
+	snapshots = {};
+	inFlight.clear();
+	listeners.forEach((fn) => fn());
 }

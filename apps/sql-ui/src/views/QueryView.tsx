@@ -43,42 +43,60 @@
 //      before anything is sent rather than run into a false sense of safety.
 //
 // The confirmation dialog is likewise a TEXT CHECK and says so in its own
-// words; it prevents nothing and is not called a safe mode anywhere.
+// words; it prevents nothing and is not called a safe mode anywhere. What it
+// asks about is the SAVED CONNECTION's safety level, set in the connection's
+// editor; the dialog itself has no answer that turns asking off.
 // =============================================================================
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { usePrefs } from 'shell';
 import type { GridCellComponent, GridColumnDefinition } from 'shell';
-import { Banner, Button, Card, CardDataGrid, ConfirmDialog, ContentHeader, EmptyState, StatusBadge, ToggleGroup, commonStyles, monoEl, mutedEl } from 'shell';
-import type { SqlEndpoint, SqlDialect } from '../connect';
-import { useSchema } from '../schema/schemaStore';
+import { AnchoredPopup, Banner, Button, Card, CardDataGrid, ConfirmDialog, ContentHeader, EmptyState, StatusBadge, ToggleGroup, commonStyles, isInVSCode, monoEl, mutedEl } from 'shell';
+import type { SqlEndpoint, SqlExecuteResult, SqlDialect } from '../connect';
+import { noteExecuteFailure, noteExecuteSuccess, probeExecute, useExecuteState, useSchema } from '../schema/schemaStore';
+import { SCHEMA_ONLY_REASON } from '../executeGate';
+import GatedButton from '../components/GatedButton';
 import { useSqlEnv } from '../sqlEnv';
 import SqlEditor from '../components/SqlEditor';
 import type { DecorationRange, EditorCursorState, SqlEditorHandle } from '../components/SqlEditor';
 import StatementStrip from '../components/StatementStrip';
 import CellInspector from '../components/CellInspector';
+import WriteConfirmDialog from '../components/WriteConfirmDialog';
+import SafetyDowngradeDialog from '../components/SafetyDowngradeDialog';
+import { FailureBanner } from 'shared/explorer/components/FailureBanner';
+import { createGeneration } from 'shared/explorer/generation';
+import { lineRange, clock } from 'shared/explorer/runner/format';
+import { useStatementRunner } from 'shared/explorer/runner/useStatementRunner';
 import HistoryPanel from '../components/HistoryPanel';
+import { SaveQueryButton, SavedQueriesButton } from '../components/SavedQueriesPanel';
+import AskBar from '../components/AskBar';
 import ExplainPanel from '../components/ExplainPanel';
 import { announce } from '../a11y/announce';
+import { menuKeyTarget } from '../a11y/menuKeys';
 import { splitStatements, splitStatementsIn, statementAtOffset } from '../sql/split';
-import { classifyStatement, patternCheck } from '../sql/classify';
-import type { PatternFinding } from '../sql/classify';
-import { applyRowLimit, formatBatchOutcome, formatElapsed, formatPriorStatements, hasStatementInFlight, leadingVerb } from '../sql/batch';
-import type { StatementRun, RunOutcome } from '../sql/batch';
+import { liveBufferText, selectRunTargets } from '../sql/targets';
+import { classifyStatement } from '../sql/classify';
+import { isSafetyDowngrade, needsConfirmation, parseRowEstimate, rowEstimateStatement, toWriteConfirmation } from '../sql/safety';
+import type { RowEstimate } from '../sql/safety';
+import { SAFETY_LEVELS, enforcedSafety, safetyLevelOf } from '../connect/savedConnections';
+import type { AskedSafety, SafetyLevel } from '../connect/savedConnections';
+import { useConnectionRecord } from '../connectionRecord';
+import { ALL_ROWS_WARNING, applyRowLimit, formatBatchOutcome, formatElapsed, formatPriorStatements, gridCopies, leadingVerb, mayHaveChangedRows, runSummary, settleStatement } from '../sql/batch';
+import type { StatementRun } from '../sql/batch';
+import { guardLayouts, layoutRulesFor } from '../sql/gridLayout';
 import {
 	ALLOW_EXECUTE_OFF_TEXT,
-	DATABASE_SAID_LABEL,
 	GENERIC_ERROR_TEXT,
 	TRANSACTION_REFUSAL_TEXT,
 	describeFailure,
 	maxRowsText,
 } from '../sql/failure';
 import type { FailureNotice } from '../sql/failure';
-import { inferColumnTypes } from '../sql/resultTypes';
+import { MERGED_COLUMNS_NOTE, inferColumnTypes, mayMergeColumns, precisionNoteApplies } from '../sql/resultTypes';
+import { CSV_FORMULA_NOTE, browserCopy, browserDownload, deliverExport, exportFileName, exportResult } from '../sql/export';
+import type { ExportFormat } from '../sql/export';
 import { buildCompletionModel } from '../sql/completion';
 import { buildExplain } from '../sql/explain';
-import { emitRun } from '../history/runEvents';
 import type { HistoryEntry } from '../history/types';
 import { DatabaseIcon } from '../icons';
 
@@ -96,6 +114,11 @@ export interface QueryViewProps {
 	initialSql?: string;
 	/** `generated` marks SQL the app wrote, which is previewed before it runs. */
 	origin?: 'generated';
+	/**
+	 * Told once a batch (or a History rerun) ends that may have changed rows,
+	 * so the workbench's other pages stop trusting what they counted.
+	 */
+	onWrite?: () => void;
 }
 
 /**
@@ -118,34 +141,30 @@ interface RunTarget {
 	endLine?: number;
 }
 
-/** A pending pattern-check confirmation, and the resolver waiting on it. */
-interface PatternPrompt {
-	/** The statement the check fired on. */
-	run: StatementRun;
-	/** What the check saw. */
-	finding: PatternFinding;
-}
-
-/** A failed statement, and where in the batch it was. */
-interface FailureState {
-	/** What the failure means and what to show. */
-	notice: FailureNotice;
-	/** Zero-based index of the statement that failed. */
-	index: number;
-	/** Line range of the failing statement; '' when it has no editor position. */
-	lines: string;
-	/** What is true of everything before the failure ('' when it failed first). */
-	prior: string;
-}
-
 /** Row-limit options offered by the header toggle. */
 const LIMIT_OPTIONS = ['200', '1000', 'All'] as const;
 
-/** Prefs key holding the per-connection pattern-check switch. */
-const PATTERN_CHECK_PREF = 'sql.patternChecks';
+/** Shown on the results header line when a value may not be the number the database holds. */
+const PRECISION_NOTE = 'Decimal values arrive as floating point; integers above 2^53 lose precision.';
 
-/** How long a run must last before "Stop waiting" is offered. */
-const STOP_WAITING_AFTER_MS = 1000;
+/** The safety levels as the line under the editor offers them (the editor's own names). */
+const SAFETY_CHOICES: Record<SafetyLevel, string> = {
+	off: "Don't ask",
+	risky: 'Ask before risky writes',
+	every: 'Ask before every write',
+};
+
+/**
+ * How long a saved level is shown as pending when the stored record has not
+ * caught up (a dev tool's copy of it arrives a moment after the save).
+ */
+const SAFETY_SYNC_GRACE_MS = 3000;
+
+/** How the export announcements name each format. */
+const EXPORT_NAMES: Record<ExportFormat, string> = { csv: 'CSV', json: 'JSON', markdown: 'Markdown' };
+
+/** The column list of a result that has none (a stable empty array for memos). */
+const EMPTY_COLUMNS: readonly string[] = [];
 
 // =============================================================================
 // STYLES
@@ -156,31 +175,38 @@ const styles = {
 		...commonStyles.columnFill,
 	} as CSSProperties,
 
-	// Column below the header: editor at a fixed share, results fill the rest.
+	// Column below the header: the editor and the results share it. Tight
+	// padding and gaps, because at 1440x900 every pixel here is a row of
+	// results or a line of editor (live L2).
 	body: {
 		flex: 1,
 		minHeight: 0,
 		display: 'flex',
 		flexDirection: 'column',
-		gap: 12,
-		padding: '16px 24px 24px',
+		gap: 6,
+		padding: '8px 24px 8px',
 	} as CSSProperties,
 
+	// 13 lines of editor (Monaco's line is 20 px), never fewer than 10; it
+	// shares any height beyond its basis with the results.
 	editorRegion: {
-		flex: '0 0 38%',
-		minHeight: 120,
+		flex: '1 1 262px',
+		minHeight: 200,
 		display: 'flex',
 		flexDirection: 'column',
 	} as CSSProperties,
 
+	// Ten result rows: the card header (51 px), the grid header (34) and
+	// 10 rows of 23 px, so `SELECT ... LIMIT 10` shows whole at 1440x900.
 	resultsRegion: {
-		flex: 1,
+		flex: '1 1 317px',
 		minHeight: 0,
 		display: 'flex',
 		flexDirection: 'column',
 	} as CSSProperties,
 
-	// The pre-run truth line under the editor.
+	// The pre-run truth line under the editor: one line of 11 px text, as
+	// tall as the text, so the editor keeps 13 lines and the results 10 rows.
 	willRun: {
 		display: 'flex',
 		alignItems: 'center',
@@ -188,7 +214,24 @@ const styles = {
 		gap: 12,
 		fontSize: 11,
 		color: 'var(--rr-text-secondary)',
-		paddingTop: 6,
+	} as CSSProperties,
+
+	// Never wraps onto a second line: a long preview ellipsizes, and the
+	// full text is the span's title.
+	willRunText: {
+		minWidth: 0,
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap',
+	} as CSSProperties,
+
+	// The safety level's button keeps the shell's 26 px small size (a click
+	// target over 24 px) but counts 14 px in the line: it reaches into the
+	// gaps above and below instead of making the line taller.
+	safetyAnchor: {
+		display: 'inline-flex',
+		flexShrink: 0,
+		margin: '-6px 0',
 	} as CSSProperties,
 
 	// Result meta line in the grid card's action slot.
@@ -200,60 +243,30 @@ const styles = {
 		color: 'var(--rr-text-secondary)',
 	} as CSSProperties,
 
-	// Verbatim driver text inside the error banner.
-	verbatim: {
-		margin: '6px 0 0',
-		padding: 8,
-		maxHeight: 180,
-		overflow: 'auto',
-		fontFamily: 'var(--rr-font-mono, monospace)',
-		fontSize: 11,
-		whiteSpace: 'pre-wrap',
-		background: 'color-mix(in srgb, var(--rr-text-primary) 6%, transparent)',
-		borderRadius: 4,
+	// A button's menu (Export, and the safety level).
+	popupMenu: {
+		...commonStyles.popupMenu,
+		minWidth: 200,
 	} as CSSProperties,
 
-	// Statement excerpt inside the confirmation dialog.
-	excerpt: {
-		margin: '8px 0',
-		padding: 8,
-		maxHeight: 120,
-		overflow: 'auto',
-		fontFamily: 'var(--rr-font-mono, monospace)',
+	menuItems: {
+		display: 'flex',
+		flexDirection: 'column',
+		alignItems: 'stretch',
+		gap: 2,
+	} as CSSProperties,
+
+	menuNote: {
 		fontSize: 11,
-		whiteSpace: 'pre-wrap',
-		background: 'color-mix(in srgb, var(--rr-text-primary) 6%, transparent)',
-		borderRadius: 4,
+		color: 'var(--rr-text-secondary)',
+		padding: '4px 8px',
+		maxWidth: 260,
 	} as CSSProperties,
 };
 
 // =============================================================================
 // HELPERS
 // =============================================================================
-
-/**
- * Describe a line range the way the pre-run line and the strip do.
- *
- * @param from - First line (one-based), or undefined for a statement with no
- *               position in the editor (a rerun from the history drawer).
- * @param to - Last line (one-based).
- * @returns e.g. `line 4` or `lines 4–6`; '' when there is no position.
- */
-function lineRange(from?: number, to?: number): string {
-	if (from === undefined || to === undefined) return '';
-	return from === to ? `line ${from}` : `lines ${from}–${to}`;
-}
-
-/**
- * Clock time for the meta and history lines.
- *
- * @param at - Unix ms.
- * @returns `HH:MM`.
- */
-function clock(at: number): string {
-	const date = new Date(at);
-	return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
-}
 
 /**
  * Why Explain cannot run on a statement, or null when it can.
@@ -265,10 +278,12 @@ function clock(at: number): string {
  * @param dialect - The engine dialect.
  * @param sql - The statement exactly as it would be sent.
  * @param connected - Whether the shell connection is live.
+ * @param executeOff - Whether the node is schema only (its execute is off).
  * @returns The reason, or null when the statement can be explained.
  */
-function explainRefusal(dialect: SqlDialect, sql: string, connected: boolean): string | null {
+function explainRefusal(dialect: SqlDialect, sql: string, connected: boolean, executeOff: boolean): string | null {
 	if (!connected) return 'Not connected.';
+	if (executeOff) return SCHEMA_ONLY_REASON;
 	if (!sql.trim()) return 'Write a statement to explain.';
 	if (buildExplain(dialect, sql) === null) return `EXPLAIN is not available for this engine (${dialect}).`;
 	return null;
@@ -287,6 +302,32 @@ function resultCellEl(value: unknown): HTMLElement {
 }
 
 /**
+ * Move focus between the buttons of a popup menu with Up, Down, Home and End.
+ *
+ * @param event - The key event on the menu's container.
+ */
+function moveMenuFocus(event: React.KeyboardEvent<HTMLElement>): void {
+	const items = Array.from(event.currentTarget.querySelectorAll('button'));
+	const target = menuKeyTarget(event.key, items.indexOf(document.activeElement as HTMLButtonElement), items.length);
+	if (target === null) return;
+	event.preventDefault();
+	items[target]?.focus();
+}
+
+/**
+ * After a popup menu closes, give focus back to the button that opened it,
+ * but only when focus was lost with the menu: a click that put focus somewhere
+ * else (the editor, another control) keeps it there.
+ *
+ * @param anchor - The element holding the menu's button.
+ */
+function refocusIfLost(anchor: React.RefObject<HTMLElement | null>): void {
+	requestAnimationFrame(() => {
+		if (document.activeElement === null || document.activeElement === document.body) anchor.current?.querySelector('button')?.focus();
+	});
+}
+
+/**
  * Turn a finished statement into the history entry the drawer stores.
  *
  * @param run - The finished statement.
@@ -301,13 +342,15 @@ function toHistoryEntry(run: StatementRun): HistoryEntry {
 		at: Date.now() - (run.ms ?? 0),
 		ms: run.ms ?? 0,
 		outcome,
-		rows: run.outcome === 'rows' ? run.rows?.length ?? 0 : undefined,
-		affected: run.outcome === 'affected' ? run.affected ?? 0 : undefined,
-		error: run.error,
 		kind: run.kind,
+		// Absent fields are left out rather than set to undefined: the entry may
+		// cross to a dev tool's controller as JSON.
+		...(run.outcome === 'rows' ? { rows: run.rows?.length ?? 0 } : {}),
+		...(run.outcome === 'affected' ? { affected: run.affected ?? 0 } : {}),
+		...(run.error !== undefined ? { error: run.error } : {}),
 		// Only a limit the APP appended is reported; a statement's own LIMIT is
 		// already visible in the stored text.
-		limit: run.limitState === 'applied' ? run.limitApplied ?? undefined : undefined,
+		...(run.limitState === 'applied' && typeof run.limitApplied === 'number' ? { limit: run.limitApplied } : {}),
 	};
 }
 
@@ -327,28 +370,144 @@ function toHistoryEntry(run: StatementRun): HistoryEntry {
  * @param props - {@link QueryViewProps}.
  * @returns The query document element.
  */
-export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSql, origin }) => {
+export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSql, origin, onWrite }) => {
 	const env = useSqlEnv();
 	const snapshot = useSchema(endpoint.key);
-	const prefs = usePrefs();
+	// What asks before it runs is the saved connection's safety level: the
+	// same per-user record in both mounts. Until the record is known it reads
+	// as the default, which asks.
+	const { record: connectionRecord, status: connectionStatus } = useConnectionRecord(endpoint.connId ?? null);
+	// The owner's answer, asked once when this realm's copy of the record is
+	// slow to show a saved level (see commitSafety). It holds only for the copy
+	// it was asked against: any newer copy retires it, even one with the same
+	// value, since a second writer may have changed the level back meanwhile.
+	const [askedSafety, setAskedSafety] = useState<AskedSafety | null>(null);
+	const connectionRecordRef = useRef(connectionRecord);
+	connectionRecordRef.current = connectionRecord;
+	const safety = enforcedSafety(connectionRecord, askedSafety);
+	// The runner copies its hooks once per batch; they read the level here,
+	// so each statement is checked at the level set when it is reached.
+	const safetyRef = useRef(safety);
+	safetyRef.current = safety;
+
+	// ── The safety level, changed in place ───────────────────────────────────
+	//
+	// The line under the editor opens a menu of the three levels. Only a choice
+	// made there is saved, and a LOWER level asks first, so no keystroke on the
+	// control can turn asking down. Only the id and the level are sent: the
+	// record's owner sets that one field, so the stored config (a direct
+	// connection's password included) is never re-typed, rebuilt or sent again.
+	const [safetyMenuOpen, setSafetyMenuOpen] = useState(false);
+	const [confirmSafety, setConfirmSafety] = useState<SafetyLevel | null>(null);
+	// A level being saved, shown until the stored record says the same (a dev
+	// tool's copy arrives a moment later) or, at the latest, a short grace after
+	// the save succeeded, so a copy that never arrives cannot hold it.
+	const [pendingSafety, setPendingSafety] = useState<SafetyLevel | null>(null);
+	const savingSafety = pendingSafety !== null;
+	const shownSafety = pendingSafety ?? safety;
+	const safetyAnchorRef = useRef<HTMLSpanElement>(null);
+	const safetyMenuRef = useRef<HTMLDivElement>(null);
+	const safetySyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+	useEffect(() => {
+		if (pendingSafety === null || pendingSafety !== safety) return;
+		setPendingSafety(null);
+		if (safetySyncTimerRef.current !== null) clearTimeout(safetySyncTimerRef.current);
+	}, [pendingSafety, safety]);
+	useEffect(() => {
+		return () => { if (safetySyncTimerRef.current !== null) clearTimeout(safetySyncTimerRef.current); };
+	}, []);
+
+	// Why the level cannot be changed here: there is no saved record to change.
+	const safetyGate = connectionRecord !== null
+		? null
+		: connectionStatus === 'ready' ? 'This connection is not saved, so its level cannot be changed here.' : 'Reading the saved connection…';
+
+	/**
+	 * Put focus back on the safety button, on the next frame: the menu (a
+	 * portal) and the downgrade dialog have unmounted by then.
+	 */
+	const focusSafetyButton = useCallback((): void => {
+		requestAnimationFrame(() => safetyAnchorRef.current?.querySelector('button')?.focus());
+	}, []);
+
+	/**
+	 * Save a level the user chose (and, for a lower one, confirmed).
+	 *
+	 * @param next - The level.
+	 */
+	const commitSafety = useCallback((next: SafetyLevel, confirmedLowering = false): void => {
+		const connId = endpoint.connId;
+		if (!connId) return;
+		setPendingSafety(next);
+		env.setConnectionSafety(connId, next, { confirmedLowering }).then(
+			() => {
+				announce(`Safety level for this connection: ${SAFETY_CHOICES[next]}`);
+				if (safetySyncTimerRef.current !== null) clearTimeout(safetySyncTimerRef.current);
+				// Still not in this realm's copy after the grace: ask the owner once,
+				// rather than fall back to showing the old level.
+				safetySyncTimerRef.current = setTimeout(() => {
+					void env.getConnection(connId).then(
+						(record) => setAskedSafety(record === null ? null : { level: safetyLevelOf(record), against: connectionRecordRef.current }),
+						() => undefined,
+					).finally(() => setPendingSafety(null));
+				}, SAFETY_SYNC_GRACE_MS);
+			},
+			(error: unknown) => {
+				setPendingSafety(null);
+				announce(`The safety level was not changed. ${error instanceof Error ? error.message : String(error)}`);
+			},
+		).finally(() => {
+			// Focus stays where the user put it; only focus the page lost comes back here.
+			if (document.activeElement === null || document.activeElement === document.body) focusSafetyButton();
+		});
+	}, [endpoint.connId, env, focusSafetyButton]);
+
+	/**
+	 * A level picked in the menu: a higher one is saved at once, a lower one
+	 * asks first.
+	 *
+	 * @param level - The level picked.
+	 */
+	const chooseSafety = useCallback((level: SafetyLevel): void => {
+		setSafetyMenuOpen(false);
+		if (savingSafety || level === safety) {
+			focusSafetyButton();
+			return;
+		}
+		// A lower level asks first. The dialog takes focus (on Cancel) and gives
+		// it back when it closes, so the button is not focused under it.
+		if (isSafetyDowngrade(safety, level)) {
+			setConfirmSafety(level);
+			return;
+		}
+		focusSafetyButton();
+		commitSafety(level);
+	}, [focusSafetyButton, savingSafety, safety, commitSafety]);
+
+	// The menu renders in a portal: focus moves to the level in force when it
+	// opens (on the next frame, once it has been measured and shown).
+	useEffect(() => {
+		if (!safetyMenuOpen) return undefined;
+		const frame = requestAnimationFrame(() => {
+			const menu = safetyMenuRef.current;
+			(menu?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]') ?? menu?.querySelector('button'))?.focus();
+		});
+		return () => cancelAnimationFrame(frame);
+	}, [safetyMenuOpen]);
 
 	// ── Editor + run state ───────────────────────────────────────────────────
 	const [sql, setSql] = useState(initialSql ?? '');
 	const [limit, setLimit] = useState<string>('1000');
-	const [running, setRunning] = useState(false);
-	const [runs, setRuns] = useState<StatementRun[]>([]);
-	const [selectedRun, setSelectedRun] = useState<number | null>(null);
-	const [activeIndex, setActiveIndex] = useState(0);
 	const [cursor, setCursor] = useState<EditorCursorState>({ offset: 0, selectionText: '', selectionStart: 0, selectionEnd: 0 });
 	const [lastRun, setLastRun] = useState<{ index: number; at: number; start?: number; end?: number } | null>(null);
 
 	// ── Notices ──────────────────────────────────────────────────────────────
-	const [failure, setFailure] = useState<FailureState | null>(null);
-	const [showVerbatim, setShowVerbatim] = useState(false);
-	const [abandonNotice, setAbandonNotice] = useState<string | null>(null);
-	const [txRefused, setTxRefused] = useState(false);
-	const [allowExecuteOff, setAllowExecuteOff] = useState(false);
-	const [canStop, setCanStop] = useState(false);
+	// Whether the node refuses to execute: learned by the workbench's probe and
+	// by what runs here (see schemaStore).
+	const allowExecuteOff = useExecuteState(endpoint.key) === 'off';
+	const gateReason = allowExecuteOff ? SCHEMA_ONLY_REASON : null;
+	// One id per mounted query: several instances stay mounted at once.
+	const gateNoteId = useId();
 	const [untouchedGenerated, setUntouchedGenerated] = useState(origin === 'generated');
 
 	// ── Drawers + dialogs ────────────────────────────────────────────────────
@@ -356,44 +515,41 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	const [explainOpen, setExplainOpen] = useState(false);
 	const [explainSql, setExplainSql] = useState('');
 	const [pendingLoad, setPendingLoad] = useState<string | null>(null);
-	const [inspected, setInspected] = useState<{ row: Record<string, unknown>; number: number } | null>(null);
-	const [patternPrompt, setPatternPrompt] = useState<PatternPrompt | null>(null);
-	const [patternChecksOn, setPatternChecksOn] = useState<boolean>(() => {
-		const bag = prefs.getPref(PATTERN_CHECK_PREF) as Record<string, boolean> | undefined;
-		return bag?.[endpoint.key] !== false;
-	});
+	// The inspected row, by its index in the shown statement's own rows.
+	const [inspected, setInspected] = useState<number | null>(null);
+	// Bumped when a batch starts: with the shown statement's index it keys the
+	// grid, so a new result gets a new grid rather than new data under old columns.
+	const [batchSeq, setBatchSeq] = useState(0);
+	// The affected-row estimate, with the statement it is for: a batch can ask
+	// about two statements in a row, and the second must not show the first's.
+	const [estimate, setEstimate] = useState<{ run: StatementRun; value: RowEstimate } | null>(null);
+	const [estimateGeneration] = useState(createGeneration);
+	const [exportOpen, setExportOpen] = useState(false);
 
 	// ── Refs ─────────────────────────────────────────────────────────────────
 	const editorRef = useRef<SqlEditorHandle>(null);
-	// Monotonic run id. Every await re-checks it: a response whose sequence has
-	// moved on belongs to a run the user abandoned and is DROPPED, never landed.
-	const runSeqRef = useRef(0);
-	const runningRef = useRef(false);
-	const runStartedRef = useRef(0);
-	const runsRef = useRef<StatementRun[]>([]);
-	const activeIndexRef = useRef(0);
-	const mountedRef = useRef(true);
-	const patternResolverRef = useRef<((answer: 'run' | 'always' | 'cancel') => void) | null>(null);
-	const patternChecksOnRef = useRef(patternChecksOn);
+	const exportAnchorRef = useRef<HTMLSpanElement>(null);
+	const exportMenuRef = useRef<HTMLDivElement>(null);
 	// The buffer text as of the last run or the last load: anything else in the
 	// editor is unsaved work that must not be replaced without asking.
 	const committedTextRef = useRef(initialSql ?? '');
-
-	// Set on EVERY setup, not only by `useRef(true)`: under StrictMode React
-	// runs setup, cleanup and setup again on the same instance, and a flag the
-	// cleanup cleared would otherwise stay false for the life of that
-	// instance — silently dropping every later statement from history.
-	useEffect(() => {
-		mountedRef.current = true;
-		return () => {
-			mountedRef.current = false;
-			// A dialog open at unmount would otherwise leave the run loop
-			// awaiting a promise nobody can settle.
-			patternResolverRef.current?.('cancel');
-			patternResolverRef.current = null;
-		};
+	// The editor text an editor run is cut from. runFromEditor offers it,
+	// onStart takes it (the runner calls onStart synchronously, and only when
+	// the batch really starts), and onFinished marks it as run. The `sql` state
+	// can lag the editor by a render after a fast Ctrl+Enter, so it is never
+	// that text.
+	const editorRunTextRef = useRef<string | null>(null);
+	const startedRunTextRef = useRef<string | null>(null);
+	// Set when a statement of the running batch may have changed rows;
+	// reported (and cleared) when the batch ends.
+	const wroteRef = useRef(false);
+	const onWriteRef = useRef(onWrite);
+	onWriteRef.current = onWrite;
+	const reportWrite = useCallback((): void => {
+		if (!wroteRef.current) return;
+		wroteRef.current = false;
+		onWriteRef.current?.();
 	}, []);
-	useEffect(() => { patternChecksOnRef.current = patternChecksOn; }, [patternChecksOn]);
 
 	const dialect = snapshot.dialect;
 	const statements = useMemo(() => splitStatements(sql, dialect), [sql, dialect]);
@@ -404,26 +560,161 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		[snapshot.schema, snapshot.refreshedAt],
 	);
 
-	// ── Preferences ──────────────────────────────────────────────────────────
+	// ── The runner ───────────────────────────────────────────────────────────
+	//
+	// The batch's rules (one statement per call, the first failure ends it, a
+	// late answer after Stop waiting is dropped, a flagged statement asks first) are
+	// shared with the other Explorers (shared/explorer/runner); everything SQL
+	// decides is handed in here. The runner lives in the document: in a dev-tool
+	// frame its session is the REMOTE one (every statement an op on the
+	// controller), in the full app the engine core's.
+	const {
+		runs,
+		running,
+		inFlight,
+		canStop,
+		selectedRun,
+		setSelectedRun,
+		activeIndex,
+		failure,
+		abandonNotice,
+		refusal: txRefusal,
+		patternPrompt,
+		answerPattern,
+		runTargets: runStatements,
+		stopWaiting,
+	} = useStatementRunner<StatementRun, { sql: string }, SqlExecuteResult, FailureNotice>({
+		// Nothing is sent to a node that is schema only: not by the keyboard
+		// (Ctrl/Cmd+Enter, Ctrl/Cmd+Shift+Enter) nor by History's Rerun, which
+		// the gated buttons do not cover. The reason is said, since a key press
+		// has no tooltip to show it.
+		canRun: () => {
+			if (allowExecuteOff) {
+				announce(SCHEMA_ONLY_REASON);
+				return false;
+			}
+			return env.ready;
+		},
+		initRun: (target, index): StatementRun => ({
+			index,
+			sql: target.text,
+			kind: classifyStatement(target.text, dialect),
+			verb: leadingVerb(target.text, dialect),
+			start: target.start,
+			end: target.end,
+			startLine: target.startLine,
+			endLine: target.endLine,
+			outcome: 'pending',
+		}),
+		textOf: (run) => run.sql,
+		// Transaction control cannot work through per-call autocommit, so it is
+		// refused before anything is sent rather than run and misunderstood. No
+		// announce(): the Banner is already a polite live region (Banner.tsx:75-76),
+		// and mirroring it would read the refusal twice.
+		refuse: (list) => (list.some((run) => run.kind === 'tx') ? TRANSACTION_REFUSAL_TEXT : null),
+		// Read before every statement, so a level changed in the connection's
+		// editor applies from the next statement on. No answer in the dialog
+		// turns asking off: the level is the connection's, changed in its editor.
+		patternChecksOn: () => safetyRef.current !== 'off',
+		patternCheck: (run) => needsConfirmation(run.sql, dialect, safetyRef.current),
+		prepare: (run) => {
+			const prepared = applyRowLimit(run.sql, limit, dialect);
+			return { send: { sql: prepared.sql }, patch: { limitApplied: prepared.limit, limitState: prepared.state } };
+		},
+		// `idempotent` gates the session's one retry after a restart: a read may be
+		// sent twice harmlessly, a write may NOT (the controller checks again).
+		// The batch's ticket goes down too (port of 740b69c6d), so a read the
+		// user stopped waiting for (or whose tab closed) is not sent again by the
+		// full app's retry, and a frame drops its late answer.
+		// `confirmed`: this runner already asked (or the user chose not to be asked) before sending; the
+		// controller refuses a statement that asks at the level and arrives without it.
+		execute: (run, send, ticket) => env.getSession(endpoint).execute(send.sql, { idempotent: run.kind === 'read', generation: ticket, confirmed: true }),
+		// Captures the result's columns before any grid has seen its rows.
+		settle: (run, response) => settleStatement(run, response),
+		describeFailure: (message) => describeFailure(message),
+		// Says "ran" or "committed" per the kinds that preceded the failure — the
+		// sentence that stops a reader assuming the batch rolled back.
+		formatPrior: (list, failedIndex) => formatPriorStatements(list, failedIndex),
+		// The runner records only while this document is mounted.
+		// A statement that may have changed rows is noted here, and reported
+		// once when the batch ends (finished, or Stop waiting), so the
+		// workbench's Data page counts again.
+		record: (run) => {
+			if (mayHaveChangedRows(run)) wroteRef.current = true;
+			env.history.record(endpoint, toHistoryEntry(run));
+		},
+		onFailure: (notice) => noteExecuteFailure(endpoint.key, notice.verbatim),
+		onStart: () => {
+			startedRunTextRef.current = editorRunTextRef.current;
+			setUntouchedGenerated(false);
+			setInspected(null);
+			setBatchSeq((seq) => seq + 1);
+		},
+		onFinished: (info, opts) => {
+			if (info.shown) setLastRun({ index: info.shown.index, at: Date.now(), start: info.shown.start, end: info.shown.end });
+			// Only an editor run makes the buffer "already run". A rerun from the
+			// history drawer must not mark untouched editor text as run, or the
+			// next Load-into-editor would silently discard it. What is marked is the
+			// live text the run was cut from, not the (possibly lagging) `sql` state.
+			if (opts.fromEditor && startedRunTextRef.current !== null) committedTextRef.current = startedRunTextRef.current;
+			// A statement that actually ran is the only proof the node's execute
+			// gate is open again, so a successful run retires the warning.
+			if (info.resolved) noteExecuteSuccess(endpoint.key);
+			reportWrite();
+		},
+		// Only outcomes that have NO live region of their own are announced. A
+		// failure is not one: the error Banner is an assertive alert already
+		// (Banner.tsx:75-76), so announcing it here would read it twice. A
+		// declined confirmation is announced, or the last run's sentence stays.
+		summarize: (info) => runSummary(info),
+		announce,
+		// The warning Banner carries the notice; it is a live region already.
+		onStopped: () => {
+			reportWrite();
+			editorRef.current?.focus();
+		},
+	});
 
-	/**
-	 * Turn the pattern check on or off for THIS connection, in the workspace
-	 * prefs (server-side, per user) and in local state.
-	 *
-	 * @param on - Whether the check should run.
-	 */
-	const setPatternChecks = useCallback((on: boolean): void => {
-		const bag = (prefs.getPref(PATTERN_CHECK_PREF) as Record<string, boolean> | undefined) ?? {};
-		prefs.setPref(PATTERN_CHECK_PREF, { ...bag, [endpoint.key]: on });
-		// Written HERE, not only by the effect that mirrors the state below:
-		// the run loop resumes from `await askPatternConfirm(...)` in a
-		// microtask and reads this ref for the NEXT statement, which happens
-		// before React runs that passive effect. Leaving it to the effect made
-		// "Run and stop asking" ask again for every further match in the batch.
-		patternChecksOnRef.current = on;
-		setPatternChecksOn(on);
-		announce(on ? 'Pattern checks on for this connection' : 'Pattern checks off for this connection');
-	}, [prefs, endpoint.key]);
+	// ── The write confirmation's row estimate ────────────────────────────────
+	//
+	// While a confirmation is open, a plain EXPLAIN (no ANALYZE: it plans and
+	// runs nothing) asks the planner how many rows the write would change. It
+	// goes on the document's session, not through the runner, so it is never
+	// recorded in history; the dialog shows "Estimating…" meanwhile and never
+	// waits for it. Closing the dialog drops a late answer.
+	useEffect(() => {
+		if (!patternPrompt) return undefined;
+		const { run } = patternPrompt;
+		const statement = rowEstimateStatement(run.sql, dialect);
+		// A schema-only node is sent nothing, the estimate included.
+		if (statement === null || !env.ready || allowExecuteOff) {
+			setEstimate({ run, value: { state: 'none' } });
+			return undefined;
+		}
+		setEstimate({ run, value: { state: 'estimating' } });
+		let alive = true;
+		const ticket = estimateGeneration.next();
+		env.getSession(endpoint).execute(statement, { idempotent: true, generation: ticket }).then(
+			(result) => {
+				if (!alive) return;
+				const rows = parseRowEstimate(dialect, result.rows ?? []);
+				setEstimate({ run, value: rows === null ? { state: 'none' } : { state: 'rows', rows } });
+			},
+			() => { if (alive) setEstimate({ run, value: { state: 'none' } }); },
+		);
+		return () => {
+			alive = false;
+			estimateGeneration.invalidate();
+		};
+	}, [patternPrompt, dialect, env, endpoint, estimateGeneration, allowExecuteOff]);
+
+	// The open confirmation's own estimate; before its effect has run, what it
+	// is about to be.
+	const promptEstimate = useMemo((): RowEstimate => {
+		if (!patternPrompt) return { state: 'none' };
+		if (estimate !== null && estimate.run === patternPrompt.run) return estimate.value;
+		return env.ready && !allowExecuteOff && rowEstimateStatement(patternPrompt.run.sql, dialect) !== null ? { state: 'estimating' } : { state: 'none' };
+	}, [patternPrompt, estimate, env.ready, dialect, allowExecuteOff]);
 
 	// ── Editor wiring ────────────────────────────────────────────────────────
 
@@ -445,26 +736,22 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	 * The statements the Run button would send right now: the selection when
 	 * there is one, otherwise the statement holding the caret.
 	 *
-	 * Reads the live editor handle rather than the debounced preview state, so
-	 * a keypress that lands between a caret move and its settle still sends
-	 * what the user is looking at.
+	 * Reads the live editor handle for the TEXT as well as the caret and the
+	 * selection. The `sql` state can lag the editor by a render when the run
+	 * action fires right after the last keystrokes; pairing that stale copy with
+	 * the live caret selected a truncated statement. The state copy is only the
+	 * fallback when there is no editor to ask.
 	 *
 	 * @returns The statements to run (possibly empty).
 	 */
 	const currentTarget = useCallback((): RunTarget[] => {
-		const selection = editorRef.current?.getSelection();
-		if (selection && selection.text.trim()) {
-			// A selection is NOT necessarily one statement — `SELECT …; DELETE …`
-			// can be dragged in one gesture. Sending it whole would classify it
-			// by its first keyword alone, so the pattern check would never see
-			// the DELETE, a trailing ROLLBACK would never be refused, and the
-			// whole thing would be marked read-only and become eligible for the
-			// session's retry. Split it exactly like the buffer.
-			return splitStatementsIn(sql, selection.start, selection.end, dialect);
-		}
-		const offset = editorRef.current?.getCursorOffset() ?? cursor.offset;
-		const statement = statementAtOffset(sql, offset, dialect);
-		return statement ? [statement] : [];
+		const editor = editorRef.current;
+		return selectRunTargets(
+			liveBufferText(editor, sql),
+			editor?.getSelection() ?? null,
+			editor?.getCursorOffset() ?? cursor.offset,
+			dialect,
+		);
 	}, [sql, dialect, cursor.offset]);
 
 	// The pre-run line and the editor decoration, always saying the same thing.
@@ -508,253 +795,41 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		editorRef.current?.setDecorations(preview.decorations);
 	}, [preview]);
 
-	// Whether a statement is at the database, which is NOT the same as the
-	// batch running: `running` is already true while a pattern-check dialog
-	// waits for an answer and nothing has been sent.
-	const inFlight = useMemo(() => hasStatementInFlight(runs), [runs]);
-
-	// "Stop waiting" only appears once a statement IN FLIGHT has been slow.
-	// Keying this on `running` offered it while a confirmation was open, and
-	// clicking it then announced that the database might still be running a
-	// statement that had never been sent.
-	//
-	// The timer measures an uninterrupted STRETCH of statements, not each one:
-	// the publish that resolves statement i and the publish that dispatches
-	// i + 1 happen in the same microtask continuation, and React 18 batches
-	// them into one render (the app mounts with `createRoot`,
-	// packages/shell/src/bootstrap.tsx:94), so `inFlight` never observes false
-	// in between and the effect does not re-run. What does reset it is a
-	// confirmation dialog: nothing is at the database while one is open, so
-	// the next statement starts the second again. Both are correct for what
-	// the button says.
-	useEffect(() => {
-		if (!inFlight) {
-			setCanStop(false);
-			return undefined;
-		}
-		const timer = setTimeout(() => setCanStop(true), STOP_WAITING_AFTER_MS);
-		return () => clearTimeout(timer);
-	}, [inFlight]);
-
-	// ── Pattern-check confirmation ───────────────────────────────────────────
-
 	/**
-	 * Open the confirmation dialog and wait for the answer.
-	 *
-	 * @param run - The statement being confirmed.
-	 * @param finding - What the pattern check saw.
-	 * @returns The user's choice.
-	 */
-	const askPatternConfirm = useCallback((run: StatementRun, finding: PatternFinding): Promise<'run' | 'always' | 'cancel'> => {
-		return new Promise((resolve) => {
-			patternResolverRef.current = resolve;
-			setPatternPrompt({ run, finding });
-		});
-	}, []);
-
-	/**
-	 * Answer the open confirmation dialog.
-	 *
-	 * @param answer - The user's choice.
-	 */
-	const answerPattern = useCallback((answer: 'run' | 'always' | 'cancel'): void => {
-		setPatternPrompt(null);
-		const resolve = patternResolverRef.current;
-		patternResolverRef.current = null;
-		resolve?.(answer);
-	}, []);
-
-	// ── Running ──────────────────────────────────────────────────────────────
-
-	/**
-	 * Publish a finished statement to the history subscribers, but only while
-	 * this document is still mounted — a closed tab must not write.
-	 *
-	 * @param run - The finished statement.
-	 */
-	const record = useCallback((run: StatementRun): void => {
-		if (!mountedRef.current) return;
-		emitRun(endpoint.key, toHistoryEntry(run));
-	}, [endpoint.key]);
-
-	/**
-	 * Commit a run list to state and to the ref the abandon path reads.
-	 *
-	 * @param next - The new run list.
-	 */
-	const publishRuns = useCallback((next: StatementRun[]): void => {
-		runsRef.current = next;
-		setRuns(next);
-	}, []);
-
-	/**
-	 * Run a list of statements in order, stopping at the first error.
+	 * Run a list of statements in order, stopping at the first error (the shared
+	 * runner; SQL's targets carry their text under `sql`).
 	 *
 	 * @param targets - The statements to send, in order.
+	 * @param opts - `fromEditor` marks the buffer as run.
 	 */
-	const runTargets = useCallback(async (targets: RunTarget[], opts?: { fromEditor?: boolean }): Promise<void> => {
-		if (!env.ready || runningRef.current || targets.length === 0) return;
-
-		// Transaction control cannot work through per-call autocommit, so it is
-		// refused before anything is sent rather than run and misunderstood.
-		if (targets.some((target) => classifyStatement(target.sql, dialect) === 'tx')) {
-			// No announce(): the Banner below is already a polite live region
-			// (Banner.tsx:75-76), and mirroring it would read the refusal twice.
-			setTxRefused(true);
-			return;
-		}
-
-		const seq = runSeqRef.current + 1;
-		runSeqRef.current = seq;
-		runningRef.current = true;
-		setRunning(true);
-		setTxRefused(false);
-		setFailure(null);
-		setShowVerbatim(false);
-		setAbandonNotice(null);
-		setUntouchedGenerated(false);
-		setSelectedRun(null);
-		setInspected(null);
-
-		const list: StatementRun[] = targets.map((target, index) => ({
-			index,
-			sql: target.sql,
-			kind: classifyStatement(target.sql, dialect),
-			verb: leadingVerb(target.sql, dialect),
-			start: target.start,
-			end: target.end,
-			startLine: target.startLine,
-			endLine: target.endLine,
-			outcome: 'pending' as RunOutcome,
-		}));
-		publishRuns(list);
-
-		const session = env.getSession(endpoint);
-		const results = [...list];
-		let failedAt = -1;
-
-		for (let i = 0; i < results.length; i++) {
-			if (runSeqRef.current !== seq) return;
-
-			// One confirmation per matching statement, asked before it is sent.
-			if (patternChecksOnRef.current) {
-				const finding = patternCheck(results[i].sql, dialect);
-				if (finding) {
-					const answer = await askPatternConfirm(results[i], finding);
-					if (runSeqRef.current !== seq) return;
-					if (answer === 'cancel') {
-						for (let j = i; j < results.length; j++) results[j] = { ...results[j], outcome: 'skipped' };
-						publishRuns([...results]);
-						break;
-					}
-					if (answer === 'always') setPatternChecks(false);
-				}
-			}
-
-			const prepared = applyRowLimit(results[i].sql, limit, dialect);
-			results[i] = { ...results[i], outcome: 'running', limitApplied: prepared.limit, limitState: prepared.state };
-			publishRuns([...results]);
-			setActiveIndex(i);
-			activeIndexRef.current = i;
-			const started = performance.now();
-			runStartedRef.current = started;
-
-			try {
-				// `idempotent` gates the session's one retry with a fresh token:
-				// a read may be sent twice harmlessly, a write may NOT.
-				const response = await session.execute(prepared.sql, { idempotent: results[i].kind === 'read' });
-				if (runSeqRef.current !== seq) return;
-				const rows = response.rows ?? [];
-				const affected = response.affected_rows ?? 0;
-				const outcome: RunOutcome = rows.length > 0 || results[i].kind === 'read' ? 'rows' : 'affected';
-				results[i] = { ...results[i], outcome, rows, affected, ms: performance.now() - started };
-				publishRuns([...results]);
-				record(results[i]);
-			} catch (error) {
-				if (runSeqRef.current !== seq) return;
-				const message = error instanceof Error ? error.message : String(error);
-				const notice = describeFailure(message);
-				results[i] = { ...results[i], outcome: 'error', error: message, ms: performance.now() - started };
-				for (let j = i + 1; j < results.length; j++) results[j] = { ...results[j], outcome: 'skipped' };
-				publishRuns([...results]);
-				failedAt = i;
-				setFailure({
-					notice,
-					index: i,
-					lines: lineRange(results[i].startLine, results[i].endLine),
-					// Says "ran" or "committed" per the kinds that preceded the
-					// failure — the sentence that stops a reader assuming the
-					// batch rolled back.
-					prior: formatPriorStatements(results, i),
-				});
-				if (notice.allowExecuteOff) setAllowExecuteOff(true);
-				record(results[i]);
-				break;
-			}
-		}
-
-		if (runSeqRef.current !== seq) return;
-		runningRef.current = false;
-		setRunning(false);
-
-		// Show the last statement that returned rows; failing that, the last
-		// one that resolved at all.
-		const withRows = [...results].reverse().find((run) => run.outcome === 'rows');
-		const resolved = [...results].reverse().find((run) => run.outcome === 'rows' || run.outcome === 'affected');
-		const shown = withRows ?? resolved ?? null;
-		setSelectedRun(shown ? shown.index : null);
-		if (shown) setLastRun({ index: shown.index, at: Date.now(), start: shown.start, end: shown.end });
-		// Only an editor run makes the buffer "already run". A rerun from the
-		// history drawer must not mark untouched editor text as run, or the
-		// next Load-into-editor would silently discard it.
-		if (opts?.fromEditor) committedTextRef.current = sql;
-		// A statement that actually ran is the only proof the node's execute
-		// gate is open again, so a successful run retires the warning.
-		if (resolved) setAllowExecuteOff(false);
-
-		// Only outcomes that have NO live region of their own are announced. A
-		// failure is not one: the error Banner is an assertive alert already
-		// (Banner.tsx:75-76), so announcing it here would read it twice. The
-		// batch summary and the row counts live in the strip and the meta line,
-		// which are ordinary text.
-		if (results.length > 1) announce(`${results.length} statements: ${formatBatchOutcome(results)}`);
-		else if (failedAt < 0 && shown?.outcome === 'rows') announce(`Statement returned ${(shown.rows?.length ?? 0).toLocaleString()} rows`);
-		else if (failedAt < 0 && shown?.outcome === 'affected') announce(`Statement affected ${(shown.affected ?? 0).toLocaleString()} rows`);
-	}, [env, dialect, endpoint, limit, sql, askPatternConfirm, publishRuns, record, setPatternChecks]);
-
-	/** Run the selection, or the statement at the caret. */
-	const runOne = useCallback((): void => { void runTargets(currentTarget(), { fromEditor: true }); }, [runTargets, currentTarget]);
-
-	/** Run every statement in the buffer, in order. */
-	const runAll = useCallback((): void => { void runTargets(splitStatements(sql, dialect), { fromEditor: true }); }, [runTargets, sql, dialect]);
+	const runTargets = useCallback((targets: RunTarget[], opts?: { fromEditor?: boolean }): Promise<void> => {
+		return runStatements(targets.map(({ sql: text, ...position }) => ({ text, ...position })), opts);
+	}, [runStatements]);
 
 	/**
-	 * Stop waiting for the statement in flight.
+	 * Run statements cut from the editor's text, and offer that text to be marked
+	 * as run once the batch ends (see editorRunTextRef).
 	 *
-	 * There is NO server-side cancel: this bumps the run sequence so the late
-	 * answer is discarded, and says plainly that the database may still be
-	 * running the statement.
+	 * @param text - The live editor text the targets were cut from.
+	 * @param targets - The statements to send.
 	 */
-	const stopWaiting = useCallback((): void => {
-		if (!runningRef.current) return;
-		runSeqRef.current += 1;
-		runningRef.current = false;
-		const ms = performance.now() - runStartedRef.current;
-		setRunning(false);
-		const next = runsRef.current.map((run) => {
-			if (run.outcome === 'running') return { ...run, outcome: 'abandoned' as RunOutcome, ms };
-			if (run.outcome === 'pending') return { ...run, outcome: 'skipped' as RunOutcome };
-			return run;
-		});
-		publishRuns(next);
-		const abandoned = next.find((run) => run.outcome === 'abandoned');
-		if (abandoned) record(abandoned);
-		setAbandonNotice(
-			`Stopped waiting after ${(ms / 1000).toFixed(1)} s. The statement may still be running on the database; this tool cannot cancel it.`,
-		);
-		// The warning Banner carries this; it is a live region already.
-		editorRef.current?.focus();
-	}, [publishRuns, record]);
+	const runFromEditor = useCallback((text: string, targets: RunTarget[]): void => {
+		editorRunTextRef.current = text;
+		void runTargets(targets, { fromEditor: true });
+		editorRunTextRef.current = null;
+	}, [runTargets]);
+
+	/** Run the selection, or the statement at the caret. */
+	const runOne = useCallback((): void => {
+		const text = liveBufferText(editorRef.current, sql);
+		runFromEditor(text, currentTarget());
+	}, [runFromEditor, currentTarget, sql]);
+
+	/** Run every statement in the buffer, in order. */
+	const runAll = useCallback((): void => {
+		const text = liveBufferText(editorRef.current, sql);
+		runFromEditor(text, splitStatements(text, dialect));
+	}, [runFromEditor, sql, dialect]);
 
 	// ── Explain, history, and loading a statement back in ────────────────────
 
@@ -784,14 +859,14 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		// nothing can be explained, say why: Ctrl/Cmd+Shift+E has no tooltip,
 		// and a keybinding that does nothing at all reads as a broken app.
 		const sent = targetSqlAsSent();
-		const refusal = explainRefusal(dialect, sent, env.ready);
+		const refusal = explainRefusal(dialect, sent, env.ready, allowExecuteOff);
 		if (refusal) {
 			announce(refusal);
 			return;
 		}
 		setExplainSql(sent);
 		setExplainOpen(true);
-	}, [targetSqlAsSent, dialect, env.ready]);
+	}, [targetSqlAsSent, dialect, env.ready, allowExecuteOff]);
 
 	/**
 	 * Whether Explain can run right now, and why not when it cannot. Derived
@@ -804,12 +879,12 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 			: '';
 		const statement = selected || statementAtOffset(sql, cursor.offset, dialect)?.sql || '';
 		const candidate = statement ? applyRowLimit(statement, limit, dialect).sql : '';
-		const refusal = explainRefusal(dialect, candidate, env.ready);
+		const refusal = explainRefusal(dialect, candidate, env.ready, allowExecuteOff);
 		return {
 			disabled: refusal !== null,
 			title: refusal ?? "Show the database's plan for the statement Run would send (Ctrl+Shift+E)",
 		};
-	}, [env.ready, cursor, sql, dialect, limit]);
+	}, [env.ready, cursor, sql, dialect, limit, allowExecuteOff]);
 
 	/**
 	 * Put a statement into the editor, asking first when doing so would throw
@@ -846,8 +921,9 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 
 	/**
 	 * Run one statement from the history drawer. The drawer has already
-	 * confirmed anything that changed data last time; the pattern check still
-	 * applies, because it is about this statement's text, not its past.
+	 * confirmed anything that changed data last time; the connection's safety
+	 * level still applies, because it is about this statement's text, not its
+	 * past.
 	 *
 	 * @param entry - The history entry to run again.
 	 */
@@ -859,17 +935,26 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 	// ── Results ──────────────────────────────────────────────────────────────
 
 	const displayed = selectedRun !== null ? runs[selectedRun] ?? null : null;
-	const rows = displayed?.rows ?? [];
+	const rows = useMemo(() => displayed?.rows ?? [], [displayed]);
+
+	// The inspector holds an index into the shown statement's rows, so showing
+	// another statement closes it rather than pointing it at that one's rows.
+	useEffect(() => { setInspected(null); }, [selectedRun]);
+	// The shown statement's columns, as captured when it settled. Never read
+	// off a row: the grid writes its columns' keys into the rows it renders.
+	const resultCols = displayed?.columns ?? EMPTY_COLUMNS;
+	// The grid renders (and writes into) copies; the statement's rows stay as
+	// the node returned them.
+	const gridRows = useMemo(() => gridCopies(rows), [rows]);
 
 	const columnTypes = useMemo(
-		() => (rows.length > 0 && displayed ? inferColumnTypes(rows, snapshot.schema, displayed.sql, dialect) : {}),
-		[rows, displayed, snapshot.schema, dialect],
+		() => (rows.length > 0 && displayed ? inferColumnTypes(rows, snapshot.schema, displayed.sql, dialect, resultCols) : {}),
+		[rows, displayed, snapshot.schema, dialect, resultCols],
 	);
 
 	const columns = useMemo<GridColumnDefinition[]>(() => {
-		const first = rows[0];
-		if (!first) return [];
-		return Object.keys(first).map((key) => {
+		if (rows.length === 0) return [];
+		return resultCols.map((key) => {
 			const info = columnTypes[key];
 			return {
 				title: key,
@@ -882,10 +967,16 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 				formatter: (cell: GridCellComponent) => resultCellEl(cell.getValue()),
 			} satisfies GridColumnDefinition;
 		});
-	}, [rows, columnTypes]);
+	}, [rows, resultCols, columnTypes]);
+	// Saved layouts keep no width for a flexible column (sql/gridLayout.ts), so a
+	// grid built while hidden can never freeze one at 40 px.
+	const gridLayouts = useMemo(() => guardLayouts(env.gridPersistence, layoutRulesFor(columns)), [env.gridPersistence, columns]);
 
-	/** True when at least one shown column is numeric (float-precision note). */
-	const hasNumeric = useMemo(() => Object.values(columnTypes).some((info) => info.rrType === 'number'), [columnTypes]);
+	// The precision note, only when a value could have lost digits on the way
+	// (a DECIMAL/NUMERIC column, a long float, an integer beyond 2^53).
+	const showPrecisionNote = useMemo(() => precisionNoteApplies(resultCols, rows, columnTypes), [resultCols, rows, columnTypes]);
+	// Rows arrive as objects, so two columns with one name merge into one.
+	const showMergedNote = useMemo(() => displayed !== null && rows.length > 0 && mayMergeColumns(displayed.sql, dialect), [displayed, rows.length, dialect]);
 
 	/** The result meta line's parts. */
 	const meta = useMemo((): { text: string; limitReached: boolean } => {
@@ -913,6 +1004,41 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 		};
 	}, [displayed, rows.length, lastRun]);
 
+	// A VS Code webview refuses downloads, so there an export is copied.
+	const copiesExports = useMemo(() => isInVSCode(), []);
+
+	/**
+	 * Export the shown statement's rows: CSV and JSON download (or are copied
+	 * where downloads are refused), Markdown is copied. The rows are the
+	 * statement's own, by its captured columns, as the run returned them.
+	 *
+	 * @param format - The format.
+	 */
+	const exportRows = useCallback((format: ExportFormat): void => {
+		setExportOpen(false);
+		// The menu was a portal: give focus back to the button that opened it.
+		exportAnchorRef.current?.querySelector('button')?.focus();
+		if (!displayed) return;
+		const payload = { ...exportResult(format, resultCols, rows), fileName: exportFileName(label, displayed.index, format) };
+		const what = `${rows.length.toLocaleString()} ${rows.length === 1 ? 'row' : 'rows'} as ${EXPORT_NAMES[format]}`;
+		void deliverExport(payload, { downloadsRefused: copiesExports, download: browserDownload, copy: browserCopy }).then((outcome) => {
+			// A page that blocks downloads quietly cannot be told apart, so this
+			// says the download started, not that it finished.
+			if (outcome === 'downloaded') announce(`Download started: ${what}`);
+			else if (outcome === 'failed') announce(`Could not export ${what}`);
+			else announce(format === 'markdown' ? `Copied ${what}` : `Downloads are not available here, so ${what} was copied`);
+		});
+	}, [displayed, resultCols, rows, label, copiesExports]);
+
+	// The menu renders in a portal at the end of the page, so Tab from the
+	// button would never reach it: focus moves to its first item when it opens
+	// (on the next frame, once it has been measured and shown).
+	useEffect(() => {
+		if (!exportOpen) return undefined;
+		const frame = requestAnimationFrame(() => exportMenuRef.current?.querySelector('button')?.focus());
+		return () => cancelAnimationFrame(frame);
+	}, [exportOpen]);
+
 	/** Title for the results region when there is no grid to show. */
 	const emptyTitle = !displayed
 		? 'No results yet'
@@ -923,7 +1049,7 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 				: 'Statement executed';
 
 	const batchLine = runs.length > 1 ? formatBatchOutcome(runs) : '';
-	const canRun = env.ready && !running && sql.trim().length > 0;
+	const canRun = env.ready && !running && sql.trim().length > 0 && !allowExecuteOff;
 
 	// ── Render ───────────────────────────────────────────────────────────────
 
@@ -937,8 +1063,13 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 						<ToggleGroup
 							options={LIMIT_OPTIONS.map((option) => ({ id: option, label: option }))}
 							value={limit}
-							onChange={setLimit}
+							onChange={(next) => {
+								setLimit(next);
+								if (next === 'All') announce(ALL_ROWS_WARNING);
+							}}
 						/>
+						<SaveQueryButton endpoint={endpoint} sql={sql} />
+						<SavedQueriesButton endpoint={endpoint} />
 						<Button
 							variant="ghost"
 							pressed={historyOpen}
@@ -948,43 +1079,59 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 						>
 							History
 						</Button>
-						<Button
+						<GatedButton
 							variant="secondary"
 							onClick={openExplain}
 							disabled={explainState.disabled}
 							ariaExpanded={explainOpen}
 							title={explainState.title}
+							gateReason={gateReason}
+							reasonId={gateNoteId}
 						>
 							Explain
-						</Button>
+						</GatedButton>
 						{inFlight && canStop && (
 							<Button variant="ghost" title="Stop waiting for the answer. This does not cancel the statement." onClick={stopWaiting}>
 								Stop waiting
 							</Button>
 						)}
-						<Button
+						<GatedButton
 							variant="secondary"
 							onClick={runAll}
 							disabled={!canRun}
 							title="Run every statement in order, stop at the first error (Ctrl+Shift+Enter)"
+							gateReason={gateReason}
+							reasonId={gateNoteId}
 						>
 							Run all
-						</Button>
-						<Button
+						</GatedButton>
+						<GatedButton
 							variant="primary"
 							onClick={runOne}
 							disabled={!canRun}
 							title="Run selection, or the statement at the cursor (Ctrl+Enter)"
+							gateReason={gateReason}
+							reasonId={gateNoteId}
 						>
 							{running ? 'Running…' : 'Run'}
-						</Button>
+						</GatedButton>
 					</>
 				}
 			/>
 
 			<div style={styles.body}>
+				{/* A question becomes SQL in a new query; nothing runs. */}
+				<AskBar endpoint={endpoint} />
+
 				{/* The node refuses to execute anything — schema browsing still works. */}
-				{allowExecuteOff && <Banner variant="warning">{ALLOW_EXECUTE_OFF_TEXT}</Banner>}
+				{allowExecuteOff && (
+					<div id={gateNoteId}>
+						<Banner variant="warning">
+							{ALLOW_EXECUTE_OFF_TEXT}{' '}
+							<Button variant="ghost" small onClick={() => { if (env.ready) void probeExecute(env.getSession(endpoint)); }}>Check again</Button>
+						</Banner>
+					</div>
+				)}
 
 				{/* SQL the app wrote, shown before it runs. */}
 				{untouchedGenerated && <Banner variant="info">Generated preview: review, then Run</Banner>}
@@ -1006,48 +1153,71 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 
 				{/* The pre-run truth line: what Run would send, in words. */}
 				<div style={styles.willRun}>
-					<span>{preview.text}</span>
-					{!patternChecksOn && (
-						<Button
+					<span style={styles.willRunText} title={preview.text}>{preview.text}</span>
+					<span ref={safetyAnchorRef} style={styles.safetyAnchor}>
+						<GatedButton
 							variant="ghost"
 							small
-							title="Confirmations for unbounded UPDATE/DELETE, an UPDATE/DELETE inside a WITH clause, TRUNCATE, DROP and ALTER are off for this connection. Click to turn them on."
-							onClick={() => setPatternChecks(true)}
+							ariaExpanded={safetyMenuOpen}
+							title="How much this connection asks before a statement that changes something. A check on the statement text, not a database permission."
+							onClick={() => setSafetyMenuOpen((open) => !open)}
+							gateReason={safetyGate}
 						>
-							Pattern checks off
-						</Button>
-					)}
+							{`Safety: ${SAFETY_CHOICES[shownSafety]}`}{savingSafety ? ' (saving…)' : ''}
+						</GatedButton>
+					</span>
+					<AnchoredPopup
+						anchorRef={safetyAnchorRef}
+						open={safetyMenuOpen}
+						onClose={() => {
+							setSafetyMenuOpen(false);
+							refocusIfLost(safetyAnchorRef);
+						}}
+						align="end"
+						style={styles.popupMenu}
+					>
+						<div
+							ref={safetyMenuRef}
+							role="group"
+							aria-label="Safety level for this connection"
+							style={styles.menuItems}
+							onKeyDown={(event) => {
+								// Escape closes the menu (the popup's own listener); focus goes back to the button.
+								if (event.key === 'Escape') focusSafetyButton();
+								else moveMenuFocus(event);
+							}}
+						>
+							{SAFETY_LEVELS.map((level) => (
+								<Button key={level} variant="ghost" small pressed={level === shownSafety} onClick={() => chooseSafety(level)}>
+									{SAFETY_CHOICES[level]}
+								</Button>
+							))}
+							<div style={styles.menuNote}>Lowering the level asks first. A check on the statement text, not a database permission.</div>
+						</div>
+					</AnchoredPopup>
 				</div>
 
+				{/* All has a cost the toggle cannot show. */}
+				{limit === 'All' && (
+					<div style={styles.meta}>
+						<StatusBadge variant="warning">No row limit</StatusBadge>
+						<span>{ALL_ROWS_WARNING}</span>
+					</div>
+				)}
+
 				{/* Transaction control was refused before anything was sent. */}
-				{txRefused && <Banner variant="warning">{TRANSACTION_REFUSAL_TEXT}</Banner>}
+				{txRefusal && <Banner variant="warning">{txRefusal}</Banner>}
 
 				{/* The user stopped waiting; the statement may still be running. */}
 				{abandonNotice && <Banner variant="warning">{abandonNotice}</Banner>}
 
 				{/* Execution failure. */}
 				{failure && (
-					<Banner variant="error">
-						<div>{failure.notice.generic ? GENERIC_ERROR_TEXT : failure.notice.headline}</div>
-						<div>
-							{`Statement ${failure.index + 1}${failure.lines ? ` (${failure.lines})` : ''}.`}
-							{failure.prior && ` ${failure.prior}`}
-						</div>
-						{failure.notice.maxExecuteRows !== null && <div>{maxRowsText(failure.notice.maxExecuteRows)}</div>}
-						{!failure.notice.generic && failure.notice.verbatim && (
-							<>
-								<Button
-									variant="ghost"
-									small
-									ariaExpanded={showVerbatim}
-									onClick={() => setShowVerbatim((open) => !open)}
-								>
-									{showVerbatim ? `Hide “${DATABASE_SAID_LABEL}”` : DATABASE_SAID_LABEL}
-								</Button>
-								{showVerbatim && <pre style={styles.verbatim}>{failure.notice.verbatim}</pre>}
-							</>
-						)}
-					</Banner>
+					<FailureBanner
+						failure={failure}
+						genericText={GENERIC_ERROR_TEXT}
+						extra={failure.notice.maxExecuteRows !== null ? <div>{maxRowsText(failure.notice.maxExecuteRows)}</div> : undefined}
+					/>
 				)}
 
 				{/* Per-statement outcomes of the last batch. */}
@@ -1063,22 +1233,68 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 					{displayed && rows.length > 0 ? (
 						<Card noBodyPadding fill>
 							<CardDataGrid<Record<string, unknown>>
+								key={`${batchSeq}:${displayed.index}`}
 								title="Results"
 								actions={
 									<span style={styles.meta}>
 										{meta.text}
 										{meta.limitReached && <StatusBadge variant="warning">Limit reached, more rows may exist</StatusBadge>}
-										<span title="The grid's gear menu exports the rows this run returned.">Export: grid menu (gear)</span>
+										{/* On this line rather than under the grid, which would cost a row. */}
+										{showPrecisionNote && <span>{PRECISION_NOTE}</span>}
+										{showMergedNote && <span>{MERGED_COLUMNS_NOTE}</span>}
+										<span ref={exportAnchorRef}>
+											<Button
+												variant="secondary"
+												small
+												ariaExpanded={exportOpen}
+												title="Export the rows this statement returned"
+												onClick={() => setExportOpen((open) => !open)}
+											>
+												Export
+											</Button>
+										</span>
+										<AnchoredPopup
+											anchorRef={exportAnchorRef}
+											open={exportOpen}
+											onClose={() => {
+												setExportOpen(false);
+												refocusIfLost(exportAnchorRef);
+											}}
+											align="end"
+											style={styles.popupMenu}
+										>
+											<div
+												ref={exportMenuRef}
+												role="group"
+												aria-label="Export"
+												style={styles.menuItems}
+												onKeyDown={(event) => {
+													// Escape closes the menu (the popup's own listener); focus goes back to the button.
+													if (event.key === 'Escape') exportAnchorRef.current?.querySelector('button')?.focus();
+													else moveMenuFocus(event);
+												}}
+											>
+												<div style={styles.menuNote}>{`Rows this statement returned (${rows.length.toLocaleString()})`}</div>
+												<Button variant="ghost" small onClick={() => exportRows('csv')}>{copiesExports ? 'Copy as CSV' : 'Download CSV'}</Button>
+												<Button variant="ghost" small onClick={() => exportRows('json')}>{copiesExports ? 'Copy as JSON' : 'Download JSON'}</Button>
+												<Button variant="ghost" small onClick={() => exportRows('markdown')}>Copy as Markdown</Button>
+												<div style={styles.menuNote}>{CSV_FORMULA_NOTE}</div>
+											</div>
+										</AnchoredPopup>
 									</span>
 								}
 								columns={columns}
-								data={rows}
+								data={gridRows}
 								tableId="sql-query-results"
+								persistence={gridLayouts}
 								paginate={false}
 								height="100%"
 								emptyTitle="No rows"
 								emptyDescription="The statement returned no rows."
-								onRowClick={(row) => setInspected({ row, number: Math.max(1, rows.indexOf(row) + 1) })}
+								onRowClick={(row) => {
+									const index = gridRows.indexOf(row);
+									if (index >= 0) setInspected(index);
+								}}
 							/>
 						</Card>
 					) : (
@@ -1092,17 +1308,15 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 							}
 						/>
 					)}
-					{hasNumeric && rows.length > 0 && (
-						<div style={styles.meta}>Decimal values arrive as floating point; integers above 2^53 lose precision.</div>
-					)}
 				</div>
 			</div>
 
 			{/* One row of the result, in full. */}
 			<CellInspector
 				open={inspected !== null}
-				row={inspected?.row ?? null}
-				rowNumber={inspected?.number ?? 0}
+				row={inspected === null ? null : rows[inspected] ?? null}
+				columns={resultCols}
+				rowNumber={(inspected ?? 0) + 1}
 				rowCount={rows.length}
 				subtitle={displayed ? `statement ${displayed.index + 1}${lastRun ? ` · executed ${clock(lastRun.at)}` : ''}` : ''}
 				onClose={() => setInspected(null)}
@@ -1139,23 +1353,35 @@ export const QueryView: React.FC<QueryViewProps> = ({ endpoint, label, initialSq
 				/>
 			)}
 
-			{/* Pattern check — a TEXT check, and it says so. */}
+			{/* Lowering the connection's safety level asks first; Cancel changes nothing. */}
+			{confirmSafety !== null && (
+				<SafetyDowngradeDialog
+					level={confirmSafety}
+					connection={connectionRecord?.name ?? endpoint.nodeName}
+					onConfirm={() => {
+						const level = confirmSafety;
+						setConfirmSafety(null);
+						focusSafetyButton();
+						// The user confirmed the lower level in this dialog: the owner issues
+						// the ticket a lower level needs (a plain operation cannot lower it).
+						commitSafety(level, true);
+					}}
+					onCancel={() => {
+						setConfirmSafety(null);
+						focusSafetyButton();
+					}}
+				/>
+			)}
+
+			{/* The connection's safety level asks first — a TEXT check, and it says so. */}
 			{patternPrompt && (
-				<ConfirmDialog
-					title="Run this statement?"
-					destructive
-					message={
-						<>
-							<div>{`Pattern check: ${patternPrompt.finding.kind} detected. This is a text check, not a database safeguard.`}</div>
-							<pre style={styles.excerpt}>{patternPrompt.run.sql.split('\n').slice(0, 3).join('\n')}</pre>
-							<div>It runs immediately and commits on its own.</div>
-						</>
-					}
-					confirmLabel="Run statement"
-					secondaryLabel="Run and stop asking on this connection"
-					onConfirm={() => answerPattern('run')}
-					onSecondary={() => answerPattern('always')}
-					onCancel={() => answerPattern('cancel')}
+				<WriteConfirmDialog
+					key={patternPrompt.run.index}
+					confirmation={toWriteConfirmation(patternPrompt.finding)}
+					sql={patternPrompt.run.sql}
+					connection={connectionRecord?.name ?? endpoint.nodeName}
+					estimate={promptEstimate}
+					onAnswer={answerPattern}
 				/>
 			)}
 		</div>

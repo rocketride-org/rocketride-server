@@ -6,14 +6,15 @@ import { deepEquals, getDefaultFormState, type RJSFSchema } from '@rjsf/utils';
 import validator from '@rjsf/validator-ajv8';
 import { mergeFormDefaults, preserveStoredArrays, replaceStoredArray, storedArrays } from './storedArrays';
 
+const credentialMapSchema: RJSFSchema = {
+	type: 'array',
+	default: [],
+	items: { type: 'object', properties: { credentialValue: { type: 'string' } } },
+};
 const schema: RJSFSchema = {
 	type: 'object',
 	properties: {
-		credentialMap: {
-			type: 'array',
-			default: [],
-			items: { type: 'object', properties: { credentialValue: { type: 'string' } } },
-		},
+		credentialMap: credentialMapSchema,
 		defaultRepo: { type: 'string', default: '' },
 	},
 };
@@ -92,7 +93,7 @@ test('replace is explicit, leaves the old blob intact, and permits both clearing
 });
 
 test('protecting one array does not remove an edit to another', () => {
-	const two = { ...schema, properties: { ...schema.properties, other: schema.properties?.credentialMap } } satisfies RJSFSchema;
+	const two = { ...schema, properties: { ...schema.properties, other: credentialMapSchema } } satisfies RJSFSchema;
 	const original = { secureParameters, other: [] };
 	const saved = preserveStoredArrays({ ...original, credentialMap: [], other: [{ credentialValue: 'new' }] }, original, storedArrays(two, original));
 	assert.equal(Object.hasOwn(saved, 'credentialMap'), false);

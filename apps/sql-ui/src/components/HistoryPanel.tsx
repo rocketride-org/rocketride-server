@@ -29,13 +29,15 @@
 // instead of it.
 //
 // The privacy notice is not decoration. These statements are written to the
-// user's workspace file on the RocketRide server, verbatim, including any
-// literal values typed into a WHERE clause. Someone who assumes browser-local
-// storage would be wrong in a way that matters, so the drawer says where the
-// text goes, in the drawer, every time it is open.
+// RocketRide server, verbatim, including any literal values typed into a
+// WHERE clause: the full app keeps them in the user's workspace file, a dev
+// tool in a history file in the user's store (or, when that file cannot be
+// read, for the session only). Someone who assumes browser-local storage
+// would be wrong in a way that matters, so the drawer says where the text
+// goes, for the mount it is in, every time it is open (SqlEnv history).
 // =============================================================================
 
-import React, { useMemo, useState } from 'react';
+import React, { useId, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
 	Button,
@@ -48,22 +50,19 @@ import {
 	ToggleGroup,
 	useDebouncedValue,
 } from 'shell';
-import type { SqlEndpoint } from '../connect';
+import type { SqlDialect, SqlEndpoint } from '../connect';
 import type { HistoryEntry } from '../history/types';
-import {
-	HistoryPrefsBridge,
-	clearForKey,
-	removeEntry,
-	setNote,
-	setRecording,
-	togglePin,
-	useHistory,
-	useRecording,
-} from '../history/historyStore';
+import { useExecuteState, useSchema } from '../schema/schemaStore';
+import { SCHEMA_ONLY_REASON, executeGateReason } from '../executeGate';
+import { CANCELLED_NOTHING_SENT, historyTitle } from '../sql/batch';
+import { useSqlEnv } from '../sqlEnv';
 import { DEFAULT_HISTORY_LIMITS } from '../history/trim';
 import { getDocs, nextQueryDoc } from '../docs';
 import type { QueryDocPayload } from '../docs';
 import { useSqlPageNav } from '../pageNav';
+import { outcomeBadge } from '../history/outcomeBadge';
+import { SaveQueryButton } from './SavedQueriesPanel';
+import GatedButton from './GatedButton';
 import { announce } from '../a11y/announce';
 import { DatabaseIcon } from '../icons';
 
@@ -100,13 +99,6 @@ type HistoryFilter = 'all' | 'reads' | 'writes' | 'errors' | 'pinned';
 // =============================================================================
 // CONSTANTS
 // =============================================================================
-
-/**
- * Where history is stored, said plainly. Approved wording — the statement
- * text leaves the browser, and a person deserves to know that before they
- * type a password into a WHERE clause.
- */
-const PRIVACY_NOTICE = 'Saved in your RocketRide workspace file on the server, not in this browser. Statements are stored as typed, including literal values.';
 
 /** The filter strip's options. */
 const FILTERS: { id: HistoryFilter; label: string }[] = [
@@ -272,39 +264,6 @@ function clock(at: number): string {
 }
 
 /**
- * The outcome badge's text and severity.
- *
- * @param entry - The entry to describe.
- * @returns The badge variant and its label.
- */
-function outcomeBadge(entry: HistoryEntry): { variant: 'success' | 'info' | 'error' | 'muted'; label: string } {
-	switch (entry.outcome) {
-		case 'rows': return {
-			variant: 'success',
-			// A bare row count cannot say whether it is the whole answer or
-			// the ceiling cutting it off, so it never appears without one.
-			label: entry.limit !== undefined
-				? `${entry.rows ?? 0} rows (limit ${entry.limit})`
-				: `${entry.rows ?? 0} rows returned`,
-		};
-		case 'affected': return { variant: 'info', label: `${entry.affected ?? 0} affected` };
-		case 'error': return { variant: 'error', label: 'error' };
-		default: return { variant: 'muted', label: 'abandoned' };
-	}
-}
-
-/**
- * The first non-empty line of a statement, for the collapsed row.
- *
- * @param sql - The statement text.
- * @returns The first line with meaning, or the whole text when there is none.
- */
-function firstLine(sql: string): string {
-	const line = sql.split('\n').map((part) => part.trim()).find(Boolean);
-	return line ?? sql.trim();
-}
-
-/**
  * Whether a statement changed data when it last ran, so a rerun needs
  * confirming. Judged from the entry's KIND, which came from a text pattern —
  * a lexical reading of the statement, not a promise from the database.
@@ -321,14 +280,15 @@ function changesData(entry: HistoryEntry): boolean {
  * the eye does: when, what kind, how it ended, and the statement itself.
  *
  * @param entry - The entry.
+ * @param dialect - The connection's dialect (comment syntax for the title).
  * @returns The row's accessible label.
  */
-function rowLabel(entry: HistoryEntry): string {
+function rowLabel(entry: HistoryEntry, dialect: SqlDialect): string {
 	const badge = outcomeBadge(entry);
 	const parts = [clock(entry.at), KIND_LABEL[entry.kind].toLowerCase(), badge.label];
 	if (entry.pinned) parts.push('pinned');
 	if (entry.note) parts.push(`note: ${entry.note}`);
-	parts.push(firstLine(entry.sql));
+	parts.push(historyTitle(entry.sql, dialect));
 	return parts.join(', ');
 }
 
@@ -349,8 +309,21 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 	// In-workbench page navigation.
 	const pageNav = useSqlPageNav();
 
-	const entries = useHistory(endpoint.key);
-	const isRecording = useRecording(endpoint.key);
+	// History lives where this mount keeps it (the full app's preferences, or
+	// the dev tool's controller), and so does the sentence saying where.
+	const history = useSqlEnv().history;
+	const entries = history.useHistory(endpoint);
+	const isRecording = history.useRecording(endpoint);
+	const privacyNotice = history.usePrivacyNotice();
+	// Why history can be neither shown nor changed now (the full app, after
+	// another account signed in without a reload), or null.
+	const refusal = history.useRefusal();
+	// A schema-only node runs nothing, so Rerun is off with the reason, like
+	// the query page's Run.
+	const rerunGate = executeGateReason(useExecuteState(endpoint.key));
+	const gateNoteId = useId();
+	// Row titles skip leading comments by this connection's comment rules.
+	const dialect = useSchema(endpoint.key).dialect;
 
 	const [search, setSearch] = useState('');
 	const debouncedSearch = useDebouncedValue(search, 200);
@@ -426,6 +399,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 	 * @returns The list content.
 	 */
 	const renderList = (): React.ReactNode => {
+		if (refusal !== null) return <EmptyState icon={<DatabaseIcon />} title="History unavailable" description={refusal} />;
 		if (entries.length === 0) {
 			return (
 				<EmptyState
@@ -451,7 +425,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 						type="button"
 						style={styles.row}
 						aria-expanded={expanded}
-						aria-label={rowLabel(entry)}
+						aria-label={rowLabel(entry, dialect)}
 						onClick={() => toggleExpanded(entry)}
 					>
 						<span style={styles.rowTop}>
@@ -461,7 +435,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 							{entry.pinned && <StatusBadge variant="info">Pinned</StatusBadge>}
 							{entry.truncated && <StatusBadge variant="muted">truncated</StatusBadge>}
 						</span>
-						<span style={styles.rowSql}>{firstLine(entry.sql)}</span>
+						<span style={styles.rowSql}>{historyTitle(entry.sql, dialect)}</span>
 						{entry.note && <span style={styles.rowNote}>{entry.note}</span>}
 					</button>
 
@@ -486,9 +460,9 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 									value={noteDraft}
 									placeholder="Why this statement matters"
 									onChange={(event) => setNoteDraft(event.target.value)}
-									onBlur={() => setNote(endpoint.key, entry.id, noteDraft.trim())}
+									onBlur={() => history.setNote(endpoint, entry.id, noteDraft.trim())}
 									onKeyDown={(event) => {
-										if (event.key === 'Enter') setNote(endpoint.key, entry.id, noteDraft.trim());
+										if (event.key === 'Enter') history.setNote(endpoint, entry.id, noteDraft.trim());
 									}}
 								/>
 							</label>
@@ -502,13 +476,13 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 								<Button variant="secondary" small onClick={() => onLoadIntoEditor(entry.sql)}>
 									Load into editor
 								</Button>
-								<Button variant="primary" small onClick={() => requestRerun(entry)}>Rerun</Button>
+								<GatedButton variant="primary" small onClick={() => requestRerun(entry)} gateReason={rerunGate} reasonId={gateNoteId}>Rerun</GatedButton>
 								<Button
 									variant="ghost"
 									small
 									pressed={!!entry.pinned}
 									onClick={() => {
-										togglePin(endpoint.key, entry.id);
+										history.togglePin(endpoint, entry.id);
 										announce(entry.pinned ? 'Entry unpinned' : 'Entry pinned');
 									}}
 								>
@@ -518,7 +492,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 									variant="ghost"
 									small
 									onClick={() => {
-										removeEntry(endpoint.key, entry.id);
+										history.removeEntry(endpoint, entry.id);
 										setExpandedId(null);
 										announce('Entry deleted');
 									}}
@@ -526,6 +500,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 									Delete
 								</Button>
 								<Button variant="ghost" small onClick={() => openInNewQuery(entry)}>Open in new query</Button>
+								{!entry.truncated && <SaveQueryButton endpoint={endpoint} sql={entry.sql} small />}
 							</div>
 						</div>
 					)}
@@ -553,16 +528,13 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 
 	return (
 		<>
-			{/* Keeps the store's access to workspace preferences alive while the
-			    drawer is open, so a run recorded now is actually written. */}
-			<HistoryPrefsBridge />
-
 			<DetailPanel
 				open={open}
 				onClose={onClose}
 				modeless
 				width={440}
-				persistKey="sqlHistoryWidth"
+				// The width rides the same preferences: kept only while history can be.
+				persistKey={refusal === null ? 'sqlHistoryWidth' : undefined}
 				avatar={<span style={styles.avatar}><DatabaseIcon /></span>}
 				title="History"
 				subtitle={`${endpoint.nodeName} · this connection`}
@@ -575,9 +547,10 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 							variant="ghost"
 							small
 							pressed={isRecording}
-							title="Record the statements you run on this connection"
+							disabled={refusal !== null}
+							title={refusal ?? 'Record the statements you run on this connection'}
 							onClick={() => {
-								setRecording(endpoint.key, !isRecording);
+								history.setRecording(endpoint, !isRecording);
 								announce(isRecording ? 'Recording off for this connection' : 'Recording on for this connection');
 							}}
 						>
@@ -601,6 +574,8 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 					<ToggleGroup options={FILTERS} value={filter} onChange={setFilter} wrap />
 				</div>
 
+				{rerunGate && <div id={gateNoteId} style={styles.capLine}>{`Schema only: ${SCHEMA_ONLY_REASON} Rerun is off.`}</div>}
+
 				<Section label={`Statements (${visible.length})`}>
 					{renderList()}
 				</Section>
@@ -611,7 +586,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 					</div>
 				)}
 
-				<div style={styles.notice}>{PRIVACY_NOTICE}</div>
+				<div style={styles.notice}>{privacyNotice}</div>
 			</DetailPanel>
 
 			{confirmRerun && (
@@ -620,7 +595,11 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 					message={rerunMessage(confirmRerun)}
 					confirmLabel="Run again"
 					destructive
-					onCancel={() => setConfirmRerun(null)}
+					onCancel={() => {
+						setConfirmRerun(null);
+						// The live region keeps its last sentence; say this one ran nothing.
+						announce(CANCELLED_NOTHING_SENT);
+					}}
 					onConfirm={() => {
 						const entry = confirmRerun;
 						setConfirmRerun(null);
@@ -637,7 +616,7 @@ export const HistoryPanel: React.FC<HistoryPanelProps> = (props) => {
 					destructive
 					onCancel={() => setConfirmClear(false)}
 					onConfirm={() => {
-						clearForKey(endpoint.key);
+						history.clearForKey(endpoint);
 						setConfirmClear(false);
 						setExpandedId(null);
 						announce('History cleared for this connection');

@@ -41,6 +41,8 @@ import { RULE_LABELS, runSchemaChecks } from '../schema/quality';
 import type { Finding } from '../schema/quality';
 import { requestTableRecord } from '../navigation';
 import { DatabaseIcon } from '../icons';
+import { useSqlEnv } from '../sqlEnv';
+import { guardLayouts, layoutRulesFor } from '../sql/gridLayout';
 
 // =============================================================================
 // TYPES
@@ -135,6 +137,8 @@ const styles = {
  * @returns The panel element.
  */
 export const InsightsPanel: React.FC<InsightsPanelProps> = ({ endpoint, snapshot }) => {
+	// Grid layouts: the env's (session-only copies in a dev-tool frame).
+	const env = useSqlEnv();
 	const graph = useMemo(() => buildRelationGraph(snapshot.schema), [snapshot.schema]);
 	const shape = useMemo(() => orientation(graph), [graph]);
 	const findings = useMemo(
@@ -218,6 +222,9 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({ endpoint, snapshot
 			] satisfies GridColumnDefinition[],
 		[],
 	);
+	// Saved layouts keep no width for a flexible column (sql/gridLayout.ts), so a
+	// grid built while hidden can never freeze one at 40 px.
+	const gridLayouts = useMemo(() => guardLayouts(env.gridPersistence, layoutRulesFor(columns)), [env.gridPersistence, columns]);
 
 	// ── Loading / error framing, matching the Overview page ──────────────────
 
@@ -297,6 +304,7 @@ export const InsightsPanel: React.FC<InsightsPanelProps> = ({ endpoint, snapshot
 						columns={columns}
 						data={rows}
 						tableId="sql-insights-findings"
+						persistence={gridLayouts}
 						paginate={false}
 						height="100%"
 						onRowClick={(row) => requestTableRecord(endpoint.key, row.table)}

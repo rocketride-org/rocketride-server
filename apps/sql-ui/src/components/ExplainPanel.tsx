@@ -36,6 +36,7 @@
 // =============================================================================
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { createGeneration } from 'shared/explorer/generation';
 import type { CSSProperties } from 'react';
 import { Banner, Button, DetailPanel, EmptyState, ToggleGroup } from 'shell';
 import type { SqlEndpoint, SqlDialect } from '../connect';
@@ -162,6 +163,11 @@ export const ExplainPanel: React.FC<ExplainPanelProps> = ({ endpoint, dialect, s
 
 	const explainSql = useMemo(() => buildExplain(dialect, sql), [dialect, sql]);
 
+	// One ticket per EXPLAIN, expired when the drawer closes, the statement
+	// changes or the panel unmounts: the session then sends nothing more for
+	// that call (its one retry after a restart included) and drops its answer.
+	const [generation] = useState(createGeneration);
+
 	/**
 	 * Run the EXPLAIN and record what came back.
 	 *
@@ -174,11 +180,12 @@ export const ExplainPanel: React.FC<ExplainPanelProps> = ({ endpoint, dialect, s
 		setResult(null);
 		setShowVerbatim(false);
 		const started = Date.now();
+		const ticket = generation.next();
 		try {
 			const session = env.getSession(endpoint);
-			// Plain EXPLAIN only plans, so re-running it after a token refresh
-			// cannot change anything on the database.
-			const { rows } = await session.execute(explainSql, { idempotent: true });
+			// Plain EXPLAIN only plans, so it opts in to the session's one retry
+			// (after a TASK_STOPPED refusal raised before the node saw it).
+			const { rows } = await session.execute(explainSql, { idempotent: true, generation: ticket });
 			if (signal.cancelled) return;
 			const at = Date.now();
 			const parsed = parseExplain(dialect, rows);
@@ -197,7 +204,7 @@ export const ExplainPanel: React.FC<ExplainPanelProps> = ({ endpoint, dialect, s
 		} finally {
 			if (!signal.cancelled) setRunning(false);
 		}
-	}, [env, endpoint, dialect, explainSql]);
+	}, [env, endpoint, dialect, explainSql, generation]);
 
 	// Opening the drawer (or changing the statement while it is open) explains.
 	useEffect(() => {
@@ -208,8 +215,11 @@ export const ExplainPanel: React.FC<ExplainPanelProps> = ({ endpoint, dialect, s
 		// must not hide a new plan's actual text behind a parse miss.
 		setView('raw');
 		void run(signal);
-		return () => { signal.cancelled = true; };
-	}, [open, explainSql, run]);
+		return () => {
+			signal.cancelled = true;
+			generation.invalidate();
+		};
+	}, [open, explainSql, run, generation]);
 
 	const meta = result
 		? `EXPLAIN ran ${clockTime(result.at)} · round trip ${result.seconds.toFixed(3)} s · Planner estimates, not measurements.`
