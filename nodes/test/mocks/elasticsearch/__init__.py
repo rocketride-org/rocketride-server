@@ -29,7 +29,9 @@ def _field(source: Dict[str, Any], path: str) -> Any:
     """The value at a dotted path such as 'meta.chunkId', or None."""
     value: Any = source
     for part in path.split('.'):
-        value = value.get(part) if isinstance(value, dict) else None
+        if not isinstance(value, dict):
+            return None
+        value = value.get(part)
     return value
 
 
@@ -45,26 +47,41 @@ def _matches(source: Dict[str, Any], clause: Dict[str, Any]) -> bool:
     Only term and range are applied. Any other clause (match, knn, ...) matches
     every document, as this mock did before it applied filters at all.
     """
-    if not isinstance(clause, dict) or len(clause) != 1:
+    if 'term' in clause:
+        kind = 'term'
+    elif 'range' in clause:
+        kind = 'range'
+    else:
         return True
-    ((kind, condition),) = clause.items()
-    if kind not in ('term', 'range') or not isinstance(condition, dict) or len(condition) != 1:
+
+    condition = clause[kind]
+    if not isinstance(condition, dict) or len(condition) != 1:
         return True
-    ((path, expected),) = condition.items()
+    path = next(iter(condition))
+    expected = condition[path]
     actual = _field(source, path)
+
     if kind == 'term':
         if isinstance(expected, dict):
             expected = expected.get('value')
         return actual == expected
+
     if actual is None:
         return False
-    checks = {
-        'gte': lambda b: actual >= b,
-        'gt': lambda b: actual > b,
-        'lte': lambda b: actual <= b,
-        'lt': lambda b: actual < b,
-    }
-    return all(checks[op](bound) for op, bound in expected.items() if op in checks)
+    for op, bound in expected.items():
+        if op == 'gte':
+            if actual < bound:
+                return False
+        elif op == 'gt':
+            if actual <= bound:
+                return False
+        elif op == 'lte':
+            if actual > bound:
+                return False
+        elif op == 'lt':
+            if actual >= bound:
+                return False
+    return True
 
 
 class IndicesMock:
@@ -134,9 +151,12 @@ class Elasticsearch:
 
         # Sort on fields (stable, so equal values keep storage order); '_score' and the like are left alone
         for sort in reversed(body.get('sort', [])):
-            if isinstance(sort, dict):
-                ((path, order),) = sort.items()
-                descending = (order.get('order') if isinstance(order, dict) else order) == 'desc'
+            if not isinstance(sort, dict):
+                continue
+            for path, order in sort.items():
+                if isinstance(order, dict):
+                    order = order.get('order')
+                descending = order == 'desc'
                 hits.sort(key=lambda hit, path=path: _sort_key(_field(hit['_source'], path)), reverse=descending)
 
         # A request that names a size gets that page only

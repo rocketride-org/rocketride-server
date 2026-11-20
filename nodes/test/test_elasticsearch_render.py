@@ -15,90 +15,42 @@ limit.
 
 from __future__ import annotations
 
-import importlib.util
-import math
 import random
-import sys
 import tracemalloc
-import types
-from collections.abc import Iterator
-from contextlib import contextmanager
-from pathlib import Path
 
 import pytest
 
-_TEST_DIR = Path(__file__).resolve().parent
-_NODE_DIR = _TEST_DIR.parent / 'src' / 'nodes' / 'store_elasticsearch'
-_MOCK_DIR = _TEST_DIR / 'mocks' / 'elasticsearch'
-_PACKAGE = 'es_render_under_test'
-_MOCK_PACKAGE = 'es_render_mock'
-_STUB_MODULE_NAMES = ('elasticsearch', 'elasticsearch.helpers', 'numpy', _PACKAGE)
+from nodes.store_elasticsearch.constants import CONTENT_FIELD
+from nodes.store_elasticsearch.elasticsearch_store import Store
+
+# The shared mock, imported as part of this test package: the real
+# elasticsearch package, if loaded, is left alone
+from .mocks import elasticsearch as es_mock
+
+MAX_RESULT_WINDOW = es_mock.MAX_RESULT_WINDOW
 _INDEX = 'test-index'
 
 
-@contextmanager
-def _scoped_stubs() -> Iterator[None]:
-    """Stand in the client packages and a bare parent package, so the driver loads without the node's __init__."""
-    original = {name: sys.modules.get(name) for name in _STUB_MODULE_NAMES}
-
-    elasticsearch = types.ModuleType('elasticsearch')
-    elasticsearch.Elasticsearch = object
-    helpers = types.ModuleType('elasticsearch.helpers')
-    helpers.bulk = helpers.scan = lambda *args, **kwargs: None
-    helpers.BulkIndexError = Exception
-    numpy = types.ModuleType('numpy')
-    numpy.exp = math.exp
-    package = types.ModuleType(_PACKAGE)
-    package.__path__ = [str(_NODE_DIR)]
-    sys.modules.update(
-        {'elasticsearch': elasticsearch, 'elasticsearch.helpers': helpers, 'numpy': numpy, _PACKAGE: package}
-    )
-    try:
-        yield
-    finally:
-        for name, module in original.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
-
-
-def _load_module(name: str, path: Path, package_dir: Path | None = None) -> types.ModuleType:
-    """Load a module from a file under a private name, so the real packages are left alone."""
-    locations = [str(package_dir)] if package_dir else None
-    spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=locations)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    finally:
-        sys.modules.pop(name, None)
-    return module
-
-
-def _load_store_class() -> type:
-    with _scoped_stubs():
-        return _load_module(f'{_PACKAGE}.elasticsearch_store', _NODE_DIR / 'elasticsearch_store.py').Store
-
-
-def _load_mock() -> types.ModuleType:
-    """A fresh copy of the shared mock, with its own in-memory index."""
-    for name in [name for name in sys.modules if name.startswith(_MOCK_PACKAGE)]:
-        sys.modules.pop(name)
-    return _load_module(_MOCK_PACKAGE, _MOCK_DIR / '__init__.py', _MOCK_DIR)
-
-
-_mock = _load_mock()
-MAX_RESULT_WINDOW = _mock.MAX_RESULT_WINDOW
-_CONTENT_FIELD = _load_module(f'{_PACKAGE}_constants', _NODE_DIR / 'constants.py').CONTENT_FIELD
+@pytest.fixture(autouse=True)
+def _empty_mock_index():
+    """Each test starts with an empty mock server, and leaves it as it found it."""
+    saved_store, saved_indices = dict(es_mock._store), dict(es_mock._indices)
+    es_mock._store.clear()
+    es_mock._indices.clear()
+    yield
+    es_mock._store.clear()
+    es_mock._store.update(saved_store)
+    es_mock._indices.clear()
+    es_mock._indices.update(saved_indices)
 
 
 def _doc(object_id, chunk, content=None, copy=0):
+    if content is None:
+        content = f'chunk {chunk}'
     return {
         '_id': f'{object_id}-{chunk}-{copy}',
         '_source': {
-            _CONTENT_FIELD: f'chunk {chunk}' if content is None else content,
+            CONTENT_FIELD: content,
             'meta': {'objectId': object_id, 'chunkId': chunk},
         },
     }
@@ -117,10 +69,9 @@ def _shuffled(docs):
 
 def _store(docs):
     """The driver on the shared mock, holding ``docs`` in one index, with every search body recorded."""
-    mock = _load_mock()
-    client = mock.Elasticsearch()
+    client = es_mock.Elasticsearch()
     client.indices.create(index=_INDEX)
-    mock._store[_INDEX] = list(docs)
+    es_mock._store[_INDEX] = list(docs)
 
     client.searches = []
     search = client.search
@@ -132,8 +83,7 @@ def _store(docs):
 
     client.search = recorded_search
 
-    store_cls = _load_store_class()
-    driver = store_cls.__new__(store_cls)  # no connection: render uses the client object only
+    driver = Store.__new__(Store)  # no connection: render uses the client object only
     driver.client = client
     driver.index = _INDEX
     return driver
@@ -234,7 +184,7 @@ def test_render_of_an_unknown_document_calls_nothing():
 
 @pytest.mark.parametrize('size', [MAX_RESULT_WINDOW, MAX_RESULT_WINDOW + 1])
 def test_the_mock_enforces_the_result_window(size):
-    client = _load_mock().Elasticsearch()
+    client = es_mock.Elasticsearch()
     if size > MAX_RESULT_WINDOW:
         with pytest.raises(ValueError, match='Result window is too large'):
             client.search(index=_INDEX, body={'size': size})
@@ -244,8 +194,7 @@ def test_the_mock_enforces_the_result_window(size):
 
 def test_the_mock_ignores_clauses_it_does_not_model():
     """A match or knn query still sees every document, as before the mock applied filters."""
-    mock = _load_mock()
-    mock._store[_INDEX] = _docs('o1', 3)
-    body = {'query': {'bool': {'must': [{'match': {_CONTENT_FIELD: 'anything'}}]}}}
+    es_mock._store[_INDEX] = _docs('o1', 3)
+    body = {'query': {'bool': {'must': [{'match': {CONTENT_FIELD: 'anything'}}]}}}
 
-    assert len(mock.Elasticsearch().search(index=_INDEX, body=body)['hits']['hits']) == 3
+    assert len(es_mock.Elasticsearch().search(index=_INDEX, body=body)['hits']['hits']) == 3

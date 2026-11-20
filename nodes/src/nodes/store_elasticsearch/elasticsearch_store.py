@@ -683,42 +683,30 @@ class Store(DocumentStoreBase):
         # only. The cursor moves forward on every full page, and re-reading a
         # copy only replaces it in place. The callback gets the joined text one
         # renderChunkSize group of chunkIds at a time.
-        groupSize = max(1, self.renderChunkSize)
-        pageSize = max(1, self.renderPageSize)
+        groupSize = self.renderChunkSize
+        pageSize = self.renderPageSize
         groupStart = 0
         pieces: Dict[int, str] = {}
 
         cursor = 0
         while True:
-            search_body = {
-                'query': {
-                    'bool': {
-                        'must': [
-                            {'term': {'meta.objectId': objectId}},
-                            {'range': {'meta.chunkId': {'gte': cursor}}},
-                        ]
-                    }
-                },
-                'size': pageSize,
-                'sort': [{'meta.chunkId': {'order': 'asc'}}],
-                '_source': [CONTENT_FIELD, 'meta.chunkId'],
-            }
-
-            # Perform the query (Elasticsearch 8.x uses body parameter)
-            response = self.client.search(index=self.index, body=search_body)
-            hits = response.get('hits', {}).get('hits', [])
+            hits = self._searchRenderPage(objectId, cursor, pageSize)
 
             lastChunk = cursor
             for hit in hits:
                 source = hit.get('_source') or {}
                 chunk = (source.get('meta') or {}).get('chunkId')
+
+                # meta.chunkId is mapped as an integer and the range query only
+                # matches hits that have one, so this skips only a malformed hit
+                # that has no place in the document's order
                 if not isinstance(chunk, int) or chunk < cursor:
                     continue
                 lastChunk = max(lastChunk, chunk)
 
                 # Hits arrive in chunkId order, so a chunk past the current group completes it
                 if chunk >= groupStart + groupSize:
-                    self._handOverRenderGroup(pieces, callback)
+                    self._emitRenderGroup(pieces, callback)
                     pieces = {}
                     groupStart = chunk - chunk % groupSize
 
@@ -727,19 +715,48 @@ class Store(DocumentStoreBase):
 
             if len(hits) < pageSize:
                 break
+            cursor = self._nextRenderCursor(cursor, lastChunk)
 
-            # Every full page moves the cursor forward, so render always ends
-            if lastChunk > cursor:
-                # Start at the page's last chunkId: its copies may not all have fit
-                cursor = lastChunk
-            else:
-                # A full page of copies of one chunkId: step past it
-                cursor += 1
+        self._emitRenderGroup(pieces, callback)
 
-        self._handOverRenderGroup(pieces, callback)
+    def _searchRenderPage(self, objectId: str, cursor: int, pageSize: int) -> List[Dict[str, Any]]:
+        """
+        Return up to pageSize hits of one document from chunkId cursor on, in chunkId order.
+        """
+        search_body = {
+            'query': {
+                'bool': {
+                    'must': [
+                        {'term': {'meta.objectId': objectId}},
+                        {'range': {'meta.chunkId': {'gte': cursor}}},
+                    ]
+                }
+            },
+            'size': pageSize,
+            'sort': [{'meta.chunkId': {'order': 'asc'}}],
+            '_source': [CONTENT_FIELD, 'meta.chunkId'],
+        }
+
+        # Perform the query (Elasticsearch 8.x uses body parameter)
+        response = self.client.search(index=self.index, body=search_body)
+        return response.get('hits', {}).get('hits', [])
 
     @staticmethod
-    def _handOverRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
+    def _nextRenderCursor(cursor: int, lastChunk: int) -> int:
+        """
+        Return where the page after a full page starts.
+
+        Every full page moves the cursor forward, so render always ends.
+        """
+        if lastChunk > cursor:
+            # Start at the page's last chunkId: its copies may not all have fit
+            return lastChunk
+
+        # A full page of copies of one chunkId: step past it
+        return cursor + 1
+
+    @staticmethod
+    def _emitRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
         """
         Send one render group's text to the callback, joined in chunkId order.
 
