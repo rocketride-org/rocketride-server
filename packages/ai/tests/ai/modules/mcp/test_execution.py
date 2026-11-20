@@ -347,11 +347,15 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
 
     assert result['ok'] is True
     assert result['address'] == fake_engine._token
-    # The address is public information and rides the path; no credential
-    # ever rides a URL (access logs, Referer, history) — the uploader sends
-    # its rr_ key in the Authorization header.
-    assert result['upload_url'] == f'{fake_engine.base_url}/task/data/{fake_engine._token}'
-    assert '?' not in result['upload_url']
+    # The upload door is the MCP module's own route (plan 3.7): the only
+    # URL-carried value is a one-time nonce minted in the task tracker and
+    # bound to this task. No credential ever rides a URL (access logs,
+    # Referer, history) and the address does not ride this one either.
+    prefix = f'{fake_engine.base_url}/mcp/upload/'
+    assert result['upload_url'].startswith(prefix)
+    nonce = result['upload_url'][len(prefix) :]
+    assert nonce and '/' not in nonce and '?' not in result['upload_url']
+    assert tasks.consume_upload_nonce(nonce) == {'token': fake_engine._token, 'caller_auth': None}
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
     assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.dropper&pipe={fake_engine._token}'
     assert 'auth=' not in result['dropper_url']
@@ -359,6 +363,29 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
     assert result['source'] == 'src-fake'
     # address tracked so monitor/terminate work against it
     assert tasks.get(fake_engine._token) is not None
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_binds_the_nonce_to_the_calling_identity(fake_engine):
+    """The nonce carries the credential the tool call ran under (identity.CALLER_AUTH),
+    which is what the upload route forwards the bytes with.
+    """
+    from ai.modules.mcp import identity
+
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    token = identity.CALLER_AUTH.set('rr_caller_key')
+    try:
+        result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
+    finally:
+        identity.CALLER_AUTH.reset(token)
+
+    nonce = result['upload_url'].rsplit('/', 1)[1]
+    assert tasks.consume_upload_nonce(nonce) == {'token': fake_engine._token, 'caller_auth': 'rr_caller_key'}
+    # one-time: a second redemption answers nothing
+    assert tasks.consume_upload_nonce(nonce) is None
 
 
 @pytest.mark.asyncio

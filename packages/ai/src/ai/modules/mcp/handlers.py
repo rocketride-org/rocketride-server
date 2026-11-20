@@ -58,9 +58,9 @@ SERVER_INSTRUCTIONS = (
     'needed. Without inputs, send_data feeds input and monitor waits for completion. '
     'list_running_pipelines finds addresses; terminate stops a task. Pipeline definitions are always inline '
     'JSON objects; no tool reads a pipeline from a file path. Store tools take store-relative paths. To '
-    'take files over HTTP, run_dropper_pipe starts or reuses a task and returns an upload_url and a '
-    "dropper_url; send_files (local engines only) uploads files from the engine host's own disk into a "
-    'running task.\n\n'
+    'take files over HTTP, run_dropper_pipe starts or reuses a task and returns an upload_url (a one-time, '
+    'credential-free link; each upload response carries the next one) and a dropper_url; send_files '
+    "(local engines only) uploads files from the engine host's own disk into a running task.\n\n"
     'Other tools: list_integrations (credential setup status; variable names only, never values), '
     'resolve_config, describe_pipeline, scaffold_node; store_read, store_list, store_stat, store_get_url; '
     'save_template, load_template; deploy_add, then deploy_to_team, then deploy_set_schedule, with '

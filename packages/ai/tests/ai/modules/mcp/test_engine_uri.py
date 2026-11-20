@@ -226,9 +226,11 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     )
 
     assert result['ok'] is True, result
-    # The address rides the path; no credential ever rides a URL.
-    assert result['upload_url'] == f'{origin}/task/data/{result["address"]}'
+    # The upload door is the MCP module's own nonce route on the resolved
+    # origin (plan 3.7); only the one-time nonce rides the URL, no credential.
+    assert result['upload_url'].startswith(f'{origin}/mcp/upload/')
     assert '?' not in result['upload_url']
+    assert result['address'] not in result['upload_url']
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
     assert result['dropper_url'] == f'{origin}/?appid=rocketride.dropper&pipe={result["address"]}'
     assert 'auth=' not in result['dropper_url']

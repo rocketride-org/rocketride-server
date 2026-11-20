@@ -15,6 +15,7 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from ai.constants import CONST_DEFAULT_WEB_HOST, CONST_DEFAULT_WEB_PORT
 from ai.web import oauth_resource, openai_apps_challenge
 
+from . import apps as apps_mod
 from . import auth
 from . import identity
 from .engine import make_engine_client
@@ -144,6 +145,11 @@ def _refuse_existing_claimants(server: Any) -> None:
     converter-typed pattern such as ``/mcp/{id:int}`` compiles to a regex no
     fixed probe satisfies, yet still disarms auth for every ``/mcp/<digits>``
     the Mount forwards.
+
+    The module's own ``apps.UPLOAD_PATH`` (``/mcp/upload/{nonce}``, public,
+    plan 3.7) is registered by ``initModule`` AFTER this check and ahead of
+    the Mount, so it is never a claimant on first mount -- and is exactly the
+    claimant that makes a second mount on the same server fail here.
 
     Raises:
         RuntimeError: naming the claimant(s).
@@ -531,7 +537,17 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # The audience guard runs first: a Zitadel token must be stamped for the
     # MCP project, or it does not reach the session manager. Static API keys
     # and credential-less dev requests pass straight through — see auth.py.
+    #
+    # The dropper widget's upload door (apps.UPLOAD_PATH, plan 3.7) is the
+    # ONE sanctioned public descendant of /mcp, and it goes onto the router
+    # BEFORE the Mount so the router reaches it first: a request to it never
+    # arrives at handle_mcp. It is public because the widget carries no
+    # credential -- the one-time nonce in the path is the authorization, and
+    # the route checks it itself. _refuse_existing_claimants ran above, so a
+    # second initModule on the same server still trips on this route.
     # ------------------------------------------------------------------
+    if hasattr(server, 'add_route'):
+        apps_mod.register_upload_route(server, engine_factory, task_registry)
 
     async def _reject(send: Any, message: str) -> None:
         """Send a 401 carrying the discovery challenge, in raw ASGI."""

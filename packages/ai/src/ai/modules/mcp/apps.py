@@ -8,13 +8,37 @@ server dist — the workspace's sources and node_modules are excluded). Each wid
 a ``ui://`` resource with the profile mimeType; tools opt in by registering
 with ``ui_resource_uri`` (see tooling.py). Hosts without the UI extension see
 the plain JSON tool results, unchanged.
+
+The dropper widget's upload door lives here too (plan 3.7): ``POST
+/mcp/upload/{nonce}``. The widget runs in the host's sandbox and holds no
+platform credential, so the request carries none -- the one-time nonce
+``run_dropper_pipe`` minted is the whole authorization. The route redeems
+it against the session's task tracker and forwards the bytes INTO that task
+over the caller's own engine client (open -> write -> close on the caller's
+control, which is what the SDK's ``send`` is), so ``spend.check`` bills the
+caller exactly as a DAP call would. This is the ONE HTTP door the DAP-only
+rule admits (plan 3.5), scoped to the MCP app surface; identical on OSS.
 """
 
+import asyncio
+import logging
+import uuid
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import mcp.types as types
+from fastapi.responses import JSONResponse, Response
+from starlette.datastructures import UploadFile
+from starlette.requests import Request
+
+from ai.web.response import ResultSuccess, error, exception, formatException
+
+from . import identity
+from .registry import TaskRegistry
+
+logger = logging.getLogger(__name__)
 
 UI_MIME_TYPE = 'text/html;profile=mcp-app'
 UI_EXTENSION_ID = 'io.modelcontextprotocol/ui'
@@ -97,3 +121,220 @@ def read_ui_resource(uri: str, apps_dir: Optional[Path] = None) -> Optional[str]
                 _HTML_CACHE[str(path)] = cached
             return cached[1]
     return None
+
+
+# ----------------------------------------------------------------------------
+# Upload route: POST /mcp/upload/{nonce}
+# ----------------------------------------------------------------------------
+
+# The one public descendant of /mcp. It is registered AHEAD of the MCP Mount
+# (Starlette matches routes in order), so a request to it never reaches
+# handle_mcp -- and it is listed public because the widget sends no
+# credential: AuthMiddleware would otherwise answer 401 before the nonce is
+# ever looked at. See __init__.initModule step 4.
+UPLOAD_PATH = '/mcp/upload/{nonce}'
+
+# A query-string credential is refused outright on this door, as the task
+# data door and auth.authorize refuse it: the nonce IS the authorization and
+# nothing else may ride the URL.
+_REFUSED_QUERY_NAMES = frozenset({'auth', 'token'})
+
+
+def upload_url(base_url: str, nonce: str) -> str:
+    """Compose the widget's upload URL for ``nonce`` on the engine origin.
+
+    Args:
+        base_url: The engine's HTTP(S) origin (``EngineClient.base_url``).
+        nonce: A nonce from ``TaskRegistry.issue_upload_nonce``.
+
+    Returns:
+        str: ``{origin}/mcp/upload/{nonce}``; the nonce is the only
+            URL-carried value and it is single-use.
+    """
+    return f'{str(base_url).rstrip("/")}{UPLOAD_PATH.format(nonce=nonce)}'
+
+
+def _mime_of(request: Request) -> str:
+    """The request's media type, parameters stripped and lower-cased."""
+    return (request.headers.get('content-type') or 'application/octet-stream').split(';')[0].strip().lower()
+
+
+def _filename_of(request: Request) -> str:
+    """The ``Content-Disposition`` filename of a raw-body upload, else a generated one."""
+    disposition = request.headers.get('content-disposition') or ''
+    for part in disposition.split(';'):
+        name, sep, value = part.strip().partition('=')
+        if sep and name.strip().lower() == 'filename':
+            value = value.strip().strip('"')
+            if value:
+                return value
+    return f'content-{uuid.uuid4()}'
+
+
+async def _parts_of(request: Request) -> List[Tuple[str, str, bytes, str]]:
+    """Split the request into ``(unique_key, filename, payload, mimetype)`` parts.
+
+    Multipart bodies yield one part per field in submission order -- a file
+    field under its filename and content type, a string field as
+    ``text/plain`` -- with repeated field names suffixed ``_0``, ``_1`` the way
+    the task data door keys them, so the widget's result map reads the same.
+    Any other body is a single raw object.
+    """
+    if _mime_of(request) != 'multipart/form-data':
+        body = await request.body()
+        return [('content', _filename_of(request), body, _mime_of(request))]
+
+    form = await request.form()
+    items = list(form.multi_items())
+    counts = Counter(key for key, _ in items)
+    seen: Dict[str, int] = {}
+    parts: List[Tuple[str, str, bytes, str]] = []
+    for key, value in items:
+        if counts[key] > 1:
+            seen[key] = seen.get(key, -1) + 1
+            unique_key = f'{key}_{seen[key]}'
+        else:
+            unique_key = key
+        if isinstance(value, UploadFile):
+            payload = await value.read()
+            parts.append(
+                (unique_key, value.filename or unique_key, payload, value.content_type or 'application/octet-stream')
+            )
+        else:
+            parts.append((unique_key, f'{unique_key}-{uuid.uuid4()}', str(value).encode('utf-8'), 'text/plain'))
+    return parts
+
+
+async def _forward_part(client: Any, address: str, part: Tuple[str, str, bytes, str]) -> Tuple[str, Any]:
+    """Send one part into the task on the caller's control; an exception is the result."""
+    unique_key, filename, payload, mimetype = part
+    try:
+        outcome = await client.send(
+            address, payload, objinfo={'name': filename, 'size': len(payload)}, mimetype=mimetype
+        )
+    except Exception as exc:  # noqa: BLE001 - reported per object, as the task data door does
+        return unique_key, exc
+    return unique_key, outcome
+
+
+async def _forward_upload(client: Any, address: str, request: Request) -> Dict[str, Any]:
+    """Forward every part of ``request`` into ``address`` and build the result map.
+
+    The map is the shape the widget renders -- ``{objectsRequested,
+    objectsCompleted, resultTypes, objects}`` -- with each object's pipe
+    result under its field key, ``status: 'OK'`` stamped on success and the
+    formatted exception on failure. Parts are sent concurrently, as the task
+    data door sends them.
+    """
+    parts = await _parts_of(request)
+    result: Dict[str, Any] = {
+        'objectsRequested': len(parts),
+        'objectsCompleted': 0,
+        'resultTypes': {},
+        'objects': {},
+    }
+    for unique_key, outcome in await asyncio.gather(*(_forward_part(client, address, part) for part in parts)):
+        if isinstance(outcome, Exception):
+            result['objects'][unique_key] = formatException(outcome).model_dump()
+            continue
+        outcome = dict(outcome) if isinstance(outcome, dict) else {'result': outcome}
+        result['resultTypes'].update(outcome.pop('result_types', None) or {})
+        outcome['status'] = 'OK'
+        result['objects'][unique_key] = outcome
+        result['objectsCompleted'] += 1
+    return result
+
+
+async def handle_upload(request: Request, engine_factory: Callable[[], Any], tasks: TaskRegistry) -> Response:
+    """Serve ``POST /mcp/upload/{nonce}``.
+
+    Steps:
+
+    1. Refuse a URL-carried credential (400): the nonce is the authorization.
+    2. Redeem the nonce (404 when unknown, already used, or its task is no
+       longer tracked -- the three are indistinguishable on purpose).
+    3. Bind the credential the nonce was minted under and build the caller's
+       engine client through the same factory a tool call uses, so the
+       upload is the caller's on the wire and in the ledger. The client is
+       closed when the request ends, exactly as ``handle_mcp`` closes its
+       per-request clients.
+    4. Forward the parts (open -> write -> close per object, via ``send``).
+    5. Answer the standard engine envelope ``{status: 'OK', data}`` plus the
+       NEXT ``upload_url``: the redeemed nonce is spent, and the widget's
+       "drop more files" needs a fresh one. No next URL is issued once the
+       task has left the tracker.
+
+    Args:
+        request: The incoming request; ``nonce`` is its path parameter.
+        engine_factory: ``__init__._make_engine_factory``'s closure.
+        tasks: The server's task tracker, where the nonce was minted.
+
+    Returns:
+        Response: A JSON envelope; errors use the engine's error envelope.
+    """
+    # 1. no credential rides this URL
+    refused = _REFUSED_QUERY_NAMES.intersection(request.query_params.keys())
+    if refused:
+        return error(
+            f'{sorted(refused)[0]!r} is not a parameter on this door: the nonce in the path is the only '
+            'authorization and no credential rides the URL',
+            httpStatus=400,
+        )
+
+    # 2. one nonce, one upload
+    bound = tasks.consume_upload_nonce(str(request.path_params.get('nonce') or ''))
+    if bound is None:
+        return error(
+            'unknown or already used upload nonce; call run_dropper_pipe again for a fresh upload_url',
+            httpStatus=404,
+        )
+    address, caller_auth = bound['token'], bound['caller_auth']
+
+    # 3. the caller's own engine client, 4. forward
+    auth_token = identity.CALLER_AUTH.set(caller_auth)
+    bucket: list = []
+    clients_token = identity.REQUEST_CLIENTS.set(bucket)
+    try:
+        client = engine_factory()
+        base_url = client.base_url
+        try:
+            data = await _forward_upload(client, address, request)
+        except Exception as exc:  # noqa: BLE001 - the body could not be read or split; same envelope as the door
+            return exception(exc)
+    finally:
+        try:
+            for per_request in bucket:
+                try:
+                    await per_request.close()
+                except Exception:  # noqa: BLE001 - one failed close must not skip the rest
+                    logger.exception('failed to close the upload route engine client')
+        finally:
+            identity.REQUEST_CLIENTS.reset(clients_token)
+            identity.CALLER_AUTH.reset(auth_token)
+
+    # 5. the envelope and the next nonce
+    content = ResultSuccess(data=data).model_dump(exclude_none=True)
+    try:
+        content['upload_url'] = upload_url(base_url, tasks.issue_upload_nonce(address, caller_auth))
+    except KeyError:  # the task left the tracker while the upload ran: nothing further to authorize
+        pass
+    return JSONResponse(content=content)
+
+
+def register_upload_route(server: Any, engine_factory: Callable[[], Any], tasks: TaskRegistry) -> None:
+    """Register ``POST /mcp/upload/{nonce}`` as a public route on ``server``.
+
+    Public because the widget carries no credential; the nonce is checked by
+    ``handle_upload`` itself. Must run BEFORE the MCP Mount is appended so the
+    router reaches this route first.
+
+    Args:
+        server: The WebServer (or test double) exposing ``add_route``.
+        engine_factory: The module's engine-client factory.
+        tasks: The module's task tracker.
+    """
+
+    async def mcp_upload(request: Request) -> Response:
+        return await handle_upload(request, engine_factory, tasks)
+
+    server.add_route(UPLOAD_PATH, mcp_upload, ['POST'], public=True)

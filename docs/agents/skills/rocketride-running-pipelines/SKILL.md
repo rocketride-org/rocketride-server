@@ -42,7 +42,8 @@ state that truthfully, you have not earned the run — do the missing step inste
 2. **Push input** — pick the tool by the **source** node:
    - Raw text/data → `send_data` (`input` is a **string** — serialize JSON). Result inline.
    - **Files from the host** → start with `run_dropper_pipe` instead: it returns an
-     `upload_url` (multipart-POST the files to it) and a `dropper_url` (browser drag-drop page
+     `upload_url` (a one-time, credential-free link — multipart-POST the files to it with no
+     header; the response carries the next link) and a `dropper_url` (browser drag-drop page
      to hand the user). `send_files` reads paths on the engine host and exists only on a
      local (loopback-bound) engine.
    - `chat` source → **no MCP chat tool exists**; use the SDK fallback below.

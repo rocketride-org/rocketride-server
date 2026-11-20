@@ -1,0 +1,432 @@
+# Copyright 2026 Aparavi Software AG. MIT License.
+"""The dropper widget's upload door: ``POST /mcp/upload/{nonce}`` (plan 3.7).
+
+``run_dropper_pipe`` mints a one-time nonce bound to the task it started and
+to the caller identity the tool call ran under; the route redeems it once and
+forwards the bytes into the task over the CALLER's engine client, with no
+credential on the widget's request. These tests drive the real ASGI mount
+end to end (the same ``FakeWebServer`` harness as test_identity.py) and, for
+the public-path decision, the real ``WebServer`` + ``AuthMiddleware`` (the
+harness of test_route_reservation.py).
+"""
+
+import contextlib
+import json
+from types import SimpleNamespace
+from urllib.parse import urlsplit
+
+import httpx
+import pytest
+
+from ai.modules.mcp import apps, registry as registry_mod
+from ai.modules.mcp.registry import TaskRegistry
+
+PIPE = {'components': [], 'source': 'x'}
+
+_HEADERS = {
+    'content-type': 'application/json',
+    'accept': 'application/json, text/event-stream',
+    'authorization': 'Bearer rr_e2e_key',
+    'MCP-Protocol-Version': '2026-07-28',
+}
+
+
+def _tools_call(name, arguments):
+    return {
+        'jsonrpc': '2.0',
+        'id': 1,
+        'method': 'tools/call',
+        'params': {
+            'name': name,
+            'arguments': arguments,
+            '_meta': {
+                'io.modelcontextprotocol/protocolVersion': '2026-07-28',
+                'io.modelcontextprotocol/clientCapabilities': {},
+            },
+        },
+    }
+
+
+def _tool_result(resp):
+    """The tool's JSON result out of a Streamable-HTTP response (SSE or JSON)."""
+    assert resp.status_code == 200, resp.text[:300]
+    if resp.headers.get('content-type', '').startswith('text/event-stream'):
+        messages = [json.loads(line[5:]) for line in resp.text.splitlines() if line.startswith('data:')]
+    else:
+        messages = [resp.json()]
+    message = next(m for m in messages if 'result' in m)
+    return message['result']['structuredContent']
+
+
+def _recording_factory(built):
+    from .conftest import FakeEngineClient
+
+    def _make(config, on_event=None):
+        client = FakeEngineClient(env_keys=[], auth=config.get('rocketride_auth'))
+        built.append(client)
+        return client
+
+    return _make
+
+
+@contextlib.asynccontextmanager
+async def _mcp_app(monkeypatch, built):
+    """Mount the real `/mcp` on a FakeWebServer; record every engine client built."""
+    import ai.modules.mcp as mcp_module
+
+    from .conftest import FakeWebServer
+
+    monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
+    srv = FakeWebServer()
+    mcp_module.initModule(srv, {'mcp_dev_no_auth': True})
+    try:
+        for handler in srv.app.router.on_startup:
+            await handler()
+        transport = httpx.ASGITransport(app=srv.app)
+        async with httpx.AsyncClient(transport=transport, base_url='http://testserver') as client:
+            yield client
+    finally:
+        for handler in srv.app.router.on_shutdown:
+            await handler()
+
+
+async def _start_dropper(app, headers=_HEADERS):
+    headers = {**headers, 'Mcp-Method': 'tools/call', 'Mcp-Name': 'run_dropper_pipe'}
+    result = _tool_result(
+        await app.post('/mcp', json=_tools_call('run_dropper_pipe', {'pipeline': PIPE}), headers=headers)
+    )
+    assert result['ok'] is True, result
+    return result
+
+
+async def _upload(app, upload_url, **kwargs):
+    """POST the widget's multipart body to the route: no header, no query credential."""
+    files = kwargs.pop('files', {'file_0': ('a.txt', b'hello', 'text/plain')})
+    return await app.post(urlsplit(upload_url).path, files=files, **kwargs)
+
+
+# --- the registry: nonces live and die with the task ----------------------
+
+
+def test_registry_issues_a_nonce_only_for_a_tracked_task():
+    tasks = TaskRegistry()
+    with pytest.raises(KeyError):
+        tasks.issue_upload_nonce('tok-1', 'rr_x')
+    tasks.add('tok-1', pipeline_ref='<inline>')
+    nonce = tasks.issue_upload_nonce('tok-1', 'rr_x')
+    assert nonce and '/' not in nonce and '?' not in nonce
+
+
+def test_registry_nonce_is_redeemed_exactly_once():
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    nonce = tasks.issue_upload_nonce('tok-1', None)
+    assert tasks.consume_upload_nonce(nonce) == {'token': 'tok-1', 'caller_auth': None}
+    assert tasks.consume_upload_nonce(nonce) is None
+    assert tasks.consume_upload_nonce('never-issued') is None
+
+
+def test_registry_remove_drops_the_tasks_nonces_and_keeps_the_others():
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    tasks.add('tok-2')
+    gone = tasks.issue_upload_nonce('tok-1', 'rr_a')
+    kept = tasks.issue_upload_nonce('tok-2', 'rr_b')
+    tasks.remove('tok-1')
+    assert tasks.consume_upload_nonce(gone) is None
+    assert tasks.consume_upload_nonce(kept) == {'token': 'tok-2', 'caller_auth': 'rr_b'}
+
+
+def test_registry_eviction_drops_the_evicted_tasks_nonces(monkeypatch):
+    monkeypatch.setattr(registry_mod, 'MAX_TASKS', 2)
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    nonce = tasks.issue_upload_nonce('tok-1', None)
+    tasks.add('tok-2')
+    tasks.add('tok-3')  # evicts tok-1
+    assert tasks.get('tok-1') is None
+    assert tasks.consume_upload_nonce(nonce) is None
+
+
+def test_registry_re_add_keeps_the_tasks_nonces():
+    """`use_existing` re-registers the same task; its live nonce stays valid."""
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    nonce = tasks.issue_upload_nonce('tok-1', None)
+    tasks.add('tok-1', pipeline_ref='<inline>')
+    assert tasks.consume_upload_nonce(nonce) == {'token': 'tok-1', 'caller_auth': None}
+
+
+def test_registry_caps_live_nonces_per_task_oldest_first(monkeypatch):
+    monkeypatch.setattr(registry_mod, 'MAX_UPLOAD_NONCES_PER_TASK', 2)
+    tasks = TaskRegistry()
+    tasks.add('tok-1')
+    first = tasks.issue_upload_nonce('tok-1', None)
+    second = tasks.issue_upload_nonce('tok-1', None)
+    third = tasks.issue_upload_nonce('tok-1', None)
+    assert tasks.consume_upload_nonce(first) is None
+    assert tasks.consume_upload_nonce(second) is not None
+    assert tasks.consume_upload_nonce(third) is not None
+
+
+# --- the route, end to end on the real /mcp mount -------------------------
+
+
+@pytest.mark.asyncio
+async def test_nonce_upload_is_accepted_once_and_the_bytes_land_in_the_task_as_the_caller(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        # No credential inside either URL: the nonce is the only URL-carried
+        # value and the address does not ride the upload link either.
+        assert 'rr_e2e_key' not in started['upload_url'] and 'rr_e2e_key' not in started['dropper_url']
+        assert '?' not in started['upload_url'] and 'auth=' not in started['dropper_url']
+        assert urlsplit(started['upload_url']).path.startswith('/mcp/upload/')
+        assert len(built) == 1  # the tool call's per-caller client, already closed
+        assert built[0].close_calls == 1
+
+        resp = await _upload(app, started['upload_url'], files={'file_0': ('a.txt', b'hello', 'text/plain')})
+
+    assert resp.status_code == 200, resp.text
+    envelope = resp.json()
+    assert envelope['status'] == 'OK'
+    data = envelope['data']
+    assert data['objectsRequested'] == 1 and data['objectsCompleted'] == 1
+    assert data['objects']['file_0']['status'] == 'OK'
+    # The route built the CALLER's engine client (the credential the nonce was
+    # minted under), sent open -> write -> close on the caller's control --
+    # the SDK's send -- and closed that client when the request ended.
+    assert len(built) == 2
+    uploader = built[1]
+    assert uploader.auth == 'rr_e2e_key'
+    assert uploader.sent == [
+        {
+            'token': started['address'],
+            'data': b'hello',
+            'objinfo': {'name': 'a.txt', 'size': 5},
+            'mimetype': 'text/plain',
+        }
+    ]
+    assert uploader.close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_nonce_reuse_is_refused_and_the_response_carried_the_next_one(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        first = await _upload(app, started['upload_url'])
+        assert first.status_code == 200
+        # one nonce, one upload
+        again = await _upload(app, started['upload_url'])
+        assert again.status_code == 404
+        assert again.json()['status'] == 'Error'
+        # the accepted upload handed the widget the next link; it works exactly once too
+        next_url = first.json()['upload_url']
+        assert next_url != started['upload_url'] and 'rr_e2e_key' not in next_url
+        second = await _upload(app, next_url, files={'file_0': ('b.txt', b'again', 'text/plain')})
+        assert second.status_code == 200
+        assert (await _upload(app, next_url)).status_code == 404
+
+    assert [c.sent[0]['data'] for c in built if c.sent] == [b'hello', b'again']
+
+
+@pytest.mark.asyncio
+async def test_a_nonce_from_another_session_is_refused(monkeypatch):
+    """A nonce is bound to the tracker that minted it: another MCP server
+    (another session's tracker) does not know it and answers 404.
+    """
+    # One recording list: the monkeypatched factory is module-level, so the
+    # second mount records every client built for either server.
+    built = []
+    async with _mcp_app(monkeypatch, built) as app_a, _mcp_app(monkeypatch, built) as app_b:
+        started = await _start_dropper(app_a)
+        resp = await _upload(app_b, started['upload_url'])
+        assert resp.status_code == 404
+        assert not any(c.sent for c in built)
+        # ...and the right session still accepts it
+        assert (await _upload(app_a, started['upload_url'])).status_code == 200
+
+    assert [c.sent[0]['token'] for c in built if c.sent] == [started['address']]
+
+
+@pytest.mark.asyncio
+async def test_a_nonce_is_refused_after_terminate(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        headers = {**_HEADERS, 'Mcp-Method': 'tools/call', 'Mcp-Name': 'terminate'}
+        result = _tool_result(
+            await app.post('/mcp', json=_tools_call('terminate', {'address': started['address']}), headers=headers)
+        )
+        assert result == {'ok': True, 'terminated': started['address']}
+
+        resp = await _upload(app, started['upload_url'])
+
+    assert resp.status_code == 404
+    assert not any(c.sent for c in built)
+
+
+@pytest.mark.asyncio
+async def test_unknown_nonce_is_refused_without_building_a_client(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        resp = await app.post('/mcp/upload/not-a-nonce', files={'file_0': ('a.txt', b'x', 'text/plain')})
+    assert resp.status_code == 404
+    assert built == []
+
+
+@pytest.mark.asyncio
+async def test_a_query_credential_is_refused_before_the_nonce_is_spent(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        refused = await _upload(app, started['upload_url'], params={'auth': 'rr_leaked'})
+        assert refused.status_code == 400
+        assert 'auth' in refused.json()['error']['error']
+        # the nonce was not consumed by the refused request
+        assert (await _upload(app, started['upload_url'])).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_failed_part_is_reported_per_object_and_the_rest_still_land(monkeypatch):
+    from .conftest import FakeEngineClient
+
+    built = []
+
+    def _make(config, on_event=None):
+        client = FakeEngineClient(env_keys=[], auth=config.get('rocketride_auth'))
+
+        async def _send(token, data, objinfo=None, mimetype=None, on_sse=None):
+            if data == b'bad':
+                raise RuntimeError('engine refused the object')
+            client.sent.append({'token': token, 'data': data, 'objinfo': objinfo, 'mimetype': mimetype})
+            return {'text': data.decode(), 'result_types': {'text': 'text'}}
+
+        client.send = _send
+        built.append(client)
+        return client
+
+    import ai.modules.mcp as mcp_module
+
+    from .conftest import FakeWebServer
+
+    monkeypatch.setattr(mcp_module, 'make_engine_client', _make)
+    srv = FakeWebServer()
+    mcp_module.initModule(srv, {'mcp_dev_no_auth': True})
+    for handler in srv.app.router.on_startup:
+        await handler()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=srv.app), base_url='http://testserver') as app:
+            started = await _start_dropper(app)
+            resp = await app.post(
+                urlsplit(started['upload_url']).path,
+                files=[('file', ('ok.txt', b'fine', 'text/plain')), ('file', ('bad.txt', b'bad', 'text/plain'))],
+                data={'question': 'what is this'},
+            )
+    finally:
+        for handler in srv.app.router.on_shutdown:
+            await handler()
+
+    assert resp.status_code == 200, resp.text
+    data = resp.json()['data']
+    assert data['objectsRequested'] == 3 and data['objectsCompleted'] == 2
+    assert data['objects']['file_0'] == {'text': 'fine', 'status': 'OK'}
+    assert data['objects']['file_1']['status'] == 'Error'
+    assert data['objects']['question'] == {'text': 'what is this', 'status': 'OK'}
+    assert data['resultTypes'] == {'text': 'text'}
+    # the string field went in as text/plain under a generated name
+    string_part = next(s for s in built[-1].sent if s['data'] == b'what is this')
+    assert string_part['mimetype'] == 'text/plain' and string_part['objinfo']['name'].startswith('question-')
+
+
+@pytest.mark.asyncio
+async def test_raw_body_upload_is_one_object_named_by_content_disposition(monkeypatch):
+    built = []
+    async with _mcp_app(monkeypatch, built) as app:
+        started = await _start_dropper(app)
+        resp = await app.post(
+            urlsplit(started['upload_url']).path,
+            content=b'%PDF-1.4',
+            headers={'content-type': 'application/pdf', 'content-disposition': 'attachment; filename="doc.pdf"'},
+        )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()['data']['objects']['content']['status'] == 'OK'
+    assert built[-1].sent == [
+        {
+            'token': started['address'],
+            'data': b'%PDF-1.4',
+            'objinfo': {'name': 'doc.pdf', 'size': 8},
+            'mimetype': 'application/pdf',
+        }
+    ]
+
+
+def test_upload_url_composes_on_the_engine_origin():
+    assert apps.upload_url('http://localhost:5565/', 'n0nce') == 'http://localhost:5565/mcp/upload/n0nce'
+    assert apps.UPLOAD_PATH == '/mcp/upload/{nonce}'
+
+
+# --- the public-path decision on the real WebServer + AuthMiddleware -------
+
+
+def _web_server(monkeypatch, tmp_path, built):
+    """The test_route_reservation.py harness: real WebServer, any credential accepted."""
+    pytest.importorskip('rocketlib')
+    import ai.modules.mcp as mcp_module
+    import ai.modules.shell.shell as shell_mod
+    from ai.web.server import WebServer
+
+    (tmp_path / 'index.html').write_text('<!doctype html><title>shell</title>')
+    monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
+
+    server = WebServer()
+    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH'):
+        monkeypatch.delenv(name, raising=False)
+
+    async def _accept_any(authorization):
+        return SimpleNamespace(auth=authorization)
+
+    monkeypatch.setattr(server, '_authenticate_credential_inner', _accept_any)
+    server.use('shell', {})
+    server.use('mcp', {})
+    return server
+
+
+@contextlib.asynccontextmanager
+async def _serve(server):
+    await server._user_startup()
+    try:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=server.app), base_url='http://testserver') as c:
+            yield c
+    finally:
+        await server._user_shutdown()
+
+
+def test_only_the_upload_route_is_public_under_mcp(monkeypatch, tmp_path):
+    server = _web_server(monkeypatch, tmp_path, [])
+    assert server.is_public_route('/mcp/upload/some-nonce') is True
+    for path in ('/mcp', '/mcp/', '/mcp/anything', '/mcp/upload', '/mcp/upload/a/b'):
+        assert server.is_public_route(path) is False, path
+
+
+@pytest.mark.asyncio
+async def test_credential_less_upload_passes_auth_middleware_and_lands_as_the_caller(monkeypatch, tmp_path):
+    """The widget's POST carries no credential, so AuthMiddleware must let it
+    through to the route (404 for a bad nonce, never 401) -- and a real nonce
+    minted through the authenticated /mcp door forwards as that caller.
+    """
+    built = []
+    server = _web_server(monkeypatch, tmp_path, built)
+    async with _serve(server) as app:
+        unknown = await app.post('/mcp/upload/not-a-nonce', files={'file_0': ('a.txt', b'x', 'text/plain')})
+        assert unknown.status_code == 404, unknown.text[:200]
+
+        started = await _start_dropper(app)
+        resp = await _upload(app, started['upload_url'])
+
+    assert resp.status_code == 200, resp.text[:300]
+    assert resp.json()['status'] == 'OK'
+    assert built[-1].auth == 'rr_e2e_key'
+    assert built[-1].sent[0]['token'] == started['address'] and built[-1].sent[0]['data'] == b'hello'
