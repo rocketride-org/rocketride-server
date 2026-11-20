@@ -35,7 +35,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { AUTH_POPUP_KEY, forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from './authPopup';
+import { AUTH_POPUP_KEY, deliverSession, forgetAuthPopup, isAuthPopupWindow, receiveSession, rememberAuthPopup, shouldStartPopupSignIn } from './authPopup';
+import type { IAuthChannel } from './authPopup';
 
 /** A minimal in-memory Storage. */
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { data: Map<string, string> } {
@@ -140,4 +141,69 @@ test('Shell.tsx remembers the role before startOAuth and forgets it on completio
 	assert.ok(!/const isAuthPopup = window\.name === 'rrauth'/.test(code), 'the window.name-only check is gone');
 	assert.ok(/rememberAuthPopup\([^)]*\);\s*void cm\.startOAuth\(\);/.test(code), 'the role is remembered right before the popup starts OAuth');
 	assert.ok(/if \(isAuthPopup\) \{\s*forgetAuthPopup\(/.test(code), 'the role is forgotten when the popup completes');
+});
+
+// ── Sign-in start and session handoff ───────────────────────────────────────
+
+test('a popup return carrying only an error does not restart sign-in', () => {
+	assert.equal(shouldStartPopupSignIn(new URLSearchParams('rrauth=1'), false), true, 'a fresh popup heads to the IdP');
+	assert.equal(shouldStartPopupSignIn(new URLSearchParams('code=abc&state=x'), false), false, 'a return with a code is processed, not restarted');
+	assert.equal(shouldStartPopupSignIn(new URLSearchParams('error=access_denied&state=x'), false), false, 'an error-only return must not loop back to the IdP');
+	assert.equal(shouldStartPopupSignIn(new URLSearchParams('rrauth=1'), true), false, 'a session already exists');
+});
+
+/** A channel whose far end only ACKs after `ackAfter` posts (never when null). */
+function fakeChannel(ackAfter: number | null): IAuthChannel & { posts: unknown[]; closed: boolean } {
+	const channel = {
+		posts: [] as unknown[],
+		closed: false,
+		onmessage: null as IAuthChannel['onmessage'],
+		postMessage(message: unknown) {
+			channel.posts.push(message);
+			if (ackAfter !== null && channel.posts.length >= ackAfter) setImmediate(() => channel.onmessage?.({ data: { type: 'ack' } }));
+		},
+		close() {
+			channel.closed = true;
+		},
+	};
+	return channel;
+}
+
+test('the popup keeps posting the session until the preview ACKs it, then reports delivery', async () => {
+	const channel = fakeChannel(3);
+	const delivered = await deliverSession('tok', channel, { intervalMs: 5, timeoutMs: 2000 });
+	assert.equal(delivered, true);
+	assert.ok(channel.posts.length >= 3, 'it re-posted until the third post was ACKed');
+	assert.deepEqual(channel.posts[0], { type: 'login', token: 'tok' });
+	assert.equal(channel.closed, true);
+});
+
+test('without an ACK the popup is told delivery failed and must stay open', async () => {
+	const channel = fakeChannel(null);
+	const delivered = await deliverSession('tok', channel, { intervalMs: 5, timeoutMs: 40 });
+	assert.equal(delivered, false, 'one post is not delivery');
+	assert.ok(channel.posts.length >= 2);
+	assert.equal(channel.closed, true);
+});
+
+test('the preview adopts a delivered session, ACKs it, and reloads only when the token changed', () => {
+	const calls: string[] = [];
+	let stored = '';
+	const deps = {
+		loadToken: () => stored,
+		saveToken: (t: string) => {
+			stored = t;
+			calls.push(`save:${t}`);
+		},
+		ack: () => void calls.push('ack'),
+		reload: () => void calls.push('reload'),
+	};
+	receiveSession({ type: 'login', token: 'tok' }, deps);
+	assert.deepEqual(calls, ['save:tok', 'ack', 'reload']);
+	calls.length = 0;
+	receiveSession({ type: 'login', token: 'tok' }, deps); // the popup's retry after the reload
+	assert.deepEqual(calls, ['ack'], 'a repeat is ACKed again but does not reload or save');
+	calls.length = 0;
+	for (const junk of [null, {}, { type: 'login' }, { type: 'login', token: '' }, { type: 'ack' }, { type: 'login', token: 5 }]) receiveSession(junk, deps);
+	assert.deepEqual(calls, [], 'anything else is ignored');
 });

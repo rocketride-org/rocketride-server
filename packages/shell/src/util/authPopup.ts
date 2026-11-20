@@ -156,3 +156,81 @@ export function forgetAuthPopup(storage: RoleStorage | null = sessionStore()): v
 		/* storage unavailable: nothing was remembered */
 	}
 }
+
+/**
+ * Whether a fresh popup should head to the IdP now: not when the URL already
+ * carries an IdP return (`code`, or an `error` alone, which must not restart
+ * sign-in and loop the user back to the IdP), and not when a session exists.
+ *
+ * @param params - The page's query parameters.
+ * @param hasToken - Whether a session token is already stored.
+ * @returns True when the popup should start the OAuth redirect.
+ */
+export function shouldStartPopupSignIn(params: URLSearchParams, hasToken: boolean): boolean {
+	return !params.get('code') && !params.get('error') && !hasToken;
+}
+
+/** The slice of BroadcastChannel the session handoff uses. */
+export interface IAuthChannel {
+	postMessage(message: unknown): void;
+	close(): void;
+	onmessage: ((event: { data: unknown }) => void) | null;
+}
+
+/**
+ * The popup side of the handoff: post the session until the embedded preview
+ * ACKs it (a BroadcastChannel post has no delivery guarantee, and a preview
+ * that is still loading misses it), then report success so the popup may close.
+ *
+ * @param token - The session token to hand over.
+ * @param channel - The `rr:auth` channel (closed when done).
+ * @param options - Retry interval and overall wait, in ms.
+ * @returns True once acknowledged; false when no ACK arrived in time (the popup must stay open).
+ */
+export function deliverSession(token: string, channel: IAuthChannel, options: { intervalMs?: number; timeoutMs?: number } = {}): Promise<boolean> {
+	return new Promise((resolve) => {
+		let timer: ReturnType<typeof setInterval> | undefined;
+		let deadline: ReturnType<typeof setTimeout> | undefined;
+		const finish = (ok: boolean): void => {
+			clearInterval(timer);
+			clearTimeout(deadline);
+			channel.onmessage = null;
+			try {
+				channel.close();
+			} catch {
+				/* already closed */
+			}
+			resolve(ok);
+		};
+		channel.onmessage = (event) => {
+			if ((event.data as { type?: unknown } | null | undefined)?.type === 'ack') finish(true);
+		};
+		const send = (): void => {
+			try {
+				channel.postMessage({ type: 'login', token });
+			} catch {
+				finish(false);
+			}
+		};
+		send();
+		timer = setInterval(send, options.intervalMs ?? 500);
+		deadline = setTimeout(() => finish(false), options.timeoutMs ?? 15_000);
+	});
+}
+
+/**
+ * The embedded-preview side of the handoff: adopt a delivered session, ACK it
+ * on the channel, and reload only when the token actually changed (the popup
+ * re-posts until it hears the ACK, so a repeat must not reload again).
+ *
+ * @param data - The channel message.
+ * @param deps - Token storage, the ACK post and the reload.
+ */
+export function receiveSession(data: unknown, deps: { loadToken(): string; saveToken(token: string): void; ack(): void; reload(): void }): void {
+	const message = data as { type?: unknown; token?: unknown } | null | undefined;
+	if (message?.type !== 'login' || typeof message.token !== 'string' || message.token === '') return;
+	const fresh = deps.loadToken() !== message.token;
+	if (fresh) deps.saveToken(message.token);
+	deps.ack();
+	if (fresh) deps.reload();
+}

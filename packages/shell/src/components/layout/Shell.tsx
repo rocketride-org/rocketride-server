@@ -40,7 +40,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { withoutCredentials } from '../../util/identity';
-import { forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from '../../util/authPopup';
+import { deliverSession, forgetAuthPopup, isAuthPopupWindow, receiveSession, rememberAuthPopup, shouldStartPopupSignIn } from '../../util/authPopup';
+import type { IAuthChannel } from '../../util/authPopup';
 import { ConnectionManager } from '../../connection/connection';
 import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
@@ -447,7 +448,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// role is remembered in sessionStorage across the round trip.
 			const bootParams = new URLSearchParams(window.location.search);
 			const isAuthPopup = isAuthPopupWindow(window.name, bootParams);
-			if (isAuthPopup && !bootParams.get('code') && !cm.loadToken()) {
+			if (isAuthPopup && shouldStartPopupSignIn(bootParams, !!cm.loadToken())) {
 				// Fresh popup: head straight to the IdP (top-level — allowed)
 				rememberAuthPopup();
 				void cm.startOAuth();
@@ -481,11 +482,14 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				// and close — the popup never renders the shell.
 				if (isAuthPopup) {
 					forgetAuthPopup();
+					// Close only once the embedded preview has ACKed the session: a post alone can
+					// be missed (the preview may still be loading), and closing then loses the sign-in.
+					let delivered = true;
 					try {
 						const token = cm.loadToken();
-						if (token) new BroadcastChannel('rr:auth').postMessage({ type: 'login', token });
+						if (token) delivered = await deliverSession(token, new BroadcastChannel('rr:auth') as unknown as IAuthChannel);
 					} catch { /* channel unavailable — the user closes the popup */ }
-					window.close();
+					if (delivered) window.close();
 					return;
 				}
 
@@ -738,12 +742,16 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		if (window.self === window.top) return;
 		const channel = new BroadcastChannel('rr:auth');
 		channel.onmessage = (e: MessageEvent) => {
-			const data = e.data as { type?: string; token?: string } | undefined;
-			if (data?.type === 'login' && data.token) {
-				cm.saveToken(data.token);
-				console.warn('[shell] reloading: auth popup delivered a session over rr:auth');
-				window.location.reload();
-			}
+			receiveSession(e.data, {
+				loadToken: () => cm.loadToken() ?? '',
+				saveToken: (token) => cm.saveToken(token),
+				ack: () => channel.postMessage({ type: 'ack' }),
+				reload: () => {
+					console.warn('[shell] reloading: auth popup delivered a session over rr:auth');
+					// A tick later so the ACK posted just before is flushed ahead of the unload.
+					setTimeout(() => window.location.reload(), 0);
+				},
+			});
 		};
 		// (rrdev:loginPending — the embedder's ACK — needs no listener since
 		// the popup-or-embedder choice became synchronous; embedders keep
