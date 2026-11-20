@@ -62,7 +62,7 @@ from ai.common import node_config
 from ai.common.parameters import resolve_call_params
 from ai.constants import CONST_SPEND_ALLOW_SECONDS
 
-from .engine_key import stack_order
+from .engine_key import IndexMap, index_map_of
 from .pipeline import resolve_pipeline_env
 from .types import EngineState, LAUNCH_TYPE, TaskError
 
@@ -581,6 +581,10 @@ class TaskControl:
     # resolved once per component for the control's life, not once per request
     param_views: Dict[str, Any] = field(default_factory=dict, repr=False, compare=False)
 
+    # Author id <-> stack index for this control's pipeline (C.23), built on
+    # first use and dropped when the pipeline changes (``index_map``)
+    index_cache: Optional[IndexMap] = field(default=None, repr=False, compare=False)
+
     # When the paying unit last answered "allowed" (monotonic); a request within
     # CONST_SPEND_ALLOW_SECONDS of it asks no question (the engine's own gate
     # trusts an allow for the same window). A refusal is never cached.
@@ -626,6 +630,43 @@ class TaskControl:
         """The owner-filtered index key ``<rung>.<ownerId>.<address>`` a name resolves through (plan 7.5)."""
         return control_key(self.rung, self.owner_id, self.address)
 
+    @property
+    def index_map(self) -> IndexMap:
+        """
+        Author component id <-> stack index for this control's pipeline (C.23).
+
+        The engine speaks stack indexes (a trace's component, the open's
+        config, the status it aggregates); this control's user sees the ids
+        THEY wrote, whatever ids the engine's first starter wrote. Built from
+        the engine's canonical walk (``engine_key.index_map_of``), the same
+        order the task file and ``config`` follow, once per pipeline.
+        """
+        if self.index_cache is None:
+            self.index_cache = index_map_of(self.pipeline or {}, self.source)
+        return self.index_cache
+
+    def author_flow(self, body: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        A flow event body as this control's user wrote the pipeline: stack indexes become author ids (C.23).
+
+        ``component`` names a component on ``enter``/``leave`` and the object
+        on ``begin``/``end``; ``pipes`` is the object name followed by the
+        component stack. Only components are translated.
+
+        Args:
+            body: This control's copy of an ``apaevt_flow`` body, updated in place.
+
+        Returns:
+            The same body.
+        """
+        names = self.index_map
+        if body.get('op') in ('enter', 'leave'):
+            body['component'] = names.author(body.get('component'))
+        pipes = body.get('pipes')
+        if isinstance(pipes, list) and pipes:
+            body['pipes'] = pipes[:1] + [names.author(name) for name in pipes[1:]]
+        return body
+
     def caller_config(self) -> List[Dict[str, Any]]:
         """
         The config a binding's first frame carries to the engine: ``config`` by stack index, expanded for THIS control (plan 5.3).
@@ -643,7 +684,7 @@ class TaskControl:
             CallerConfigError: An env value does not fit its typed leaf.
         """
         expanded = list(resolve_pipeline_env({'config': self.config}, self.env)['config'])
-        components = stack_order((self.pipeline or {}).get('components', []) or [])
+        components = self.index_map.order((self.pipeline or {}).get('components', []) or [])
         for index, (component, stored) in enumerate(zip(components, self.config)):
             if index >= len(expanded) or not isinstance(stored, dict):
                 continue
@@ -781,11 +822,20 @@ class TaskControl:
         refused. The result keys each node's values by the leaf's schema path,
         which ``IInstanceBase.settings`` overlays.
 
+        The ``parameters`` map targets the ids THIS control's pipeline was
+        written with (published maps stay in author ids); the engine knows
+        the component at that STACK INDEX by the id its first starter wrote,
+        which is what its node reads as ``config.node.id``. So each target
+        goes author id -> stack index (this control's map) -> the engine's id
+        at that index (C.23, ``engine_targets``); on one owner's private
+        engine the two are the same id.
+
         Args:
             admitted: Params already admitted by name (``check_params``).
 
         Returns:
-            ``{nodeId: {path: value}}``; empty when none were given.
+            ``{nodeId: {path: value}}`` keyed by the engine's ids; empty when
+            none were given.
 
         Raises:
             TaskError: TASK_PARAM_REJECTED with ``errors=[{name, reason}]``.
@@ -801,7 +851,30 @@ class TaskControl:
                 address=self.address,
                 errors=errors,
             )
-        return per_node
+        return self.engine_targets(per_node)
+
+    def engine_targets(self, per_node: Mapping[str, Any]) -> Dict[str, Any]:
+        """
+        Re-key a per-node map from this control's author ids to the held engine's ids, through the stack index (C.23).
+
+        Args:
+            per_node: ``{authorId: values}``.
+
+        Returns:
+            ``{engineId: values}``; an id outside the stack, or no engine map
+            to read, keeps its author id.
+        """
+        engine = self.task
+        engine_map = getattr(engine, 'index_map', None) if engine is not None else None
+        if not isinstance(engine_map, IndexMap):
+            return dict(per_node)
+        own = self.index_map
+        out: Dict[str, Any] = {}
+        for node_id, values in per_node.items():
+            index = own.to_index(node_id)
+            target = engine_map.to_id(index) if index is not None and index < own.stacked else None
+            out[target or node_id] = values
+        return out
 
     def project_status(self, status: Dict[str, Any], shared: bool) -> Dict[str, Any]:
         """
@@ -824,6 +897,9 @@ class TaskControl:
         body = dict(status)
         # Step 1: the availability projection every holder is entitled to
         body['engine'] = {'availability': self.engine_state}
+        # Step 1a: the engine aggregates by STACK INDEX; this control's user
+        # reads the component ids they wrote (C.23)
+        self._author_status(body)
         # Step 1b: the notes name THIS control's identity. The engine stores
         # them as the node emitted them (placeholders intact) because two
         # controls of one owner may hold one private engine under different
@@ -862,6 +938,34 @@ class TaskControl:
                 body[key] = empty
         return body
 
+    def _author_status(self, body: Dict[str, Any]) -> None:
+        """
+        Translate the component names of an engine status body to this control's author ids (C.23).
+
+        ``componentStats`` is keyed by component and ``pipeflow.byPipe`` holds
+        each pipe's object name followed by its component stack; both come
+        from traces that name components by stack index. ``slowestDocs``
+        names objects, never components, so it passes through.
+
+        Args:
+            body: The projected copy of the status, updated in place.
+        """
+        names = self.index_map
+        if not names.engine_indexes:
+            return
+        stats = body.get('componentStats')
+        if isinstance(stats, dict):
+            body['componentStats'] = {names.author(key): value for key, value in stats.items()}
+        flow = body.get('pipeflow')
+        if isinstance(flow, dict) and isinstance(flow.get('byPipe'), dict):
+            body['pipeflow'] = {
+                **flow,
+                'byPipe': {
+                    pipe: (stack[:1] + [names.author(name) for name in stack[1:]]) if isinstance(stack, list) else stack
+                    for pipe, stack in flow['byPipe'].items()
+                },
+            }
+
     def setup_declared_parameters(self) -> None:
         """
         Set up the per-call parameters the control's current pipeline DECLARES (its ``parameters`` map).
@@ -874,6 +978,7 @@ class TaskControl:
         """
         self.parameters = dict((self.pipeline or {}).get('parameters') or {})
         self.param_views.clear()
+        self.index_cache = None
 
     def credit_allowed(self, now: float) -> bool:
         """

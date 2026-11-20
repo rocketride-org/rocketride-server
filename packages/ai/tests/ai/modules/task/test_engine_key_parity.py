@@ -96,7 +96,11 @@ def test_engine_key_parity_between_the_server_and_a_bare_interpreter():
 
 
 def test_engine_key_imports_the_standard_library_only():
-    """No ai.*, rocketlib, asyncio or relative import: the module stays pure."""
+    """No ai.*, rocketlib, engLib, asyncio or relative import: the module stays pure.
+
+    ``sys`` is there to LOOK UP the engine's ``pipelineStack`` binding in
+    ``sys.modules`` (C.23); the engine itself is never imported.
+    """
     tree = ast.parse(MODULE_PATH.read_text(encoding='utf-8'))
     imported = set()
     for node in ast.walk(tree):
@@ -105,7 +109,7 @@ def test_engine_key_imports_the_standard_library_only():
         elif isinstance(node, ast.ImportFrom):
             assert node.level == 0, 'relative import in engine_key.py'
             imported.add((node.module or '').split('.')[0])
-    assert imported <= {'hashlib', 'json', 'typing'}, imported
+    assert imported <= {'hashlib', 'json', 'sys', 'typing'}, imported
 
 
 def test_avoid_mocks_is_part_of_the_content_identity():

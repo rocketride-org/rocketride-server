@@ -220,8 +220,9 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Emit a trace line for a filter instance (its pipeType.id is
-    ///		the component)
+    ///		Emit a trace line for a filter instance: the component field
+    ///		is its stack index (pipeType.stackIndex), or its type for a
+    ///		filter the pipeline does not name
     //-----------------------------------------------------------------
     void emitTrace(TextView kind, IServiceFilterInstance *pInstance,
                    const json::Value &trace) noexcept;

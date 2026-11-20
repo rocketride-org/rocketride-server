@@ -314,6 +314,261 @@ ErrorOr<LifecycleRegions> computeLifecycleRegions(
 }
 
 //-------------------------------------------------------------------------
+/// @details
+///		Compute the canonical stack of a pipeline. See endpoint.hpp for the
+///		contract: the members generatePipelineStack has always walked, in an
+///		order that depends on the shape alone, and the shape hash.
+//-------------------------------------------------------------------------
+ErrorOr<PipelineStack> computePipelineStack(
+    const json::Value &pipeline, const std::string &sourceId) noexcept {
+    // One component as the walk sees it: an edge is (from id, lane) for
+    // data and (from id, classType) for control
+    struct Node {
+        std::string id;
+        std::string provider;
+        std::vector<std::pair<std::string, std::string>> inputs;
+        std::vector<std::pair<std::string, std::string>> controls;
+    };
+
+    // sha256 as lowercase hex: the canonical form's labels and the shape hash
+    const auto hashOf = localfcn(const std::string &text)->std::string {
+        return _ts(crypto::Sha256::make(InputData{text}));
+    };
+
+    // Step 1: the components by id. An entry with no id is skipped, as the
+    // engine's walk always skipped it; two entries with one id are refused:
+    // the walk could not tell which one an edge names
+    std::vector<Node> nodes;
+    std::unordered_map<std::string, size_t> byId;
+    const auto &components = pipeline["components"];
+    if (components.isArray()) {
+        for (const auto &component : components) {
+            if (!component.isObject()) continue;
+            auto id = component.lookup<std::string>("id", "");
+            if (id.empty()) continue;
+            if (byId.count(id))
+                return APERR(Ec::InvalidParam, "Duplicate id found: ", id);
+
+            Node node;
+            node.id = id;
+            node.provider = component.lookup<std::string>("provider", "");
+
+            // The wiring as the file states it; its order is not the shape
+            const auto collect = localfcn(
+                const char *member, const char *label,
+                std::vector<std::pair<std::string, std::string>> &out) {
+                const auto &edges = component[member];
+                if (!edges.isArray()) return;
+                for (const auto &edge : edges) {
+                    if (!edge.isObject()) continue;
+                    auto from = edge.lookup<std::string>("from", "");
+                    if (from.empty()) continue;
+                    out.emplace_back(from, edge.lookup<std::string>(label, ""));
+                }
+            };
+            collect("input", "lane", node.inputs);
+            collect("control", "classType", node.controls);
+
+            byId.emplace(id, nodes.size());
+            nodes.push_back(_mv(node));
+        }
+    }
+
+    // Step 2: the canonical form of every component. Start from the
+    // provider (the source marked as such) and refine: a component's next
+    // label hashes its own with the sorted labels of its neighbours over
+    // every data and control edge, in and out, each with the edge's lane or
+    // classType. Stop when a round splits no class further. Ids never enter
+    // a label, so the forms of two specs that differ only in ids agree.
+    const size_t count = nodes.size();
+    std::vector<std::vector<std::string>> neighbours(count);
+    std::vector<std::string> label(count);
+    for (size_t index = 0; index < count; ++index)
+        label[index] =
+            hashOf(nodes[index].provider +
+                   (nodes[index].id == sourceId ? "\x1esource" : ""));
+
+    const auto distinct = localfcn(const std::vector<std::string> &labels) {
+        return std::unordered_set<std::string>(labels.begin(), labels.end())
+            .size();
+    };
+    auto classes = distinct(label);
+    for (size_t round = 0; round < count; ++round) {
+        // Gather each component's neighbour labels, edges in both directions
+        for (auto &list : neighbours) list.clear();
+        for (size_t to = 0; to < count; ++to) {
+            const auto link =
+                localfcn(const char *kind, const std::string &from,
+                         const std::string &tag) {
+                auto it = byId.find(from);
+                if (it == byId.end()) return;
+                neighbours[to].push_back(std::string(kind) + "<\x1f" + tag +
+                                         "\x1f" + label[it->second]);
+                neighbours[it->second].push_back(std::string(kind) + ">\x1f" +
+                                                 tag + "\x1f" + label[to]);
+            };
+            for (const auto &edge : nodes[to].inputs)
+                link("i", edge.first, edge.second);
+            for (const auto &edge : nodes[to].controls)
+                link("c", edge.first, edge.second);
+        }
+
+        // The next label: own label plus the sorted neighbourhood
+        std::vector<std::string> next(count);
+        for (size_t index = 0; index < count; ++index) {
+            auto &list = neighbours[index];
+            std::sort(list.begin(), list.end());
+            std::string signature = label[index];
+            for (const auto &entry : list) signature += "\x1e" + entry;
+            next[index] = hashOf(signature);
+        }
+
+        // A round that splits no class is the fixed point
+        auto nextClasses = distinct(next);
+        label = _mv(next);
+        if (nextClasses == classes) break;
+        classes = nextClasses;
+    }
+
+    // Step 3: the walk. Stack index 0 is the source; a member is added once,
+    // in the order the walk reaches it
+    std::vector<std::string> order{sourceId};
+    std::unordered_map<std::string, int> indexOf{{sourceId, 0}};
+    const auto add = localfcn(const std::string &id) {
+        if (indexOf.count(id)) return;
+        indexOf.emplace(id, (int)order.size());
+        order.push_back(id);
+    };
+
+    // The data consumers of a member, depth first, as the engine has always
+    // walked them: by lane name, then provider, then canonical form; the id
+    // breaks a tie only between components the shape cannot tell apart
+    std::unordered_set<std::string> walked;
+    std::function<void(const std::string &)> walkData;
+    walkData = localfcn(const std::string &fromId) {
+        if (!walked.insert(fromId).second) return;
+
+        std::vector<
+            std::tuple<std::string, std::string, std::string, std::string>>
+            consumers;
+        for (size_t index = 0; index < count; ++index) {
+            const auto &node = nodes[index];
+            for (const auto &edge : node.inputs)
+                if (edge.first == fromId)
+                    consumers.emplace_back(edge.second, node.provider,
+                                           label[index], node.id);
+        }
+        std::sort(consumers.begin(), consumers.end());
+
+        for (const auto &consumer : consumers) {
+            const auto &id = std::get<3>(consumer);
+            add(id);
+            walkData(id);
+        }
+    };
+    walkData(sourceId);
+
+    // The invoked components: one whose control edge comes from a member
+    // (the source included) joins, with its own data consumers, until none
+    // is left. Each round takes the least candidate by classType, then
+    // provider, then canonical form, then the stack index of the member that
+    // invokes it; the id breaks a tie only between indistinguishable ones
+    for (;;) {
+        bool found = false;
+        std::tuple<std::string, std::string, std::string, int, std::string>
+            best;
+        for (size_t index = 0; index < count; ++index) {
+            const auto &node = nodes[index];
+            if (indexOf.count(node.id)) continue;
+            for (const auto &edge : node.controls) {
+                auto from = indexOf.find(edge.first);
+                if (from == indexOf.end()) continue;
+                auto candidate =
+                    std::make_tuple(edge.second, node.provider, label[index],
+                                    from->second, node.id);
+                if (!found || candidate < best) best = candidate;
+                found = true;
+            }
+        }
+        if (!found) break;
+
+        const auto &id = std::get<4>(best);
+        add(id);
+        walkData(id);
+    }
+
+    // Step 4: the stack, wiring by stack index. A member must name its
+    // provider (the source is the endpoint, configured on its own)
+    PipelineStack stack;
+    for (int index = 0; index < (int)order.size(); ++index) {
+        PipelineStackEntry entry;
+        entry.index = index;
+        entry.id = order[index];
+
+        auto found = byId.find(entry.id);
+        if (found != byId.end()) {
+            const auto &node = nodes[found->second];
+            entry.provider = node.provider;
+            if (index > 0 && entry.provider.empty())
+                return APERR(Ec::InvalidParam, "The component", entry.id,
+                             "does not have a provider");
+
+            // Edges from components outside the stack are not built
+            const auto wire = localfcn(
+                const std::vector<std::pair<std::string, std::string>> &edges,
+                std::vector<std::pair<int, std::string>> &out) {
+                for (const auto &edge : edges) {
+                    auto from = indexOf.find(edge.first);
+                    if (from == indexOf.end()) continue;
+                    out.emplace_back(from->second, edge.second);
+                }
+                std::sort(out.begin(), out.end());
+                out.erase(std::unique(out.begin(), out.end()), out.end());
+            };
+            wire(node.inputs, entry.inputs);
+            wire(node.controls, entry.controls);
+        }
+        stack.components.push_back(_mv(entry));
+    }
+
+    // Step 5: the shape hash over the ordered (provider, inputs, controls)
+    // plus avoidMocks. Built as JSON arrays only, so nothing depends on key
+    // order; ids never appear
+    json::Value shape(json::arrayValue);
+    for (const auto &entry : stack.components) {
+        json::Value inputs(json::arrayValue);
+        for (const auto &edge : entry.inputs) {
+            json::Value pair(json::arrayValue);
+            pair.append(edge.first);
+            pair.append(edge.second.c_str());
+            inputs.append(pair);
+        }
+        json::Value controls(json::arrayValue);
+        for (const auto &edge : entry.controls) {
+            json::Value pair(json::arrayValue);
+            pair.append(edge.first);
+            pair.append(edge.second.c_str());
+            controls.append(pair);
+        }
+        json::Value row(json::arrayValue);
+        row.append(entry.provider.c_str());
+        row.append(inputs);
+        row.append(controls);
+        shape.append(row);
+    }
+    const auto &mocks = pipeline["avoidMocks"];
+    bool avoidMocks = mocks.isBool()
+                          ? mocks.asBool()
+                          : (mocks.isIntegral() ? mocks.asInt() != 0 : false);
+    json::Value identity(json::arrayValue);
+    identity.append(avoidMocks);
+    identity.append(shape);
+    stack.hash = hashOf(identity.stringify());
+
+    return stack;
+}
+
+//-------------------------------------------------------------------------
 /// @brief Creates a connection table mapping indices of components in the list
 /// to their
 ///        dependencies and associated lanes.
@@ -509,31 +764,14 @@ Error IServiceEndpoint::buildConnections() noexcept {
 /// detected.
 //-----------------------------------------------------------------------------
 Error IServiceEndpoint::generatePipelineStack() noexcept {
-    Error ccode;
-
-    // Forward declarations
-    std::function<Error(std::string & sourceId)> walkComponents;
-    std::function<Error(const json::Value &dependent)> addComponent;
-
     // Get the components
     auto &components = config.pipeline.components();
 
-    // Determins if this component is already loaded
-    auto isComponentLoaded = localfcn(std::string & id) {
-        for (const auto pipe : pipeStack) {
-            if (pipe.id == id) return true;
-        }
-        // Return the pipe id
-        return false;
-    };
-
-    // Add the component to the stack
-    addComponent = localfcn(const json::Value &dependent)->Error {
+    // Add the component to the stack at its canonical stack index
+    const auto addComponent =
+        localfcn(const json::Value &dependent, int stackIndex)->Error {
         // Get its id
         auto id = dependent["id"].asString();
-
-        // If we already loaded this, done
-        if (isComponentLoaded(id)) return {};
 
         // Get the name of the provider
         auto filterName = dependent["provider"].asString();
@@ -569,111 +807,10 @@ Error IServiceEndpoint::generatePipelineStack() noexcept {
         // Get the capabilities of the service
         auto capabilities = (*serviceInfo)->capabilities;
 
-        // Add it
+        // Add it, named by its canonical stack index
         pipeStack.push_back(
             {id, capabilities, filterName, filterName, connConfig});
-        return {};
-    };
-
-    // Given a component, this will go through all components and add
-    // components to the stack that are dependent on the given component
-    std::unordered_set<std::string> loadedIds;
-    walkComponents = localfcn(std::string & sourceId)->Error {
-        // If we loaded this already, skip it
-        if (loadedIds.find(sourceId) != loadedIds.end()) return {};
-
-        // Say we loaded this
-        loadedIds.insert(sourceId);
-
-        // Now, for each of its connections
-        for (const auto &component : components) {
-            // Get this nodes id
-            std::string componentId = component["id"].asString();
-            if (componentId.empty()) continue;
-
-            // Check to see if this has input
-            if (!component.isMember("input")) continue;
-
-            // Get the input
-            auto &input = component["input"];
-
-            // Walk through all of the components inputs
-            for (const auto &input : input) {
-                // Get the lane and the connect to target
-                std::string fromId = input["from"].asString();
-
-                // If the from is not connected to us, skip it
-                if (fromId.empty() || fromId != sourceId) continue;
-
-                // Add all the components that depend on this one
-                if (auto ccode = addComponent(component)) return ccode;
-
-                // Walk into this as well
-                if (auto ccode = walkComponents(componentId)) return ccode;
-            }
-        }
-
-        // And done now
-        return {};
-    };
-
-    // Walk through all the components and find those the have a control
-    // (invoke) interface. If it does, and one of the from ids is included in
-    // the pipe stack — or IS the source itself — we need to add this to the
-    // stack as well. The source is the root of the data walk, never a stack
-    // member, so it needs its own spelling here exactly as it has in
-    // buildConnections (COMPONENT_SOURCE) and the fromIndex==-1 control
-    // binding: a tool wired to an invoke-capable source (the 'tools'
-    // endpoint) instantiates just like a tool wired to an agent.
-    const auto walkControl = localfcn(const std::string &sourceId,
-                                      const json::Value &components)
-                                 ->Error {
-        bool bAdded = true;
-
-        // While we have added components...
-        while (bAdded) {
-            // We need to restart every time we add a components since it may
-            // in fact have invokes itself
-            bAdded = false;
-
-            // Now, for each of its connections
-            for (const auto &component : components) {
-                // If this component does not have a control member, it is not
-                // referenced as invokable, so, skip it
-                if (!component.isMember("control")) continue;
-
-                // Check if this is already loaded
-                auto compId = component["id"].asString();
-                if (isComponentLoaded(compId)) continue;
-
-                // Get the input
-                auto &controls = component["control"];
-
-                // For each of the bound controls
-                for (auto &controlObject : controls) {
-                    // Get the control id to which are being invoked from
-                    auto classType = controlObject["classType"].asString();
-                    auto invokeFrom = controlObject["from"].asString();
-
-                    // If this is not part of our pipe stack (and not the
-                    // source, which is the walk root rather than a stack
-                    // member), skip it
-                    if (invokeFrom != sourceId && !isComponentLoaded(invokeFrom)) continue;
-
-                    // Add this component, someone is invoking it
-                    if (auto ccode = addComponent(component)) return ccode;
-
-                    // Also walk downstream data-flow connections from this
-                    // control component so that sub-pipeline nodes (connected
-                    // via input lanes from this node) are included in the stack
-                    if (auto ccode = walkComponents(compId)) return ccode;
-
-                    // We added it, so start over again
-                    bAdded = true;
-                    break;
-                }
-            }
-        }
+        pipeStack.back().stackIndex = stackIndex;
         return {};
     };
 
@@ -681,12 +818,29 @@ Error IServiceEndpoint::generatePipelineStack() noexcept {
     auto sourceId =
         config.pipeline.source().lookup<std::string>("id", "source");
 
-    // Walk them
-    if (ccode = walkComponents(sourceId)) return ccode;
+    // The canonical walk (plan 7.2): the members and their order depend on
+    // the shape alone, so every holder of an engine names a component by
+    // the same stack index (traces, the open's config). Index 0 is the
+    // source, the endpoint itself, which is the walk's root and never a
+    // stack member
+    auto stack =
+        computePipelineStack(config.pipeline.root()["pipeline"], sourceId);
+    if (!stack) return stack.ccode();
 
-    // Walk the controls and add the components which are going to be
-    // controlled (invoked)
-    if (ccode = walkControl(sourceId, components)) return ccode;
+    // The component entries by id, to add each member with its own config
+    std::unordered_map<std::string, const json::Value *> byId;
+    for (const auto &component : components)
+        if (component.isObject())
+            byId.emplace(component.lookup<std::string>("id", ""), &component);
+
+    // Add every member after the source in stack order
+    for (const auto &entry : stack->components) {
+        if (entry.index == 0) continue;
+        auto found = byId.find(entry.id);
+        if (found == byId.end()) continue;
+        if (auto ccode = addComponent(*found->second, entry.index))
+            return ccode;
+    }
 
     // And done
     return {};

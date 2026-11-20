@@ -89,7 +89,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .engine_key import CONST_CATALOG_NODE_PREFIX, engine_content, stack_order
+from .engine_key import CONST_CATALOG_NODE_PREFIX, IndexMap, engine_content, index_map_of, pipeline_stack, stack_order
 from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
@@ -1021,6 +1021,9 @@ class TaskEngine(DAPBase):
         self._launch_args = launch_args
         self._launch_type: LAUNCH_TYPE = launch_type
         self._pipeline: Dict[str, Any] = pipeline
+        # Author id <-> stack index of the pipeline this engine runs (the
+        # first starter's ids), built on first use (``index_map``, C.23)
+        self._index_cache: Optional[IndexMap] = None
         # Where ${...} placeholders resolve from. The values are loaded at each
         # (re)start and dropped once the task file is written, so decrypted
         # variables are not held for the task's lifetime.
@@ -1365,6 +1368,17 @@ class TaskEngine(DAPBase):
 
         os.makedirs(data_path, exist_ok=True)
 
+        # The engine's canonical stack of this spec (C.23): the order the
+        # components are written in, so position i in the task file is stack
+        # index i, the index the engine's traces and every control's open
+        # speak. Its shape hash is logged beside the key it does not replace
+        # yet (C.25 keys engines by it)
+        walked_from = pipeline.get('source') or self.source
+        stack = pipeline_stack(pipeline, walked_from)
+        self._index_cache = index_map_of(pipeline, walked_from, stack)
+        if stack is not None:
+            debug(f'Engine "{self.engine_key}" shape {stack.get("hash")}')
+
         config = {
             'keystore': 'kvsfile://data/keystore.json',
             'pipeline': {
@@ -1380,7 +1394,7 @@ class TaskEngine(DAPBase):
                 # task file
                 'components': [
                     {**component, 'config': {}} if isinstance(component, dict) else component
-                    for component in stack_order(pipeline.get('components', []))
+                    for component in stack_order(pipeline.get('components', []), stack)
                 ],
                 # The public-name map of the pipeline's per-call params
                 # (plan 5.2). Not part of the engine key: specs differing only
@@ -2464,6 +2478,10 @@ class TaskEngine(DAPBase):
                     copy['late'] = True
                 if event_name == 'apaevt_status_update':
                     copy = self._project_status(key, copy)
+                # The engine names components by stack index; this control's
+                # copy, and its run log, name them as its user wrote them
+                if event_name == 'apaevt_flow':
+                    self._author_flow(key, copy)
                 # The run's chapter is per continuum: the receiving control's
                 # run-begin marker, not the first holder's
                 if event_name == 'apaevt_task' and 'beginSeq' in copy and writer is not None:
@@ -2502,6 +2520,34 @@ class TaskEngine(DAPBase):
             body['teamId'] = control.teamId
         if control.userId:
             body['userId'] = control.userId
+
+    def _author_flow(self, key: str, body: Dict[str, Any]) -> None:
+        """
+        Translate a flow event's stack indexes to the receiving control's author ids (C.23).
+
+        Args:
+            key: The receiving control's registry key.
+            body: The control's copy of the ``apaevt_flow`` body, updated in place.
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return
+        control.author_flow(body)
+
+    @property
+    def index_map(self) -> IndexMap:
+        """
+        Author id <-> stack index of the pipeline this engine runs: its first starter's ids (C.23).
+
+        A control's ids may differ from the engine's for the same shape; the
+        stack index is what they share. Written with the task file
+        (``_build_task``) and rebuilt from the engine's pipeline otherwise.
+        """
+        if self._index_cache is None:
+            pipeline = self._pipeline or {}
+            self._index_cache = index_map_of(pipeline, pipeline.get('source') or self.source)
+        return self._index_cache
 
     def _route(self, type: EVENT_TYPE, event_name: str, body: Dict[str, Any]) -> List[tuple]:
         """
@@ -2863,6 +2909,11 @@ class TaskEngine(DAPBase):
         elif event_type == 'apaevt_trace':
             operation = body.get('op', '')
             pipe_id = body.get('pipeId', '')
+            # On enter/leave the engine names the component by its STACK
+            # INDEX (C.23): the engine's own status (pipeflow, componentStats)
+            # aggregates by index, and each receiving control's copy is
+            # translated to its author ids on delivery (_author_flow,
+            # TaskControl.project_status)
             component_name = body.get('componentId', '')
             raw_trace = body.get('trace', {})
 
