@@ -588,6 +588,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				try {
 					// DA F9: the API key fetched at attach (or login) is known before any answer is scrubbed.
 					if (apiKeyReady) await apiKeyReady;
+					// Teardown, logout or detach may have finished while the key was awaited: nothing has reached
+					// the engine yet, so refuse the request instead of starting work after the realm is gone.
+					if (st.detached || closing > 0 || epoch !== startedIn) throw deny('capability', 'client.request', { command: req.command });
 					// DA F8: events for this run that arrive before the answer are buffered, not dropped.
 					if (req.mintedProject) st.pending.set(req.mintedProject, []);
 					let response: DAPMessage;

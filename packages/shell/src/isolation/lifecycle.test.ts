@@ -32,7 +32,7 @@ import test from 'node:test';
 import type { DAPMessage } from 'rocketride';
 import { ENTRY_A, makeRoot } from './__test__/fixtures';
 import { clientRequest, dap, settle } from './__test__/realm';
-import { assertDenied, startRun } from './__test__/util';
+import { assertDenied, assertNotForwarded, startRun } from './__test__/util';
 
 const execMsg = (): DAPMessage => dap('execute', { pipeline: { components: [], source: 'chat_1' }, args: [], ttl: 60 });
 const terminated = (t: ReturnType<typeof makeRoot>): string[] => t.cm.engine.messagesFor('terminate').map((r) => String((r.message.arguments as { token?: string }).token));
@@ -89,6 +89,26 @@ test('G4-F4 teardownAll refuses new requests and terminates a run that answers l
 	const late = engine.runs[runsBefore];
 	assert.ok(terminated(t).includes(late.token), 'the late run is terminated, not forgotten');
 	assert.equal((await clientRequest(A, dap('rrext_ping'))).ok, true, 'requests work again after teardown');
+});
+
+test('G4-F4 a request waiting for the API key is refused when teardown completes meanwhile', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const release = t.cm.holdApiKey();
+	tt.after(release);
+	t.cm.emit('shell:login', {}); // a key refresh is now pending
+	await settle();
+	const before = engine.received.length;
+	const pending = clientRequest(A, execMsg()); // waits for the key
+	await settle();
+	await t.root.teardownAll(3000); // completes while the request still waits
+	release();
+	const envelope = await pending;
+	assertDenied(envelope, 'capability', 'an execute that waited for the key across a teardown');
+	assertNotForwarded(engine, before, 'an execute that waited for the key across a teardown');
+	assert.equal(engine.runs.length, 0, 'no run was started after teardown');
 });
 
 test('G4-F4 detach ends the realm runs', async (tt) => {
