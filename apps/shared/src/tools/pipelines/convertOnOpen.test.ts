@@ -170,11 +170,18 @@ test('a reachable-leaf problem alone (a missing secret) is not a trigger', () =>
 // Once per revision
 // =============================================================================
 
-test('the signature follows the name, components and parameters only', () => {
+test('the signature is the whole written document less the bookkeeping fields', () => {
 	const a = documentSig(OLD_PIPE);
+	// Bookkeeping: the reload counter and the canvas view are not text
 	assert.equal(documentSig({ ...OLD_PIPE, viewport: { x: 9, y: 9, zoom: 2 }, docRevision: 99 }), a);
+	// Key order is not text either: the file as loaded and the canvas's rebuild agree
+	const { components, project_id, version, ...rest } = OLD_PIPE;
+	assert.equal(documentSig({ version, project_id, ...rest, components: components.map((c) => ({ ...Object.fromEntries(Object.entries(c).reverse()) })) }), a);
+	// Everything the host writes is text
 	assert.notEqual(documentSig({ ...OLD_PIPE, name: 'renamed' }), a);
 	assert.notEqual(documentSig({ ...OLD_PIPE, parameters: { apikey: 'llm_1.apikey' } }), a);
+	assert.notEqual(documentSig({ ...OLD_PIPE, store: { kind: 'team', team: 'ops' } }), a);
+	assert.notEqual(documentSig({ ...OLD_PIPE, version: 2 }), a);
 	assert.notEqual(documentSig(NEW_PIPE), a);
 });
 
@@ -192,6 +199,20 @@ test('a parameters edit during the pending call drops the reply and the next run
 	// ...and the reply for THAT text carries the edited map forward
 	const applied = applyConvertResult(markAttempted(pending, documentSig(edited)), edited, { ...CLEAN_REPLY, pipeline: { ...NEW_PIPE, parameters: edited.parameters } });
 	assert.deepEqual(applied.nextProject?.parameters, edited.parameters);
+	assert.equal(applied.nextProject?.docRevision, 5);
+});
+
+test('a store edit during the pending call drops the reply and the next run sends the current text', () => {
+	// The PACKAGE page writes the store block through the document; the reply
+	// is rebuilt from the document that was sent, so the stale reply must be
+	// dropped or the store edit is silently reverted.
+	const sentSig = documentSig(OLD_PIPE);
+	const pending = markAttempted(INITIAL_CONVERT_STATE, sentSig);
+	const edited = { ...OLD_PIPE, store: { kind: 'team', team: 'ops' }, docRevision: 4 };
+	assert.notEqual(documentSig(edited), sentSig);
+	assert.equal(shouldConvert(pending, documentSig(edited), 4, true), true);
+	const applied = applyConvertResult(markAttempted(pending, documentSig(edited)), edited, { ...CLEAN_REPLY, pipeline: { ...NEW_PIPE, store: edited.store } });
+	assert.deepEqual(applied.nextProject?.store, edited.store);
 	assert.equal(applied.nextProject?.docRevision, 5);
 });
 

@@ -137,12 +137,40 @@ export function unknownConfigKeyNodes(nodes: readonly IConfigShapeNode[], servic
 // =============================================================================
 
 /**
- * The text signature a conversion is keyed on: the pipeline's name, its
- * components and its parameters map — everything the converter's reply
- * would write back over, so an edit to any of them while a call is pending
- * retires the reply instead of letting it restore the old map. Editor-only
- * fields (viewport, revision counters) are left out so a view change never
- * reads as a new text.
+ * Document fields that are editor bookkeeping, not text: `docRevision` is
+ * the reload counter the canvas, the PACKAGE pages and this module bump on
+ * every write, and `viewport` is the view the canvas strips before writing
+ * (a user preference). Everything else the host writes to the file.
+ */
+const BOOKKEEPING_FIELDS: ReadonlySet<string> = new Set(['docRevision', 'viewport']);
+
+/**
+ * JSON with object keys in sorted order at every level, so two
+ * serializations of one text (the file as loaded, the canvas's rebuild)
+ * compare equal whatever order their keys came in.
+ *
+ * @param value - Any JSON value.
+ * @returns The canonical JSON text.
+ */
+function canonicalJson(value: unknown): string {
+	if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+	if (value && typeof value === 'object') {
+		const record = value as Record<string, unknown>;
+		const keys = Object.keys(record)
+			.filter((key) => record[key] !== undefined)
+			.sort();
+		return `{${keys.map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+	}
+	return JSON.stringify(value) ?? 'null';
+}
+
+/**
+ * The text signature a conversion is keyed on: the WHOLE document the host
+ * writes, less the bookkeeping fields ({@link BOOKKEEPING_FIELDS}). The
+ * converter's reply is rebuilt from the document that was sent, so any edit
+ * made while the call is pending — a node, the name, the parameters map,
+ * the store block, anything — must read as a new text: the stale reply is
+ * dropped and the current text is sent instead.
  *
  * @param project - The document.
  * @returns The signature.
@@ -150,7 +178,11 @@ export function unknownConfigKeyNodes(nodes: readonly IConfigShapeNode[], servic
 export function documentSig(project: unknown): string {
 	const doc = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
 	try {
-		return JSON.stringify({ name: doc.name ?? null, components: doc.components ?? [], parameters: doc.parameters ?? null });
+		const text: Record<string, unknown> = {};
+		for (const [key, value] of Object.entries(doc)) {
+			if (!BOOKKEEPING_FIELDS.has(key)) text[key] = value;
+		}
+		return canonicalJson(text);
 	} catch {
 		return ' nosig';
 	}
