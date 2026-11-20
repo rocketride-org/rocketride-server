@@ -39,7 +39,7 @@ PLACEHOLDER = '${ROCKETRIDE_CHROMA_KEY}'
 def glb():
     """The node's IGlobal, without the engine's endpoint plumbing."""
     instance = IGlobal.__new__(IGlobal)
-    instance.glb = SimpleNamespace(logicalType='chroma')
+    instance.glb = SimpleNamespace(logicalType='chroma', connConfig={})
     return instance
 
 

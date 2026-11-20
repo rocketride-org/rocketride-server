@@ -33,7 +33,7 @@ from rocketlib import IGlobalBase
 class IGlobal(IGlobalBase):
     #: The extractor's config: the resolved node config as a plain dict plus
     #: the two keys VideoFrameExtractor reads under other names.
-    grab_config: dict = {}
+    grab_config: dict
 
     def beginGlobal(self):
         """Build the extractor config from the resolved node config.

@@ -44,7 +44,7 @@ class IGlobal(IGlobalBase):
         # Shared runtime state
         bag = self.IEndpoint.endpoint.bag
         # Create the chat interface on the resolved config (defaults applied, flat)
-        self.chat = Chat(self.glb.logicalType, self.config, bag)
+        self.chat = Chat(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         self.chat = None

@@ -41,19 +41,23 @@ class Parser:
     _spreadsheet_extract_sub_tables: bool = False
 
     # Instance variables
-    bag: Dict[str, Any]
+    _llama_parse: Any
 
-    def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
+    def __init__(self, provider: str, connConfig: Dict[str, Any], llama_parse: Any):
         """
-        Initialize the LlamaParse parser with the given provider, connection configuration, and bag.
+        Initialize the LlamaParse parser with the given provider, connection configuration, and client.
+
+        Args:
+            provider (str): The node's provider word, for the debug trail.
+            connConfig (Dict[str, Any]): The control's resolved configuration.
+            llama_parse (Any): The control's ``LlamaParse`` client, built by the IGlobal.
         """
-        # Init the base
+        # The control's client, owned and dropped by the IGlobal
+        self._llama_parse = llama_parse
 
-        # Store the bag explicitly
-        self.bag = bag
-
+        # The config carries the API key: log the provider and the chosen
+        # options below, never the raw config
         debug(f'LlamaParse Parser: Provider: {provider}')
-        debug(f'LlamaParse Parser: Raw connConfig: {connConfig}')
 
         # The resolved node configuration; the simple-mode leaves are absent in advanced mode
         config = connConfig
@@ -117,10 +121,8 @@ class Parser:
             # Use the global LlamaParse instance from IGlobal
             debug('Using global LlamaParse instance...')
 
-            # Get the global instance from the bag
-            global_instance = self.bag.get('llama_parse')
-
-            parser = global_instance
+            # The control's LlamaParse client, handed over by the IGlobal
+            parser = self._llama_parse
             debug('Using existing global LlamaParse instance')
 
             # Parse the document directly from bytes

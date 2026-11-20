@@ -13,6 +13,7 @@ import numpy as np
 
 from rocketlib import IGlobalBase
 from ai.common.models.base import ModelClient, get_model_server_address
+from ai.common.utils import LoaderCache
 
 
 _KOKORO_REPO_ID = 'hexgrad/Kokoro-82M'
@@ -20,6 +21,11 @@ _KOKORO_LOADER_TYPE = 'kokoro'
 _KOKORO_SAMPLE_RATE = 24000
 _INT16_MAX = 32767
 _WAV_MIME = 'audio/wav'
+
+#: The local Kokoro pipelines the controls of this engine share, keyed by
+#: (repo, language): the weights depend on nothing else; the voice is per call.
+#: The last control to release one frees it.
+_PIPELINES = LoaderCache()
 
 
 class IGlobal(IGlobalBase):
@@ -34,6 +40,7 @@ class IGlobal(IGlobalBase):
     _voice: str
     _lang: str
     _pipeline: Optional[Any] = None
+    _pipeline_key: Optional[tuple] = None
     _remote_client: Optional[Any] = None
 
     def beginGlobal(self):
@@ -60,10 +67,16 @@ class IGlobal(IGlobalBase):
 
             depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
 
-            self._ensure_spacy_en_model()
-            from kokoro import KPipeline
+            key = (_KOKORO_REPO_ID, self._lang)
+            self._pipeline = _PIPELINES.acquire(key, self._load_pipeline)
+            self._pipeline_key = key
 
-            self._pipeline = KPipeline(lang_code=self._lang)
+    def _load_pipeline(self) -> Any:
+        """Build the local ``KPipeline`` for this control's language (once per process, via the cache)."""
+        self._ensure_spacy_en_model()
+        from kokoro import KPipeline
+
+        return KPipeline(lang_code=self._lang)
 
     @staticmethod
     def _ensure_spacy_en_model() -> None:
@@ -149,8 +162,11 @@ class IGlobal(IGlobalBase):
             raise
 
     def endGlobal(self):
-        """Release the local pipeline and disconnect the remote client, if any."""
+        """Release the local pipeline to the loader cache and disconnect the remote client, if any."""
         self._pipeline = None
+        if self._pipeline_key is not None:
+            _PIPELINES.release(self._pipeline_key)
+            self._pipeline_key = None
         client = self._remote_client
         if client is not None:
             try:

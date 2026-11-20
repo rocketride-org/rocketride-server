@@ -85,6 +85,3 @@ class Chat(ChatBase):
             max_tokens=self._modelOutputTokens,
             model_kwargs=model_kwargs,
         )
-
-        # Save our chat class into the bag
-        bag['chat'] = self

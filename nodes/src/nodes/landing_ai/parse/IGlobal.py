@@ -43,7 +43,7 @@ class IGlobal(IGlobalBase):
         from .parse import Parser
 
         bag = self.IEndpoint.endpoint.bag
-        self._parser = Parser(self.glb.logicalType, self.config, bag)
+        self._parser = Parser(self.config.node.provider, self.config, bag)
         debug('Landing.ai Parse Global: parser initialized')
 
     def parser(self):

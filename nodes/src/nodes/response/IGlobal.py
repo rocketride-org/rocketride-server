@@ -30,7 +30,7 @@ from .IValidator import configured_keys, reserved_key_error
 
 class IGlobal(IGlobalBase):
     laneName: Optional[str] = None
-    lanes: Dict[str, str] = {}
+    lanes: Dict[str, str]
 
     def beginGlobal(self):
         """Read the result keys; refuse to run with a reserved one.

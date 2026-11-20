@@ -217,11 +217,10 @@ class ContextOptimizer:
                 f'context_optimizer: budget percentages sum to {pct_sum:.1f}% (< 90%), context window may be underutilized'
             )
 
-        # Cache the tiktoken encoding (lazily imported) and its resolved name.
-        # The name is derived from ``model_name`` on first use (see
-        # ``_resolve_encoding_name``) so gpt-5 / gpt-4o count against o200k_base
-        # rather than the old hardcoded cl100k_base.
-        self._encoding = None
+        # The resolved tiktoken encoding name. It is derived from ``model_name``
+        # on first use (see ``_resolve_encoding_name``) so gpt-5 / gpt-4o count
+        # against o200k_base rather than the old hardcoded cl100k_base; the
+        # encoding itself lives in the module-scope loader cache.
         self._encoding_name: Optional[str] = None
 
         # Track which model names we've already warned about, so the unknown-model
@@ -591,22 +590,22 @@ class ContextOptimizer:
         return self._encoding_name
 
     def _get_encoding(self, encoding_name: Optional[str] = None):
-        """Return a cached tiktoken encoding instance.
+        """Return the tiktoken encoding, from tiktoken's own process-wide cache.
 
         When *encoding_name* is ``None`` the encoding is resolved from the
         configured model (see :meth:`_resolve_encoding_name`). tiktoken is
         imported lazily so that module-level import does not fail before
-        ``depends()`` has installed the package at runtime. The cache key is the
-        encoding name, so switching models/encodings rebuilds it correctly.
+        ``depends()`` has installed the package at runtime. ``get_encoding``
+        caches by encoding name under its own lock, and nothing is stored on
+        the optimizer, so concurrent calls asking for different encodings
+        never swap one under the other.
         """
         import tiktoken
 
         if encoding_name is None:
             encoding_name = self._resolve_encoding_name()
 
-        if self._encoding is None or self._encoding.name != encoding_name:
-            self._encoding = tiktoken.get_encoding(encoding_name)
-        return self._encoding
+        return tiktoken.get_encoding(encoding_name)
 
     def count_tokens(self, text: Optional[str], encoding: Optional[str] = None) -> int:
         """Count tokens in *text* using the model's tiktoken encoding.

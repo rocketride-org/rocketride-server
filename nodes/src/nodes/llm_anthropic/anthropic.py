@@ -105,6 +105,3 @@ class Chat(ChatBase):
             max_tokens=self._modelOutputTokens,
             custom_get_token_ids=_estimate_token_ids,
         )
-
-        # Save our chat class into the bag
-        bag['chat'] = self

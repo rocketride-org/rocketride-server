@@ -13,7 +13,6 @@ Covers the CodeRabbit review follow-ups:
 
 from __future__ import annotations
 
-import logging
 import sys
 import threading
 import time
@@ -256,13 +255,13 @@ def test_redis_backend_close_calls_client_close():
     assert client.close_called is True, 'RedisBackend.close() must explicitly release the connection.'
 
 
-def test_redis_backend_close_logs_errors(caplog):
-    """close() should not propagate errors, but it should log them."""
+def test_redis_backend_close_logs_errors():
+    """close() should not propagate errors, but it should report them through rocketlib."""
     backend = _make_redis_backend_with_fake()
     backend._client.close = MagicMock(side_effect=RuntimeError('boom'))  # type: ignore[attr-defined]
-    with caplog.at_level(logging.DEBUG):
+    with patch('nodes.memory_persistent.memory_store.warning') as warned:
         backend.close()
-    assert 'RedisBackend.close failed: boom' in caplog.text
+    assert 'RedisBackend.close failed: boom' in warned.call_args.args[0]
 
 
 def test_store_facade_exposes_backend_close():

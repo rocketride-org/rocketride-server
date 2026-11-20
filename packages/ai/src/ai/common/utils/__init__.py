@@ -26,11 +26,15 @@ Public surface:
 - ``colorize_depth``, ``decode_ndarray``, ``encode_ndarray``, ``image_to_bytes``
   — image/ndarray (de)serialization helpers.
 - ``validate_public_url`` — reject non-public/SSRF-prone URLs.
+- ``LoaderCache`` — the module-scope cache of model handles keyed by model id,
+  shared by the controls holding them and dropped by the last (plan 4.1 rule 1).
+- ``stub_matplotlib_pyplot``, ``register_debugger_thread`` — process-wide hooks
+  node code may not perform itself (plan 4.3: no ``sys.modules`` of another package).
 
 Implementations live in submodules (``string_utils``, ``content_blocks``,
 ``tool_args``,
 ``config_utils``, ``agent_tools``, ``file_utils``, ``cuda_utils``, ``hardware``,
-``http_retry``, ``image_utils``, ``url_utils``); this package re-exports them so
+``http_retry``, ``image_utils``, ``url_utils``, ``loader_cache``, ``process_hooks``); this package re-exports them so
 the canonical import path is ``from ai.common.utils import <name>``.
 """
 
@@ -41,6 +45,7 @@ from .file_utils import decode_data_url, guess_filename
 from .cuda_utils import pick_torch_device, pick_torch_dtype, resolve_pipeline_device
 from .hardware import check_hardware, parse_hardware_requirement, probe_hardware
 from .http_retry import get_with_retry, post_with_retry
+from .loader_cache import LoaderCache
 from .image_utils import (
     colorize_depth,
     decode_ndarray,
@@ -49,6 +54,7 @@ from .image_utils import (
     matched_quality,
     source_quality,
 )
+from .process_hooks import register_debugger_thread, stub_matplotlib_pyplot
 from .string_utils import safe_str
 from .tool_args import (
     int_arg,
@@ -67,6 +73,7 @@ from .tool_args import (
 from .url_utils import validate_public_url
 
 __all__ = [
+    'LoaderCache',
     'colorize_depth',
     'check_hardware',
     'config_int',
@@ -84,6 +91,7 @@ __all__ = [
     'normalize_tool_input',
     'post_with_retry',
     'probe_hardware',
+    'register_debugger_thread',
     'optional_bool',
     'optional_int',
     'optional_str',
@@ -100,6 +108,7 @@ __all__ = [
     'resolve_pipeline_device',
     'safe_str',
     'source_quality',
+    'stub_matplotlib_pyplot',
     'validate_public_url',
     'validate_tool_input_schema',
 ]

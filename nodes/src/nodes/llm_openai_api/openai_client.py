@@ -43,9 +43,6 @@ class Chat(ChatBase):
         # Get the llm
         self._llm = ChatOpenAI(**kwargs)
 
-        # Save our chat class into the bag
-        bag['chat'] = self
-
     def is_retryable_error(self, error):
         """
         Determine if the error is retryable.

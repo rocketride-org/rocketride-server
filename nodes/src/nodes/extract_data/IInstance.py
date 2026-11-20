@@ -36,7 +36,11 @@ class IInstance(IInstanceBase):
 
     # Class attributes for tracking the current chunk and table IDs.
     chunkId: int = 0
-    table: List = []
+    table: List
+
+    def beginInstance(self):
+        """Start this binding with its own empty accumulator."""
+        self.table = []
 
     def _extractData(self, text: Union[str, List[Doc]]) -> None:
         """

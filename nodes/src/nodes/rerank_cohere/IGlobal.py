@@ -54,7 +54,7 @@ class IGlobal(IGlobalBase):
         from .rerank_client import RerankClient
 
         bag = self.IEndpoint.endpoint.bag
-        self._reranker = RerankClient(self.glb.logicalType, self.config, bag)
+        self._reranker = RerankClient(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         self._reranker = None

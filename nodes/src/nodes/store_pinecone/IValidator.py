@@ -199,6 +199,6 @@ class IValidator(IValidatorBase):
         if syntaxOnly:
             return
         # An unfilled reference is reported as such; the probe must not send the placeholder as the key
-        if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', config['apikey']):
+        if warn_if_credential_unresolved(self.config.node.provider, 'apikey', config['apikey']):
             return
         probe_connection(config)

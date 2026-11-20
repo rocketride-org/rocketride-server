@@ -111,6 +111,16 @@ def _require_modify(access, op: str = 'this operation') -> None:
         raise MicrosoftAccessError(f"{op} needs the modify scope. Raise this node's access to 'modify' to enable it.")
 
 
+_COMPOSE_SCHEMA_PROPERTIES = {
+    'to': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Recipient email addresses'},
+    'subject': {'type': 'string', 'description': 'Subject line'},
+    'body': {'type': 'string', 'description': 'Message body'},
+    'cc': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Cc recipient email addresses'},
+    'bcc': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Bcc recipient email addresses'},
+    'html': {'type': 'boolean', 'description': 'Treat "body" as HTML (default false, plain text)'},
+}
+
+
 class IInstance(MicrosoftToolInstanceBase):
     IGlobal: IGlobal
     SERVICE = SERVICE
@@ -210,15 +220,6 @@ class IInstance(MicrosoftToolInstanceBase):
     # =======================================================================
     # SEND / DRAFT / REPLY / FORWARD
     # =======================================================================
-
-    _COMPOSE_SCHEMA_PROPERTIES = {
-        'to': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Recipient email addresses'},
-        'subject': {'type': 'string', 'description': 'Subject line'},
-        'body': {'type': 'string', 'description': 'Message body'},
-        'cc': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Cc recipient email addresses'},
-        'bcc': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Bcc recipient email addresses'},
-        'html': {'type': 'boolean', 'description': 'Treat "body" as HTML (default false, plain text)'},
-    }
 
     def _compose_message(self, args: dict, op: str) -> dict:
         """Build a Graph ``message`` body from the shared compose args."""

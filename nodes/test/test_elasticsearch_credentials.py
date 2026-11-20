@@ -54,9 +54,9 @@ def _resolve(logical_type, conn_config):
     return resolveConfig(rocketlib.getServiceSchema(logical_type), conn_config)
 
 
-def _iglobal(logical_type):
+def _iglobal(logical_type, conn_config=None):
     glb = IGlobal.__new__(IGlobal)
-    glb.glb = SimpleNamespace(logicalType=logical_type)
+    glb.glb = SimpleNamespace(logicalType=logical_type, connConfig=conn_config or {})
     glb.IEndpoint = MagicMock()
     return glb
 
@@ -87,10 +87,11 @@ def warnings(monkeypatch):
 
 def test_opensearch_with_basic_auth_stops_on_an_unfilled_password(opensearch_client):
     """With basic auth on, an unfilled password stops the node before the client is built."""
-    config = _resolve('opensearch', {'basic': {'password': PLACEHOLDER}})
+    stored = {'basic': {'password': PLACEHOLDER}}
+    config = _resolve('opensearch', stored)
 
     with pytest.raises(UnresolvedCredentialError, match=MISSING):
-        _iglobal('opensearch')._begin_opensearch(config)
+        _iglobal('opensearch', stored)._begin_opensearch(config)
 
     opensearch_client.assert_not_called()
 

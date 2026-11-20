@@ -39,7 +39,11 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     chunkId: int = 0
-    markdown_parts: List[str] = []
+    markdown_parts: List[str]
+
+    def beginInstance(self):
+        """Start this binding with its own empty accumulator."""
+        self.markdown_parts = []
 
     def open(self, obj: Entry):
         """Reset accumulation state for a new object."""

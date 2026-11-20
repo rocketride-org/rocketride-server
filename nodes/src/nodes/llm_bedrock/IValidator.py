@@ -68,9 +68,9 @@ class IValidator(IValidatorBase):
 
             # Do not send a ${...} the engine left unfilled to the provider as the key:
             # its reply would say the key is wrong, not which variable is missing.
-            if warn_if_credential_unresolved(self.glb.logicalType, 'accessKey', accessKey):
+            if warn_if_credential_unresolved(self.config.node.provider, 'accessKey', accessKey):
                 return
-            if warn_if_credential_unresolved(self.glb.logicalType, 'secretKey', secretKey):
+            if warn_if_credential_unresolved(self.config.node.provider, 'secretKey', secretKey):
                 return
 
             region = config.get('region')

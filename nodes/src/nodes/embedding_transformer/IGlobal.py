@@ -39,7 +39,7 @@ class IGlobal(IGlobalBase):
         from .sentenceTransformer import Embedding
 
         bag = self.IEndpoint.endpoint.bag
-        self.embedding = Embedding(self.glb.logicalType, self.config, bag)
+        self.embedding = Embedding(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         # Destroy the embedding module

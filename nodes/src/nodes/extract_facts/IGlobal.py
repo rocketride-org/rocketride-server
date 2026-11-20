@@ -26,7 +26,7 @@ from rocketlib import IGlobalBase, warning
 
 
 class IGlobal(IGlobalBase):
-    fields: List = []
+    fields: List
     validate: bool = True
     include_provenance: bool = True
 

@@ -30,7 +30,7 @@ class IGlobal(IGlobalBase):
     """Global lifecycle: read the resolved configuration once per run and normalise it for the checks."""
 
     # The validation settings the instances hand to validate_payload, built in beginGlobal
-    validation: Dict[str, Any] = {}
+    validation: Dict[str, Any]
 
     def beginGlobal(self):
         """Read the resolved config and lower-case the metric keywords, which match against lower-cased labels.

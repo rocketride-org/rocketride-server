@@ -199,9 +199,6 @@ class Chat(ChatBase):
             custom_get_token_ids=self._estimate_token_ids,
         )
 
-        # Save our chat class into the bag
-        bag['chat'] = self
-
     @staticmethod
     def _estimate_token_ids(text: str) -> list:
         """Estimate token ids at about four characters a token.

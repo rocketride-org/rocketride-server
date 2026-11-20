@@ -35,7 +35,7 @@ class IGlobal(IGlobalBase):
     user_id: str = ''
     agent_id: str = ''
     app_id: str = ''
-    group_ids: List[str] = []
+    group_ids: List[str]
     wait: bool = True
     ingest_timeout: int = 30
     extract_artifacts: bool = False

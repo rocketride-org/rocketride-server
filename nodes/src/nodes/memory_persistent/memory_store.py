@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import copy
 import json
-import logging
 import math
 import re
 import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+
+from rocketlib import warning
 
 
 # ---------------------------------------------------------------------------
@@ -29,7 +30,6 @@ from typing import Any, Dict, List, Optional
 
 _SESSION_ID_RE = re.compile(r'^[a-zA-Z0-9_\-]{1,128}$')
 _KEY_RE = re.compile(r'^[a-zA-Z0-9_\-\.]{1,256}$')
-_LOGGER = logging.getLogger(__name__)
 
 
 def _validate_session_id(session_id: str) -> None:
@@ -605,7 +605,7 @@ class RedisBackend(MemoryBackend):
         try:
             self._client.close()
         except Exception as exc:  # noqa: BLE001 - teardown must not fail if Redis close raises.
-            _LOGGER.debug('RedisBackend.close failed: %s', exc, exc_info=True)
+            warning(f'memory_persistent: RedisBackend.close failed: {exc}')
 
 
 # ---------------------------------------------------------------------------

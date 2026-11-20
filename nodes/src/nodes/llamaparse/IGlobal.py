@@ -53,17 +53,12 @@ class IGlobal(IGlobalBase):
 
         from .parser import Parser
 
-        bag = self.IEndpoint.endpoint.bag
-
         # The resolved config: the API key is required by the schema, the mode
         # selector decides which leaves are present
         config = self.config
 
         # Set up the lock for thread safety
         self._parserLock = threading.Lock()
-
-        # Initialize the parser with the full configuration
-        self._parser = Parser(self.glb.logicalType, config, bag)
 
         parser_args = {'verbose': False, 'api_key': config.api_key}
         if config.configMode == 'advanced':
@@ -107,8 +102,9 @@ class IGlobal(IGlobalBase):
         except Exception as e:
             raise RuntimeError(f'LlamaParse Global: Error creating LlamaParse instance: {e}') from e
 
-        # Store the LlamaParse instance in the bag for the parser to use
-        bag['llama_parse'] = self._llama_parse
+        # The parser holds this control's LlamaParse client: nothing is shared
+        # through the endpoint bag, which every control of the engine sees
+        self._parser = Parser(self.config.node.provider, config, self._llama_parse)
         debug('LlamaParse Global: LlamaParse initialized successfully')
 
         # Provenance advisory (issue #1406): this node emits flattened Markdown and

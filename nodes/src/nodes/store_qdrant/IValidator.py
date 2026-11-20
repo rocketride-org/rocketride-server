@@ -166,6 +166,6 @@ class IValidator(IValidatorBase):
         # An unfilled reference is reported as such; the probe must not send
         # the placeholder text as the key and surface Qdrant's "unauthorized".
         # The local branch has no key, so its None passes the check.
-        if warn_if_credential_unresolved(self.glb.logicalType, 'apikey', config.get('apikey')):
+        if warn_if_credential_unresolved(self.config.node.provider, 'apikey', config.get('apikey')):
             return
         probe_connection(config)

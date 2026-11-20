@@ -394,7 +394,7 @@ class IGlobal(IGlobalBase):
         # engine (ai.common.models.device_budget); with --modelserver the server batches
 
         # Initialize the OCR reader
-        self.reader = Reader(self.glb.logicalType, config, bag)
+        self.reader = Reader(self.config.node.provider, config, bag)
 
         self.io = io
         self.Img2TableImage = Img2TableImage

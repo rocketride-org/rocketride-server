@@ -51,7 +51,7 @@ class IGlobal(IGlobalBase):
         err = validate_serverbase(config.serverbase)
         if err:
             raise ValueError(err)
-        self._chat = Chat(self.glb.logicalType, config, bag)
+        self._chat = Chat(self.config.node.provider, config, bag)
 
     def endGlobal(self):
         """Release the chat client."""

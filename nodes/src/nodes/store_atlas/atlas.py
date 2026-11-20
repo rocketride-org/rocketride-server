@@ -35,7 +35,6 @@ from typing import List, Callable, Dict, Any, Mapping, Optional
 from uuid import uuid4
 import sys
 import numpy as np
-import logging
 
 from pymongo import MongoClient
 from pymongo.collection import Collection
@@ -45,10 +44,11 @@ from pymongo.operations import SearchIndexModel
 
 from pydantic import ValidationError
 
+from rocketlib import debug, error, warning
+
 from ai.common.schema import Doc, DocFilter, DocMetadata, QuestionText
 from ai.common.store import DocumentStoreBase
 
-logger = logging.getLogger(__name__)
 
 """
 NOTE: MongoDB Atlas Vector Search requires:
@@ -135,9 +135,9 @@ class Store(DocumentStoreBase):
         if not self._doesCollectionExist():
             try:
                 self.database.create_collection(self.collection_name)
-                logger.info(f'Created MongoDB collection: {self.collection_name}')
+                debug(f'Created MongoDB collection: {self.collection_name}')
             except CollectionInvalid:
-                logger.info(f'Collection {self.collection_name} already exists')
+                debug(f'Collection {self.collection_name} already exists')
 
         # Create regular indexes for metadata fields
         index_fields = [
@@ -154,16 +154,16 @@ class Store(DocumentStoreBase):
         for field_spec in index_fields:
             try:
                 self.collection.create_index([field_spec])
-                logger.debug(f'Created index on {field_spec[0]}')
+                debug(f'Created index on {field_spec[0]}')
             except OperationFailure as e:
-                logger.warning(f'Could not create index on {field_spec[0]}: {e}')
+                warning(f'Could not create index on {field_spec[0]}: {e}')
 
         # Create text index for keyword search
         try:
             self.collection.create_index([('content', 'text')], name=self.text_index_name)
-            logger.info('Created text search index')
+            debug('Created text search index')
         except OperationFailure as e:
-            logger.warning(f'Could not create text search index: {e}')
+            warning(f'Could not create text search index: {e}')
 
         # Create vector search index
         try:
@@ -187,15 +187,15 @@ class Store(DocumentStoreBase):
                 # Create the search index directly without SearchIndexModel
                 result = self.collection.create_search_index(search_index)
 
-                logger.info(
+                debug(
                     f'Created vector search index: {self.vector_index_name} with {vectorSize} dimensions, result: {result}'
                 )
             else:
-                logger.info(f'Vector search index {self.vector_index_name} already exists')
+                debug(f'Vector search index {self.vector_index_name} already exists')
 
         except Exception as e:
-            logger.error(f'Could not create vector search index: {e}')
-            logger.info('You may need to create the vector search index manually in Atlas UI')
+            error(f'Could not create vector search index: {e}')
+            debug('You may need to create the vector search index manually in Atlas UI')
 
         return True
 
@@ -262,9 +262,9 @@ class Store(DocumentStoreBase):
 
         try:
             results = list(self.collection.aggregate(pipeline))
-            logger.info(f'Results: {results}')
+            debug(f'Results: {results}')
         except OperationFailure as e:
-            logger.error(f'OperationFailure: {e}')
+            error(f'OperationFailure: {e}')
 
         return self._convertToDocs(results, include_score=True)
 
@@ -502,7 +502,7 @@ class Store(DocumentStoreBase):
                     else:
                         cleaned_meta[field_name] = meta_dict[field_name]
                 except (ValueError, TypeError) as e:
-                    logger.warning(f'Failed to convert {field_name}: {e}')
+                    warning(f'Failed to convert {field_name}: {e}')
                     cleaned_meta[field_name] = default_value
             else:
                 cleaned_meta[field_name] = default_value
@@ -515,7 +515,7 @@ class Store(DocumentStoreBase):
         try:
             return DocMetadata(**cleaned_meta)
         except ValidationError as e:
-            logger.error(f'Failed to create DocMetadata: {e}')
+            error(f'Failed to create DocMetadata: {e}')
             return None
 
     def _convertToDocs(self, documents: List[Dict[str, Any]], include_score: bool = False) -> List[Doc]:
@@ -524,7 +524,7 @@ class Store(DocumentStoreBase):
 
         for doc in documents:
             if 'meta' not in doc:
-                logger.warning("Document missing 'meta' field")
+                warning("Document missing 'meta' field")
                 continue
 
             metadata = self._validateMetadata(doc['meta'])

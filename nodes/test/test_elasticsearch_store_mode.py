@@ -50,7 +50,7 @@ def _resolve(conn_config):
 def _begin_elasticsearch(monkeypatch, conn_config):
     """Run _begin_elasticsearch on the resolved config with the store stood in; return the IGlobal."""
     glb = IGlobal.__new__(IGlobal)
-    glb.glb = SimpleNamespace(logicalType='elasticsearch')
+    glb.glb = SimpleNamespace(logicalType='elasticsearch', connConfig={})
     glb.IEndpoint = MagicMock()
     stub = types.ModuleType('nodes.store_elasticsearch.elasticsearch_store')
     stub.Store = MagicMock()

@@ -39,7 +39,11 @@ class IInstance(IInstanceBase):
 
     # Current object context
     current_text: str = ''
-    current_entities: List[dict] = []
+    current_entities: List[dict]
+
+    def beginInstance(self):
+        """Start this binding with its own empty accumulator."""
+        self.current_entities = []
 
     def open(self, obj: Entry):
         """Initialize instance for a new object."""

@@ -106,9 +106,6 @@ class Chat(ChatBase):
         # Get model-specific token limit
         self._modelTotalTokens = self._getModelTokens(config.get('modelTotalTokens', None))
 
-        # Save our chat class into the bag
-        bag['chat'] = self
-
         # Output some debug information
         debug(f'    Chat model        : {self._model}')
         debug(f'    Chat total tokens : {self._modelTotalTokens}')
