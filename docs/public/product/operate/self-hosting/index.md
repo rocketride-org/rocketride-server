@@ -42,7 +42,8 @@ there, so no node code is downloaded at run time. A node's Python packages and
 models still install on first use; provision them in advance for an offline host.
 To upgrade, extract the new release into a new, empty runtime directory. A
 `nodes/<name>/` folder that an older release left in the runtime directory is
-loaded instead of the node in the archive, and nothing replaces it.
+loaded instead of the node in the archive, and nothing replaces it. Copy only the
+nodes you wrote yourself from the old `nodes/` into the new one.
 
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
