@@ -22,16 +22,13 @@ from unittest import mock
 
 import pytest
 
-# The live suite drives real Discord; an offline run without discord.py must
-# skip this directory instead of breaking collection for the unit tests. The
-# probe names ``discord.ext`` because a bare ``discord`` also resolves to the
-# node package of that name once a test module has put nodes/src/nodes on
-# sys.path; only discord.py has the ``ext`` subpackage.
-pytest.importorskip('discord.ext')
+# discord.py, imported past the node package of the same name; skips the
+# module without it, fails when DISCORD_LIVE=1 (see live_support.import_discord_py)
+from .live_support import import_discord_py
 
-import discord  # noqa: E402
+discord = import_discord_py()
 
-from .live_support import (
+from .live_support import (  # noqa: E402
     StubTarget,
     SynthUser,
     live_only,
