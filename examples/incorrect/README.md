@@ -22,7 +22,7 @@ driven by two owners with conflicting timing.
 | `incorrect-second-start-feeds-subpipe-node.pipe` | A second start feeds a *middle* sub-pipeline node `sub_mid`. | same "…must not be shared with the main pipeline or another start" |
 | `incorrect-subpipe-merges-into-main.pipe` | The sub-pipeline flows back into a main-flow node `main_node` (the tool pipeline intersects the main pipeline). | same "…must not be shared…" |
 | `incorrect-shared-subpipe-node.pipe` | Two `tool_pipe`s (`pipe_tool_1`, `pipe_tool_2`) whose sub-pipelines both include `shared_node`. | `Pipeline node "Prompt" (shared_node) is reachable from two control roots ( "Pipeline Tool" (pipe_tool_1) and "Pipeline Tool" (pipe_tool_2) ) - a node has exactly one lifecycle owner` |
-| `incorrect-data-fed-tool-pipe.pipe` | A data input wired into `tool_pipe` (which also drives a sub-pipeline). | `Component pipe_tool_1 input lane questions not found in service definition` |
+| `incorrect-data-fed-tool-pipe.pipe` | A data input wired into `tool_pipe` (which also drives a sub-pipeline). | `Control node "Pipeline Tool" (pipe_tool_1) drives a sub-pipeline and is also data-fed …` |
 
 The first three map to the topologies discussed as **#1, #2, #4**. (#3 — the same
 `tool_pipe` invoked from two starts — is valid, so it is not here.)
@@ -30,10 +30,11 @@ The first three map to the topologies discussed as **#1, #2, #4**. (#3 — the s
 ### A note on the last one
 
 `tool_pipe` is **invoke-only**: its `services.json` declares only `_source` *output*
-lanes, no input lane. So wiring a data input into it is rejected earlier, by lane
-validation, with the message above — you cannot data-feed a `tool_pipe` at all. The
-engine's separate "drives a sub-pipeline and is also data-fed" guard is a safety net for a
-*future* invoke-capable node that does accept a data input.
+lanes, no input lane, so you cannot data-feed a `tool_pipe` at all. Opening the pipeline
+does not check lanes, so `use()` rejects it with the guard above: `pipe_tool_1` is
+invoked by `agent_1`, fed data by `chat_1`, and drives a sub-pipeline. `client.validate()`
+does check lanes and names the wrong one: `Component pipe_tool_1 input from chat_1 is on
+lane questions, which tool_pipe does not take; it takes no lanes`.
 
 ## Reading the error
 

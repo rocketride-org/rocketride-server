@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Build, run, and manage AI pipelines from Python.
+  RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Python SDK and CLI.
 </p>
 
 <p align="center">
@@ -51,12 +51,11 @@ schedules, server-side file storage, and run-log replay.
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open-source, developer-native AI pipeline
-platform: build, debug, and deploy production AI workflows without leaving your IDE,
-on a visual canvas or code-first. 140+ ready-to-use nodes (15+ LLM providers, 10+
-vector stores, OCR, NER, PII anonymization) run on a high-performance C++ engine,
-deployable anywhere, MIT licensed. You build your `.pipe` — and run it against the
-fastest AI runtime available.
+[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only
+enterprise-grade runtime built on C++. Build, test and publish durable agents that
+scale in production. It spans the full AI Development Lifecycle (AIDLC): build,
+stage, test, release and maintain. Its rapidly growing node library includes agents,
+models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 
 ## Configuration
 

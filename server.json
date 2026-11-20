@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.rocketride-org/rocketride",
+  "title": "RocketRide",
+  "description": "Open source AI meta-harness with an enterprise-grade C++ runtime. Build and run pipelines over MCP.",
+  "version": "3.6.0",
+  "websiteUrl": "https://docs.rocketride.org/",
+  "repository": {
+    "url": "https://github.com/rocketride-org/rocketride-server",
+    "source": "github"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.rocketride.ai/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer rr_... API key; omit to sign in with OAuth",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
