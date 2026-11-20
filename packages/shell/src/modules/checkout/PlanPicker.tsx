@@ -578,13 +578,16 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		return <p style={S.status}>No plans available.</p>;
 	}
 
-	const featureLineStyle = featureFontSize ? { ...S.featureLine, fontSize: featureFontSize } : S.featureLine;
-	const renderFeatureLine = (line: string, i: number) => (
-		<div key={i} style={featureLineStyle}>
-			<span style={S.featureCheck}>&#10003;</span>
-			<span style={S.featureText}>{line}</span>
-		</div>
-	);
+	let featureLineStyle: CSSProperties = S.featureLine;
+	if (featureFontSize) featureLineStyle = { ...S.featureLine, fontSize: featureFontSize };
+	const renderFeatureLine = (line: string, i: number) => {
+		return (
+			<div key={i} style={featureLineStyle}>
+				<span style={S.featureCheck}>&#10003;</span>
+				<span style={S.featureText}>{line}</span>
+			</div>
+		);
+	};
 
 	return (
 		<div>
@@ -617,6 +620,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 					const cta = isAction ? undefined : ctaConfig?.[plan.stripePriceId];
 					const ctaDisabled = cta?.disabled ?? false;
 					const desc = planDescription(plan);
+					const hasFeatureBlock = (desc?.length ?? 0) > 0 || uniformCardHeight;
 					// The other interval's list, which a uniform-height card also reserves room for.
 					let twinDesc: string[] | null = null;
 					if (uniformCardHeight && !isAction) {
@@ -683,7 +687,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 							    list sits hidden in the same grid cell (see ``cardFeatures``),
 							    and the block is always rendered so it fills the card and
 							    keeps the CTA at the bottom. */}
-							{(desc?.length || uniformCardHeight) && (
+							{hasFeatureBlock && (
 								<div style={S.cardFeatures}>
 									<div style={S.featureList}>{(desc ?? []).map(renderFeatureLine)}</div>
 									{twinDesc && (
