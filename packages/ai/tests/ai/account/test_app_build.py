@@ -490,9 +490,7 @@ async def test_job_typecheck_failure_is_terminal_with_tsc_errors(monkeypatch, bu
 
 
 @pytest.mark.asyncio
-async def test_saas_build_wraps_typecheck_and_bundle_in_the_sandbox_not_install(
-    monkeypatch, build_store, toolchain
-):
+async def test_saas_build_wraps_typecheck_and_bundle_in_the_sandbox_not_install(monkeypatch, build_store, toolchain):
     """Under --saas the compilers run through app_build_sandbox.command (the
     filesystem boundary) while the pnpm install is not wrapped.
     """
@@ -1381,11 +1379,7 @@ def test_workspace_yaml_recursive_alias_is_a_build_failure_not_a_crash():
 
 
 def test_workspace_yaml_ordinary_aliases_and_catalogs_still_load():
-    source = (
-        'packages:\n  - "apps/*"\n'
-        'catalog: &base\n  react: ^18.2.0\n'
-        'catalogs:\n  next: *base\n'
-    )
+    source = 'packages:\n  - "apps/*"\ncatalog: &base\n  react: ^18.2.0\ncatalogs:\n  next: *base\n'
     out = _patched_workspace_yaml(source, 'apps/x', [])
     assert 'react' in out and 'overrides' in out
 
