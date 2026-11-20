@@ -60,10 +60,6 @@ _REPEAT_PAUSE_SECONDS = 1.0
 # How many such pages in a row a trash update tolerates before it fails.
 _MAX_STALLS = 2
 
-# The most chunks render asks Weaviate for in one page. Weaviate rejects a
-# query whose offset + limit exceeds QUERY_MAXIMUM_RESULTS (10000 by default).
-_RENDER_PAGE_SIZE = 10000
-
 
 class Store(DocumentStoreBase):
     apikey: str | None = None
@@ -73,6 +69,9 @@ class Store(DocumentStoreBase):
     port: int = 0
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
+    # The most chunks render asks Weaviate for in one page. Weaviate rejects a
+    # query whose offset + limit exceeds QUERY_MAXIMUM_RESULTS (10000 by default).
+    renderPageSize: int = 10000
     similarity: str = 'Cosine'
     client: WeaviateClient | None = None
     collectionObj: Collection | None = None
@@ -625,14 +624,9 @@ class Store(DocumentStoreBase):
         # only. The cursor moves forward on every full page, so any number of
         # copies is passed, and re-reading a copy only replaces it in place.
         groupSize = max(1, self.renderChunkSize)
+        pageSize = max(1, self.renderPageSize)
         groupStart = 0
         pieces: Dict[int, str] = {}
-
-        def handOver() -> None:
-            # In chunkId order; a missing chunk adds no text, and the join walks
-            # only the chunks present, not the gaps between them
-            if pieces:
-                callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
 
         cursor = 0
         while True:
@@ -642,7 +636,7 @@ class Store(DocumentStoreBase):
                     & Filter.by_property('chunkId').greater_or_equal(cursor)
                 ),
                 sort=Sort.by_property('chunkId', ascending=True),
-                limit=_RENDER_PAGE_SIZE,
+                limit=pageSize,
             )
 
             lastChunk = cursor
@@ -654,15 +648,33 @@ class Store(DocumentStoreBase):
 
                 # Chunks arrive in order, so a chunk past the current group completes it
                 if chunk >= groupStart + groupSize:
-                    handOver()
+                    self._handOverRenderGroup(pieces, callback)
                     pieces = {}
                     groupStart = chunk - chunk % groupSize
 
                 # Of several copies of one chunk number, the last one read is kept
                 pieces[chunk] = point.properties.get('content') or ''
 
-            if len(points.objects) < _RENDER_PAGE_SIZE:
+            if len(points.objects) < pageSize:
                 break
-            cursor = lastChunk if lastChunk > cursor else cursor + 1
 
-        handOver()
+            # Every full page moves the cursor forward, so render always ends
+            if lastChunk > cursor:
+                # Start at the page's last chunkId: its copies may not all have fit
+                cursor = lastChunk
+            else:
+                # A full page of copies of one chunkId: step past it
+                cursor += 1
+
+        self._handOverRenderGroup(pieces, callback)
+
+    @staticmethod
+    def _handOverRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
+        """
+        Send one render group's text to the callback, joined in chunkId order.
+
+        A missing chunk adds no text, and the join walks only the chunks present,
+        not the gaps between them.
+        """
+        if pieces:
+            callback(''.join(pieces[chunk] for chunk in sorted(pieces)))

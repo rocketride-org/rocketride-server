@@ -106,7 +106,7 @@ def test_render_keeps_every_chunk_when_copies_straddle_a_page(monkeypatch):
     _second_copy(records, 3, 'chunk 3')
     _second_copy(records, 4, 'chunk 4')
     store, collection = _make_store(_shuffled(records))
-    monkeypatch.setitem(store.render.__globals__, '_RENDER_PAGE_SIZE', 4)
+    store.renderPageSize = 4
     fetch = collection.query.fetch_objects
     calls = []
 
@@ -118,6 +118,7 @@ def test_render_keeps_every_chunk_when_copies_straddle_a_page(monkeypatch):
     monkeypatch.setattr(collection.query, 'fetch_objects', counted_fetch)
 
     assert _render(store, 'doc') == [_expected(10)]
+    assert [call['limit'] for call in calls] == [4] * len(calls)
 
 
 def test_render_passes_a_full_page_of_copies_of_one_chunk(monkeypatch):
@@ -127,7 +128,7 @@ def test_render_passes_a_full_page_of_copies_of_one_chunk(monkeypatch):
         _second_copy(records, 1, 'chunk 1')
         records[f'doc-1-copy-{copy}'] = records.pop('doc-1-copy')
     store, collection = _make_store(_shuffled(records))
-    monkeypatch.setitem(store.render.__globals__, '_RENDER_PAGE_SIZE', 4)
+    store.renderPageSize = 4
     fetch = collection.query.fetch_objects
     calls = []
 
@@ -139,6 +140,7 @@ def test_render_passes_a_full_page_of_copies_of_one_chunk(monkeypatch):
     monkeypatch.setattr(collection.query, 'fetch_objects', counted_fetch)
 
     assert _render(store, 'doc') == [_expected(4)]
+    assert [call['limit'] for call in calls] == [4] * len(calls)
 
 
 def test_render_does_not_walk_the_gap_between_sparse_chunks():
