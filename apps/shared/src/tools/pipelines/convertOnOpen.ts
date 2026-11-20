@@ -178,10 +178,10 @@ function canonicalJson(value: unknown): string {
 export function documentSig(project: unknown): string {
 	const doc = project && typeof project === 'object' ? (project as Record<string, unknown>) : {};
 	try {
-		const text: Record<string, unknown> = {};
-		for (const [key, value] of Object.entries(doc)) {
-			if (!BOOKKEEPING_FIELDS.has(key)) text[key] = value;
-		}
+		// Object.fromEntries defines own data properties: a JSON-parsed document
+		// with an own `__proto__` key keeps it as text instead of hitting the
+		// inherited setter (which would drop it from the signature).
+		const text = Object.fromEntries(Object.entries(doc).filter(([key]) => !BOOKKEEPING_FIELDS.has(key)));
 		return canonicalJson(text);
 	} catch {
 		return ' nosig';

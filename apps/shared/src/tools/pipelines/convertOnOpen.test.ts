@@ -185,6 +185,20 @@ test('the signature is the whole written document less the bookkeeping fields', 
 	assert.notEqual(documentSig(NEW_PIPE), a);
 });
 
+test('an own __proto__ key in a parsed document is text, and the bookkeeping strip still applies', () => {
+	// JSON.parse gives an OWN `__proto__` data property; building the stripped
+	// copy by assignment would hit the inherited setter and lose it
+	const base = JSON.stringify(OLD_PIPE).slice(0, -1);
+	const one = JSON.parse(`${base},"__proto__":{"x":1}}`);
+	const two = JSON.parse(`${base},"__proto__":{"x":2}}`);
+	assert.ok(Object.prototype.hasOwnProperty.call(one, '__proto__'));
+	assert.notEqual(documentSig(one), documentSig(two));
+	assert.notEqual(documentSig(one), documentSig(OLD_PIPE));
+	// The bookkeeping fields still fall away beside it
+	const withBookkeeping = JSON.parse(`${base},"__proto__":{"x":1},"docRevision":77,"viewport":{"x":1,"y":2,"zoom":3}}`);
+	assert.equal(documentSig(withBookkeeping), documentSig(one));
+});
+
 test('a parameters edit during the pending call drops the reply and the next run sends the current text', () => {
 	// The editor keeps the sent signature and compares it to the document as
 	// it stands when the reply lands; the API Params page writes `parameters`
