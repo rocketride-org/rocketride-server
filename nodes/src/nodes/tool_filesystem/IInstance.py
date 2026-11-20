@@ -45,7 +45,6 @@ from __future__ import annotations
 import asyncio
 import mimetypes
 import os
-import sys
 import threading
 from typing import TYPE_CHECKING, Any
 
@@ -57,7 +56,7 @@ if TYPE_CHECKING:
     from rocketlib import Entry
 
 from ai.common.avi.descriptor import descriptor_from_payload
-from ai.common.utils import optional_str, require_dict, require_str
+from ai.common.utils import optional_str, register_debugger_thread, require_dict, require_str
 
 from .IGlobal import IGlobal, OnConflict
 
@@ -506,7 +505,7 @@ class IInstance(IInstanceBase):
         (it is only invoked on pipeline-source pipes), but guard anyway so a
         non-source endpoint falls through to the engine default.
         """
-        _register_debugger_thread()
+        register_debugger_thread('tool_filesystem')
         render = getattr(self.IEndpoint, 'renderStoreObject', None)
         if render is None:
             return
@@ -806,39 +805,6 @@ def _ext_from_mime(mime: str | None) -> str:
     if not subtype or subtype.startswith('vnd.'):
         return ''
     return f'.{subtype}'
-
-
-# Thread idents already registered with a loaded debugger (see
-# ``_register_debugger_thread``). Failed registrations are recorded too, so a
-# broken debugger produces one warning instead of one per rendered object.
-_DEBUGGER_THREADS: set[int] = set()
-
-
-def _register_debugger_thread() -> None:
-    """Register an engine-spawned thread with pydevd before traced code runs.
-
-    The designer launches dev-mode tasks under debugpy, and ``renderObject``
-    executes on the engine's C++ ThreadedQueue thread — a thread pydevd never
-    saw get created. When line instrumentation fires on such an unregistered
-    foreign thread, pydevd livelocks on its internal lock and the render
-    wedges mid-object (objects stuck PROCESSING in the designer trace).
-    Registering through the official ``settrace`` API happens outside the
-    instrumentation callback, making the thread known to the debugger first.
-
-    No-op when no debugger is loaded (task mode) — ``pydevd`` is only in
-    ``sys.modules`` when debugpy/pydevd attached to this process.
-    """
-    pydevd = sys.modules.get('pydevd')
-    if pydevd is None:
-        return
-    ident = threading.get_ident()
-    if ident in _DEBUGGER_THREADS:
-        return
-    _DEBUGGER_THREADS.add(ident)
-    try:
-        pydevd.settrace(suspend=False)
-    except Exception as e:
-        warning(f'tool_filesystem: pydevd thread registration failed (continuing untraced): {e}')
 
 
 _STREAM_LOOP: asyncio.AbstractEventLoop | None = None

@@ -118,6 +118,20 @@ set(CMAKE_CXX_FLAGS_UBSAN
     CACHE STRING "Flags used by the C++ compiler during UndefinedBehaviourSanitizer builds."
     FORCE)
 
+# Sanitize: the ASAN flags plus UndefinedBehaviourSanitizer, in one build
+# (builder --cmake-config=Sanitize). vptr is off: the vcpkg crashpad has no
+# typeinfo for its classes, so the vptr check fails to link (undefined reference
+# to typeinfo for crashpad::Settings). Recover is on for ASan so that, with
+# halt_on_error=0, one run reports every error instead of stopping at the first.
+set(CMAKE_C_FLAGS_SANITIZE
+    "${CMAKE_C_FLAGS_ASAN} -fsanitize=undefined -fno-sanitize=vptr -fsanitize-recover=address"
+    CACHE STRING "Flags used by the C compiler during Sanitize (ASan + UBSan) builds."
+    FORCE)
+set(CMAKE_CXX_FLAGS_SANITIZE
+    "${CMAKE_CXX_FLAGS_ASAN} -fsanitize=undefined -fno-sanitize=vptr -fsanitize-recover=address"
+    CACHE STRING "Flags used by the C++ compiler during Sanitize (ASan + UBSan) builds."
+    FORCE)
+
 # We need the linker flags -Xlinker -export-dynamic
 # to make the embedded python symbols available (see APPLAT-6500)
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} \

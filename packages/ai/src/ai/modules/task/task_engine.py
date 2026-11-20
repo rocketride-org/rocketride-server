@@ -321,15 +321,21 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
-# token key would let pipeline code mint any run's private token, and the fetch
-# signing key a /task/fetch claim for any path under the store root (#1070).
+# token key would let pipeline code mint any run's private token. The fetch
+# signing key would let it mint a /task/fetch claim for any path under the store
+# root (#1070). The datacore grant key would let it mint a grant for any
+# tenant's database, and the broker token is the provisioner's bearer under the
+# name production sets today (ROCKETRIDE_DB_BROKER_TOKEN, also popped in
+# _build_subprocess_env) and the operator-only name it is moving to
+# (RR_DB_BROKER_TOKEN). rocketride-saas #975.
 CONST_SUBPROCESS_ENV_NEVER = frozenset(
     {
         CONST_TASK_TOKEN_KEY_ENV,
         'RR_SIGNING_KEY',
         'RR_MODEL_SERVER_ADMIN_TOKEN',
-        'ROCKETRIDE_DB_BROKER_TOKEN',
         'RR_DATACORE_GRANT_KEY',
+        'RR_DB_BROKER_TOKEN',
+        'ROCKETRIDE_DB_BROKER_TOKEN',
     }
 )
 
