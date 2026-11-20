@@ -61,6 +61,9 @@ public:
     ///		Declare our factory info
     //-----------------------------------------------------------------
     _const auto FactoryType = "task";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = ITask;
 
     //-----------------------------------------------------------------
     /// @details
