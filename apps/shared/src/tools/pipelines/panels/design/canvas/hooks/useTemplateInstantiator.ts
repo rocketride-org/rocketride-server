@@ -38,7 +38,7 @@
  *   3. Once ready, recomputes edges, updates internals, and calls fitView
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Node, useReactFlow, useUpdateNodeInternals } from '@xyflow/react';
 
 import { useFlowGraph } from '../context/FlowGraphContext';
@@ -50,6 +50,34 @@ import { hasConfigurableSchema } from '../util/helpers';
 import { constantMarkers, validateConfig } from 'shared/components/node-config';
 import type { ITemplate } from '../templates/types';
 import type { INodeData } from '../types';
+
+/**
+ * Claims a pendingIds batch for the post-ready work. Returns true, and
+ * latches the batch into `handled`, only when the flow is ready, the batch
+ * is non-empty, it is not the batch already handled (compared by array
+ * identity), and every pending node has been measured. A pass that runs
+ * before measurement returns false WITHOUT latching, so the same batch
+ * still runs once measured.
+ *
+ * @param handled - The latch: the batch the post-ready work last ran for.
+ * @param pendingIds - The current batch of node ids awaiting post-ready work.
+ * @param isFlowReady - Whether the flow reports all nodes measured.
+ * @param nodes - The canvas nodes (only id and measured are read).
+ * @returns True when the post-ready work should run now.
+ */
+export function claimPostReadyBatch(handled: { current: readonly string[] | null }, pendingIds: readonly string[], isFlowReady: boolean, nodes: readonly Pick<Node, 'id' | 'measured'>[]): boolean {
+	if (!isFlowReady || pendingIds.length === 0) return false;
+	if (handled.current === pendingIds) return false;
+
+	// Every pending node must exist and have been measured
+	for (const id of pendingIds) {
+		const node = nodes.find((n) => n.id === id);
+		if (node?.measured?.width == null) return false;
+	}
+
+	handled.current = pendingIds;
+	return true;
+}
 
 /**
  * Instantiates a template onto the canvas.
@@ -66,6 +94,16 @@ export function useTemplateInstantiator() {
 	// IDs of nodes waiting for measurement before post-ready work
 	const [pendingIds, setPendingIds] = useState<string[]>([]);
 
+	// The pendingIds batch the post-ready work already ran for. The effect's
+	// setPendingIds([]) is a Default-lane update, but its onContentChanged
+	// makes the docs store re-render at Sync lane first, so the effect re-runs
+	// with the same stale batch and a new currentProject. Without this latch
+	// each pass emits again, and the store echo loops until React throws
+	// "Maximum update depth exceeded" (first node added to a new pipeline).
+	// Follow-ups (emit bypasses FlowGraphContext bookkeeping; currentProject
+	// as a dependency): rocketride-org/rocketride-server#3382.
+	const handledIdsRef = useRef<readonly string[] | null>(null);
+
 	// -----------------------------------------------------------------
 	// Post-ready: once isFlowReady is true and we have pending nodes,
 	// update internals, notify host, and fitView. Handles both the
@@ -73,14 +111,9 @@ export function useTemplateInstantiator() {
 	// isFlowReady was already true (single addNode).
 	// -----------------------------------------------------------------
 	useEffect(() => {
-		if (!isFlowReady || pendingIds.length === 0) return;
-
-		// Check that all pending nodes are actually measured
-		const allMeasured = pendingIds.every((id) => {
-			const node = nodes.find((n) => n.id === id);
-			return node?.measured?.width != null;
-		});
-		if (!allMeasured) return;
+		// Ready, non-empty, all measured, and not the batch already handled;
+		// a starved re-render sees the same array and stops here.
+		if (!claimPostReadyBatch(handledIdsRef, pendingIds, isFlowReady, nodes)) return;
 
 		updateNodeInternals(pendingIds);
 		setPendingIds([]);
@@ -193,6 +226,8 @@ export function useTemplateInstantiator() {
 	/**
 	 * Schedule a fitView. If nodeIds are provided, waits for those nodes
 	 * to be measured first (via isFlowReady). Otherwise fires immediately.
+	 * Pass a fresh array per call: the post-ready latch compares batches by
+	 * identity, so a reused array would be treated as already handled.
 	 */
 	const requestFitView = useCallback(
 		(nodeIds?: string[]) => {
