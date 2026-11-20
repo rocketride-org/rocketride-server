@@ -163,6 +163,9 @@ Examples:
         help='Enable SaaS account implementation (requires extension overlay)',
     )
 
+    # No longer read; accepted so a launcher that still passes it starts
+    parser.add_argument('--node_path', help=argparse.SUPPRESS)
+
     return parser
 
 
@@ -189,6 +192,8 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['modelserver'] = args.modelserver
         config['base_port'] = args.base_port
         config['verbose'] = args.verbose
+        if args.node_path is not None:
+            warning("--node_path is no longer read: put a custom node in the engine's nodes/ directory")
 
     if config.get('modelserver'):
         config['modelserver'] = _normalize_modelserver(config['modelserver'])
@@ -221,6 +226,21 @@ async def run(config: Dict[str, Any] = None) -> None:
     from ai.account import account
 
     await account.init_account(server)
+
+    # The nodes the server does not carry: their definitions now, their code on demand
+    from ai.modules.task import node_store
+
+    node_store.start()
+
+    # The public-page catch-all registers LAST, after every module and account
+    # route, so every real route wins (FastAPI matches in registration order).
+    # It then builds the first page aggregate from the published app manifests.
+    # Bounded: a slow store starts the engine on the legacy page list while the
+    # build finishes in the background; a failed build keeps the legacy list
+    # until the next platform app deploy event or the refresh backstop.
+    from ai.modules.shell import register_public_pages
+
+    await register_public_pages(server)
 
     # Start the FastAPI server loop
     await server.serve()

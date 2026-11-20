@@ -1,6 +1,7 @@
 ---
 title: Runtime & Engine
 sidebar_position: 2
+description: The engine is the RocketRide runtime that loads a .pipe definition, brings its nodes to life, and moves data through the graph until the work is done.
 ---
 
 # Runtime & engine
@@ -50,8 +51,8 @@ protocols and the engine handles the rest:
 - **[WebSocket](/connect/websocket)**: the native engine protocol. The
   [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it
   for you.
-- **[MCP](/connect/mcp/stdio)**: exposes running pipelines as tools for AI
-  assistants.
+- **[MCP](/connect/mcp/http)**: the engine's built-in MCP server, to build, run and
+  observe pipelines.
 
 As pipelines run, the engine reports call trees, token usage, and memory so you
 can observe what happened. See [Troubleshooting](/support/troubleshooting) for reading

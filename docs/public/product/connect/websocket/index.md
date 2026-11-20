@@ -1,12 +1,13 @@
 ---
-title: WebSocket
+title: WebSocket protocol
+sidebar_label: WebSocket
 ---
 
 # WebSocket protocol
 
 The RocketRide [engine](/concepts/runtime-engine) speaks a native **WebSocket**
 protocol. Every consumer (the [TypeScript](/clients/typescript) and
-[Python](/clients/python) SDKs and the [MCP server](/connect/mcp/stdio)) connects
+[Python](/clients/python) SDKs and the [MCP server](/connect/mcp/http)) connects
 over this one socket to start pipelines and stream results. You rarely touch it
 directly; the SDKs frame the messages for you. This page documents what they
 send so you can debug, trace, or build your own client.
@@ -24,7 +25,8 @@ send so you can debug, trace, or build your own client.
   `ROCKETRIDE_URI`). If `auth` fails the request errors. Once authenticated, each
   task request carries the task `token` returned by `execute` (the SDK's `use()`)
   in its `arguments`.
-  Cloud requires a key; a local engine typically does not.
+  Cloud requires a key. The SDKs and the CLI also need one for a local engine;
+  an engine started without a key accepts any non-empty value.
 
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
@@ -34,7 +36,9 @@ different host or port to reach a remote or self-hosted engine.
 Before authenticating, a client may open a public connection and send
 `rrext_public_probe`. The response body carries `version`, `capabilities`,
 `platform`, the public `apps` list, `stripePublishableKey` (when billing is
-configured), and `endpoints` — the server's public addresses:
+configured), `posthogPublishableKey` + `posthogHost` (when product telemetry
+is configured; absent means telemetry is off), and `endpoints` — the server's
+public addresses:
 
 ```json
 { "endpoints": { "api": "origin", "ui": "origin" } }
@@ -205,12 +209,21 @@ reads that lane; anything unmatched falls through to the raw/tags lane.
 | --- | --- |
 | `application/json` | `json` |
 | `text/*` | `text` |
+| `application/json`, `application/xml`, `application/x-ndjson`, `application/yaml`, `application/*+json`, `application/*+xml`, when nothing reads their own lane or raw (`tags`) | `text` |
 | `image/*`, `video/*`, `audio/*` | `image`, `video`, `audio` |
-| `application/rocketride-question+json` | `questions` |
+| `application/rocketride-question+json` | `questions`; with no `questions` reader it goes to raw, never `text` |
 | `application/rocketlib-tag` | `tags` |
 | anything else, or no reader above | raw, delivered on `tags` |
 
 The prefix `lane/<name>` bypasses detection and targets a lane directly.
+
+On the `text` lane the body is decoded as UTF-8 and delivered as **one** text when
+the pipe closes, however many `write` calls carried it. A node such as `question`
+makes one question per text, so a webhook body that arrives in two chunks still
+makes one question. A body over 8 MiB is not held whole: what has arrived is
+written as one text when the limit is crossed, and each later chunk as its own
+text. Invalid UTF-8, including a body that ends inside a character, fails the
+request.
 
 ### When nothing reads the chosen lane
 
@@ -251,8 +264,8 @@ command.
 
 - [Observability](/connect/websocket/observability): monitoring events and
   metrics over this socket.
-- [MCP](/connect/mcp/stdio): pipelines-as-tools for AI assistants, transported over
-  this socket.
+- [MCP](/connect/mcp/http): the engine's built-in MCP server, to build, run and
+  observe pipelines.
 - [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): the
   clients that speak this protocol.
 - [Pipeline JSON Reference](/reference/pipeline-reference): the `.pipe` payload shape.

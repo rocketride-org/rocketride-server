@@ -1,6 +1,7 @@
 ---
 title: Pipelines
 sidebar_position: 1
+description: "A pipeline is the unit of work in RocketRide: a directed graph of components that move and transform data, authored as .pipe files (JSON) and run by the engine."
 ---
 
 # Pipelines
@@ -40,11 +41,12 @@ reference is generated from the schema source and published at
     { "id": "in", "provider": "webhook", "config": { "mode": "Source" } },
     {
       "id": "out",
-      "provider": "response",
-      "config": { "lanes": [{ "laneId": "questions", "laneName": "questions" }] },
+      "provider": "response_questions",
+      "config": { "laneName": "questions" },
       "input": [{ "lane": "questions", "from": "in" }]
     }
-  ]
+  ],
+  "source": "in"
 }
 ```
 

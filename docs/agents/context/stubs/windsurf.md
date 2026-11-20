@@ -5,13 +5,17 @@ description: Use when working with RocketRide pipelines, apps, SDK, components, 
 
 <!-- ROCKETRIDE:BEGIN -->
 
-# RocketRide: AI Pipeline & App Platform
+# RocketRide
+
+RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
 
 Use RocketRide when building AI pipelines (document processing, RAG, agents, data integration) or when building apps on the RocketRide platform (React UIs on the platform shell, often embedding pipelines).
 
 ## Documentation
 
 Full docs: `.rocketride/docs/`
+
+RocketRide has a built-in MCP server (hosted at `https://api.rocketride.ai/mcp`). Setup and sign-in are in ROCKETRIDE_INTEGRATIONS.md in that folder.
 
 **Read the relevant doc(s) before generating any RocketRide code.**
 

@@ -1,10 +1,12 @@
 ---
-title: Client Libraries
+title: RocketRide Client Libraries
+sidebar_label: Overview
+description: Official client libraries for the RocketRide Engine. The TypeScript and Python clients talk to the engine the same way and share one core API.
 ---
 
 # RocketRide Client Libraries
 
-Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol. The chat widget embeds a brandable pipeline chat UI in any web page.
+Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The engine's built-in MCP server lets AI assistants build, run and observe pipelines over the Model Context Protocol. The chat widget embeds a brandable pipeline chat UI in any web page.
 
 ---
 
@@ -27,7 +29,7 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 | **TypeScript** | `rocketride`     | [TypeScript SDK](/clients/typescript)       |
 | **Python**     | `rocketride`     | [Python SDK](/clients/python)               |
 | **VS Code**    | `rocketride` (extension) | [VS Code Extension](/clients/vscode) |
-| **MCP**        | `rocketride-mcp` | [MCP server](/connect/mcp/stdio)                  |
+| **MCP**        | built into the engine (`/mcp`) | [MCP server](/connect/mcp/http) |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 
@@ -50,10 +52,9 @@ npm install rocketride
 
 # Python
 pip install rocketride
-
-# MCP
-pip install rocketride-mcp
 ```
+
+The `rocketride-mcp` package is deprecated. Use the built-in server instead; see [HTTP MCP Server](/connect/mcp/http). Existing users can still find the old package on the [stdio MCP page](/connect/mcp/stdio).
 
 The chat widget is **not on a public registry yet**; build it from this repository and self-host the bundle:
 
