@@ -70,6 +70,50 @@ instead **self-registers by URL convention**, fetching
 `/apps/<appId>/dev/package.json` from its own origin. A locally registered
 app id REPLACES the server's manifest row wholesale.
 
+**Trust boundary.** The dev hooks (`window.__rrShellDev`, the `rrdev:*` message
+listener) exist only in the DEV flavor of the shell; a production build can
+never enable them from the URL, `sessionStorage` or an injected boot config.
+`?rrdev=1` merely selects the dev flavor's assets, and that flavor is reachable
+from the production origin, so what it does for a caller is restricted in code.
+A `rrdev:*` message is honoured only from a window with the right relation AND
+an origin from a closed set of exactly two:
+
+- as the shell's **parent** (a framed shell): a `vscode-webview://<id>` page
+  (the VS Code App Builder) or a page of the shell's **own origin** (the web
+  App Builder's blob preview iframe);
+- as the shell's **opener** (a top-level tab): a page of the shell's **own
+  origin** only (the web App Builder's debug tab). No other origin, and
+  `vscode-webview://`, is ever an opener.
+
+A loopback origin is **never** a sender, not even for a loopback-served shell,
+and a page that merely `window.open()`s or frames the shell is not trusted by
+that fact. `rrdev:registerRemote` entries must be absolute `http(s)` loopback
+URLs; console rows are posted only to the verified embedder origin. `#rrtoken=`
+seeding is honoured only in a dev build, on a top-level shell served from
+loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). In a dev build on
+a top-level shell that is NOT loopback-served, and in a production build on a
+top-level shell (loopback or not), the fragment is ignored (nothing is saved or
+cleared) and stripped from the URL; a framed shell never acts on it or strips it
+here. The `rrauthorigin` sign-in relay is armed only on `http://localhost` and
+`http://127.0.0.1`, the shells its OAuth bounce can return to (any port; the
+`pnpm start` server is `http://localhost:3000`, so it is armed there); on any
+other shell (an `https://` origin, `[::1]`, `*.localhost`, other `127.x.x.x`
+addresses) it is not armed.
+
+Deliberate compatibility costs of a closed set, so nobody is surprised:
+browser-hosted VS Code and Codespaces (webview origins on `*.vscode-cdn.net`)
+are refused; code-server is refused whether it is served from a loopback or a
+non-loopback host; and a dev server reached by LAN IP or a forwarded hostname
+(not loopback) loses URL-convention self-registration, remote entries,
+`#rrtoken` seeding and the sign-in relay. Those dev servers are intentionally
+unsupported: dev remotes, token seeding and the relay are bound to loopback so
+that a dev flavor served from a real origin (the production origin included)
+cannot be steered by a link, and the loopback predicate (`isLoopbackHostname`,
+devGate.ts) cannot tell a LAN dev server from an attacker's host. Only the
+embedder cases (`*.vscode-cdn.net`, code-server) are governed by the allow-list
+`isAllowedEmbedderOrigin`; supporting one of them is a deliberate change there,
+with its own review.
+
 The extension manages the dev servers through a serialized per-app operation
 chain (start/stop/restart run one at a time). Closing a preview **lingers**
 the server for 60 s so a quick reopen revives it instantly; a Reload or
