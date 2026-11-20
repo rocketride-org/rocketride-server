@@ -268,7 +268,7 @@ async function packageNode(name, srcDir) {
 		services[file] = text;
 		if (icon) icons[icon] = await fs.promises.readFile(path.join(srcDir, icon), 'utf8');
 	}
-	files['.rrnode'] = Buffer.from(JSON.stringify({ name }));
+	files['.rrnode'] = Buffer.from(JSON.stringify({ name, contract: NODES_CONTRACT }));
 
 	const sha256 = contentDigest(files);
 	return { files, entry: { sha256, services, icons, requires: [...requires].sort() } };
