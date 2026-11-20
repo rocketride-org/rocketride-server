@@ -765,10 +765,9 @@ def _make_iglobal(conn_config=None):
     mock_endpoint.endpoint.bag = {}
     iglobal.IEndpoint = mock_endpoint
 
-    mock_glb = Mock()
-    mock_glb.logicalType = 'tool_slack'
-    mock_glb.connConfig = conn_config or {}
-    iglobal.glb = mock_glb
+    # A plain namespace, not a Mock: the base reads the node identity off glb
+    # for config.node, so an auto-created attribute would masquerade as one
+    iglobal.glb = SimpleNamespace(logicalType='tool_slack', connConfig=conn_config or {})
     return iglobal
 
 

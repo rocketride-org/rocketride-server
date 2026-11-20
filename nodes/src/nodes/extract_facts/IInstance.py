@@ -47,10 +47,6 @@ class IInstance(IInstanceBase):
     Facts are emitted on closing() to the answers and/or documents lanes.
     """
 
-    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
-    # instance is an accessor method; per-call values come from self.settings
-    iglobal_methods_only = True
-
     # Reference to a global instance providing shared functionality.
     IGlobal: IGlobal
 

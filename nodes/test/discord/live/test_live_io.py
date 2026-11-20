@@ -23,8 +23,11 @@ from unittest import mock
 import pytest
 
 # The live suite drives real Discord; an offline run without discord.py must
-# skip this directory instead of breaking collection for the unit tests.
-pytest.importorskip('discord')
+# skip this directory instead of breaking collection for the unit tests. The
+# probe names ``discord.ext`` because a bare ``discord`` also resolves to the
+# node package of that name once a test module has put nodes/src/nodes on
+# sys.path; only discord.py has the ``ext`` subpackage.
+pytest.importorskip('discord.ext')
 
 import discord  # noqa: E402
 

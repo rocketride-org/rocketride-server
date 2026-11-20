@@ -28,10 +28,6 @@ from rocketlib import debug, error, Entry
 
 
 class IInstance(IInstanceBase):
-    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
-    # instance is an accessor method; per-call values come from self.settings
-    iglobal_methods_only = True
-
     IGlobal: IGlobal
 
     def __init__(self):

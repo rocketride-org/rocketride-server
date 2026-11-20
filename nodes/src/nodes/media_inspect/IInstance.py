@@ -43,10 +43,6 @@ SCHEMA_VERSION = 1
 class IInstance(MediaInstance):
     """Measure a recording or extract caller-selected pictures."""
 
-    # Certified multitenant (plan 4.2, 4.4): every IGlobal read from this
-    # instance is an accessor method; per-call values come from self.settings
-    iglobal_methods_only = True
-
     IGlobal: IGlobal
     node = NODE
     modes = ('probe', 'levels', 'stills')
