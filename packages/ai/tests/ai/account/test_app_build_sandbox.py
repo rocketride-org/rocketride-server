@@ -70,6 +70,8 @@ def test_policy_paths_cannot_inject_an_allow_rule(monkeypatch, tmp_path):
 def _platform_node():
     node = os.environ.get('RR_BUILD_NODE') or shutil.which('node')
     if not node:
+        if os.environ.get('RR_TEST_APP_COMPILERS') == '1':
+            pytest.fail('Node is required for the live compiler gate (RR_TEST_APP_COMPILERS=1)')
         pytest.skip('Node is required for the real compiler boundary probe')
     result = subprocess.run([node, '-p', 'process.execPath'], text=True, capture_output=True, check=True)
     return result.stdout.strip()

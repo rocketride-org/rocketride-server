@@ -475,6 +475,15 @@ async def _exec(argv: List[str], cwd: str, timeout: int, on_line: Any = None) ->
     return int(proc.returncode or 0), _truncated(''.join(chunks))
 
 
+def _tsc_args(tsconfig: str) -> List[str]:
+    """The platform typecheck's tsc flags: the one place the argv is built.
+
+    ``--tsBuildInfoFile null`` resets a tsconfig value: typescript < 5.6
+    reports TS5069 for tsBuildInfoFile without incremental.
+    """
+    return ['--noEmit', '--incremental', 'false', '--composite', 'false', '--tsBuildInfoFile', 'null', '-p', tsconfig]
+
+
 async def _exec_compiler(
     argv: List[str], cwd: str, timeout: int, job_dir: str, env_dir: str, on_line: Any = None
 ) -> Tuple[int, str]:
@@ -1955,19 +1964,7 @@ class AppBuildWorker:
             if not tsc:
                 raise BuildInfraFailure('typecheck', 'baked typescript missing from the toolchain env')
             await feed.set_phase('typecheck')
-            # `--tsBuildInfoFile null` resets a tsconfig value: typescript
-            # < 5.6 reports TS5069 for tsBuildInfoFile without incremental.
-            tsc_args = [
-                '--noEmit',
-                '--incremental',
-                'false',
-                '--composite',
-                'false',
-                '--tsBuildInfoFile',
-                'null',
-                '-p',
-                tsconfig,
-            ]
+            tsc_args = _tsc_args(tsconfig)
             code, out = await _exec_compiler(
                 [node, tsc, *tsc_args],
                 app_dir,

@@ -57,19 +57,7 @@ async def test_real_compilers_css_loaders_and_tsconfig_boundary(monkeypatch, tmp
     tsc = build._resolve_platform_tsc(env)
     rsbuild = build._resolve_bin(env, '@rsbuild/core', ('rsbuild',))
     assert tsc and rsbuild
-    tsc_argv = [
-        node,
-        tsc,
-        '--noEmit',
-        '--incremental',
-        'false',
-        '--composite',
-        'false',
-        '--tsBuildInfoFile',
-        'null',
-        '-p',
-        str(tsconfig),
-    ]
+    tsc_argv = [node, tsc, *build._tsc_args(str(tsconfig))]
 
     async def run(argv):
         return await build._exec_compiler(argv, str(app), 120, str(job), env)
