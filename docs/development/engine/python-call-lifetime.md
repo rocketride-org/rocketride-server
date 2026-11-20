@@ -416,6 +416,10 @@ still enter the node. Once the flag is set, `boundInstance()` throws
 error travels back up the chain to the Python call that started it and is
 raised there, the same way a gate refusal is.
 
+A C++ filter can refuse the same way. `parse`, which reads an object on a
+thread of its own, fails a write, an `open` or a `closing` that reaches it
+after its end with the same code and text.
+
 ## An object left open
 
 `open` keeps a reference to the Python entry on the filter it was called on
