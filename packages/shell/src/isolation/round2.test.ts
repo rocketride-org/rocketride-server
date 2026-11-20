@@ -34,7 +34,7 @@ import type { DAPMessage } from 'rocketride';
 import { ENTRY_A, ENTRY_B, makeRoot, refAppKey } from './__test__/fixtures';
 import { clientRequest, dap, settle } from './__test__/realm';
 import { assertDenied, brief, outcome, startRun } from './__test__/util';
-import { walk } from './walk';
+import { walk, WalkError, WALK_MAX_NODES } from './walk';
 
 const key = refAppKey(ENTRY_A.id);
 const keyB = refAppKey(ENTRY_B.id);
@@ -110,6 +110,14 @@ test('G4R2-L1 the rate bucket is charged before the walk; the walker bounds tota
 
 	const six = 'x'.repeat(6 * 1024 * 1024);
 	assert.throws(() => walk({ a: six, b: six }), 'two 6 MiB strings exceed the walker total');
+});
+
+test('R2 undefined-valued properties count against the walker node budget', () => {
+	const many: Record<string, unknown> = {};
+	for (let i = 0; i < WALK_MAX_NODES + 1; i++) many[`k${i}`] = undefined;
+	assert.throws(() => walk(many), WalkError, 'enumerating more undefined properties than the node budget is refused');
+	const few: Record<string, unknown> = { a: undefined, b: 1 };
+	assert.deepEqual({ ...(walk(few) as object) }, { b: 1 }, 'a few undefined properties are still dropped from the copy');
 });
 
 // =============================================================================

@@ -119,7 +119,11 @@ export function walk(value: unknown, options: IWalkOptions = {}): unknown {
 				if (FORBIDDEN_KEYS.has(key)) throw new WalkError('forbidden key');
 				const d = Object.getOwnPropertyDescriptor(v, key)!;
 				if (!('value' in d)) throw new WalkError('accessor property');
-				if (d.value === undefined) continue;
+				if (d.value === undefined) {
+					// Dropped from the copy, but it was enumerated: it counts against the node budget like any other.
+					if (++nodes > WALK_MAX_NODES) throw new WalkError('too many nodes');
+					continue;
+				}
 				countChars(key);
 				options.onString?.(key);
 				out[key] = visit(d.value, depth + 1);

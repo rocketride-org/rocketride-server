@@ -97,8 +97,14 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 	let best = Infinity;
 	let floor = Infinity;
 	for (let r = 0; r < 3; r++) {
-		floor = Math.min(floor, time(control));
-		best = Math.min(best, time(m));
+		// The order alternates, so neither side always runs first (warm-up, a cooling host).
+		if (r % 2 === 0) {
+			floor = Math.min(floor, time(control));
+			best = Math.min(best, time(m));
+		} else {
+			best = Math.min(best, time(m));
+			floor = Math.min(floor, time(control));
+		}
 	}
 	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms (linear floor ${floor.toFixed(1)} ms)`);
 	// 1000 ms on a quiet host (seen at 779 ms under load), and never more than

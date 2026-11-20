@@ -223,7 +223,7 @@ const SPARE_MAX = 4;
  */
 export function hashWindows(s: string): IWindows {
 	const count = Math.max(0, s.length - PREFIX + 1);
-	let h = spare.length > 0 && spare[spare.length - 1].length >= count ? spare.pop()! : new Int32Array(Math.max(count, 1024));
+	const h = spare.length > 0 && spare[spare.length - 1].length >= count ? spare.pop()! : new Int32Array(Math.max(count, 1024));
 	if (count > 0) {
 		let x = hashAt(s, 0);
 		h[0] = x;
