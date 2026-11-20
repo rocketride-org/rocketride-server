@@ -773,10 +773,12 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				// lower. Put the reference back (addMonitor raises the count again) so the failure changes
 				// nothing and a retry removes one reference, not two. If that cannot be done either, the SDK's
 				// count stays lowered and the ledger follows it, so the two agree: the reference then counts as removed.
-				const restored = await client().addMonitor({ token: run!.token }, types).then(
-					() => true,
-					() => false
-				);
+				const restored = await client()
+					.addMonitor({ token: run!.token }, types)
+					.then(
+						() => true,
+						() => false
+					);
 				if (!restored) lowerLedger(run!, types);
 				throw err;
 			}

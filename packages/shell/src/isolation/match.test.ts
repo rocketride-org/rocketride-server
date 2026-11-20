@@ -96,17 +96,24 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 	};
 	let best = Infinity;
 	let floor = Infinity;
+	const rounds: string[] = [];
 	for (let r = 0; r < 3; r++) {
 		// The order alternates, so neither side always runs first (warm-up, a cooling host).
-		if (r % 2 === 0) {
-			floor = Math.min(floor, time(control));
-			best = Math.min(best, time(m));
+		const controlFirst = r % 2 === 0;
+		let f: number;
+		let b: number;
+		if (controlFirst) {
+			f = time(control);
+			b = time(m);
 		} else {
-			best = Math.min(best, time(m));
-			floor = Math.min(floor, time(control));
+			b = time(m);
+			f = time(control);
 		}
+		floor = Math.min(floor, f);
+		best = Math.min(best, b);
+		rounds.push(`round ${r} (${controlFirst ? 'control first' : 'matcher first'}): matcher ${b.toFixed(1)} ms, control ${f.toFixed(1)} ms`);
 	}
-	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms (linear floor ${floor.toFixed(1)} ms)`);
+	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms (linear floor ${floor.toFixed(1)} ms); ${rounds.join('; ')}`);
 	// 1000 ms on a quiet host (seen at 779 ms under load), and never more than
 	// 15x the floor on a contended one; the quadratic case is 2.8 s, 35x or more.
 	assert.ok(best < 1000 || best < 15 * floor, `the scan took ${best.toFixed(1)} ms against a ${floor.toFixed(1)} ms floor`);
