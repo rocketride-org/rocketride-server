@@ -46,6 +46,9 @@ import re
 # own test infra runs chromadb/chroma:0.6.3, which works.
 _MIN_CHROMA_VERSION = (0, 6)
 
+# How many chunks render asks Chroma for in one get.
+_RENDER_PAGE_SIZE = 1000
+
 
 def _check_server_version(version: str) -> None:
     """
@@ -776,76 +779,59 @@ class Store(DocumentStoreBase):
         if not self.doesCollectionExist():
             return
 
-        # Since chunks are returned in any order, and a single objectId
-        # may contain tens of thousands of chunks, we grave them one
-        # group at a time (renderChunkSize), put them into an array,
-        # join them and call the callback
-        offset = 0
+        # Chunks come back in any order, and a document may hold tens of
+        # thousands of them. Read them one renderChunkSize group of chunkIds
+        # at a time, paging through each group until a short page, then join
+        # the group's text in chunkId order. Chroma returns a field only when
+        # the request includes it, and each metadata is a dict.
+        #
+        # ChunkIds need not be contiguous, and a chunk number can be stored
+        # twice (an upsert without chunk 0 that repeats one), so neither a gap
+        # nor a group's object count says where the document ends: after each
+        # group, ask whether any chunk lies past it.
+        groupSize = max(1, self.renderChunkSize)
+        groupStart = 0
         while True:
-            filter = {
+            groupEnd = groupStart + groupSize
+            where = {
                 '$and': [
-                    {
-                        'chunkId': {
-                            '$gte': offset,
-                        }
-                    },
-                    {
-                        'chunkId': {
-                            '$lt': offset + self.renderChunkSize,
-                        }
-                    },
-                    {
-                        'objectId': {
-                            '$eq': objectId,
-                        }
-                    },
+                    {'chunkId': {'$gte': groupStart}},
+                    {'chunkId': {'$lt': groupEnd}},
+                    {'objectId': {'$eq': objectId}},
                 ]
             }
-            results = self.collectionObj.get(where=filter, include=['documents'], limit=self.renderChunkSize)
-            # Create a renderChunkSize array with empty
-            # entries. This will allow us to join even when
-            # a chunk doesn't come back
-            text: List[str] = [''] * self.renderChunkSize
-            lastIndex = -1
-            for i in range(len(results['ids'])):
-                # Get the info
-                metadata = results['metadatas'][i]
-                content = results['documents'][i]
-                chunk = metadata.chunkId
 
-                # Should never happen since we gave it an offset
-                if chunk < offset:
-                    continue
+            pieces: Dict[int, str] = {}
+            offset = 0
+            while True:
+                results = self.collectionObj.get(
+                    where=where, include=['documents', 'metadatas'], limit=_RENDER_PAGE_SIZE, offset=offset
+                )
+                ids = results.get('ids') or []
+                metadatas = results.get('metadatas') or []
+                documents = results.get('documents') or []
+                for metadata, content in zip(metadatas, documents):
+                    chunk = (metadata or {}).get('chunkId')
+                    if not isinstance(chunk, int) or chunk < groupStart or chunk >= groupEnd:
+                        continue
+                    # Of two copies of one chunk number, the last one read is kept
+                    pieces[chunk] = content or ''
 
-                # Should never happen since we gave it a range
-                if chunk >= offset + self.renderChunkSize:
-                    continue
+                if len(ids) < _RENDER_PAGE_SIZE:
+                    break
+                offset += len(ids)
 
-                # Get the index into the array
-                index = chunk - offset
+            # Hand over the group in chunkId order; a missing chunk adds no text,
+            # and the join walks only the chunks present, not the gaps between them
+            if pieces:
+                callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
 
-                # Add it to our array
-                text[index] = content
-
-                # Determine the highest index we use
-                if index > lastIndex:
-                    lastIndex = index
-
-            # Compute the number of items we are going to process
-            numberOfItems = lastIndex + 1
-
-            # If we got no items back, we are done
-            if numberOfItems < 1:
+            # Go on only while some chunk lies past this group
+            later = self.collectionObj.get(
+                where={'$and': [{'chunkId': {'$gte': groupEnd}}, {'objectId': {'$eq': objectId}}]},
+                include=[],
+                limit=1,
+            )
+            if not later.get('ids'):
                 break
-
-            # Join it together
-            fullText = ''.join(text[0:numberOfItems])
-
-            # Call the output function
-            callback(fullText)
-
-            # If we got less than we asked for, must be done
-            if numberOfItems < self.renderChunkSize:
-                break
-
-            offset += self.renderChunkSize
+            groupStart = groupEnd
