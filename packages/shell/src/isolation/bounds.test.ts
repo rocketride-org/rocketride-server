@@ -136,6 +136,24 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		await Promise.all(calls);
 		assert.equal(reached, 12, `exactly 12 more store handles (the limit) reach the engine, ${reached} did`);
 	});
+	await tt.test('repeated adds of one monitor type are bounded, and so is the teardown work', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const run = await startRun(A);
+		const engine = t.cm.engine;
+		const results = [];
+		for (let i = 0; i < 40; i++) results.push(await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['summary'] })));
+		assert.equal(results.filter((r) => r.ok).length, 16, 'the first 16 adds of one type are admitted');
+		assert.equal(
+			results.filter((r) => !r.ok && r.message.includes('"code":"quota"')).length,
+			24,
+			'the rest are quota denials'
+		);
+		assert.equal(engine.monitorCalls.filter((c) => c.kind === 'add').length, 16, 'a denied add never reaches the engine');
+		await t.root.teardownAll(3000);
+		assert.ok(engine.monitorCalls.filter((c) => c.kind === 'remove').length <= 16, 'teardown removes once per admitted add, never more');
+	});
 	await tt.test('monitor keys', async (st) => {
 		const t = makeRoot();
 		st.after(() => t.cleanup());

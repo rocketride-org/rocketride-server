@@ -88,6 +88,8 @@ const STATUS_EVENT = 'apaevt_status_update';
 const CLIENT_EVENT_OP = 'client.event';
 /** Later lookups of a lost run (ms after the previous one): at 30 s and 150 s. After the last one answers TASK_NOT_REGISTERED the run stops counting. */
 const LOST_RUN_RETRY_MS = [30_000, 120_000];
+/** Most times one realm may add the same monitor type of a run: teardown removes once per add, so this bounds its work (the key quota only counts distinct types). */
+const MONITOR_REFS_MAX = 16;
 /** The engine's code for a project/source with no live run (`TaskError.NOT_REGISTERED`, `modules/task/types.py`). */
 const TASK_NOT_REGISTERED = 'TASK_NOT_REGISTERED';
 /** Failures raised before the request reaches the socket (`client()` here, `DAPClient.request` in the SDK): nothing was sent, so nothing can be lost. */
@@ -681,6 +683,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const types = [...new Set(params.types as string[])];
 			const counts = st.ledger.monitors.get(run!.handle) ?? new Map<string, number>();
 			const added = types.filter((t) => !counts.has(t)).length;
+			if (types.some((t) => (counts.get(t) ?? 0) >= MONITOR_REFS_MAX)) rejectWith(deny('quota', 'client.addMonitor'), 'client.addMonitor');
 			if (st.ledger.used('monitorKeys') + added > QUOTAS.monitorKeys) rejectWith(deny('quota', 'client.addMonitor'), 'client.addMonitor');
 			const release = st.ledger.reserve('monitorKeys', added);
 			const startedIn = epoch;
