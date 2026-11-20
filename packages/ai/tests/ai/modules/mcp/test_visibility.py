@@ -82,7 +82,7 @@ async def test_monitor_polls_until_terminal_state(fake_engine, monkeypatch):
     registry = ToolRegistry()
     visibility.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
@@ -109,7 +109,7 @@ async def test_monitor_terminates_on_cancelled_state(fake_engine, monkeypatch):
     registry = ToolRegistry()
     visibility.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
@@ -131,7 +131,7 @@ async def test_monitor_terminates_when_status_completed_flag_true_even_if_state_
     registry = ToolRegistry()
     visibility.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
@@ -197,7 +197,7 @@ async def test_monitor_polls_counter_matches_call_count(fake_engine, monkeypatch
     registry = ToolRegistry()
     visibility.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
@@ -213,7 +213,7 @@ async def test_monitor_default_counts_when_status_lacks_them(fake_engine, monkey
     registry = ToolRegistry()
     visibility.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 
@@ -234,7 +234,7 @@ async def test_monitor_single_poll_timeout_returns_current_snapshot_not_hard_err
     registry = ToolRegistry()
     visibility.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('monitor')(fake_engine, tasks, {'address': 'tok-1'})
 

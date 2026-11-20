@@ -105,99 +105,93 @@ async def _upload(app, upload_url, **kwargs):
     return await app.post(urlsplit(upload_url).path, files=files, **kwargs)
 
 
-# --- the registry: nonces live and die with the task ----------------------
+# --- the registry: nonces live and die with the RUN (its control id) -------
+
+ADDRESS = 'acme.proj.src'
 
 
 def test_registry_issues_a_nonce_only_for_a_tracked_task():
     tasks = TaskRegistry()
     with pytest.raises(KeyError):
-        tasks.issue_upload_nonce('tok-1', 'rr_x')
-    tasks.add('tok-1', pipeline_ref='<inline>')
-    nonce = tasks.issue_upload_nonce('tok-1', 'rr_x')
+        tasks.issue_upload_nonce(ADDRESS, 'rr_x')
+    tasks.add(ADDRESS, instance='c1', pipeline_ref='<inline>')
+    nonce = tasks.issue_upload_nonce(ADDRESS, 'rr_x')
     assert nonce and '/' not in nonce and '?' not in nonce
+    # the control id names the same entry: every MCP verb hands the registry a control id
+    assert tasks.get('c1') == tasks.get(ADDRESS) == {'token': ADDRESS, 'instance': 'c1', 'pipeline_ref': '<inline>'}
+    assert tasks.instance_of(ADDRESS) == tasks.instance_of('c1') == 'c1'
+    assert tasks.issue_upload_nonce('c1', 'rr_x')
 
 
 def test_registry_nonce_is_redeemed_exactly_once():
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    nonce = tasks.issue_upload_nonce('tok-1', None)
-    assert tasks.consume_upload_nonce(nonce) == {'token': 'tok-1', 'caller_auth': None, 'generation': 1}
+    tasks.add(ADDRESS, instance='c1')
+    nonce = tasks.issue_upload_nonce(ADDRESS, None)
+    assert tasks.consume_upload_nonce(nonce) == {'token': ADDRESS, 'instance': 'c1', 'caller_auth': None}
     assert tasks.consume_upload_nonce(nonce) is None
     assert tasks.consume_upload_nonce('never-issued') is None
 
 
-def test_registry_remove_drops_the_tasks_nonces_and_keeps_the_others():
+def test_registry_remove_by_either_handle_drops_the_tasks_nonces_and_keeps_the_others():
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    tasks.add('tok-2')
-    gone = tasks.issue_upload_nonce('tok-1', 'rr_a')
-    kept = tasks.issue_upload_nonce('tok-2', 'rr_b')
-    tasks.remove('tok-1')
+    tasks.add(ADDRESS, instance='c1')
+    tasks.add('other.proj.src', instance='c2')
+    gone = tasks.issue_upload_nonce(ADDRESS, 'rr_a')
+    kept = tasks.issue_upload_nonce('other.proj.src', 'rr_b')
+    tasks.remove('c1')  # terminate names the control id
+    assert tasks.get(ADDRESS) is None and tasks.instance_of('c1') is None
     assert tasks.consume_upload_nonce(gone) is None
-    assert tasks.consume_upload_nonce(kept) == {'token': 'tok-2', 'caller_auth': 'rr_b', 'generation': 1}
+    assert tasks.consume_upload_nonce(kept) == {'token': 'other.proj.src', 'instance': 'c2', 'caller_auth': 'rr_b'}
 
 
 def test_registry_eviction_drops_the_evicted_tasks_nonces(monkeypatch):
     monkeypatch.setattr(registry_mod, 'MAX_TASKS', 2)
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    nonce = tasks.issue_upload_nonce('tok-1', None)
-    tasks.add('tok-2')
-    tasks.add('tok-3')  # evicts tok-1
-    assert tasks.get('tok-1') is None
+    tasks.add(ADDRESS, instance='c1')
+    nonce = tasks.issue_upload_nonce(ADDRESS, None)
+    tasks.add('b.proj.src', instance='c2')
+    tasks.add('c.proj.src', instance='c3')  # evicts ADDRESS
+    assert tasks.get(ADDRESS) is None
     assert tasks.consume_upload_nonce(nonce) is None
 
 
-def test_registry_re_add_of_the_same_live_instance_keeps_the_tasks_nonces():
-    """`use_existing` attached to the LIVE instance (use() said reused): the nonce stays valid."""
+def test_registry_re_add_of_the_same_run_keeps_the_tasks_nonces():
+    """`use_existing` attached to the LIVE run: use() answers the same control id, the nonce stays valid."""
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    nonce = tasks.issue_upload_nonce('tok-1', None)
-    tasks.add('tok-1', same_instance=True, pipeline_ref='<inline>')
-    assert tasks.consume_upload_nonce(nonce) == {'token': 'tok-1', 'caller_auth': None, 'generation': 1}
+    tasks.add(ADDRESS, instance='c1')
+    nonce = tasks.issue_upload_nonce(ADDRESS, None)
+    tasks.add(ADDRESS, instance='c1', pipeline_ref='<inline>')
+    assert tasks.consume_upload_nonce(nonce) == {'token': ADDRESS, 'instance': 'c1', 'caller_auth': None}
 
 
-def test_registry_new_launch_at_the_same_address_drops_the_earlier_runs_nonces():
+def test_registry_new_run_at_the_same_address_drops_the_earlier_runs_nonces():
     """The address is reused by the next run of the same project/source and the
-    engine never calls remove on expiry: a fresh launch (the default add) is a
-    new instance, so the earlier run's nonce must not redeem into it.
+    engine never calls remove on expiry: a different control id at the address
+    is a new run, so the earlier run's nonce must not redeem into it.
     """
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    stale = tasks.issue_upload_nonce('tok-1', 'rr_first_caller')
-    tasks.add('tok-1', pipeline_ref='<inline>')
+    tasks.add(ADDRESS, instance='c1')
+    stale = tasks.issue_upload_nonce(ADDRESS, 'rr_first_caller')
+    tasks.add(ADDRESS, instance='c2', pipeline_ref='<inline>')
     assert tasks.consume_upload_nonce(stale) is None
-    assert tasks.get('tok-1') is not None
+    assert tasks.instance_of(ADDRESS) == 'c2' and tasks.get('c1') is None
 
 
-def test_registry_generation_bumps_on_a_fresh_add_and_holds_on_the_same_instance():
-    tasks = TaskRegistry()
-    assert tasks.generation_of('tok-1') is None
-    tasks.add('tok-1')
-    first = tasks.generation_of('tok-1')
-    tasks.add('tok-1', same_instance=True)
-    assert tasks.generation_of('tok-1') == first
-    tasks.add('tok-1')
-    assert tasks.generation_of('tok-1') == first + 1
-    tasks.remove('tok-1')
-    assert tasks.generation_of('tok-1') is None
-
-
-def test_registry_refuses_a_replacement_link_for_a_superseded_generation():
-    """The replacement link a redeemed nonce buys must name the instance that
-    nonce was minted for: after a fresh launch took the address over, the
-    old generation is refused; a same_instance re-add keeps it current.
+def test_registry_refuses_a_replacement_link_for_a_superseded_run():
+    """The replacement link a redeemed nonce buys must name the run that nonce
+    was minted for: after a fresh launch took the address over, the old control
+    id is refused; a same-run re-add keeps it current.
     """
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    bound = tasks.consume_upload_nonce(tasks.issue_upload_nonce('tok-1', 'rr_a'))
-    assert bound == {'token': 'tok-1', 'caller_auth': 'rr_a', 'generation': tasks.generation_of('tok-1')}
-    tasks.add('tok-1', same_instance=True)
-    assert tasks.issue_upload_nonce('tok-1', 'rr_a', generation=bound['generation'])
-    tasks.add('tok-1')  # a fresh launch at the same address
+    tasks.add(ADDRESS, instance='c1')
+    bound = tasks.consume_upload_nonce(tasks.issue_upload_nonce(ADDRESS, 'rr_a'))
+    assert bound == {'token': ADDRESS, 'instance': 'c1', 'caller_auth': 'rr_a'}
+    tasks.add(ADDRESS, instance='c1')
+    assert tasks.issue_upload_nonce(ADDRESS, 'rr_a', instance=bound['instance'])
+    tasks.add(ADDRESS, instance='c2')  # a fresh launch at the same address
     with pytest.raises(KeyError):
-        tasks.issue_upload_nonce('tok-1', 'rr_a', generation=bound['generation'])
-    assert tasks.issue_upload_nonce('tok-1', 'rr_b')  # unqualified minting (run_dropper_pipe) is unaffected
+        tasks.issue_upload_nonce(ADDRESS, 'rr_a', instance=bound['instance'])
+    assert tasks.issue_upload_nonce(ADDRESS, 'rr_b')  # unqualified minting (run_dropper_pipe) is unaffected
 
 
 def test_allocate_keys_never_shadows_a_submitted_key():
@@ -220,10 +214,10 @@ def test_dropper_csp_admits_the_mcp_origin_next_to_the_engine_origin(tmp_path):
 def test_registry_caps_live_nonces_per_task_oldest_first(monkeypatch):
     monkeypatch.setattr(registry_mod, 'MAX_UPLOAD_NONCES_PER_TASK', 2)
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    first = tasks.issue_upload_nonce('tok-1', None)
-    second = tasks.issue_upload_nonce('tok-1', None)
-    third = tasks.issue_upload_nonce('tok-1', None)
+    tasks.add(ADDRESS, instance='c1')
+    first = tasks.issue_upload_nonce(ADDRESS, None)
+    second = tasks.issue_upload_nonce(ADDRESS, None)
+    third = tasks.issue_upload_nonce(ADDRESS, None)
     assert tasks.consume_upload_nonce(first) is None
     assert tasks.consume_upload_nonce(second) is not None
     assert tasks.consume_upload_nonce(third) is not None
@@ -547,7 +541,7 @@ async def test_streaming_oversize_is_cut_off_before_buffering_and_nothing_is_for
 
     monkeypatch.setattr(apps, 'MAX_UPLOAD_BYTES', 16)
     tasks = TaskRegistry()
-    tasks.add('tok-1')
+    tasks.add(ADDRESS, instance='c1')
     clients = []
 
     def factory():
@@ -561,7 +555,7 @@ async def test_streaming_oversize_is_cut_off_before_buffering_and_nothing_is_for
         return client
 
     async def drive(content_type, chunks):
-        nonce = tasks.issue_upload_nonce('tok-1', 'rr_x')
+        nonce = tasks.issue_upload_nonce(ADDRESS, 'rr_x')
         pending = [{'type': 'http.request', 'body': chunk, 'more_body': True} for chunk in chunks]
         pending.append({'type': 'http.request', 'body': b'', 'more_body': False})
 
@@ -616,21 +610,25 @@ async def test_colliding_field_names_all_land_in_the_result_map(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_a_new_run_at_the_same_address_refuses_the_old_nonce_and_use_existing_keeps_it(monkeypatch):
-    """use() answers `reused: True` only when use_existing attached to the live
-    instance; a fresh launch at the same address is a new instance and the
-    earlier run's nonce must not upload into it.
+    """use() answers the run's control id in its token slot: the same id when
+    use_existing attached to the live run, a new one for a fresh launch at the
+    same address -- and the earlier run's nonce must not upload into that.
     """
     import ai.modules.mcp as mcp_module
 
     from .conftest import FakeEngineClient, FakeWebServer
 
     built = []
+    runs = {'live': None, 'count': 0}
 
     def _make(config, on_event=None):
         client = FakeEngineClient(env_keys=[], auth=config.get('rocketride_auth'))
 
         async def _use(**kwargs):
-            return {'token': 'tok-1', 'projectId': 'p', 'source': 's', 'reused': bool(kwargs.get('use_existing'))}
+            if not (kwargs.get('use_existing') and runs['live']):
+                runs['count'] += 1
+                runs['live'] = f'c{runs["count"]}'
+            return {'token': runs['live'], 'address': ADDRESS, 'projectId': 'p', 'source': 's'}
 
         client.use = _use
         built.append(client)
@@ -650,15 +648,17 @@ async def test_a_new_run_at_the_same_address_refuses_the_old_nonce_and_use_exist
                 result = _tool_result(
                     await app.post('/mcp', json=_tools_call('run_dropper_pipe', args), headers=headers)
                 )
-                assert result['ok'] is True and result['address'] == 'tok-1'
+                assert result['ok'] is True and result['address'] == runs['live']
                 return result['upload_url']
 
             first = await start()
-            attached = await start(use_existing=True)  # the same live instance: both links stay good
+            attached = await start(use_existing=True)  # the same live run (same control id): both links stay good
             assert (await _upload(app, first)).status_code == 200
-            relaunched = await start()  # a fresh launch at the same address: a new instance
+            relaunched = await start()  # a fresh launch at the same address: a new control id
             assert (await _upload(app, attached)).status_code == 404
             assert (await _upload(app, relaunched)).status_code == 200
+            # every forwarded upload named the RUN it was minted for, never the address
+            assert [c.sent[0]['token'] for c in built if c.sent] == ['c1', 'c2']
     finally:
         for handler in srv.app.router.on_shutdown:
             await handler()
@@ -681,8 +681,8 @@ async def _drive_renewal(monkeypatch, between, *, oversize=False):
 
     monkeypatch.setattr(apps, 'MAX_UPLOAD_BYTES', 16)
     tasks = TaskRegistry()
-    tasks.add('tok-1')
-    nonce = tasks.issue_upload_nonce('tok-1', 'rr_x')
+    tasks.add(ADDRESS, instance='c1')
+    nonce = tasks.issue_upload_nonce(ADDRESS, 'rr_x')
 
     def factory():
         client = FakeEngineClient()
@@ -710,23 +710,21 @@ async def _drive_renewal(monkeypatch, between, *, oversize=False):
 
 @pytest.mark.asyncio
 async def test_a_fresh_launch_between_redeem_and_renewal_gets_no_replacement_link(monkeypatch):
-    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add('tok-1'))
+    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add(ADDRESS, instance='c2'))
     assert status == 200 and body['status'] == 'OK'
     assert 'upload_url' not in body
 
-    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add('tok-1'), oversize=True)
+    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add(ADDRESS, instance='c2'), oversize=True)
     assert status == 413
     assert 'upload_url' not in body
 
 
 @pytest.mark.asyncio
 async def test_a_same_instance_re_add_between_redeem_and_renewal_keeps_the_replacement_link(monkeypatch):
-    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add('tok-1', same_instance=True))
+    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add(ADDRESS, instance='c1'))
     assert status == 200
     assert body['upload_url'].startswith('http://mcp.test/mcp/upload/')
 
-    status, body = await _drive_renewal(
-        monkeypatch, lambda tasks: tasks.add('tok-1', same_instance=True), oversize=True
-    )
+    status, body = await _drive_renewal(monkeypatch, lambda tasks: tasks.add(ADDRESS, instance='c1'), oversize=True)
     assert status == 413
     assert body['upload_url'].startswith('http://mcp.test/mcp/upload/')

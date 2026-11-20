@@ -300,20 +300,24 @@ async def _parts_of(request: Request) -> List[Tuple[str, str, bytes, str]]:
     return parts
 
 
-async def _forward_part(client: Any, address: str, part: Tuple[str, str, bytes, str]) -> Tuple[str, Any]:
-    """Send one part into the task on the caller's control; an exception is the result."""
+async def _forward_part(client: Any, control_id: str, part: Tuple[str, str, bytes, str]) -> Tuple[str, Any]:
+    """Send one part into the run on the caller's control; an exception is the result.
+
+    The data OPEN names the CONTROL ID (plan section 1), the run the nonce
+    was minted for -- never the address, which a later run would answer.
+    """
     unique_key, filename, payload, mimetype = part
     try:
         outcome = await client.send(
-            address, payload, objinfo={'name': filename, 'size': len(payload)}, mimetype=mimetype
+            control_id, payload, objinfo={'name': filename, 'size': len(payload)}, mimetype=mimetype
         )
     except Exception as exc:  # noqa: BLE001 - reported per object, as the task data door does
         return unique_key, exc
     return unique_key, outcome
 
 
-async def _forward_upload(client: Any, address: str, request: Request) -> Dict[str, Any]:
-    """Forward every part of ``request`` into ``address`` and build the result map.
+async def _forward_upload(client: Any, control_id: str, request: Request) -> Dict[str, Any]:
+    """Forward every part of ``request`` into the run ``control_id`` and build the result map.
 
     The map is the shape the widget renders -- ``{objectsRequested,
     objectsCompleted, resultTypes, objects}`` -- with each object's pipe
@@ -328,7 +332,7 @@ async def _forward_upload(client: Any, address: str, request: Request) -> Dict[s
         'resultTypes': {},
         'objects': {},
     }
-    for unique_key, outcome in await asyncio.gather(*(_forward_part(client, address, part) for part in parts)):
+    for unique_key, outcome in await asyncio.gather(*(_forward_part(client, control_id, part) for part in parts)):
         if isinstance(outcome, Exception):
             result['objects'][unique_key] = formatException(outcome).model_dump()
             continue
@@ -364,8 +368,8 @@ async def handle_upload(
        NEXT ``upload_url`` on this server's origin: the redeemed nonce is
        spent, and the widget's "drop more files" needs a fresh one. No next
        URL is issued once the task has left the tracker or a fresh launch has
-       taken its address over (the registry generation the nonce was minted
-       for must still be current; a ``use_existing`` re-add keeps it).
+       taken its address over (the control id the nonce was minted for must
+       still be the one tracked there; a ``use_existing`` re-add keeps it).
 
     Args:
         request: The incoming request; ``nonce`` is its path parameter.
@@ -395,7 +399,7 @@ async def handle_upload(
             'unknown or already used upload nonce; call run_dropper_pipe again for a fresh upload_url',
             httpStatus=404,
         )
-    address, caller_auth, generation = bound['token'], bound['caller_auth'], bound['generation']
+    address, instance, caller_auth = bound['token'], bound['instance'], bound['caller_auth']
 
     # 3. the caller's own engine client, 4. forward
     auth_token = identity.CALLER_AUTH.set(caller_auth)
@@ -404,14 +408,14 @@ async def handle_upload(
     try:
         client = engine_factory()
         try:
-            data = await _forward_upload(client, address, request)
+            data = await _forward_upload(client, instance, request)
         except UploadTooLarge:
             # this request spent its nonce; while the SAME instance is still
             # tracked, hand out the next link with the refusal. A fresh launch
             # that took the address over meanwhile gets no link: it would carry
             # this request's caller into a run that is not theirs
             try:
-                return _too_large(mcp_origin, tasks.issue_upload_nonce(address, caller_auth, generation=generation))
+                return _too_large(mcp_origin, tasks.issue_upload_nonce(address, caller_auth, instance=instance))
             except KeyError:
                 return _too_large(mcp_origin, None)
         except Exception as exc:  # noqa: BLE001 - the body could not be read or split; same envelope as the door
@@ -433,7 +437,7 @@ async def handle_upload(
     content = ResultSuccess(data=data).model_dump(exclude_none=True)
     try:
         content['upload_url'] = upload_url(
-            mcp_origin, tasks.issue_upload_nonce(address, caller_auth, generation=generation)
+            mcp_origin, tasks.issue_upload_nonce(address, caller_auth, instance=instance)
         )
     except KeyError:
         pass

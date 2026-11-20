@@ -223,7 +223,7 @@ async def test_build_mcp_server_uses_passed_in_task_registry(monkeypatch, fake_e
     from ai.modules.mcp.registry import TaskRegistry
 
     tasks = TaskRegistry()
-    tasks.add('preexisting-token', pipeline_ref='/tmp/a.pipe')
+    tasks.add('preexisting-token', instance='c1', pipeline_ref='/tmp/a.pipe')
 
     def _register_all(registry):
         @registry.register('registry_probe', 'desc', _dummy_schema())

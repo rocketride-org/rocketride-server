@@ -133,10 +133,10 @@ def test_harderror_default_error_type():
 def test_task_registry_add_get_list_remove():
     reg = TaskRegistry()
 
-    reg.add('tok-1', pipeline_ref='/tmp/a.pipe')
+    reg.add('tok-1', instance='c1', pipeline_ref='/tmp/a.pipe')
 
-    assert reg.get('tok-1') == {'token': 'tok-1', 'pipeline_ref': '/tmp/a.pipe'}
-    assert reg.list() == [{'token': 'tok-1', 'pipeline_ref': '/tmp/a.pipe'}]
+    assert reg.get('tok-1') == {'token': 'tok-1', 'instance': 'c1', 'pipeline_ref': '/tmp/a.pipe'}
+    assert reg.list() == [{'token': 'tok-1', 'instance': 'c1', 'pipeline_ref': '/tmp/a.pipe'}]
 
     reg.remove('tok-1')
 
@@ -158,8 +158,8 @@ def test_task_registry_remove_missing_is_a_noop():
 
 def test_task_registry_list_returns_multiple_entries():
     reg = TaskRegistry()
-    reg.add('tok-1', pipeline_ref='a')
-    reg.add('tok-2', pipeline_ref='b')
+    reg.add('tok-1', instance='c1', pipeline_ref='a')
+    reg.add('tok-2', instance='c2', pipeline_ref='b')
 
     tokens = {entry['token'] for entry in reg.list()}
 

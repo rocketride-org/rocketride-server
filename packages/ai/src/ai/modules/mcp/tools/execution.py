@@ -153,13 +153,18 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
 
+    # The token slot carries the control id of THIS run (plan section 1); the
+    # address beside it is stable across runs. The registry keys on the
+    # address and tracks the run by its control id, so a use_existing attach
+    # (same control id) refreshes the entry and a fresh launch replaces it
     token = started.get('token')
-    if not token:
+    address = started.get('address')
+    if not token or not address:
         return _bad(
-            'engine did not return a task address',
+            'engine did not return a task address and control id',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    tasks.add(token, same_instance=bool(started.get('reused')), pipeline_ref='<inline>')
+    tasks.add(address, instance=token, pipeline_ref='<inline>')
 
     result_payload: Dict[str, Any] = {'ok': True, 'address': token}
     result_payload['projectId'] = started.get('projectId')
@@ -217,18 +222,21 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
 
-    address = started.get('token')
-    if not address:
+    token = started.get('token')
+    address = started.get('address')
+    if not token or not address:
         return _bad(
-            'engine did not return a task address for the dropper URL',
+            'engine did not return a task address and control id for the dropper URL',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    # A fresh launch is a new task instance at this address: earlier nonces
-    # die with the instance that issued them; use_existing keeps them
-    tasks.add(address, same_instance=bool(started.get('reused')), pipeline_ref='<inline>')
+    # The run is tracked at its address by its control id: a fresh launch is
+    # a new instance and the earlier run's nonces die with it; a use_existing
+    # attach (same control id) keeps them
+    tasks.add(address, instance=token, pipeline_ref='<inline>')
 
-    # The nonce binds this task to the caller identity the route will forward
-    # as (None on the shared-client path, where the route uses that client too)
+    # The nonce binds this run (its control id) to the caller identity the
+    # route will forward as (None on the shared-client path, where the route
+    # uses that client too)
     nonce = tasks.issue_upload_nonce(address, identity.CALLER_AUTH.get())
 
     # upload_url points at THIS MCP server -- the only place that holds the
@@ -238,9 +246,11 @@ async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
     if not mcp_origin:
         raise RuntimeError('MCP origin is not bound: run_dropper_pipe runs only under handle_mcp')
     base_url = str(client.base_url).rstrip('/')
+    # `address` in the result is what send_data/terminate/monitor take -- the
+    # control id, as for run_pipeline; the dropper deep link names the pipe
     result_payload: Dict[str, Any] = {
         'ok': True,
-        'address': address,
+        'address': token,
         'upload_url': upload_url(mcp_origin, nonce),
         'dropper_url': f'{base_url}/?appid=rocketride.dropper&pipe={address}',
         'projectId': started.get('projectId'),
