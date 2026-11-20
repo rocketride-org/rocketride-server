@@ -1225,7 +1225,10 @@ class TaskServer(DAPBase):
             return False
         except Exception as e:
             if subject and authz is not None:
-                conn._authz_verified_at = 0.0
+                # Only the identity this rebuild started from is marked: a newer auth that
+                # landed during the await owns its own stamp, and a deauthed socket has none.
+                if conn._account_info is info and getattr(conn, '_authenticated', False):
+                    conn._authz_verified_at = 0.0
                 failed = self.count_authz('read_failed')
                 warning(
                     f'[AUTHZ] {label} rebuild failed conn={conn.get_connection_id()} user={info.userId} '

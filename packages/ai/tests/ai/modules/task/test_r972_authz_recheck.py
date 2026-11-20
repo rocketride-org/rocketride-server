@@ -616,3 +616,35 @@ async def test_r972_1b_debugger_events_skip_unauthenticated_connections(monkeypa
         await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
 
         assert events(debugger, 'stopped') == []
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rebuild_for_an_old_identity_does_not_unverify_a_newer_one(monkeypatch):
+    """A rebuild of identity A that fails after a newer auth installed identity B leaves B's stamp alone."""
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    newer = identity('admin', ADMIN)
+    account.fail_rebuild = RuntimeError('database unavailable')
+
+    def newer_auth_lands():
+        conn._account_info = newer
+        conn._authz_verified_at = clock.now
+
+    account.during_rebuild = newer_auth_lands
+
+    await server.push_account_update('admin')
+
+    assert conn._account_info is newer
+    assert conn._authz_verified_at == clock.now, "the newer identity's verification stamp was overwritten"
+    conn._transport.disconnect.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rebuild_for_the_current_identity_still_marks_it_unverified(monkeypatch):
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    account.fail_rebuild = RuntimeError('database unavailable')
+
+    await server.push_account_update('admin')
+
+    assert conn._authz_verified_at == 0.0
