@@ -1033,7 +1033,8 @@ async def _caller_answer(token: str, app_id: str) -> dict:
     verdict = None
     if entry is not None and 'isolated' in entry:
         verdict = Verdict(isolated=entry['isolated'] is True, firstParty=entry.get('firstParty') is True)
-    return _remember(_verdict_cache, key, app_id, verdict=verdict, org=org_id)
+    bound = entry.get('registryVersion') if entry is not None else None
+    return _remember(_verdict_cache, key, app_id, verdict=verdict, org=org_id, registryVersion=bound)
 
 
 async def version_verdict(token: str, app_id: str) -> Optional[Verdict]:
@@ -1245,6 +1246,13 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
         user_id, org_id, _ = _identity_of(info)
         dirs = await token_version_dirs(user_id, org_id, app_id)
     else:
+        # The public pin both supplied the verdict above and names the ONE
+        # version an anonymous caller may load: a built, ready version with
+        # no public binding (open OSS serving lists every built version) is
+        # not advertised as a public frame.
+        pinned = (await _caller_answer('', app_id)).get('registryVersion')
+        if type(pinned) is not int or pinned != version:
+            return None
         dirs = await public_version_dirs(app_id, version)
     dist_dir = dirs.get(version)
     facts = await _version_facts(app_id, version, dist_dir) if dist_dir else None

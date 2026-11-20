@@ -297,6 +297,17 @@ def test_apps_frame_anonymous_public_only(world):
         assert resp.status_code == 404, app_id
 
 
+def test_apps_frame_anonymous_oss_needs_a_public_binding_for_that_version(world, monkeypatch):
+    """T29: OSS lists every built version; an unbound ready v1 is not a public frame beside a public v2 pin."""
+    reg = world.registry
+    reg.add('acme.ossthird', 1, org='local')
+    reg.add('acme.ossthird', 2, org='local')
+    reg.rows = [r for r in reg.rows if not (r['appId'] == 'acme.ossthird' and r['version'] == 1)]  # v1: built, unbound
+    reg.install(monkeypatch, saas=False)
+    assert world.frame('acme.ossthird', 2, auth=False).status_code == 200
+    assert world.frame('acme.ossthird', 1, auth=False).status_code == 404
+
+
 def test_apps_frame_anonymous_does_not_get_a_user_token(world):
     """T29: an anonymous answer never contains a token path."""
     body = world.frame(THIRD, auth=False).json()
