@@ -462,6 +462,24 @@ def describe_login_key_expiry(expires_at: Optional[str]) -> str:
     return f' It expires on {utc_day(expires_at)} (bounded by your sign-in session); run `rocketride login` again before then.'
 
 
+def minted_key_expiry_note(minted: dict) -> str:
+    """
+    The expiry sentence for the key ``account.create_key()`` returned.
+
+    Args:
+        minted: The ``create_key()`` result. ``expiresAt`` is absent when the
+            server did not report an expiry (print nothing, claim nothing),
+            None when the key does not expire, else the granted timestamp.
+
+    Returns:
+        A sentence to append to the "minted API key" line, or '' when the
+        server did not report an expiry.
+    """
+    if 'expiresAt' not in minted:
+        return ''
+    return describe_login_key_expiry(minted['expiresAt'])
+
+
 async def _sign_in_saas(uri: str, out: Output) -> str:
     """
     Sign in to a saas server and mint a durable API key for ``.env``.
@@ -533,7 +551,7 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
         if not key:
             raise RuntimeError('Sign-in succeeded but the server minted no API key')
         display = result.get('displayName', '')
-        expiry = describe_login_key_expiry(minted['expiresAt']) if 'expiresAt' in minted else ''
+        expiry = minted_key_expiry_note(minted)
         out.line(f'Signed in{f" as {display}" if display else ""}; minted API key {key_name!r}.{expiry}')
         page = _render_callback_page(True, web_url=web_url)
         return key
