@@ -61,6 +61,7 @@ import { ToolGlyph } from './surfaces/devtools/ToolGlyph';
 import { useDevToolPins } from './surfaces/devtools/devToolPins';
 import { CodiconExtensions } from 'shared/components/icons/Codicon';
 import { AgentSession } from 'shared/modules/agent/agent';
+import { AGENT_ENABLED } from 'shared/tools/agent/enabled';
 import { registerRocketHostOps } from './ops/hostOps';
 import { registerRocketFsOps } from './ops/fsOps';
 import { registerRocketAppDevOps } from './ops/appdevOps';
@@ -336,7 +337,10 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 				const live = /^[a-z][a-zA-Z]*:/.test(uri)
 					? LIVE_PREFIXES.some((p) => uri.startsWith(p))
 					: uri === 'desktop' || uri.includes('/') || uri.includes('.');
-				if (!live) docs.discardDocument(uri);
+				// The agent is gated off: its restored tabs would hang on "Loading"
+				// (tool:) or point at an Agent tab that no longer exists (intro:).
+				const hiddenAgent = !AGENT_ENABLED && (uri === 'tool:agent' || uri.startsWith('tool:agent/') || uri === 'intro:agent');
+				if (!live || hiddenAgent) docs.discardDocument(uri);
 			}
 		}
 
@@ -344,7 +348,7 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		// conversation — the startup surface. Only when NO tabs were restored:
 		// an existing session's tabs come back exactly as left.
 		const restored = docs.getState();
-		if (Object.keys(restored.editors).length === 0) {
+		if (AGENT_ENABLED && Object.keys(restored.editors).length === 0) {
 			const session = AgentSession.newSession();
 			docs.openStaticDocument(`tool:agent/${session.sessionId}`, session.title);
 		}
@@ -401,7 +405,8 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 	const scmNode = useMemo(() => <ScmProvider />, []);
 
 	// The workbench rail containers, VS Code's order: Explorer first, then
-	// Source Control, then this platform's modes. Agent carries isDefault —
+	// Source Control, then this platform's modes. Agent carries isDefault
+	// (Apps does while AGENT_ENABLED is off) —
 	// rail POSITION and startup view are independent. The four mode
 	// containers are deliberately WITHOUT content: they share the one
 	// SidebarProvider node above, which mirrors the rail's selection through
@@ -425,8 +430,8 @@ const RocketApp: React.FC<ShellAppProps> = (_props) => {
 		return [
 			{ id: 'explorer', title: 'Explorer', icon: <CodiconFiles size={20} />, content: explorerNode },
 			{ id: 'scm', title: 'Source Control', icon: <CodiconSourceControl size={20} />, content: scmNode, ...(pendingCount > 0 ? { badge: pendingCount } : {}) },
-			{ id: 'agent', title: 'Agent', icon: <AgentIcon size={20} />, isDefault: true },
-			{ id: 'apps', title: 'Apps', icon: <AppsIcon size={20} /> },
+			...(AGENT_ENABLED ? [{ id: 'agent', title: 'Agent', icon: <AgentIcon size={20} />, isDefault: true }] : []),
+			{ id: 'apps', title: 'Apps', icon: <AppsIcon size={20} />, ...(AGENT_ENABLED ? {} : { isDefault: true }) },
 			{ id: 'nodes', title: 'Nodes', icon: <CodiconCircuitBoard size={20} /> },
 			{ id: 'pipelines', title: 'Pipelines', icon: <CodiconTypeHierarchy size={20} /> },
 			...toolViews,
