@@ -18,8 +18,8 @@ on:
 jobs:
   sanitize:
     name: Ubuntu 22.04
-    # About 3x the 59 min of a local Sanitize build + tests (32 cores); a compiling Release run takes 42 min here (4 cores).
-    timeout-minutes: 180
+    # Runs took 39 and 56 min. A PR that changes vcpkg ports may need a re-run once Build has filled the cache.
+    timeout-minutes: 120
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -82,8 +82,7 @@ jobs:
 
       # The clang-18 that the regular Linux build installs (so the vcpkg binary
       # cache matches), plus llvm-symbolizer for file and line in the reports and
-      # the sanitizer runtime. The test program proves that clang links a
-      # sanitized program and that it runs on this runner.
+      # the sanitizer runtime.
       - name: Install the toolchain
         run: |
           set -euo pipefail
@@ -96,14 +95,53 @@ jobs:
             echo "::error::$symbolizer is missing after installing llvm-18"
             exit 1
           fi
-          smoke="$RUNNER_TEMP/sanitizer-smoke"
-          printf 'int main() { return 0; }\n' > "$smoke.cpp"
-          if ! clang++ -fsanitize=address,undefined "$smoke.cpp" -o "$smoke"; then
-            echo "::error::clang++ cannot link a program with -fsanitize=address,undefined (sanitizer runtime missing?)"
+          echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+
+      # Without a planted error, a job that silently loses its reports (options
+      # not parsed, report script no longer parsing) would end green. The
+      # canary has one heap-buffer-overflow and one
+      # signed-integer-overflow. It is compiled with the sanitizer flags of the
+      # Sanitize build type (packages/server/cmake/flags/x64-linux-clang-rocketride.cmake),
+      # not its whole flag set, and run with the job's options plus its own
+      # log_path (a later option value wins). Its reports go to their own folder,
+      # which the report script reads in full, so the program and the summary
+      # file sit beside it. The summary goes to a throwaway file so the canary
+      # stays out of the job summary; in that mode the script prints one
+      # tab-separated line per group (count, sanitizer, kind, location) on stdout.
+      - name: Canary, a planted error must be reported
+        run: |
+          set -euo pipefail
+          canary_dir="$RUNNER_TEMP/sanitizer-canary"
+          canary_exe="$RUNNER_TEMP/sanitizer-canary-exe"
+          mkdir -p "$canary_dir"
+          # -g -O1 -fno-omit-frame-pointer give the reports file, line and frames.
+          if ! clang++ -fsanitize=address,undefined -fsanitize-recover=address -fno-sanitize=vptr \
+            -g -O1 -fno-omit-frame-pointer scripts/ci/sanitizer-canary.cpp -o "$canary_exe"; then
+            echo "::error::clang++ cannot build a program with -fsanitize=address,undefined (sanitizer runtime missing?)"
             exit 1
           fi
-          "$smoke"
-          echo "ASAN_SYMBOLIZER_PATH=$symbolizer" >> "$GITHUB_ENV"
+          for options in "$ASAN_OPTIONS" "$UBSAN_OPTIONS"; do
+            if [[ "$options" != *log_path=* ]]; then
+              echo "::error::the job's ASAN_OPTIONS or UBSAN_OPTIONS has no log_path, so the job would lose its reports"
+              exit 1
+            fi
+          done
+          export ASAN_OPTIONS="$ASAN_OPTIONS:log_path=$canary_dir/report"
+          export UBSAN_OPTIONS="$UBSAN_OPTIONS:log_path=$canary_dir/report"
+          "$canary_exe" > /dev/null 2>&1 || true
+          code=0
+          # The script's own ::error:: line (stderr) would show as an error on the
+          # expected exit code 1, so it is kept for the failure message only.
+          err="$RUNNER_TEMP/sanitizer-canary-stderr.txt"
+          out=$(GITHUB_STEP_SUMMARY="$RUNNER_TEMP/sanitizer-canary-summary.md" \
+            node scripts/ci/sanitizer-report.mjs "$canary_dir" 2> "$err") || code=$?
+          kinds=$(awk -F'\t' 'NF >= 3 { print $3 }' <<< "$out" | sort | paste -sd' ')
+          if [ "$code" -ne 1 ] || [ "$kinds" != "heap-buffer-overflow signed-integer-overflow" ]; then
+            echo "::error::the sanitizer job cannot see errors: the canary's planted errors were not reported as expected (report script exit code $code, groups: ${kinds:-none}; wanted exit code 1 with exactly heap-buffer-overflow and signed-integer-overflow)"
+            echo "$out"
+            cat "$err"
+            exit 1
+          fi
 
       - name: Build
         run: ./builder server:build nodes:build --cmake-config=Sanitize --nodownload --verbose --autoinstall --system-compiler
@@ -171,7 +209,7 @@ jobs:
         run: bash scripts/ci/check-sanitizer-symbols.sh dist/server/aptest dist/server/engtest dist/server/nodetest
 
       # Under halt_on_error=0 the programs exit 0 after a report, so this step is
-      # what fails the job: it exits 1 when any report was written.
+      # what fails the job: it exits 1 when any report is not on the script's known list.
       - name: Fail on sanitizer reports
         if: always() && env.SANITIZER_REPORT_DIR != ''
         run: node scripts/ci/sanitizer-report.mjs "$SANITIZER_REPORT_DIR"
