@@ -1,5 +1,7 @@
 # RocketRide — Start Here
 
+RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
+
 RocketRide is a platform for building **AI solutions**, and a solution usually has
 three layers:
 
@@ -8,8 +10,8 @@ three layers:
 - One or more **pipelines** — the intelligence: portable `.pipe` JSON files that
   wire pipeline components (parsers, LLMs, vector stores, agents, tools) into
   executable dataflows on a RocketRide server.
-- **Pipeline components (nodes)** — the 150+ capabilities pipelines compose:
-  13+ LLM providers, vector/graph/relational stores, OCR, transcription,
+- **Pipeline components (nodes)** — the capabilities pipelines compose:
+  LLM providers, vector/graph/relational stores, OCR, transcription,
   vision, PII handling, agents, and a large tool ecosystem.
 
 You can build any layer alone — a script driving a pipeline is a complete

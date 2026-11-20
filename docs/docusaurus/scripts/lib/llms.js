@@ -3,7 +3,7 @@
  *
  *   /nodes            generated catalog of every node page
  *   /llms.txt         per-section index with links to each page's .md sibling
- *   /llms-full.txt    full concatenation of every page's raw markdown
+ *   /llms-full.txt    full concatenation of every page's cleaned markdown
  *
  * Consumes the manifest that docs:gather persists at <contentDir>/.manifest.json.
  */
@@ -11,9 +11,27 @@
 const path = require('path');
 const { exists, readFile, writeFileEnsure } = require('../../../../scripts/lib');
 const { sections, sectionFor } = require('./spine');
+const { cleanTwin, INDEX_LINE_PREFIX } = require('./twin');
 
 const SITE_TITLE = 'RocketRide Documentation';
-const SITE_DESC = 'Build, run, and ship data + AI pipelines with the RocketRide toolchain.';
+// Opening paragraph and "when to use" list at the top of llms.txt, for agents
+// deciding whether RocketRide fits the task.
+const SITE_ABOUT =
+	'MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native ' +
+	'download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, ' +
+	'or the VS Code extension.';
+const SITE_WHEN = [
+	'Use RocketRide when:',
+	'',
+	'- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, ' +
+		'PII anonymization) and take them to production.',
+	'- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, the CLI, ' +
+		'the Python and TypeScript SDKs, or your IDE.',
+	'- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.',
+];
+const SITE_DESC =
+	'RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. ' +
+	'Build, test and publish durable agents that scale in production.';
 // Absolute base for llms.txt links. The llms.txt format specifies URLs, and an
 // agent that fetched the file on its own has no base to resolve against.
 // Mirrors `url` in docusaurus.config.ts.
@@ -192,7 +210,7 @@ function ordered(manifest) {
 }
 
 function llmsIndex(manifest) {
-	const lines = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, ''];
+	const lines = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, '', SITE_ABOUT, '', ...SITE_WHEN, ''];
 	const order = sections().map((s) => s.label);
 	const bySection = new Map();
 	const entryLine = (e) => `- [${e.title}](${SITE_URL}${e.mdSibling})${e.description ? `: ${e.description}` : ''}`;
@@ -217,12 +235,14 @@ function llmsIndex(manifest) {
 }
 
 async function llmsFull(manifest, generated) {
-	const parts = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, ''];
+	const parts = [`# ${SITE_TITLE}`, '', `> ${SITE_DESC}`, '', SITE_ABOUT, '', ...SITE_WHEN, ''];
 	for (const e of ordered(manifest)) {
 		let content = generated.get(e.id);
 		if (content == null && e.source && (await exists(e.source))) content = await readFile(e.source);
 		if (content == null) continue;
-		parts.push('', '---', '', `# ${e.title}`, '', `Route: ${e.route}`, '', String(content).trim(), '');
+		// The heading above already carries the title, so cleanTwin must not add it again.
+		const clean = cleanTwin(String(content), { mdx: /\.mdx$/i.test(e.source || ''), addTitle: false });
+		parts.push('', '---', '', `# ${e.title}`, '', `Route: ${e.route}`, '', clean.trim(), '');
 	}
 	return parts.join('\n');
 }
@@ -249,10 +269,22 @@ async function buildIndex({ contentDir, staticDir, task }) {
 	withCatalog.push({ id: 'nodes', route: '/nodes', title: 'Overview', mdSibling: '/nodes.md' });
 	generated.set('nodes', catalog);
 
+	// Rewrite every `.md` twin as clean markdown that points back at llms.txt.
+	// docs:gather and docs:release-notes wrote them raw; doing it here covers
+	// every writer (pages, node READMEs, placeholders, generated pages) once.
+	for (const e of withCatalog) {
+		const twin = path.join(staticDir, e.mdSibling);
+		if (!(await exists(twin))) continue;
+		const raw = await readFile(twin);
+		if (raw.startsWith(INDEX_LINE_PREFIX)) continue; // already rewritten
+		const mdx = /\.mdx$/i.test(e.source || '');
+		await writeFileEnsure(twin, cleanTwin(raw, { mdx, indexUrl: `${SITE_URL}/llms.txt` }));
+	}
+
 	await writeFileEnsure(path.join(staticDir, 'llms.txt'), llmsIndex(withCatalog));
 	await writeFileEnsure(path.join(staticDir, 'llms-full.txt'), await llmsFull(withCatalog, generated));
 
 	if (task) task.output = `Indexed ${withCatalog.length} pages (${nodes.length} nodes)`;
 }
 
-module.exports = { buildIndex };
+module.exports = { buildIndex, SITE_URL };

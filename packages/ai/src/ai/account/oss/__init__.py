@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 
-from ..base import ENV_MASK, ENV_NAME, AccountBase
+from ..base import ENV_MASK, AccountBase, env_changes
 
 
 def _env_line(name: str, value: str) -> str:
@@ -78,34 +78,15 @@ def _env_changes(args: Dict[str, Any]) -> Tuple[Dict[str, Optional[str]], Option
         The changes (a name to its value, None to delete) and None, or an
         empty dict and the error text when a name or value is refused.
     """
-    raw, deleted = args.get('env', {}), args.get('delete', [])
-    if not isinstance(raw, dict) or not isinstance(deleted, list):
-        return {}, '`env` must be an object and `delete` a list; nothing was saved.'
-    if not all(isinstance(name, str) for name in deleted):
-        return {}, 'Environment names and values must be strings; nothing was saved.'
-    changes = dict(raw)
-    changes.update({name: None for name in deleted})
-    if not all(isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in changes.items()):
-        return {}, 'Environment names and values must be strings; nothing was saved.'
-    rejected = sorted(k for k in changes if not ENV_NAME.fullmatch(k))
-    if rejected:
-        # Names only: the values are secrets and must not reach the client.
-        return {}, (
-            'Unsupported environment variable name(s): '
-            + ', '.join(rejected)
-            + ". Names begin with 'ROCKETRIDE_' and hold no whitespace, '=', '#', quote or NUL; nothing was saved."
-        )
+    try:
+        changes = env_changes(args)
+    except ValueError as e:
+        return {}, str(e)
     # A .env line ends at a line break, the environment at a NUL, and
     # load_dotenv expands '${', quoted or not
     if any(v is not None and (any(c in v for c in '\0\r\n') or '${' in v) for v in changes.values()):
         return {}, (
             "Environment values cannot contain a line break, NUL or '${' (the .env loader expands it); nothing was saved."
-        )
-    # A key typed after the mask in an editor's field: storing it would hide it for good
-    typed_on_mask = sorted(k for k, v in changes.items() if v is not None and v != ENV_MASK and v.startswith(ENV_MASK))
-    if typed_on_mask:
-        return {}, (
-            'The value of ' + ', '.join(typed_on_mask) + ' begins with the mask; replace it whole. Nothing was saved.'
         )
     return changes, None
 
@@ -121,11 +102,21 @@ def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dic
 
     Returns:
         The merged names and values and None, or an empty dict and the error
-        text when the mask names nothing stored or the locale cannot hold a
-        name or value.
+        text when the mask names nothing stored, one variable is sent under
+        two names that differ only in case (fold_case), or the locale cannot
+        hold a name or value.
     """
     env = {k: v for k, v in os.environ.items() if k.startswith('ROCKETRIDE_')}
     if fold_case:
+        folded: Dict[str, List[str]] = {}
+        for k in changes:
+            folded.setdefault(k.upper(), []).append(k)
+        # Two sent names that differ only in case are one variable here, stored or new
+        twice = sorted(name for sent in folded.values() if len(sent) > 1 for name in sent)
+        if twice:
+            return {}, (
+                'One variable sent under more than one name: ' + ', '.join(twice) + '. Send it once; nothing was saved.'
+            )
         changes = {(k.upper() if k.upper() in env else k): v for k, v in changes.items()}
     unmasked = sorted(k for k, v in changes.items() if v == ENV_MASK and k not in env)
     if unmasked:
@@ -312,15 +303,24 @@ class Account(AccountBase):
         - seed rows current          -> no-op (binding self-heal only)
         - seed rows behind apps.json -> force: mint the NEXT version and
           repoint the public binding (append-only — older versions and any
-          session pins on them survive)
+          session pins on them survive). "Behind" is EITHER the manifest
+          version string moving OR the built bundle's digest differing from
+          the newest seed's recorded bundleSha256 — version strings lie when
+          an upgrade ships a rebuilt bundle without a bump, and the digest is
+          the truth. A seed row predating the digest field reads as changed
+          (one re-seed records it). Neither trigger fires while the public
+          rung serves a user's direct deploy: a release never repoints that.
         - rail rows but NO seed rows (a user deployed the id first) ->
           force: bind the public rung to a fresh SEED version, never to a
           user row
         """
         from ai.account.seed_apps import (
+            PUBLIC_AUDIENCE,
             SEED_COMMENT,
             SYSTEM_ACTOR,
+            bundle_digest,
             load_manifest_entries,
+            public_serves_user_deploy,
             seed_manifest_app,
         )
 
@@ -345,9 +345,24 @@ class Account(AccountBase):
                     if not seeds:
                         force = True
                     else:
-                        stored = (((seeds[0].get('metadata') or {}).get('manifest')) or {}).get('version')
+                        metadata = seeds[0].get('metadata') if isinstance(seeds[0].get('metadata'), dict) else {}
+                        stored = ((metadata or {}).get('manifest') or {}).get('version')
                         shipped = entry.get('version')
-                        force = bool(shipped) and str(stored or '') != str(shipped)
+                        version_moved = bool(shipped) and str(stored or '') != str(shipped)
+                        # The digest trigger: an upgrade that rebuilt the
+                        # bundle without bumping the manifest version must
+                        # still march. No local bundle = nothing to compare
+                        # (never force); a seed row without a digest reads
+                        # as changed, so one re-seed records it.
+                        build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+                        local = bundle_digest(str(app_id))
+                        digest_changed = local is not None and build.get('bundleSha256') != local
+                        if version_moved or digest_changed:
+                            # Neither trigger may repoint a public rung that
+                            # serves someone's deliberate deploy (the same
+                            # guard bundle_changed honors).
+                            public = await self.publish_get('local', 'app', str(app_id), PUBLIC_AUDIENCE)
+                            force = not public_serves_user_deploy(rows, public)
                 # Step 2: run the shared seeder with that policy.
                 if await seed_manifest_app(self, 'local', entry, SYSTEM_ACTOR, force=force):
                     seeded += 1

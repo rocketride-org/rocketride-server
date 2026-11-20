@@ -256,6 +256,15 @@ export class BusHost {
 		};
 		auth.onDidChange.on('changed', pushCloudAuth);
 		this.disposables.push({ dispose: () => auth.onDidChange.removeListener('changed', pushCloudAuth) });
+		// The editor's telemetry setting, mirrored for the shell's telemetry
+		// host: in VS Code it is the ONE consent switch (no banner, no Privacy
+		// section) — webviews cannot read VS Code settings themselves. Retained,
+		// so a late webview replays the current value first.
+		const pushTelemetryEnabled = (): void => {
+			this.retained.publish('shell:telemetryEnabled', { enabled: vscode.env.isTelemetryEnabled });
+		};
+		pushTelemetryEnabled();
+		this.disposables.push(vscode.env.onDidChangeTelemetryEnabled(pushTelemetryEnabled));
 		// Identity + cloud-connectedness also move with either connection.
 		for (const event of ['shell:statusChange', 'shell:accountUpdate'] as const) {
 			this.connectionManager.on(event, pushCloudAuth);

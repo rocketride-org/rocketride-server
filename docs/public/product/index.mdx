@@ -7,9 +7,10 @@ hide_table_of_contents: true
 hide_title: true
 pagination_next: null
 pagination_prev: null
+description: RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Pipelines are portable JSON that run the same way on your laptop, your servers, or RocketRide Cloud.
 ---
 
-import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuBlocks, LuBookOpen } from 'react-icons/lu';
+import { LuZap, LuCode, LuRocket, LuCloud, LuPlug, LuBlocks, LuBookOpen, LuBot } from 'react-icons/lu';
 import { SiPython, SiTypescript, SiDiscord, SiGithub } from 'react-icons/si';
 import { VscVscode } from 'react-icons/vsc';
 
@@ -17,7 +18,7 @@ import { VscVscode } from 'react-icons/vsc';
 
 # RocketRide <span className="rr-accent">Documentation</span>
 
-RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JSON: version-controlled, shareable, and executed by a multithreaded C++ core that runs the same way on your laptop, your servers, or RocketRide Cloud.
+RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Pipelines are portable JSON that run the same way on your laptop, your servers, or RocketRide Cloud.
 
 <div className="rr-hero-actions">
   <a className="rr-btn rr-btn--primary" href="/quickstart/">Get Started</a>
@@ -31,12 +32,15 @@ RocketRide is an open-source runtime for AI pipelines. Pipelines are portable JS
 
 New to RocketRide? Start here: run a working pipeline and pick up the core concepts along the way.
 
-<CardGrid>
+<CardGrid columns={3}>
   <Card href="/quickstart/ide-walkthrough" title="Build in your IDE" icon={<LuZap />}>
     Install the VS Code extension, deploy a local runtime, and assemble a pipeline visually in minutes.
   </Card>
   <Card href="/quickstart/sdk-integration" title="Integrate with an SDK" icon={<LuCode />}>
     Drop pipelines into your TypeScript or Python application with a few lines of code.
+  </Card>
+  <Card href="/quickstart/coding-agents" title="Use from a coding agent" icon={<LuBot />}>
+    Copy-paste commands for any coding agent: run the engine, check it, connect over MCP.
   </Card>
 </CardGrid>
 
@@ -66,7 +70,7 @@ New to RocketRide? Start here: run a working pipeline and pick up the core conce
     The full catalog: LLMs, vector stores, parsers, tools, and more.
   </Card>
   <Card href="/connect/mcp/http" title="MCP" icon={<LuPlug />}>
-    Expose any pipeline as an MCP tool for AI assistants.
+    Build, run and observe pipelines through the MCP server.
   </Card>
   <Card href="/clients/vscode" title="VS Code Extension" icon={<VscVscode />}>
     Build, run, and debug pipelines visually in your editor.

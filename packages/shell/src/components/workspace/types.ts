@@ -325,6 +325,17 @@ export interface AppDescriptor {
 	id: string;
 	/** Display name shown in the app switcher. */
 	name: string;
+	/**
+	 * The app value stamped on this app's events; defaults to `id`. For apps
+	 * whose dashboards predate the descriptor id. Chosen once here: the shell
+	 * binds the app's reporter to it, so it is fixed for the reporter's
+	 * lifetime and per-event props still cannot overwrite it. Honoured only
+	 * for first-party apps (`rocketride` or `rocketride.*` ids); the value must
+	 * match the events contract's `app` pattern (`^[A-Za-z0-9._-]{1,128}$`),
+	 * must not be the reserved stamp 'shell', and must not be another
+	 * registered app's id. Anything else falls back to `id`.
+	 */
+	telemetryId?: string;
 	/** Optional icon shown in the app switcher list. */
 	icon?: React.ReactNode;
 	/** Branding tokens (logo, welcome text) for the app. */
@@ -575,6 +586,10 @@ export interface ShellApiConfig {
 	RR_APIKEY?: string;
 	/** Stripe publishable key — required for Stripe Elements checkout. */
 	RR_STRIPE_PUBLISHABLE_KEY?: string;
+	/** PostHog project token (phc_*), served by the probe; absent = telemetry off. */
+	RR_POSTHOG_KEY?: string;
+	/** The analytics ingestion address, served by the probe alongside the key. */
+	RR_POSTHOG_HOST?: string;
 	/** Zitadel instance base URL — required for PKCE OAuth login. */
 	RR_ZITADEL_URL?: string;
 	/** Zitadel application client ID — required for PKCE OAuth login. */

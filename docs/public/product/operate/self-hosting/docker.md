@@ -1,5 +1,7 @@
 ---
-title: Docker
+title: Run the Engine in Docker
+sidebar_label: Docker
+description: The RocketRide engine ships as a published container image, the same one the VS Code extension Docker mode pulls. Run it with Docker in one command.
 ---
 
 # Run the Engine in Docker
@@ -10,6 +12,11 @@ The engine ships as a published container image — the same one the
 ```text
 ghcr.io/rocketride-org/rocketride-engine
 ```
+
+> **Setting up from a coding agent?** The
+> [coding-agents start page](/quickstart/coding-agents) has a ready-to-run
+> `docker run` command plus the health check, the client key and the MCP
+> connection, in one place.
 
 ## Quickstart
 
@@ -46,6 +53,8 @@ non-empty one. Widen it only behind TLS and authentication (see
 - **Platform:** `linux/amd64` only. On Apple Silicon add
   `--platform linux/amd64` (Docker runs it under emulation — fine for
   development; the VS Code extension does the same).
+- **Carries the node archive** in `/opt/nodes`, so runs get their nodes without
+  internet access.
 - **Runs as non-root** (user `rocketride`, uid 1000), listens on **5565**, and starts
   the engine bound to all container interfaces — the port mapping above is
   what controls actual exposure.

@@ -1,12 +1,13 @@
 ---
-title: WebSocket
+title: WebSocket protocol
+sidebar_label: WebSocket
 ---
 
 # WebSocket protocol
 
 The RocketRide [engine](/concepts/runtime-engine) speaks a native **WebSocket**
 protocol. Every consumer (the [TypeScript](/clients/typescript) and
-[Python](/clients/python) SDKs and the [MCP server](/connect/mcp/stdio)) connects
+[Python](/clients/python) SDKs and the [MCP server](/connect/mcp/http)) connects
 over this one socket to start pipelines and stream results. You rarely touch it
 directly; the SDKs frame the messages for you. This page documents what they
 send so you can debug, trace, or build your own client.
@@ -35,7 +36,9 @@ different host or port to reach a remote or self-hosted engine.
 Before authenticating, a client may open a public connection and send
 `rrext_public_probe`. The response body carries `version`, `capabilities`,
 `platform`, the public `apps` list, `stripePublishableKey` (when billing is
-configured), and `endpoints` — the server's public addresses:
+configured), `posthogPublishableKey` + `posthogHost` (when product telemetry
+is configured; absent means telemetry is off), and `endpoints` — the server's
+public addresses:
 
 ```json
 { "endpoints": { "api": "origin", "ui": "origin" } }
@@ -261,8 +264,8 @@ command.
 
 - [Observability](/connect/websocket/observability): monitoring events and
   metrics over this socket.
-- [MCP](/connect/mcp/stdio): pipelines-as-tools for AI assistants, transported over
-  this socket.
+- [MCP](/connect/mcp/http): the engine's built-in MCP server, to build, run and
+  observe pipelines.
 - [TypeScript SDK](/clients/typescript) · [Python SDK](/clients/python): the
   clients that speak this protocol.
 - [Pipeline JSON Reference](/reference/pipeline-reference): the `.pipe` payload shape.
