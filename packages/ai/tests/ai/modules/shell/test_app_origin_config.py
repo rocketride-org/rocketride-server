@@ -360,12 +360,22 @@ def test_valid_templates_start(template, isolation_env):
         "https://app.example 'unsafe-inline'",
         'javascript:',
         'https://',
+        'https://app.example:65536',
+        'https://app.example:99999',
+        'https://app.example:0',
+        'https://app.example:00000',
     ],
 )
 def test_invalid_shell_origins_refuse_start(origins, isolation_env):
     """T8: RR_SHELL_ORIGINS become ``frame-ancestors``; only plain origins are accepted."""
     isolation_env.set(RR_SHELL_ORIGINS=origins)
     _refuses('RR_SHELL_ORIGINS')
+
+
+@pytest.mark.parametrize('origin', ['https://app.example:1', 'https://app.example:65535', 'http://localhost:5173'])
+def test_shell_origin_ports_in_range_start(origin, isolation_env):
+    isolation_env.set(RR_SHELL_ORIGINS=origin)
+    _validate()
 
 
 def test_no_shell_origin_at_all_refuses_start(isolation_env):

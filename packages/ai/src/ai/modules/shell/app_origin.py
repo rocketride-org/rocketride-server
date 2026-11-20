@@ -211,6 +211,13 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         origin = token.lower().rstrip('/')
         if not _ORIGIN.fullmatch(origin):
             raise _refuse(f'RR_SHELL_ORIGINS: {token!r} is not an http(s) origin')
+        # Five digits match the grammar, but 65536 (and :0) name no port: refuse them here, not in a browser.
+        try:
+            origin_port = urlsplit(origin).port
+        except ValueError:
+            origin_port = 0
+        if origin_port == 0:
+            raise _refuse(f'RR_SHELL_ORIGINS: {token!r} has a port outside 1-65535')
         if origin not in shell_origins:
             shell_origins.append(origin)
     if not shell_origins:
