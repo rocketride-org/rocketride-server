@@ -251,20 +251,36 @@ class _DeployBase(DAPConn):
         """Refuse pointing the store at ``version`` unless the store gate passes.
 
         The gate is the app door's (``app_deploy.publish_block_of``), read off
-        the version's review state: on a server with a review ladder only an
-        approved ('ready') version reaches the store; without one any version
-        that did not fail does. Every door that can point ``~public`` calls
-        this first (``rrext_deploy_pipe deploy`` and ``add``'s ``deployTo``).
+        the version's review state, tightened to what the pipe serving gate
+        serves: the store serves a pipe only a 'ready' version on every server
+        (``pipe_serving_block_of``). With a review ladder that is the approved
+        version; without one the pipe door promotes each version to 'ready' as
+        it is stored, so a version in any other state never finished its
+        deploy. Only a pipe version takes this door: an app reaches the store
+        through the app door, which keeps its manifest. Every door that can
+        point ``~public`` calls this first (``rrext_deploy_pipe deploy`` and
+        ``add``'s ``deployTo``).
 
         Raises:
-            ValueError: The version is not on the rail, or the gate refuses it.
+            ValueError: The version is not on the rail, is an app's, or the
+                gate refuses it.
         """
         entries = await account.deployments_versions(org_id, project_id)
         entry = next((e for e in entries if int(e.get('version', 0)) == version), None)
         if entry is None:
             raise ValueError(f'version {version} is not published for {project_id}')
+        if str(entry.get('kind') or 'pipe') != 'pipe':
+            raise ValueError(
+                f'Version {version} of {project_id} is an app: point the store at an app with the app door '
+                '(rrext_deploy_app publish), which keeps its manifest'
+            )
         state = str(entry.get('state') or DEFAULT_REVIEW_STATE)
         refusal = publish_block_of(project_id, version, state, True, bool(account.review_ladder))
+        if not refusal and state != 'ready':
+            refusal = (
+                f'Version {version} of {project_id} is not ready for the store (state {state!r}): '
+                'its deploy did not finish, so deploy it again'
+            )
         if refusal:
             raise ValueError(refusal)
 

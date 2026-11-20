@@ -850,16 +850,30 @@ class TestPublicDeploy:
         assert args[5] == 'team-1'  # the publisher's dev team, stamped at pointer time
 
     @pytest.mark.asyncio
-    async def test_a_server_without_a_reviewer_takes_any_version_that_did_not_fail(self, account_stub):
+    async def test_a_server_without_a_reviewer_takes_the_ready_version_it_promoted(self, account_stub):
+        # Without a ladder the pipe door promotes a version to 'ready' as it is
+        # stored, and the store serves a pipe only 'ready' (pipe_serving_block_of):
+        # a version left 'private' never finished its deploy
         account_stub.review_ladder = False
         conn = _make_conn(_account_info())
-        self._rail(account_stub, 'private')
+        self._rail(account_stub, 'ready')
         await conn._deploy_deploy({}, dict(self._DEPLOY))
         assert account_stub.deployments_deploy.await_args.args[1] == '~public'
+        self._rail(account_stub, 'private')
+        with pytest.raises(ValueError, match='not ready for the store'):
+            await conn._deploy_deploy({}, dict(self._DEPLOY))
         self._rail(account_stub, 'failed')
         with pytest.raises(ValueError, match='failed processing'):
             await conn._deploy_deploy({}, dict(self._DEPLOY))
         assert account_stub.deployments_deploy.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_an_app_version_never_takes_the_pipe_doors_store_pointer(self, account_stub):
+        # An app reaches the store through the app door, which keeps its manifest
+        account_stub.deployments_versions.return_value = [{'version': 1, 'state': 'ready', 'kind': 'app'}]
+        with pytest.raises(ValueError, match='is an app'):
+            await _make_conn(_account_info())._deploy_deploy({}, dict(self._DEPLOY))
+        account_stub.deployments_deploy.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_a_version_not_on_the_rail_is_refused_by_name(self, account_stub):
