@@ -38,6 +38,7 @@ import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
 import { formatTime, formatDayTime } from 'shell';
 import { buttonize } from 'shared/utils/buttonize';
+import { DeleteVersionMark } from 'shared/components/deploy';
 import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 import { VersionRecordPanel } from './VersionRecordPanel';
 import type { IVersionRecordPanelProps } from './VersionRecordPanel';
@@ -91,6 +92,11 @@ export interface IDeployPanelProps {
 	    listings hide it; history and artifacts survive; re-deploying any
 	    version revives it. */
 	onRemove?: (teamId: string) => Promise<void>;
+	/** Delete one deployed version from the server (HARD — its storage goes,
+	    the number is never reused). The card's top-right mark renders only on
+	    rows the server marks `deletable`; the server refuses by name otherwise
+	    and the refusal shows under the strip. */
+	onDeleteVersion?: (version: number) => Promise<void>;
 	/** Set/clear one source's schedule (the where-live pill opens the stock
 	    SchedulePanel editor; cron null clears). */
 	onSetSchedule?: (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => Promise<void>;
@@ -142,6 +148,8 @@ const S = {
 		flexShrink: 0,
 		display: 'flex',
 		flexDirection: 'column',
+		// The delete mark anchors to the card's top-right corner.
+		position: 'relative',
 	} as CSSProperties,
 	versionCardNewest: {
 		borderColor: 'var(--rr-accent-faded)',
@@ -342,7 +350,7 @@ function shortSha(sha: string): string {
  * The DEPLOY-page lifecycle surface: version strip, where-live grid,
  * merged history grid. See the module docstring for the collapsing rules.
  */
-export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onRemove, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
+export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onRemove, onDeleteVersion, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
 	// --- Panel-owned registry data (fetched, never passed in) -----------------
 
 	const [versions, setVersions] = useState<DeployVersionCard[]>([]);
@@ -491,6 +499,11 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 					const live = liveByVersion.get(v.version) ?? [];
 					return (
 						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}), ...(fetchArtifact ? { cursor: 'pointer' } : {}) }} title={fetchArtifact ? 'View this version' : undefined} {...buttonize(() => openVersionDrawer(v), Boolean(fetchArtifact))}>
+							{/* The delete mark (plan 2.3): present ONLY while the server
+							    says the version is deletable — no rung pins it, it is not
+							    in review, its build is not running. Confirmed inside; the
+							    refusal, if any, lands under the strip like every verb. */}
+							<DeleteVersionMark version={v.version} deletable={v.deletable} subject={pipelineName || 'this pipeline'} onDelete={onDeleteVersion ? (version) => run(() => onDeleteVersion(version)) : undefined} disabled={busy} />
 							<div style={S.versionNum}>v{v.version}</div>
 							<div style={S.versionMeta}>
 								{v.publishedBy}

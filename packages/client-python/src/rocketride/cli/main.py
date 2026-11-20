@@ -52,6 +52,7 @@ ROCKETRIDE_DEPLOY_URI/ROCKETRIDE_DEPLOY_APIKEY for deploy verbs), which
 import argparse
 import asyncio
 import os
+import re
 import sys
 
 from .utils.env import (
@@ -112,6 +113,29 @@ def _add_deploy_connection_args(parser: argparse.ArgumentParser) -> None:
         help=f'Deployment target API key (can use {ENV_DEPLOY_APIKEY} env var)',
     )
     _add_json_arg(parser)
+
+
+def _registry_version(text: str) -> int:
+    """
+    Parse a registry version argument: the WHOLE value is digits, with an optional ``v``.
+
+    ``int()`` would accept ``'0'`` and the TypeScript CLI's ``parseInt`` once
+    read ``'3.5'`` as 3: a typo must never address a neighbouring version.
+    Mirrors ``executeDeployDelete`` in the TypeScript CLI (``3`` and ``v3``).
+
+    Args:
+        text: The argument as typed.
+
+    Returns:
+        The positive registry version.
+
+    Raises:
+        argparse.ArgumentTypeError: Anything else.
+    """
+    match = re.fullmatch(r'v?(\d+)', text.strip(), re.IGNORECASE)
+    if match is None or int(match.group(1)) < 1:
+        raise argparse.ArgumentTypeError(f"invalid version '{text}': name the registry version number, e.g. 3")
+    return int(match.group(1))
 
 
 def _add_json_arg(parser: argparse.ArgumentParser) -> None:
@@ -607,6 +631,15 @@ def setup_parser() -> argparse.ArgumentParser:
         verb_parser.add_argument('project', help='Project id')
         verb_parser.add_argument('--team', default='', help='Team the deployment belongs to')
 
+    d_delete = deploy_subparsers.add_parser(
+        'delete',
+        help='Delete one deployed version from the server (refused while a rung pins it, in review, or building)',
+    )
+    _add_deploy_connection_args(d_delete)
+    d_delete.add_argument('project', help='Project id (a pipe id or an app id)')
+    d_delete.add_argument('version', type=_registry_version, help='Registry version to delete (3 or v3)')
+    d_delete.add_argument('--yes', action='store_true', help='Skip the confirmation (required when not on a terminal)')
+
     d_log = deploy_subparsers.add_parser('log', help="Read an app version's build log")
     _add_deploy_connection_args(d_log)
     d_log.add_argument('app_id', help='App id')
@@ -711,7 +744,7 @@ async def _dispatch(args) -> int:
     if args.command == 'deploy':
         if not getattr(args, 'deploy_subcommand', None):
             print(
-                'Error: Deploy subcommand is required (add, list, get, versions, history, publish, run, artifact, enable, disable, remove, log, schedule)',
+                'Error: Deploy subcommand is required (add, list, get, versions, history, publish, run, artifact, enable, disable, remove, delete, log, schedule)',
                 file=sys.stderr,
             )
             return 1

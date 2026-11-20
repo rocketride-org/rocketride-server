@@ -49,6 +49,7 @@ from ai.account import account as account_singleton
 from ai.account import manifest_push
 from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
+    _rail_entry,
     _serving_block_of,
     artifact_file_url,
     developer_id_required,
@@ -1896,3 +1897,14 @@ def test_developer_id_required_names_the_ways_in():
     assert 'registerDeveloper(id)' in message
     assert 'register_developer(id)' in message
     assert 'rrext_' not in message
+
+
+def test_rail_entry_carries_the_registry_deletable_flag():
+    """The app rail passes the registry read's ``deletable`` through (plan 2.3): the
+    card draws its delete mark from this flag alone; a row without one is not
+    deletable (an older row source, never a guess).
+    """
+    entry = {'version': 4, 'state': 'private', 'sha256': 'ab', 'publishedAt': 1.0, 'comment': '', 'deletable': True}
+    assert _rail_entry(entry, {'appVersion': '0.1.0'})['deletable'] is True
+    assert _rail_entry({**entry, 'deletable': False}, None)['deletable'] is False
+    assert _rail_entry({k: v for k, v in entry.items() if k != 'deletable'}, None)['deletable'] is False

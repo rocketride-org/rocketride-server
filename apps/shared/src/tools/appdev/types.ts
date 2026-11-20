@@ -110,6 +110,11 @@ export interface AppVersionInfo {
 	 * word ('queued', 'building', ...). A 'private' review state says
 	 * nothing about servability — this does. */
 	buildStatus?: string;
+	/** Whether `deploy delete` would take this version right now: no rung
+	 * pins it, it is not in review, its build is not queued/running. The
+	 * server's own check, carried on every rail row; the card shows its
+	 * delete mark only when true (no greyed control, decided 2026-11-16). */
+	deletable?: boolean;
 }
 
 /** One row of the "Where this app is live" reverse index. */
@@ -380,6 +385,11 @@ export interface IAppBuilderHost {
 	/** Remove an audience binding (SOFT — republishing revives it). The
 	 * target is the pin's handle ('@me' | '@team/<name>' | '@public'). */
 	removePublish?: (target: string) => Promise<void>;
+	/** Delete one deployed version from the server (HARD — its storage goes,
+	 * the number is never reused). Addressed by the REGISTRY version int. The
+	 * server refuses by name while a rung pins it, it is in review, or its
+	 * build runs; the card offers it only on rows the server marks deletable. */
+	deleteVersion?: (version: number) => Promise<void>;
 	/** The caller's team roster — the publish picker's team rows. */
 	listTeams?: () => Promise<Array<{ id: string; name: string }>>;
 	/** The reverse index for the Where-live panel. */

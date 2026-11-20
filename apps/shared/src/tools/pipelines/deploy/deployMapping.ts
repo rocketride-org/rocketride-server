@@ -36,6 +36,9 @@ export function mapVersionCards(rows: DeployArtifact[]): DeployVersionCardDTO[] 
 		publishedAt: v.publishedAt ?? 0,
 		publishedBy: v.publishedBy?.display || v.publishedBy?.userId || '',
 		...(v.comment ? { comment: v.comment } : {}),
+		// The server's own delete check; an older row source carries none,
+		// and a card without the flag draws no mark (never a guess).
+		...(v.deletable !== undefined ? { deletable: v.deletable } : {}),
 	}));
 }
 

@@ -3095,7 +3095,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param appId - App id
 	 * @returns Rail entries, newest first
 	 */
-	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; buildPhase: string; buildEndedAt?: number | null; rungs: string[] }>> {
+	async listDeployments(appId: string): Promise<Array<{ registryVersion: number; appVersion: string; sha256: string; publishedAt: number; author: string; message: string; state: string; buildStatus: string; buildPhase: string; buildEndedAt?: number | null; rungs: string[]; deletable?: boolean }>> {
 		const body = await this.call('rrext_deploy_app', { subcommand: 'versions', appId });
 		return (body as any)?.versions ?? [];
 	}

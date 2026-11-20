@@ -57,6 +57,9 @@ export interface WireRailEntry {
 	state?: string;
 	/** Server build status ('', 'ok', 'failed', or a ticker word). */
 	buildStatus?: string;
+	/** Whether `deploy delete` would take this version right now — the
+	 *  server's own check (no pin, not in review, not building). */
+	deletable?: boolean;
 }
 
 /** One where-live pin as the SDK returns it (client.whereApp). */
@@ -129,6 +132,9 @@ export function toVersionInfos(rail: WireRailEntry[]): AppVersionInfo[] {
 		rungs: (v.rungs ?? []).filter((r): r is 'personal' | 'team' | 'public' => r === 'personal' || r === 'team' || r === 'public'),
 		state: (v.state || undefined) as AppVersionInfo['state'],
 		buildStatus: v.buildStatus,
+		// The server's own delete check; a row without it (an older row
+		// source) draws no mark, never a guess.
+		...(v.deletable !== undefined ? { deletable: v.deletable } : {}),
 	}));
 }
 

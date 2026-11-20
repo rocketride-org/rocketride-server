@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 0dc2c1491a3f027c495b549601af588eee0c8438
+// Source commit: 403e6a7e6ed67413ed338e93c3957a04642ea413
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1392,6 +1392,27 @@ export interface DeployArtifact {
     publishedAt?: number;
     /** Optional "what changed" note supplied at publish time. */
     comment?: string;
+    /**
+     * Whether `deploy.delete` would take this version right now: no rung pins
+     * it, it is not in review, its build is not queued/running. Computed by
+     * the server on every read; the version card shows its delete mark only
+     * when this is true.
+     */
+    deletable?: boolean;
+}
+/** Body of `deploy.delete`: what was removed from the server. */
+export interface DeployDeleteResult {
+    projectId?: string;
+    version?: number;
+    /** 'pipe' | 'app' | 'node' */
+    kind?: string;
+    /** The deleted artifact's content hash — the history row carries it too. */
+    sha256?: string;
+    deleted?: boolean;
+    /** Unix timestamp (seconds). */
+    deletedAt?: number;
+    /** The organization whose registry the version left. */
+    orgId?: string;
 }
 /** Per-source schedule on a team deployment. */
 export interface DeploymentSchedule {
@@ -5009,6 +5030,23 @@ declare class DeployApi {
      */
     remove(projectId: string, teamId: string): Promise<Deployment>;
     /**
+     * Deletes one deployed version from the server (apps and pipes alike).
+     *
+     * Allowed only while nothing points at the version: refused with a clear
+     * message when any rung pins it (unpublish it first), when it is in the
+     * review queue (withdraw it first), or while its build is queued or
+     * running. What goes is ALL of the version's server storage (the registry
+     * JSON, its content dir, its registry entry); the history keeps the
+     * deploy line and gains a delete line, and the version number is never
+     * reused. {@link versions} rows carry `deletable`: whether this call
+     * would succeed right now.
+     *
+     * @param projectId - The project (a pipe's short id, or an app id).
+     * @param version - The registry version to delete.
+     * @returns What was removed (`{ projectId, version, kind, sha256, deleted, orgId }`).
+     */
+    delete(projectId: string, version: number): Promise<DeployDeleteResult>;
+    /**
      * Sets (or clears) one source's schedule on a team deployment.
      *
      * The paused flag is untouched — editing cron/ttl preserves it (a new
@@ -6332,6 +6370,7 @@ export declare class RocketRideClient extends DAPClient {
         buildPhase: string;
         buildEndedAt?: number | null;
         rungs: string[];
+        deletable?: boolean;
     }>>;
     /**
      * Submit a deployed version for store review — flips the DEPLOYMENT's own

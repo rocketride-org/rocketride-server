@@ -12,9 +12,12 @@
  * undefined, which is fine for the component smoke tests — except for
  * module-scope style spreads like `...commonStyles.textEllipsis`, which need
  * commonStyles to be an object. This stub returns a module whose commonStyles
- * hands back an empty style fragment for any name and leaves every other
- * export undefined, matching what the tests already tolerate. Loaded via
- * `--require` before tsx starts resolving test files.
+ * hands back an empty style fragment for any name, renders the two controls
+ * a smoke test may draw (Button as a native button carrying its accessible
+ * name, title and disabled state; ConfirmDialog as nothing, since a closed
+ * dialog draws nothing), and leaves every other export undefined, matching
+ * what the tests already tolerate. Loaded via `--require` before tsx starts
+ * resolving test files.
  *
  * 'rocketride' is NOT stubbed: it is a workspace dependency (the SDK's own
  * build), and pure modules under test (the Assets model's path and README
@@ -23,9 +26,17 @@
 
 const Module = require('module');
 
+const React = require('react');
+
 const stub = {
 	// Any style-fragment lookup yields an empty, spreadable object.
 	commonStyles: new Proxy({}, { get: () => ({}) }),
+	// A native button with the attributes a smoke test asserts on; variants
+	// and sizing are the real shell's concern.
+	Button: ({ ariaLabel, title, disabled, onClick, children }) =>
+		React.createElement('button', { type: 'button', 'aria-label': ariaLabel, title, disabled, onClick }, children),
+	// The real dialog portals nothing until opened; the stand-in draws nothing.
+	ConfirmDialog: () => null,
 };
 
 // step: intercept CJS loads of the shell specifier before tsx resolves it

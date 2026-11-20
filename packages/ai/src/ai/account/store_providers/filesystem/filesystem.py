@@ -4,6 +4,7 @@ import aiofiles
 import aiofiles.os
 import asyncio
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional
@@ -277,6 +278,34 @@ class FilesystemStore(IStore):
             raise
         except Exception as e:
             raise StorageError(f'Failed to delete file {filename}: {e}') from e
+
+    async def delete_tree(self, prefix: str) -> int:
+        """
+        Remove a directory tree whole (``shutil.rmtree`` under the store root).
+
+        The per-file default would leave the directories themselves (and
+        any lock files) behind; a deleted version's content dir must be
+        gone entirely. Runs off the event loop like the other blocking
+        filesystem calls. A prefix that is not a directory is a no-op.
+        """
+        if not prefix:
+            raise StorageError('delete_tree requires a non-empty prefix')
+        full_path = self._get_full_path(prefix.rstrip('/'))
+        if full_path == self._root_path:
+            raise StorageError('delete_tree cannot target the store root')
+
+        def remove_tree() -> int:
+            """Count the files, then remove the tree — one blocking unit off the loop."""
+            if not full_path.is_dir():
+                return 0
+            count = sum(1 for entry in full_path.rglob('*') if entry.is_file())
+            shutil.rmtree(full_path)
+            return count
+
+        try:
+            return await asyncio.to_thread(remove_tree)
+        except Exception as e:
+            raise StorageError(f'Failed to delete tree {prefix}: {e}') from e
 
     async def get_modified_time(self, filename: str) -> float:
         """Get the last modified time of a file as an epoch timestamp."""

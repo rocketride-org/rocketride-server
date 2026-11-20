@@ -733,6 +733,22 @@ class AccountBase(ABC):
         """Every kind:'app' version whose build status matches (restart requeue)."""
         return await self._deployment_backend().scan_builds(statuses)
 
+    async def deployments_delete_version(self, org_id: str, project_id: str, version: int, actor: dict) -> dict:
+        """Delete ONE registry version's storage (``deploy delete``, plan 2.3).
+
+        Refused (ValueError) while any publish row pins the version, while
+        it is in review, or while its build is queued/running — the one
+        rule ``deployment_backend.delete_block_of`` states for both
+        editions. Otherwise the registry JSON, the whole sibling content
+        dir and the version's registry entry go; the history keeps the
+        deploy line and gains the delete line; the number is never reused.
+        The SaaS override deletes the same files plus the
+        ``deployment_artifacts`` row.
+
+        Returns ``{'projectId', 'version', 'kind', 'sha256', 'deleted'}``.
+        """
+        return await self._deployment_backend().delete_version(org_id, project_id, version, actor)
+
     async def publish_get(self, org_id: str, kind: str, app_id: str, audience: dict) -> dict | None:
         """One audience's publish row of one app, or None."""
         return await self._deployment_backend().publish_get(org_id, kind, app_id, audience)

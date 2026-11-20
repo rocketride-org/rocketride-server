@@ -31,9 +31,13 @@
 #                 version vN (kind='pipe' default: pipeline dict, optionally
 #                 with its folder zip as ``data`` (the store block's files);
 #                 kind='app': built-bundle zip, routed to app_deploy)
-#   versions      the registry entries for a project (the version strip)
+#   versions      the registry entries for a project (the version strip);
+#                 each row says whether it is ``deletable`` right now
 #   artifact      one immutable artifact's JSON, sha256-verified on load
 #   history       the immutable audit trail (who/what/when)
+#   delete        remove one deployed version's storage from the server
+#                 (apps and pipes alike) while nothing points at it: refused
+#                 when a rung pins it, it is in review, or its build runs
 #
 # PIPE-specific deploy control — pointing a team at a version, its lifecycle,
 # scheduling and running — lives on rrext_deploy_pipe (cmd_pipe.py). App
@@ -339,6 +343,7 @@ class DeployCommands(_DeployBase):
         # server, transport) lives on TaskConn via the other mixins.
         self._deploy_subcommand_handlers = {
             'add': self._deploy_add,
+            'delete': self._deploy_delete,
             'versions': self._deploy_versions,
             'artifact': self._deploy_artifact,
             'history': self._deploy_history,
@@ -558,6 +563,49 @@ class DeployCommands(_DeployBase):
                 await broadcast_review_state(self._server, org_id, project_id, row_version, 'private')
             except Exception as exc:
                 debug(f'[DEPLOY] could not withdraw {project_id} v{row_version}: {exc}')
+
+    # =========================================================================
+    # DELETE (remove one deployed version from the server)
+    # =========================================================================
+
+    async def _deploy_delete(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """The ONE delete door: remove a deployed version of any kind (plan 2.3).
+
+        Apps and pipes alike address the registry name + version. The
+        account layer refuses while anything points at the version (a rung
+        pins it, it is in review, its build is queued/running) and
+        otherwise removes ALL of its storage — the registry JSON, the whole
+        sibling content dir, the registry entry — leaving the history's
+        deploy line plus a delete line; the number is never reused.
+
+        Permission: the deploy permission on the artifact's org, i.e. the
+        gate ``add`` applies — ``task.control`` on at least one membership
+        team (an org admin holds it on every team). Deleting is destructive
+        for every rung that could later be pointed at the version, so the
+        org-open posture the app add verb takes is deliberately NOT enough
+        here.
+        """
+        project_id = self._registry_id(args.get('projectId'))
+        version = args.get('version')
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise ValueError('version is required and must be a positive integer')
+        if not self._teams_with('task.control'):
+            raise PermissionError("Permission 'task.control' denied")
+        org_id = self._org_id()
+
+        body = await account.deployments_delete_version(org_id, project_id, version, self._actor())
+        await account.audit(
+            self._account_info.userId,
+            'deploy',
+            'deploy_delete',
+            request_data={'projectId': project_id, 'version': version},
+            org_id=org_id,
+        )
+        # Registry rails re-fetch on the org-scoped signal (nothing served
+        # the version, so there is no hold to release and no scheduler row)
+        await self._notify_deploy_changed(org_id, '', project_id, 'delete')
+        body = {**body, 'orgId': org_id}
+        return self.build_response(request, body=body)
 
     # =========================================================================
     # READS

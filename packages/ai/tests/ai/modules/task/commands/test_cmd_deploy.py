@@ -891,6 +891,74 @@ class TestStateAndSchedules:
 
 
 # ============================================================================
+# delete — one version's storage goes, apps and pipes through the one door
+# ============================================================================
+
+
+class TestDelete:
+    @pytest.mark.asyncio
+    async def test_delete_routes_to_the_registry_name_and_audits(self, account_stub):
+        account_stub.deployments_delete_version = AsyncMock(
+            return_value={'projectId': 'acme.proj-1', 'version': 2, 'kind': 'pipe', 'sha256': 'abc', 'deleted': True}
+        )
+        conn = _make_conn(_account_info())
+        result = await conn._deploy_delete({}, {'projectId': 'proj-1', 'version': 2})
+        # The short id composes into the caller's namespace; an app id (already
+        # dotted) passes through the same door.
+        assert account_stub.deployments_delete_version.await_args.args[:3] == ('org-1', 'acme.proj-1', 2)
+        assert account_stub.deployments_delete_version.await_args.args[3]['userId'] == 'user-1'
+        assert result['body']['deleted'] is True and result['body']['orgId'] == 'org-1'
+        audit = account_stub.audit.await_args
+        assert audit.args[2] == 'deploy_delete'
+        assert audit.kwargs['request_data'] == {'projectId': 'acme.proj-1', 'version': 2}
+        # Registry rails re-fetch on the org-scoped deploy-changed signal.
+        event = conn._server.broadcast_server_event.await_args.args
+        body = next(a for a in event if isinstance(a, dict))['body']
+        assert (body['projectId'], body['action']) == ('acme.proj-1', 'delete')
+
+        await conn._deploy_delete({}, {'projectId': 'acme.brandy', 'version': 1})
+        assert account_stub.deployments_delete_version.await_args.args[1] == 'acme.brandy'
+
+    @pytest.mark.asyncio
+    async def test_delete_refusals_pass_through_untouched(self, account_stub):
+        # The account layer states the reason (pinned / in review / building);
+        # the door neither swallows nor rewrites it, and audits nothing.
+        account_stub.deployments_delete_version = AsyncMock(
+            side_effect=ValueError('acme.proj-1 v2 is published to @team/Production; unpublish it first')
+        )
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='published to @team/Production; unpublish it first'):
+            await conn._deploy_delete({}, {'projectId': 'proj-1', 'version': 2})
+        account_stub.audit.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_delete_needs_the_deploy_permission(self, account_stub):
+        account_stub.deployments_delete_version = AsyncMock(return_value={'version': 2, 'deleted': True})
+        # task.control nowhere (the add gate): refused before the account layer.
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
+        with pytest.raises(PermissionError, match='task.control'):
+            await conn._deploy_delete({}, {'projectId': 'proj-1', 'version': 2})
+        account_stub.deployments_delete_version.assert_not_awaited()
+        # An org admin holds every team permission (the account record lists
+        # every org team; the resolver expands org.admin on each).
+        admin = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+        admin._account_info.organization['permissions'] = ['org.admin']
+        await admin._deploy_delete({}, {'projectId': 'proj-1', 'version': 2})
+        account_stub.deployments_delete_version.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_delete_validates_its_arguments(self, account_stub):
+        account_stub.deployments_delete_version = AsyncMock()
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='projectId'):
+            await conn._deploy_delete({}, {'version': 2})
+        for bad in (None, '2', 0, -1, 1.5, True):
+            with pytest.raises(ValueError, match='positive integer'):
+                await conn._deploy_delete({}, {'projectId': 'proj-1', 'version': bad})
+        account_stub.deployments_delete_version.assert_not_awaited()
+
+
+# ============================================================================
 # preview — the single evaluator
 # ============================================================================
 

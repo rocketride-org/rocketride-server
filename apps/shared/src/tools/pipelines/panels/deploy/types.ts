@@ -43,6 +43,10 @@ export interface DeployVersionCard {
 	publishedBy: string;
 	/** Optional "what changed" note. */
 	comment?: string;
+	/** Whether `deploy delete` would take this version right now (no rung
+	 *  pins it, not in review, not building) — computed by the server on
+	 *  every read. The card shows its delete mark only when true. */
+	deletable?: boolean;
 }
 
 /** Per-source schedule facts on a live deployment (keyed by sourceId). */

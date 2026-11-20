@@ -29,13 +29,15 @@ real filesystem store. The SaaS DB implementation must satisfy the same
 assertions (its suite reuses these semantics against the DB).
 """
 
+import json
+import os
 import shutil
 import tempfile
 
 import pytest
 
-from ai.account.deployment_backend import FileDeploymentBackend, artifact_path
-from ai.account.store import StorageError
+from ai.account.deployment_backend import FileDeploymentBackend, artifact_content_dir, artifact_path, delete_block_of
+from ai.account.store import StorageError, StorageNotFoundError
 from ai.account.store_providers.filesystem import FilesystemStore
 
 
@@ -598,6 +600,247 @@ class TestArtifact:
         a = artifact_path('org-1', 'acme.proj-1', 1, 'a' * 64)
         b = artifact_path('org-1', 'acme.proj-1', 1, 'b' * 64)
         assert a != b
+
+
+# ============================================================================
+# deploy delete — one version's storage goes while nothing points at it
+# ============================================================================
+
+
+async def _write_content(store, entry):
+    """Lay the content dir beside the registry JSON the way the doors do (bundle/source/dist/build.log)."""
+    content_dir = artifact_content_dir(entry['artifactPath'])
+    for rel in ('bundle/app.zip', 'source/package.json', 'dist/index.html', 'build.log'):
+        await store.write_file(f'{content_dir}/{rel}', rel)
+    return content_dir
+
+
+class TestDeleteVersion:
+    @pytest.mark.asyncio
+    async def test_free_version_loses_every_path_and_the_number_is_never_reused(self, backend, store):
+        """Plan 2.3: the registry JSON, the whole sibling content dir and the
+        registry entry are gone; the history keeps the deploy line and gains
+        the delete line; the next deploy takes a HIGHER number.
+        """
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR, 'first')
+        v2 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR, 'second')
+        content_dir = await _write_content(store, v2)
+        assert await store.list_files(content_dir + '/')
+
+        result = await backend.delete_version('org-1', 'acme.brandy', 2, OTHER)
+        assert result['deleted'] is True and (result['version'], result['kind']) == (2, 'app')
+        assert result['sha256'] == v2['sha256']
+
+        # Every path the version owned is gone: the JSON, the content tree,
+        # the directory itself (the filesystem store removes it whole).
+        with pytest.raises(StorageNotFoundError):
+            await store.read_file(v2['artifactPath'])
+        assert await store.list_files(content_dir + '/') == []
+        assert not os.path.isdir(os.path.join(store._root_path, content_dir))
+        # The registry entry is gone; v1 and its bytes are untouched.
+        assert [v['version'] for v in await backend.versions('org-1', 'acme.brandy')] == [1]
+        assert await store.read_file(v1['artifactPath'])
+
+        # History: the deploy line stays, a delete line (who, when, what) is added.
+        rows = (await backend.history('org-1', 'acme.brandy'))['rows']
+        delete_rows = [r for r in rows if r['action'] == 'delete']
+        assert len(delete_rows) == 1
+        assert delete_rows[0]['version'] == 2 and delete_rows[0]['actor'] == OTHER
+        assert delete_rows[0]['data'] == {'sha256': v2['sha256'], 'kind': 'app'}
+        assert [r['version'] for r in rows if r['action'] == 'publish'] == [2, 1]
+
+        # The number is never reused: the next deploy is v3, not v2.
+        v3 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR, 'third')
+        assert v3['version'] == 3
+
+    @pytest.mark.asyncio
+    async def test_pinned_version_is_refused_naming_the_rung(self, backend, store):
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        await _write_content(store, v1)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_TEAM, 1, {'name': 'B'}, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 1, {'name': 'B'}, ACTOR)
+        with pytest.raises(ValueError, match=r'v1 is published to @public, @team/team-1; unpublish it first'):
+            await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        # Nothing moved: the bytes and the entry are intact.
+        assert await store.read_file(v1['artifactPath'])
+        assert [v['version'] for v in await backend.versions('org-1', 'acme.brandy')] == [1]
+
+        # A pipe's team pointer pins the same way; a soft-removed pointer does not.
+        p1 = await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
+        with pytest.raises(ValueError, match='@team/team-1'):
+            await backend.delete_version('org-1', 'acme.proj-1', 1, ACTOR)
+        await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'removed', ACTOR)
+        assert (await backend.delete_version('org-1', 'acme.proj-1', 1, ACTOR))['deleted'] is True
+        with pytest.raises(StorageNotFoundError):
+            await store.read_file(p1['artifactPath'])
+
+    @pytest.mark.asyncio
+    async def test_version_in_review_is_refused(self, backend):
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        await backend.set_artifact_state('org-1', 'acme.brandy', 1, 'submit', ACTOR)
+        with pytest.raises(ValueError, match='v1 is in review; withdraw it first'):
+            await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        # Withdrawn, it is free again.
+        await backend.set_artifact_state('org-1', 'acme.brandy', 1, 'private', ACTOR)
+        assert (await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR))['deleted'] is True
+
+    @pytest.mark.asyncio
+    async def test_building_version_is_refused(self, backend):
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        for status in ('queued', 'building'):
+            await backend.set_build('org-1', 'acme.brandy', 1, {'status': status})
+            with pytest.raises(ValueError, match='v1 is still building; wait for the build to finish'):
+                await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        # A finished build (ok or failed) no longer holds the version.
+        await backend.set_build('org-1', 'acme.brandy', 1, {'status': 'failed'})
+        assert (await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR))['deleted'] is True
+
+    @pytest.mark.asyncio
+    async def test_unknown_version_and_bad_arguments_refuse(self, backend):
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        with pytest.raises(StorageError, match='v7: not in the registry'):
+            await backend.delete_version('org-1', 'acme.brandy', 7, ACTOR)
+        with pytest.raises(ValueError, match='positive integer'):
+            await backend.delete_version('org-1', 'acme.brandy', 0, ACTOR)
+        with pytest.raises(StorageError, match='not in the registry'):
+            await backend.delete_version('org-1', 'acme.nothing', 1, ACTOR)
+
+    @pytest.mark.asyncio
+    async def test_versions_rows_carry_deletable_from_the_same_checks(self, backend):
+        """The card draws its delete mark from ``deletable`` alone: it is the
+        verb's refusal check evaluated on every row of the version strip.
+        """
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # v1: pinned below
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # v2: in review
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # v3: building
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)  # v4: free
+        await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_USER, 1, {'name': 'B'}, ACTOR)
+        await backend.set_artifact_state('org-1', 'acme.brandy', 2, 'submit', ACTOR)
+        await backend.set_build('org-1', 'acme.brandy', 3, {'status': 'queued'})
+        rows = await backend.versions('org-1', 'acme.brandy')
+        assert [(r['version'], r['deletable']) for r in rows] == [(4, True), (3, False), (2, False), (1, False)]
+        # A disabled pin still pins; a soft-removed one frees the version.
+        await backend.publish_set_state('org-1', 'app', 'acme.brandy', AUD_USER, 'disabled', ACTOR)
+        assert [r['deletable'] for r in await backend.versions('org-1', 'acme.brandy') if r['version'] == 1] == [False]
+        await backend.publish_set_state('org-1', 'app', 'acme.brandy', AUD_USER, 'removed', ACTOR)
+        assert [r['deletable'] for r in await backend.versions('org-1', 'acme.brandy') if r['version'] == 1] == [True]
+
+    @pytest.mark.asyncio
+    async def test_delete_commits_the_meta_before_the_bytes_go(self, backend, store, monkeypatch):
+        """The registry forgets the version FIRST; the content tree goes next and the registry JSON last."""
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        content_dir = await _write_content(store, v1)
+        order = []
+        real_tree, real_file = store.delete_tree, store.delete_file
+
+        async def spy_tree(prefix):
+            order.append(('tree', prefix, [v['version'] for v in await backend.versions('org-1', 'acme.brandy')]))
+            return await real_tree(prefix)
+
+        async def spy_file(filename, expected_version=None):
+            order.append(('file', filename, [v['version'] for v in await backend.versions('org-1', 'acme.brandy')]))
+            return await real_file(filename, expected_version)
+
+        monkeypatch.setattr(store, 'delete_tree', spy_tree)
+        monkeypatch.setattr(store, 'delete_file', spy_file)
+        assert (await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR))['deleted'] is True
+        # Both byte deletes saw a registry that had ALREADY forgotten v1; tree before JSON.
+        assert [(kind, path) for kind, path, _ in order] == [('tree', content_dir), ('file', v1['artifactPath'])]
+        assert all(seen == [] for _, _, seen in order)
+
+    @pytest.mark.asyncio
+    async def test_delete_retries_after_a_content_tree_failure(self, backend, store, monkeypatch):
+        """A store failure on the tree leaves the JSON (the marker) and names the leftover; the retry finishes."""
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        content_dir = await _write_content(store, v1)
+        real_tree = store.delete_tree
+
+        async def failing_tree(prefix):
+            raise StorageError('disk went away')
+
+        monkeypatch.setattr(store, 'delete_tree', failing_tree)
+        with pytest.raises(StorageError, match=rf'removed from the registry.*{content_dir}.*run deploy delete again'):
+            await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        # The registry is already right; the bytes linger.
+        assert await backend.versions('org-1', 'acme.brandy') == []
+        assert await store.read_file(v1['artifactPath'])
+        assert await store.list_files(content_dir + '/')
+
+        monkeypatch.setattr(store, 'delete_tree', real_tree)
+        result = await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        assert result['deleted'] is True and result['sha256'] == v1['sha256'] and result['kind'] == 'app'
+        with pytest.raises(StorageNotFoundError):
+            await store.read_file(v1['artifactPath'])
+        assert await store.list_files(content_dir + '/') == []
+        rows = (await backend.history('org-1', 'acme.brandy'))['rows']
+        assert [r['version'] for r in rows if r['action'] == 'delete'] == [1]  # one delete line, not two
+
+    @pytest.mark.asyncio
+    async def test_delete_retries_after_a_registry_json_failure(self, backend, store, monkeypatch):
+        """The tree is gone, the JSON failed: the error names the JSON and the retry removes it."""
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        content_dir = await _write_content(store, v1)
+        real_file = store.delete_file
+
+        async def failing_file(filename, expected_version=None):
+            raise StorageError('permission denied')
+
+        monkeypatch.setattr(store, 'delete_file', failing_file)
+        with pytest.raises(StorageError, match=rf'{v1["artifactPath"]}.*run deploy delete again'):
+            await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        assert await store.list_files(content_dir + '/') == []
+        assert await store.read_file(v1['artifactPath'])
+
+        monkeypatch.setattr(store, 'delete_file', real_file)
+        assert (await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR))['deleted'] is True
+        with pytest.raises(StorageNotFoundError):
+            await store.read_file(v1['artifactPath'])
+
+    @pytest.mark.asyncio
+    async def test_delete_is_idempotent_once_the_bytes_are_gone(self, backend, store):
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        await _write_content(store, v1)
+        first = await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        again = await backend.delete_version('org-1', 'acme.brandy', 1, OTHER)
+        assert again['deleted'] is True and again['deletedAt'] == first['deletedAt']
+        assert (again['sha256'], again['kind']) == (v1['sha256'], 'app')
+        rows = (await backend.history('org-1', 'acme.brandy'))['rows']
+        assert [r['actor'] for r in rows if r['action'] == 'delete'] == [ACTOR]  # the retry wrote nothing
+        # A version that never existed is still "not in the registry".
+        with pytest.raises(StorageError, match='v9: not in the registry'):
+            await backend.delete_version('org-1', 'acme.brandy', 9, ACTOR)
+
+    @pytest.mark.asyncio
+    async def test_delete_persists_the_inferred_kind_of_a_legacy_meta(self, backend, store):
+        """B37: deleting a pre-C.17 meta's last version must not free the name for another kind."""
+        v1 = await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        # A pre-C.17 meta carries no top-level kind: strip it as the upgrade finds it.
+        path = backend._meta_path('org-1', 'acme.brandy')
+        meta = json.loads(await store.read_file(path))
+        del meta['kind']
+        await store.write_file(path, json.dumps(meta))
+
+        await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
+        assert json.loads(await store.read_file(path))['kind'] == 'app'
+        assert await backend.versions('org-1', 'acme.brandy') == []
+        with pytest.raises(ValueError, match="'acme.brandy' is already an app in this organization"):
+            await backend.publish('org-1', 'acme.brandy', {**PIPE, 'project_id': 'brandy'}, ACTOR)
+        # The name's own kind still deploys, at a never-reused number.
+        assert (await backend.publish('org-1', 'acme.brandy', APP, ACTOR))['version'] == 2
+        assert v1['version'] == 1
+
+    def test_delete_block_of_is_the_shared_rule(self):
+        """Both editions refuse through this one function (the saas twin imports it)."""
+        free = {'version': 5, 'state': 'private', 'metadata': {'build': {'status': 'ok'}}}
+        assert delete_block_of(free, []) == ''
+        pin = {'audience': {'type': 'team', 'id': 't-1', 'name': 'Production', 'handle': '@team/Production'}}
+        assert delete_block_of(free, [pin]) == 'v5 is published to @team/Production; unpublish it first'
+        assert delete_block_of({**free, 'state': 'submit'}, []) == 'v5 is in review; withdraw it first'
+        building = {**free, 'metadata': {'build': {'status': 'building'}}}
+        assert delete_block_of(building, []) == 'v5 is still building; wait for the build to finish'
+        # The pin outranks the other reasons: unpublishing is the first step.
+        assert 'unpublish' in delete_block_of({**building, 'state': 'submit'}, [pin])
 
 
 # ============================================================================
