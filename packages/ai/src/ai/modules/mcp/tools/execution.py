@@ -29,7 +29,8 @@ normalizer's hard-failure set.
 import asyncio
 from typing import Any, Dict
 
-from ..apps import DROPPER_URI
+from .. import identity
+from ..apps import DROPPER_URI, upload_url
 from ..errors import _bad, _timeout
 from ..tooling import ToolHints, ToolRegistry
 
@@ -152,13 +153,18 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
     if err:
         return err
 
+    # The token slot carries the control id of THIS run (plan section 1); the
+    # address beside it is stable across runs. The registry keys on the
+    # address and tracks the run by its control id, so a use_existing attach
+    # (same control id) refreshes the entry and a fresh launch replaces it
     token = started.get('token')
-    if not token:
+    address = started.get('address')
+    if not token or not address:
         return _bad(
-            'engine did not return a task address',
+            'engine did not return a task address and control id',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    tasks.add(token, pipeline_ref='<inline>')
+    tasks.add(address, instance=token, pipeline_ref='<inline>')
 
     result_payload: Dict[str, Any] = {'ok': True, 'address': token}
     result_payload['projectId'] = started.get('projectId')
@@ -198,36 +204,54 @@ async def _run_pipeline(client, tasks, args: Dict[str, Any]) -> dict:
 
 
 async def _run_dropper_pipe(client, tasks, args: Dict[str, Any]) -> dict:
-    """Start a pipeline and return its address and a credential-free upload URL.
+    """Start a pipeline and return its address, a one-time upload URL and the dropper deep link.
 
     Bytes cannot ride the MCP tool call (transport payload limits), so this
     tool returns the HTTP endpoint an out-of-band uploader POSTs files to:
-    ``/task/data/{address}``, authenticated with an ``rr_`` key in the
-    ``Authorization`` header. No credential ever rides a URL (query strings
-    land in access logs, browser history and ``Referer`` headers). The
-    caller-minted scoped upload key for the sandboxed widget is the widget
-    work package; until it lands the widget cannot upload. Unlike
-    ``run_pipeline`` there is no inline-send path.
+    the MCP module's own ``/mcp/upload/{nonce}`` route (plan 3.7). The nonce
+    is minted here, bound in the session's task tracker to the task just
+    started AND to the credential this call runs under, and dies with
+    either; the route redeems it once and forwards the bytes into the task
+    as this caller. No key is minted and no credential ever rides a URL
+    (query strings land in access logs, browser history and ``Referer``
+    headers) -- the nonce authorizes one upload into one task the caller
+    already started. ``dropper_url`` is the shell app's deep link (plan 3.6),
+    credential-free. Unlike ``run_pipeline`` there is no inline-send path.
     """
     started, err = await _start_task(client, args, 'run_dropper_pipe')
     if err:
         return err
 
-    address = started.get('token')
-    if not address:
+    token = started.get('token')
+    address = started.get('address')
+    if not token or not address:
         return _bad(
-            'engine did not return a task address for the dropper URL',
+            'engine did not return a task address and control id for the dropper URL',
             'the pipeline may have failed to start, or the engine response was malformed',
         )
-    tasks.add(address, pipeline_ref='<inline>')
+    # The run is tracked at its address by its control id: a fresh launch is
+    # a new instance and the earlier run's nonces die with it; a use_existing
+    # attach (same control id) keeps them
+    tasks.add(address, instance=token, pipeline_ref='<inline>')
 
-    # The upload door is the address-keyed data route; the dropper UI is the
-    # shell app's deep link (plan 3.6) - no credential rides either URL
+    # The nonce binds this run (its control id) to the caller identity the
+    # route will forward as (None on the shared-client path, where the route
+    # uses that client too)
+    nonce = tasks.issue_upload_nonce(address, identity.CALLER_AUTH.get())
+
+    # upload_url points at THIS MCP server -- the only place that holds the
+    # nonce -- never at the engine the tools talk to, which may be another
+    # origin; dropper_url is the engine's shell app
+    mcp_origin = identity.MCP_ORIGIN.get()
+    if not mcp_origin:
+        raise RuntimeError('MCP origin is not bound: run_dropper_pipe runs only under handle_mcp')
     base_url = str(client.base_url).rstrip('/')
+    # `address` in the result is what send_data/terminate/monitor take -- the
+    # control id, as for run_pipeline; the dropper deep link names the pipe
     result_payload: Dict[str, Any] = {
         'ok': True,
-        'address': address,
-        'upload_url': f'{base_url}/task/data/{address}',
+        'address': token,
+        'upload_url': upload_url(mcp_origin, nonce),
         'dropper_url': f'{base_url}/?appid=rocketride.dropper&pipe={address}',
         'projectId': started.get('projectId'),
         'source': started.get('source'),
@@ -326,9 +350,10 @@ def register(registry: ToolRegistry) -> None:
 
     registry.register(
         'run_dropper_pipe',
-        'Start a RocketRide pipeline and return two self-contained URLs for getting files in over a '
-        'separate HTTP data channel (file bytes cannot ride the MCP tool call): upload_url for a '
-        'programmatic multipart POST, and dropper_url for a human to drag-drop files in a browser. '
+        'Start a RocketRide pipeline and return two URLs for getting files in over a separate HTTP data '
+        'channel (file bytes cannot ride the MCP tool call): upload_url, a credential-free one-time link '
+        'for a multipart POST into the task (one POST per link; the response carries the next link), and '
+        'dropper_url for a human to drag-drop files in a browser. '
         'Same inputs as run_pipeline, minus the inline-send path. '
         'Result includes projectId and source for use with log_traces/log_trace.',
         _RUN_DROPPER_PIPE_SCHEMA,
@@ -337,8 +362,8 @@ def register(registry: ToolRegistry) -> None:
             read_only=False,
             destructive=True,
             open_world=True,
-            reason="Starts a billable task and returns public upload URLs; the pipeline's nodes can reach any "
-            'external service it names.',
+            reason='Starts a billable task and returns a one-time upload link billed to the caller; the '
+            "pipeline's nodes can reach any external service it names.",
         ),
     )(_run_dropper_pipe)
 

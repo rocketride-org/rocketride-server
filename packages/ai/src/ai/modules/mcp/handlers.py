@@ -58,9 +58,9 @@ SERVER_INSTRUCTIONS = (
     'needed. Without inputs, send_data feeds input and monitor waits for completion. '
     'list_running_pipelines finds addresses; terminate stops a task. Pipeline definitions are always inline '
     'JSON objects; no tool reads a pipeline from a file path. Store tools take store-relative paths. To '
-    'take files over HTTP, run_dropper_pipe starts or reuses a task and returns an upload_url and a '
-    "dropper_url; send_files (local engines only) uploads files from the engine host's own disk into a "
-    'running task.\n\n'
+    'take files over HTTP, run_dropper_pipe starts or reuses a task and returns an upload_url (a one-time, '
+    'credential-free link; each upload response carries the next one) and a dropper_url; send_files '
+    "(local engines only) uploads files from the engine host's own disk into a running task.\n\n"
     'Other tools: list_integrations (credential setup status; variable names only, never values), '
     'resolve_config, describe_pipeline, scaffold_node; store_read, store_list, store_stat, store_get_url; '
     'save_template, load_template; deploy_add, then deploy_to_team, then deploy_set_schedule, with '
@@ -89,6 +89,7 @@ def build_mcp_server(
     registry: Optional[ToolRegistry] = None,
     apps_dir: Optional[Path] = None,
     engine_origin: Optional[str] = None,
+    mcp_origin: Optional[str] = None,
     local_engine: bool = False,
 ) -> Server:
     """Build and return a low-level MCP Server wired with tools and resources.
@@ -125,6 +126,10 @@ def build_mcp_server(
             `engine_factory().base_url` -- avoids building (and, on the
             per-caller path above, leaking into the request's close bucket) a
             whole EngineClient just to read a string.
+        mcp_origin: This MCP server's own public origin (see
+            `__init__._resolve_mcp_origin`): the dropper widget uploads to
+            `/mcp/upload/{nonce}` HERE, so the widget CSP must admit it next to
+            the engine origin.
         local_engine: True when the engine is bound to loopback (decided once
             in ``__init__.initModule``). Only then are ``local_engine_only``
             tools such as ``send_files`` listed and dispatched; the default is
@@ -197,7 +202,7 @@ def build_mcp_server(
 
     async def _on_list_resources(ctx, params: types.PaginatedRequestParams | None) -> types.ListResourcesResult:
         return types.ListResourcesResult(
-            resources=resources_mod.list_resources() + apps_mod.list_ui_resources(apps_dir, engine_origin),
+            resources=resources_mod.list_resources() + apps_mod.list_ui_resources(apps_dir, engine_origin, mcp_origin),
             ttl_ms=RESOURCES_LIST_TTL_MS,
             cache_scope=CACHE_SCOPE,
         )

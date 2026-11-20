@@ -207,15 +207,34 @@ separate HTTP channel (bytes cannot ride an MCP tool call).
 - **Parameters:** `pipeline` (object, required); plus the shared start
   parameters (no `inputs`).
 - **Returns:** `{ok, address, upload_url, dropper_url, projectId, source}`.
-  `upload_url` is the engine's `/task/data/{address}` door for programmatic
-  multipart POSTs (authenticated with the caller's `rr_` key in the
-  `Authorization` header); `dropper_url` opens the dropper app on that pipe
+  `upload_url` is the MCP server's own one-time upload link,
+  `/mcp/upload/<nonce>`: a multipart `POST` to it (no `Authorization`
+  header, no query credential) forwards the files into the task as the
+  caller who started it, so the upload is billed to that caller exactly as a
+  `send_data` call would be. The nonce is single-use and bound to the RUN
+  that minted it (the control id `use()` answered, not the address): the
+  response is the engine envelope `{status, data}` plus the **next**
+  `upload_url`, and the link answers `404` once used, after `terminate`
+  through MCP, once a fresh launch through MCP has replaced the run at that
+  address (`run_pipeline`/`run_dropper_pipe` without `use_existing`; an
+  attach with `use_existing` keeps the link), or on another MCP server. One
+  gap remains: a run restarted outside MCP (DAP, another client) is not
+  seen by the MCP server, so an unused link stays usable until it is
+  consumed, the run is terminated through MCP, or the MCP server lets it go;
+  a liveness check of the control id at upload time will close it. The link
+  names the MCP server itself (the only holder of the nonce),
+  not the engine the tools run on. One request may carry at most 100 MiB; a
+  larger body answers `413` with a link to retry with once the drop is split.
+  `dropper_url` opens the dropper app on that pipe
   (`?appid=rocketride.dropper&pipe=<address>`), where a person signs in and
   drags files into the running pipeline.
-- **Notable:** the URLs carry the task's address and no credential. If the
-  pipeline has no data-ingress source, the task is cleaned up and the call
-  fails with a `BadRequest` instead of leaving an orphaned run. In MCP Apps hosts the result renders as the
-  [file-dropper widget](/connect/mcp/http/resources-and-widgets#widgets).
+- **Notable:** neither URL carries a credential; `upload_url` carries only
+  the nonce, `dropper_url` only the address. If the pipeline has no
+  data-ingress source, the task is cleaned up and the call fails with a
+  `BadRequest` instead of leaving an orphaned run. In MCP Apps hosts the
+  result renders as the
+  [file-dropper widget](/connect/mcp/http/resources-and-widgets#widgets),
+  which uploads through the same link.
 
 ### send_data
 

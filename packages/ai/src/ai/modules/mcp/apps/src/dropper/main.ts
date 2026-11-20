@@ -3,12 +3,16 @@
  * Copyright (c) 2026 Aparavi Software AG
  * See LICENSE file for details.
  *
- * Dropper widget: drag-drop upload to the address-keyed upload_url from the
- * run_dropper_pipe tool result (header-authenticated; the widget's scoped
- * upload key is the widget work package). The POST is synchronous — its response is the
- * standard engine envelope {status: 'OK', data: DataResult} (or
- * {status: 'Error', error}), where DataResult is
- * {objectsRequested, objectsCompleted, resultTypes, objects}.
+ * Dropper widget: drag-drop upload to the upload_url from the run_dropper_pipe
+ * tool result. That URL is the MCP module's own POST /mcp/upload/<nonce>
+ * route (plan 3.7): the nonce is one-time and bound to the task, so the
+ * request carries NO header and NO query credential -- the server forwards
+ * the bytes into the task as the caller who started it. The POST is
+ * synchronous; its response is the standard engine envelope
+ * {status: 'OK', data: DataResult} (or {status: 'Error', error}), where
+ * DataResult is {objectsRequested, objectsCompleted, resultTypes, objects},
+ * plus upload_url: the NEXT one-time link, since the one just used is spent.
+ * A 404 means the link was already used or its task has ended.
  * XHR (not fetch) for upload-progress events. Requires csp.connectDomains to
  * include the engine origin (stamped by apps.py at list time).
  */
@@ -34,7 +38,13 @@ interface Envelope {
 	status?: 'OK' | 'Error';
 	data?: DataResult;
 	error?: Record<string, unknown>;
+	/** The next one-time upload link; absent once the task has ended. */
+	upload_url?: string;
 }
+
+/** Shown in place of the dropzone once no one-time link is left to use. */
+const SPENT_MESSAGE =
+	'This upload link was already used or its task has ended. Ask the assistant to run run_dropper_pipe again.';
 
 const app = new App({ name: 'RocketRide dropper', version: '0.1.0' });
 const root = document.getElementById('root') as HTMLElement;
@@ -208,7 +218,9 @@ function renderResults(data: DataResult): void {
 
 	wrap.appendChild(nav);
 	wrap.appendChild(panel);
-	root.replaceChildren(wrap, buildDropzone('Drop more files'));
+	// Each link is one-time: a further drop needs the next one the server
+	// handed back; without it the task has ended.
+	root.replaceChildren(wrap, info?.upload_url ? buildDropzone('Drop more files') : el('p', 'empty', SPENT_MESSAGE));
 }
 
 function upload(files: FileList | File[]): void {
@@ -221,6 +233,10 @@ function upload(files: FileList | File[]): void {
 	const label = el('p', undefined, 'Uploading…');
 	root.replaceChildren(label, bar);
 
+	// Once the server has answered, the link in hand is spent whatever the
+	// outcome and the response carries the next one (xhr.onload). On a
+	// network error or timeout the request may never have arrived, so the
+	// link is kept for "Try again"; a spent one then answers 404.
 	const xhr = new XMLHttpRequest();
 	xhr.open('POST', info.upload_url);
 	xhr.upload.onprogress = (e) => {
@@ -236,14 +252,27 @@ function upload(files: FileList | File[]): void {
 		} catch {
 			envelope = null;
 		}
+		// The server answered, so the link just used is spent either way.
+		if (info) info.upload_url = typeof envelope?.upload_url === 'string' ? envelope.upload_url : '';
 		if (envelope?.status === 'OK' && envelope.data) {
 			renderResults(envelope.data);
 			return;
 		}
-		const message = envelope?.status === 'Error'
+		if (xhr.status === 404) {
+			root.replaceChildren(el('p', 'empty', SPENT_MESSAGE));
+			return;
+		}
+		// 413: the server names its byte limit and hands back a link to retry
+		// with once the drop is split into smaller uploads.
+		const message = xhr.status === 413
+			? `Upload refused: ${String(envelope?.error?.error ?? 'the upload is too large')}`
+			: envelope?.status === 'Error'
 			? `Pipeline error: ${JSON.stringify(envelope.error ?? {})}`
 			: `Unexpected response (HTTP ${xhr.status})`;
-		root.replaceChildren(el('p', 'empty', message), buildDropzone('Try again'));
+		root.replaceChildren(
+			el('p', 'empty', message),
+			info?.upload_url ? buildDropzone('Try again') : el('p', 'empty', SPENT_MESSAGE),
+		);
 	};
 	xhr.onerror = () => {
 		root.replaceChildren(

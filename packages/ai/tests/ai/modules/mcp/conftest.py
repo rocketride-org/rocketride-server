@@ -66,6 +66,10 @@ LOCAL_ENGINE_ONLY_TOOL_NAMES = ('send_files',)
 FAKE_ARTIFACT = {'version': 3, 'pipelineName': 'demo', 'sha256': 'abc'}
 FAKE_DEPLOYMENT = {'projectId': 'proj-1', 'teamId': 'team-1', 'version': 3, 'state': 'enabled', 'schedules': {}}
 
+# The task address use() answers beside the control id in its token slot (C.22):
+# stable across runs, where the control id names ONE run.
+FAKE_ADDRESS = 'acme.proj-fake.src-fake'
+
 
 class FakeEngineClient:
     def __init__(
@@ -217,7 +221,8 @@ class FakeEngineClient:
         self.used.append(kwargs)
         return {
             'token': self._token,
-            'id': 'acme.proj-fake.src-fake',
+            'id': FAKE_ADDRESS,
+            'address': FAKE_ADDRESS,
             'projectId': 'proj-fake',
             'source': 'src-fake',
             **kwargs,

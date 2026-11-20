@@ -12,10 +12,27 @@ from ai.modules.mcp.tooling import ToolRegistry
 from ai.modules.mcp.tools import execution
 from ai.modules.mcp.tools import register_all
 
+from .conftest import FAKE_ADDRESS
+
 
 # Minimal inline pipeline used everywhere a definition is required — the
 # tools are inline-only (no server-side filepath reads by design).
 PIPE = {'source': 'a', 'components': []}
+MCP_ORIGIN = 'http://mcp.test:5565'
+
+
+@pytest.fixture(autouse=True)
+def _bound_mcp_origin():
+    """`handle_mcp` binds the server's own origin for every request; the handlers
+    under test run outside it, so bind one here (run_dropper_pipe needs it).
+    """
+    from ai.modules.mcp import identity
+
+    token = identity.MCP_ORIGIN.set(MCP_ORIGIN)
+    try:
+        yield
+    finally:
+        identity.MCP_ORIGIN.reset(token)
 
 
 # --- registration -----------------------------------------------------------
@@ -138,7 +155,13 @@ async def test_run_pipeline_with_inputs_leaves_a_reused_run_running(fake_engine)
 
     async def reused_use(**kwargs):
         fake_engine.used.append(kwargs)
-        return {'token': fake_engine._token, 'projectId': 'proj-fake', 'source': 'src-fake', 'reused': True}
+        return {
+            'token': fake_engine._token,
+            'address': FAKE_ADDRESS,
+            'projectId': 'proj-fake',
+            'source': 'src-fake',
+            'reused': True,
+        }
 
     fake_engine.use = reused_use
 
@@ -262,7 +285,7 @@ async def test_terminate_calls_seam_and_removes_from_registry(fake_engine):
     registry = ToolRegistry()
     execution.register(registry)
     tasks = TaskRegistry()
-    tasks.add('tok-1', pipeline_ref='p.pipe')
+    tasks.add('tok-1', instance='c1', pipeline_ref='p.pipe')
 
     result = await registry.handler('terminate')(fake_engine, tasks, {'address': 'tok-1'})
 
@@ -347,18 +370,57 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
 
     assert result['ok'] is True
     assert result['address'] == fake_engine._token
-    # The address is public information and rides the path; no credential
-    # ever rides a URL (access logs, Referer, history) — the uploader sends
-    # its rr_ key in the Authorization header.
-    assert result['upload_url'] == f'{fake_engine.base_url}/task/data/{fake_engine._token}'
-    assert '?' not in result['upload_url']
+    # The upload door is the MCP module's own route (plan 3.7): the only
+    # URL-carried value is a one-time nonce minted in the task tracker and
+    # bound to this task. No credential ever rides a URL (access logs,
+    # Referer, history) and the address does not ride this one either.
+    # ...and the link names THIS MCP server (the only holder of the nonce), not
+    # the engine the tool talked to
+    prefix = f'{MCP_ORIGIN}/mcp/upload/'
+    assert not result['upload_url'].startswith(fake_engine.base_url)
+    assert result['upload_url'].startswith(prefix)
+    nonce = result['upload_url'][len(prefix) :]
+    assert nonce and '/' not in nonce and '?' not in result['upload_url']
+    assert tasks.consume_upload_nonce(nonce) == {
+        'token': FAKE_ADDRESS,
+        'instance': fake_engine._token,
+        'caller_auth': None,
+    }
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
-    assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.dropper&pipe={fake_engine._token}'
+    # ...and the deep link names the PIPE (the address), not the run
+    assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.dropper&pipe={FAKE_ADDRESS}'
     assert 'auth=' not in result['dropper_url']
     assert result['projectId'] == 'proj-fake'
     assert result['source'] == 'src-fake'
     # address tracked so monitor/terminate work against it
     assert tasks.get(fake_engine._token) is not None
+
+
+@pytest.mark.asyncio
+async def test_run_dropper_pipe_binds_the_nonce_to_the_calling_identity(fake_engine):
+    """The nonce carries the credential the tool call ran under (identity.CALLER_AUTH),
+    which is what the upload route forwards the bytes with.
+    """
+    from ai.modules.mcp import identity
+
+    registry = ToolRegistry()
+    execution.register(registry)
+    tasks = TaskRegistry()
+
+    token = identity.CALLER_AUTH.set('rr_caller_key')
+    try:
+        result = await registry.handler('run_dropper_pipe')(fake_engine, tasks, {'pipeline': PIPE})
+    finally:
+        identity.CALLER_AUTH.reset(token)
+
+    nonce = result['upload_url'].rsplit('/', 1)[1]
+    assert tasks.consume_upload_nonce(nonce) == {
+        'token': FAKE_ADDRESS,
+        'instance': fake_engine._token,
+        'caller_auth': 'rr_caller_key',
+    }
+    # one-time: a second redemption answers nothing
+    assert tasks.consume_upload_nonce(nonce) is None
 
 
 @pytest.mark.asyncio
