@@ -31,9 +31,8 @@ import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, 
 import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
-import { ConnectionFailure, withTimeout } from './errors';
+import { ConnectionFailure, KEY_REQUIRED_MESSAGE, withTimeout } from './errors';
 import { KEYLESS_CREDENTIAL, RemoteManager } from './remote-manager';
-import { KEY_REQUIRED_MESSAGE } from './errors';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
@@ -2549,6 +2548,7 @@ test('bootstrap keeps the key-required message when a saved keyless credential i
 		const status = manager.connectionStatus;
 		assert.equal(status.state, ConnectionState.AUTH_FAILED);
 		assert.equal(status.lastError, KEY_REQUIRED_MESSAGE);
+		assert.equal(status.lastFailure?.lastError, KEY_REQUIRED_MESSAGE, 'the latched failure the banner reads');
 	} finally {
 		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
 		else delete (globalThis as { window?: Window }).window;
