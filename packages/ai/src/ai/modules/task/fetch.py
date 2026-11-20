@@ -85,9 +85,15 @@ def _decode_fetch_claim(token: str):
     from ai.account.file_store import FETCH_CLAIM_VERSION, fetch_signing_key  # deferred: Account singleton
 
     try:
+        key = fetch_signing_key()
+    except ValueError:
+        # A weak or misconfigured key fails closed with the generic 401, never the config message.
+        return None, JSONResponse({'error': 'Invalid token'}, status_code=401)
+
+    try:
         # Require the `exp` claim so a signed token without an expiration is
         # rejected rather than treated as non-expiring.
-        payload = jwt.decode(token, fetch_signing_key(), algorithms=['HS256'], options={'require': ['exp']})
+        payload = jwt.decode(token, key, algorithms=['HS256'], options={'require': ['exp']})
     except jwt.ExpiredSignatureError:
         return None, JSONResponse({'error': 'Token expired'}, status_code=401)
     except jwt.InvalidTokenError as e:

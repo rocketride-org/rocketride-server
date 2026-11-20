@@ -779,6 +779,17 @@ class TestFetchSigningKeyStaysInTheEngine:
         monkeypatch.setenv('RR_STORE_URL', store_url)
         task.warn_if_signing_key_is_ephemeral()
 
+    @pytest.mark.parametrize('store_url', ['s3://bucket/prefix', 'azureblob://container'])
+    def test_cloud_backend_short_key_fetch_claim_is_generic_401(self, monkeypatch, store_url):
+        from ai.modules.task.fetch import _decode_fetch_claim
+
+        monkeypatch.setenv('RR_SIGNING_KEY', 'short')
+        monkeypatch.setenv('RR_STORE_URL', store_url)
+        payload, error = _decode_fetch_claim('abc')
+        assert payload is None
+        assert error.status_code == 401
+        assert b'RR_SIGNING_KEY' not in error.body
+
     def test_filesystem_backend_still_rejects_short_key(self, monkeypatch):
         from ai.modules import task
 

@@ -52,8 +52,9 @@ inherit the engine's full environment, only an allowlist:
 `RR_SIGNING_KEY`, `RR_MODEL_SERVER_ADMIN_TOKEN`, `RR_DATACORE_GRANT_KEY`, and
 `ROCKETRIDE_DB_BROKER_TOKEN` are never in a task's environment, even through
 `RR_SUBPROCESS_ENV`: the engine signs the download URLs a task asks for. A
-configured `RR_SIGNING_KEY` needs at least 32 UTF-8 bytes; a shorter value
-refuses task-module startup. Tasks
+configured `RR_SIGNING_KEY` needs at least 32 UTF-8 bytes on the filesystem
+store backend, or task-module startup refuses it; S3 and Azure presign and do
+not use it. Tasks
 run as the engine's OS user, so on a shared or multi-user engine set the key in
 the engine's process environment rather than in the `.env` next to the binary,
 and set `RR_PROC_PRIVATE=1` (Linux only) so tasks cannot read the engine's
