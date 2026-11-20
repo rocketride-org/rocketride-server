@@ -869,7 +869,9 @@ export class RocketRideClient extends DAPClient {
 			this._assertCurrentOperation(operation);
 
 			// A newer account push can arrive while monitor restoration is waiting.
-			const account = operation.accountUpdate ?? result;
+			// Keep the auth-only isNewUser flag when the push does not carry one.
+			const pushed = operation.accountUpdate;
+			const account = pushed ? { ...pushed, isNewUser: pushed.isNewUser ?? result.isNewUser } : result;
 			this._uri = operation.endpoint;
 			this._connectResult = account;
 			this._authenticated = true;

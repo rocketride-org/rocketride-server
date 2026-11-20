@@ -2544,6 +2544,29 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(client.getAccountInfo()).toEqual(updated);
 	});
 
+	it('keeps the auth isNewUser flag when a buffered account update pushes null', async () => {
+		const client: RocketRideClient = makeClient();
+		await client.addMonitor({ token: 'task-1' }, ['output']);
+
+		const login = loginOutcome(client.login('monitor-new-user-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'new user socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'new user auth');
+		const account = connectResult('monitor-new-user');
+		socket.respond(lifecycleRequests('auth', socket)[0].message, { ...account, isNewUser: true });
+		await waitForLifecycle(() => lifecycleRequests('rrext_monitor', socket).length === 1, 'held monitor restoration');
+
+		const updated = { ...account, isNewUser: null, displayName: 'Refreshed' };
+		await socket.onmessage?.({
+			data: JSON.stringify({ type: 'event', seq: 20_001, event: 'apaext_account', body: updated }),
+		} as MessageEvent);
+		socket.respond(lifecycleRequests('rrext_monitor', socket)[0].message, {});
+
+		await expect(login).resolves.toEqual({ status: 'resolved', value: { ...updated, isNewUser: true } });
+		expect(client.getAccountInfo()).toMatchObject({ displayName: 'Refreshed', isNewUser: true });
+	});
+
 	it('coalesces equivalent PKCE credentials regardless of property insertion order', async () => {
 		const client = makeClient();
 		const firstCredential = {

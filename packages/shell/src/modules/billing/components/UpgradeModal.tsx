@@ -301,7 +301,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({
 				}
 			}
 			if (!mounted.current) return;
-			const validated = authenticated ? parsePlanChangeOutcome(result) : result;
+			const validated = authenticated || result !== undefined ? parsePlanChangeOutcome(result) : result;
 			if (authenticated && validated?.status === 'requires_action') {
 				throw new Error('Payment is still awaiting confirmation. Try finishing the plan change again.');
 			}
