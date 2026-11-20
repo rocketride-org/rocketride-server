@@ -582,6 +582,14 @@ function makeRunDbPytestAction(options = {}) {
 				}
 			}
 
+			// The same selectors as the mocked pass: --markers and --pytestPattern.
+			const selectors = [
+				...(options.markers ? ['-m', options.markers] : []),
+				...(options.pytestPattern ? ['-k', options.pytestPattern] : []),
+			];
+			// A selection can leave a suite with no test to run, so the
+			// every-suite-passed check applies only to a full pass.
+			const checkResults = required && selectors.length === 0;
 			const pytestTokens = splitPytestOpts(options.pytest);
 			try {
 				for (const pass of passes) {
@@ -601,10 +609,11 @@ function makeRunDbPytestAction(options = {}) {
 							'no:xdist',
 							`--junitxml=${report}`,
 							...withoutXdistArgs(pytestTokens),
+							...selectors,
 						],
 						execOpts: { task, cwd: PACKAGE_DIR, env: pass.env },
 					});
-					if (required) {
+					if (checkResults) {
 						const xml = await fs.promises.readFile(report, 'utf8');
 						checkRequiredDbResults(xml, pass.suites, pass.report);
 						for (const { lane, suites: pooledSuites } of pass.pooled) {
