@@ -381,13 +381,13 @@ def _first_bound_at(rows: List[Dict[str, Any]]) -> Optional[float]:
 
 
 def _scope_sees(scope: Optional[Dict[str, str]], row: Dict[str, Any]) -> bool:
-    """True when a viewer of a binding in ``scope`` can also see ``row``.
+    """True when EVERY viewer of a binding in ``scope`` also sees ``row``.
 
-    ``scope`` is the audience of the binding being checked (None: every
-    caller-visible row, the receipt-time view). Public rows are seen by
-    everyone; a team row only by that team's viewers; a user row only by that
-    user. A personal scope is the caller's own, which sees every row the
-    caller can see.
+    ``scope`` is the audience of the binding being checked. Public rows are
+    seen by everyone; a team row only by that team's viewers. A public
+    binding's viewers include team and user members, so only public rows are
+    common to all of them. A personal scope sees the rows its owner sees;
+    _caller_sees limits those to the caller's own.
     """
     if scope is None or scope.get('type') == 'user':
         return True
@@ -399,13 +399,28 @@ def _scope_sees(scope: Optional[Dict[str, str]], row: Dict[str, Any]) -> bool:
     return False
 
 
+def _caller_sees(conn: Any, row: Dict[str, Any]) -> bool:
+    """True when the caller can see ``row``: a public row, a row of a team the
+    caller belongs to, or the caller's own user row (resolve's audience walk).
+    """
+    audience = row.get('audience') or {}
+    kind = audience.get('type', '')
+    if kind == 'public':
+        return True
+    if kind == 'team':
+        return str(audience.get('id') or '') in set(_team_ids_of(conn).values())
+    if kind == 'user':
+        user_id = conn._account_info.userId
+        return bool(user_id) and audience.get('id') == user_id
+    return False
+
+
 async def _container_claims(
     account: Any,
     org_id: str,
     conn: Any,
     app_id: str,
     module_id: str,
-    scope: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Other visible app ids holding ``module_id`` -> when each was first bound.
 
@@ -415,9 +430,12 @@ async def _container_claims(
     nothing, exactly as the resolver drops it. First-bind time still reads ALL
     of the app's rows, as the resolver does. Reads every caller-visible
     publish row (public rows from every org, plus the caller's team and user
-    rows): the engine cannot see other orgs' private apps. ``scope`` is the
-    audience of the binding being checked: rows a viewer of that binding
-    cannot see are left out, so both contenders are timed within one scope. A
+    rows): the engine cannot see other orgs' private apps. A rival is dated
+    from ALL of those rows, whatever the audience of the binding being
+    checked: a public binding's viewers include team and user members, so any
+    row the caller sees can make resolve withhold the new binding. A
+    disabled binding gives up the name only until it is re-enabled, after
+    which the app bound first wins again. A
     stored name that is reserved for the claimant (_reserved_container) is
     withheld at resolve anyway and holds nothing. Raises on a registry error,
     an artifact read included, so callers refuse rather than skip the check.
@@ -426,7 +444,7 @@ async def _container_claims(
     by_app: Dict[str, List[Dict[str, Any]]] = {}
     for row in rows or []:
         other = str(row.get('appId') or '')
-        if other and other != app_id and _scope_sees(scope, row):
+        if other and other != app_id:
             by_app.setdefault(other, []).append(row)
     claims: Dict[str, Any] = {}
     for other, other_rows in by_app.items():
@@ -453,8 +471,10 @@ async def _container_claims(
 
 # One lock per container name: the claim check and the binding write must be
 # one step, or two first publishes for different apps both pass the check
-# before either row lands. Process-local (one engine serves the registry);
-# weak so idle names do not accumulate.
+# before either row lands. Process-local: it serializes publishes within one
+# engine process only; a deployment running several engines against one
+# registry needs a backend-level uniqueness constraint on the name. Weak so
+# idle names do not accumulate.
 _container_locks: 'weakref.WeakValueDictionary[str, asyncio.Lock]' = weakref.WeakValueDictionary()
 
 
@@ -1128,14 +1148,19 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             # Claim check and binding write are ONE step under the name's lock
             # (_container_lock): _container_holder applies resolve's rule (the
             # app whose id derives the name keeps it, else the one bound
-            # strictly first; a tie or an unknown time blocks), timed within
-            # the proposed binding's audience scope.
+            # strictly first; a tie or an unknown time blocks). The publisher is
+            # dated from the rows every viewer of the binding sees, each
+            # rival from every row the caller sees.
             if developer:
                 await stack.enter_async_context(_container_lock(module_id))
                 try:
-                    claims = await _container_claims(account, home, conn, app_id, module_id, audience)
+                    claims = await _container_claims(account, home, conn, app_id, module_id)
+                    # Only the publisher's own rows every viewer of the proposed
+                    # binding sees, and that the caller can see, date it.
                     own_rows = [
-                        r for r in await account.publish_of_app(home, 'app', app_id) if _scope_sees(audience, r)
+                        r
+                        for r in await account.publish_of_app(home, 'app', app_id)
+                        if _scope_sees(audience, r) and _caller_sees(conn, r)
                     ]
                     own_first = _first_bound_at(own_rows) if claims else None
                 except Exception as exc:

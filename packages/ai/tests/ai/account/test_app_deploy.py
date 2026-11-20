@@ -2392,6 +2392,76 @@ async def test_publish_counts_an_earlier_binding_the_audience_can_see(registry, 
 
 
 @pytest.mark.asyncio
+async def test_publish_dates_a_rival_from_every_row_the_caller_sees(registry, quiet_push):
+    """A public binding's viewers include team members, so a rival's earlier
+    TEAM row (visible to the caller) dates the rival: resolve would withhold
+    the new public binding for those viewers, and publish refuses it.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 80.0
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    registry.publishes[('acme_brandy', 'team~t1')] = {
+        'orgId': 'org-other',
+        'appId': 'acme_brandy',
+        'audience': dict(AUD_TEAM),
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {'name': 'acme_brandy'},
+        'publishedAt': 30.0,
+        'createdAt': 30.0,
+    }
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@public'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_personal_publish_ignores_own_rows_the_caller_cannot_see(registry, quiet_push):
+    """An @me publish is dated only from own rows the caller can see: a team
+    row of a team the caller is not in does not exist in the caller's resolve
+    view, so the earlier-bound rival wins and publish refuses.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.publishes[('acme.brandy', 'team~t2')] = {
+        'orgId': 'org1',
+        'appId': 'acme.brandy',
+        'audience': {'type': 'team', 'id': 't2'},
+        'version': 1,
+        'state': 'enabled',
+        'snapshot': {'name': 'Brandy'},
+        'publishedAt': 50.0,
+        'createdAt': 50.0,
+    }
+    _foreign_public_row(registry, 'acme_brandy', 100.0)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=1, target='@me'))
+
+    assert result['success'] is False
+    assert 'acme_brandy' in result['message']
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+async def test_publish_accepts_the_platform_home_container_name(registry, quiet_push, no_published_pages, monkeypatch):
+    """rocketride_home is the one rocketride_* name that stays eligible at publish."""
+    monkeypatch.setenv('RR_PUBLIC_ROOT_APPS', 'rocketride.home')
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.artifacts[1]['moduleId'] = 'rocketride_home'
+    dev = _FakeConn(teams=_TEAMS, developer_id='rocketride')
+
+    result = await handle_deploy_app(dev, _platform_request('publish', version=1, target='@public'))
+
+    assert result['success'] is True
+    assert len(registry.set_calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_publish_ignores_a_rival_whose_binding_is_disabled(registry, quiet_push):
     """A disabled rival binding is not served, so it holds nothing at publish."""
     registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
