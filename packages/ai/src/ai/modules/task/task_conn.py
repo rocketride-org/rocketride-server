@@ -321,6 +321,7 @@ class TaskConn(
         # Account info set when client sends successful auth { auth: apikey } command.
         self._account_info: Optional[AccountInfo] = None
         self._authenticated = False
+        self._dashboard_user_id: Optional[str] = None
 
         # Client IP — set by task_server.listen() immediately after construction,
         # used for per-IP unauthenticated connection tracking.
@@ -467,6 +468,9 @@ class TaskConn(
         self._account_info = result
         self._authenticated = True
         self._authz_verified_at = t0
+        # The user the connection_added event was scoped to: a later deauth
+        # clears userId, but the dashboards that saw the add must see the removal.
+        self._dashboard_user_id = result.userId
         self._server.release_unauthed_slot(self._client_ip)
 
         # Capture optional client identification from auth arguments

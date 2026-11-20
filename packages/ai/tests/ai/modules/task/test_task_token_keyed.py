@@ -146,7 +146,7 @@ def _server(logs, monkeypatch, key=None):
 
 
 def _conn(user_id='user-1', team_id='team-1', auth='rr_session_key'):
-    conn = SimpleNamespace()
+    conn = SimpleNamespace(_authenticated=True)
     conn._account_info = AccountInfo(
         auth=auth,
         userId=user_id,
@@ -502,6 +502,31 @@ def test_no_opt_in_forwards_the_key_to_a_task_subprocess(opt_in):
         assert env.get('RR_OTHER') == 'x'  # the opt-in itself still works
 
 
+@pytest.mark.parametrize(
+    'opt_in', ['', 'RR_*', '*', 'ROCKETRIDE_*', 'RR_DATACORE_GRANT_KEY,RR_DB_BROKER_TOKEN,ROCKETRIDE_DB_BROKER_TOKEN']
+)
+def test_no_opt_in_forwards_a_datacore_credential(opt_in):
+    """The datacore grant key mints a grant for ANY tenant and the broker
+    token is the provisioner's bearer (rocketride-saas #975). Like the task
+    token key, no operator opt-in hands either to pipeline code.
+    """
+    secrets = {'RR_DATACORE_GRANT_KEY', 'RR_DB_BROKER_TOKEN', 'ROCKETRIDE_DB_BROKER_TOKEN'}
+    env = filter_subprocess_env(
+        {
+            'RR_DATACORE_GRANT_KEY': KEY_A,
+            'RR_DB_BROKER_TOKEN': KEY_B,
+            'ROCKETRIDE_DB_BROKER_TOKEN': KEY_B,
+            'rocketride_db_broker_token': KEY_B,
+            'ROCKETRIDE_X': '1',
+            'RR_OTHER': 'x',
+            'RR_SUBPROCESS_ENV': opt_in,
+        }
+    )
+    assert not {name.upper() for name in env} & secrets
+    # The ROCKETRIDE_* namespace still reaches the child, minus the token.
+    assert env.get('ROCKETRIDE_X') == '1'
+
+
 def test_a_short_key_stops_the_engine_at_startup(monkeypatch):
     monkeypatch.setenv('RR_TASK_TOKEN_KEY', 'too-short')
 
@@ -570,7 +595,7 @@ async def test_a_pk_is_refused_while_a_restart_onto_a_private_source_runs(logs, 
 
     control.task.restart_task = _restart
     control.task.has_attached_debugger = lambda: False
-    conn = SimpleNamespace(_account_info=None)
+    conn = SimpleNamespace(_authenticated=True, _account_info=None)
     restart = asyncio.ensure_future(
         ts.restart_task(
             {'arguments': {'token': started['token'], 'pipeline': json.loads(json.dumps(PRIVATE_PIPELINE))}}, conn
@@ -606,7 +631,7 @@ async def test_a_failed_restart_onto_a_public_source_does_not_open_a_private_run
     with pytest.raises(RuntimeError):
         await ts.restart_task(
             {'arguments': {'token': started['token'], 'pipeline': json.loads(json.dumps(CHAT_PIPELINE))}},
-            SimpleNamespace(_account_info=None),
+            SimpleNamespace(_authenticated=True, _account_info=None),
         )
     with pytest.raises(TaskError):
         await ts.authenticate(started['publicToken'])

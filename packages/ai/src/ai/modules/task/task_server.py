@@ -638,8 +638,10 @@ class TaskServer(DAPBase):
 
         # A revoked connection holds the bare identity by now; its dashboard
         # event is still scoped to the user it belonged to (#972).
-        conn_user_id = getattr(conn, '_revoked_user_id', None) or getattr(
-            getattr(conn, '_account_info', None), 'userId', None
+        conn_user_id = (
+            getattr(conn, '_revoked_user_id', None)
+            or getattr(conn, '_dashboard_user_id', None)
+            or getattr(getattr(conn, '_account_info', None), 'userId', None)
         )
 
         # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the
@@ -1722,6 +1724,11 @@ class TaskServer(DAPBase):
                     # must see the ones the caller is about to get. Refused, not
                     # restarted: the run is the owner's and still running, and
                     # a submitted pipeline is never applied to it anyway.
+                    # A deauth or revoke that lands during the wait leaves the
+                    # bare identity (auth ''), which the authorization would
+                    # read as the trusted in-process caller: re-check here.
+                    if conn is not None and not getattr(conn, '_authenticated', False):
+                        raise PermissionError('Not authenticated')
                     try:
                         await existing_control.task.authorize_reuse(credential=self._presenting_credential(conn))
                     except PermissionError as e:
