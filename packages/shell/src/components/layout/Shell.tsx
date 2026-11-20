@@ -39,6 +39,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
+import { withoutCredentials } from '../../util/identity';
+import { forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from '../../util/authPopup';
 import { ConnectionManager } from '../../connection/connection';
 import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
@@ -281,6 +283,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── React state ───────────────────────────────────────────────────────
 	const [renderPhase, setRenderPhase] = useState<RenderPhase>('loading');
 	const [identity, setIdentity] = useState<ConnectResult | null>(null);
+	// What useAuthUser() hands the shell's subtree, apps included: the user
+	// with a blank session token (#1022). Shell code that needs the token
+	// reads it with cm.loadToken().
+	const publicIdentity = useMemo(() => withoutCredentials(identity), [identity]);
 
 	// The resolved identity drives telemetry's signed-in state and the opaque
 	// id the consented instance identifies by (never an email or name).
@@ -437,10 +443,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// embedded sign-in prompt opens THIS ORIGIN in a popup named
 			// 'rrauth': the popup runs the normal top-level round trip, then
 			// hands the session token back over BroadcastChannel and closes.
+			// COOP can clear window.name and the IdP drops ?rrauth=1, so the
+			// role is remembered in sessionStorage across the round trip.
 			const bootParams = new URLSearchParams(window.location.search);
-			const isAuthPopup = window.name === 'rrauth' || bootParams.get('rrauth') === '1';
+			const isAuthPopup = isAuthPopupWindow(window.name, bootParams);
 			if (isAuthPopup && !bootParams.get('code') && !cm.loadToken()) {
 				// Fresh popup: head straight to the IdP (top-level — allowed)
+				rememberAuthPopup();
 				void cm.startOAuth();
 				return;
 			}
@@ -471,6 +480,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				// Popup completion: deliver the session to the opener's iframe
 				// and close — the popup never renders the shell.
 				if (isAuthPopup) {
+					forgetAuthPopup();
 					try {
 						const token = cm.loadToken();
 						if (token) new BroadcastChannel('rr:auth').postMessage({ type: 'login', token });
@@ -952,7 +962,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const orgId = identity?.organization?.id ?? '';
 
 	return (
-		<ShellIdentityContext.Provider value={identity}>
+		<ShellIdentityContext.Provider value={publicIdentity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
 				{/* Mid-rescope the workspace subtree is OUT of the tree (its
 				    unmount flushed the old workspace's stores on the old

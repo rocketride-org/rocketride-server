@@ -36,7 +36,7 @@ import type { ToolChannel } from './toolChannel';
 export interface ShellAppProps {
 	/** Whether the RocketRide WebSocket is currently connected. */
 	isConnected: boolean;
-	/** Authenticated user identity, or null when not logged in. */
+	/** Authenticated user identity (with a blank `userToken`, #1022), or null when not logged in. */
 	identity: ConnectResult | null;
 }
 
@@ -582,7 +582,10 @@ export interface ShellAccountConfig {
 export interface ShellApiConfig {
 	/** Base URI for the RocketRide WebSocket server. */
 	ROCKETRIDE_URI?: string;
-	/** Hard-coded API key for service accounts / dev; bypasses OAuth2 when present. */
+	/**
+	 * Hard-coded API key for service accounts / dev; bypasses OAuth2 when present.
+	 * Host input only: `useShellApiConfig()` and `shell:init` omit it (#1022). Kept because the type is frozen in the shell-api contract.
+	 */
 	RR_APIKEY?: string;
 	/** Stripe publishable key — required for Stripe Elements checkout. */
 	RR_STRIPE_PUBLISHABLE_KEY?: string;

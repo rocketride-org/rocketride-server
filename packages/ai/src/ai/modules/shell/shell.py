@@ -79,6 +79,27 @@ from . import public_pages
 from .contract import Page, own_title, page_instant
 from .settings import app_url
 
+# Script and stylesheet types pinned for every platform. mimetypes.guess_type
+# reads the OS registry on Windows, where '.js' maps to application/javascript
+# or even text/plain depending on what is installed; text/plain under
+# nosniff breaks module scripts. These are the types Python itself uses on
+# POSIX (RFC 9239 for JavaScript), so Linux and macOS responses do not change.
+_PINNED_MEDIA_TYPES = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.css': 'text/css',
+}
+
+
+def _media_type(name: str | os.PathLike) -> Optional[str]:
+    """Return the media type for a served file name, the same on every OS.
+
+    None means "no opinion": FileResponse then falls back to its own guess.
+    """
+    suffix = os.path.splitext(os.fspath(name))[1].lower()
+    return _PINNED_MEDIA_TYPES.get(suffix) or mimetypes.guess_type(os.fspath(name))[0]
+
+
 # Engine binary directory — all static paths are relative to this.
 _root_dir = os.path.dirname(sys.executable)
 
@@ -91,6 +112,75 @@ _apps_root = os.path.join(_root_dir, 'static', 'apps')
 # Crawler files are cheap to regenerate but change rarely — let shared
 # caches hold them for an hour (same max-age convention as task/fetch.py).
 CACHE_CONTROL = 'public, max-age=3600'
+
+# Frame ancestors every shell document allows: its own origin, and the VS Code
+# App Builder preview, whose webview iframe (vscode-webview://<id>) sits inside
+# the desktop workbench (vscode-file://vscode-app). frame-ancestors checks
+# every ancestor up to the top, so both schemes are needed for the desktop
+# preview. Any VS Code extension's webview matches vscode-webview:, which the
+# #1022 design accepts. Web-hosted VS Code (vscode.dev, code-server,
+# github.dev) uses https origins instead; those hosts are added through
+# RR_SHELL_FRAME_ANCESTORS_EXTRA. A wildcard over a multi-label public suffix
+# (*.co.uk) is not detected: that needs the public suffix list.
+_FRAME_ANCESTORS_DEFAULT = ("'self'", 'vscode-webview:', 'vscode-file:')
+
+# Sources accepted from RR_SHELL_FRAME_ANCESTORS_EXTRA (lowercased first): a
+# non-web scheme ("vscode-webview:"), or an http(s) host with an optional port
+# whose name is not a bare or top-level wildcard. Anything else (keywords,
+# paths, separators, quotes, '*', web schemes) would widen or break the policy.
+_FRAME_ANCESTOR_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*:$')
+_FRAME_ANCESTOR_HOST = re.compile(r'^https?://(\*\.[a-z0-9-]+(\.[a-z0-9-]+)+|[a-z0-9-]+(\.[a-z0-9-]+)*)(:\d{1,5})?$')
+_FRAME_ANCESTOR_WEB_SCHEMES = frozenset(
+    {'http:', 'https:', 'ws:', 'wss:', 'data:', 'blob:', 'filesystem:', 'javascript:'}
+)
+
+
+def _frame_ancestor_sources(value: str) -> str:
+    """
+    Build the frame-ancestors source list for shell documents.
+
+    Args:
+        value: Whitespace-separated extra CSP sources, appended to
+            ``'self' vscode-webview: vscode-file:``.
+
+    Returns:
+        The full source list, lowercased, in order, without duplicates.
+
+    Raises:
+        ValueError: If any extra token is not a non-web scheme source or an
+            http(s) host source; the message names the offending token.
+    """
+    sources = list(_FRAME_ANCESTORS_DEFAULT)
+    for raw in value.split():
+        token = raw.lower()
+        is_scheme = bool(_FRAME_ANCESTOR_SCHEME.match(token)) and token not in _FRAME_ANCESTOR_WEB_SCHEMES
+        if not (is_scheme or _FRAME_ANCESTOR_HOST.match(token)):
+            raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {raw}')
+        if token not in sources:
+            sources.append(token)
+    return ' '.join(sources)
+
+
+# Headers for shell DOCUMENTS (index.html, prerender captures, any other HTML
+# under the shell root, static/ included), never scripts, styles or other
+# assets. frame-ancestors stops a cross-origin page from framing the shell;
+# COOP cuts the window.opener handle of a page that window.open()s the shell
+# (#1022). Built once at import, so an invalid RR_SHELL_FRAME_ANCESTORS_EXTRA
+# stops engine startup.
+_frame_ancestors = _frame_ancestor_sources(os.environ.get('RR_SHELL_FRAME_ANCESTORS_EXTRA', ''))
+_SHELL_DOCUMENT_HEADERS = {
+    'Content-Security-Policy': f'frame-ancestors {_frame_ancestors}',
+    'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+}
+
+# Suffixes served as documents. SVG is left out: the shell only loads its SVGs
+# (favicon, icons) as images, where neither header applies.
+_DOCUMENT_SUFFIXES = frozenset({'.html', '.htm', '.xhtml'})
+
+
+def shell_document_headers(headers: Optional[dict] = None) -> dict:
+    """Apply framing and opener policy to shell HTML, including rendered pages."""
+    return {**(headers or {}), **_SHELL_DOCUMENT_HEADERS}
 
 
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
@@ -221,10 +311,10 @@ async def shell_static(request: Request):
     # Prerendered marketing page, when the shell build carries a capture for
     # this route (see _capture_for). Only '/' reaches here with a non-/shell/
     # path, and a capture is served only if it exists, so no route list is
-    # mirrored.
+    # mirrored. Every capture is still a shell document.
     capture = _capture_for(request)
     if capture is not None:
-        return FileResponse(capture)
+        return FileResponse(capture, headers=_SHELL_DOCUMENT_HEADERS)
 
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
@@ -254,16 +344,19 @@ async def shell_static(request: Request):
 
     # Serve the file if it exists. Everything under static/ is content-hashed
     # (a new build changes the name), so the browser may keep it for good.
+    # HTML anywhere under the shell root (static/ included) is a document and
+    # gets the framing policy; themes, icons and other assets do not.
     if file_path.exists() and file_path.is_file():
+        headers = dict(_SHELL_DOCUMENT_HEADERS) if file_path.suffix.lower() in _DOCUMENT_SUFFIXES else {}
         if is_static:
-            return FileResponse(file_path, headers={'Cache-Control': 'public, max-age=31536000, immutable'})
-        return FileResponse(file_path)
+            headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return FileResponse(file_path, headers=headers or None, media_type=_media_type(file_path))
 
     # SPA fallback: serve index.html for any unmatched route so that
     # client-side routing (React Router, etc.) can handle it.
     index_path = Path(_shell_root) / 'index.html'
     if index_path.exists() and index_path.is_file():
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers=_SHELL_DOCUMENT_HEADERS)
 
     # Shell hasn't been built yet
     raise HTTPException(
@@ -558,7 +651,7 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
-    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
+    media_type = _media_type(rest[-1]) or 'application/octet-stream'
     return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
 
 
@@ -690,7 +783,7 @@ async def apps_static(request: Request):
 
     # Serve the file if it exists
     if file_path.exists() and file_path.is_file():
-        return FileResponse(file_path)
+        return FileResponse(file_path, media_type=_media_type(file_path))
 
     raise HTTPException(status_code=404, detail='Not found')
 
