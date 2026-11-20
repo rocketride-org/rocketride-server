@@ -49,7 +49,8 @@ int indexOf(const engine::store::PipelineStack &stack, const std::string &id) {
     return -1;
 }
 
-// A RAG-like chain with a fork: webhook -> parse -> (embed -> store, llm)
+// A RAG-like chain with a fork: webhook -> parse -> (embed -> store, llm);
+// the llm also reads the source directly, so it has two input edges
 const auto CHAIN = R"({
     "source": "hook",
     "components": [
@@ -61,18 +62,21 @@ const auto CHAIN = R"({
         { "id": "store", "provider": "qdrant",
           "input": [ { "lane": "documents", "from": "embed" } ] },
         { "id": "llm", "provider": "llm_openai",
-          "input": [ { "lane": "questions", "from": "parse" } ] }
+          "input": [ { "lane": "questions", "from": "parse" },
+                     { "lane": "questions", "from": "hook" } ] }
     ]
 })"_json;
 
 // The same shape: every id renamed, components and edges listed in another
-// order, names, configuration and UI data changed
+// order (the llm's two input edges reversed), names, configuration and UI
+// data changed
 const auto CHAIN_SHUFFLED = R"({
     "source": "src_9",
     "components": [
         { "id": "z_answer", "provider": "llm_openai", "name": "Answer",
           "config": { "model": "gpt-5" }, "ui": { "position": { "x": 4 } },
-          "input": [ { "from": "a_parser", "lane": "questions" } ] },
+          "input": [ { "from": "src_9", "lane": "questions" },
+                     { "from": "a_parser", "lane": "questions" } ] },
         { "id": "q_vectors", "provider": "qdrant", "config": { "host": "h" },
           "input": [ { "lane": "documents", "from": "m_embedder" } ] },
         { "id": "a_parser", "provider": "parse",
@@ -303,5 +307,52 @@ TEST_CASE("store::pipelineStack") {
         unnamed["components"][1]["provider"] = "";
         auto refused = computePipelineStack(unnamed, "hook");
         REQUIRE(!refused);
+    }
+
+    // A nodeless control call goes to the first target that accepts, in the
+    // order the controls are wired, which follows the stack: two tools of
+    // one classType are ordered by provider, never by id, so every holder
+    // of a shape reaches the same tool first
+    SECTION("tools of one classType are ordered by provider, not id") {
+        auto renamed = AGENT;
+        renamed["components"][2]["id"] = "z";  // tool_http
+        renamed["components"][4]["id"] = "a";  // tool_python
+        auto stack = computePipelineStack(renamed, "chat");
+        REQUIRE_NO_ERROR(stack);
+        REQUIRE(indexOf(*stack, "z") < indexOf(*stack, "a"));
+        REQUIRE(stack->components[indexOf(*stack, "z")].provider ==
+                "tool_http");
+
+        auto original = computePipelineStack(AGENT, "chat");
+        REQUIRE_NO_ERROR(original);
+        REQUIRE(stack->hash == original->hash);
+    }
+
+    // The source is the endpoint, never a stack filter: an edge INTO it is
+    // not built, so it is neither on its row nor in the hash; an edge out of
+    // it is
+    SECTION("edges into the source are not wiring") {
+        auto looped = AGENT;
+        json::Value back(json::objectValue);
+        back["classType"] = "tool";
+        back["from"] = "agent";
+        looped["components"][0]["control"].append(back);
+        json::Value fed(json::objectValue);
+        fed["lane"] = "answers";
+        fed["from"] = "agent";
+        looped["components"][0]["input"].append(fed);
+
+        auto first = computePipelineStack(AGENT, "chat");
+        auto second = computePipelineStack(looped, "chat");
+        REQUIRE_NO_ERROR(first);
+        REQUIRE_NO_ERROR(second);
+        REQUIRE(second->components[0].inputs.empty());
+        REQUIRE(second->components[0].controls.empty());
+        REQUIRE(providersOf(*first) == providersOf(*second));
+        REQUIRE(first->hash == second->hash);
+
+        // The agent's own input from the source is kept
+        REQUIRE(second->components[1].inputs ==
+                std::vector<std::pair<int, std::string>>{{0, "questions"}});
     }
 }

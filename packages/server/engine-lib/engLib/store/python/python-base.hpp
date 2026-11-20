@@ -330,6 +330,18 @@ private:
 
     //-------------------------------------------------------------
     /// @details
+    ///		The factory kind the node was built with (the service
+    ///		definition's `node`, "python"), resolved ONCE at
+    ///		construction while the service is visible (a custom
+    ///		service is only inside the starter's withCustomServices
+    ///		scope); config.node.physicalType of every control. Empty
+    ///		when the definition had none: then the stack's own
+    ///		physicalType stands in
+    //-------------------------------------------------------------
+    Text m_physicalType;
+
+    //-------------------------------------------------------------
+    /// @details
     ///		Handle to the imported <path>.IGlobal (or, in config mode,
     ///		<path>.IValidator) submodule - empty when the file is absent
     //-------------------------------------------------------------

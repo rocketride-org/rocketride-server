@@ -93,6 +93,11 @@ IPythonGlobalBase::IPythonGlobalBase(const FactoryArgs &args) noexcept
                                : _cast<TextView>(pipeType.logicalType);
         m_modulePath = _ts(servicePath);
 
+        // The factory kind config.node reports for every control, resolved
+        // here while the service definition is visible
+        if (serviceDef.physicalType)
+            m_physicalType = _ts(_cast<TextView>(serviceDef.physicalType));
+
         // Are we supporting our endpoint?
         if (endpoint->pipeType.logicalType == pipeType.logicalType &&
             endpoint->pipeType.physicalType == pipeType.physicalType) {
@@ -314,11 +319,9 @@ Text IPythonGlobalBase::componentName() noexcept {
 //-------------------------------------------------------------------------
 GlobalContext IPythonGlobalBase::makeContext(const Text &controlId,
                                             const json::Value &connConfig) {
-    // Step 1: the factory kind from the service definition, else the stack's
-    Text physicalType = pipeType.physicalType;
-    auto service = IServices::getServiceDefinition(pipeType.logicalType);
-    if (service && (*service)->physicalType)
-        physicalType = _ts(_cast<TextView>((*service)->physicalType));
+    // Step 1: the factory kind the constructor resolved, else the stack's own
+    const Text &physicalType =
+        m_physicalType ? m_physicalType : pipeType.physicalType;
 
     // Step 2: the record, every field an owned copy
     return GlobalContext{controlId,

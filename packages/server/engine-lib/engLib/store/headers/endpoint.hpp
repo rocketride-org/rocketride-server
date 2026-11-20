@@ -172,9 +172,22 @@ struct PipelineStack {
 ///		classType, then provider, then canonical form. The canonical form
 ///		is the component's colour after refining provider labels over the
 ///		labelled data and control edges in both directions until the
-///		partition is stable, so two components that tie on it are
-///		indistinguishable by shape and the last tie-break (the id) cannot
-///		change the hash.
+///		partition is stable; the id breaks a tie that remains.
+///
+///		LIMIT: equal colours do not prove two components interchangeable.
+///		Refinement cannot split some regular structures (for example four
+///		identical branches off the source whose sinks are shared by
+///		neighbouring pairs in a ring): there the id tie-break decides which
+///		branch is walked first, and renaming ids can change the order and
+///		so the hash. Two specs that differ only in ids get one hash
+///		whenever refinement separates every component that is not
+///		interchangeable with another, which covers chains, trees, forks,
+///		symmetric branches and agents with their tools; for the rest the
+///		cost is a second engine for one shape, never a wrong one.
+///
+///		Edges INTO the source (index 0) are not wiring the engine builds
+///		(the source is the endpoint, never a stack filter), so they are
+///		left out of the stack and the hash; edges out of it are kept.
 ///
 ///		The SHAPE hash is sha256 over the ordered list of (provider, input
 ///		edges by stack index and lane, control edges by stack index and

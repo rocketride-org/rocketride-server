@@ -163,12 +163,20 @@ def test_the_index_map_translates_stack_members_and_passes_everything_else_throu
     assert names.author('pipe') == 'pipe'
     assert names.author('ask.search()') == 'ask.search()'
     assert names.author(None) is None
+    # Only the engine's ASCII decimal is an index: other digits are labels
+    assert names.author('²') == '²'
+    assert names.author('١') == '١'
+    assert names.author('9' * 40) == '9' * 40
     assert [c['id'] for c in names.order([{'id': 'x'}, {'id': 'orphan'}, {'id': 'hook'}, {'id': 'ask'}])] == [
         'hook',
         'ask',
         'orphan',
         'x',
     ]
+
+    # An index the table does not hold passes through instead of raising
+    short = IndexMap(['hook'], stacked=3, engine_indexes=True)
+    assert short.author('2') == '2'
 
     # An engine that names components by id: nothing is an index
     by_id = IndexMap(['1', 'ask'], stacked=0, engine_indexes=False)
@@ -192,6 +200,32 @@ def test_the_binding_is_looked_up_never_imported(monkeypatch):
     names = index_map_of(spec, 'b')
     assert seen == [(spec, 'b')]
     assert (names.ids, names.stacked, names.engine_indexes, names.shape_hash) == (['b', 'a'], 1, True, 'h')
+
+
+def test_a_stack_row_without_a_component_keeps_its_slot(monkeypatch):
+    """A source named but not listed keeps index 0, so every later component keeps the index the engine traces."""
+
+    def binding(pipeline, source):
+        return {
+            'components': [
+                {'index': 0, 'id': 'src', 'provider': '', 'inputs': [], 'controls': []},
+                {
+                    'index': 1,
+                    'id': 'ask',
+                    'provider': 'prompt',
+                    'inputs': [{'from': 0, 'lane': 'questions'}],
+                    'controls': [],
+                },
+            ],
+            'hash': 'h',
+        }
+
+    monkeypatch.setitem(sys.modules, engine_key.CONST_ENGINE_MODULE, SimpleNamespace(pipelineStack=binding))
+    names = index_map_of({'components': [{'id': 'orphan'}, {'id': 'ask'}]}, 'src')
+
+    assert names.ids == ['src', 'ask', 'orphan'] and names.stacked == 2
+    assert (names.author('0'), names.author('1'), names.author('2')) == ('src', 'ask', '2')
+    assert names.to_index('ask') == 1
 
 
 def test_engine_content_orders_configs_by_the_engines_stack(stub_binding):
@@ -332,7 +366,11 @@ CHAIN = {
         {'id': 'parse', 'provider': 'parse', 'input': [{'lane': 'tags', 'from': 'hook'}]},
         {'id': 'embed', 'provider': 'embedding', 'input': [{'lane': 'text', 'from': 'parse'}]},
         {'id': 'store', 'provider': 'qdrant', 'input': [{'lane': 'documents', 'from': 'embed'}]},
-        {'id': 'llm', 'provider': 'llm_openai', 'input': [{'lane': 'questions', 'from': 'parse'}]},
+        {
+            'id': 'llm',
+            'provider': 'llm_openai',
+            'input': [{'lane': 'questions', 'from': 'parse'}, {'lane': 'questions', 'from': 'hook'}],
+        },
     ],
 }
 
@@ -346,7 +384,7 @@ CHAIN_SHUFFLED = {
             'name': 'Answer',
             'config': {'model': 'x'},
             'ui': {'position': {'x': 4}},
-            'input': [{'from': 'a_parser', 'lane': 'questions'}],
+            'input': [{'from': 'src_9', 'lane': 'questions'}, {'from': 'a_parser', 'lane': 'questions'}],
         },
         {'id': 'q_vectors', 'provider': 'qdrant', 'input': [{'lane': 'documents', 'from': 'm_embedder'}]},
         {'id': 'a_parser', 'provider': 'parse', 'input': [{'lane': 'tags', 'from': 'src_9'}]},

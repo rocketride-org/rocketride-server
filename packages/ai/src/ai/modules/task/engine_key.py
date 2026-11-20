@@ -86,6 +86,9 @@ ComponentFacts = Callable[[str, Dict[str, Any]], Tuple[Dict[str, Any], bool]]
 #: The engine module whose ``pipelineStack`` binding is the canonical walk.
 CONST_ENGINE_MODULE = 'engLib'
 
+#: The longest stack index a trace can carry, in decimal digits.
+CONST_MAX_INDEX_DIGITS = 9
+
 
 def _component_id(component: Any) -> str:
     """A component entry's id as a string ('' for a malformed entry)."""
@@ -193,9 +196,10 @@ class IndexMap:
         """
         The author's id for a component the engine named in a trace.
 
-        The engine writes a stack member's index in decimal; anything else (a
-        filter the pipeline does not name, a tool call's own label) passes
-        through, as does every value on an engine that names by id.
+        The engine writes a stack member's index in ASCII decimal; anything
+        else (a filter the pipeline does not name, a tool call's own label, a
+        label of non-ASCII digits such as '²') passes through, as does
+        every value on an engine that names by id.
 
         Args:
             component: The trace's component field.
@@ -203,10 +207,15 @@ class IndexMap:
         Returns:
             The author id, or the value unchanged.
         """
-        if not self.engine_indexes or not isinstance(component, str) or not component.isdigit():
+        if not self.engine_indexes or not isinstance(component, str):
+            return component
+        # Only the engine's own spelling is an index: ASCII digits, no longer
+        # than any stack could need (str.isdigit alone accepts '²', which
+        # int() refuses)
+        if not (0 < len(component) <= CONST_MAX_INDEX_DIGITS and component.isascii() and component.isdigit()):
             return component
         index = int(component)
-        return self.ids[index] if index < self.stacked else component
+        return self.ids[index] if index < min(self.stacked, len(self.ids)) else component
 
     def order(self, components: List[Any]) -> List[Any]:
         """The spec's component entries in this stack order (entries this map does not know go last, by id)."""
@@ -221,6 +230,12 @@ def index_map_of(
     """
     The id <-> index table of a spec, from the engine's canonical stack when the process has it.
 
+    Position i of ``ids`` is the engine's stack index i, row for row, never
+    compacted: a stack row the spec has no component entry for (a source
+    named by ``source`` but missing from ``components``) keeps its slot under
+    the id the stack gives it, so every later component keeps the index the
+    engine traces it by. The components the engine never builds follow, by id.
+
     Args:
         pipeline: The spec.
         source: The entry component id.
@@ -232,13 +247,19 @@ def index_map_of(
     """
     if stack is None:
         stack = pipeline_stack(pipeline, source)
-    ordered = stack_order(list(pipeline.get('components') or []), stack)
-    stacked = len(stack.get('components') or []) if stack else 0
+    components = list(pipeline.get('components') or [])
+    if stack is None:
+        return IndexMap([_component_id(c) for c in stack_order(components)], 0, engine_indexes=False)
+    # The stack's rows by index, then everything the engine never builds
+    rows = sorted(stack.get('components') or [], key=lambda row: int(row.get('index')))
+    ids = [str(row.get('id')) for row in rows]
+    stacked = set(ids)
+    ids += [_component_id(c) for c in sorted(components, key=_component_id) if _component_id(c) not in stacked]
     return IndexMap(
-        [_component_id(c) for c in ordered],
-        stacked,
-        engine_indexes=stack is not None,
-        shape_hash=str(stack.get('hash')) if stack else None,
+        ids,
+        len(rows),
+        engine_indexes=True,
+        shape_hash=str(stack.get('hash')),
     )
 
 

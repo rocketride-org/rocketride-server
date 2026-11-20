@@ -397,6 +397,10 @@ ErrorOr<PipelineStack> computePipelineStack(
         // Gather each component's neighbour labels, edges in both directions
         for (auto &list : neighbours) list.clear();
         for (size_t to = 0; to < count; ++to) {
+            // Edges INTO the source are not built (it is the endpoint, never
+            // a stack filter), so they shape nothing
+            if (nodes[to].id == sourceId) continue;
+
             const auto link =
                 localfcn(const char *kind, const std::string &from,
                          const std::string &tag) {
@@ -498,7 +502,10 @@ ErrorOr<PipelineStack> computePipelineStack(
     }
 
     // Step 4: the stack, wiring by stack index. A member must name its
-    // provider (the source is the endpoint, configured on its own)
+    // provider (the source is the endpoint, configured on its own). Only
+    // the wiring the engine builds is recorded: buildConnections never
+    // makes the source (index 0) a destination, so its own inputs and
+    // controls are left out; edges FROM it are kept
     PipelineStack stack;
     for (int index = 0; index < (int)order.size(); ++index) {
         PipelineStackEntry entry;
@@ -525,8 +532,10 @@ ErrorOr<PipelineStack> computePipelineStack(
                 std::sort(out.begin(), out.end());
                 out.erase(std::unique(out.begin(), out.end()), out.end());
             };
-            wire(node.inputs, entry.inputs);
-            wire(node.controls, entry.controls);
+            if (index > 0) {
+                wire(node.inputs, entry.inputs);
+                wire(node.controls, entry.controls);
+            }
         }
         stack.components.push_back(_mv(entry));
     }
