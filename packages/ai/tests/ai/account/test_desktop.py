@@ -277,7 +277,7 @@ async def test_oss_login_assembly_uses_the_stored_desktop(monkeypatch):
     from ai.account import app_deploy
     from ai.account.oss import Account
 
-    async def pins(org_id, team_id, teams):
+    async def pins(org_id, team_id, teams, strict=False):
         return [{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}, {'name': 'malformed, no id'}]
 
     monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
@@ -296,7 +296,7 @@ async def test_oss_login_assembly_survives_a_broken_desktop_store(monkeypatch):
     from ai.account import app_deploy
     from ai.account.oss import Account
 
-    async def pins(org_id, team_id, teams):
+    async def pins(org_id, team_id, teams, strict=False):
         return [{'id': 'rocketride.chat'}]
 
     class _Broken:
@@ -450,7 +450,7 @@ async def test_oss_login_assembly_failed_resolution_writes_no_desktop_then_seeds
 
     state = {'fail': True}
 
-    async def pins(org_id, team_id, teams):
+    async def pins(org_id, team_id, teams, strict=False):
         if state['fail']:
             raise RuntimeError('registry down')
         return [{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}]
@@ -472,7 +472,7 @@ async def test_oss_login_assembly_empty_inventory_still_seeds(monkeypatch):
     from ai.account import app_deploy
     from ai.account.oss import Account
 
-    async def pins(org_id, team_id, teams):
+    async def pins(org_id, team_id, teams, strict=False):
         return []
 
     monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
@@ -495,7 +495,7 @@ def _oss_account(monkeypatch, state: Dict[str, Any]):
     from ai.account import app_deploy
     from ai.account.oss import Account
 
-    async def pins(org_id, team_id, teams):
+    async def pins(org_id, team_id, teams, strict=False):
         if state.get('fail'):
             raise RuntimeError('registry down')
         return [dict(p) for p in state['pins']]
@@ -543,6 +543,9 @@ async def test_oss_list_get_public_on_a_failed_inventory_write_nothing_then_seed
     ]
     write = await acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.sql'))
     assert write == {'success': False, 'message': 'The app catalog is unavailable; try again.'}
+    # authenticate() checks ROCKETRIDE_APIKEY: a developer with one set would
+    # get the 401 tuple here instead of the identity.
+    monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
     signed_in = await acct.authenticate('')
     assert signed_in.apps == []
     # Nothing was written by any door while the registry was down.
@@ -574,3 +577,95 @@ async def test_oss_public_catalog_on_a_failed_inventory_still_reads_the_stored_d
         'rocketride.sql': False,
     }
     assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat']
+
+
+# ---------------------------------------------------------------------------
+# PR #3385 round 3: the failure signal comes from the RESOLVER (publish_list
+# fails, resolve_app_pins is the real one), never seeds, and the next success
+# seeds
+# ---------------------------------------------------------------------------
+
+
+def _publish_row(app_id: str, version: int) -> Dict[str, Any]:
+    """One enabled public binding whose deployment serves (built, ready)."""
+    return {
+        'appId': app_id,
+        'version': version,
+        'orgId': 'local',
+        'state': 'enabled',
+        'audience': {'type': 'public', 'id': ''},
+        'artifactState': 'ready',
+        'artifactBuild': 'ok',
+        'snapshot': {'name': app_id, 'mode': 'free'},
+    }
+
+
+@pytest.mark.asyncio
+async def test_oss_publish_list_failure_reaches_the_assembly_and_never_seeds(monkeypatch):
+    """The resolver used to swallow a publish_list failure into [] — the
+    assembly then seeded an EMPTY desktop and recovery could never seed.
+    The real resolve_app_pins runs here; only the registry verbs are faked.
+    """
+    from ai.account import account as live_account
+    from ai.account.oss import Account
+
+    state: Dict[str, Any] = {'fail': True}
+
+    async def publish_list(org_id, kind, audiences):
+        if state['fail']:
+            raise RuntimeError('registry down')
+        return [_publish_row('rocketride.chat', 1), _publish_row('rocketride.sql', 1)]
+
+    async def deployments_artifact(org_id, app_id, version):
+        return {'kind': 'app', 'name': app_id, 'appVersion': '1.0.0'}
+
+    monkeypatch.setattr(live_account, 'publish_list', publish_list, raising=False)
+    monkeypatch.setattr(live_account, 'deployments_artifact', deployments_artifact, raising=False)
+    monkeypatch.setattr(live_account, 'review_ladder', False, raising=False)
+
+    acct = Account.__new__(Account)
+    acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
+
+    with pytest.raises(InventoryUnavailableError):
+        await acct._assemble_apps()
+    listed = await acct.handle_app(_conn(), _req('list'))
+    assert listed == {'success': True, 'body': {'apps': []}}
+    assert await acct._desktop_backend().read('local', 'local') is None
+
+    # The registry recovers: the next assembly seeds the whole inventory.
+    state['fail'] = False
+    listed = await acct.handle_app(_conn(), _req('list'))
+    assert [(a['id'], a['onDesktop']) for a in listed['body']['apps']] == [
+        ('rocketride.chat', True),
+        ('rocketride.sql', True),
+    ]
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat', 'rocketride.sql']
+
+
+@pytest.mark.asyncio
+async def test_resolver_default_still_degrades_to_an_empty_list(monkeypatch):
+    """Every other caller (SaaS login/catalog, the OSS public walk, the
+    probe) keeps the resolver's previous behaviour: [] on failure.
+    """
+    from ai.account import account as live_account
+    from ai.account.app_deploy import resolve_app_pins
+
+    async def publish_list(org_id, kind, audiences):
+        raise RuntimeError('registry down')
+
+    monkeypatch.setattr(live_account, 'publish_list', publish_list, raising=False)
+    assert await resolve_app_pins('local', 'local', ['local']) == []
+    with pytest.raises(InventoryUnavailableError, match='registry down'):
+        await resolve_app_pins('local', 'local', ['local'], strict=True)
+
+
+@pytest.mark.asyncio
+async def test_resolver_empty_publish_list_is_an_empty_inventory_even_when_strict(monkeypatch):
+    from ai.account import account as live_account
+    from ai.account.app_deploy import resolve_app_pins
+
+    async def publish_list(org_id, kind, audiences):
+        return []
+
+    monkeypatch.setattr(live_account, 'publish_list', publish_list, raising=False)
+    assert await resolve_app_pins('local', 'local', ['local'], strict=True) == []

@@ -288,7 +288,12 @@ class Account(AccountBase):
         from ai.account.app_deploy import resolve_app_pins
 
         try:
-            entries = await resolve_app_pins('local', 'local', ['local'])
+            # strict: the resolver's own publish_list guard answers [] to
+            # every other caller; here an outage must stay distinguishable
+            # from an empty inventory (the desktop seeds from this list).
+            entries = await resolve_app_pins('local', 'local', ['local'], strict=True)
+        except InventoryUnavailableError:
+            raise
         except Exception as exc:
             # A broken publish store must never block sign-in — but say so,
             # and say it as a failure, never as "no apps".

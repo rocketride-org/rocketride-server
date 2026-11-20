@@ -70,6 +70,7 @@ from urllib.parse import quote
 
 from rocketlib import debug
 
+from ai.account.base import InventoryUnavailableError
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
 
 #: The artifact kinds that walk the store review ladder (plan S8): apps, and
@@ -1440,7 +1441,9 @@ def _holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
     return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
 
 
-async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[str]) -> List[Dict[str, Any]]:
+async def resolve_app_pins(
+    org_id: str, user_id: Optional[str], team_ids: List[str], strict: bool = False
+) -> List[Dict[str, Any]]:
     """
     Resolves the caller's published apps via the scope walk over the binding
     rows: public first, then each team, then the user row — most specific
@@ -1456,6 +1459,14 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
     with desktop membership and subscriptions; internal pins are on-desktop by
     definition. Pure additive input to the assembly — the dev overlay still
     overrides on top.
+
+    FAILURE: a publish registry that does not answer is ``[]`` by default (a
+    manifest that degrades to nothing rather than a failed login or probe —
+    every SaaS caller relies on that). ``strict=True`` turns it into
+    ``InventoryUnavailableError`` instead, for the caller that must tell an
+    outage from an empty inventory: the OSS desktop seeds from this list on
+    a user's first read, and an outage must never be written down as "no
+    apps". A successful EMPTY publish list is an empty inventory either way.
     """
     from ai.account import account
 
@@ -1467,6 +1478,8 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         rows = await account.publish_list(org_id, 'app', audiences)
     except Exception as exc:
         debug(f'[app_deploy] publish_list failed: {exc}')
+        if strict:
+            raise InventoryUnavailableError(f'publish registry unavailable: {exc}') from exc
         return []
 
     # Precedence: sorted so each app id's winner lands LAST and the blind
