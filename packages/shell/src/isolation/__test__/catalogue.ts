@@ -118,6 +118,24 @@ export async function prepareCtx(realm: IOpenedRealm, appKey: string): Promise<I
 }
 
 /** Plausible, unowned values: what a core-only realm sends (the capability check comes first). */
+/** The `arguments.subcommand` a case sends, if any. */
+export function subcommandOf(c: ICase, appKey: string): string | undefined {
+	const sub = (c.build(dummyCtx(appKey)).message?.arguments as { subcommand?: unknown } | undefined)?.subcommand;
+	return typeof sub === 'string' ? sub : undefined;
+}
+
+/** Whether the catalogue has a case for one table row AND, when the row lists subcommands, for each of them. */
+export function missingCases(rows: Array<{ op: string; command?: string; subcommands?: string[] }>, cases: ICase[], appKey: string): string[] {
+	const missing: string[] = [];
+	for (const row of rows) {
+		for (const sub of row.subcommands ?? [undefined]) {
+			const hit = cases.some((c) => c.op === row.op && c.command === row.command && (sub === undefined || subcommandOf(c, appKey) === sub));
+			if (!hit) missing.push(`${row.op} ${row.command ?? ''}${sub === undefined ? '' : ` ${sub}`}`);
+		}
+	}
+	return missing;
+}
+
 export function dummyCtx(appKey: string): ICaseCtx {
 	return { token: 'rh_AAAAAAAAAAAAAAAAAAAAAA', projectId: 'rp_AAAAAAAAAAAAAAAAAAAAAA', source: 'chat_1', pipeId: 1, fsHandle: 'fsh-0', path: (name) => `apps/${appKey}/${name}` };
 }

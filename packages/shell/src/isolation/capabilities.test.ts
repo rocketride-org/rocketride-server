@@ -63,7 +63,13 @@ test('T2 the capability table has known capabilities, ops and type names; an unk
 		if (row.top !== undefined) {
 			assert.ok(row.top.length === 0 || (row.top.length === 1 && row.top[0] === 'token'), `${where}: top must be [] or ["token"], got ${JSON.stringify(row.top)}`);
 		}
-		assert.ok(rowFor(row.op, row.command, row.subcommand), `${where}: rowFor finds no row for a row of the table`);
+		// Each configured subcommand resolves to ITS OWN row (a row without a subcommand list is looked up bare).
+		for (const sub of row.subcommands ?? [undefined]) {
+			const found = rowFor(row.op, row.command, sub);
+			assert.ok(found, `${where} ${sub ?? ''}: rowFor finds no row for a row of the table`);
+			assert.equal(found.cap, row.cap, `${where} ${sub ?? ''}: rowFor returned another row's capability`);
+			if (sub !== undefined) assert.ok(found.subcommands?.includes(sub), `${where} ${sub}: the row found does not list the subcommand`);
+		}
 	}
 
 	assert.throws(() => loadTable({ v: 1, rows: [{ cap: 'core', op: 'client.request', command: 'rrext_ping', args: { x: 'no-such-type' } }] }), /no-such-type|unknown type/i, 'an unknown type name must fail the load');
@@ -111,6 +117,11 @@ test('T3 every DAP command in the SDK client has a row or is on the denied list'
 	);
 	for (const denied of DENIED_COMMANDS) {
 		assert.ok(!rowCommands.has(denied), `${denied} is on the denied list and also has a row`);
+	}
+	// The prefix families are refused as a whole: no row may sit under one either.
+	for (const command of rowCommands) {
+		const prefix = DENIED_PREFIXES.find((p) => command?.startsWith(p));
+		assert.equal(prefix, undefined, `${command} has a row but falls under the denied prefix ${prefix}`);
 	}
 
 	const literals = sdkCommandLiterals();

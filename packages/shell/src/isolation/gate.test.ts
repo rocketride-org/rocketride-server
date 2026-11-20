@@ -38,7 +38,7 @@ import test from 'node:test';
 import type { TestContext } from 'node:test';
 import type { DAPMessage } from 'rocketride';
 import type { DenyCode } from './capabilityDenied';
-import { CASES, dummyCtx, prepareCtx } from './__test__/catalogue';
+import { CASES, dummyCtx, missingCases, prepareCtx, subcommandOf } from './__test__/catalogue';
 import type { ICase } from './__test__/catalogue';
 import { ENTRY_A, ENTRY_B, makeRoot, refAppKey } from './__test__/fixtures';
 import type { ITestRoot } from './__test__/fixtures';
@@ -137,13 +137,11 @@ test('T4 each denied command or family is refused and never forwarded', async (t
 test('T5 each pipelines.run and fs.app row is allowed with its capability and denied without', async (tt) => {
 	const key = refAppKey(ENTRY_A.id);
 	const rows = readCapabilityJson().rows;
-	for (const row of rows) {
-		assert.ok(
-			CASES.some((c) => c.op === row.op && c.command === row.command),
-			`the test catalogue has no case for the table row ${row.cap} ${row.op} ${row.command ?? ''}`
-		);
-	}
-	const capOf = (c: ICase): string | undefined => rows.find((r) => r.op === c.op && r.command === c.command)?.cap;
+	assert.deepEqual(missingCases(rows, CASES, key), [], 'the test catalogue has no case for these table rows (each listed subcommand counts)');
+	const capOf = (c: ICase): string | undefined => {
+		const sub = subcommandOf(c, key);
+		return rows.find((r) => r.op === c.op && r.command === c.command && (r.subcommands === undefined || (sub !== undefined && r.subcommands.includes(sub))))?.cap;
+	};
 
 	for (const c of CASES.filter((x) => ['pipelines.run', 'fs.app'].includes(capOf(x) ?? ''))) {
 		await tt.test(`${c.name} (${capOf(c)})`, async (st) => {
@@ -214,12 +212,7 @@ test('T6 client.request params, DAP top-level keys and timeouts are bounded', as
 
 test('T7 an unknown argument key is refused on every row', async (tt) => {
 	const key = refAppKey(ENTRY_A.id);
-	for (const row of readCapabilityJson().rows) {
-		assert.ok(
-			CASES.some((c) => c.op === row.op && c.command === row.command),
-			`the test catalogue has no case for the table row ${row.op} ${row.command ?? ''}`
-		);
-	}
+	assert.deepEqual(missingCases(readCapabilityJson().rows, CASES, key), [], 'the test catalogue has no case for these table rows (each listed subcommand counts)');
 	for (const c of CASES) {
 		await tt.test(c.name, async (st) => {
 			const { t, A, engine } = fixture(st);
