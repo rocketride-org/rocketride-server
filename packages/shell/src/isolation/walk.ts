@@ -120,8 +120,9 @@ export function walk(value: unknown, options: IWalkOptions = {}): unknown {
 				const d = Object.getOwnPropertyDescriptor(v, key)!;
 				if (!('value' in d)) throw new WalkError('accessor property');
 				if (d.value === undefined) {
-					// Dropped from the copy, but it was enumerated: it counts against the node budget like any other.
+					// Dropped from the copy, but it was enumerated: its node and its name's characters count against the budgets.
 					if (++nodes > WALK_MAX_NODES) throw new WalkError('too many nodes');
+					countChars(key);
 					continue;
 				}
 				countChars(key);

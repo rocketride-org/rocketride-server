@@ -311,7 +311,10 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	 * Ends what no ledger can hold: a run (terminate) or an open handle (fs_close,
 	 * pipe close). A transport failure and a negative DAP answer are both failures
 	 * (the SDK resolves the latter): the call is retried on the lost-run schedule,
-	 * then logged. A handle the engine no longer knows counts as closed.
+	 * then logged. For a handle (fs_close, pipe close) a retry helps only when
+	 * the call never reached the engine (transport failure): the engine releases
+	 * a handle even when its close fails, so a retry after a negative answer is
+	 * answered as an unknown handle, which this treats as a failure, not as closed.
 	 */
 	const endOrphanCall = (what: string, command: string, args: Record<string, unknown>, retriesLeft: number[] = [...LOST_RUN_RETRY_MS]): void => {
 		track(sendEngine(command, args).then(terminated, () => false)).then((done) => {

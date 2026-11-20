@@ -54,7 +54,7 @@ from urllib.parse import urlsplit
 
 from rocketlib import debug
 from types import SimpleNamespace
-from typing import Any, List, Mapping, NamedTuple, Optional, Tuple
+from typing import Any, Dict, List, Mapping, NamedTuple, Optional, Tuple
 
 MODES = ('off', 'optin', 'enforce')
 HOST_SOURCES = ('host', 'edge-header')
@@ -1127,14 +1127,27 @@ _RATE_OVERFLOW_FACTOR = 50
 _RATE_OVERFLOW_KEY = ('overflow',)  # not a str: no client or caller name can equal it
 
 
+# A full table is pruned of ended windows at most once per interval per cache, so a flood of
+# new keys cannot make every request scan every entry. Keyed by id(cache): the caches are module-level.
+_RATE_PRUNE_INTERVAL = 1.0
+_rate_pruned_at: Dict[int, float] = {}
+
+
+def _prune_rate_cache(cache: dict, now: float) -> None:
+    """Drop every counter whose window has ended."""
+    for k in [k for k, v in cache.items() if v['expiry'] <= now]:
+        cache.pop(k, None)
+
+
 def _rate_ok(cache: dict, key: str, limit: int) -> bool:
     """One more request for ``key`` inside its fixed window (``FRAME_RATE_WINDOW``)."""
     hit = _cached(cache, key)
     if hit is None:
         if len(cache) >= _RATE_KEYS_MAX:
             now = time.time()
-            for k in [k for k, v in cache.items() if v['expiry'] <= now]:
-                cache.pop(k, None)
+            if not 0 <= now - _rate_pruned_at.get(id(cache), float('-inf')) < _RATE_PRUNE_INTERVAL:
+                _rate_pruned_at[id(cache)] = now
+                _prune_rate_cache(cache, now)
         if len(cache) >= _RATE_KEYS_MAX:
             # Full of live windows: existing buckets stay as they are; a new key counts against the shared one.
             key, limit = _RATE_OVERFLOW_KEY, limit * _RATE_OVERFLOW_FACTOR

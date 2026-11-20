@@ -1122,28 +1122,36 @@ class AccountBase(ABC):
         if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
             raise ValueError(f'capabilities must be a list of {sorted(known)}')
         backend = self._deployment_backend()
-        previous = await self.approved_capabilities(org_id, app_id, version)
+        # Read the earlier grant strictly: a read error stops the call before anything is written,
+        # so a failed read can never turn into a rollback to the default grant.
+        previous = await AccountBase._stored_capabilities(self, org_id, app_id, version)
         entry = await backend.set_approved_capabilities(org_id, app_id, version, list(caps))
         try:
             await self.deployments_history_append(
                 org_id, app_id, 'capabilities', actor, version=version, data={'capabilities': list(caps)}
             )
         except BaseException:
-            # A grant with no audit entry must not stay in effect: put the earlier grant back
-            # (best effort), then report the failure so the caller does not think it applied.
+            # Best effort, not atomic: the grant and its history entry are two writes. Put the earlier
+            # grant back only while the stored value is still the one this call wrote (a grant another
+            # admin made in between is left alone), then report the failure so the caller does not think it applied.
             try:
-                await backend.set_approved_capabilities(org_id, app_id, version, list(previous))
-            except Exception:
-                pass
+                await backend.set_approved_capabilities(org_id, app_id, version, list(previous), only_if=list(caps))
+            except Exception as rollback_error:
+                from rocketlib import warning
+
+                warning(
+                    f'capabilities: {app_id} v{version}: the grant could not be rolled back after its '
+                    f'history entry failed: {rollback_error}'
+                )
             raise
         return entry
 
-    async def approved_capabilities(self, org_id: str, app_id: str, version: int) -> list:
-        """The capabilities granted to one app version; ``['core']`` when none (or nothing valid) is stored."""
-        try:
-            entries = await self.deployments_versions(org_id, app_id)
-        except Exception:
-            return ['core']
+    async def _stored_capabilities(self, org_id: str, app_id: str, version: int) -> list:
+        """The stored grant for one app version, ``['core']`` when none (or nothing valid) is stored.
+
+        Raises whatever the registry read raises: callers that must not guess decide what a read error means.
+        """
+        entries = await self.deployments_versions(org_id, app_id)
         for entry in entries or []:
             if not isinstance(entry, dict) or int(entry.get('version', 0)) != version:
                 continue
@@ -1152,6 +1160,13 @@ class AccountBase(ABC):
             if isinstance(caps, list) and caps and all(isinstance(c, str) for c in caps):
                 return list(caps)
         return ['core']
+
+    async def approved_capabilities(self, org_id: str, app_id: str, version: int) -> list:
+        """The capabilities granted to one app version; ``['core']`` when none (or nothing valid) is stored."""
+        try:
+            return await AccountBase._stored_capabilities(self, org_id, app_id, version)
+        except Exception:
+            return ['core']
 
     # =========================================================================
     # DAP COMMAND DISPATCH — SaaS overrides all of these

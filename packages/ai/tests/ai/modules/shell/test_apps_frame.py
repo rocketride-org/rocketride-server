@@ -641,6 +641,24 @@ def test_a_full_rate_table_admits_new_callers_up_to_a_shared_overflow_limit(cloc
     )
 
 
+def test_a_full_rate_table_is_not_rescanned_for_every_new_key(clock, monkeypatch):
+    """Pruning ended windows runs at most once per interval, however many new keys arrive."""
+    ao = _ao()
+    monkeypatch.setattr(ao, '_RATE_KEYS_MAX', 3)
+    passes = []
+    real = ao._prune_rate_cache
+    monkeypatch.setattr(ao, '_prune_rate_cache', lambda cache, now: (passes.append(now), real(cache, now))[1])
+    cache: dict = {}
+    for key in 'abc':
+        assert ao._rate_ok(cache, key, 2)
+    for i in range(50):
+        ao._rate_ok(cache, f'new{i}', 2)
+    assert len(passes) == 1, 'a flood of new keys pruned the full table once, not once per request'
+    clock.advance(ao._RATE_PRUNE_INTERVAL + 0.5)
+    ao._rate_ok(cache, 'later', 2)
+    assert len(passes) == 2, 'the prune runs again once its interval has passed'
+
+
 @pytest.mark.asyncio
 async def test_the_already_authenticated_caller_is_used_not_authenticated_again(isolation_env, monkeypatch):
     """``frame_grant`` passes its caller on: a second ``authenticate`` that raises cannot turn it anonymous."""

@@ -614,3 +614,23 @@ class TestIterEnabled:
         # scheduler feed — iter_enabled swallows the StorageError and yields
         # nothing instead of raising.
         assert [d async for d in backend.iter_enabled()] == []
+
+
+class TestApprovedCapabilitiesSwap:
+    @pytest.mark.asyncio
+    async def test_only_if_swaps_only_while_the_stored_grant_is_the_expected_one(self, backend):
+        """The rollback swap is decided inside the registry mutation: a newer grant by someone else stays."""
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+
+        async def stored():
+            entry = next(v for v in await backend.versions('org-1', 'acme.brandy') if v['version'] == 1)
+            return entry['metadata'].get('approvedCapabilities')
+
+        await backend.set_approved_capabilities('org-1', 'acme.brandy', 1, ['core', 'a'])
+        # another admin's grant lands after ours: the rollback of ours (expecting ['core', 'a']) must not touch it
+        await backend.set_approved_capabilities('org-1', 'acme.brandy', 1, ['core', 'b'])
+        await backend.set_approved_capabilities('org-1', 'acme.brandy', 1, ['core'], only_if=['core', 'a'])
+        assert await stored() == ['core', 'b']
+        # while the stored grant is still the expected one, the swap happens
+        await backend.set_approved_capabilities('org-1', 'acme.brandy', 1, ['core'], only_if=['core', 'b'])
+        assert await stored() == ['core']
