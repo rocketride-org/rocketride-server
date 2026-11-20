@@ -1,5 +1,6 @@
 ---
 title: Security
+description: An overview of how RocketRide handles credentials, network exposure, and authentication across its components.
 ---
 
 # Security
@@ -51,10 +52,10 @@ inherit the engine's full environment, only an allowlist:
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
 
-| Variable            | Effect                                                                                                                                                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment; use that only on a single-user install. |
-| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                           |
+| Variable            | Effect                                                                                                                                                                                                                                                                                                                                           |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `RR_SUBPROCESS_ENV` | Extra variables to pass to tasks: names separated by commas or spaces, a trailing `*` for a prefix (`SLACK_BOT_TOKEN,GH_*`). A bare `*` passes the whole environment except `RR_TASK_TOKEN_KEY`, which tasks never get, and the five `ROCKETRIDE_DB_` variables the engine removes (listed above); use a bare `*` only on a single-user install. |
+| `RR_PROC_PRIVATE`   | `1` makes the engine and each task restrict their sensitive `/proc/<pid>` entries (environment, memory, open files) to root. Linux only. Hosted engines turn this on automatically.                                                                                                                                                              |
 
 Set both in the engine's own environment or its `.env` file. Pipelines cannot
 change `RR_` variables.
@@ -106,6 +107,8 @@ credentials and writes them to the Project Log:
 
 - **Public authorization key** - presented by external callers in the
   `Authorization: Bearer <key>` header. Safe to share with trusted API clients.
+  It is accepted only while the run's source is a Webhook, Chat, Dropper,
+  Discord or Telegram node: on any other run it authenticates nothing.
 - **Private token** - the internal credential for the endpoint. Used by the SDK
   to connect to a running task via `--token`. Do not share this publicly.
 
@@ -114,19 +117,33 @@ shared or exportable log), so the private token is only visible to that
 operator. Retrieve it from your own Project Log when you need to connect a client
 with `--token`.
 
-Both are generated fresh each time the pipeline starts. There is no persistent
-credential to rotate — stopping and restarting the pipeline issues new
-credentials automatically.
+The private token is an HMAC of the run's identity under the engine's
+`RR_TASK_TOKEN_KEY`, so it cannot be worked out from the project, source or
+owner. A relaunch of the same run gets the same private token while the key
+stays the same. Without `RR_TASK_TOKEN_KEY` the engine uses a random key of its
+own process, and the private token changes whenever the engine restarts. Set
+the key (at least 32 characters, the same value on every replica) to keep it.
+The engine never passes the key to pipeline code, even when `RR_SUBPROCESS_ENV`
+names it. Tasks run as the engine's OS user, so on Linux set `RR_PROC_PRIVATE=1`
+(hosted engines do this already) or a task can read the engine's
+`/proc/<pid>/environ`; and keep the key out of any file the task can read, such
+as the engine's `.env`, on an engine shared by several users.
 
 ## MCP authentication
 
-The [MCP server](/connect/mcp/stdio) authenticates callers in two ways:
+The engine's built-in [MCP server](/connect/mcp/http) (`/mcp`) accepts two
+credentials and rejects everything else:
 
-- **`ROCKETRIDE_AUTH` / `ROCKETRIDE_APIKEY`** — the API key used to connect the
-  MCP server to the RocketRide engine. Required; set in the environment.
-- **`MCP_API_KEY`** — a Bearer token that clients must present to the MCP
-  server when it is running in SSE (HTTP) mode. Optional for stdio mode,
-  required for any network-exposed SSE deployment.
+- **OAuth access token**, for Claude, ChatGPT and other OAuth clients. The
+  client discovers the sign-in flow from the endpoint itself.
+- **RocketRide API key** (`rr_...`), sent as `Authorization: Bearer rr_...`, for
+  Cursor, scripts and anything else that can set a header.
+
+Task-scoped keys (`tk_`/`pk_`) and PKCE exchange codes (`cd_`) never grant
+access to `/mcp`. The only exception is the `MCP_DEV_NO_AUTH=1` development
+bypass, which the engine honors only on a loopback address. A self-hosted engine on a non-loopback address refuses OAuth
+tokens until `MCP_EXPECTED_AUDIENCE` is set; see
+[Self-hosting the MCP server](/connect/mcp/http/self-hosting).
 
 ## Pipeline file security
 
@@ -157,5 +174,5 @@ vulnerability reporting process and SLA.
 
 - [Best Practices](/guides/best-practices): credential management patterns.
 - [Self-hosting](/operate/self-hosting): network configuration.
-- [MCP Server](/connect/mcp/stdio): MCP-specific authentication.
+- [MCP Server](/connect/mcp/http/connect#authentication): MCP-specific authentication.
 - [Security policy](/support/security-policy): vulnerability reporting.

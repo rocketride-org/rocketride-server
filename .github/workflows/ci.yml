@@ -62,6 +62,7 @@ jobs:
     outputs:
       code: ${{ steps.filter.outputs.code }}
       container: ${{ steps.filter.outputs.container }}
+      cpp: ${{ steps.filter.outputs.cpp }}
       tests: ${{ steps.scope.outputs.tests }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -90,6 +91,27 @@ jobs:
               - 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
               - 'packages/server/scripts/tasks.js'
               - '.github/workflows/_build.yaml'
+            # What the sanitizer job builds, how it builds and runs it, and
+            # how it reports. The node patterns go by file type, so a new C++
+            # node needs no edit here. task_engine.py holds the environment
+            # allowlist that keeps the sanitizer options in task processes.
+            cpp:
+              - 'packages/server/**'
+              - 'nodes/**/*.{cpp,cc,cxx,c,hpp,hh,hxx,h,inl,ipp}'
+              - 'nodes/**/CMakeLists.txt'
+              - 'nodes/**/*.cmake'
+              - 'packages/vcpkg/**'
+              - 'scripts/build.js'
+              - 'scripts/compiler.js'
+              - 'scripts/compiler-unix.js'
+              - 'scripts/compiler-unix.sh'
+              - 'scripts/lib/cmake.js'
+              - 'scripts/lib/toolchain.js'
+              - 'nodes/scripts/node-build.js'
+              - 'nodes/scripts/tasks.js'
+              - 'packages/ai/src/ai/modules/task/task_engine.py'
+              - '.github/workflows/_sanitize.yaml'
+              - 'scripts/ci/**'
       # A file counts as `outside` unless it sits in a TypeScript-only area:
       # with predicate-quantifier 'every' it must match all patterns, so it
       # must match '**' and none of the exclusions. No Python or C++ suite
@@ -111,8 +133,8 @@ jobs:
           OUTSIDE: ${{ steps.typescript.outputs.outside }}
         run: |
           if [ "$CODE" = "true" ] && [ "$OUTSIDE" = "false" ]; then
-            echo "tests=shell:test shared:test client-typescript:test" >> "$GITHUB_OUTPUT"
-            echo "Only TypeScript areas changed: running the shell, shared and client-typescript suites. Pushes to develop still run every suite." >> "$GITHUB_STEP_SUMMARY"
+            echo "tests=shell:test shared:test rocket-ui:test client-typescript:test" >> "$GITHUB_OUTPUT"
+            echo "Only TypeScript areas changed: running the shell, shared, rocket-ui and client-typescript suites. Pushes to develop still run every suite." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "tests=test" >> "$GITHUB_OUTPUT"
           fi
@@ -214,6 +236,31 @@ jobs:
     steps:
       - run: echo "Build skipped — no code changes detected"
 
+  # ---------------------------------------------------------------------------
+  #  Sanitizers — the engine, its C++ test programs and the C++ nodes built
+  #  with ASan and UBSan, then server:test and nodes:test against them.
+  #  Opt-in while the engine still has known sanitizer reports: a pull request
+  #  that changes C++ code (`cpp` above) runs it only with the ci:sanitize
+  #  label. Like ci:test, the label is read when the pull request is opened or
+  #  pushed to, so add the label, then push. Manual runs always run it; push,
+  #  schedule and the merge queue never do (a red CI on develop would hold
+  #  back the prerelease). Not in CI OK's needs: it reports sanitizer errors
+  #  without blocking merges.
+  # ---------------------------------------------------------------------------
+  sanitize:
+    name: Sanitizers (ASan + UBSan)
+    needs: [init, changes]
+    if: >-
+      !cancelled() &&
+      needs.init.result == 'success' &&
+      (github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' && needs.changes.outputs.cpp == 'true' &&
+      contains(github.event.pull_request.labels.*.name, 'ci:sanitize')))
+    uses: ./.github/workflows/_sanitize.yaml
+    permissions:
+      contents: read
+      packages: read
+
   # CodeQL: replaced by GitHub's "Default setup" — managed in repo Settings →
   # Code security. Scans Python, JavaScript/TypeScript (and C/C++ via
   # GitHub-managed autobuild). Findings surface in the Security tab.
@@ -310,6 +357,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint:scripts
+      - name: Test node packaging
+        run: node --test nodes/scripts/tasks.test.js
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream

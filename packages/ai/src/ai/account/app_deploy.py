@@ -70,6 +70,15 @@ from typing import Any, Dict, List, Optional
 from rocketlib import debug
 
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
+from ai.account.app_rows import (
+    RUNG_RANK,
+    dist_dir_of,
+    holds_required_permissions,
+    manifest_of,
+    metadata_of,
+    precedence_sorted,
+    serving_block_of,
+)
 
 
 def build_of(entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -224,8 +233,15 @@ async def _visible_rows_of(conn: Any, account: Any, org_id: str, app_id: Optiona
     return rows
 
 
-# Audience precedence for cross-publisher arbitration (most specific wins).
-_RUNG_RANK = {'public': 0, 'team': 1, 'user': 2}
+def _app_rows(entries: Any) -> List[Dict[str, Any]]:
+    """The kind:'app' rows of a registry listing — app identity ONLY.
+
+    The rail is keyed by project id, and the pipe door accepts any project
+    id, so a project id's listing can carry pipe rows that merely share the
+    string with an app id (rocketride-ai/rocketride-saas#1011). Pipe rows are never evidence that an org
+    owns, builds, or may serve an app.
+    """
+    return [e for e in entries or [] if isinstance(e, dict) and e.get('kind') == 'app']
 
 
 async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tuple[str, bool]':
@@ -240,7 +256,7 @@ async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tu
     their natural not-found paths.
     """
     try:
-        entries = await account.deployments_versions(org_id, app_id)
+        entries = _app_rows(await account.deployments_versions(org_id, app_id))
     except Exception:
         entries = []
     if entries:
@@ -248,7 +264,7 @@ async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tu
     rows = await _visible_rows_of(conn, account, org_id, app_id)
     if rows:
         rows.sort(
-            key=lambda r: (-_RUNG_RANK.get((r.get('audience') or {}).get('type', ''), 0), str(r.get('orgId') or ''))
+            key=lambda r: (-RUNG_RANK.get((r.get('audience') or {}).get('type', ''), 0), str(r.get('orgId') or ''))
         )
         return str(rows[0].get('orgId') or org_id), False
     return org_id, True
@@ -273,8 +289,13 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     The platform org holds ``rocketride``, so ``rocketride.*`` is reachable
     by nobody else.
 
-    An org with no developer-id owns no namespace and cannot publish apps
-    until an org admin claims one (rrext_app developer_register).
+    An org with no developer-id owns no namespace and cannot deploy or publish
+    apps until an org admin claims one with ``rrext_deploy_app
+    developer_register`` (SaaS only). Users reach that verb through the App
+    Builder's Deploy tab, the npm CLI's ``rocketride app developer register
+    <id>`` or ``client.registerDeveloper(id)`` (Python:
+    ``client.register_developer(id)``), so the error below names those, never
+    the raw verb.
 
     Raises:
         ValueError: no developer-id, or app_id outside the owned namespace.
@@ -282,14 +303,56 @@ def _assert_owns_namespace(conn: Any, app_id: str) -> None:
     dev = _developer_id_of(conn)
     if not dev:
         raise ValueError(
-            'Publishing an app requires a registered developer id — an org admin must '
-            'claim one (rrext_app developer_register) before apps can be deployed or published'
+            'Deploying or publishing an app requires a registered developer id, and your organization '
+            'has none. An org admin claims it once, permanently: on the Deploy tab in the App Builder, '
+            'with the npm CLI (rocketride app developer register <id>), or in code with '
+            'client.registerDeveloper(id) (Python: client.register_developer(id)). '
+            'App ids must then be <id>.<name>.'
         )
     if app_id != dev and not app_id.startswith(f'{dev}.'):
         raise ValueError(
             f'App id {app_id!r} is outside your developer namespace — it must be {dev!r} '
             f'or start with {dev + "."!r} (apps are namespaced by your developer id, guaranteed unique)'
         )
+
+
+async def assert_pipe_id_outside_app_namespace(conn: Any, account: Any, org_id: str, project_id: str) -> None:
+    """GUARANTEE a pipe's project id is not inside the caller's app namespace.
+
+    The inverse of ``_assert_owns_namespace``: ``<developerId>`` and
+    ``<developerId>.*`` are app ids, so the pipe door must not mint registry
+    rows there. Exception: a caller whose org ALREADY holds pipe rows for the
+    id (and only pipe rows: no app or node row) keeps publishing it, so registering a developer id
+    never strands a pipe the org already ships (pipe rows carry no app
+    identity, the resolvers read ``kind: 'app'`` only).
+
+    The engine only knows the CALLER's developer id; ids inside OTHER orgs'
+    namespaces (or equal to another org's app id) are refused by the account
+    backend's publish, which sees every org (rocketride-ai/rocketride-saas#1011).
+
+    Raises:
+        ValueError: ``project_id`` is the caller's developer id or inside it,
+            and the caller's org has no pipe-only history for it.
+    """
+    dev = _developer_id_of(conn)
+    if not dev or not (project_id == dev or project_id.startswith(f'{dev}.')):
+        return
+    try:
+        rail = await account.deployments_versions(org_id, project_id)
+    except Exception as exc:
+        # Fail closed (no history means no exception), but say why: a
+        # registry read failure is not a namespace problem.
+        debug(f'[app_deploy] pipe namespace check: rail lookup failed for {project_id}: {exc}')
+        rail = []
+    # Pipe-ONLY history: a node row (or any other non-pipe kind) on the id is
+    # not a pipe the org already ships, so it earns no exception. A kind-less
+    # row is a pipe, as the deployment backend reads it.
+    if rail and all(isinstance(e, dict) and (e.get('kind') or 'pipe') == 'pipe' for e in rail):
+        return
+    raise ValueError(
+        f'Pipeline project_id {project_id!r} is inside your developer namespace {dev!r} — '
+        "that keyspace is reserved for apps (deploy apps via rrext_deploy add kind='app')"
+    )
 
 
 # =============================================================================
@@ -377,7 +440,7 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         return conn.build_error(request, 'data is not a valid zip archive')
     # appRoot names the app folder inside a workspace-relative zip; its shape
     # is guarded like a zip entry (it becomes a path inside the source tree).
-    caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
+    caller_meta = metadata_of(args)
     app_root = str(caller_meta.get('appRoot') or '')
     if app_root and (
         app_root.startswith('/')
@@ -810,6 +873,32 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         # the pointer would mint URLs to an empty directory.
         if not _is_built(entry):
             return conn.build_error(request, _not_built_error(app_id, version, entry))
+        # PUBLIC-PAGES gate (the trust boundary of the public-page surface):
+        # the public rung is the only one the page aggregate reads, so a
+        # manifest declaring publicPages/site is validated here, before the
+        # binding exists: privilege, path grammar, reserved prefixes,
+        # cross-app claims, data entries, snapshot files. For a platform app
+        # the gate always reads the build's dist/app-manifest.json, so it
+        # refuses the publish on a storage error or a missing artifact path
+        # even when the app declares no pages. A third-party app is never
+        # read: its metadata.manifest alone decides.
+        if audience['type'] == 'public':
+            from ai.modules.shell.public_pages import gate_errors
+
+            manifest = manifest_of(entry)
+            # No artifact path, no build output: an empty path would name the store's root dist/.
+            artifact_path = str(entry.get('artifactPath') or '')
+            dist_dir = ''
+            if artifact_path:
+                dist_dir = dist_dir_of(artifact_path)
+            try:
+                page_errors = await gate_errors(app_id, manifest, dist_dir)
+            except Exception as exc:
+                return conn.build_error(request, f'Could not verify the publicPages claims of {app_id}: {exc}')
+            if page_errors:
+                return conn.build_error(
+                    request, f'Version {version} of {app_id} cannot go public: ' + '; '.join(page_errors)
+                )
 
         row = await account.publish_set(
             home, 'app', app_id, audience, version, manifest_snapshot(entry, artifact), _actor_of(conn)
@@ -1111,8 +1200,7 @@ def manifest_snapshot(entry: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[s
     metadata.manifest is the listing truth (zip deploys carry the full
     appManifest); artifact fields fill the gaps for legacy binary deploys.
     """
-    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
-    manifest = metadata.get('manifest') if isinstance(metadata.get('manifest'), dict) else {}
+    manifest = manifest_of(entry)
     return {
         'name': str(manifest.get('name') or artifact.get('name') or artifact.get('appId') or ''),
         'publisher': str(manifest.get('publisher') or ''),
@@ -1188,7 +1276,7 @@ async def _where_of(
     Serving truth (#2461) rides beside it, from the SAME gate the manifest
     walk applies: ``enabled`` (the binding's own state — a disabled binding
     stays listed, republishing revives it), ``serving`` plus ``reason`` (''
-    when serving, else why not: see _serving_block_of), and ``servesYou`` —
+    when serving, else why not: see serving_block_of), and ``servesYou`` —
     the one pin the caller's own published resolution picks: the scope-walk
     WINNER among serving pins, dropped (no fallback to a less specific pin,
     exactly as the catalog drops it) when serving enforces requiredPermissions
@@ -1201,13 +1289,13 @@ async def _where_of(
             r for r in rows if (r.get('audience') or {}).get('type') != 'public' or r.get('artifactState') == 'ready'
         ]
 
-    blocks = [_serving_block_of(row, account.review_ladder) for row in rows]
+    blocks = [serving_block_of(row, account.review_ladder) for row in rows]
     serving_rows = [row for row, block in zip(rows, blocks) if not block]
-    winner = _precedence_sorted(serving_rows)[-1] if serving_rows else None
+    winner = precedence_sorted(serving_rows)[-1] if serving_rows else None
     # Only SaaS enforces requiredPermissions (the catalog + the serve
     # route); OSS serving is open, so a gated app still reaches the caller.
     if winner is not None and 'saas' in getattr(account, 'capabilities', ()):
-        if not _holds_required_permissions(winner, set(getattr(conn._account_info, 'sysPermissions', None) or [])):
+        if not holds_required_permissions(winner, set(getattr(conn._account_info, 'sysPermissions', None) or [])):
             winner = None
 
     pins: List[Dict[str, Any]] = []
@@ -1276,61 +1364,6 @@ async def _caller_entitled_to_version(
 # =============================================================================
 
 
-def _serving_block_of(row: Dict[str, Any], review_ladder: bool) -> str:
-    """
-    Why one publish binding does not serve, or '' when it does.
-
-    THE serving gate, shared by the manifest scope walk (what a browser is
-    actually handed) and the owner's where-list (what App Builder says is
-    live), so the two can never disagree (#2461). Reasons, first match wins:
-    'disabled' (the binding itself), 'failed' (the deployment failed
-    processing), 'in-review' / 'rejected' / 'not-approved' (a public binding
-    on a review-ladder server needs a 'ready' deployment; internal rungs and
-    ladder-less servers do not), then 'build-failed' / 'building' (no
-    servable bytes yet — a version serves only once its build is 'ok').
-    """
-    if row.get('state') != 'enabled':
-        return 'disabled'
-    deploy_state = row.get('artifactState') or ''
-    if deploy_state == 'failed':
-        return 'failed'
-    if (row.get('audience') or {}).get('type') == 'public' and review_ladder and deploy_state != 'ready':
-        return {'submit': 'in-review', 'rejected': 'rejected'}.get(deploy_state, 'not-approved')
-    build = row.get('artifactBuild')
-    if build == 'failed':
-        return 'build-failed'
-    if build != 'ok':
-        return 'building'
-    return ''
-
-
-def _precedence_sorted(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Publish rows ordered so the scope-walk WINNER of each app id lands last.
-
-    MORE-SPECIFIC audience wins (user > team > public); on a same-rung tie
-    the LOWEST org id wins — the same rule _home_org_of uses, so a stray
-    duplicate public row can never let a higher-UUID org displace a lower
-    one (the seeded platform org, at the minimum UUID, always holds its
-    ids). Rank ascending, org id DESCENDING within a rank, both stable.
-    """
-    ordered = sorted(rows, key=lambda r: str(r.get('orgId') or ''), reverse=True)
-    ordered.sort(key=lambda r: _RUNG_RANK.get((r.get('audience') or {}).get('type', ''), 0))
-    return ordered
-
-
-def _holds_required_permissions(row: Dict[str, Any], sys_perms: Any) -> bool:
-    """
-    Whether a caller holding ``sys_perms`` passes a binding's declared gate.
-
-    The catalog's own rule (``_catalog_entries``): a manifest declaring
-    ``requiredPermissions`` serves only a caller who holds ALL of them, or
-    the ``sys.admin`` platform superuser. Anonymous holds none.
-    """
-    required = (row.get('snapshot') or {}).get('requiredPermissions') or []
-    return not required or 'sys.admin' in sys_perms or all(p in sys_perms for p in required)
-
-
 # The scaffold's publisher when no developer id is known; a reserved slug no
 # org can register, so a listing treats it as no publisher at all.
 _PLACEHOLDER_PUBLISHER = 'local'
@@ -1393,14 +1426,14 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         return []
 
     # Precedence: sorted so each app id's winner lands LAST and the blind
-    # dict-overwrite below keeps it (see _precedence_sorted).
+    # dict-overwrite below keeps it (see precedence_sorted).
     resolved: Dict[str, Dict[str, Any]] = {}
-    for row in _precedence_sorted(rows):
+    for row in precedence_sorted(rows):
         # The SERVING gate (binding live, deployment serveable for the rung,
         # build 'ok') — shared with the owner's where-list so App Builder
         # never calls live what this walk would not hand a browser. An
         # unbuilt pin is silently skipped (the DEPLOY surfaces show why).
-        if _serving_block_of(row, account.review_ladder):
+        if serving_block_of(row, account.review_ladder):
             continue
         audience_type = (row.get('audience') or {}).get('type', '')
         app_id = row.get('appId') or ''
@@ -1418,8 +1451,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         # The version's stored appManifest (metadata.manifest): the listing
         # truth, and the only publisher source on the DB edition (its fixed
         # snapshot columns drop `publisher`).
-        artifact_meta = artifact.get('metadata') if isinstance(artifact.get('metadata'), dict) else {}
-        artifact_manifest = artifact_meta.get('manifest') if isinstance(artifact_meta.get('manifest'), dict) else {}
+        artifact_manifest = manifest_of(artifact)
         rung = 'personal' if audience_type == 'user' else audience_type
         mode = snapshot.get('mode') or 'free'
         # Internal-pin serving status. A public (store) entry gets its real
@@ -1474,11 +1506,6 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
 # =============================================================================
 # VERSIONED SERVING — the /apps/<appId>/v<N>/ route's entitlement resolvers
 # =============================================================================
-
-
-def _dist_dir_of(artifact_path: str) -> str:
-    """The servable dist tree of one registry entry (the build's output)."""
-    return f'{artifact_content_dir(artifact_path)}/dist'
 
 
 async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, str]:
@@ -1538,7 +1565,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
         # Same rule the catalog applies: ALL declared permissions, and
         # sys.admin as the platform superuser passes. Anonymous holds none,
         # so a gated app never serves pre-auth.
-        if not _holds_required_permissions(row, sys_perms):
+        if not holds_required_permissions(row, sys_perms):
             continue
         if (
             account.review_ladder
@@ -1551,7 +1578,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
         version = row.get('version')
         artifact_path = str(row.get('artifactPath') or '')
         if isinstance(version, int) and artifact_path:
-            dirs[version] = _dist_dir_of(artifact_path)
+            dirs[version] = dist_dir_of(artifact_path)
 
     # Developer-org entitlement: the caller org's OWN rail (rail rows exist
     # only inside the owning developer namespace), built versions only —
@@ -1560,7 +1587,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
     # follows visibility parity.
     if user_id and org_id:
         try:
-            entries = await account.deployments_versions(org_id, app_id)
+            entries = _app_rows(await account.deployments_versions(org_id, app_id))
         except Exception:
             entries = []
         for entry in entries:
@@ -1569,7 +1596,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
             version = int(entry.get('version', 0))
             artifact_path = str(entry.get('artifactPath') or '')
             if version and artifact_path:
-                dirs[version] = _dist_dir_of(artifact_path)
+                dirs[version] = dist_dir_of(artifact_path)
     return dirs
 
 
@@ -1584,7 +1611,7 @@ async def open_version_dirs(app_id: str) -> Dict[int, str]:
 
     dirs: Dict[int, str] = {}
     try:
-        entries = await account.deployments_versions('local', app_id)
+        entries = _app_rows(await account.deployments_versions('local', app_id))
     except Exception:
         entries = []
     for entry in entries:
@@ -1593,7 +1620,7 @@ async def open_version_dirs(app_id: str) -> Dict[int, str]:
         version = int(entry.get('version', 0))
         artifact_path = str(entry.get('artifactPath') or '')
         if version and artifact_path:
-            dirs[version] = _dist_dir_of(artifact_path)
+            dirs[version] = dist_dir_of(artifact_path)
     return dirs
 
 

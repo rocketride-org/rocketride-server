@@ -72,3 +72,65 @@ Semantics worth knowing:
 - `Answer.parsePython(value)` (static) extracts Python code from a code block.
 
 A complete chat program is [example 6](/clients/typescript/examples#6-chat-question-with-instructions-and-examples-parse-json-answer).
+
+## Native tool calling
+
+Put the conversation in `messages` to send it as real model turns, with tools
+the model can call. A non-empty `messages` is turn mode. The model answers with
+a message you append unchanged, a stop reason, and any tool calls. You run the
+tools and send each result back under the call's `id`.
+
+```typescript
+import { Answer, Question } from 'rocketride';
+
+const question = new Question({ role: 'You file GitHub issues.' });
+question.tools = [{ name: 'github.create_issue', description: 'Create an issue.', inputSchema: schema }];
+question.addMessage({ role: 'user', content: 'File an issue about the flaky test.' });
+for (let turn = 0; turn < MAX_TURNS; turn++) {
+	const answer = Answer.fromResult(await client.chat({ token, question }));
+	if (answer.error) throw new Error(answer.error.message);
+	question.addMessage(answer.message!);
+	if (answer.stopReason !== 'tool_use') {
+		console.log(answer.getText());
+		break;
+	}
+	for (const call of answer.toolCalls) {
+		try {
+			question.addToolResult(call.id, await runTool(call.name, call.args));
+		} catch (e) {
+			question.addToolResult(call.id, String(e), true);
+		}
+	}
+}
+```
+
+Treat each call as untrusted input: a document or a tool result can carry a
+prompt injection. Keep a turn limit, and have `runTool` refuse a name you did
+not send and arguments that do not match the tool's `inputSchema`.
+
+- Tool names stay yours, dots included. The engine maps them to names the
+  provider accepts and maps calls back.
+- `call.args` is an object, or the raw string when the model's arguments were
+  not valid JSON. Answer a string with `addToolResult(call.id, '...', true)`.
+- The system prompt is `role`, instructions and examples. Context, documents and
+  goals are added to the last user message. Retrieval nodes take their query from
+  `questions`, which turn mode rejects, so pass retrieved text in `context` yourself.
+  `history`, `questions` and `expectJson` are rejected in turn mode.
+- Before the LLM node, a prompt node keeps the conversation and tools and adds its
+  instructions to the system prompt, and a guardrails node checks the text and tool
+  results of the last user message. Agent and context optimizer nodes read
+  `questions`, so they do not take a turn.
+- Reasoning blocks in `answer.message` carry provider state. Keep them as they
+  are; the next request needs them.
+- With `cachePrefix: true`, the Anthropic node caches the system prompt and the
+  conversation so far.
+- The Anthropic, OpenAI and OpenAI-Compatible API nodes support turn mode. Any
+  other LLM node answers with `answer.error.code === 'tools_unsupported'` before
+  calling its model. Two tool names that become the same provider name get
+  `invalid_request`: rename one rather than retry. A Question that breaks a turn
+  rule (for example a last message from the assistant, after a `max_tokens` stop)
+  is never sent: `client.chat()` throws an `Error` that names the rule.
+- `toDict()` sends `messages` and `tools` only when set, so other questions go
+  out exactly as before. An engine older than turn mode ignores `messages` and
+  answers a near-empty prompt as text, so `fromResult` returns a text `Answer`
+  with no `message`.
