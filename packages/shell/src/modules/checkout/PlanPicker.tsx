@@ -230,9 +230,16 @@ const S = {
 		objectPosition: `${count > 1 ? (index / (count - 1)) * 100 : 50}% 50%`,
 	}),
 
+	// One grid cell: with ``uniformCardHeight`` the other interval's list is stacked hidden in it too, so the
+	// cell sizes to the taller list at the card's real width.
 	cardFeatures: {
 		flex: 1,
 		padding: '8px 12px 12px',
+		display: 'grid',
+	} as CSSProperties,
+
+	featureList: {
+		gridArea: '1 / 1',
 		display: 'flex',
 		flexDirection: 'column' as const,
 		gap: 3,
@@ -247,10 +254,9 @@ const S = {
 		gap: 6,
 	} as CSSProperties,
 
-	// A flex item defaults to min-width: auto, so a long unbroken word (a URL, a model name) would overflow the
-	// clipping card instead of wrapping.
+	// ``anywhere`` (unlike ``break-word``) counts its break points in the min-content width, so this flex item can
+	// shrink and a long unbroken word (a URL, a model name) wraps instead of running past the clipping card.
 	featureText: {
-		minWidth: 0,
 		overflowWrap: 'anywhere',
 	} as CSSProperties,
 
@@ -404,12 +410,13 @@ export interface PlanPickerProps {
 	cardImageAspect?: number;
 
 	/**
-	 * When true, every card's feature list is padded (with invisible spacer
-	 * rows) to the largest description length across ALL passed plans — both
-	 * intervals included. Because the grid stretches cards to equal height, this
-	 * keeps card height constant when toggling Monthly/Annual, even though the
-	 * annual tiers carry extra bonus lines. Default ``false`` (checkout/upgrade
-	 * modals render their natural, unpadded height).
+	 * When true, each billable card also lays out its tier's feature list from
+	 * the other interval, hidden, in the same space, so it reserves the taller of
+	 * its Monthly and Annual lists as wrapped at the card's real width. Because
+	 * the grid stretches cards to equal height, card height holds across the
+	 * Monthly/Annual toggle (when both intervals show the same tiers), even
+	 * though the annual tiers carry extra bonus lines. Default ``false``
+	 * (checkout/upgrade modals render their natural height).
 	 */
 	uniformCardHeight?: boolean;
 
@@ -490,17 +497,6 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
 	}, [plans, interval, showToggle]);
 
-	// Largest description length across ALL plans (both intervals). Drives the
-	// ``uniformCardHeight`` spacer padding so a card reserves the tallest feature
-	// list even when the current interval's own list is shorter — the height
-	// stays constant across the Monthly/Annual toggle. It counts entries, not
-	// wrapped lines, so in a narrow card where the two intervals' copy wraps
-	// differently the height can still shift by a line.
-	const maxDescLines = useMemo(
-		() => (uniformCardHeight ? plans.reduce((m, p) => Math.max(m, planDescription(p)?.length ?? 0), 0) : 0),
-		[plans, uniformCardHeight],
-	);
-
 	// The lowest-order billable plan visible at the current interval -- the
 	// "Starter" default. ``visiblePlans`` is already sorted by order ascending.
 	const defaultPlan = useMemo(
@@ -570,6 +566,14 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		return <p style={S.status}>No plans available.</p>;
 	}
 
+	const featureLineStyle = featureFontSize ? { ...S.featureLine, fontSize: featureFontSize } : S.featureLine;
+	const renderFeatureLine = (line: string, i: number) => (
+		<div key={i} style={featureLineStyle}>
+			<span style={S.featureCheck}>&#10003;</span>
+			<span style={S.featureText}>{line}</span>
+		</div>
+	);
+
 	return (
 		<div>
 			{/* Interval toggle */}
@@ -601,6 +605,11 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 					const cta = isAction ? undefined : ctaConfig?.[plan.stripePriceId];
 					const ctaDisabled = cta?.disabled ?? false;
 					const desc = planDescription(plan);
+					// The same tier at the other interval, whose list this card also reserves room for.
+					const twin = uniformCardHeight && !isAction
+						? plans.find((p) => p.nickname === plan.nickname && p.interval !== plan.interval && !planAction(p))
+						: undefined;
+					const twinDesc = twin ? planDescription(twin) : null;
 					// Whole-card selection only applies when a selection handler is
 					// wired (the checkout/upgrade modals). On display-only pages
 					// (pricing) the card is static — the CTA button is the action —
@@ -657,23 +666,18 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 								/>
 							)}
 
-							{/* Feature description lines. In uniform-height mode the list is
-							    padded with invisible spacer rows up to ``maxDescLines`` so
-							    every card reserves the same feature-area height. */}
-							{((desc && desc.length > 0) || (uniformCardHeight && maxDescLines > 0)) && (
+							{/* Feature description lines. In uniform-height mode the twin's
+							    list sits hidden in the same grid cell (see ``cardFeatures``),
+							    and the block is always rendered so it fills the card and
+							    keeps the CTA at the bottom. */}
+							{(desc?.length || uniformCardHeight) && (
 								<div style={S.cardFeatures}>
-									{(desc ?? []).map((line, i) => (
-										<div key={i} style={featureFontSize ? { ...S.featureLine, fontSize: featureFontSize } : S.featureLine}>
-											<span style={S.featureCheck}>&#10003;</span>
-											<span style={S.featureText}>{line}</span>
+									<div style={S.featureList}>{(desc ?? []).map(renderFeatureLine)}</div>
+									{twinDesc && (
+										<div style={{ ...S.featureList, visibility: 'hidden' }} aria-hidden="true">
+											{twinDesc.map(renderFeatureLine)}
 										</div>
-									))}
-									{uniformCardHeight && Array.from({ length: Math.max(0, maxDescLines - (desc?.length ?? 0)) }).map((_, i) => (
-										<div key={`pad-${i}`} style={{ ...S.featureLine, visibility: 'hidden', ...(featureFontSize ? { fontSize: featureFontSize } : null) }} aria-hidden="true">
-											<span style={S.featureCheck}>&#10003;</span>
-											<span>&#160;</span>
-										</div>
-									))}
+									)}
 								</div>
 							)}
 
