@@ -35,7 +35,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { AUTH_POPUP_KEY, forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from './authPopup';
+import { AUTH_POPUP_KEY, forgetAuthPopup, hasReturnLegParams, isAuthPopupWindow, rememberAuthPopup } from './authPopup';
 
 /** A minimal in-memory Storage. */
 function memoryStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> & { data: Map<string, string> } {
@@ -140,4 +140,13 @@ test('Shell.tsx remembers the role before startOAuth and forgets it on completio
 	assert.ok(!/const isAuthPopup = window\.name === 'rrauth'/.test(code), 'the window.name-only check is gone');
 	assert.ok(/rememberAuthPopup\([^)]*\);\s*void cm\.startOAuth\(\);/.test(code), 'the role is remembered right before the popup starts OAuth');
 	assert.ok(/if \(isAuthPopup\) \{\s*forgetAuthPopup\(/.test(code), 'the role is forgotten when the popup completes');
+});
+
+test('an IdP error return counts as a return leg, so the shell never restarts OAuth on it', () => {
+	assert.equal(hasReturnLegParams(new URLSearchParams('error=access_denied&state=s')), true);
+	assert.equal(hasReturnLegParams(new URLSearchParams('code=c&state=s')), true);
+	assert.equal(hasReturnLegParams(new URLSearchParams('rrauth=1')), false);
+	assert.equal(hasReturnLegParams(new URLSearchParams('')), false);
+	const code = readFileSync(path.join(__dirname, '..', 'components', 'layout', 'Shell.tsx'), 'utf8');
+	assert.ok(/isAuthPopup && !hasReturnLegParams\(bootParams\) && !cm\.loadToken\(\)/.test(code), 'only a popup with no return-leg parameter starts OAuth');
 });

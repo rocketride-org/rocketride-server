@@ -23,7 +23,7 @@ appModule.actions.push({
 		description: 'Testing rocket-ui',
 		run: async (ctx, task) => {
 			const testFiles = (await readdir(path.join(APP_ROOT, 'src'), { recursive: true }))
-				.filter((f) => f.endsWith('.test.ts'))
+				.filter((f) => f.endsWith('.test.ts') || f.endsWith('.test.tsx'))
 				.map((f) => path.join('src', f));
 			await execCommand('node', ['--import', 'tsx', '--test', '--test-reporter=spec', ...testFiles], {
 				task,

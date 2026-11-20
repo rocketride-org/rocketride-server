@@ -123,9 +123,10 @@ the system temp dir -- and renamed to
 ## Generating symbols
 
 A minidump on its own is not human-readable -- you need Breakpad-format `.sym`
-files that match the exact crashed build. Release/Sanitize builds generate them
-automatically with modern [Mozilla `dump_syms`](https://github.com/mozilla/dump_syms)
-(DWARF-5 capable) into a `symbols/` store next to the engine, keyed by debug-ID:
+files that match the exact crashed build. `Release` builds and Linux `Sanitize`
+builds (`--cmake-config=Sanitize`) generate them automatically with modern
+[Mozilla `dump_syms`](https://github.com/mozilla/dump_syms) (DWARF-5 capable) into
+a `symbols/` store next to the engine, keyed by debug-ID:
 
 ```text
 symbols/<module>/<debug-id>/<module>.sym
