@@ -367,6 +367,9 @@ export interface PlanPickerProps {
 	/** Content rendered below the plan cards (e.g. a "Continue" button). */
 	footer?: React.ReactNode;
 
+	/** Called when the user changes the visible billing interval. */
+	onIntervalChange?: (interval: 'month' | 'year') => void;
+
 	/** Default interval on first render. Default: ``'month'``. */
 	defaultInterval?: 'month' | 'year';
 
@@ -438,6 +441,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	ctaConfig,
 	currentPriceId,
 	footer,
+	onIntervalChange,
 	defaultInterval = 'month',
 	autoSelectDefault = false,
 	cardImageSrc,
@@ -448,15 +452,15 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// ── Internal interval state ──────────────────────────────────────────
 	const [interval, setInterval] = useState<'month' | 'year'>(defaultInterval);
 
-	// Reset interval when plans change (e.g. different app loaded)
+	// Keep the selected interval while the refreshed catalog still offers it.
 	useEffect(() => {
 		const hasMonth = plans.some((p) => p.interval === 'month');
 		const hasYear = plans.some((p) => p.interval === 'year');
-		if (!hasMonth && hasYear) {
-			setInterval('year');
-		} else if (hasMonth) {
-			setInterval('month');
-		}
+		setInterval((current) => {
+			if (current === 'month' && !hasMonth && hasYear) return 'year';
+			if (current === 'year' && !hasYear && hasMonth) return 'month';
+			return current;
+		});
 	}, [plans]);
 
 	// ── Derived data ─────────────────────────────────────────────────────
@@ -523,6 +527,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	const handleToggle = useCallback(
 		(newInterval: 'month' | 'year') => {
 			setInterval(newInterval);
+			onIntervalChange?.(newInterval);
 
 			if (!onSelectPlan) return;
 
@@ -548,7 +553,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 				.sort((a, b) => planOrder(a) - planOrder(b))[0];
 			if (fallback) onSelectPlan(fallback);
 		},
-		[plans, selectedPlan, onSelectPlan, autoSelectDefault]
+		[plans, selectedPlan, onSelectPlan, autoSelectDefault, onIntervalChange]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────

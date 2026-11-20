@@ -13,7 +13,7 @@
 
 import React, { CSSProperties } from 'react';
 import { MessageData, SettingsData, ConnectionMode, EngineVersionItem, settingsStyles as S } from './SettingsWebview';
-import { ConnectionConfig } from '../components/ConnectionConfig';
+import { ConnectionConfig, type ConnectionConfigProps } from '../components/ConnectionConfig';
 import type { ServiceStatus, DockerStatus, VersionOption } from '../components/panels/shared';
 
 // ============================================================================
@@ -71,7 +71,7 @@ interface ConnectionSettingsProps {
 	isSubscribed?: boolean;
 	/** Checkout callbacks for CloudPanel's embedded CheckoutModal. */
 	onFetchPlans?: () => Promise<any[]>;
-	onCreateCheckout?: (priceId: string) => Promise<{ clientSecret: string; subscriptionId: string }>;
+	onCreateCheckout?: ConnectionConfigProps['onCreateCheckout'];
 	onConfirmPending?: (subscriptionId: string, priceId: string) => Promise<void>;
 	onCheckoutSuccess?: () => void;
 	// -- Docker panel props --

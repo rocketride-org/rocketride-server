@@ -260,6 +260,9 @@ export default tseslint.config(
 				paths: [
 					{ name: 'shared', message: "The shared root barrel is retired: use deep 'shared/<group>' specs." },
 					{ name: 'shell-ui', message: "Renamed: import from 'shell'." },
+					{ name: 'shell/src/modules', message: "The shell surface is barrel-only: the React checkout barrel is not extension-host-safe; import from 'shell', or the checkoutScope/checkoutDispatch/types leaves." },
+					{ name: 'shell/src/modules/checkout', message: "The shell surface is barrel-only: the React checkout barrel is not extension-host-safe; import from 'shell', or the checkoutScope/checkoutDispatch/types leaves." },
+					{ name: 'shell/src/modules/checkout/index', message: "The shell surface is barrel-only: the React checkout barrel is not extension-host-safe; import from 'shell', or the checkoutScope/checkoutDispatch/types leaves." },
 				],
 				patterns: [
 					// gitignore semantics: a file under an excluded dir cannot be
@@ -272,8 +275,9 @@ export default tseslint.config(
 					// prefs/settings leaves (prefsStore, settingsRegistry,
 					// types), the workspace leaves (workspaceStore,
 					// devToolPins, workspaceFs), the ops leaves and the
-					// binary wire codec.
-					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css', '!shell/src', 'shell/src/*', '!shell/src/components', 'shell/src/components/*', '!shell/src/components/workspace', 'shell/src/components/workspace/*', '!shell/src/components/workspace/toolRelay', '!shell/src/components/workspace/toolWorkspaceFs', '!shell/src/components/workspace/prefsStore', '!shell/src/components/workspace/settingsRegistry', '!shell/src/components/workspace/types', '!shell/src/ops', 'shell/src/ops/*', '!shell/src/ops/busOps', '!shell/src/ops/busBridge', '!shell/src/ops/clientOps', '!shell/src/ops/retained', '!shell/src/workspace', 'shell/src/workspace/*', '!shell/src/workspace/workspaceStore', '!shell/src/workspace/devToolPins', '!shell/src/workspace/workspaceFs', '!shell/src/connection', 'shell/src/connection/*', '!shell/src/connection/binaryWire'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride'; the listed ext-host-safe leaves are the sanctioned deep imports)." },
+					// binary wire codec, and the checkout leaves (checkoutScope,
+					// checkoutDispatch, checkout types: no runtime imports).
+					{ group: ['shell/*', '!shell/themes', 'shell/themes/*', '!shell/themes/rocketride-default.css', '!shell/src', 'shell/src/*', '!shell/src/components', 'shell/src/components/*', '!shell/src/components/workspace', 'shell/src/components/workspace/*', '!shell/src/components/workspace/toolRelay', '!shell/src/components/workspace/toolWorkspaceFs', '!shell/src/components/workspace/prefsStore', '!shell/src/components/workspace/settingsRegistry', '!shell/src/components/workspace/types', '!shell/src/ops', 'shell/src/ops/*', '!shell/src/ops/busOps', '!shell/src/ops/busBridge', '!shell/src/ops/clientOps', '!shell/src/ops/retained', '!shell/src/workspace', 'shell/src/workspace/*', '!shell/src/workspace/workspaceStore', '!shell/src/workspace/devToolPins', '!shell/src/workspace/workspaceFs', '!shell/src/connection', 'shell/src/connection/*', '!shell/src/connection/binaryWire', '!shell/src/connection/checkoutScope', '!shell/src/modules', 'shell/src/modules/*', '!shell/src/modules/checkout', 'shell/src/modules/checkout/*', '!shell/src/modules/checkout/checkoutDispatch', '!shell/src/modules/checkout/types'], message: "The shell surface is barrel-only: import the name from 'shell' (the theme stylesheet is the one exported subpath; SDK values/types come from 'rocketride'; the listed ext-host-safe leaves are the sanctioned deep imports)." },
 				],
 			}],
 		},

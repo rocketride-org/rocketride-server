@@ -172,9 +172,9 @@ export type CheckoutModalPromoProps =
 
 		/**
 		 * Redeems a credit-grant (hackathon) code — $0 subscription plus
-		 * immediate credits, no plan selection or payment step.
+		 * immediate credits, no plan selection or payment step. Forward the attempt ID on retries.
 		 */
-		onRedeemPromoCode: (code: string) => Promise<PromoRedemption>;
+		onRedeemPromoCode: (code: string, attemptId?: string) => Promise<PromoRedemption>;
 	}
 	| {
 		onValidatePromoCode?: undefined;
@@ -196,9 +196,10 @@ export interface CheckoutModalBaseProps {
 
 	/**
 	 * Id of the app being subscribed to. Optional. It picks the label of the
-	 * button shown after a grant or hackathon code is redeemed: the pipeline
-	 * builder (`rocketride.pipeBuilder`) keeps "Start building", every other
-	 * app gets "Continue to <appName>".
+	 * button shown after a grant or hackathon code subscribes the org to the
+	 * app: the pipeline builder (`rocketride.pipeBuilder`) keeps "Start
+	 * building", every other app gets "Continue to <appName>". A credits-only
+	 * grant shows "Done", which just closes the modal.
 	 */
 	appId?: string;
 
@@ -226,13 +227,14 @@ export interface CheckoutModalBaseProps {
 
 	/**
 	 * Creates a Stripe subscription on the server and returns the
-	 * client secret needed by Stripe Elements to confirm the payment.
+	 * client secret needed by Stripe Elements to confirm the payment. Forward the
+	 * attempt ID so the connected server can recognize a retry.
 	 *
 	 * `clientSecret` is `null` when the first invoice is $0 (e.g. a 100%-off
 	 * promotion code) — the subscription is already active and the payment
 	 * step is skipped entirely.
 	 */
-	onCreateCheckout: (priceId: string, promotionCode?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
+	onCreateCheckout: (priceId: string, promotionCode?: string, attemptId?: string) => Promise<{ clientSecret: string | null; subscriptionId: string; status?: string }>;
 
 	/**
 	 * Notifies the server that payment was confirmed client-side.
@@ -240,7 +242,16 @@ export interface CheckoutModalBaseProps {
 	 */
 	onConfirmPending: (subscriptionId: string, priceId: string) => Promise<void>;
 
-	/** Called after a successful payment — host should close the modal. */
+	/** Whether the checkout still belongs to the host's current session and modal. */
+	isCheckoutCurrent?: () => boolean;
+
+	/** The server confirmed it can safely resolve an already-used attempt ID. */
+	supportsCheckoutReplay?: boolean;
+
+	/** Require explicit server status before accepting a no-payment response. */
+	requireCheckoutStatus?: boolean;
+
+	/** Called after a successful payment or a grant that subscribes the org to the app — host should close the modal. */
 	onSuccess: () => void;
 
 	/** Called when the user dismisses the modal without completing checkout. */
