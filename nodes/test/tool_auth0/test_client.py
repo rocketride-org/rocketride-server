@@ -85,7 +85,7 @@ def test_token_reuse_and_concurrency(client):
         for call in requests.post.call_args_list + requests.request.call_args_list
     )
     auth.close()
-    assert auth._tokens == {'read': None} and auth._config == {}
+    assert auth._token is None and auth._config == {}
 
 
 def test_expiry_and_401_refresh(client, monkeypatch):
@@ -232,81 +232,30 @@ def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
 
 
 @pytest.mark.parametrize(
-    'operation',
+    'operation,args,not_found',
     [
-        'search_users',
-        'get_user',
-        'get_user_logs',
-        'get_log_event',
-        'get_user_blocks',
-        'get_connection',
-        'get_connection_clients',
-        'list_connections',
-        'list_users',
-        'list_applications',
-        'search_logs',
-        'get_brute_force_settings',
-        'get_ip_throttling_settings',
-        'list_roles',
-        'get_user_roles',
-        'get_user_permissions',
-        'list_organizations',
-        'get_organization_members',
+        ('search_users', {'email': 'a@example.com'}, 'RESOURCE_NOT_FOUND'),
+        ('get_user', {'user_id': 'id'}, 'USER_NOT_FOUND'),
+        ('get_user_logs', {'user_id': 'id'}, 'USER_NOT_FOUND'),
+        ('get_log_event', {'log_id': 'id'}, 'RESOURCE_NOT_FOUND'),
+        ('get_user_blocks', {'user_id': 'id'}, 'USER_NOT_FOUND'),
     ],
 )
-@pytest.mark.parametrize('status,code', [(403, 'MISSING_SCOPE'), (404, None)])
-def test_all_tools_map_remote_errors_through_flat_contract(client, node, operation, status, code):
+@pytest.mark.parametrize('status', [403, 404])
+def test_all_tools_map_remote_errors_through_flat_contract(client, node, operation, args, not_found, status):
     _, auth, requests, _ = client
     instance = node[0].IInstance()
     instance.IGlobal = types.SimpleNamespace(client=auth)
-    failed = response(status, {'error': 'Forbidden', 'errorCode': 'insufficient_scope', 'message': 'private-token'})
-    requests.request.return_value = failed
-    args = {'email': 'a@example.com'} if operation == 'search_users' else {}
-    if operation not in (
-        'search_users',
-        'list_connections',
-        'list_users',
-        'list_applications',
-        'search_logs',
-        'get_brute_force_settings',
-        'get_ip_throttling_settings',
-        'list_roles',
-        'list_organizations',
-    ):
-        key = {
-            'get_log_event': 'log_id',
-            'get_connection': 'connection_id',
-            'get_connection_clients': 'connection_id',
-            'get_organization_members': 'organization_id',
-        }.get(operation, 'user_id')
-        args[key] = 'id'
-    result = getattr(instance, operation)(args)
-    expected = code or (
-        'RESOURCE_NOT_FOUND'
-        if operation
-        in (
-            'search_users',
-            'get_log_event',
-            'get_connection',
-            'get_connection_clients',
-            'list_connections',
-            'list_users',
-            'list_applications',
-            'search_logs',
-            'get_brute_force_settings',
-            'get_ip_throttling_settings',
-            'list_roles',
-            'list_organizations',
-            'get_organization_members',
-        )
-        else 'USER_NOT_FOUND'
+    requests.request.return_value = response(
+        status, {'error': 'Forbidden', 'errorCode': 'insufficient_scope', 'message': 'private-token'}
     )
+    result = getattr(instance, operation)(args)
     assert result == {
         'success': False,
         'error': 'The Auth0 application lacks a required permission.'
         if status == 403
         else 'The requested Auth0 resource was not found.',
-        'error_code': expected,
+        'error_code': 'MISSING_SCOPE' if status == 403 else not_found,
         'retryable': False,
         'retry_after_seconds': None,
     }
@@ -316,24 +265,11 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
 @pytest.mark.parametrize(
     'operation,argument,payload,path',
     [
-        ('search_users', {'email': 'jane@example.com'}, [], '/users'),
+        ('search_users', {'email': 'jane@example.com'}, [], '/users-by-email'),
         ('get_user', {'user_id': 'auth0|1'}, {'user_id': 'auth0|1'}, '/users/auth0%7C1'),
         ('get_user_logs', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/logs'),
         ('get_log_event', {'log_id': 'log1'}, {'log_id': 'log1'}, '/logs/log1'),
         ('get_user_blocks', {'user_id': 'auth0|1'}, {'blocked_for': []}, '/user-blocks/auth0%7C1'),
-        ('get_connection', {'connection_id': 'con/1'}, {'id': 'con/1'}, '/connections/con%2F1'),
-        ('get_connection_clients', {'connection_id': 'con/1'}, {'clients': []}, '/connections/con%2F1/clients'),
-        ('list_connections', {}, [], '/connections'),
-        ('list_users', {}, [], '/users'),
-        ('list_applications', {}, [], '/clients'),
-        ('search_logs', {}, [], '/logs'),
-        ('get_brute_force_settings', {}, {'enabled': True}, '/attack-protection/brute-force-protection'),
-        ('get_ip_throttling_settings', {}, {'enabled': True}, '/attack-protection/suspicious-ip-throttling'),
-        ('list_roles', {}, [], '/roles'),
-        ('get_user_roles', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/roles'),
-        ('get_user_permissions', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/permissions'),
-        ('list_organizations', {}, {'organizations': []}, '/organizations'),
-        ('get_organization_members', {'organization_id': 'org/1'}, {'members': []}, '/organizations/org%2F1/members'),
     ],
 )
 def test_read_tools_use_approved_http_routes_and_read_token(client, node, operation, argument, payload, path):
@@ -347,21 +283,6 @@ def test_read_tools_use_approved_http_routes_and_read_token(client, node, operat
     assert call.kwargs['headers']['Authorization'] == 'Bearer read-token'
     assert call.kwargs['allow_redirects'] is False
     assert requests.post.call_args.kwargs['json']['client_id'] == 'read'
-
-
-def test_connection_clients_route_passes_cursor_once(client, node):
-    """Send the cursor as an HTTP parameter and do not fetch another page."""
-    _, auth, requests, _ = client
-    instance = node[0].IInstance()
-    instance.IGlobal = types.SimpleNamespace(client=auth)
-    requests.request.return_value = response(200, {'clients': [], 'next': 'next-token'})
-    result = instance.get_connection_clients({'connection_id': 'con/1', 'limit': 3, 'cursor': 'cursor+/='})
-    assert result['next_cursor'] == 'next-token'
-    requests.request.assert_called_once()
-    call = requests.request.call_args
-    assert call.args == ('GET', 'https://tenant.us.auth0.com/api/v2/connections/con%2F1/clients')
-    assert call.kwargs['params'] == {'take': 3, 'from': 'cursor+/='}
-    assert call.kwargs['headers']['Authorization'] == 'Bearer read-token'
 
 
 def test_api_redirect_is_not_followed(client):
@@ -393,7 +314,7 @@ def test_close_during_token_refresh_waits_and_clears_credentials(client):
         release.set()
         pending.result(timeout=5)
         closed.result(timeout=5)
-    assert auth._config == {} and auth._tokens == {'read': None}
+    assert auth._config == {} and auth._token is None
     with pytest.raises(module.Auth0Error) as error:
         auth.request('get_user', identifier='u')
     assert error.value.code == 'CLIENT_CLOSED'

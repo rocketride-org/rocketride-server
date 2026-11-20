@@ -33,6 +33,11 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from urllib.parse import quote
 
+from ai.common.config import UnresolvedCredentialError, check_credential_resolved
+
+
+_USER_OPERATIONS = frozenset({'get_user', 'get_user_logs', 'get_user_blocks'})
+
 
 class Auth0Error(ValueError):
     """A safe, structured error for the calling tool."""
@@ -82,19 +87,20 @@ def validate_domain(domain):
         not re.fullmatch(r'[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?', label) for label in labels
     ):
         raise Auth0Error('INVALID_DOMAIN', 'A valid Auth0 tenant hostname is required.')
-    return domain.lower()
+    return domain
 
 
 def validate_config(cfg: dict) -> None:
     """Reject incomplete credentials without including values in errors."""
     for key in ('domain', 'clientId', 'clientSecret'):
         if not isinstance(cfg.get(key), str) or not cfg[key].strip():
-            raise ValueError(f'Auth0: {key} is required')
+            raise Auth0Error('INVALID_INPUT', f'Auth0: {key} is required')
     validate_domain(cfg['domain'])
-    keys = ('clientId', 'clientSecret')
-    for key in keys:
-        if re.search(r'\$\{[^}]*\}|<REDACTED>', cfg[key]):
-            raise ValueError(f'Auth0: {key} contains an unresolved credential reference')
+    for key in ('clientId', 'clientSecret'):
+        try:
+            check_credential_resolved('tool_auth0', key, cfg[key])
+        except UnresolvedCredentialError:
+            raise Auth0Error('INVALID_INPUT', f'Auth0: {key} contains an unresolved credential reference') from None
 
 
 class Auth0Client:
@@ -105,25 +111,25 @@ class Auth0Client:
         validate_config(cfg)
         self._config = {key: cfg[key] for key in ('domain', 'clientId', 'clientSecret')}
         self._base = 'https://' + validate_domain(cfg['domain'])
-        self._tokens = {'read': None}
-        self._locks = {'read': threading.Lock()}
+        self._token = None
+        self._lock = threading.Lock()
         self._closed = False
 
     def close(self) -> None:
         """Release credential references."""
-        with self._locks['read']:
+        with self._lock:
             self._closed = True
             self._config.clear()
-            self._tokens = {'read': None}
+            self._token = None
 
-    def _token(self, kind):
-        """Get or refresh the cached token for the credential kind."""
+    def _get_token(self):
+        """Get or refresh the cached Management API token."""
         import requests
 
-        with self._locks[kind]:
+        with self._lock:
             if self._closed:
                 raise Auth0Error('CLIENT_CLOSED', 'Auth0 client is closed.')
-            cached = self._tokens[kind]
+            cached = self._token
             if cached and time.monotonic() < cached[1]:
                 return cached[0]
             try:
@@ -165,38 +171,25 @@ class Auth0Client:
                     raise ValueError
             except (ValueError, TypeError, KeyError):
                 raise Auth0Error('AUTHENTICATION_FAILED', 'Auth0 returned an invalid token response.') from None
-            self._tokens[kind] = (token, time.monotonic() + max(0, expires - min(60, expires * 0.1)))
+            self._token = (token, time.monotonic() + max(0, expires - min(60, expires * 0.1)))
             return token
 
-    def _invalidate(self, kind, token):
+    def _invalidate(self, token):
         """Discard a cached token if it matches the rejected token."""
-        with self._locks[kind]:
-            if self._tokens[kind] and self._tokens[kind][0] == token:
-                self._tokens[kind] = None
+        with self._lock:
+            if self._token and self._token[0] == token:
+                self._token = None
 
     def request(self, operation, *, identifier=None, params=None):
         """Call an approved read-only route."""
         import requests
 
         routes = {
-            'search_users': ('GET', '/users'),
-            'list_users': ('GET', '/users'),
-            'list_applications': ('GET', '/clients'),
-            'search_logs': ('GET', '/logs'),
-            'get_brute_force_settings': ('GET', '/attack-protection/brute-force-protection'),
-            'get_ip_throttling_settings': ('GET', '/attack-protection/suspicious-ip-throttling'),
+            'search_users': ('GET', '/users-by-email'),
             'get_user': ('GET', '/users/{id}'),
             'get_user_logs': ('GET', '/users/{id}/logs'),
             'get_log_event': ('GET', '/logs/{id}'),
             'get_user_blocks': ('GET', '/user-blocks/{id}'),
-            'get_connection': ('GET', '/connections/{id}'),
-            'get_connection_clients': ('GET', '/connections/{id}/clients'),
-            'list_connections': ('GET', '/connections'),
-            'list_roles': ('GET', '/roles'),
-            'get_user_roles': ('GET', '/users/{id}/roles'),
-            'get_user_permissions': ('GET', '/users/{id}/permissions'),
-            'list_organizations': ('GET', '/organizations'),
-            'get_organization_members': ('GET', '/organizations/{id}/members'),
         }
         if operation not in routes:
             raise Auth0Error('INVALID_INPUT', 'Unsupported Auth0 operation.')
@@ -205,14 +198,13 @@ class Auth0Client:
             if not isinstance(identifier, str) or not 1 <= len(identifier) <= 300 or identifier in ('.', '..'):
                 raise Auth0Error('INVALID_INPUT', 'A valid identifier is required.')
             path = path.replace('{id}', quote(identifier, safe=''))
-        kind = 'read'
         if self._closed:
             raise Auth0Error('CLIENT_CLOSED', 'Auth0 client is closed.')
         auth_retry = False
         retries = 0
         waited = 0.0
         while True:
-            token = self._token(kind)
+            token = self._get_token()
             try:
                 response = requests.request(
                     method,
@@ -223,11 +215,11 @@ class Auth0Client:
                     allow_redirects=False,
                 )
             except requests.exceptions.RequestException:
-                raise Auth0Error('AUTH0_UNAVAILABLE', 'Auth0 could not be reached.', retryable=kind == 'read') from None
+                raise Auth0Error('AUTH0_UNAVAILABLE', 'Auth0 could not be reached.', retryable=True) from None
             status = response.status_code
             if status == 401:
-                self._invalidate(kind, token)
-                if kind == 'read' and not auth_retry:
+                self._invalidate(token)
+                if not auth_retry:
                     auth_retry = True
                     continue
                 raise Auth0Error('AUTHENTICATION_FAILED', 'Auth0 authentication failed.')
@@ -239,32 +231,27 @@ class Auth0Client:
                 except ValueError:
                     raise Auth0Error('API_ERROR', 'Auth0 returned an invalid response.') from None
             if status == 429 or 500 <= status < 600:
-                delay = max(2**retries, _retry_after(response.headers))
-                if kind == 'read' and retries < 2 and 0 <= delay <= 10 - waited:
+                retry_delay = _retry_after(response.headers)
+                delay = max(2**retries, retry_delay)
+                if retries < 2 and delay <= 10 - waited:
                     time.sleep(delay)
                     waited += delay
                     retries += 1
                     continue
-                raise Auth0Error(
-                    'RATE_LIMITED' if status == 429 else 'AUTH0_UNAVAILABLE',
-                    'Auth0 rate limit reached.' if status == 429 else 'Auth0 is unavailable.',
-                    retryable=kind == 'read',
-                    retry_after_seconds=_retry_after(response.headers) or None if status == 429 else None,
-                )
+                if status == 429:
+                    code = 'RATE_LIMITED'
+                    message = 'Auth0 rate limit reached.'
+                    retry_after = retry_delay or None
+                else:
+                    code = 'AUTH0_UNAVAILABLE'
+                    message = 'Auth0 is unavailable.'
+                    retry_after = None
+                raise Auth0Error(code, message, retryable=True, retry_after_seconds=retry_after)
             if status == 404:
-                raise Auth0Error(
-                    'USER_NOT_FOUND'
-                    if operation
-                    in (
-                        'get_user',
-                        'get_user_logs',
-                        'get_user_blocks',
-                        'get_user_roles',
-                        'get_user_permissions',
-                    )
-                    else 'RESOURCE_NOT_FOUND',
-                    'The requested Auth0 resource was not found.',
-                )
+                code = 'RESOURCE_NOT_FOUND'
+                if operation in _USER_OPERATIONS:
+                    code = 'USER_NOT_FOUND'
+                raise Auth0Error(code, 'The requested Auth0 resource was not found.')
             if status == 403:
                 try:
                     body = response.json()
@@ -277,7 +264,6 @@ class Auth0Client:
                     codes = set()
                 if 'insufficient_scope' in codes:
                     raise Auth0Error('MISSING_SCOPE', 'The Auth0 application lacks a required permission.')
-                # Tenants without the plan entitlement (for example, Organizations) are rejected with 403.
                 if codes & {'operation_not_supported', 'feature_not_enabled'}:
                     raise Auth0Error('FEATURE_UNAVAILABLE', 'The Auth0 tenant is not entitled to this feature.')
             raise Auth0Error('API_ERROR', 'Auth0 rejected the request.')

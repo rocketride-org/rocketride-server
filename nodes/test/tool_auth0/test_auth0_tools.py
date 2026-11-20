@@ -66,19 +66,6 @@ def dispatched_tool(tool, monkeypatch):
         'get_user_logs',
         'get_log_event',
         'get_user_blocks',
-        'get_connection',
-        'get_connection_clients',
-        'list_connections',
-        'list_users',
-        'list_applications',
-        'search_logs',
-        'get_brute_force_settings',
-        'get_ip_throttling_settings',
-        'list_roles',
-        'get_user_roles',
-        'get_user_permissions',
-        'list_organizations',
-        'get_organization_members',
     ],
 )
 @pytest.mark.parametrize('payload', ['not-json', '[]', 'null', [], 1, None, {'input': []}, {'unexpected': 1}])
@@ -90,23 +77,33 @@ def test_dispatch_rejects_invalid_input_without_api(dispatched_tool, method, pay
     client.request.assert_not_called()
 
 
-@pytest.mark.parametrize('payload', [{}, '{}', {'input': {}}, {'input': {}, 'security_context': {}}])
-def test_dispatch_accepts_legitimate_empty_input(dispatched_tool, payload):
-    """Accept empty object and dispatcher envelope forms."""
+@pytest.mark.parametrize(
+    'payload',
+    [
+        {'user_id': 'id'},
+        '{"user_id": "id"}',
+        {'input': {'user_id': 'id'}},
+        {'input': {'user_id': 'id'}, 'security_context': {}},
+    ],
+)
+def test_dispatch_accepts_valid_input_forms(dispatched_tool, payload):
+    """Accept plain objects, JSON objects, and dispatcher envelopes."""
     instance, client = dispatched_tool
     client.request.return_value = []
-    result = instance._dispatch_tool({'tool_name': 'list_users', 'input': payload}, 'tool.invoke')
-    assert result['output'] == {'success': True, 'users': [], 'count': 0}
+    result = instance._dispatch_tool({'tool_name': 'get_user_logs', 'input': payload}, 'tool.invoke')
+    assert result['output'] == {'success': True, 'events': [], 'count': 0}
 
 
 def test_dispatch_accepts_model_input(dispatched_tool):
     """Accept dispatcher objects that expose model_dump."""
     instance, client = dispatched_tool
     client.request.return_value = []
-    model = types.SimpleNamespace(model_dump=lambda: {'limit': 1})
-    result = instance._dispatch_tool({'tool_name': 'list_users', 'input': model}, 'tool.invoke')
+    model = types.SimpleNamespace(model_dump=lambda: {'user_id': 'id', 'limit': 1})
+    result = instance._dispatch_tool({'tool_name': 'get_user_logs', 'input': model}, 'tool.invoke')
     assert result['output']['success'] is True
-    client.request.assert_called_once_with('list_users', params={'page': 0, 'per_page': 1})
+    client.request.assert_called_once_with(
+        'get_user_logs', identifier='id', params={'page': 0, 'per_page': 1, 'sort': 'date:-1'}
+    )
 
 
 @pytest.mark.parametrize(
@@ -117,19 +114,6 @@ def test_dispatch_accepts_model_input(dispatched_tool):
         ('get_user_logs', {'user_id': 'id'}),
         ('get_log_event', {'log_id': 'id'}),
         ('get_user_blocks', {'user_id': 'id'}),
-        ('get_connection', {'connection_id': 'id'}),
-        ('get_connection_clients', {'connection_id': 'id'}),
-        ('list_connections', {}),
-        ('list_users', {}),
-        ('list_applications', {}),
-        ('search_logs', {}),
-        ('get_brute_force_settings', {}),
-        ('get_ip_throttling_settings', {}),
-        ('list_roles', {}),
-        ('get_user_roles', {'user_id': 'id'}),
-        ('get_user_permissions', {'user_id': 'id'}),
-        ('list_organizations', {}),
-        ('get_organization_members', {'organization_id': 'org_1'}),
     ],
 )
 def test_dispatch_rejects_extra_fields(dispatched_tool, method, args):
@@ -148,504 +132,13 @@ def test_registered_schemas(tool):
         'get_user_logs',
         'get_log_event',
         'get_user_blocks',
-        'get_connection',
-        'get_connection_clients',
-        'list_connections',
-        'list_users',
-        'list_applications',
-        'search_logs',
-        'get_brute_force_settings',
-        'get_ip_throttling_settings',
-        'list_roles',
-        'get_user_roles',
-        'get_user_permissions',
-        'list_organizations',
-        'get_organization_members',
     }
     registered = {name for name in dir(instance) if hasattr(getattr(instance, name), '__tool_meta__')}
     assert registered == names
     for name in names:
         meta = getattr(instance, name).__tool_meta__
-        assert 'required' in meta['input_schema'] and meta['output_schema']['properties']['success']
+        assert meta['input_schema']['required'] and meta['output_schema']['properties']['success']
         assert meta['description']
-
-
-def test_search_logs_filters_and_bounds_results(tool):
-    instance, client, _ = tool
-    client.request.return_value = [
-        {
-            'log_id': 'id',
-            'date': '2026-01-01',
-            'type': 'fp',
-            'description': 'secret raw',
-            'user_id': 'Bearer private-token',
-            'client_name': '192.0.2.1',
-            'ip': '192.0.2.1',
-            'user_agent': 'private-agent',
-            'details': {'secret': 'private'},
-        }
-    ] * 51
-    result = instance.search_logs({'event_type': 'fp', 'limit': 50})
-    assert result['count'] == len(result['events']) == 50
-    assert result['events'][0] == {
-        'log_id': 'id',
-        'date': '2026-01-01',
-        'type': 'fp',
-        'description': 'Login failed because the password was invalid.',
-        'user_id': None,
-        'client_name': None,
-    }
-    assert 'private' not in str(result) and '192.0.2.1' not in str(result)
-    client.request.assert_called_with(
-        'search_logs', params={'page': 0, 'per_page': 50, 'sort': 'date:-1', 'q': 'type:fp'}
-    )
-    client.request.return_value = []
-    assert instance.search_logs({}) == {'success': True, 'events': [], 'count': 0}
-    client.request.assert_called_with('search_logs', params={'page': 0, 'per_page': 20, 'sort': 'date:-1'})
-    client.request.return_value = [{'type': 'other'}]
-    assert instance.search_logs({})['events'] == [
-        {
-            'log_id': None,
-            'date': None,
-            'type': 'other',
-            'description': 'No specific diagnostic is available for this event type.',
-            'user_id': None,
-            'client_name': None,
-        }
-    ]
-
-
-def test_diagnostic_tool_schemas_and_scopes(tool):
-    instance, _, _ = tool
-    meta = instance.search_logs.__tool_meta__
-    assert meta['input_schema']['properties']['event_type']['enum'] == [
-        'f',
-        'fp',
-        'fu',
-        'limit_wc',
-        'limit_sul',
-        'limit_mu',
-    ]
-    assert 'read:logs' in meta['description']
-    assert set(meta['output_schema']['properties']['events']['items']['properties']) == {
-        'log_id',
-        'date',
-        'type',
-        'description',
-        'user_id',
-        'client_name',
-    }
-    for method in ('get_brute_force_settings', 'get_ip_throttling_settings'):
-        metadata = getattr(instance, method).__tool_meta__
-        assert metadata['input_schema'] == {
-            'type': 'object',
-            'required': [],
-            'properties': {},
-            'additionalProperties': False,
-        }
-        assert 'read:attack_protection' in metadata['description']
-
-
-@pytest.mark.parametrize(
-    'args',
-    [
-        {'event_type': 'fp OR type:*'},
-        {'event_type': None},
-        {'event_type': []},
-        {'q': '*'},
-        {'limit': 0},
-        {'limit': 51},
-        {'limit': True},
-        {'limit': '1'},
-    ],
-)
-def test_search_logs_rejects_invalid_input(tool, args):
-    instance, client, _ = tool
-    assert instance.search_logs(args)['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize('payload', [{}, [None], [{'type': []}], [{'user_id': 1}]])
-def test_search_logs_rejects_malformed_response(tool, payload):
-    instance, client, _ = tool
-    client.request.return_value = payload
-    assert instance.search_logs({})['error_code'] == 'API_ERROR'
-
-
-def test_attack_protection_settings_filter_and_map(tool):
-    instance, client, _ = tool
-    client.request.return_value = {
-        'enabled': True,
-        'mode': 'count_per_identifier',
-        'max_attempts': 10,
-        'shields': ['block', 'user_notification'],
-        'allowlist': ['192.0.2.1'],
-    }
-    assert instance.get_brute_force_settings({}) == {
-        'success': True,
-        'enabled': True,
-        'mode': 'count_per_identifier',
-        'max_attempts': 10,
-        'shields': ['block', 'user_notification'],
-    }
-    client.request.return_value = {
-        'enabled': True,
-        'shields': ['block'],
-        'allowlist': ['192.0.2.1'],
-        'stage': {
-            'pre-login': {'max_attempts': 100, 'rate': 864000, 'ip': '192.0.2.1'},
-            'pre-user-registration': {'max_attempts': 50, 'rate': 1200},
-            'other': {'ip': '192.0.2.1'},
-        },
-    }
-    assert instance.get_ip_throttling_settings({}) == {
-        'success': True,
-        'enabled': True,
-        'shields': ['block'],
-        'login_limits': {'max_attempts': 100, 'rate': 864000},
-        'signup_limits': {'max_attempts': 50, 'rate': 1200},
-    }
-    client.request.return_value = {'enabled': False, 'stage': {'pre-login': {}}}
-    assert instance.get_ip_throttling_settings({}) == {
-        'success': True,
-        'enabled': False,
-        'shields': None,
-        'login_limits': {'max_attempts': None, 'rate': None},
-        'signup_limits': None,
-    }
-    client.request.return_value = {'enabled': False}
-    assert instance.get_brute_force_settings({}) == {
-        'success': True,
-        'enabled': False,
-        'shields': None,
-        'mode': None,
-        'max_attempts': None,
-    }
-    assert instance.get_ip_throttling_settings({}) == {
-        'success': True,
-        'enabled': False,
-        'shields': None,
-        'login_limits': None,
-        'signup_limits': None,
-    }
-
-
-@pytest.mark.parametrize(
-    'method,payload',
-    [
-        ('get_brute_force_settings', []),
-        ('get_brute_force_settings', {}),
-        ('get_brute_force_settings', {'enabled': 'true'}),
-        ('get_brute_force_settings', {'enabled': True, 'mode': []}),
-        ('get_brute_force_settings', {'enabled': True, 'max_attempts': True}),
-        ('get_brute_force_settings', {'enabled': True, 'shields': ['192.0.2.1']}),
-        ('get_ip_throttling_settings', {'enabled': True, 'shields': 'block'}),
-        ('get_ip_throttling_settings', {'enabled': True, 'stage': []}),
-        ('get_ip_throttling_settings', {'enabled': True, 'stage': {'pre-login': []}}),
-        ('get_ip_throttling_settings', {'enabled': True, 'stage': {'pre-login': {'rate': True}}}),
-        ('get_ip_throttling_settings', {'enabled': True, 'stage': {'pre-user-registration': {'max_attempts': -1}}}),
-    ],
-)
-def test_protection_rejects_malformed_response(tool, method, payload):
-    instance, client, _ = tool
-    client.request.return_value = payload
-    assert getattr(instance, method)({})['error_code'] == 'API_ERROR'
-
-
-@pytest.mark.parametrize('method', ['get_brute_force_settings', 'get_ip_throttling_settings'])
-def test_protection_rejects_arguments(tool, method):
-    instance, client, _ = tool
-    assert getattr(instance, method)({'extra': 1})['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize('method,key', [('list_users', 'users'), ('list_applications', 'applications')])
-def test_inventory_schemas_and_empty_page(tool, method, key):
-    instance, client, _ = tool
-    metadata = getattr(instance, method).__tool_meta__
-    schema = metadata['input_schema']
-    assert schema['required'] == [] and schema['additionalProperties'] is False
-    assert schema['properties'] == {
-        'page': {'type': 'integer', 'minimum': 0, 'maximum': 99, 'default': 0},
-        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50, 'default': 20},
-    }
-    fields = metadata['output_schema']['properties'][key]['items']['properties']
-    assert set(fields) == (
-        {'user_id', 'email', 'name', 'blocked', 'last_login'} if key == 'users' else {'client_id', 'name', 'app_type'}
-    )
-    client.request.return_value = []
-    assert getattr(instance, method)({}) == {'success': True, key: [], 'count': 0}
-    client.request.assert_called_once_with(method, params={'page': 0, 'per_page': 20})
-
-
-@pytest.mark.parametrize('method,key', [('list_users', 'users'), ('list_applications', 'applications')])
-def test_inventory_filters_fields_and_caps_page(tool, method, key):
-    instance, client, _ = tool
-    if method == 'list_users':
-        entry = {
-            'user_id': 'u',
-            'email': 'a@example.com',
-            'name': 'User\nName',
-            'blocked': True,
-            'last_login': 'today',
-            'email_verified': True,
-            'app_metadata': {'secret': 'private'},
-        }
-        expected = {
-            'user_id': 'u',
-            'email': 'a@example.com',
-            'name': 'UserName',
-            'blocked': True,
-            'last_login': 'today',
-        }
-    else:
-        entry = {
-            'client_id': 'c',
-            'name': 'Application\nName',
-            'app_type': 'spa',
-            'client_secret': 'private',
-            'client_metadata': {'secret': 'private'},
-            'jwt_configuration': {'secret': 'private'},
-            'signing_keys': ['private'],
-        }
-        expected = {'client_id': 'c', 'name': 'ApplicationName', 'app_type': 'spa'}
-    client.request.return_value = [entry] * 51
-    result = getattr(instance, method)({'page': 99, 'limit': 50})
-    assert result == {'success': True, key: [expected] * 50, 'count': 50}
-    assert 'private' not in str(result)
-    client.request.assert_called_with(method, params={'page': 99, 'per_page': 50})
-    client.request.return_value = [{}]
-    result = getattr(instance, method)({'page': 0, 'limit': 1})
-    assert result['count'] == 1 and all(value is None for value in result[key][0].values())
-
-
-@pytest.mark.parametrize('method', ['list_users', 'list_applications'])
-@pytest.mark.parametrize(
-    'args',
-    [
-        {'page': -1},
-        {'page': 100},
-        {'page': True},
-        {'page': 1.5},
-        {'limit': 0},
-        {'limit': 51},
-        {'limit': False},
-        {'limit': '1'},
-        {'q': '*'},
-        {'filter': 'x'},
-    ],
-)
-def test_inventory_rejects_invalid_inputs(tool, method, args):
-    instance, client, _ = tool
-    assert getattr(instance, method)(args)['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    'method,payload',
-    [
-        ('list_users', {}),
-        ('list_users', [None]),
-        ('list_users', [{'blocked': 'false'}]),
-        ('list_users', [{'name': {}}]),
-        ('list_applications', {}),
-        ('list_applications', [1]),
-        ('list_applications', [{'client_id': []}]),
-        ('list_applications', [{'name': False}]),
-    ],
-)
-def test_inventory_rejects_malformed_responses(tool, method, payload):
-    instance, client, _ = tool
-    client.request.return_value = payload
-    assert getattr(instance, method)({})['error_code'] == 'API_ERROR'
-
-
-def test_connection_schemas(tool):
-    instance, _, _ = tool
-    get_schema = instance.get_connection.__tool_meta__['input_schema']
-    assert get_schema['required'] == ['connection_id']
-    assert get_schema['properties']['connection_id'] == {'type': 'string', 'minLength': 1, 'maxLength': 128}
-    list_schema = instance.list_connections.__tool_meta__['input_schema']
-    assert list_schema['required'] == [] and list_schema['additionalProperties'] is False
-    assert list_schema['properties'] == {
-        'page': {'type': 'integer', 'minimum': 0, 'maximum': 99, 'default': 0},
-        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50, 'default': 20},
-    }
-    list_fields = instance.list_connections.__tool_meta__['output_schema']['properties']['connections']['items'][
-        'properties'
-    ]
-    assert set(list_fields) == {'id', 'name', 'strategy'}
-    properties = instance.get_connection.__tool_meta__['output_schema']['properties']
-    assert set(properties) == {
-        'success',
-        'error',
-        'error_code',
-        'retryable',
-        'retry_after_seconds',
-        'id',
-        'name',
-        'strategy',
-    }
-    schema = instance.get_connection_clients.__tool_meta__
-    assert schema['input_schema']['required'] == ['connection_id']
-    assert schema['input_schema']['properties'] == {
-        'connection_id': {'type': 'string', 'minLength': 1, 'maxLength': 128},
-        'limit': {'type': 'integer', 'minimum': 1, 'maximum': 50, 'default': 20},
-        'cursor': {'type': 'string', 'minLength': 1, 'maxLength': 1000},
-    }
-    assert set(schema['output_schema']['properties']) == {
-        'success',
-        'error',
-        'error_code',
-        'retryable',
-        'retry_after_seconds',
-        'clients',
-        'count',
-        'next_cursor',
-    }
-
-
-def test_connection_clients_discoverable_and_single_page(dispatched_tool):
-    """Discover the tool and fetch exactly one filtered page."""
-    instance, client = dispatched_tool
-    assert 'get_connection_clients' in instance._collect_tool_methods()
-    client.request.return_value = {
-        'clients': [{'client_id': 'client', 'client_secret': 'private'}],
-        'next': 'cursor+/=',
-    }
-    result = instance._dispatch_tool(
-        {'tool_name': 'get_connection_clients', 'input': {'connection_id': 'con/1', 'limit': 1, 'cursor': 'prev+/='}},
-        'tool.invoke',
-    )['output']
-    assert result == {'success': True, 'clients': [{'client_id': 'client'}], 'count': 1, 'next_cursor': 'cursor+/='}
-    client.request.assert_called_once_with(
-        'get_connection_clients', identifier='con/1', params={'take': 1, 'from': 'prev+/='}
-    )
-
-
-def test_connection_clients_default_and_boundaries(tool):
-    """Map default and maximum page sizes without requesting subsequent pages."""
-    instance, client, _ = tool
-    client.request.return_value = {'clients': []}
-    assert instance.get_connection_clients({'connection_id': 'id'}) == {
-        'success': True,
-        'clients': [],
-        'count': 0,
-        'next_cursor': None,
-    }
-    client.request.assert_called_once_with('get_connection_clients', identifier='id', params={'take': 20})
-    client.request.reset_mock()
-    client.request.return_value = {'clients': [{'client_id': 'x' * 300}] * 50, 'next': 'x' * 1000}
-    result = instance.get_connection_clients({'connection_id': 'x' * 128, 'limit': 50, 'cursor': 'x' * 1000})
-    assert result['success'] and result['count'] == 50 and result['next_cursor'] == 'x' * 1000
-    assert client.request.call_count == 1
-
-
-@pytest.mark.parametrize(
-    'args',
-    [
-        {},
-        {'connection_id': ''},
-        {'connection_id': '..'},
-        {'connection_id': 'x' * 129},
-        {'connection_id': 'id', 'limit': True},
-        {'connection_id': 'id', 'limit': 0},
-        {'connection_id': 'id', 'limit': 51},
-        {'connection_id': 'id', 'limit': '1'},
-        {'connection_id': 'id', 'cursor': ''},
-        {'connection_id': 'id', 'cursor': None},
-        {'connection_id': 'id', 'cursor': 'x' * 1001},
-        {'connection_id': 'id', 'cursor': 'bad\u200b'},
-        {'connection_id': 'id', 'extra': 1},
-    ],
-)
-def test_connection_clients_invalid_input(tool, args):
-    """Reject invalid inputs without making an Auth0 request."""
-    instance, client, _ = tool
-    assert instance.get_connection_clients(args)['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    'payload',
-    [
-        [],
-        {},
-        {'clients': None},
-        {'clients': {}},
-        {'clients': [None]},
-        {'clients': [{}]},
-        {'clients': [{'client_id': None}]},
-        {'clients': [{'client_id': ''}]},
-        {'clients': [{'client_id': 'x' * 301}]},
-        {'clients': [{'client_id': 'bad\u202e'}]},
-        {'clients': [{'client_id': 'ok'}] * 21},
-        {'clients': [], 'next': 1},
-        {'clients': [], 'next': ''},
-        {'clients': [], 'next': 'x' * 1001},
-        {'clients': [], 'next': 'bad\n'},
-    ],
-)
-def test_connection_clients_malformed_response(tool, payload):
-    """Reject malformed pages rather than exposing partial data."""
-    instance, client, _ = tool
-    client.request.return_value = payload
-    assert instance.get_connection_clients({'connection_id': 'id'})['error_code'] == 'API_ERROR'
-
-
-def test_connections_filter_secrets_and_preserve_names(tool):
-    instance, client, _ = tool
-    connection = {
-        'id': 'con_1',
-        'name': 'Customer Token Portal',
-        'strategy': 'auth0',
-        'enabled_clients': ['client1'],
-        'options': {'client_secret': 'private'},
-        'signing_key': 'private',
-        'client_secret': 'private',
-    }
-    expected = {'id': 'con_1', 'name': 'Customer Token Portal', 'strategy': 'auth0'}
-    client.request.return_value = connection
-    assert instance.get_connection({'connection_id': 'con_1'}) == {'success': True, **expected}
-    client.request.assert_called_with('get_connection', identifier='con_1')
-    client.request.return_value = [connection] * 3
-    assert instance.list_connections({'page': 99, 'limit': 2}) == {
-        'success': True,
-        'connections': [expected, expected],
-        'count': 2,
-    }
-    client.request.assert_called_with('list_connections', params={'page': 99, 'per_page': 2})
-    assert client.request.call_count == 2  # One detail call and one list call, with no client-page fan-out.
-    client.request.return_value = []
-    assert instance.list_connections({}) == {'success': True, 'connections': [], 'count': 0}
-    client.request.assert_called_with('list_connections', params={'page': 0, 'per_page': 20})
-    client.request.return_value = {}
-    assert instance.get_connection({'connection_id': 'x' * 128}) == {
-        'success': True,
-        'id': None,
-        'name': None,
-        'strategy': None,
-    }
-
-
-@pytest.mark.parametrize(
-    'field,value',
-    [
-        ('id', 'x' * 129),
-        ('name', 'x' * 301),
-        ('strategy', 'x' * 129),
-        ('name', 'bad\u200bname'),
-        ('name', 'bad\u202ename'),
-        ('id', {}),
-    ],
-)
-def test_unsafe_connection_fields_rejected(tool, field, value):
-    """Reject unsafe fields without returning partial connection data."""
-    instance, client, _ = tool
-    client.request.return_value = {field: value}
-    assert instance.get_connection({'connection_id': 'id'})['error_code'] == 'API_ERROR'
-    client.request.return_value = [{field: value}]
-    assert instance.list_connections({})['error_code'] == 'API_ERROR'
 
 
 @pytest.mark.parametrize(
@@ -666,103 +159,35 @@ def test_unsafe_identity_connections_rejected(tool, identities):
     assert instance.get_user({'user_id': 'id'})['error_code'] == 'API_ERROR'
 
 
-def test_legitimate_identity_and_connection_names_preserved(tool):
+def test_legitimate_identity_connection_names_preserved(tool):
     """Preserve valid connection names without shortening them."""
     instance, client, _ = tool
     name = 'Username-Password-Authentication'
-    client.request.return_value = {'name': name, 'enabled_clients': ['client-id']}
-    assert instance.get_connection({'connection_id': 'id'})['name'] == name
     client.request.return_value = {'identities': [{'connection': name}]}
     assert instance.get_user({'user_id': 'id'})['connections'] == [name]
 
 
-@pytest.mark.parametrize(
-    'method,payload',
-    [
-        ('list_users', {'user_id': 'x' * 301}),
-        ('list_users', {'last_login': 'bad\u200bdate'}),
-        ('list_applications', {'client_id': 'x' * 301}),
-        ('list_applications', {'app_type': '\u202e'}),
-    ],
-)
-def test_unsafe_inventory_identifiers_rejected(tool, method, payload):
-    """Reject oversized or nonprintable inventory identifiers."""
-    instance, client, _ = tool
-    client.request.return_value = [payload]
-    assert getattr(instance, method)({})['error_code'] == 'API_ERROR'
-
-
-@pytest.mark.parametrize('value', ['', ' ', '.', '..', 'x' * 129, None, 1])
-def test_invalid_connection_id(tool, value):
-    instance, client, _ = tool
-    assert instance.get_connection({'connection_id': value})['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    'key,value',
-    [
-        ('page', -1),
-        ('page', 100),
-        ('page', True),
-        ('page', 1.5),
-        ('limit', 0),
-        ('limit', 51),
-        ('limit', False),
-        ('limit', '1'),
-    ],
-)
-def test_invalid_connection_pagination(tool, key, value):
-    instance, client, _ = tool
-    assert instance.list_connections({key: value})['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-@pytest.mark.parametrize(
-    'method,payload',
-    [
-        ('get_connection', []),
-        ('list_connections', {}),
-        ('list_connections', [None]),
-    ],
-)
-def test_malformed_connection_responses(tool, method, payload):
-    instance, client, _ = tool
-    client.request.return_value = payload
-    args = {'connection_id': 'id'} if method == 'get_connection' else {}
-    assert getattr(instance, method)(args)['error_code'] == 'API_ERROR'
-
-
-@pytest.mark.parametrize('method,args', [('get_connection', {'connection_id': 'id'}), ('list_connections', {})])
-def test_connection_errors_use_flat_envelope(tool, method, args):
-    instance, client, module = tool
-    client.request.side_effect = module.Auth0Error(
-        'RATE_LIMITED', 'Rate limited.', retryable=True, retry_after_seconds=3
-    )
-    assert getattr(instance, method)(args) == {
-        'success': False,
-        'error': 'Rate limited.',
-        'error_code': 'RATE_LIMITED',
-        'retryable': True,
-        'retry_after_seconds': 3,
-    }
-
-
-def test_search_exact_case_insensitive_and_query_safety(tool):
+def test_search_uses_case_sensitive_email_and_limits_sanitized_matches(tool):
     instance, client, _ = tool
     client.request.return_value = [
+        {'user_id': '2', 'email': 'jane+tag@example.com'},
         {'user_id': '1', 'email': 'Jane+tag@EXAMPLE.COM', 'name': 'Jane', 'email_verified': True, 'secret': 'hidden'},
-        {'user_id': '2', 'email': 'other@example.com'},
+        {'user_id': '3', 'email': 'Jane+tag@EXAMPLE.COM'},
     ]
-    result = instance.search_users({'input': {'email': 'jane+tag@example.com', 'limit': 5}})
+    result = instance.search_users({'input': {'email': 'Jane+tag@EXAMPLE.COM', 'limit': 1}})
     assert result == {
         'success': True,
         'users': [{'user_id': '1', 'email': 'Jane+tag@EXAMPLE.COM', 'name': 'Jane', 'email_verified': True}],
         'count': 1,
     }
-    params = client.request.call_args.kwargs['params']
-    assert params['q'] == r'email:"jane\+tag@example.com"' and params['search_engine'] == 'v3'
-    assert params['per_page'] == 100
+    client.request.assert_called_once_with(
+        'search_users',
+        params={
+            'email': 'Jane+tag@EXAMPLE.COM',
+            'fields': 'user_id,email,name,email_verified',
+            'include_fields': 'true',
+        },
+    )
     client.request.return_value = []
     assert instance.search_users({'email': 'nobody@example.com'}) == {'success': True, 'users': [], 'count': 0}
 
@@ -806,6 +231,14 @@ def test_user_fields_and_admin_block_default(tool):
         'connections': ['db'],
     }
     assert 'secret' not in str(result) and '192.0.2.1' not in str(result)
+    client.request.assert_called_once_with(
+        'get_user',
+        identifier='u',
+        params={
+            'fields': 'user_id,email,name,email_verified,blocked,last_login,logins_count,identities',
+            'include_fields': 'true',
+        },
+    )
 
 
 def test_logs_are_bounded_and_derived_from_allowlist(tool):
@@ -890,7 +323,7 @@ def test_recognized_event_diagnostics_are_allowlisted(tool, code):
     assert 'private raw event' not in str(result)
 
 
-def test_blocks_and_unblock_paths(tool):
+def test_blocks_and_unblock_is_unavailable(tool):
     instance, client, _ = tool
     block = {'identifier': '192.0.2.1', 'ip': '192.0.2.1', 'connection': 'db'}
     client.request.return_value = {'blocked_for': [block]}
@@ -969,28 +402,3 @@ def test_tool_after_global_close_returns_structured_error(tool):
     instance.IGlobal.client = None
     result = instance.get_user({'user_id': 'u'})
     assert result['error_code'] == 'CLIENT_CLOSED'
-
-
-@pytest.mark.parametrize('page,limit', [(19, 50), (39, 25), (99, 10)])
-def test_connection_pagination_accepts_the_1000_record_boundary(tool, page, limit):
-    """Send pages whose final requested record is exactly the 1,000th."""
-    instance, client, _ = tool
-    client.request.return_value = []
-    assert instance.list_connections({'page': page, 'limit': limit})['success']
-    client.request.assert_called_once_with('list_connections', params={'page': page, 'per_page': limit})
-
-
-@pytest.mark.parametrize('page,limit', [(20, 50), (39, 26), (99, 11)])
-def test_connection_pagination_rejects_pages_beyond_1000(tool, page, limit):
-    """Reject an over-limit page before making a connection request."""
-    instance, client, _ = tool
-    assert instance.list_connections({'page': page, 'limit': limit})['error_code'] == 'INVALID_INPUT'
-    client.request.assert_not_called()
-
-
-def test_connection_limit_does_not_change_other_list_tools(tool):
-    """Keep the connection-specific offset constraint off other tools."""
-    instance, client, _ = tool
-    client.request.return_value = []
-    assert instance.list_users({'page': 20, 'limit': 50})['success']
-    client.request.assert_called_once_with('list_users', params={'page': 20, 'per_page': 50})

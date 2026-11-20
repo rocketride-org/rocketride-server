@@ -15,10 +15,9 @@ with this node installed and the test tenant configuration is required.
 
 1. Configure the node with the authorized read-only M2M application and confirm it has only the required read permissions. Confirm the tenant and test user are the designated test
    resources. Do not put credentials in command lines or chat.
-2. Call `search_users` for the test user's known email, then repeat with a
-   different letter case. Confirm the intended account appears in both results.
-   Record pass/fail only; search-v3 is eventually consistent, so record an
-   inconclusive result if the account is not indexed yet.
+2. Call `search_users` using the email's stored capitalization. Confirm the
+   intended account appears. Change the capitalization and confirm that the
+   same account is absent. Record only whether each check passed.
 3. Call `get_user` using the designated test user's ID and record whether the
    administrative `blocked` value is present and valid, without recording it
    alongside an identifying value.
@@ -39,25 +38,17 @@ with this node installed and the test tenant configuration is required.
    Other read operations require their own scopes; do not infer the minimum
    user-log scope from a token that has both permissions.
 
-## Live write: unavailable
-
-The node does not expose account changes. It cannot perform a live write until an
-independent human authorization mechanism is supported. Do not make a DELETE
-as part of these read-only checks.
-
 ## Sanitized evidence
 
 | Check | Result | Notes without secrets or identifiers |
 | --- | --- | --- |
 | Authorized dedicated test tenant and test user | Pass | User confirmed tenant, users and intended scopes. |
 | Read token acquisition and reuse | Pass | One token request for three direct client reads in under one minute. |
-| Exact-email and mixed-case search | Pass | Tool searches passed for three users; direct client searches with both casings returned the same user. |
-| User profile and administrative block state | Pass | Read for all three designated users. |
+| Exact-email lookup | Pending | The previous search-v3 implementation passed exact and mixed-case checks for three users. Repeat with `/users-by-email`. |
+| User profile and administrative block state | Pending field projection check | Reads passed for all three designated users before field projection was added. Confirm the narrowed response includes connection names. |
 | Recent user logs and individual event | Pass | Both tools succeeded; a direct client read also confirmed page limit and order. |
 | Brute-force block state and no-block response | Pass | No blocks returned for the three designated users. |
-| User-log scope | Pass, with qualification | User confirmed only `read:logs_users` was selected for a separate application; `get_user_logs` succeeded and `list_users` was denied. `search_logs` unexpectedly succeeded; token claims were not inspected. |
-| Connection-client continuation | Pass | A one-client page returned a cursor, and the next page returned a different client. |
-| Unblock | Not run | Node writes are disabled pending independent human authorization. |
+| User-log scope | Inconclusive | `get_user_logs` succeeded when only `read:logs_users` was selected for a separate application. A tenant-wide log search also succeeded unexpectedly, and the token claims were not inspected. |
 
 The OpenRouter chat pipeline returned an answer consistent with the direct
 read-only result. The agent's individual tool calls were not independently

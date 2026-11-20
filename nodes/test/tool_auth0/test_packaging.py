@@ -115,4 +115,4 @@ def test_read_only_credentials_are_sufficient_for_catalog_readiness(monkeypatch)
     state = module.evaluate(entry, read_vars)
     assert state['status'] == 'configured' and not state['missing']
     assert set(state['wiring']) == {'auth0.domain', 'auth0.clientId', 'auth0.clientSecret'}
-    assert 'ROCKETRIDE_AUTH0_WRITE_CLIENT_SECRET' not in module.setup_block(entry)['variables']
+    assert sorted(module.setup_block(entry)['variables']) == sorted(read_vars)

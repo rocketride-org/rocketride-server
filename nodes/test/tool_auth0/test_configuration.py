@@ -34,6 +34,8 @@ def node(monkeypatch):
     rocketlib.IInstanceBase = type('IInstanceBase', (), {})
     rocketlib.OPEN_MODE = types.SimpleNamespace(CONFIG='config')
     rocketlib.warning = Mock()
+    rocketlib.getServiceDefinition = Mock()
+    rocketlib.IJson = type('IJson', (), {})
 
     def tool_function(**metadata):
         def decorate(fn):
@@ -43,24 +45,31 @@ def node(monkeypatch):
         return decorate
 
     rocketlib.tool_function = tool_function
-    config = types.ModuleType('ai.common.config')
-    config.Config = types.SimpleNamespace(getNodeConfig=Mock())
     depends = types.ModuleType('depends')
     depends.depends = Mock()
     for name, module in (
         ('rocketlib', rocketlib),
         ('ai', types.ModuleType('ai')),
         ('ai.common', types.ModuleType('ai.common')),
-        ('ai.common.config', config),
         ('depends', depends),
     ):
         monkeypatch.setitem(sys.modules, name, module)
+    common = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common'
+    config_spec = importlib.util.spec_from_file_location('ai.common.config', common / 'config.py')
+    config = importlib.util.module_from_spec(config_spec)
+    monkeypatch.setitem(sys.modules, config_spec.name, config)
+    # The mocked Config.getNodeConfig does not parse JSON5.
+    monkeypatch.setitem(sys.modules, 'json5', types.ModuleType('json5'))
+    config_spec.loader.exec_module(config)
+    monkeypatch.setattr(config.Config, 'getNodeConfig', Mock())
+
     utils = types.ModuleType('ai.common.utils')
-    helper = NODE.parents[3] / 'packages' / 'ai' / 'src' / 'ai' / 'common' / 'utils' / 'tool_args.py'
+    helper = common / 'utils' / 'tool_args.py'
     helper_spec = importlib.util.spec_from_file_location('auth0_test_tool_args', helper)
     helper_module = importlib.util.module_from_spec(helper_spec)
     helper_spec.loader.exec_module(helper_module)
     utils.normalize_tool_input = helper_module.normalize_tool_input
+    utils.validate_tool_input_schema = helper_module.validate_tool_input_schema
     monkeypatch.setitem(sys.modules, 'ai.common.utils', utils)
     spec = importlib.util.spec_from_file_location(
         'auth0_test_node', NODE / '__init__.py', submodule_search_locations=[str(NODE)]
@@ -80,7 +89,7 @@ def test_service_configuration():
     assert service['path'] == 'nodes.tool_auth0'
     assert service['classType'] == ['tool'] and service['lanes'] == {}
     assert 'nosaas' not in service['capabilities']
-    assert 'Unblocking is unavailable' in ' '.join(service['description'])
+    assert 'read-only' in ' '.join(service['description'])
     field = service['fields']['auth0.clientSecret']
     assert field['secure'] is True and field['ui']['ui:widget'] == 'ApiKeyWidget'
     assert all(f'auth0.{name}' in service['shape'][0]['properties'] for name in ('domain', 'clientId', 'clientSecret'))
@@ -114,6 +123,7 @@ def test_lifecycle_and_safe_validation(node):
         get_config.return_value = cfg
         with pytest.raises(ValueError) as exc:
             instance.beginGlobal()
+        assert exc.value.code == 'INVALID_INPUT'
         assert 'secret' not in str(exc.value).lower().replace('clientsecret', '')
         warning.reset_mock()
         instance.validateConfig()
@@ -135,6 +145,7 @@ def test_each_missing_credential_fails_safely(node, field):
     get_config.return_value = config
     with pytest.raises(ValueError) as error:
         instance.beginGlobal()
+    assert error.value.code == 'INVALID_INPUT'
     assert 'read-private' not in str(error.value)
     depends.assert_not_called()
 

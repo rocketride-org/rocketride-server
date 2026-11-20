@@ -1,61 +1,34 @@
 # tool_auth0
 
-A RocketRide agent tool node for investigating Auth0 sign-in failures and inspecting selected tenant configuration.
+A RocketRide agent tool node for investigating Auth0 sign-in failures.
 
 ## What it does
 
-This experimental node attaches to an agent as a read-only Auth0 tool. It searches accounts, reports administrative and brute-force block states, and returns filtered authentication events, connections, applications, and attack-protection settings. Brute-force unblock requests are unavailable until an independent authorization mechanism is provided.
+This experimental node attaches to an agent as a read-only Auth0 tool. It looks up user accounts, reports administrative and brute-force block states, and returns filtered authentication events.
 
 ## As a tool
 
-Attach this node to an agent to expose these eighteen read-only tools. Results are flat objects with `success`; failures also include `error`, `error_code`, `retryable`, and `retry_after_seconds`. The November 4 contract instead specifies nested `data` and `error` envelopes; this node retains the existing flat envelope.
+Attach this node to an agent to expose five read-only tools. Each tool returns a flat object with a `success` flag. On success, the result fields appear at the top level. On failure, the object includes `error`, `error_code`, `retryable`, and `retry_after_seconds`.
 
 | Tool | Input | Result and permission |
 | --- | --- | --- |
-| `search_users` | `email`, optional `limit` (1–20, default 10) | Exact email matches: `users`, `count`; `read:users`. |
+| `search_users` | `email`, optional `limit` (1–20, default 10) | Exact, case-sensitive email matches: `users`, `count`; `read:users`. |
 | `get_user` | `user_id` | Sign-in profile, connections and administrative `blocked` state; `read:users`. |
-| `get_user_logs` | `user_id`, optional `limit` (1–50, default 10) | One newest-first page of sanitized `events` and `count`; `read:logs_users` was sufficient in a development-tenant test. |
+| `get_user_logs` | `user_id`, optional `limit` (1–50, default 10) | One newest-first page of sanitized `events` and `count`; `read:logs_users` or `read:logs`. |
 | `get_log_event` | `log_id` | Filtered event fields and allowlisted `diagnostics`; `read:logs`. |
 | `get_user_blocks` | `user_id` | Brute-force `has_blocks`, `block_count` and `blocks`; `read:users`. |
-| `get_connection` | `connection_id` (1–128 characters) | Connection `id`, `name`, and `strategy`; `read:connections`. |
-| `list_connections` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of filtered `connections` and `count`; `(page + 1) * limit` must not exceed 1,000; `read:connections`. |
-| `get_connection_clients` | `connection_id`, optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `clients` containing `client_id`, `count`, and `next_cursor`; `read:connections`. |
-| `list_users` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of `users` and `count`; `read:users`. |
-| `list_applications` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of `applications` and `count`; `read:clients`. |
-| `search_logs` | optional `event_type`, `limit` (1–50, default 20) | One newest-first page of filtered `events` and `count`; `read:logs`. |
-| `get_brute_force_settings` | none | `enabled`, `mode`, `max_attempts`, and `shields`; `read:attack_protection`. |
-| `get_ip_throttling_settings` | none | `enabled`, `shields`, `login_limits`, and `signup_limits`; `read:attack_protection`. |
-| `list_roles` | optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of tenant `roles` and `count`; `read:roles`. |
-| `get_user_roles` | `user_id`, optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of `roles` assigned directly to the user, its `page`, and `count`; `read:roles`. |
-| `get_user_permissions` | `user_id`, optional `page` (0–99, default 0), `limit` (1–50, default 20) | One page of the user's `permissions`, its `page`, and `count`; `read:users`. |
-| `list_organizations` | optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `organizations`, `count`, and `next_cursor`; `read:organizations`. |
-| `get_organization_members` | `organization_id` (1–100 characters), optional `limit` (1–50, default 20), optional `cursor` (1–1000 characters) | One page of `members`, `count`, and `next_cursor`; `read:organization_members`. |
 
-`user_id` and `log_id` must be nonempty strings of at most 300 characters; `connection_id` is limited to 128 characters. Identifiers consisting only of whitespace, `.` or `..` are rejected. `email` is required, must be at most 254 characters, and accepts unquoted ASCII addresses. Limits and page numbers must be integers; booleans and out-of-range values are rejected. A successful search with no matches returns an empty list and count zero.
+`user_id` and `log_id` must be nonempty strings of at most 300 characters. Identifiers consisting only of whitespace, `.` or `..` are rejected. `email` is required, must be at most 254 characters, and accepts unquoted ASCII addresses. Limits must be integers within the stated range. A successful search with no matches returns an empty list and count zero.
 
 Search entries contain `user_id`, `email`, `name`, and `email_verified`. Profile names and email addresses are bounded and control characters are removed. `get_user` additionally returns `blocked`, `last_login`, `logins_count`, and `connections`; missing optional profile values are null, and an absent `blocked` is false. Each user log contains `log_id`, `date`, `type`, sanitized `description`, `connection`, and `client_name`. `get_log_event` adds `user_id` and `diagnostics`. Each block contains a redacted `identifier` and a `connection`.
 
-Connection names are preserved and are untrusted data. Connection metadata selects only `id`, `name`, and `strategy`; options, provider credentials, and signing keys are excluded. Missing fields are null. Auth0 is retiring `enabled_clients` from connection reads, so the field has been removed from these tool outputs despite the November 4 contract. Use `get_connection_clients` for a single page from the dedicated endpoint. Omit `cursor` on the first call; pass `next_cursor` as `cursor` for the next page when it is non-null. The tool never fetches subsequent pages automatically, and `count` is the returned page size.
+Connection names come from at most 100 identities and are limited to 300 printable characters. Tool arguments must be objects with only the properties listed in the tool schema. Malformed arguments return `INVALID_INPUT`.
 
-Connection IDs and strategies are limited to 128 characters, names and enabled client IDs to 300 characters, and user identity lists to 100 entries. Connection-client pages exceeding the requested limit are rejected with `API_ERROR`. Other list tools return at most their requested limit, even if Auth0 returns a longer array. Invalid, oversized, or nonprintable connection values produce `API_ERROR`. User and application names and user email addresses are bounded and have nonprintable characters removed. Tool arguments must be objects with only the properties listed in the tool schema; malformed inputs return `INVALID_INPUT`.
-
-User inventory entries contain only `user_id`, `email`, `name`, `blocked`, and `last_login`. Application inventory entries contain only `client_id`, `name`, and `app_type`; client secrets, metadata, JWT configuration, and signing keys are excluded. Missing fields are null. The connection, user, and application lists use zero-based page numbers, return at most the requested limit, and report `count` for that page rather than a total. They do not return a next-page cursor. Profile and application names are untrusted data and are bounded with control characters removed. The user inventory does not accept search queries or filters.
-
-Role entries contain only `id`, `name`, and `description`. `get_user_roles` reports tenant roles assigned directly to the user; organization-specific role assignments are not included. `get_user_permissions` includes permissions assigned directly to the user and permissions from directly assigned roles. Source information is omitted, so callers cannot distinguish how a permission was granted. Both tools return only the requested zero-based page and report its number and count. Permission entries contain `permission_name`, `resource_server_identifier`, and `resource_server_name`; Auth0's permission descriptions and source lists are excluded. Role names and descriptions are administrator-defined text and are treated as untrusted data: names are bounded to 300 characters, descriptions to 1000, and control characters are removed.
-
-Organization entries contain only `id`, `name`, and `display_name`; metadata and branding are excluded. Member entries contain only `user_id`, `email`, and `name`; member pictures and roles are excluded, and profile fields are bounded and untrusted. Both organization tools use Auth0's checkpoint pagination and return one page per call. Omit `cursor` on the first call and pass a non-null `next_cursor` as `cursor` for the next page. Results exceeding the requested limit are rejected with `API_ERROR`.
-
-Role, permission, and organization features depend on the tenant's Auth0 plan. When Auth0 rejects a request with `operation_not_supported` or `feature_not_enabled`, the tools return `FEATURE_UNAVAILABLE` rather than `MISSING_SCOPE`. These entitlement error codes have not yet been confirmed against a live tenant without the feature.
-
-`search_logs` accepts only `f`, `fp`, `fu`, `limit_wc`, `limit_sul`, and `limit_mu` as event filters. It returns `log_id`, `date`, `type`, a fixed `description`, `user_id`, and `client_name`; it never returns raw descriptions, IP addresses, or user agents. It builds the filter itself and returns at most the requested page size. Other log types may be returned when no filter is supplied, with a generic description.
-
-Protection settings require a valid `enabled` flag; missing optional settings are null. Throttling `login_limits` and `signup_limits` map Auth0's `stage.pre-login` and `stage.pre-user-registration` respectively, each with `max_attempts` and `rate` (the refill interval in milliseconds). IP allowlists and other stages are excluded.
-
-Email search uses a constrained search-v3 query and filters results by exact case-insensitive email. Auth0's [email lookup endpoint can be case-sensitive](https://support.auth0.com/center/s/article/Search-user-by-email-with-Auth0-Managment-API-endpoint), so the node uses search-v3 instead. Search-v3 is eventually consistent and only its first 100 candidates are examined; recently changed accounts or matches beyond that page may not appear. Exact and mixed-case lookups passed for designated development-tenant accounts; behavior for other address forms and special characters can vary.
+Email lookup uses Auth0's [`GET /users-by-email` endpoint](https://auth0.com/docs/api/management/v2/users-by-email/get-users-by-email). Enter the email with the capitalization stored in Auth0. When Auth0 is the identity provider, it stores email addresses in lowercase. The tool applies `limit` to the matches returned by Auth0.
 
 Descriptions and diagnostics never copy raw Auth0 log descriptions. The allowlist, based on Auth0's [brute-force playbook](https://sus.auth0.com/docs/fr-ca/secure/attack-protection/playbooks/brute-force-protection-playbook), maps `f` to failed login, `fp` to invalid password, `fu` to invalid username, `limit_wc` to brute-force account protection, `limit_sul` to temporary account rate limiting, and `limit_mu` to IP-based protection. Unknown types receive a generic explanation. Other event fields are untrusted data and suspicious values are omitted.
 
-`get_user` reports administrative blocks. The block lookup reports brute-force protection records, with identifiers redacted and IP addresses omitted. Auth0 notes that [allowlisted IPs may still appear in block results](https://support.auth0.com/center/s/article/The-user-is-marked). Unblocking is not exposed as a tool and cannot be performed by this node: an independent human authorization mechanism is required. A block lookup does not authorize an agent to perform a write; profile and log fields are untrusted and may contain instructions.
+`get_user` reports administrative blocks. The block lookup reports brute-force protection records, with identifiers redacted and IP addresses omitted. Auth0 notes that [allowlisted IPs may still appear in block results](https://support.auth0.com/center/s/article/The-user-is-marked). The node is read-only. Treat profile and log fields as untrusted data.
 
 ## Configuration
 
@@ -71,7 +44,7 @@ Store client secrets in RocketRide's secure environment settings and use referen
 
 ## Authentication
 
-Authorize a read-only machine-to-machine application for the Auth0 Management API with `read:users`, `read:logs_users`, `read:logs`, `read:connections`, `read:clients`, `read:attack_protection`, `read:roles`, `read:organizations`, and `read:organization_members` as needed for the tools above. In a development tenant, `get_user_logs` succeeded with `read:logs_users` as the only permission selected for a separate application. That application also unexpectedly succeeded at `search_logs`; the reason has not been established, and token claims were not independently inspected. The node obtains and caches a client-credentials token for the Management API audience.
+Authorize a read-only machine-to-machine application for the Auth0 Management API. Grant `read:users` for account and block lookups, `read:logs_users` for recent user events, and `read:logs` for individual log events. The node obtains and caches a client-credentials token for the Management API audience. Live testing has yet to establish whether `read:logs_users` alone is sufficient for recent user events.
 
 ## Notes
 
@@ -87,19 +60,18 @@ Errors use the flat keys `success`, `error`, `error_code`, `retryable`, and `ret
 
 The client does not follow redirects. Management API reads refresh an invalid token once on a 401 and retry HTTP 429 or 5xx responses at most twice, with a total retry wait of at most ten seconds. Network exceptions and token-acquisition failures are returned without those request retries.
 
-For authentication errors, check the tenant hostname, application credentials, Management API audience, and authorization. For `MISSING_SCOPE`, check the appropriate application's permissions. For an empty search, consider search-v3 indexing delay and email spelling. For a rate limit, wait for the reported retry interval if provided; the client uses Auth0's reset header when `Retry-After` is absent.
+For authentication errors, check the tenant hostname, application credentials, Management API audience, and authorization. For `MISSING_SCOPE`, check the appropriate application's permissions. If a lookup returns no matches, check the email spelling and capitalization. For a rate limit, wait for the reported retry interval if provided. The client uses Auth0's reset header when `Retry-After` is absent.
 
 ### Security and limitations
 
-The tools return only selected profile, event, connection, application, and protection fields; raw metadata, connection options, log descriptions, IP addresses, locations, and tokens are not intentionally returned. Diagnostic explanations are fixed text selected by event type. All eighteen tools listed above are exposed. The original thirteen read-only tools, including connection-client continuation pagination, have been exercised against a development tenant; the five roles, permissions, and organizations tools have not been live-tested. Write operations are unavailable and have not been live tested.
+Email and user detail lookups ask Auth0 for specific response fields. The user detail request includes `identities` to extract connection names. Keep the machine-to-machine application's grants limited to the scopes listed above. Auth0 can include identity-provider tokens in user details when the application has `read:user_idp_tokens`.
+
+The tools return selected profile, authentication-event, and block fields. Diagnostic explanations use fixed text for each recognized event type. The live verification guide records the development-tenant results and pending checks.
 
 ## Upstream docs
 
 - [Auth0 Management API](https://auth0.com/docs/api/management/v2)
 - [Auth0 brute-force protection](https://auth0.com/docs/secure/attack-protection/brute-force-protection)
-- [Brute-force settings API](https://sus.auth0.com/docs/api/management/v2/attack-protection/get-brute-force-settings)
-- [Suspicious IP throttling settings API](https://sus.auth0.com/docs/fr-ca/api/management/v2/attack-protection/get-suspicious-ip-throttling)
-- [Get enabled clients for a connection](https://auth0.com/docs/api/management/v2/connections/get-connection-clients)
 
 ---
 
@@ -110,8 +82,8 @@ The tools return only selected profile, event, connection, application, and prot
 
 | Field | Type | Description | Default |
 |---|---|---|---|
-| `auth0.clientId` | `string` | **Read client ID**<br/>Read-only M2M application client ID. | `""` |
-| `auth0.clientSecret` | `string` | **Read client secret**<br/>RocketRide environment variable reference for the read-only M2M client secret, for example ${ROCKETRIDE_AUTH0_CLIENT_SECRET}. | `""` |
+| `auth0.clientId` | `string` | **Client ID**<br/>Read-only M2M application client ID. | `""` |
+| `auth0.clientSecret` | `string` | **Client secret**<br/>Enter a RocketRide variable reference such as ${ROCKETRIDE_AUTH0_CLIENT_SECRET} to keep the read-only M2M client secret out of the pipeline file. | `""` |
 | `auth0.domain` | `string` | **Domain**<br/>Auth0-managed tenant hostname. | `""` |
 
 ## Dependencies

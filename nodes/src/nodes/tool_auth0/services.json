@@ -15,8 +15,8 @@
 	"icon": "auth0.svg",
 	"documentation": "https://docs.rocketride.org/nodes/tool_auth0",
 	"description": [
-		"Investigate Auth0 sign-in failures as agent tools.",
-		"Inspect user profiles, authentication events, and brute-force blocks. Unblocking is unavailable."
+		"Investigate Auth0 sign-in failures with read-only agent tools.",
+		"Inspect user profiles, authentication events, and brute-force blocks."
 	],
 	"tile": [],
 	"lanes": {},
@@ -40,14 +40,14 @@
 		},
 		"auth0.clientId": {
 			"type": "string",
-			"title": "Read client ID",
+			"title": "Client ID",
 			"description": "Read-only M2M application client ID.",
 			"default": ""
 		},
 		"auth0.clientSecret": {
 			"type": "string",
-			"title": "Read client secret",
-			"description": "RocketRide environment variable reference for the read-only M2M client secret, for example ${ROCKETRIDE_AUTH0_CLIENT_SECRET}.",
+			"title": "Client secret",
+			"description": "Enter a RocketRide variable reference such as ${ROCKETRIDE_AUTH0_CLIENT_SECRET} to keep the read-only M2M client secret out of the pipeline file.",
 			"default": "",
 			"pattern": "^\\$\\{ROCKETRIDE_[A-Z0-9_]+\\}$",
 			"secure": true,
