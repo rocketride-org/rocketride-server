@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-20T10:02:18.101Z
-// Source commit: 0902ef834610e0c083e5d94d7719f28ac6333af3
+// Generated:     2026-11-20T10:45:54.245Z
+// Source commit: a1e8790989c99513f4a12d04c002c0be04feae5c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -15738,6 +15738,8 @@ interface IAccountViewProps {
     usageByPublication?: PublicationUsage[];
     /** Label of the period the publication breakdown covers (e.g. "November 2026"). */
     publicationPeriod?: string;
+    /** Why the served-by-publication read failed, or null when it answered (rows or none). */
+    publicationError?: string | null;
     /** Currently running tasks with live token data. */
     activeTasks?: ActiveTask[];
     /** Whether dashboard data is still loading. */
