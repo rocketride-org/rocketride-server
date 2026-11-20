@@ -358,3 +358,16 @@ async def test_r972_1a_push_never_installs_over_a_deauth(monkeypatch, perms):
     assert conn._account_info.userId == ''
     assert conn._account_info.sysPermissions == []
     assert events(conn, 'apaext_account') == []
+
+
+@pytest.mark.asyncio
+async def test_r972_deauth_disconnect_event_stays_user_scoped(monkeypatch):
+    """A deauthed socket's connection_removed is scoped to its former user, not ''."""
+    server = make_server(FakeAccount(), monkeypatch)
+    conn = make_conn(server, identity('admin', ADMIN), monitors=WILDCARD_ALL)
+
+    await conn.on_deauth(_request('deauth'))
+    server.broadcast_server_event = AsyncMock()
+    await server._dapbase_on_disconnected(conn)
+
+    assert server.broadcast_server_event.call_args.kwargs['user_id'] == 'admin'

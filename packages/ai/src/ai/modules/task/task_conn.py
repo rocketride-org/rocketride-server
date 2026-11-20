@@ -253,6 +253,10 @@ class TaskConn(
     # the revoked user for the disconnect handler's dashboard event.
     _revoked: bool = False
     _revoked_user_id: Optional[str] = None
+    # The user a deauthed (not revoked) socket belonged to, so its disconnect
+    # event stays user-scoped after the bare identity replaces userId. Cleared
+    # by a later successful auth.
+    _deauthed_user_id: Optional[str] = None
     # When this connection's platform authority was last verified, on the
     # live re-check's monotonic clock (``TaskServer._authz``); 0 = never.
     _authz_verified_at: float = 0.0
@@ -466,6 +470,7 @@ class TaskConn(
 
         self._account_info = result
         self._authenticated = True
+        self._deauthed_user_id = None
         self._authz_verified_at = t0
         self._server.release_unauthed_slot(self._client_ip)
 
@@ -510,6 +515,7 @@ class TaskConn(
         if not self._authenticated:
             return self.build_response(request, body={})
 
+        self._deauthed_user_id = getattr(self._account_info, 'userId', None) or None
         self._drop_authority()
 
         return self.build_response(request, body={})

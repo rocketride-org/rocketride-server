@@ -606,3 +606,22 @@ async def test_r972_1b_debugger_events_skip_unauthenticated_connections(monkeypa
         await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
 
         assert events(debugger, 'stopped') == []
+
+
+@pytest.mark.asyncio
+async def test_r972_failed_old_rebuild_keeps_newer_identity_verification(monkeypatch):
+    """A rebuild that fails after a newer auth installed must not clear that auth's stamp."""
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    old_info = conn._account_info
+
+    async def rebuild(info):
+        # A newer identity is installed and stamped while the old rebuild runs.
+        conn._account_info = identity('admin', ADMIN)
+        conn._authz_verified_at = clock.now
+        raise RuntimeError('database unavailable')
+
+    account.rebuild_account_info = rebuild
+    await server._push_rebuilt(account, conn, old_info, 'push_account_update')
+
+    assert conn._authz_verified_at == clock.now

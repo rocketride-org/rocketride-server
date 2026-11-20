@@ -638,8 +638,11 @@ class TaskServer(DAPBase):
 
         # A revoked connection holds the bare identity by now; its dashboard
         # event is still scoped to the user it belonged to (#972).
-        conn_user_id = getattr(conn, '_revoked_user_id', None) or getattr(
-            getattr(conn, '_account_info', None), 'userId', None
+        # A deauthed connection likewise keeps its former user (_deauthed_user_id).
+        conn_user_id = (
+            getattr(conn, '_revoked_user_id', None)
+            or getattr(getattr(conn, '_account_info', None), 'userId', None)
+            or getattr(conn, '_deauthed_user_id', None)
         )
 
         # No dev-overlay cleanup: dev previews are LOCAL-FIRST — the
@@ -1214,7 +1217,10 @@ class TaskServer(DAPBase):
             return False
         except Exception as e:
             if subject and authz is not None:
-                conn._authz_verified_at = 0.0
+                # Only invalidate the verification this rebuild's identity owns;
+                # a newer auth stamped its own, and a deauthed socket has none.
+                if conn._account_info is info and getattr(conn, '_authenticated', False):
+                    conn._authz_verified_at = 0.0
                 failed = self.count_authz('read_failed')
                 warning(
                     f'[AUTHZ] {label} rebuild failed conn={conn.get_connection_id()} user={info.userId} '
