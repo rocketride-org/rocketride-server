@@ -188,14 +188,17 @@ test('T41 backstop: a note hit is redacted, any other hit is denied, ids inside 
 		expectDenied(await status(A, run.token), 'credential', 'session token as a key');
 	});
 
-	await tt.test("the run's own project id inside a URL, raw and URL-encoded, is replaced by the alias", async () => {
-		for (const [label, form] of [
-			['raw', real.projectId],
-			['encodeURIComponent', encodeURIComponent(real.projectId)],
+	await tt.test("the run's own project id inside a URL (path and query) is replaced by the alias", async () => {
+		// A minted id is only unreserved URL characters, so encodeURIComponent returns it unchanged: there is
+		// no distinct encoded form to test (a second "encoded" iteration would just rerun the raw one).
+		assert.equal(encodeURIComponent(real.projectId), real.projectId, 'a minted project id has no encoded form of its own');
+		for (const [label, url, expected] of [
+			['path', `https://h/p/${real.projectId}/x`, `https://h/p/${run.projectId}/x`],
+			['query', `https://h/p?project=${real.projectId}&q=1`, `https://h/p?project=${run.projectId}&q=1`],
 		] as const) {
-			t.cm.engine.setStatus({ name: `https://h/p/${form}/x` });
-			const body = expectOk(await status(A, run.token), `status with the ${label} project id in a URL`);
-			assert.equal(body.name, `https://h/p/${run.projectId}/x`, `${label}: the alias replaces the real project id`);
+			t.cm.engine.setStatus({ name: url });
+			const body = expectOk(await status(A, run.token), `status with the project id in a ${label}`);
+			assert.equal(body.name, expected, `${label}: the alias replaces the real project id`);
 		}
 	});
 
@@ -235,9 +238,10 @@ test('T42 N1 property test: 200 seeded random sequences, and nothing real ever r
 		assert.ok(real.projectId.startsWith('rrapp.'), `iteration ${i}: a real project id`);
 		assert.match(real.id, /^[0-9a-f]{8}\.chat_1$/, `iteration ${i}: a real task id`);
 		// Always: a plain status read, a pipeline read and an event.
+		// Successful baseline traffic is REQUIRED: a gate that denied everything would leave the transcript clean.
 		engine.setStatus({ notes: ['plain note'] });
-		await status(A, run.token);
-		await call(A, 'rrext_get_pipeline', { token: run.token });
+		assert.deepEqual(expectOk(await status(A, run.token), `iteration ${i}: baseline status`).notes, ['plain note'], `iteration ${i}: the baseline status is delivered`);
+		expectOk(await call(A, 'rrext_get_pipeline', { token: run.token }), `iteration ${i}: baseline pipeline`);
 		t.cm.emitEngineEvent(engine.event(pick(kinds), { project_id: real.projectId, source: SRC, notes: ['plain note'] }));
 		await A.request('client.addMonitor', { key: { token: run.token }, types: ['summary'] }).catch(() => undefined);
 		// Then a random sequence.

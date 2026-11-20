@@ -31,6 +31,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { DAPMessage } from 'rocketride';
 import { ENTRY_A, makeRoot, refAppKey } from './__test__/fixtures';
+import { transcript } from './__test__/n1';
 import { clientRequest, dap, settle } from './__test__/realm';
 import { assertDenied, assertDeniedOp, assertNotForwarded, brief, outcome, startRun, trackSettled, openFs, openPipe } from './__test__/util';
 
@@ -103,7 +104,8 @@ test('T27 request and response size caps', async (tt) => {
 	const envelope = await clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
 	assertDenied(envelope, 'too_large', 'a response of 8 MiB + 1');
 	await settle();
-	assert.ok(!brief(A.received.slice(before)).includes('xxxxxxxxxx'), 'the body must not reach the realm');
+	// Whole messages, not brief() (which cuts at 240 characters and would miss a leak later in the body).
+	assert.ok(!transcript(A, before).some((text) => text.includes('xxxxxxxxxx')), 'the body must not reach the realm');
 });
 
 test('T28 per-realm quotas', async (tt) => {
