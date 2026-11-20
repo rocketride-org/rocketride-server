@@ -200,11 +200,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** Fetches the API key from both sources: `getClient().getApiKey()` and `host.apiKey` (`hostOps.ts:122`). */
 	const refreshApiKeys = (): void => {
 		addApiKey(clientApiKey());
+		// A logout or teardown bumps the epoch: an answer from the session before it must not re-add that session's key.
+		const askedIn = epoch;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const answered = Promise.resolve()
 			.then(() => cm.ops().request('host.apiKey', {}))
 			.then(
-				(answer) => addApiKey(isPlainObject(answer) ? answer.apiKey : undefined),
+				(answer) => {
+					if (epoch === askedIn) addApiKey(isPlainObject(answer) ? answer.apiKey : undefined);
+				},
 				() => undefined
 			);
 		const waited = new Promise<void>((resolve) => {

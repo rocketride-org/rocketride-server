@@ -153,6 +153,32 @@ test('T112 the shell API key is in the backstop: denied, redacted in notes and e
 	}
 });
 
+test('T112b a host.apiKey answer that arrives after logout does not re-add the previous session key', async () => {
+	const t = makeRoot();
+	try {
+		Object.assign(t.cm.apiKeySources, { client: false, host: true });
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		await startRun(A);
+		const oldKey = newKey();
+		t.cm.apiKey = oldKey;
+		const release = t.cm.holdApiKey();
+		t.cm.emit('shell:login', { user: {} });
+		t.cm.emit('shell:logout', {});
+		release();
+		await settle();
+		t.cm.apiKey = newKey();
+		t.cm.emit('shell:login', { user: {} });
+		await settle();
+		const run = await startRun(A);
+		t.cm.engine.setStatus({ name: `old ${oldKey}` });
+		assert.equal(expectOk(await status(A, run.token), 'status naming the old key').name, `old ${oldKey}`, 'the previous session key is no longer in the backstop');
+		t.cm.engine.setStatus({ name: `new ${t.cm.apiKey}` });
+		expectDenied(await status(A, run.token), 'credential', 'the new session key is');
+	} finally {
+		t.cleanup();
+	}
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // T113 — inbound free strings (N1-f)
 // ─────────────────────────────────────────────────────────────────────────────
