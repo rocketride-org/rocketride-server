@@ -45,6 +45,18 @@ function planDescription(plan: CheckoutPlan): string[] | null {
 	return null;
 }
 
+/**
+ * Find the same tier at the other recurring interval (month <-> year), whose feature
+ * list a uniform-height card also reserves room for. One-time and interval-less plans
+ * don't toggle, so they have no twin.
+ */
+function findTwinPlan(plans: CheckoutPlan[], plan: CheckoutPlan): CheckoutPlan | null {
+	if (plan.interval !== 'month' && plan.interval !== 'year') return null;
+	let twinInterval: CheckoutPlan['interval'] = 'month';
+	if (plan.interval === 'month') twinInterval = 'year';
+	return plans.find((p) => p.nickname === plan.nickname && p.interval === twinInterval && !planAction(p)) ?? null;
+}
+
 /** Format amountCents as a display price string, respecting metadata.displayAmount override. */
 export function planAmount(plan: CheckoutPlan): string {
 	const display = plan.metadata?.displayAmount;
@@ -605,11 +617,12 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 					const cta = isAction ? undefined : ctaConfig?.[plan.stripePriceId];
 					const ctaDisabled = cta?.disabled ?? false;
 					const desc = planDescription(plan);
-					// The same tier at the other interval, whose list this card also reserves room for.
-					const twin = uniformCardHeight && !isAction
-						? plans.find((p) => p.nickname === plan.nickname && p.interval !== plan.interval && !planAction(p))
-						: undefined;
-					const twinDesc = twin ? planDescription(twin) : null;
+					// The other interval's list, which a uniform-height card also reserves room for.
+					let twinDesc: string[] | null = null;
+					if (uniformCardHeight && !isAction) {
+						const twin = findTwinPlan(plans, plan);
+						if (twin) twinDesc = planDescription(twin);
+					}
 					// Whole-card selection only applies when a selection handler is
 					// wired (the checkout/upgrade modals). On display-only pages
 					// (pricing) the card is static — the CTA button is the action —

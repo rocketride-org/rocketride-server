@@ -9,7 +9,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { PlanPicker } from './PlanPicker';
 import type { CheckoutPlan } from './types';
 
-const plan = (interval: 'month' | 'year', description: string[]): CheckoutPlan => ({
+const plan = (interval: CheckoutPlan['interval'], description: string[]): CheckoutPlan => ({
 	id: `pro-${interval}`,
 	appId: 'app',
 	stripePriceId: `price_pro_${interval}`,
@@ -45,6 +45,15 @@ function hiddenLists(html: string): string[] {
 
 test('uniform height lays out the other interval list in the card, hidden', () => {
 	const html = renderToStaticMarkup(<PlanPicker plans={plans} uniformCardHeight />);
+	const hidden = hiddenLists(html);
+	assert.equal(hidden.length, 1);
+	assert.match(hidden[0], /Annual bonus line/);
+});
+
+test('uniform height reserves the other recurring interval, not a one-time price of the same tier', () => {
+	const withOneTime = [plan('one_time', ['One-time line']), ...plans];
+	const html = renderToStaticMarkup(<PlanPicker plans={withOneTime} uniformCardHeight />);
+	// Only the monthly card has a twin, the annual one; the one-time card reserves nothing extra.
 	const hidden = hiddenLists(html);
 	assert.equal(hidden.length, 1);
 	assert.match(hidden[0], /Annual bonus line/);
