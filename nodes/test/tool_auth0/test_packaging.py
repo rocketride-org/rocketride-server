@@ -24,6 +24,7 @@ NODE = ROOT / 'nodes' / 'src' / 'nodes' / 'tool_auth0'
 
 
 def test_example_pipeline_wires_auth0_to_agent_without_writes():
+    """Verify the shipped pipeline wiring and read-only agent instructions."""
     pipeline = json.loads((NODE / 'example.pipe').read_text(encoding='utf-8'))
     assert next(iter(pipeline)) == 'components'
     uuid.UUID(pipeline['project_id'])
@@ -58,6 +59,7 @@ def test_example_pipeline_wires_auth0_to_agent_without_writes():
 
 
 def test_example_edges_match_actual_service_definitions():
+    """Check example ports against the current service metadata."""
     if not shutil.which('node'):
         pytest.skip('Node.js is not installed')
     dependency_check = subprocess.run(
@@ -94,6 +96,7 @@ def test_example_edges_match_actual_service_definitions():
 
 
 def test_registration_exports_and_icon(node):
+    """Verify the node exports its lifecycle classes and ships a valid icon."""
     package, _, _, _ = node
     service = json.loads((NODE / 'services.json').read_text(encoding='utf-8'))
     assert service['protocol'] == 'tool_auth0://' and service['path'] == 'nodes.tool_auth0'
@@ -103,6 +106,7 @@ def test_registration_exports_and_icon(node):
 
 
 def test_read_only_credentials_are_sufficient_for_catalog_readiness(monkeypatch):
+    """Mark the node configured with exactly the three read-only credentials."""
     module_path = ROOT / 'packages' / 'ai' / 'src' / 'ai' / 'modules' / 'mcp' / 'credentials.py'
     spec = importlib.util.spec_from_file_location('auth0_packaging_credentials', module_path)
     module = importlib.util.module_from_spec(spec)

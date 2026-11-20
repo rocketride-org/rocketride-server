@@ -19,6 +19,7 @@ node = test_configuration.node
 
 @pytest.fixture
 def tool(node):
+    """Build an Auth0 tool instance with a mock Management API client."""
     package, _, _, _ = node
     client = Mock()
     instance = package.IInstance()
@@ -125,6 +126,7 @@ def test_dispatch_rejects_extra_fields(dispatched_tool, method, args):
 
 
 def test_registered_schemas(tool):
+    """Register exactly the five read-only tools with required inputs and result schemas."""
     instance, _, _ = tool
     names = {
         'search_users',
@@ -168,6 +170,7 @@ def test_legitimate_identity_connection_names_preserved(tool):
 
 
 def test_search_uses_case_sensitive_email_and_limits_sanitized_matches(tool):
+    """Preserve the submitted email case and cap the filtered profiles."""
     instance, client, _ = tool
     client.request.return_value = [
         {'user_id': '2', 'email': 'jane+tag@example.com'},
@@ -204,6 +207,7 @@ def test_search_uses_case_sensitive_email_and_limits_sanitized_matches(tool):
     ],
 )
 def test_invalid_search_never_calls_api(tool, args):
+    """Reject malformed email lookups before contacting Auth0."""
     instance, client, _ = tool
     result = instance.search_users(args)
     assert result['success'] is False and result['error_code'] == 'INVALID_INPUT'
@@ -211,6 +215,7 @@ def test_invalid_search_never_calls_api(tool, args):
 
 
 def test_user_fields_and_admin_block_default(tool):
+    """Return projected profiles and default an absent administrative block to false."""
     instance, client, _ = tool
     client.request.return_value = {
         'user_id': 'u',
@@ -242,6 +247,7 @@ def test_user_fields_and_admin_block_default(tool):
 
 
 def test_logs_are_bounded_and_derived_from_allowlist(tool):
+    """Limit user logs and derive descriptions from known event types."""
     instance, client, _ = tool
     client.request.return_value = [
         {
@@ -271,6 +277,7 @@ def test_logs_are_bounded_and_derived_from_allowlist(tool):
 
 
 def test_suspect_fields_are_omitted_from_logs(tool):
+    """Suppress sensitive and malformed log values in the tool output."""
     instance, client, _ = tool
     client.request.return_value = {
         'log_id': 'l1',
@@ -304,6 +311,7 @@ def test_log_fields_remove_ip_addresses_but_preserve_benign_colons(tool, value, 
 
 
 def test_user_logs_maximum_is_enforced(tool):
+    """Return at most the requested page size even if Auth0 returns more events."""
     instance, client, _ = tool
     client.request.return_value = [{'log_id': str(i), 'type': 'f'} for i in range(60)]
     result = instance.get_user_logs({'user_id': 'u', 'limit': 50})
@@ -316,6 +324,7 @@ def test_user_logs_maximum_is_enforced(tool):
 
 @pytest.mark.parametrize('code', ['f', 'fp', 'fu', 'limit_wc', 'limit_sul', 'limit_mu'])
 def test_recognized_event_diagnostics_are_allowlisted(tool, code):
+    """Return the fixed explanation for each recognized event type."""
     instance, client, _ = tool
     client.request.return_value = {'log_id': '1', 'type': code, 'description': 'private raw event'}
     result = instance.get_log_event({'log_id': '1'})
@@ -324,6 +333,7 @@ def test_recognized_event_diagnostics_are_allowlisted(tool, code):
 
 
 def test_blocks_and_unblock_is_unavailable(tool):
+    """Redact block identifiers and expose only read access to block state."""
     instance, client, _ = tool
     block = {'identifier': '192.0.2.1', 'ip': '192.0.2.1', 'connection': 'db'}
     client.request.return_value = {'blocked_for': [block]}
@@ -347,6 +357,7 @@ def test_blocks_and_unblock_is_unavailable(tool):
     ],
 )
 def test_id_validation_and_flat_errors(tool, method, key):
+    """Reject invalid identifiers and preserve the flat error contract."""
     instance, client, module = tool
     for value in ('', 'x' * 301, None, 42):
         result = getattr(instance, method)({key: value})
@@ -373,6 +384,7 @@ def test_id_validation_and_flat_errors(tool, method, key):
 
 @pytest.mark.parametrize('value', ['Username-Password-Authentication', 'Passwordless-Login', 'Customer Token Portal'])
 def test_legitimate_log_names_are_preserved(tool, value):
+    """Keep ordinary provider and application names in log results."""
     instance, client, _ = tool
     client.request.return_value = {'type': 'f', 'connection': value, 'client_name': value}
     result = instance.get_log_event({'log_id': 'l'})
@@ -383,6 +395,7 @@ def test_legitimate_log_names_are_preserved(tool, value):
     'value', ['password=private', 'Bearer abcdef', 'secret: value', 'bad\x7fvalue', 'bad\u202evalue', 'x' * 301]
 )
 def test_credential_and_control_log_values_are_removed(tool, value):
+    """Omit credential-like, nonprintable, or oversized log fields."""
     instance, client, _ = tool
     client.request.return_value = {'type': 'f', 'connection': value, 'client_name': value}
     result = instance.get_log_event({'log_id': 'l'})
@@ -390,6 +403,7 @@ def test_credential_and_control_log_values_are_removed(tool, value):
 
 
 def test_profile_fields_are_bounded_and_control_characters_removed(tool):
+    """Limit profile text and remove control characters before returning it."""
     instance, client, _ = tool
     client.request.return_value = {'name': 'A\n\u202e' + 'x' * 301, 'email': 'a\x00' + 'b' * 300}
     result = instance.get_user({'user_id': 'u'})
@@ -398,6 +412,7 @@ def test_profile_fields_are_bounded_and_control_characters_removed(tool):
 
 
 def test_tool_after_global_close_returns_structured_error(tool):
+    """Report a closed client through the normal tool error envelope."""
     instance, _, _ = tool
     instance.IGlobal.client = None
     result = instance.get_user({'user_id': 'u'})

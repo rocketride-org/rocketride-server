@@ -17,6 +17,7 @@ node = test_configuration.node
 
 
 def response(status=200, body=None, headers=None):
+    """Build a mock HTTP response with a JSON body."""
     result = Mock(status_code=status, headers=headers or {}, content=b'json')
     result.json.return_value = body if body is not None else {}
     return result
@@ -24,6 +25,7 @@ def response(status=200, body=None, headers=None):
 
 @pytest.fixture
 def client(node, monkeypatch):
+    """Create an Auth0 client with mocked HTTP transport and retry delays."""
     package, _, _, _ = node
     module = sys.modules[package.__name__ + '.auth0_client']
     requests = types.ModuleType('requests')
@@ -64,6 +66,7 @@ def client(node, monkeypatch):
     ],
 )
 def test_rejects_unsafe_domains(client, domain):
+    """Reject invalid tenant hostnames before making an OAuth request."""
     module, _, requests, cfg = client
     cfg['domain'] = domain
     with pytest.raises(module.Auth0Error) as error:
@@ -73,6 +76,7 @@ def test_rejects_unsafe_domains(client, domain):
 
 
 def test_token_reuse_and_concurrency(client):
+    """Share one cached token across concurrent reads."""
     _, auth, requests, _ = client
     with ThreadPoolExecutor(max_workers=8) as pool:
         list(pool.map(lambda _: auth.request('get_user', identifier='auth0|1'), range(30)))
@@ -89,6 +93,7 @@ def test_token_reuse_and_concurrency(client):
 
 
 def test_expiry_and_401_refresh(client, monkeypatch):
+    """Refresh an expired or rejected token and retry an unauthorized read once."""
     module, auth, requests, _ = client
     clock = [100.0]
     monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
@@ -106,6 +111,7 @@ def test_expiry_and_401_refresh(client, monkeypatch):
 
 
 def test_retry_budget_and_error_sanitization(client):
+    """Bound retry delays and translate provider failures into safe errors."""
     module, auth, requests, _ = client
     requests.request.side_effect = [response(429, headers={'Retry-After': '3'}), response(503), response(503)]
     with pytest.raises(module.Auth0Error) as error:
@@ -125,6 +131,7 @@ def test_retry_budget_and_error_sanitization(client):
 
 
 def test_route_restrictions(client):
+    """Reject writes, arbitrary destinations, and dot-segment identifiers."""
     module, _, requests, cfg = client
     auth = module.Auth0Client(cfg)
     for operation, identifier in [
@@ -139,6 +146,7 @@ def test_route_restrictions(client):
 
 
 def test_large_retry_after_is_not_shortened(client):
+    """Report a retry delay outside the budget without attempting the retry."""
     module, auth, requests, _ = client
     requests.request.return_value = response(429, headers={'Retry-After': '30'})
     with pytest.raises(module.Auth0Error) as error:
@@ -149,6 +157,7 @@ def test_large_retry_after_is_not_shortened(client):
 
 
 def test_invalid_oauth_response_and_credential_sanitization(client):
+    """Turn a malformed token response into a safe authentication error."""
     module, auth, requests, _ = client
     requests.post.side_effect = None
     requests.post.return_value = response(200, {'access_token': 'private-token', 'expires_in': None})
@@ -159,6 +168,7 @@ def test_invalid_oauth_response_and_credential_sanitization(client):
 
 
 def test_encoded_identifiers_and_fixed_host(client):
+    """Encode identifiers as path segments on the configured tenant."""
     _, auth, requests, _ = client
     auth.request('get_user', identifier='auth0|one/two')
     assert requests.request.call_args.args[1] == 'https://tenant.us.auth0.com/api/v2/users/auth0%7Cone%2Ftwo'
@@ -166,6 +176,7 @@ def test_encoded_identifiers_and_fixed_host(client):
 
 @pytest.mark.parametrize('domain', ['', ' ', 'https://id:secret@tenant.auth0.com', '.auth0.com'])
 def test_invalid_domain_configuration_never_connects(client, domain):
+    """Reject malformed tenant configuration before opening any connection."""
     module, _, requests, cfg = client
     cfg['domain'] = domain
     with pytest.raises(ValueError):
@@ -176,6 +187,7 @@ def test_invalid_domain_configuration_never_connects(client, domain):
 
 @pytest.mark.parametrize('status', [400, 401, 403, 302])
 def test_oauth_failure_never_exposes_credentials(client, status):
+    """Hide credentials and response details when the OAuth grant fails."""
     module, auth, requests, _ = client
     requests.post.side_effect = None
     requests.post.return_value = response(status, {'error_description': 'read-secret'})
@@ -188,6 +200,7 @@ def test_oauth_failure_never_exposes_credentials(client, status):
 
 
 def test_token_grant_and_early_refresh(client, monkeypatch):
+    """Send the client-credentials grant and refresh before the token expires."""
     module, auth, requests, _ = client
     now = [100.0]
     monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
@@ -208,6 +221,7 @@ def test_token_grant_and_early_refresh(client, monkeypatch):
 
 
 def test_non_json_and_empty_responses(client):
+    """Handle an empty success and reject invalid JSON."""
     module, auth, requests, _ = client
     invalid = response(200)
     invalid.json.side_effect = ValueError('sensitive response')
@@ -221,6 +235,7 @@ def test_non_json_and_empty_responses(client):
 
 @pytest.mark.parametrize('operation', ['get_user'])
 def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
+    """Return a safe error without replaying a failed transport request."""
     module, auth, requests, _ = client
     requests.request.side_effect = Exception('credential=read-secret token=private-token')
     with pytest.raises(module.Auth0Error) as error:
@@ -243,6 +258,7 @@ def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
 )
 @pytest.mark.parametrize('status', [403, 404])
 def test_all_tools_map_remote_errors_through_flat_contract(client, node, operation, args, not_found, status):
+    """Verify the 403 and 404 result envelope for each public tool."""
     _, auth, requests, _ = client
     instance = node[0].IInstance()
     instance.IGlobal = types.SimpleNamespace(client=auth)
@@ -273,6 +289,7 @@ def test_all_tools_map_remote_errors_through_flat_contract(client, node, operati
     ],
 )
 def test_read_tools_use_approved_http_routes_and_read_token(client, node, operation, argument, payload, path):
+    """Use the fixed read routes, bearer token, and redirect policy."""
     _, auth, requests, _ = client
     instance = node[0].IInstance()
     instance.IGlobal = types.SimpleNamespace(client=auth)
@@ -286,6 +303,7 @@ def test_read_tools_use_approved_http_routes_and_read_token(client, node, operat
 
 
 def test_api_redirect_is_not_followed(client):
+    """Reject a redirect without sending the token to a second host."""
     module, auth, requests, _ = client
     requests.request.return_value = response(302, headers={'Location': 'https://evil.example/collect'})
     with pytest.raises(module.Auth0Error) as error:
@@ -296,12 +314,14 @@ def test_api_redirect_is_not_followed(client):
 
 
 def test_close_during_token_refresh_waits_and_clears_credentials(client):
+    """Synchronize credential cleanup with a token request in progress."""
     import threading
 
     module, auth, requests, _ = client
     entered, release = threading.Event(), threading.Event()
 
     def post(*args, **kwargs):
+        """Pause the mock token grant until the test permits it to finish."""
         entered.set()
         assert release.wait(5)
         return response(body={'access_token': 'token', 'expires_in': 3600})
@@ -322,12 +342,14 @@ def test_close_during_token_refresh_waits_and_clears_credentials(client):
 
 @pytest.mark.parametrize('domain', ['Tenant.US.Auth0.com', ' tenant.us.auth0.com ', 'https://tenant.us.auth0.com/'])
 def test_normalizes_valid_tenant_domain(client, domain):
+    """Accept common formatting variations of a valid tenant hostname."""
     module, _, _, cfg = client
     cfg['domain'] = domain
     assert module.Auth0Client(cfg)._base == 'https://tenant.us.auth0.com'
 
 
 def test_rate_limit_reset_header_and_invalid_values(client, monkeypatch):
+    """Read the reset timestamp when Retry-After is absent and ignore invalid delays."""
     module, _, _, _ = client
     monkeypatch.setattr(module.time, 'time', lambda: 1000)
     assert module._retry_after({'x-ratelimit-reset': '1007'}) == 7

@@ -29,6 +29,7 @@ def pipeline():
 
 @pytest.fixture
 def node(monkeypatch):
+    """Load the real Auth0 node and validation helpers with engine stubs."""
     rocketlib = types.ModuleType('rocketlib')
     rocketlib.IGlobalBase = type('IGlobalBase', (), {})
     rocketlib.IInstanceBase = type('IInstanceBase', (), {})
@@ -38,7 +39,10 @@ def node(monkeypatch):
     rocketlib.IJson = type('IJson', (), {})
 
     def tool_function(**metadata):
+        """Stub tool registration for tests that load the node without the engine."""
+
         def decorate(fn):
+            """Attach tool metadata to the method for validation tests."""
             fn.__tool_meta__ = metadata
             return fn
 
@@ -84,6 +88,7 @@ def node(monkeypatch):
 
 
 def test_service_configuration():
+    """Validate read-only service registration and the secure secret widget."""
     service = json.loads((NODE / 'services.json').read_text(encoding='utf-8'))
     assert service['protocol'] == 'tool_auth0://'
     assert service['path'] == 'nodes.tool_auth0'
@@ -96,6 +101,7 @@ def test_service_configuration():
 
 
 def test_lifecycle_and_safe_validation(node):
+    """Exercise client startup, cleanup, and safe configuration warnings."""
     package, get_config, depends, warning = node
     instance = package.IGlobal()
     instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='config'))
@@ -132,6 +138,7 @@ def test_lifecycle_and_safe_validation(node):
 
 @pytest.mark.parametrize('field', ['domain', 'clientId', 'clientSecret'])
 def test_each_missing_credential_fails_safely(node, field):
+    """Reject each missing credential before loading the HTTP dependency."""
     package, get_config, depends, _ = node
     instance = package.IGlobal()
     instance.IEndpoint = types.SimpleNamespace(endpoint=types.SimpleNamespace(openMode='run'))
@@ -151,6 +158,7 @@ def test_each_missing_credential_fails_safely(node, field):
 
 
 def test_credentials_are_not_taken_from_process_environment(node, monkeypatch):
+    """Require effective node credentials even when environment variables exist."""
     package, get_config, depends, _ = node
     for key in ('AUTH0_DOMAIN', 'AUTH0_CLIENT_ID', 'AUTH0_CLIENT_SECRET', 'ROCKETRIDE_AUTH0_CLIENT_SECRET'):
         monkeypatch.setenv(key, 'should-not-be-used')
@@ -163,14 +171,20 @@ def test_credentials_are_not_taken_from_process_environment(node, monkeypatch):
     depends.assert_not_called()
 
 
-def test_example_plain_environment_references_configure_auth0(node, pipeline):
-    """Expand the example's visible references before the Auth0 client validates its config."""
+@pytest.mark.parametrize(
+    'secret_name', ['ROCKETRIDE_AUTH0_CLIENT_SECRET', 'ROCKETRIDE_NEW_SECRET'], ids=['example', 'replacement']
+)
+def test_example_plain_environment_references_configure_auth0(node, pipeline, secret_name):
+    """Expand both the example and replacement references before client validation."""
     package, get_config, depends, _ = node
     example = json.loads((NODE / 'example.pipe').read_text(encoding='utf-8'))
+    if secret_name != 'ROCKETRIDE_AUTH0_CLIENT_SECRET':
+        auth0 = next(item['config'] for item in example['components'] if item['provider'] == 'tool_auth0')
+        auth0['clientSecret'] = '${' + secret_name + '}'
     env = {
         'ROCKETRIDE_AUTH0_DOMAIN': 'tenant.auth0.com',
         'ROCKETRIDE_AUTH0_CLIENT_ID': 'read-id',
-        'ROCKETRIDE_AUTH0_CLIENT_SECRET': 'read-private',
+        secret_name: 'read-private',
         'ROCKETRIDE_OPENROUTER_API_KEY': 'llm-private',
     }
     resolved = pipeline.resolve_pipeline_env(example, env)
