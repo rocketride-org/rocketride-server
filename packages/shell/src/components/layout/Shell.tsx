@@ -40,7 +40,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSPrope
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
 import { withoutCredentials } from '../../util/identity';
-import { forgetAuthPopup, isAuthPopupWindow, rememberAuthPopup } from '../../util/authPopup';
+import { forgetAuthPopup, hasReturnLegParams, isAuthPopupWindow, rememberAuthPopup } from '../../util/authPopup';
 import { ConnectionManager } from '../../connection/connection';
 import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
@@ -545,8 +545,11 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// role is remembered in sessionStorage across the round trip.
 			const bootParams = new URLSearchParams(window.location.search);
 			const isAuthPopup = isAuthPopupWindow(window.name, bootParams);
-			if (isAuthPopup && !bootParams.get('code') && !cm.loadToken()) {
-				// Fresh popup: head straight to the IdP (top-level — allowed)
+			if (isAuthPopup && !hasReturnLegParams(bootParams) && !cm.loadToken()) {
+				// Fresh popup (no return-leg parameter): head straight to the IdP
+				// (top-level — allowed). An error return (?error=…&state=…) is NOT
+				// fresh: it falls through, the popup closes without a token, and
+				// the opener's sign-in prompt stays up — no second startOAuth loop.
 				rememberAuthPopup();
 				void cm.startOAuth();
 				return;

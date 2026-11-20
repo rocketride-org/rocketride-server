@@ -31,7 +31,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isAllowedWebviewUrl } from './webviewUrl';
+import { isAllowedWebviewUrl, resolveWebviewUrl } from './webviewUrl';
 
 const SHELL = 'https://shell.example';
 
@@ -115,15 +115,14 @@ test('refuses non-http(s) schemes, credentials, non-loopback http and unparsable
 
 // ── PR2b T76 (E7): the app-origin suffix is never framed from a `webview:` document ──────────
 //
-// `isAllowedWebviewUrl(raw, shellOrigin, appOriginTemplate?)` also refuses every host under the
+// `isAllowedWebviewUrl(raw, shellOrigin, shellHref?, appOriginTemplate?)` also refuses every host under the
 // app-origin template's suffix: those are the isolated apps' origins, and a `webview:` frame is
 // not the app frame (no handshake, no scrub, and a `sandbox` with allow-same-origin of its own).
 // Without a template (isolation off) nothing changes.
 
 const TEMPLATE = 'https://{label}.apps.example';
 const LOCAL_TEMPLATE = 'http://{label}.apps.localhost:5565';
-const allowed = (raw: string, shellOrigin: string, template?: string | null): boolean =>
-	(isAllowedWebviewUrl as unknown as (raw: string, shellOrigin: string, template?: string | null) => boolean)(raw, shellOrigin, template);
+const allowed = (raw: string, shellOrigin: string, template?: string | null): boolean => isAllowedWebviewUrl(raw, shellOrigin, shellOrigin, template);
 
 test('T76 a host under the app-origin suffix is refused, whatever its spelling', () => {
 	for (const url of [
@@ -164,4 +163,26 @@ test('T76 without a template (isolation off) nothing changes, and a missing or n
 test('T76 a template without a {label} placeholder names no suffix, so nothing is refused on its account', () => {
 	assert.equal(allowed('https://docs.example/', SHELL, 'https://apps.example'), true);
 	assert.equal(allowed('https://docs.example/', SHELL, ''), true);
+});
+
+test('refuses URLs that only resolve onto the shell once the iframe applies its base', () => {
+	// `https:host/..` has no `//`, so alone it names another host but against
+	// the shell document it is a path on the shell's own origin.
+	const href = `${SHELL}/index.html`;
+	for (const url of ['https:evil.example/../apps/x/v1/index.html', 'https:evil.example/../apps/x/index.html', 'https:evil.com/../', 'https:evil.example/../', 'https:/apps/x/index.html', 'https:evil.example/chat/p/s']) {
+		assert.equal(isAllowedWebviewUrl(url, SHELL, href), false, url);
+		assert.equal(resolveWebviewUrl(url, SHELL, href), null, url);
+	}
+});
+
+test('refuses the same scheme-without-slashes form against a loopback http shell', () => {
+	const shell = 'http://localhost:5565';
+	for (const url of ['http:localhost/../apps/x/index.html', 'http:/apps/x/index.html']) {
+		assert.equal(isAllowedWebviewUrl(url, shell, `${shell}/index.html`), false, url);
+	}
+});
+
+test('hands back the canonical URL that was checked', () => {
+	assert.equal(resolveWebviewUrl('https://Docs.Example/a/../b', SHELL, `${SHELL}/index.html`), 'https://docs.example/b');
+	assert.equal(resolveWebviewUrl(`${SHELL}/chat/p/s`, SHELL, `${SHELL}/index.html`), `${SHELL}/chat/p/s`);
 });

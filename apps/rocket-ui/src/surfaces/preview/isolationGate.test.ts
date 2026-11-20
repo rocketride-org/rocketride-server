@@ -121,8 +121,8 @@ test('T75 E14 devPreviewPage builds no blob page unless the gate allows', () => 
 	assert.match(source, /previewAllowed\(/);
 });
 
-test('T76 E7 WebviewProvider hands the origin template to isAllowedWebviewUrl', () => {
+test('T76 E7 WebviewProvider hands the origin template to resolveWebviewUrl', () => {
 	const source = readFileSync(path.join(__dirname, '..', 'pages', 'WebviewProvider.tsx'), 'utf8');
 	assert.match(source, /getIsolation\(\)/);
-	assert.match(source, /isAllowedWebviewUrl\(\s*url\s*,\s*window\.location\.origin\s*,/);
+	assert.match(source, /resolveWebviewUrl\(\s*url\s*,\s*window\.location\.origin\s*,\s*window\.location\.href\s*,\s*getIsolation\(\)\?\.originTemplate/);
 });

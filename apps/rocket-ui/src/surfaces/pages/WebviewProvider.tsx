@@ -31,7 +31,7 @@
 import React from 'react';
 import type { CSSProperties } from 'react';
 import { getIsolation } from 'shell';
-import { isAllowedWebviewUrl } from './webviewUrl';
+import { resolveWebviewUrl } from './webviewUrl';
 
 // =============================================================================
 // STYLES
@@ -77,15 +77,17 @@ const WebviewProvider: React.FC<IWebviewProviderProps> = ({ uri }) => {
 	// Same-authority pages (anything on the shell origin but the engine's chat
 	// and dropper pages) and non-web schemes are never framed (#1022).
 	// Nor any isolated app's origin (E7, #1022): a webview frame is not the app frame.
-	if (!url || !isAllowedWebviewUrl(url, window.location.origin, getIsolation()?.originTemplate)) {
+	// The iframe is given the canonical URL that was checked, never the raw text.
+	const framed = url ? resolveWebviewUrl(url, window.location.origin, window.location.href, getIsolation()?.originTemplate) : null;
+	if (!framed) {
 		return <div>Invalid webview URI: {uri}</div>;
 	}
 
 	return (
 		<iframe
-			src={url}
+			src={framed}
 			style={styles.iframe}
-			title={url}
+			title={framed}
 			// Least-privilege embedding: no top-navigation hijack, and no
 			// clipboard read for arbitrary origins (write-only clipboard).
 			sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads"

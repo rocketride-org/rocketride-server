@@ -125,16 +125,59 @@ function appSuffixOf(template: string | null | undefined): string {
  *
  * @param raw - The URL taken from the `webview:` document URI.
  * @param shellOrigin - The shell's own origin (`window.location.origin`).
+ * @param shellHref - The shell document's URL (`window.location.href`), which the iframe resolves `src` against; defaults to the origin.
  * @param appOriginTemplate - `getIsolation()?.originTemplate`: hosts under its suffix are refused (#1022, E7).
  * @returns True when the URL may be framed.
  */
-export function isAllowedWebviewUrl(raw: string, shellOrigin: string, appOriginTemplate?: string | null): boolean {
+export function isAllowedWebviewUrl(raw: string, shellOrigin: string, shellHref: string = shellOrigin, appOriginTemplate?: string | null): boolean {
+	return resolveWebviewUrl(raw, shellOrigin, shellHref, appOriginTemplate) !== null;
+}
+
+/**
+ * Resolve a `webview:` URL the way the iframe will, and apply the framing rule to that URL.
+ *
+ * The iframe resolves `src` against the shell document, so input such as
+ * `https:host/../apps/x` (a special scheme with no `//`) lands on the shell's
+ * origin even though parsing it alone names another host. Such base-dependent
+ * input is refused, and the returned canonical `href` is what the iframe must
+ * be given, so the URL that was checked is the URL that loads.
+ *
+ * @param raw - The URL taken from the `webview:` document URI.
+ * @param shellOrigin - The shell's own origin (`window.location.origin`).
+ * @param shellHref - The shell document's URL (`window.location.href`); defaults to the origin.
+ * @param appOriginTemplate - `getIsolation()?.originTemplate`: hosts under its suffix are refused (#1022, E7).
+ * @returns The canonical URL to frame, or null when it must not be framed.
+ */
+export function resolveWebviewUrl(
+	raw: string,
+	shellOrigin: string,
+	shellHref: string = shellOrigin,
+	appOriginTemplate?: string | null
+): string | null {
 	let url: URL;
 	try {
 		url = new URL(raw);
 	} catch {
-		return false;
+		return null;
 	}
+	try {
+		// Same answer with and without the shell as base, or the input depends on the shell.
+		if (new URL(raw, shellHref).href !== url.href) return null;
+	} catch {
+		// Opaque or unparsable shell URL: nothing to resolve against.
+	}
+	return isAllowedUrl(url, shellOrigin, appOriginTemplate) ? url.href : null;
+}
+
+/**
+ * Apply the framing rule to an already-resolved URL.
+ *
+ * @param url - The absolute URL the iframe will load.
+ * @param shellOrigin - The shell's own origin.
+ * @param appOriginTemplate - The isolated apps' origin template, if isolation is on.
+ * @returns True when it may be framed.
+ */
+function isAllowedUrl(url: URL, shellOrigin: string, appOriginTemplate?: string | null): boolean {
 	const target = endpointOf(url);
 	if (!target || url.username || url.password) return false;
 	// E7 (#1022): never a host under the isolated apps' origin suffix.

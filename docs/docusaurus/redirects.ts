@@ -317,7 +317,7 @@ const redirects: RedirectItem[] = [
 		from: ['/sdk/python-sdk'],
 	},
 	{
-		to: '/connect/mcp/stdio',
+		to: '/connect/mcp/http',
 		from: ['/mcp_server/rocketride-mcp-server/rocketride-mcp-server', '/mcp_server/rocketride-mcp-server', '/connect/mcp'],
 	},
 	{
