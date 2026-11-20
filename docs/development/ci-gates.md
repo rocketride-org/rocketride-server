@@ -8,23 +8,42 @@ machine. Sources of truth: `.github/workflows/ci.yml`, `.github/workflows/_build
 
 **`CI OK`** (job `ci-ok`) is the *only* job marked required in branch protection.
 It aggregates the results of `init`, `changes`, `build`, `helm-changes`,
-`helm-lint`, `ruff-check`, `eslint-scripts`, `gitleaks`, and `shell-contract`, and
-fails if any of them failed or was cancelled. Jobs that were correctly **skipped**
-do not fail it — which is the whole point: a docs-only PR skips the 90-minute
-three-platform build and still merges.
+`helm-lint`, `ruff-check`, `eslint-scripts`, `gitleaks`, `shell-contract`, and
+`sanitize`, and fails if any of them failed or was cancelled. Jobs that were
+correctly **skipped** do not fail it — which is the whole point: a docs-only PR
+skips the 90-minute three-platform build and still merges.
 
-Two jobs are deliberately **outside** `ci-ok` and cannot block a merge:
+`sanitize` builds the engine, its C++ test programs and the C++ nodes with ASan
+and UBSan (`.github/workflows/_sanitize.yaml`) and runs `server:test` and
+`nodes:test` on them. It runs on every PR that changes C++ code (`cpp` below), on
+the weekly schedule and on manual runs. It never runs on push, and in the merge
+queue it is skipped (`changes` runs on PRs only), so there it does not hold
+`CI OK`.
+
+- It fails on any sanitizer report except the exact entries of the known list
+  `KNOWN_THIRD_PARTY` in `scripts/ci/sanitizer-report.mjs`. Today there is one
+  entry, `libcxxabi-exception-free`: libc++abi destroys a caught exception and
+  frees its message with its own `free`, while ASan's `operator new` allocated
+  it. Any other error fails, also one that stops inside a toolchain library. The
+  job summary lists the known groups in a "Known third-party" section.
+- Before the build, a canary program with two planted errors
+  (`scripts/ci/sanitizer-canary.cpp`) must be reported, so a run whose sanitizer
+  runtime, options or report script cannot report an error fails. The canary
+  does not cover engine task processes.
+- Its vcpkg binary cache is read-only: a PR that changes ports builds those
+  dependencies from source in this job. `sanitize` starts in parallel with
+  `build`, so on such a PR it may reach its 120-minute limit; re-run it after
+  Build has finished.
+- Each PR is checked on its own. The weekly schedule also runs the job on
+  `develop`, but it is best effort: GitHub may skip a scheduled run, and a red
+  scheduled run notifies only the last editor of the cron line.
+
+Local commands: [Sanitizer build](builder/reference.md#sanitizer-build-sanitize).
+
+One job is deliberately **outside** `ci-ok` and cannot block a merge:
 
 - `container-scan` — runs on push/schedule only, never on PRs. Adding it to the
   required list would block every merge, since it is always skipped on a PR.
-- `sanitize` — builds the engine, its C++ test programs and the C++ nodes with
-  ASan and UBSan (`.github/workflows/_sanitize.yaml`) and runs `server:test` and
-  `nodes:test` on them. It is opt-in: it runs on a PR that changes C++ code
-  (`cpp` below) and has the `ci:sanitize` label, and on manual runs, never on
-  push. The label is read when the PR is opened or pushed to, so add the label,
-  then push. It reports sanitizer errors in its job summary and fails on any,
-  but it does not block a merge until the known errors are fixed. Local
-  commands: [Sanitizer build](builder/reference.md#sanitizer-build-sanitize).
 
 The doc-schema and docs-site-build checks are not in `ci.yml` at all: they live
 in `.github/workflows/docs-schemas.yml`, which triggers on PRs into `develop`
@@ -49,8 +68,7 @@ The `changes` job (`dorny/paths-filter`) computes these booleans:
 `code == false` skips `build` (a `build-skip` job reports success under the same
 check names so branch protection stays satisfied) and skips `shell-contract`.
 `container == true` adds the node image test to the Linux build (outside pull
-requests it always runs). `cpp == true` lets a PR with the `ci:sanitize` label
-run `sanitize`.
+requests it always runs). `cpp == true` runs `sanitize` on a PR.
 
 `helm-changes` is a separate filter on `deploy/helm/**` gating `helm-lint`.
 
@@ -162,6 +180,14 @@ node nodes/scripts/gen-credentials.mjs --check   # ./builder nodes:credentials-c
 
 The first regen-checks the client-typescript SDK contract floors the same way;
 the second fails if the generated credentials catalog has drifted.
+
+### Sanitizers — `sanitize` (blocking, C++ PRs only)
+
+Linux only. Run the build, the tests and the report script with the sanitizer
+variables as [Sanitizer build](builder/reference.md#sanitizer-build-sanitize)
+shows. The job fails when the canary's two planted errors are not reported, or
+when `node scripts/ci/sanitizer-report.mjs <dir>` exits `1` (a report that is
+not on the script's known list).
 
 ### Helm — `helm-lint` (blocking, `deploy/helm/**` PRs only)
 

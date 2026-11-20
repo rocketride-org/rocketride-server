@@ -226,11 +226,14 @@ node scripts/ci/sanitizer-report.mjs "$PWD/sanitizer-reports"
   with that prefix, so these processes keep the sanitizer options.
 - The exit code stays `0` after a report under `halt_on_error=0`.
   `node scripts/ci/sanitizer-report.mjs <dir>` counts and groups the reports in
-  the directory and exits `1` when there is any.
+  the directory and exits `1` when any group counts (next point).
+- Only exact entries of the known list `KNOWN_THIRD_PARTY` in the script do not
+  count for the exit code; they are shown in a "Known third-party" section. Any
+  other report counts, also one that stops inside a toolchain library.
 
-CI runs this build and these tests in a separate job, on pull requests that
-change C++ files and carry the `ci:sanitize` label (add the label, then push),
-and on manual runs. The job is not part of `CI OK` yet.
+CI runs this build and these tests in a separate job on every pull request that
+changes C++ files, on the weekly schedule and on manual runs. The job is part of
+`CI OK` ([CI gates](../ci-gates.md)).
 
 ---
 
