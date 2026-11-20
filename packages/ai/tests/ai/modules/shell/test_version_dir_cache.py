@@ -121,6 +121,36 @@ def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
     assert calls == ['app.x']  # denial happened before using the warm map
 
 
+def test_saas_overlay_without_the_override_still_serves_assets_while_isolation_is_off(monkeypatch):
+    """The serving path (not just the hook) keeps serving an overlay that inherits the base hook."""
+    import functools
+
+    from ai.account import account
+    from ai.account.base import AccountBase
+
+    _setup(monkeypatch, [])
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'app.x/v1/dist'}
+
+    legacy_saas = SimpleNamespace(capabilities=('saas',))
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', functools.partial(AccountBase.authorize_app_use, legacy_saas))
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+
+    monkeypatch.delenv('RR_APP_ISOLATION', raising=False)
+    assert _dirs(want=1) == {1: 'app.x/v1/dist'}
+    assert _dirs() == {1: 'app.x/v1/dist'}
+
+    monkeypatch.setenv('RR_APP_ISOLATION', 'enforce')
+    assert _dirs(want=1) == {}
+    assert _dirs() == {}
+
+
 def test_warm_full_map_filters_every_concrete_version(monkeypatch):
     from ai.account import account
 

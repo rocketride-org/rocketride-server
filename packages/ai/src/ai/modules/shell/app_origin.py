@@ -711,7 +711,9 @@ async def _app_use_allowed(info: Any, app_id: str, version: int) -> bool:
     """Check live eligibility for one concrete version before runtime authority.
 
     The publish-map caches do not cache a paid seat, active membership or
-    account status. Older or unavailable SaaS overlays fail closed.
+    account status. A SaaS overlay without the override keeps serving while
+    isolation is off (the base hook allows it) and fails closed once isolation
+    is on; an overlay whose hook is missing or raises is denied.
     """
     if not _is_saas():
         return True

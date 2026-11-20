@@ -282,7 +282,9 @@ with the concrete positive registry version before minting a frame token and
 before serving an asset from a warm entitlement map. Anonymous public assets
 use the same check with `info=None`. The map caches publish/version resolution;
 it does not cache a paid seat, active user or organization membership. An
-unavailable hook or failed eligibility query denies access.
+unavailable hook or failed eligibility query denies access. A SaaS overlay that
+has not overridden the hook inherits the base one: it keeps serving while app
+isolation is off (the default) and fails closed once isolation is on.
 
 A SaaS account must override this hook alongside the isolation account methods
 before an engine can start with app isolation enabled. Frame-token asset
