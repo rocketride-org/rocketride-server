@@ -3,4 +3,6 @@
 # Pinned exactly: the unit tests stub the SDK, so a release that renamed something this node relies on
 # (the handle a failed create carries, say) would pass CI and fail in use.
 # Bump deliberately, and run nodes/test/test_tool_tenki_sdk.py against the new version first.
+# luxor-ai and tenki install the same tenki/ and tenki_sandbox/ files, so uninstalling tenki on an engine that had
+# it breaks `import luxor_ai`: reinstall luxor-ai afterwards (pip install --force-reinstall --no-deps luxor-ai).
 luxor-ai==1.5.2

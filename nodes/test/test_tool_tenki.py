@@ -592,8 +592,7 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     ('cfg', 'retired'),
     [
         ({'apikey': 'tk_mock-tenki-placeholder-for-tests'}, 'Tenki key (tk_)'),
-        ({'base_url': 'https://api.tenki.cloud'}, 'points at api.tenki.cloud'),
-        ({'base_url': 'API.Tenki.Cloud:443'}, 'points at api.tenki.cloud'),
+        ({'base_url': 'https://eu.tenki.cloud'}, 'points at eu.tenki.cloud'),
     ],
 )
 def test_a_tenki_key_or_host_still_works_and_is_warned_about_before_luxor_retires_it(monkeypatch, logs, cfg, retired):
@@ -604,6 +603,18 @@ def test_a_tenki_key_or_host_still_works_and_is_warned_about_before_luxor_retire
     logs.clear()
     _global(monkeypatch, {'apikey': _KEY, **cfg})[0].validateConfig()
     assert any(retired in line and 'stops working on 2027-01-01' in line for line in logs), logs
+
+
+@pytest.mark.parametrize('base_url', ['https://api.tenki.cloud', 'API.Tenki.Cloud:443', 'https://api.tenki.cloud/'])
+def test_tenkis_api_host_is_swapped_for_luxors_so_a_deployed_pipeline_survives_the_retirement(
+    monkeypatch, logs, base_url
+):
+    _, built = _started(monkeypatch, {'base_url': base_url})
+    assert built[0]['base_url'] == 'https://api.luxor.ai'
+    assert any('api.tenki.cloud' in line and 'connects to https://api.luxor.ai' in line for line in logs), logs
+    logs.clear()
+    _global(monkeypatch, {'apikey': _KEY, 'base_url': base_url})[0].validateConfig()
+    assert any('stops working on 2027-01-01' in line and 'clear tenki.base_url' in line for line in logs), logs
 
 
 def test_the_editor_opens_the_node_without_a_key(monkeypatch, logs):

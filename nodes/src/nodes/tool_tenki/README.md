@@ -86,7 +86,9 @@ Create a Luxor workspace API key (`lx_...`) in the Luxor dashboard
 `${ROCKETRIDE_TENKI_APIKEY}`. It never enters the VM. A Tenki key (`tk_...`) still works until
 2027-01-01, when Luxor retires the Tenki names
 ([Luxor: migrate to Luxor](https://luxor.ai/docs/migrate-to-luxor)); the node warns about one until
-it is replaced. Secret policies also need **Allow Secrets access**, chosen when the key is created
+it is replaced. An **API URL** of `https://api.tenki.cloud` is read as `https://api.luxor.ai`, the
+same service, so a deployed pipeline keeps working past that date.
+Secret policies also need **Allow Secrets access**, chosen when the key is created
 ([Luxor: access permissions](https://luxor.ai/docs/secrets/manage-secrets#access-permissions)).
 That access can change every secret and policy in the workspace, so give the node its own key.
 
@@ -122,7 +124,7 @@ That access can change every secret and policy in the workspace, so give the nod
 |---|---|---|---|
 | `tenki.allow_domains` | `array` | **Allowed outbound domains**<br/>Restricts the sandbox's outbound traffic to these hostnames, such as pypi.org, on any port; one leading *. wildcard is accepted. Leave empty for open outbound access to any host and port. List every host the agent's work needs (pip needs pypi.org and files.pythonhosted.org, for example), and no more: a listed host is somewhere data can be sent. An entry Luxor would refuse (a URL, a port, an underscore) stops the pipeline at startup. | `[]` |
 | `tenki.apikey` | `string` | **API Key**<br/>Luxor workspace API key (starts with lx_), from the API Keys screen in the Luxor dashboard. A Tenki key (tk_) still works until 2027-01-01. | `""` |
-| `tenki.base_url` | `string` | **API URL**<br/>Luxor Sandbox API endpoint. Leave empty for the default (https://api.luxor.ai). A tenki.cloud endpoint still works until 2027-01-01. | `""` |
+| `tenki.base_url` | `string` | **API URL**<br/>Luxor Sandbox API endpoint. Leave empty for the default (https://api.luxor.ai). https://api.tenki.cloud is read as https://api.luxor.ai; another tenki.cloud endpoint still works until 2027-01-01. | `""` |
 | `tenki.cpu_cores` | `integer` | **CPU Cores**<br/>Virtual CPUs for the sandbox VM, 1 to 16. 0 leaves it to Luxor: 2, or what the Image sets. | `0` |
 | `tenki.disk_size_gb` | `integer` | **Disk Size (GB)**<br/>Root disk size, 5 to 100 GB. 0 leaves it to Luxor: 5, or the Image's own disk. Luxor recommends 20 for agents that clone repositories and install dependencies. | `0` |
 | `tenki.exec_timeout_secs` | `integer` | **Execution Timeout (seconds)**<br/>Max seconds a single run_command/run_code call may take. | `120` |

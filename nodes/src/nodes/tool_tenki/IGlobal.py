@@ -69,6 +69,8 @@ _END_LOCK_WAIT_SECS = 10
 # Given an empty endpoint the SDK reads LUXORAI_API_ENDPOINT, TENKI_API_ENDPOINT and the like, so the default is passed
 # explicitly.
 _DEFAULT_BASE_URL = 'https://api.luxor.ai'
+# Tenki's API host, which Luxor serves as api.luxor.ai until it stops answering on 2027-01-01.
+_TENKI_API_HOST = 'api.tenki.cloud'
 # USER_SHUTDOWN is not in Tenki's documented lifecycle, but it is in the protocol.
 _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _SHUTTING_DOWN = 'tool_tenki: the pipeline is shutting down, so no sandbox session is used'
@@ -274,6 +276,14 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
     return prefix, secret.strip()
 
 
+def _host_of(base_url: str) -> str:
+    """base_url's host in lower case, or '' when it is not a URL (building the SDK's client reports that)."""
+    try:
+        return (urllib.parse.urlsplit(base_url if '://' in base_url else f'https://{base_url}').hostname or '').lower()
+    except ValueError:
+        return ''
+
+
 def _retired_names(apikey: str, base_url: str) -> list[str]:
     """A warning for each Tenki-era name configured: Luxor retires tk_ keys and tenki.cloud hosts on 2027-01-01."""
     retired = []
@@ -282,11 +292,13 @@ def _retired_names(apikey: str, base_url: str) -> list[str]:
             'apikey is a Tenki key (tk_), which stops working on 2027-01-01: create a Luxor key (lx_) in the Luxor '
             'dashboard and use it instead'
         )
-    try:
-        host = (urllib.parse.urlsplit(base_url if '://' in base_url else f'https://{base_url}').hostname or '').lower()
-    except ValueError:
-        host = ''  # not a URL: building the SDK's client reports that
-    if host == 'tenki.cloud' or host.endswith('.tenki.cloud'):
+    host = _host_of(base_url)
+    if host == _TENKI_API_HOST:
+        retired.append(
+            f'tenki.base_url points at {host}, which stops working on 2027-01-01, so the node connects to '
+            f'{_DEFAULT_BASE_URL}, the same service, instead: clear tenki.base_url to drop this warning'
+        )
+    elif host == 'tenki.cloud' or host.endswith('.tenki.cloud'):
         retired.append(
             f'tenki.base_url points at {host}, which stops working on 2027-01-01: clear it to use {_DEFAULT_BASE_URL}'
         )
@@ -433,6 +445,8 @@ class IGlobal(IGlobalBase):
         base_url = str(cfg.get('base_url') or '').strip() or _DEFAULT_BASE_URL
         for retired in _retired_names(apikey, base_url):
             warning(f'tool_tenki: {retired}')
+        if _host_of(base_url) == _TENKI_API_HOST:
+            base_url = _DEFAULT_BASE_URL  # a deployed pipeline shows nobody the warning, and would break on 2027-01-01
         self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def validateConfig(self) -> None:

@@ -35,7 +35,7 @@
 		"tenki.base_url": {
 			"type": "string",
 			"title": "API URL",
-			"description": "Luxor Sandbox API endpoint. Leave empty for the default (https://api.luxor.ai). A tenki.cloud endpoint still works until 2027-01-01.",
+			"description": "Luxor Sandbox API endpoint. Leave empty for the default (https://api.luxor.ai). https://api.tenki.cloud is read as https://api.luxor.ai; another tenki.cloud endpoint still works until 2027-01-01.",
 			"default": "",
 			"optional": true
 		},
