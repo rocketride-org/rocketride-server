@@ -71,7 +71,7 @@
         "custom": {
           "model": "gemini-3.1-flash-lite-preview",
           "modelTotalTokens": 1000000,
-          "outputTokens": 8192,
+          "modelOutputTokens": 8192,
           "apikey": "${ROCKETRIDE_GEMINI_KEY}"
         },
         "parameters": {}

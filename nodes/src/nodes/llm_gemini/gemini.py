@@ -23,7 +23,7 @@
 
 from typing import Any, Dict
 from ai.common.chat import ChatBase
-from ai.common.config import Config
+from ai.common.config import Config, written_value
 from ai.common.llm_adapter import debug_usage_failure, report_llm_tokens
 from google import genai
 
@@ -56,6 +56,21 @@ def _report_gemini_usage(response: Any, model: str) -> None:
     report_llm_tokens(fresh_input, output, model=model, cache_read_tokens=cache_read)
 
 
+def _sends_output_limit(provider: str, connConfig: Any) -> bool:
+    """Whether this config's output limit is one to send to Google as ``max_output_tokens``.
+
+    A catalogue profile's limit is the model's, and a value typed into Output Tokens is
+    the author's. A Custom profile with the field left empty only inherits the Custom
+    default, 65,536, which exceeds the cap of many models; Google uses the model's own
+    maximum when no limit is sent, as it did before the node sent one. The value counts
+    only where getNodeConfig reads it: the top level or the active profile's block, not
+    a leftover block of another profile.
+    """
+    if connConfig.get('profile', None) != 'custom':
+        return True
+    return bool(written_value(provider, connConfig, 'modelOutputTokens'))
+
+
 class GeminiNoTextError(Exception):
     """A response that carried no text: blocked, out of budget, or non-text only.
 
@@ -81,6 +96,8 @@ class Chat(ChatBase):
     """
 
     _client: genai.Client
+    # Whether _chat sends the output limit; see _sends_output_limit.
+    _is_output_limit_sent: bool = True
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """
@@ -117,6 +134,7 @@ class Chat(ChatBase):
             raise ValueError('Please enter your Gemini API key.')
 
         self._modelTotalTokens = config.get('modelTotalTokens', 8192)
+        self._is_output_limit_sent = _sends_output_limit(provider, connConfig)
 
         # Initialize the Google GenAI client — key format validation is delegated to the library
         self._client = genai.Client(api_key=api_key)
@@ -190,8 +208,12 @@ class Chat(ChatBase):
             This method assumes self._model is set by the parent class.
             The model should be a valid Gemini model identifier (e.g., 'gemini-pro').
         """
-        # Generate content using the configured model
-        response = self._client.models.generate_content(model=self._model, contents=prompt)
+        # Generate content using the configured model. Without max_output_tokens Google
+        # uses the model's own maximum, whatever the profile's output limit says.
+        config = None
+        if self._is_output_limit_sent:
+            config = {'max_output_tokens': self._modelOutputTokens}
+        response = self._client.models.generate_content(model=self._model, contents=prompt, config=config)
 
         # Before the text check, deliberately: a response that carried no text
         # still burned tokens, and a safety block is exactly the run somebody
