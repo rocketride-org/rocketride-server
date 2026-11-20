@@ -22,6 +22,9 @@ const net = require('net');
 const { spawn } = require('child_process');
 const { exists } = require('./fs');
 const { DIST_ROOT } = require('./paths');
+const { createLineStamper } = require('./linestamp');
+const { installStackDumps } = require('./stackdumps');
+const { startStackWatch } = require('./stackwatch');
 
 const SERVER_DIR = path.join(DIST_ROOT, 'server');
 const READY_MESSAGE = 'Application startup complete.';
@@ -265,11 +268,19 @@ async function startServer(options) {
 		serverArgs.push(`--trace=${traceLevels.join(',')}`);
 	}
 
+	// With ROCKETRIDE_TEST_STACK_DUMPS set, task children of this server write
+	// periodic stack dumps (see stackdumps.js).
+	const serverEnv = { ...process.env, ...env };
+	const stackDumps = installStackDumps(SERVER_DIR, serverEnv);
+	if (stackDumps) Object.assign(serverEnv, stackDumps.env);
+	// On Windows the watcher takes a native stack of a child frozen in startup (see stackwatch.js).
+	const stackWatch = stackDumps ? startStackWatch(serverEnv.ROCKETRIDE_TEST_STACK_DUMPS) : null;
+
 	return new Promise((resolve, reject) => {
 		const serverProcess = spawn(serverExe, serverArgs, {
 			cwd: SERVER_DIR,
 			stdio: ['pipe', 'pipe', 'pipe'],
-			env: { ...process.env, ...env },
+			env: serverEnv,
 		});
 
 		let resolved = false;
@@ -292,6 +303,11 @@ async function startServer(options) {
 		serverProcess.rocketrideDiagnostics = diagnostics;
 
 		const logStream = writeLog ? openServerLog(logName, diagnostics) : null;
+		// Each log line starts with the time it was written, so an event in the log
+		// has a wall-clock time. One stamper per stream keeps partial lines apart.
+		const logStampers = logStream
+			? { stdout: createLineStamper(logStream), stderr: createLineStamper(logStream) }
+			: null;
 
 		const recordOutput = (text) => {
 			for (const line of text.split('\n')) {
@@ -305,11 +321,11 @@ async function startServer(options) {
 		// for the full "Application startup complete." readiness message.
 		const portRegex = /Uvicorn running on https?:\/\/[\w.]+:(\d+)/;
 
-		const checkReady = (data) => {
+		const checkReady = (data, stamper) => {
 			const text = data.toString();
 			outputBuffer += text;
 
-			if (logStream) logStream.write(data);
+			stamper?.write(data);
 
 			// Retain the tail unconditionally. Callers typically stop consuming
 			// onOutput once the server is ready, so this is the only thing that
@@ -378,14 +394,26 @@ async function startServer(options) {
 			}
 		};
 
-		serverProcess.stdout.on('data', checkReady);
-		serverProcess.stderr.on('data', checkReady);
+		serverProcess.stdout.on('data', (data) => checkReady(data, logStampers?.stdout));
+		serverProcess.stderr.on('data', (data) => checkReady(data, logStampers?.stderr));
+
+		const endLog = () => {
+			logStampers?.stdout.end();
+			logStampers?.stderr.end();
+			logStream?.end();
+		};
 
 		// 'close' follows the last byte of both streams; 'exit' can come before it.
-		serverProcess.on('close', () => logStream?.end());
+		serverProcess.on('close', () => {
+			endLog();
+			stackWatch?.stop();
+			stackDumps?.release();
+		});
 
 		serverProcess.on('error', (err) => {
-			logStream?.end();
+			endLog();
+			stackWatch?.stop();
+			stackDumps?.release();
 			if (!resolved) {
 				resolved = true;
 				reject(err);
