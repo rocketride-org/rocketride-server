@@ -87,36 +87,41 @@ class CallerConfigError(ConfigError):
         self.path = path
 
 
-def _leaf_at(tree: Any, path: str) -> Any:
+def _child_key(node: Dict[str, Any], remaining: str) -> Optional[str]:
     """
-    The value at a dotted schema ``path`` of a stored config tree, or None.
+    The stored key the next step of a dotted ``remaining`` path takes, or None.
 
     A declared child name may itself carry a dot (a branch block such as
-    ``gpt-5.2``), so at every level the whole remaining path is tried as one
-    key before its first segment.
+    ``gpt-5.2``), so the stored keys are matched against the path, never the
+    path split at its dots: the longest key that is the remaining path or
+    leads it before a dot.
     """
-    remaining = path
-    node = tree
+    keys = [key for key in node if key == remaining or remaining.startswith(key + '.')]
+    return max(keys, key=len) if keys else None
+
+
+def _leaf_at(tree: Any, path: str) -> Any:
+    """The value at a dotted schema ``path`` of a stored config tree, or None."""
+    remaining, node = path, tree
     while remaining:
         if not isinstance(node, dict):
             return None
-        if remaining in node:
-            return node[remaining]
-        head, _, rest = remaining.partition('.')
-        if head not in node or not rest:
+        key = _child_key(node, remaining)
+        if key is None:
             return None
-        node, remaining = node[head], rest
+        node, remaining = node[key], remaining[len(key) + 1 :]
     return node
 
 
 def _set_leaf(tree: Dict[str, Any], path: str, value: Any) -> None:
-    """Set the value at a dotted schema ``path`` an ``_leaf_at`` walk reaches."""
-    remaining = path
-    node = tree
-    while remaining not in node:
-        head, _, rest = remaining.partition('.')
-        node, remaining = node[head], rest
-    node[remaining] = value
+    """Set the value at a dotted schema ``path`` an ``_leaf_at`` walk reached."""
+    remaining, node = path, tree
+    while True:
+        key = _child_key(node, remaining)
+        if key == remaining:
+            node[key] = value
+            return
+        node, remaining = node[key], remaining[len(key) + 1 :]
 
 
 def typed_caller_config(stored: Dict[str, Any], expanded: Dict[str, Any], view: Any) -> Dict[str, Any]:
@@ -146,7 +151,7 @@ def typed_caller_config(stored: Dict[str, Any], expanded: Dict[str, Any], view: 
     for key in view:
         path = view.path_of(key)
         raw = _leaf_at(stored, path)
-        if not isinstance(raw, str) or not WHOLE_PLACEHOLDER.match(raw):
+        if not isinstance(raw, str) or not WHOLE_PLACEHOLDER.fullmatch(raw):
             continue
         value = _leaf_at(expanded, path)
         if not isinstance(value, str) or value == raw:
@@ -156,9 +161,11 @@ def typed_caller_config(stored: Dict[str, Any], expanded: Dict[str, Any], view: 
         if kind not in TYPED_LEAVES:
             continue
         coerced = _coerce(value, descriptor)
-        mismatch = _type_error(kind, coerced)
-        if mismatch:
-            raise CallerConfigError(path, f'"{path}" {mismatch} (from {raw})')
+        # The refusal names the leaf, its type and the stored placeholder,
+        # never the env value it expanded to: the text goes back to a caller
+        # who may run with the team's environment without reading it
+        if _type_error(kind, coerced):
+            raise CallerConfigError(path, f'"{path}" expects {kind} (from {raw})')
         _set_leaf(expanded, path, coerced)
     return expanded
 
@@ -598,6 +605,11 @@ class TaskControl:
 
     # A request through this control is starting its stopped engine again
     engine_starting: bool = False
+
+    # A restart is setting up this control's successor: it stays registered
+    # (its events still route, its id still answers) but no new request
+    # resolves to it, and the restart alone decides when it leaves
+    restarting: bool = False
 
     @property
     def owner_id(self) -> str:

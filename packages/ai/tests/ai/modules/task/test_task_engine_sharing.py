@@ -1460,7 +1460,7 @@ async def test_a_failed_restart_keeps_the_predecessors_request_trees(catalog, en
 
 
 @pytest.mark.asyncio
-async def test_a_control_whose_engine_is_stopping_is_replaced_not_reused(catalog, engines):
+async def test_a_control_whose_engine_is_stopping_is_passed_over_not_reused(catalog, engines):
     """An engine in teardown takes no new hold: a matching spec call creates the replacement on a new engine."""
     ts = _server()
     a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
@@ -1470,8 +1470,36 @@ async def test_a_control_whose_engine_is_stopping_is_replaced_not_reused(catalog
     again = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
 
     assert again is not a and again.task is not stopping
-    assert a.key not in ts._task_control and list(ts._task_control) == [again.key]
+    # The stopping control stays registered: its terminal events are delivered
+    # through it, and the stop that began the teardown removes it afterwards
+    assert set(ts._task_control) == {a.key, again.key} and stopping.holds == {a.key}
     assert again.task.is_live and again.task.holds == {again.key}
+
+
+@pytest.mark.asyncio
+async def test_a_restarts_predecessor_stays_registered_while_its_successor_is_set_up(catalog, engines):
+    """An event in flight still routes to the predecessor during the setup; the successor's lookup never answers with it."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    seen = {}
+    resolve_env = ts._resolve_control_env
+
+    async def during_setup(control):
+        # The successor's start is under way: the predecessor is still the
+        # registered control of its key, marked for the lookup to pass over
+        seen['registered'] = ts._task_control.get(dev.key) is dev
+        seen['restarting'] = dev.restarting
+        return await resolve_env(control)
+
+    ts._resolve_control_env = during_setup
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': _pipeline()}}, conn=conn)
+
+    assert seen == {'registered': True, 'restarting': True}
+    # The same pipeline restarted is a successor, never the predecessor reused
+    assert dev.key not in ts._task_control and list(ts._task_control) == [result['token']]
+    assert ts._task_control[result['token']] is not dev and result['converged'] == 'none'
 
 
 @pytest.mark.asyncio
@@ -1503,19 +1531,36 @@ async def test_the_same_configuration_rewired_is_another_control_on_another_engi
 @pytest.mark.asyncio
 async def test_concurrent_identical_launches_share_one_control(catalog, monkeypatch):
     """Two identical launches that pass the lookup together are one control: the gate rechecks before registering."""
+    release = asyncio.Event()
 
-    async def slow_start(self):
-        await asyncio.sleep(0.01)
+    async def held_start(self):
+        await release.wait()
         self.state = EngineState.STARTING
         self._confirm_running()
 
-    monkeypatch.setattr(TaskEngine, 'start_task', slow_start)
+    monkeypatch.setattr(TaskEngine, 'start_task', held_start)
     ts = _server()
+    arrivals: List[str] = []
+    try_start_lock = ts._engines.try_start_lock
 
-    controls = await asyncio.gather(*(_start(ts, _pipeline(), user='user-a') for _ in range(3)))
+    async def counting(key):
+        arrivals.append(key)
+        return await try_start_lock(key)
 
-    assert len({id(c) for c in controls}) == 1 and len(ts._task_control) == 1
-    assert controls[0].task.holds == {controls[0].key}
+    monkeypatch.setattr(ts._engines, 'try_start_lock', counting)
+
+    # Another project of the same shape holds the engine's start gate while
+    # the two identical launches pass the lookup (no control of theirs exists
+    # yet) and queue behind it; only then is the gate released
+    holder = asyncio.ensure_future(_start(ts, _copy(), user='user-a'))
+    launches = [asyncio.ensure_future(_start(ts, _pipeline(), user='user-a')) for _ in range(2)]
+    while len(arrivals) < 3:
+        await asyncio.sleep(0)
+    release.set()
+    other, *controls = await asyncio.gather(holder, *launches)
+
+    assert len({id(c) for c in controls}) == 1 and set(ts._task_control) == {other.key, controls[0].key}
+    assert controls[0].task is other.task and other.task.holds == {other.key, controls[0].key}
 
 
 @pytest.mark.asyncio

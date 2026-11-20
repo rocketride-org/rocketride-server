@@ -2048,20 +2048,17 @@ class TaskServer(DAPBase):
         """True when another control also holds the engine ``control`` holds."""
         return control.task is not None and any(key != control.key for key in control.task.holds)
 
-    def _unregister_control(self, control: TaskControl, *, keep_hold: bool = False, keep_traces: bool = False) -> None:
+    def _unregister_control(self, control: TaskControl, *, keep_hold: bool = False) -> None:
         """
-        Take a control out of the registry; its subscriptions stay.
+        Take a control out of the registry with its request trees; its subscriptions stay.
 
         The control's hold goes with it unless ``keep_hold`` is set, for a
         caller that releases it through ``release_hold`` (the rule that stops
-        the engine when the last hold drops). Its request trees go with it
-        unless ``keep_traces`` is set, for a caller that may put the control
-        back (a restart's predecessor) and forgets them itself on commit.
+        the engine when the last hold drops).
 
         Args:
             control: The control to unregister.
             keep_hold: Leave the hold to the caller.
-            keep_traces: Leave the trace ownership records to the caller.
         """
         # Out of the registry, unless a replacement already took the key
         if self._task_control.get(control.key) is control:
@@ -2069,8 +2066,7 @@ class TaskServer(DAPBase):
             self._engine_unavailable.pop(control.key, None)
             self._forget_launch_owner(control)
             # Its request trees go with it (their records did)
-            if not keep_traces:
-                self.trace_owners.forget_control(control.key)
+            self.trace_owners.forget_control(control.key)
 
         # The control's one hold
         if not keep_hold and control.task is not None:
@@ -2804,17 +2800,26 @@ class TaskServer(DAPBase):
 
         # The caller's controls under the same index key (rung, owner,
         # address): on @spec the one with the same configuration ON THE
-        # ENGINE OF THIS SHAPE is REUSED (plan 3.4); a finished or stopping
-        # one is replaced; a different configuration, or the same configs
-        # rewired (another engine), is left alone, another control. A
-        # deployment run is one per index key: the pin path attaches before
-        # it starts
+        # ENGINE OF THIS SHAPE is REUSED (plan 3.4); a finished one is
+        # replaced; a stopping one and a restart's predecessor are passed
+        # over; a different configuration, or the same configs rewired
+        # (another engine), is left alone, another control. A deployment run
+        # is one per index key: the pin path attaches before it starts
         for existing_control in self._task_control.lookup(control.index_key):
             engine = existing_control.task
-            if (engine.is_task_complete() or engine.state is EngineState.STOPPING) and not existing_control.dormant:
-                # Its engine is done, or stopping (it takes no new hold, and a
-                # reused control would hand out an id its teardown is about to
-                # retire). Its subscriptions stay: they are the replacement's too
+            if existing_control.restarting:
+                # Its successor is being set up: the restart decides its fate
+                continue
+            if engine.state is EngineState.STOPPING and not existing_control.dormant:
+                # Its engine is in teardown: it takes no new hold, and a reused
+                # control would hand out an id the teardown is about to retire.
+                # It stays registered meanwhile: the terminal events and the
+                # run-log close are delivered through it, and the stop that
+                # began the teardown removes it once they are
+                continue
+            if engine.is_task_complete() and not existing_control.dormant:
+                # Its engine is done: replaced. Its subscriptions stay: they
+                # are the replacement's too
                 self._unregister_control(existing_control)
                 self.debug_message(f'Replaced finished task "{control.id}"...')
                 continue
@@ -2850,6 +2855,8 @@ class TaskServer(DAPBase):
             # caller gets that control and takes no hold of its own. A
             # deployment run reads as already running, as above
             for twin in self._task_control.lookup(control.index_key):
+                if twin.restarting:
+                    continue
                 if twin.task is engine and twin.live and (use_existing or _same_spec(twin)):
                     if control.rung != 'spec':
                         raise ValueError(f'Pipeline is already running (task {twin.id}); stop it and run again.')
@@ -3230,11 +3237,14 @@ class TaskServer(DAPBase):
                     f'({control.project_id!r} -> {pipeline.get("project_id")!r})'
                 )
 
-            # Step 3: the predecessor leaves the registry, keeping its hold,
-            # so the successor's resolution never answers with it and the
-            # engine it holds survives until the successor holds its own
+            # Step 3: the predecessor is marked restarting and STAYS
+            # registered, keeping its hold: the successor's resolution never
+            # answers with it, the engine it holds survives until the
+            # successor holds its own, and an event its engine emits
+            # meanwhile still finds it (broadcast_task_event delivers only to
+            # a registered control), as does a request naming its id
             old_engine = control.task
-            self._unregister_control(control, keep_hold=True, keep_traces=True)
+            control.restarting = True
             successor = {
                 'command': control.launch_type.value,
                 'arguments': {
@@ -3271,25 +3281,21 @@ class TaskServer(DAPBase):
                 )
             except Exception:
                 # Step 3b: a predecessor whose deployment was revoked meanwhile
-                # is not restored: it goes the way the kill switch takes every
-                # hold (the predecessor had already left the deployment index)
+                # is not kept: it goes the way the kill switch takes every hold
                 if self._revoked_after(control.deployment, control.registered_at):
-                    self.trace_owners.forget_control(control.key)
+                    self._unregister_control(control, keep_hold=True)
                     await self.release_hold(old_engine, control.key, 'unpublished')
                     raise
-                # Otherwise it is back as it was: its hold was never released,
-                # its request trees never forgotten, its subscriptions never
-                # touched
-                self._task_control[control.key] = control
-                self._schedule_control(control)
-                if control.launch_type == LAUNCH_TYPE.LAUNCH:
-                    self._note_launch_owner(control, control.launch_owner)
+                # Otherwise it is as it was: it never left the registry, its
+                # hold was never released, its request trees never forgotten,
+                # its subscriptions never touched
+                control.restarting = False
                 raise
 
-            # Step 4: the predecessor's hold goes through the hold rule: the
-            # engine stops only when that was its last hold; its request trees
-            # go with it now that the successor is committed
-            self.trace_owners.forget_control(control.key)
+            # Step 4: the successor is committed: the predecessor leaves the
+            # registry with its request trees, and its hold goes through the
+            # hold rule (the engine stops only when that was its last hold)
+            self._unregister_control(control, keep_hold=True)
             await self.release_hold(old_engine, control.key, 'restart')
             new_control = self.control_by_key(result['token'])
             converged = 'none' if new_control.task is old_engine else 'started'

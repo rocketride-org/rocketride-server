@@ -114,6 +114,7 @@ def _make_control(*, key=KEY, user_id='user-1', team_id='team-1', task=None, ttl
         source='src-1',
         ttl=ttl,
         dormant=False,
+        restarting=False,
         deployment=None,
         registered_at=0.0,
         launch_owner=None,
@@ -1300,6 +1301,7 @@ def _seed_running_task(ts):
         pipeline=_launch_pipeline(),
         task=task,
         dormant=False,
+        restarting=False,
         last_activity=0.0,
     )
     ts._task_control[LAUNCH_ID] = control

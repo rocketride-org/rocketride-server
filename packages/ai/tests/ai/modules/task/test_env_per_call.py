@@ -37,7 +37,7 @@ import pytest
 
 from ai.modules.task import caller_stamp
 from ai.modules.task.pipeline import validate_placeholders
-from ai.modules.task.task_control import TeamContext
+from ai.modules.task.task_control import TeamContext, typed_caller_config
 from ai.modules.task.types import TaskError
 
 from . import test_task_engine_sharing as sharing
@@ -243,8 +243,36 @@ async def test_a_value_that_does_not_fit_its_typed_leaf_is_refused_at_the_door(
     with pytest.raises(TaskError) as err:
         await _start(ts, _typed_pipeline(maxTokens='${ROCKETRIDE_EDGE}'))
     assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'maxTokens')
-    assert '"maxTokens" expects integer, got str' in str(err.value)
+    assert '"maxTokens" expects integer (from ${ROCKETRIDE_EDGE})' in str(err.value)
+    assert 'lots' not in str(err.value), 'the env value never leaves with the refusal'
     assert ts._task_control == {} and ts._engines == {}
+
+
+class _DottedView:
+    """One integer leaf under a branch block whose name carries a dot."""
+
+    def __iter__(self):
+        return iter(['maxTokens'])
+
+    def path_of(self, key):
+        return 'models.gpt-5.2.maxTokens'
+
+    def descriptor_of(self, key):
+        return {'type': 'integer'}
+
+
+def test_a_typed_leaf_under_a_dotted_branch_name_takes_its_type():
+    """``models.gpt-5.2.maxTokens``: the walk matches stored keys against the path, never the path split at its dots."""
+    stored = {'models': {'gpt-5.2': {'maxTokens': '${ROCKETRIDE_EDGE}'}}}
+    expanded = {'models': {'gpt-5.2': {'maxTokens': '1024'}}}
+    assert typed_caller_config(stored, expanded, _DottedView()) == {'models': {'gpt-5.2': {'maxTokens': 1024}}}
+
+
+def test_a_placeholder_followed_by_a_newline_is_not_one_whole_placeholder():
+    """Only the placeholder itself is typed: anything after it, a newline included, keeps the expansion a string."""
+    stored = {'models': {'gpt-5.2': {'maxTokens': '${ROCKETRIDE_EDGE}\n'}}}
+    expanded = {'models': {'gpt-5.2': {'maxTokens': '1024\n'}}}
+    assert typed_caller_config(stored, expanded, _DottedView())['models']['gpt-5.2']['maxTokens'] == '1024\n'
 
 
 # =============================================================================
