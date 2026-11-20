@@ -3,7 +3,7 @@ from ai.web import WebServer
 from .task_server import TaskServer
 from .task_scheduler import TaskScheduler
 from .run_log import sweep_spool_root
-from .fetch import handle_fetch, handle_fetch_dir
+from .fetch import handle_fetch, handle_fetch_dir, warn_if_signing_key_is_ephemeral
 
 
 def initModule(server: WebServer, config: Dict[str, Any]):
@@ -58,6 +58,7 @@ def initModule(server: WebServer, config: Dict[str, Any]):
 
     # Presigned file fetch — public route because auth is in the JWT token
     server.add_route('/task/fetch', handle_fetch, ['GET'], public=True)
+    warn_if_signing_key_is_ephemeral()
 
     # Directory-capability fetch for multi-file app bundles: the token rides
     # the PATH so relative chunk requests derived from remoteEntry.js inherit

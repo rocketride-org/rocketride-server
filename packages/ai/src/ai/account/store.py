@@ -611,7 +611,9 @@ class Store:
         if not client_id:
             return None
         root = str((task.get('storage') or {}).get('root') or '').strip() or None
-        return cls.file_store(RequestContext.engine(client_id), client_id=client_id, root=root)
+        file_store = cls.file_store(RequestContext.engine(client_id), client_id=client_id, root=root)
+        file_store._task_process = True
+        return file_store
 
     # =========================================================================
     # Public Static Methods
