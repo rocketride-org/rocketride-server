@@ -170,7 +170,8 @@ private:
 
         while (p) {
             auto next = p->pNext;
-            delete p;
+            // _M_new_buffer allocates each chunk as a uint8_t array
+            delete[] reinterpret_cast<uint8_t *>(p);
             p = next;
         }
 
