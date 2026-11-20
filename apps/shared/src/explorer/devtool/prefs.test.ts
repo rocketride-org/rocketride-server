@@ -649,6 +649,31 @@ describe('createFsPrefs — nothing the module does not understand is ever erase
 		assert.equal(after.version, PREFS_FILE_VERSION);
 	});
 
+	it('an unknown top-level field named __proto__ is kept as a field, not turned into the prototype, and survives the next write', async () => {
+		const original = JSON.parse(`{"version":${PREFS_FILE_VERSION},"__proto__":{"newer":true},"owners":{"team-B":{"at":5,"prefs":{"k":1}}}}`);
+		const { fs, stored } = storeOf(original);
+		const { clock, opts } = options(fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'ready');
+		prefs.setPref('history', { q: 1 });
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const after = stored();
+		assert.equal(Object.getPrototypeOf(after), Object.prototype);
+		assert.deepEqual(Object.getOwnPropertyDescriptor(after, '__proto__')?.value, { newer: true });
+	});
+
+	it('close() before the load has settled waits for it and writes the changes queued meanwhile', async () => {
+		const { fs, stored } = storeOf({ version: PREFS_FILE_VERSION, owners: {} });
+		const { opts } = options(fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		prefs.setPref('history', { q: 1 });
+		await prefs.close();
+		const owners = stored().owners as Record<string, { prefs: unknown }>;
+		assert.deepEqual(owners['team-A']?.prefs, { history: { q: 1 } });
+	});
+
 	it('an entry of THIS owner that is not a bag is never overwritten: the session stays in memory and nothing is written', async () => {
 		const original = { version: PREFS_FILE_VERSION, owners: { [OWNER]: ['old', 'format'], other: { at: 1, prefs: { a: 1 } } } };
 		const { fs, writes, stored } = storeOf(original);

@@ -222,6 +222,18 @@ class FileFormatError extends Error {
  * @param error - What the read threw.
  * @returns True for a file-not-found failure.
  */
+/**
+ * Set an own data property, even for the key `__proto__` (a plain assignment
+ * would change the object's prototype instead of keeping the field).
+ *
+ * @param target - The object.
+ * @param key - The field name.
+ * @param value - The value.
+ */
+function setOwn<T>(target: Record<string, T>, key: string, value: T): void {
+	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}
+
 function isNotFound(error: unknown): boolean {
 	return error instanceof Error && /file not found/i.test(error.message);
 }
@@ -264,7 +276,7 @@ function readFile(raw: unknown, owner: string): ILoadedFile {
 	}
 	const extra: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(raw)) {
-		if (key !== 'version' && key !== 'owners') extra[key] = value;
+		if (key !== 'version' && key !== 'owners') setOwn(extra, key, value);
 	}
 	let mine: Record<string, unknown> = {};
 	const others: Record<string, IKeptEntry> = {};
@@ -276,7 +288,7 @@ function readFile(raw: unknown, owner: string): ILoadedFile {
 			continue;
 		}
 		const at = wellFormed && typeof (entry as { at?: unknown }).at === 'number' && Number.isFinite((entry as { at: number }).at) ? (entry as { at: number }).at : 0;
-		others[id] = { at, raw: entry, pinned: !wellFormed };
+		setOwn(others, id, { at, raw: entry, pinned: !wellFormed });
 	}
 	return { mine, others, extra };
 }
@@ -467,8 +479,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 			.slice(0, Math.max(0, maxOwners - 1));
 		for (;;) {
 			const owners: Record<string, unknown> = {};
-			for (const [id, entry] of [...pinned, ...kept]) owners[id] = entry.raw;
-			owners[owner] = own;
+			for (const [id, entry] of [...pinned, ...kept]) setOwn(owners, id, entry.raw);
+			setOwn(owners, owner, own);
 			// Unknown top-level fields first, then ours: a newer client's content survives untouched.
 			const file = { ...extra, version: PREFS_FILE_VERSION, owners };
 			// Measured as client.ts fsWriteJson writes it: JSON.stringify(obj, null, 2).
@@ -588,6 +600,9 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 		},
 		flush: () => (disposed ? chain : writeNow()),
 		close: async () => {
+			// Changes made before the load reached ready are still queued: let the
+			// load apply them (it starts one when none is running) so they are written.
+			if (!disposed && (status === 'idle' || status === 'loading') && Object.keys(queued).length > 0) await load();
 			if (!disposed) await writeNow();
 			dispose();
 		},
