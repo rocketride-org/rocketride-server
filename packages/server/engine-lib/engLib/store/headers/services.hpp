@@ -308,10 +308,12 @@ private:
         // hoisted leaf pushes nothing
         std::vector<Text> pathPrefix;
 
-        // Empty at the top level or inside a plain group. Inside an enum
-        // branch or an array item it names that construct ("an enum
-        // branch" / "an array item") - "param" is a load error there,
-        // because such a property resolves branch- or item-dependently
+        // Empty everywhere but inside an array item, where it names that
+        // construct ("an array item") - "param" and "secret" are load
+        // errors there: an item has no path of its own, so the array as a
+        // whole is the parameter and the encrypt walk cannot reach it.
+        // Selector branches leave it alone (a branch leaf may be a
+        // parameter; a branch inside an item is still inside the item)
         Text nestedIn;
 
         // The names recorded for the level currently being expanded.

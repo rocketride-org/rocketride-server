@@ -24,8 +24,9 @@
 """
 File system tool node — instance.
 
-Exposes one ``@tool_function`` per operation already implemented by
-``ai.account.file_store.FileStore``:
+Exposes one ``@tool_function`` per operation of the node's ``self.files``
+(plan 5.7: the file store the SERVER roots at the calling binding's owner
+tree):
 
   * ``read_file(path, encoding?)``
   * ``write_file(path, content, encoding?)``
@@ -35,17 +36,16 @@ Exposes one ``@tool_function`` per operation already implemented by
   * ``stat_file(path)``
 
 Each method checks the corresponding allow-flag on ``self.IGlobal``, validates
-the path against the configured regex whitelist, and then invokes the
-``FileStore`` coroutine via a per-call event loop. Exceptions from the store
-(``StorageError``, ``ValueError``) propagate to the agent as tool errors.
+the path against the configured regex whitelist, and then calls ``self.files``.
+A refusal from the store (``DoorError`` carrying the server's reason, or a
+``ValueError`` from the node's own checks) propagates to the agent as a tool
+error.
 """
 
 from __future__ import annotations
 
-import asyncio
 import mimetypes
 import os
-import threading
 from typing import TYPE_CHECKING, Any
 
 from rocketlib import IInstanceBase, tool_function, warning
@@ -133,7 +133,7 @@ class IInstance(IInstanceBase):
             raise ValueError('maxBytes must be at least 1')
         max_bytes = min(max_bytes, MAX_READ_LIMIT)
 
-        data = _run_async(self.IGlobal.file_store.read, path, max_size=max_bytes)
+        data = self.files.read(path, max_size=max_bytes)
         try:
             content = data.decode(encoding)
         except UnicodeDecodeError as e:
@@ -173,7 +173,7 @@ class IInstance(IInstanceBase):
         except UnicodeEncodeError as e:
             raise ValueError(f'Failed to encode content using encoding {encoding!r}: {e}') from e
 
-        _run_async(self.IGlobal.file_store.write, path, data)
+        self.files.write(path, data)
         return {'path': path, 'bytesWritten': len(data)}
 
     @tool_function(
@@ -195,7 +195,7 @@ class IInstance(IInstanceBase):
     def delete_file(self, args):
         path, _, _ = self._prepare(args, 'delete_file')
 
-        _run_async(self.IGlobal.file_store.delete, path)
+        self.files.delete(path)
         return {'path': path, 'deleted': True}
 
     @tool_function(
@@ -217,7 +217,7 @@ class IInstance(IInstanceBase):
     def list_directory(self, args):
         path, _, _ = self._prepare(args, 'list_directory', path_required=False)
 
-        result = _run_async(self.IGlobal.file_store.list_dir, path)
+        result = self.files.list_dir(path)
         return result
 
     @tool_function(
@@ -239,7 +239,7 @@ class IInstance(IInstanceBase):
     def create_directory(self, args):
         path, _, _ = self._prepare(args, 'create_directory')
 
-        _run_async(self.IGlobal.file_store.mkdir, path)
+        self.files.mkdir(path)
         return {'path': path, 'created': True}
 
     @tool_function(
@@ -261,7 +261,7 @@ class IInstance(IInstanceBase):
     def stat_file(self, args):
         path, _, _ = self._prepare(args, 'stat_file')
 
-        return _run_async(self.IGlobal.file_store.stat, path)
+        return self.files.stat(path)
 
     # ------------------------------------------------------------------
     # Internal helpers
@@ -279,13 +279,6 @@ class IInstance(IInstanceBase):
         return {name: m for name, m in methods.items() if self._is_method_allowed(name)}
 
     def _is_method_allowed(self, name: str) -> bool:
-        # When FileStore couldn't be initialised (e.g. no running task identity
-        # missing), hide every tool method so the LLM never sees something it
-        # can't successfully invoke. ``beginGlobal()`` already logged a warning
-        # with the reason.
-        if self.IGlobal.file_store is None:
-            return False
-
         flag = _ALLOW_FLAG_BY_TOOL.get(name)
         if flag is None:
             return True
@@ -301,9 +294,8 @@ class IInstance(IInstanceBase):
         needs_content: bool = False,
     ) -> tuple[str, str | None, str | None]:
         """Shared prologue for every ``@tool_function`` method: validates
-        ``args`` is a dict (``None`` becomes ``{}``), verifies the FileStore
-        initialised, enforces the allow-flag, extracts the per-op fields, and
-        checks ``path`` against the whitelist.
+        ``args`` is a dict (``None`` becomes ``{}``), enforces the allow-flag,
+        extracts the per-op fields, and checks ``path`` against the whitelist.
 
         ``path_required=False`` makes ``path`` optional (defaults to ``''``,
         meaning the account root) — use this for directory-listing-style ops.
@@ -315,7 +307,6 @@ class IInstance(IInstanceBase):
         bypass the tool dispatcher.
         """
         args = require_dict(args) if args is not None else {}
-        self._check_ready()
         flag_attr = _ALLOW_FLAG_BY_TOOL.get(tool_name)
         if flag_attr is None:
             raise RuntimeError(f'no allow-flag mapping for tool {tool_name!r}')
@@ -347,13 +338,6 @@ class IInstance(IInstanceBase):
                 raise ValueError('content is required and must be a string')
 
         return path, encoding, content
-
-    def _check_ready(self) -> None:
-        """Verify the FileStore was successfully initialised in beginGlobal()."""
-        if self.IGlobal.file_store is None:
-            raise ValueError(
-                'filesystem tool is not available: no running task identity (rocketlib.getTask) or the account store failed to initialise (check pipeline logs)'
-            )
 
     def _check_path(self, path: str) -> None:
         """Enforce the configured path whitelist (if any)."""
@@ -419,13 +403,13 @@ class IInstance(IInstanceBase):
 
         if self.IGlobal.on_conflict == OnConflict.SKIP:
             # 'both' is an object store holding a key and a same-named prefix: still a file.
-            if _run_async(self.IGlobal.file_store.stat, candidate).get('type') in ('file', 'both'):
+            if self.files.stat(candidate).get('type') in ('file', 'both'):
                 warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
                 return None
             return candidate
 
         n = 0
-        while _run_async(self.IGlobal.file_store.stat, candidate).get('exists'):
+        while self.files.stat(candidate).get('exists'):
             n += 1
             if n > MAX_COLLISION_SUFFIX:
                 raise ValueError(
@@ -440,11 +424,7 @@ class IInstance(IInstanceBase):
         """Reference dict for a persisted file, resolving a signed URL if configured."""
         url = None
         if self.IGlobal.emit_url:
-            url = _run_async(
-                self.IGlobal.file_store.get_url,
-                path,
-                expires_in=self.IGlobal.url_expires_in,
-            )
+            url = self.files.get_url(path, expires_in=self.IGlobal.url_expires_in)
         return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
 
     def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict | None:
@@ -456,13 +436,12 @@ class IInstance(IInstanceBase):
         Returns:
             The reference, or ``None`` when the conflict policy skipped the write.
         """
-        self._check_ready()
         if not self.IGlobal.allow_write:
             raise ValueError('write access is not enabled for this filesystem tool')
         path = self._sink_target_path(filename, index=index)
         if path is None:
             return None
-        _run_async(self.IGlobal.file_store.write, path, data)
+        self.files.write(path, data)
         return self._sink_ref(path)
 
     def _sink_emit(self, refs: list[dict]) -> None:
@@ -493,9 +472,10 @@ class IInstance(IInstanceBase):
         In the engine's DIRECT pipeline mode, ``IEndpoint.scanObjects`` reports
         entries through the scan callback and the engine calls back here per
         entry with the target pipe already open. Delegates the read + raw tag
-        stream to :meth:`IEndpoint.renderStoreObject`, then prevents the C++
-        default render (which would try to re-read the object through the
-        endpoint stream API this node does not implement).
+        stream to :meth:`IEndpoint.renderStoreObject` with this binding's
+        ``self.files``, then prevents the C++ default render (which would try
+        to re-read the object through the endpoint stream API this node does
+        not implement).
 
         The sink/tool variants of this folder never receive ``renderObject``
         (it is only invoked on pipeline-source pipes), but guard anyway so a
@@ -505,7 +485,7 @@ class IInstance(IInstanceBase):
         render = getattr(self.IEndpoint, 'renderStoreObject', None)
         if render is None:
             return
-        render(object, self.instance)
+        render(object, self.instance, self.files)
         return self.preventDefault()
 
     # -- lane handlers -------------------------------------------------
@@ -579,7 +559,7 @@ class IInstance(IInstanceBase):
             # Best-effort close, then best-effort delete — separately, so a
             # failed close never strands the partial file in the store.
             try:
-                _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
+                self.files.close_write(st['handle'])
             except Exception:
                 pass
             self._discard_partial(st)
@@ -633,10 +613,10 @@ class IInstance(IInstanceBase):
             st: The stream state; must carry an open ``handle``.
         """
         try:
-            _run_on_stream_loop(self.IGlobal.file_store.close_write(st['handle']))
+            self.files.close_write(st['handle'])
             if st['write_path'] != st['path']:
                 # Staged: the destination is replaced only now, and only by a whole file.
-                _run_on_stream_loop(self.IGlobal.file_store.rename(st['write_path'], st['path'], overwrite=True))
+                self.files.rename(st['write_path'], st['path'], overwrite=True)
         except Exception:
             # A failed commit leaves an incomplete file: remove it before
             # propagating, so downstream never sees a truncated object.
@@ -657,7 +637,7 @@ class IInstance(IInstanceBase):
         if not write_path:
             return
         try:
-            _run_on_stream_loop(self.IGlobal.file_store.delete(write_path))
+            self.files.delete(write_path)
         except Exception as e:
             # The leftover is inert, but silence means nobody ever learns it is there.
             warning(f'tool_filesystem: could not remove {write_path!r} after a failed write: {e}')
@@ -720,7 +700,6 @@ class IInstance(IInstanceBase):
             if st is None or not data:
                 return
             if st['handle'] is None:
-                self._check_ready()
                 if not self.IGlobal.allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
                 name = self._stream_filename(st.get('descriptor'), st['mime'])
@@ -730,11 +709,11 @@ class IInstance(IInstanceBase):
                     streams.pop(kind, None)
                     return
                 write_path = self._write_path_for(path)
-                st['handle'] = _run_on_stream_loop(self.IGlobal.file_store.open_write(write_path))
+                st['handle'] = self.files.open_write(write_path)
                 st['path'] = path
                 st['write_path'] = write_path
             try:
-                _run_on_stream_loop(self.IGlobal.file_store.write_chunk(st['handle'], bytes(data)))
+                self.files.write_chunk(st['handle'], bytes(data))
             except Exception:
                 # Nothing revisits this stream, so its handle would hold the store's
                 # write lock until the next object's open().
@@ -801,56 +780,3 @@ def _ext_from_mime(mime: str | None) -> str:
     if not subtype or subtype.startswith('vnd.'):
         return ''
     return f'.{subtype}'
-
-
-_STREAM_LOOP: asyncio.AbstractEventLoop | None = None
-_STREAM_LOOP_LOCK = threading.Lock()
-
-
-def _run_on_stream_loop(coro):
-    """Run a store-handle coroutine on one persistent event loop.
-
-    aiofiles handles bind to the loop that opened them, so ``open_write``,
-    every ``write_chunk``, and ``close_write`` of a media stream must all run
-    on the same still-running loop. ``_run_async`` spins up a fresh loop per
-    call (fine for one-shot ops), which left the handle bound to a closed
-    loop and aborted streams with 'Event loop is closed' after the first
-    chunk. All handle-based ops therefore go through this dedicated
-    long-lived loop thread instead.
-    """
-    global _STREAM_LOOP
-    with _STREAM_LOOP_LOCK:
-        if _STREAM_LOOP is None or _STREAM_LOOP.is_closed():
-            loop = asyncio.new_event_loop()
-            threading.Thread(target=loop.run_forever, name='tool_filesystem-stream-io', daemon=True).start()
-            _STREAM_LOOP = loop
-    return asyncio.run_coroutine_threadsafe(coro, _STREAM_LOOP).result()
-
-
-def _run_async(async_fn, *args, **kwargs):
-    """Run an async callable from a synchronous node method.
-
-    Only safe to call from a thread with no running event loop. Two callers are
-    supported, both synchronous:
-
-      * the engine's tool dispatcher (``filters.py::_dispatch_tool``), which
-        calls ``@tool_function`` methods synchronously; and
-      * the pipeline-sink lane handlers (``writeDocuments``/``writeText``/
-        ``writeTable``/``writeImage``/``writeAudio``/``writeVideo``), which the
-        engine likewise invokes synchronously.
-
-    If invoked from a thread that already has a running loop, ``asyncio.run``
-    would raise a generic ``RuntimeError``; we pre-check before creating the
-    coroutine so the failure surfaces with a tool_filesystem-specific message
-    and cannot leak an unawaited coroutine.
-    """
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        pass
-    else:
-        raise RuntimeError(
-            '_run_async must not be called from a thread with a running event loop; the tool_filesystem @tool_function methods and sink lane handlers are designed to be dispatched synchronously by the engine.'
-        )
-
-    return asyncio.run(async_fn(*args, **kwargs))

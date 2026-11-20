@@ -277,7 +277,7 @@ class IInstance(IInstanceBase):
         # two callers naming one namespace must never read each other's facts,
         # so the stored namespace is qualified by the caller. A binding without
         # a caller (the owner's own engine) keeps the bare name.
-        owner = str((getattr(self, '_caller', None) or {}).get('userId') or '')
+        owner = self.caller.userId
         return f'{owner}:{ns}' if owner else ns
 
     def _public_namespace(self, args: Dict[str, Any], tool_name: str) -> str:

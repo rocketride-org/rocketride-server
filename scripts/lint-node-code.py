@@ -45,6 +45,12 @@ directory and never imports it. One check per rule of the contract:
                    ``self.config``: a parameter is per call (``self.settings``).
   caller-write     a class-level ``caller`` / ``_caller`` or any assignment to
                    ``.caller`` / ``._caller``: the engine binds the caller once.
+  identity-persist a caller identity field (``self.caller.userId`` and the
+                   other identity fields, or a name assigned from one) that
+                   reaches a call, a container, an attribute or a return:
+                   whatever a node keeps per owner lives in ``self.state`` /
+                   ``self.files``, which the server keys by the binding's
+                   owner (plan 5.7). Logging and the two doors are not sinks.
   introspection    ``gc``, ``inspect.stack`` or ``sys.modules`` of another
                    package: a node never reaches past its own objects.
   glb-pipetype     any ``.glb`` or ``.pipeType`` read: the node's identity is
@@ -63,7 +69,7 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, Iterator, List, Optional, Set
+from typing import Dict, FrozenSet, Iterable, Iterator, List, Optional, Set
 
 # =============================================================================
 # Vocabulary
@@ -110,6 +116,31 @@ MEMO_DECORATORS = {'lru_cache', 'cache', 'cached'}
 
 #: Names whose value is the node's configuration (the taint sources).
 CONFIG_NAMES = {'config', 'settings', 'connConfig'}
+
+#: The caller's identity fields (plan 4.1 rule 7): who a call is for. Whatever a
+#: node persists by identity is keyed by the SERVER (self.state / self.files).
+IDENTITY_FIELDS = {'userId', 'teamId', 'orgId', 'address', 'controlId'}
+
+#: The two attributes the caller record is read through.
+CALLER_NAMES = {'caller', '_caller'}
+
+#: Calls that only convert, test or log a value: an identity passed to one persists nothing.
+IDENTITY_SAFE_CALLS = {
+    'str',
+    'repr',
+    'len',
+    'bool',
+    'format',
+    'isinstance',
+    'debug',
+    'info',
+    'warning',
+    'error',
+    'sendSSE',
+}
+
+#: The doors whose identity the server stamps (plan 5.7).
+DOOR_NAMES = {'state', 'files'}
 
 #: Name words of a beginGlobal call that opens something (a connection, a client, a worker).
 OPENER_WORDS = {
@@ -417,6 +448,213 @@ def function_taint(func: ast.AST) -> Set[str]:
             return tainted
 
 
+def is_caller_record(expr: ast.AST) -> bool:
+    """True when ``expr`` is the caller record: ``<x>.caller``, ``<x>._caller`` or ``getattr(<x>, 'caller')``."""
+    if isinstance(expr, ast.Attribute) and expr.attr in CALLER_NAMES:
+        return True
+    return (
+        isinstance(expr, ast.Call)
+        and isinstance(expr.func, ast.Name)
+        and expr.func.id == 'getattr'
+        and len(expr.args) >= 2
+        and isinstance(expr.args[1], ast.Constant)
+        and expr.args[1].value in CALLER_NAMES
+    )
+
+
+def names_identity_field(expr: ast.AST) -> bool:
+    """True when ``expr`` is a string constant naming an identity field."""
+    return isinstance(expr, ast.Constant) and expr.value in IDENTITY_FIELDS
+
+
+def reads_identity(expr: ast.AST, tainted: Set[str]) -> bool:
+    """
+    True when ``expr`` reads a caller identity field, or a name assigned from one.
+
+    The field may be read as an attribute (``self.caller.userId``), an item or
+    a ``get`` of the record (``caller['userId']``, ``caller.get('userId')``)
+    or through ``getattr(self.caller, 'userId')``.
+    """
+    for sub in ast.walk(expr):
+        if isinstance(sub, ast.Attribute) and sub.attr in IDENTITY_FIELDS and is_caller_record(sub.value):
+            return True
+        if isinstance(sub, ast.Subscript) and names_identity_field(sub.slice):
+            if any(is_caller_record(s) for s in ast.walk(sub.value)):
+                return True
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute) and sub.func.attr == 'get':
+            if (
+                sub.args
+                and names_identity_field(sub.args[0])
+                and any(is_caller_record(s) for s in ast.walk(sub.func.value))
+            ):
+                return True
+        if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and sub.func.id == 'getattr':
+            if len(sub.args) >= 2 and names_identity_field(sub.args[1]):
+                if any(is_caller_record(s) for s in ast.walk(sub.args[0])):
+                    return True
+        if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load) and sub.id in tainted:
+            return True
+    return False
+
+
+def _own_walk(node: ast.AST) -> Iterator[ast.AST]:
+    """Yield ``node`` and its descendants, never entering a nested function, lambda or class."""
+    yield node
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+        yield from own_nodes(node)
+
+
+def _bound_names(target: Optional[ast.AST]) -> Set[str]:
+    """The plain names an assignment target binds, unpacking included."""
+    if target is None:
+        return set()
+    return {name for t in flat_targets(target) for name in assigned_names(t)}
+
+
+def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
+    """
+    The names holding a caller identity where each node of ``func`` runs, followed in statement order.
+
+    An assignment from an identity taints the names it binds and any other
+    assignment to a name clears it, so a name reused for something else is
+    clean again. A branch keeps a name tainted when either way taints it, a
+    loop body is followed until the taint at its head stops growing (a
+    ``break`` skips the loop's ``else``), an exception handler sees every state
+    its try body passed through, and a ``finally`` also every state an
+    ``else`` or a handler passed through.
+
+    Returns:
+        The taint in effect BEFORE each node of the function's own statements
+        runs, by ``id(node)``.
+    """
+    taint_of: Dict[int, FrozenSet[str]] = {}
+    loops: List[Dict[str, Set[str]]] = []
+
+    def mark(nodes: Iterable[Optional[ast.AST]], tainted: Set[str]) -> None:
+        frozen = frozenset(tainted)
+        for node in nodes:
+            if node is None:
+                continue
+            for sub in _own_walk(node):
+                taint_of[id(sub)] = taint_of.get(id(sub), frozenset()) | frozen
+
+    def bind(names: Set[str], value: Optional[ast.AST], tainted: Set[str], keep: bool = False) -> Set[str]:
+        if value is not None and reads_identity(value, tainted):
+            return tainted | names
+        return set(tainted) if keep else tainted - names
+
+    def block(statements: List[ast.stmt], tainted: Set[str]) -> Set[str]:
+        for stmt in statements:
+            tainted = statement(stmt, tainted)
+        return tainted
+
+    def passed_through(statements: List[ast.stmt], start: Set[str], end: Set[str]) -> Set[str]:
+        """Every state ``statements`` passed through: their start, the state before each node, their end."""
+        states = set(start) | end
+        for inner in statements:
+            for sub in _own_walk(inner):
+                states |= taint_of.get(id(sub), frozenset())
+        return states
+
+    def statement(stmt: ast.stmt, tainted: Set[str]) -> Set[str]:
+        # Step 1: a nested definition is its own scope; it rebinds its name
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            mark(stmt.decorator_list, tainted)
+            return tainted - {stmt.name}
+
+        # Step 2: compound statements: their header runs before the body
+        if isinstance(stmt, ast.If):
+            mark([stmt.test], tainted)
+            return block(stmt.body, set(tainted)) | block(stmt.orelse, set(tainted))
+        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            # The loop head joins the entry with every pass's end (and every
+            # continue) until that stops growing: a value carried round the
+            # loop any number of times is seen (the set of names is finite, so
+            # this ends). The else runs only when the loop is exhausted; a
+            # break leaves past it and joins after it
+            names = _bound_names(stmt.target) if isinstance(stmt, (ast.For, ast.AsyncFor)) else set()
+            head = set(tainted)
+            frame: Dict[str, Set[str]] = {'break': set(), 'continue': set()}
+            loops.append(frame)
+            try:
+                while True:
+                    if isinstance(stmt, ast.While):
+                        mark([stmt.test], head)
+                        end = block(stmt.body, set(head))
+                    else:
+                        mark([stmt.iter, stmt.target], head)
+                        end = block(stmt.body, bind(names, stmt.iter, set(head)))
+                    end |= frame['continue']
+                    if end <= head:
+                        break
+                    head |= end
+            finally:
+                loops.pop()
+            return block(stmt.orelse, head) | frame['break']
+        if isinstance(stmt, (ast.With, ast.AsyncWith)):
+            for item in stmt.items:
+                mark([item.context_expr, item.optional_vars], tainted)
+                tainted = bind(_bound_names(item.optional_vars), item.context_expr, tainted)
+            return block(stmt.body, tainted)
+        if isinstance(stmt, ast.Try) or type(stmt).__name__ == 'TryStar':
+            body = block(stmt.body, set(tainted))
+            # An exception can leave the body before any of its nodes: a
+            # handler sees every state the body passed through, not just its
+            # entry and its end
+            raised = passed_through(stmt.body, tainted, body)
+            orelse = block(stmt.orelse, set(body))
+            merged = set(orelse)
+            # A finally on an exception's path sees, besides those, every state
+            # the else and each handler passed through (one can raise partway)
+            exceptional = raised | passed_through(stmt.orelse, body, orelse)
+            for handler in stmt.handlers:
+                mark([handler.type], raised)
+                start = raised - ({handler.name} if handler.name else set())
+                end = block(handler.body, set(start))
+                merged |= end
+                exceptional |= passed_through(handler.body, start, end)
+            if stmt.finalbody:
+                block(stmt.finalbody, exceptional | merged)
+            return block(stmt.finalbody, merged)
+        if isinstance(stmt, ast.Match):
+            mark([stmt.subject], tainted)
+            merged = set(tainted)
+            for case in stmt.cases:
+                mark([case.guard], tainted)
+                merged |= block(case.body, set(tainted))
+            return merged
+
+        # Step 3: a simple statement runs with the taint before it, then binds;
+        # a break or continue hands its state to its loop and ends the block
+        mark([stmt], tainted)
+        if isinstance(stmt, (ast.Break, ast.Continue)) and loops:
+            loops[-1]['break' if isinstance(stmt, ast.Break) else 'continue'] |= tainted
+            return set()
+        if isinstance(stmt, ast.AugAssign):
+            return bind(_bound_names(stmt.target), stmt.value, tainted, keep=True)
+        if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.Delete)):
+            names = {name for t in write_targets(stmt) for name in assigned_names(t)}
+            return bind(names, assigned_value(stmt), tainted)
+        return tainted
+
+    if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        block(func.body, set())
+    return taint_of
+
+
+def is_identity_safe_call(call: ast.Call) -> bool:
+    """True for a call that only converts, tests or logs, and for a call on the node's own ``self.state`` / ``self.files``."""
+    if call_name(call) in IDENTITY_SAFE_CALLS:
+        return True
+    receiver = call.func.value if isinstance(call.func, ast.Attribute) else None
+    return (
+        isinstance(receiver, ast.Attribute)
+        and receiver.attr in DOOR_NAMES
+        and isinstance(receiver.value, ast.Name)
+        and receiver.value.id == 'self'
+    )
+
+
 def paired_values(target: ast.AST, value: ast.AST) -> Iterator[tuple]:
     """
     Yield ``(name, value)`` for each plain name an assignment binds.
@@ -655,6 +893,7 @@ class FileLint:
         self.global_unclosed()
         self.param_in_global()
         self.caller_write()
+        self.identity_persist()
         self.introspection()
         self.glb_pipetype()
         return sorted(self.findings, key=lambda f: (f.line, f.rule))
@@ -936,6 +1175,55 @@ class FileLint:
                 and sub.args[1].value in names
             ):
                 self.add('caller-write', sub, 'setattr of the caller: the caller is bound once by the engine')
+
+    # -------------------------------------------------------------------------
+    # identity-persist
+    # -------------------------------------------------------------------------
+
+    def identity_persist(self) -> None:
+        """
+        A caller identity that reaches anything a node keeps: a call, a container, an attribute, a return.
+
+        Whose data a node keeps is decided by the SERVER from the binding
+        (``self.state`` / ``self.files`` stamp the owner, plan 5.7); an identity
+        the node reads off ``self.caller`` keys nothing. Best-effort, per
+        function: names assigned from an identity field are followed in
+        statement order (a reassignment to anything else clears them); logging
+        and converting calls and calls on ``self.state`` / ``self.files`` are
+        not sinks.
+        """
+        for func in functions(self.tree):
+            taint_of = identity_taint(func)
+            for sub in own_nodes(func):
+                tainted = taint_of.get(id(sub), frozenset())
+                if isinstance(sub, ast.Call) and not is_identity_safe_call(sub):
+                    values = list(sub.args) + [k.value for k in sub.keywords]
+                    if any(reads_identity(v, tainted) for v in values):
+                        self.add(
+                            'identity-persist',
+                            sub,
+                            f'caller identity passed to {call_name(sub) or "a call"}(): '
+                            'keep per-owner data in self.state / self.files, which the server keys by owner',
+                        )
+                elif isinstance(sub, ast.Return) and sub.value is not None and reads_identity(sub.value, tainted):
+                    self.add(
+                        'identity-persist',
+                        sub,
+                        f'caller identity returned from {getattr(func, "name", "a lambda")}(): '
+                        'a key built from self.caller is a key the node chose; use self.state / self.files',
+                    )
+                for target in write_targets(sub):
+                    value = assigned_value(sub)
+                    if isinstance(target, ast.Subscript) and (
+                        reads_identity(target.slice, tainted) or (value is not None and reads_identity(value, tainted))
+                    ):
+                        self.add('identity-persist', sub, 'caller identity stored in a container: use self.state')
+                    elif isinstance(target, ast.Attribute) and value is not None and reads_identity(value, tainted):
+                        self.add(
+                            'identity-persist',
+                            sub,
+                            f'caller identity stored on .{target.attr}: use self.state / self.files',
+                        )
 
     # -------------------------------------------------------------------------
     # introspection

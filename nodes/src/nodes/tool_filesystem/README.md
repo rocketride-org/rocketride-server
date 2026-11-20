@@ -6,13 +6,14 @@ One node directory providing three RocketRide services — an agent file tool, a
 
 All three services operate on RocketRide file storage — the account-scoped store used
 by the platform and its client SDK `fs_*` methods. All paths are plain and relative to
-the task's **storage anchor**, which the task file provides: the owning user's file
-tree (`users/<client_id>/files/`) for development runs, or a task-specific subtree of
-the deployment team's storage (`teams/<teamId>/files/tasks/<projectId>/`) for deployed
-runs. Files written here are visible in the file browser and vice versa, and node
-behavior is identical in both modes. Identity and the anchor are resolved
-automatically from the running task (`rocketlib.getTask()`), never from the
-environment; no account configuration is needed on any of the three services.
+the **storage anchor** of the control the call runs under: the owning user's file
+tree (`users/<userId>/files/`) for a user-owned run, or a task-specific subtree of
+the owning team's storage (`teams/<teamId>/files/tasks/<projectId>/`) for a team-owned
+deployment. Files written here are visible in the file browser and vice versa, and node
+behavior is identical in both modes. Every operation goes through the node's
+`self.files`: the server decides whose files they are from its own record of the
+call's control, never from anything the engine or the node says, so no account
+configuration is needed on any of the three services.
 
 Three services share this node's code:
 
@@ -51,8 +52,9 @@ File Store Source (`filestore_source://`), the pipeline source:
 
 The File System service exposes the account file store to an agent as a set of
 callable tools, namespaced by the node id (an agent sees `tool_filesystem_1.read_file`).
-If no task identity is available or the account store fails to initialise, a warning is
-logged and **all** tool methods are hidden from the agent.
+A call the server cannot tie to a control (no owner, or an owner with no storage
+tree) is refused when the tool runs: the agent gets the server's reason as the tool's
+error, and the tool list itself is unchanged.
 
 Every operation is gated by a per-operation allow toggle. Read, write, list, mkdir, and
 stat are **on by default**; **delete is off by default**. Tools whose toggle is disabled
@@ -154,16 +156,17 @@ in the task's failed-object count.
 ### Storage location
 
 Files land under the configured storage backend (defaults to `~/.rocketlib/store/`).
-For the default filesystem backend the absolute path is the task's storage anchor
-plus the relative path:
+For the default filesystem backend the absolute path is the storage anchor of the
+control the call runs under, plus the relative path:
 
 ```text
-<store>/users/<client_id>/files/<path>                    # development runs
-<store>/teams/<teamId>/files/tasks/<projectId>/<path>     # deployed runs
+<store>/users/<userId>/files/<path>                       # a user-owned run
+<store>/teams/<teamId>/files/tasks/<projectId>/<path>     # a team-owned deployment
 ```
 
-The anchor comes from the task file the engine wrote at spawn; the node picks up
-the current task automatically, no configuration needed.
+The server picks the anchor for every request from its own record of the call's
+control; nothing the engine or the node sends names it, and no configuration is
+needed.
 
 ### Running the tests
 

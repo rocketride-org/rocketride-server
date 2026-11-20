@@ -313,6 +313,185 @@ def test_caller_writes_are_refused(tmp_path):
     assert rules(node) == ['caller-write', 'caller-write', 'caller-write']
 
 
+def test_a_caller_identity_reaching_what_a_node_keeps_is_refused(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def keys(self, session):
+                        owner = self.caller.userId
+                        self.store.put(f'{owner}:{session}', 1)
+                        self.cache[self.caller.orgId] = session
+                        self.last = owner
+                        return getattr(self.caller, 'teamId')
+
+                    def raw(self):
+                        return (getattr(self, '_caller', None) or {}).get('userId')
+            """
+        },
+    )
+    assert rules(node) == ['identity-persist'] * 5
+
+
+def test_only_the_nodes_own_doors_are_exempt(tmp_path):
+    # A client that happens to have a .files attribute is somebody else's storage
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def run(self):
+                        self.client.files.write('out.txt', self.caller.userId)
+                        self.files.write('out.txt', self.caller.userId)
+            """
+        },
+    )
+    assert rules(node) == ['identity-persist']
+
+
+def test_identity_taint_follows_statement_order(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                from rocketlib import debug
+
+
+                class IInstance:
+                    def cleared(self):
+                        owner = self.caller.userId
+                        debug(owner)
+                        owner = 'shared'
+                        self.store.put(owner, 1)
+
+                    def still_tainted(self):
+                        owner = 'shared'
+                        owner = self.caller.userId
+                        self.store.put(owner, 2)
+
+                    def in_a_branch(self, flag):
+                        owner = 'shared'
+                        if flag:
+                            owner = self.caller.userId
+                        self.store.put(owner, 3)
+            """
+        },
+    )
+    lines = (node / 'IInstance.py').read_text(encoding='utf-8').splitlines()
+    found = [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+    assert found == [('identity-persist', 'self.store.put(owner, 2)'), ('identity-persist', 'self.store.put(owner, 3)')]
+
+
+def test_identity_taint_through_a_loop_reaches_a_fixed_point_and_handlers_see_the_try_body(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def rotate(self):
+                        a = b = c = 'shared'
+                        for _ in range(4):
+                            self.store.put(a, 1)
+                            a = b
+                            b = c
+                            c = self.caller.userId
+
+                    def handled(self, risky):
+                        owner = 'shared'
+                        try:
+                            owner = self.caller.userId
+                            risky()
+                            owner = 'shared'
+                        except ValueError:
+                            self.store.put(owner, 2)
+                            owner = 'shared'
+                        self.store.put(owner, 3)
+            """
+        },
+    )
+    lines = (node / 'IInstance.py').read_text(encoding='utf-8').splitlines()
+    found = [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+    # The fourth pass writes the identity, and the handler can see it; both
+    # paths out of the try are clean again, so the last write is not reported
+    assert found == [
+        ('identity-persist', 'self.store.put(a, 1)'),
+        ('identity-persist', 'self.store.put(owner, 2)'),
+    ]
+
+
+def test_identity_taint_breaks_skip_the_loop_else_and_finally_sees_handler_states(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def broke(self, items):
+                        for _ in items:
+                            owner = self.caller.userId
+                            break
+                        else:
+                            owner = 'shared'
+                        self.store.put(owner, 1)
+
+                    def exhausted(self, items):
+                        owner = self.caller.userId
+                        for _ in items:
+                            pass
+                        else:
+                            owner = 'shared'
+                        self.store.put(owner, 2)
+
+                    def handled(self, risky):
+                        owner = 'shared'
+                        try:
+                            risky()
+                        except ValueError:
+                            owner = self.caller.userId
+                            risky()
+                            owner = 'shared'
+                        finally:
+                            self.store.put(owner, 3)
+                        self.store.put(owner, 4)
+            """
+        },
+    )
+    lines = (node / 'IInstance.py').read_text(encoding='utf-8').splitlines()
+    found = [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+    # The break leaves with the identity past the else; an exhausted loop runs
+    # its else; the finally can run partway through the handler, the code
+    # after the try only after the handler completed
+    assert found == [
+        ('identity-persist', 'self.store.put(owner, 1)'),
+        ('identity-persist', 'self.store.put(owner, 3)'),
+    ]
+
+
+def test_logging_and_the_doors_are_not_identity_sinks(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                from rocketlib import debug
+
+
+                class IInstance:
+                    def run(self, value):
+                        who = self.caller.userId
+                        debug(f'call from {who}')
+                        self.debug(str(who))
+                        if who == 'admin':
+                            self.state.put('last', value)
+                        with self.state.lock('series'):
+                            self.files.write('out.txt', who.encode())
+                        level = self.caller.traceLevel
+                        return level
+            """
+        },
+    )
+    assert LINT.lint_node(node) == []
+
+
 def test_gc_inspect_stack_and_sys_modules_are_refused(tmp_path):
     node = write_node(
         tmp_path,
@@ -861,7 +1040,18 @@ def test_a_conforming_node_is_clean(tmp_path):
 # =============================================================================
 
 
+#: Nodes that still key what they keep by the caller's identity, each with the
+#: one finding its move to self.state removes (plan 12; the stateful-node PRs
+#: after C.26). A node leaves this table in the PR that moves it: the test
+#: below fails as soon as the finding is gone and the entry is not.
+IDENTITY_PERSISTERS = {
+    'memory_persistent': ['memory_persistent/IInstance.py: identity-persist'],
+    'tool_laserdata_memory': ['tool_laserdata_memory/IInstance.py: identity-persist'],
+}
+
+
 @pytest.mark.parametrize('node', LINT.node_dirs(NODES_ROOT), ids=lambda p: p.name)
 def test_every_catalog_node_is_clean(node):
     findings = LINT.lint_node(node)
-    assert not findings, '\n'.join(str(f) for f in findings)
+    expected = IDENTITY_PERSISTERS.get(node.name, [])
+    assert [f'{f.path}: {f.rule}' for f in findings] == expected, '\n'.join(str(f) for f in findings)

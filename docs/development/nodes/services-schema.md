@@ -139,6 +139,26 @@ Each entry is one of:
   an agent wire the node up without handling the value itself. Set it on the
   node's own definition (a shared one describes the field's shape, the
   variable is per-node): `{"base": "vector.apikey", "env": "ROCKETRIDE_QDRANT_APIKEY"}`.
+- **`param`** — `"param": true` makes the property a per-call parameter: a
+  pipeline may expose it in its `parameters` map, and each call may then send
+  its own value, which the node reads from `self.settings` (never
+  `self.config`, which refuses it). It is legal on any leaf, a leaf inside a
+  selector branch, a selector itself (the call's value picks the branch its
+  settings resolve under) and a whole array (the caller sends the whole list;
+  each element is checked against the array's `item`). It is a load error on
+  a grouped subsection, inside an array item, and on a `constant`, `oauth2`,
+  `upload`, `secret` or `env` property. Whether a key should be a parameter
+  is a cost question: keep it configuration only when the node's `IGlobal`
+  builds something expensive from it (weights in memory, a connection pool, a
+  token that costs a network round trip, a subprocess, a listener); anything
+  cheap is a parameter. An alias inherits the flag from the definition it
+  names. The engine strips the flag and lists each parameter, with its
+  `path`, in the resolved schema's `params`.
+- **`tool`** — whether an LLM may set a parameter through a tool's input
+  schema. It defaults to the value of `param`, so `"tool": false` beside
+  `"param": true` is the only value ever written: callers may set the value,
+  an agent may not (safety switches, write or delete gates, whitelists,
+  budgets). `"tool": true` without `"param": true` is a load error.
 
 ---
 

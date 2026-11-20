@@ -287,7 +287,9 @@ class SubmitCommands(DAPConn):
                 try:
                     await task._send_data(_stamped({'subcommand': 'write', 'pipeId': pipe_id, 'data': data}))
                 except BaseException:
-                    await self._close_after_failure(task, _stamped({'subcommand': 'close', 'pipeId': pipe_id}))
+                    closing['close'] = await self._close_after_failure(
+                        task, _stamped({'subcommand': 'close', 'pipeId': pipe_id})
+                    )
                     raise
                 closed = await task._send_data(_stamped({'subcommand': 'close', 'pipeId': pipe_id}))
                 closed_body = dict(closed.get('body') or {})
@@ -306,13 +308,29 @@ class SubmitCommands(DAPConn):
 
         # Step 2: the request, unbounded: it ends when the pipeline answers
         # or fails. A caller that wants a bound streams through its own pipe
-        # and cancels it
+        # and cancels it. The binding is the control's on the engine from
+        # before its open to after its close (plan 5.7), including a cleanup
+        # close the bounded wait gave up on, which still runs on the engine
+        closing: Dict[str, Optional[asyncio.Future]] = {'close': None}
+        task.admit_binding(correlation_id, control.key)
         try:
             return await _round_trip()
         finally:
+            pending = closing['close']
+            if pending is not None and not pending.done():
+
+                def _closed(done: asyncio.Future) -> None:
+                    """The close the wait gave up on finished: its binding ends now."""
+                    if not done.cancelled():
+                        done.exception()
+                    task.end_binding(correlation_id)
+
+                pending.add_done_callback(_closed)
+            else:
+                task.end_binding(correlation_id)
             control.end_request()
 
-    async def _close_after_failure(self, task: Any, close: Dict[str, Any]) -> None:
+    async def _close_after_failure(self, task: Any, close: Dict[str, Any]) -> Optional[asyncio.Future]:
         """
         Close a pipe after a failed write, bounded, never raising.
 
@@ -323,12 +341,23 @@ class SubmitCommands(DAPConn):
         stops answering cannot hold the control's request slot forever. The
         close itself is shielded, so it still completes on the engine when
         the wait gives up.
+
+        Returns:
+            The close, when the wait gave up while it still runs (its binding
+            ends when it completes); None when it finished within the wait.
         """
         pipe_id = (close.get('arguments') or {}).get('pipeId')
+        sent = asyncio.ensure_future(task._send_data(close))
         try:
-            await asyncio.wait_for(asyncio.shield(task._send_data(close)), CONST_SUBMIT_CLOSE_SECONDS)
+            await asyncio.wait_for(asyncio.shield(sent), CONST_SUBMIT_CLOSE_SECONDS)
         except BaseException as exc:  # noqa: BLE001 - cleanup must not replace the original failure
             self.debug_message(f'submit(): closing pipe {pipe_id} after a failed write did not complete: {exc!r}')
+        if sent.done():
+            if not sent.cancelled():
+                # Retrieved here: a failed close was reported just above
+                sent.exception()
+            return None
+        return sent
 
     def _data_request(self, arguments: Dict[str, Any]) -> Dict[str, Any]:
         """One ``rrext_process`` request for the engine's data path."""

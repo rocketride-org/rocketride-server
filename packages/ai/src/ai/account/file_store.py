@@ -324,13 +324,12 @@ def _team_ids(account_info) -> 'set[str]':
 
 
 def validate_storage_root(root: str) -> str:
-    """Validate a task-file storage anchor and return it normalized.
+    """Validate an engine storage anchor and return it normalized.
 
-    The anchor is produced by trusted server code (``_build_task``) and
-    carried in the task file — but the subprocess feeds it back to us, so
-    validate shape defensively: a physical path of the form
-    ``users|teams|orgs/<id>/files[/<subtree>]`` built from path-safe
-    segments. Anything else raises ValueError.
+    The anchor is built by trusted server code (``storage_root_for``) from
+    identifiers that came in with a request, so validate shape defensively:
+    a physical path of the form ``users|teams|orgs/<id>/files[/<subtree>]``
+    built from path-safe segments. Anything else raises ValueError.
     """
     if not isinstance(root, str) or not root:
         raise ValueError('storage root must be a non-empty string')
@@ -341,6 +340,38 @@ def validate_storage_root(root: str) -> str:
         if not segment or segment in ('.', '..') or '\\' in segment or segment.startswith(('@', '=')):
             raise ValueError(f'Invalid storage root segment: {segment!r}')
     return '/'.join(segments)
+
+
+def storage_root_for(owner_kind: str, user_id: str, team_id: str, project_id: str) -> str:
+    """The storage anchor of a control's owner: where its nodes' plain paths resolve (plan 5.7).
+
+    A TEAM-owned run (a @team deploy) anchors in a task-specific subtree of
+    TEAM storage, so teammates can watch and replay it and two deployments
+    never share working storage; a USER-owned run (an interactive run, a
+    personal @me deploy) anchors in the owner's whole user tree, private and
+    never colliding with the team's run of the same project. Node-level paths
+    are identical in both.
+
+    Args:
+        owner_kind: ``'team'`` or ``'user'``.
+        user_id: The owning (or launching) user.
+        team_id: The owning team of a team-owned run.
+        project_id: The pipeline's short id.
+
+    Returns:
+        The validated root.
+
+    Raises:
+        ValueError: There is no owner to anchor in (an anonymous run), or an
+            identifier is not a path-safe segment.
+    """
+    if owner_kind == 'team':
+        if not team_id or not project_id:
+            raise ValueError('team-owned runs require a team_id and a project_id for their storage anchor')
+        return validate_storage_root(f'teams/{team_id}/files/tasks/{project_id}')
+    if not user_id:
+        raise ValueError('a run with no owner has no storage anchor')
+    return validate_storage_root(f'users/{user_id}/files')
 
 
 def _resolve_team_name(account_info, name: str) -> str:
@@ -399,11 +430,11 @@ def resolve_scope(
     """
     kind, ref, rest = parse_scope(normalized)
 
-    # -- Engine subprocess: most restricted — plain paths, no system trees ---
-    # Every path is relative to the task's storage anchor (chroot
-    # semantics): the task file's storage.root — the owner's whole tree for
-    # dev runs, a task-specific team subtree for deploy runs — so node-level
-    # paths are identical in both modes and can never leave the anchor.
+    # -- Engine (a node's self.files): most restricted — plain paths, no system trees
+    # Every path is relative to the binding owner's storage anchor (chroot
+    # semantics, storage_root_for): the owner's whole tree for dev runs, a
+    # task-specific team subtree for deploy runs — so node-level paths are
+    # identical in both modes and can never leave the anchor.
     if ctx.source == 'engine':
         if kind != 'own':
             raise PermissionError('Scoped (@) paths are not available in the engine context')
@@ -577,12 +608,13 @@ class FileStore:
             ctx: REQUIRED per-request identity (the handler's ctx, or
                  RequestContext.internal()/engine() for server subsystems) —
                  omission is a TypeError, not a silently-unauthorized store.
-            root: ENGINE contexts only — the storage anchor from the task
-                  file's ``storage.root``; every plain path the subprocess
-                  speaks resolves relative to it (chroot semantics), so dev
-                  and deploy runs use identical node-level paths. Validated
-                  by ``validate_storage_root``; forbidden for other
-                  identities (their anchor is their own namespace).
+            root: ENGINE contexts only — the storage anchor of the binding's
+                  owner (``storage_root_for``); every plain path a node's
+                  ``self.files`` speaks resolves relative to it (chroot
+                  semantics), so dev and deploy runs use identical
+                  node-level paths. Validated by ``validate_storage_root``;
+                  forbidden for other identities (their anchor is their own
+                  namespace).
         """
         if not client_id:
             raise ValueError('client_id is required')

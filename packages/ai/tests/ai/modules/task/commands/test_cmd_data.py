@@ -227,6 +227,35 @@ async def test_a_standalone_tool_frame_carries_the_config_and_an_attached_one_do
 
 
 @pytest.mark.asyncio
+async def test_a_binding_is_its_controls_from_before_its_first_frame_until_it_ends(catalog, engines, monkeypatch):
+    """A node's self.state/self.files name the binding by its correlationId: the engine resolves it from before the
+    open or the standalone tool call reaches the subprocess, and forgets it when the binding ends (plan 5.7).
+    """
+    seen, used = [], set()
+
+    async def send(self, request):
+        arguments = request['arguments']
+        used.add(self)
+        seen.append((arguments['subcommand'], self.binding_control(arguments['_caller']['correlationId'])))
+        if arguments.get('subcommand') == 'open':
+            return {'body': {'pipeId': 1, 'traceId': '1.1.7'}}
+        return {'body': {'ok': True}}
+
+    monkeypatch.setattr(TaskEngine, '_send_data', send)
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock())
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+
+    await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.control_id)
+    slot = await _opened(ts, conn)
+    await _frame(conn, subcommand='close', pipeId=slot)
+
+    assert seen == [('tool', control), ('open', control), ('close', control)]
+    assert all(engine._bindings == {} for engine in used)
+
+
+@pytest.mark.asyncio
 async def test_a_standalone_tool_frame_with_a_control_id_is_the_controls(catalog, engines, engine_log):
     """A 32-hex token on a standalone ``tool`` frame is a control id: the registry hit and the caller check, no resolution."""
     ts = _server()

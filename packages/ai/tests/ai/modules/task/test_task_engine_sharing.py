@@ -94,6 +94,7 @@ class _View:
         self._defaults = DEFAULTS[provider]
         self._values = {**self._defaults, **(config or {})}
         self.param_keys = frozenset(PARAMS.get(provider, ()))
+        self.param_paths = self.param_keys
 
     def to_dict(self):
         return dict(self._values)
@@ -106,6 +107,9 @@ class _View:
 
     def path_of(self, key):
         return key
+
+    def leaf_path(self, key):
+        return key if key in self._values else None
 
     def descriptor_of(self, key):
         return {'type': TYPES.get(type(self._defaults.get(key)), 'string')}
@@ -1845,19 +1849,17 @@ def test_every_launch_gets_its_own_engine_id_and_the_wire_trace_id_names_it():
     assert first.trace_ref(7) == '1.3.7'
 
 
-def test_a_cross_user_engine_names_no_user(monkeypatch, tmp_path):
-    """S13: the identity block names a user only on a (hash, owner) engine."""
+def test_no_engine_names_a_user(monkeypatch, tmp_path):
+    """S13, plan 5.7: no task file names an identity or a storage anchor, shared or private."""
     monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
     pipeline = _pipeline()
 
     shared = _engine(shared=True, pipeline=pipeline)._build_task(pipeline)
     private = _engine(shared=False, pipeline=pipeline)._build_task(pipeline)
 
-    assert shared['identity'] == {'userId': '', 'teamId': '', 'orgId': ''}
-    assert shared['storage'] == {'root': ''}
     assert shared['config']['pipelineTraceLevel'] == 'none'
-    assert private['identity'] == {'userId': 'user-a', 'teamId': 'team-1', 'orgId': 'org-1'}
-    assert private['storage'] == {'root': 'users/user-a/files'}
+    for task_file in (shared, private):
+        assert 'identity' not in task_file and 'storage' not in task_file
 
 
 @pytest.mark.asyncio

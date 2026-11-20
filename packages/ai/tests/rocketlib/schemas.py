@@ -29,8 +29,9 @@ Every leaf carries a dotted ``path``; a selector is an enum keyed by value whose
 branches resolve at the selector's own level; a leaf referenced by the identical
 specifier in every branch is hoisted (its ``path`` is the parent's, and it is
 still emitted inside each branch); ``params`` is the flat list of
-self-contained descriptors for the ``param``-flagged leaves; ``capabilities`` is
-the PROTOCOL_CAPS int bitmask.
+self-contained descriptors for the ``param``-flagged leaves (the engine strips
+the flag from the leaf itself, so the descriptors are the one record of it);
+``capabilities`` is the PROTOCOL_CAPS int bitmask.
 """
 
 from __future__ import annotations
@@ -161,7 +162,7 @@ DEPTH_ESTIMATE: Dict[str, Any] = {
         _leaf('type', 'type', type='constant', default='depth_estimate'),
         _leaf('model', 'model', type='string', default='depth-anything-v2'),
         _leaf('revision', 'revision', type='string', default='main'),
-        _leaf('maxEdge', 'maxEdge', type='integer', default=640, minimum=64, maximum=4096, param=True),
+        _leaf('maxEdge', 'maxEdge', type='integer', default=640, minimum=64, maximum=4096),
         _leaf('apikey', 'apikey', type='string', default='${ROCKETRIDE_DEPTH_APIKEY}'),
         {
             'name': 'tuning',
@@ -180,7 +181,82 @@ DEPTH_ESTIMATE: Dict[str, Any] = {
             'minimum': 64,
             'maximum': 4096,
             'default': 640,
+            'tool': True,
         }
+    ],
+}
+
+
+# ==== Detector: a selector param, branch-leaf params, arrays (plan 5.1) =====
+
+#: The hoisted threshold: the identical specifier in every branch.
+_CRITICAL = _leaf('criticalThreshold', 'criticalThreshold', type='number', default=3.0, minimum=0.5, maximum=20.0)
+
+#: A selector that is itself a parameter, with branch-specific parameter
+#: leaves (two branches name theirs ``sensitivity`` at different paths), a
+#: branch-specific leaf that is configuration, a hoisted parameter, a scalar
+#: array parameter and an array whose item is a group of fields.
+DETECTOR: Dict[str, Any] = {
+    'title': 'Detector',
+    'protocol': 'detector://',
+    'capabilities': 0,
+    'properties': [
+        _leaf('type', 'type', type='constant', default='detector'),
+        {
+            'name': 'method',
+            'path': 'method',
+            'type': 'string',
+            'title': 'Method',
+            'default': 'z_score',
+            'enum': {
+                'z_score': {
+                    'title': 'Z-Score',
+                    'properties': [
+                        _leaf('sensitivity', 'z_score.sensitivity', type='number', default=2.0, minimum=0.1),
+                        _leaf('windowSize', 'z_score.windowSize', type='integer', default=100, minimum=10),
+                        _CRITICAL,
+                    ],
+                },
+                'iqr': {
+                    'title': 'IQR',
+                    'properties': [
+                        _leaf('sensitivity', 'iqr.sensitivity', type='number', default=1.5, minimum=0.1),
+                        _leaf('quantiles', 'iqr.quantiles', type='integer', required=True),
+                        _CRITICAL,
+                    ],
+                },
+            },
+        },
+        _leaf('metric', 'metric', type='string', default='value'),
+        {
+            'name': 'frames',
+            'path': 'frames',
+            'type': 'array',
+            'default': [],
+            'item': {'name': 'frame', 'path': 'frames[].frame', 'type': 'integer', 'minimum': 0},
+        },
+        {
+            'name': 'rules',
+            'path': 'rules',
+            'type': 'array',
+            'default': [],
+            'item': {
+                'name': 'rule',
+                'properties': [
+                    {'name': 'field', 'path': 'rules[].rule.field', 'type': 'string', 'required': True},
+                    {'name': 'limit', 'path': 'rules[].rule.limit', 'type': 'number', 'maximum': 100},
+                ],
+            },
+        },
+    ],
+    'params': [
+        {'field': 'method', 'type': 'string', 'enum': ['z_score', 'iqr'], 'default': 'z_score', 'tool': True},
+        {'field': 'criticalThreshold', 'type': 'number', 'default': 3.0, 'tool': True},
+        {'field': 'z_score.sensitivity', 'type': 'number', 'default': 2.0, 'tool': True},
+        {'field': 'z_score.windowSize', 'type': 'integer', 'default': 100, 'tool': True},
+        {'field': 'iqr.sensitivity', 'type': 'number', 'default': 1.5, 'tool': True},
+        {'field': 'frames', 'type': 'array', 'default': [], 'tool': False},
+        {'field': 'rules', 'type': 'array', 'default': [], 'tool': True},
     ],
 }
 

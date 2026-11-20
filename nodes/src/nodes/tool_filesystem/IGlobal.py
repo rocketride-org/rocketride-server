@@ -22,17 +22,16 @@
 # =============================================================================
 
 """
-File system tool node - global (shared) state.
+File system tool node - global (per control) state.
 
-Resolves the account identity and the storage anchor from the TASK FILE the
-engine published (``rocketlib.getTask()``: the ``identity`` and ``storage``
-blocks, see task_engine._build_task) and builds a single ``FileStore``
-rooted at that anchor - the owning user's tree
+Holds the control's configuration only: the per-operation allow-flags and the
+compiled path whitelist IInstance enforces before every tool call, and the
+sink settings. The files themselves are never opened here: every operation
+goes through the instance's ``self.files`` (plan 5.7), the store the SERVER
+roots at the calling binding's owner tree - the owning user's tree
 (``users/<userId>/files/``) for development runs, a task-specific team
-subtree (``teams/<teamId>/files/tasks/<projectId>/``) for deployed runs -
-so node-level paths are identical in both modes. The instance exposes
-per-operation allow-flags and a path whitelist that IInstance enforces before
-every tool call.
+subtree (``teams/<teamId>/files/tasks/<projectId>/``) for deployed runs - so
+node-level paths are identical in both modes and no identity is read here.
 
 One IGlobal serves two definitions: the agent tool (services.tool.json, the
 allow flags) and the pipeline sink (services.store.json, the target directory
@@ -50,7 +49,6 @@ import re
 from collections.abc import Mapping
 from enum import IntEnum
 
-from ai.account.store import Store
 from rocketlib import IGlobalBase, warning
 
 
@@ -69,8 +67,6 @@ class OnConflict(IntEnum):
 class IGlobal(IGlobalBase):
     """Global state for tool_filesystem."""
 
-    client_id: str | None = None
-    file_store: object | None = None  # ai.account.file_store.FileStore
     allow_read: bool = True
     allow_write: bool = True
     allow_list: bool = True
@@ -100,30 +96,6 @@ class IGlobal(IGlobalBase):
             self.url_expires_in,
             self.on_conflict,
         ) = self._sink_config(cfg)
-
-        try:
-            # Engine identity: this node runs INSIDE the engine subprocess
-            # with no account session, and its paths come from LLM tool
-            # calls - so it gets the most restricted context: plain paths
-            # only, every @/Team, @/Org and @/User path and reserved subtree
-            # (.logs, .deployments) rejected by the store. It must never
-            # hold an internal identity (that would let a pipeline address
-            # any team's storage unchecked). Identity and the storage anchor
-            # (the owner's tree for dev runs, a task-specific team subtree
-            # for deploy runs) come from the task file the engine published
-            # via rocketlib.getTask() - never the environment - and the
-            # store resolves them itself, so this node needs no plumbing.
-            self.file_store = Store.engine_file_store()
-            self.client_id = getattr(self.file_store, '_client_id', None)
-        except Exception as e:
-            warning(f'tool_filesystem: failed to initialise FileStore: {e}')
-            self.client_id = None
-            self.file_store = None
-
-        if self.file_store is None:
-            warning(
-                'tool_filesystem: no running task with an identity (rocketlib.getTask); tool methods will be disabled. This usually means the node is running outside the task engine.'
-            )
 
     @staticmethod
     def _build_path_patterns(cfg: Mapping) -> list[re.Pattern]:
@@ -156,8 +128,6 @@ class IGlobal(IGlobalBase):
         return target_dir, emit_url, url_expires_in, on_conflict
 
     def endGlobal(self) -> None:
-        self.client_id = None
-        self.file_store = None
         self.path_patterns = []
         self.target_dir = 'output/'
         self.emit_url = False

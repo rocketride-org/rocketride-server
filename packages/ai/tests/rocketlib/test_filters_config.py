@@ -26,18 +26,19 @@
 
 from __future__ import annotations
 
+import copy
 from types import SimpleNamespace
 
 import pytest
 import rocketlib.engine
 from rocketlib.config import ConfigError, ConfigView, NodeInfo
-from rocketlib.filters import IGlobalBase, IInstanceBase, IValidatorBase
+from rocketlib.filters import NO_CALLER, Caller, IGlobalBase, IInstanceBase, IValidatorBase, freeze_caller
 
-from tests.rocketlib.schemas import CAP_GPU, DEPTH_ESTIMATE
+from tests.rocketlib.schemas import CAP_GPU, DEPTH_ESTIMATE, DETECTOR
 
 # ==== Fixtures ===============================================================
 
-SCHEMAS = {'depth_estimate': DEPTH_ESTIMATE}
+SCHEMAS = {'depth_estimate': DEPTH_ESTIMATE, 'detector': DETECTOR}
 
 
 @pytest.fixture(autouse=True)
@@ -203,36 +204,127 @@ class TestInstanceSettings:
         assert glb.counter == 5
         assert IInstanceBase.IGlobal is None
 
-    def test_caller_and_cache_default_to_none_on_the_base(self):
-        assert IInstanceBase._caller is None
+    def test_no_caller_until_the_engine_binds_one(self):
         assert IInstanceBase._settings is None
-        assert _Instance(_Global())._caller is None
-
-    def test_cache_survives_caller_cleared_at_putpipe(self):
         inst = _Instance(_Global())
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}}
-        cached = inst.settings
-        inst._caller = None
-        assert inst.settings is cached
-        assert inst.settings.maxEdge == 1024
+        assert inst._caller is None
+        assert inst.caller is NO_CALLER
+        assert inst.caller.params == {}
 
-    def test_cache_returned_while_not_reset(self):
+    def test_settings_are_computed_once_per_binding(self):
         inst = _Instance(_Global())
         inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}}
         assert inst.settings is inst.settings
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 256}}}
         assert inst.settings.maxEdge == 1024
 
-    def test_cache_reset_by_a_new_stamp(self):
+    def test_a_selector_param_reresolves_settings(self):
+        glb = _Global('detector', node_id='detector_1', conn_config={'iqr': {'quantiles': 4}})
+        inst = _Instance(glb, node_id='detector_1')
+        inst._caller = {'params': {'detector_1': {'method': 'iqr', 'iqr.sensitivity': 0.5}}}
+        assert (inst.settings.method, inst.settings.sensitivity, inst.settings.quantiles) == ('iqr', 0.5, 4)
+        # The control's IGlobal still answers its own branch
+        assert glb._resolved().method == 'z_score'
+        with pytest.raises(ConfigError, match='"method" is a parameter'):
+            glb.config.method
+
+    def test_a_param_the_call_cannot_reach_fails_at_read(self):
+        glb = _Global('detector', node_id='detector_1', conn_config={'iqr': {'quantiles': 4}})
+        inst = _Instance(glb, node_id='detector_1')
+        inst._caller = {'params': {'detector_1': {'iqr.sensitivity': 0.5}}}
+        with pytest.raises(ConfigError, match='under a branch this call does not select'):
+            inst.settings
+
+
+class TestCaller:
+    """``self.caller``: bound once by the engine, frozen, read-only (plan 4.1 rule 7)."""
+
+    ENVELOPE = {
+        'controlId': 'c' * 32,
+        'userId': 'user-1',
+        'teamId': 'team-1',
+        'orgId': 'org-1',
+        'address': 'acme.detect.webhook',
+        'rung': 'spec',
+        'traceLevel': 'none',
+        'correlationId': 'r' * 32,
+        'params': {'depth_estimate_1': {'maxEdge': 1024}, 'chunker_1': {'tags': ['a']}},
+        'env': {'ROCKETRIDE_DEPTH_APIKEY': 'sk-1'},
+        'config': [{'model': 'tiny'}],
+    }
+
+    def _bound(self) -> _Instance:
         inst = _Instance(_Global())
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 1024}}}
-        assert inst.settings.maxEdge == 1024
-        inst._caller = {'params': {'depth_estimate_1': {'maxEdge': 256}}}
-        inst._settings = None
-        assert inst.settings.maxEdge == 256
-        inst._caller = None
-        inst._settings = None
-        assert inst.settings.maxEdge == 640
+        inst._caller = copy.deepcopy(self.ENVELOPE)
+        return inst
+
+    def test_frozen_fields(self):
+        caller = self._bound().caller
+        assert isinstance(caller, Caller)
+        assert (caller.userId, caller.teamId, caller.orgId, caller.rung) == ('user-1', 'team-1', 'org-1', 'spec')
+        assert (caller.address, caller.traceLevel) == ('acme.detect.webhook', 'none')
+        assert caller.params['depth_estimate_1']['maxEdge'] == 1024
+        assert caller.env['ROCKETRIDE_DEPTH_APIKEY'] == 'sk-1'
+        # The engine's config list is the engine's: it is not part of the caller
+        assert not hasattr(caller, 'config')
+
+    def test_a_second_write_raises(self):
+        inst = self._bound()
+        with pytest.raises(AttributeError, match='bound once'):
+            inst._caller = {'userId': 'someone-else'}
+        with pytest.raises(AttributeError, match='bound once'):
+            inst._caller = None
+        assert inst.caller.userId == 'user-1'
+
+    def test_every_assignment_raises(self):
+        caller = self._bound().caller
+        with pytest.raises(AttributeError):
+            caller.userId = 'x'
+        with pytest.raises(TypeError):
+            caller.params['depth_estimate_1'] = {}
+        with pytest.raises(TypeError):
+            caller.params['depth_estimate_1']['maxEdge'] = 1
+        with pytest.raises(TypeError):
+            caller.env['ROCKETRIDE_DEPTH_APIKEY'] = 'stolen'
+        with pytest.raises(AttributeError):
+            del self._bound()._caller
+
+    def test_the_caller_is_a_private_copy(self):
+        envelope = copy.deepcopy(self.ENVELOPE)
+        inst = _Instance(_Global())
+        inst._caller = envelope
+        envelope['userId'] = 'changed'
+        envelope['params']['depth_estimate_1']['maxEdge'] = 64
+        envelope['params']['chunker_1']['tags'].append('b')
+        assert inst.caller.userId == 'user-1'
+        assert inst.caller.params['depth_estimate_1']['maxEdge'] == 1024
+        assert inst.caller.params['chunker_1']['tags'] == ('a',)
+
+    def test_nested_params_are_read_only_at_every_depth(self):
+        frozen = freeze_caller({'params': {'n': {'items': [{'value': 1}], 'limits': {'max': 2}}}})
+        with pytest.raises(TypeError):
+            frozen.params['n']['items'][0]['value'] = 2
+        with pytest.raises(TypeError):
+            frozen.params['n']['limits']['max'] = 3
+        with pytest.raises(AttributeError):
+            frozen.params['n']['items'].append({'value': 3})
+        assert frozen.params['n']['items'][0]['value'] == 1
+
+    def test_frozen_arrays_and_objects_still_reach_settings(self):
+        glb = _Global('detector', node_id='detector_1', conn_config={'iqr': {'quantiles': 4}})
+        inst = _Instance(glb, node_id='detector_1')
+        inst._caller = {'params': {'detector_1': {'frames': [1, 2], 'rules': [{'field': 'cpu', 'limit': 9}]}}}
+        assert inst.settings.frames == [1, 2]
+        assert inst.settings.rules == [{'field': 'cpu', 'limit': 9}]
+
+    def test_freezing_is_idempotent_and_typed(self):
+        frozen = freeze_caller(self.ENVELOPE)
+        assert freeze_caller(frozen) is frozen
+        assert frozen == freeze_caller(copy.deepcopy(self.ENVELOPE))
+        with pytest.raises(TypeError):
+            freeze_caller(['not', 'a', 'mapping'])
+
+    def test_settings_read_the_frozen_params(self):
+        assert self._bound().settings.maxEdge == 1024
 
     def test_settings_never_refuse(self):
         inst = _Instance(_Global(conn_config={'apikey': 'sk-control'}))

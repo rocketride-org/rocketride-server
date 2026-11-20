@@ -1,8 +1,8 @@
 # anomaly_detector
 
 A RocketRide filter node that monitors numeric text or document metadata and
-marks statistically unusual values. Pick it when a pipeline needs a rolling,
-per-run check for outliers rather than a fixed rule for every value.
+marks statistically unusual values. Pick it when a pipeline needs a rolling
+check for outliers, per series, rather than a fixed rule for every value.
 
 ## What it does
 
@@ -13,10 +13,13 @@ for changing measurements whose usual range must be learned from recent data,
 instead of a rule-based validation node that compares each item against a
 known limit.
 
-The detector is created once per pipeline execution and shares one
-thread-safe, fixed-size history across its instances. Each value is evaluated
-against the existing history and only then added to it, so the history is
-discarded when the run ends. This node is experimental.
+Values belong to series: one series by default, or one per value of a
+metadata field you name. Each series keeps its own fixed-size history in the
+node's state, outside the engine, so it survives from one call to the next
+and every replica that serves the pipeline scores the series from the same
+history; a history nobody adds to expires with the pipeline's idle timeout.
+Each value is evaluated against the existing history and only then added to
+it. This node is experimental.
 
 ## Lanes
 
@@ -42,6 +45,22 @@ Start with the profile whose kind of change you need to detect, then point
 are conservative starting points; every method needs a warm-up period before
 it can identify an outlier.
 
+Every setting is a per-call parameter: a pipeline that exposes it lets each
+call choose the method, sensitivity, window size, thresholds, metric field,
+series and series field without starting another run; the configured values
+are the defaults. A call that
+switches the method scores against the same history, so one series can be
+watched with z-score and IQR alike.
+
+### Series and series field
+
+Leave **Series field** empty to keep every value in one series named by
+**Series** (`default` unless a call or the configuration names another). Set
+it to a metadata key, such as `host`, to give each value of that key its own
+history: documents from `web-1` and `web-2` are then scored against their own
+past, never each other's. Text input, and documents without the key, use the
+**Series** value.
+
 ### Detection method and sensitivity
 
 Choose `z_score` when distance in standard deviations is meaningful, `iqr`
@@ -53,9 +72,11 @@ from the window standard deviation.
 
 ### Window size
 
-**Window size** retains 10 to 10,000 recent values, with 100 by default. Use a
-larger window for a stable long-term baseline and a smaller one when the normal
-level changes quickly. Z-Score and Rolling Average need at least two existing
+**Window size** retains 10 to 10,000 recent values per series, with 100 by
+default. Use a larger window for a stable long-term baseline and a smaller one
+when the normal level changes quickly. A call with a smaller window than the
+stored history keeps only the newest values, so shrinking it forgets the
+oldest ones for every later call. Z-Score and Rolling Average need at least two existing
 values; IQR needs four. Before that, a value is returned as `normal` with
 `insufficient data`, so a very large window does not delay the minimum
 warm-up but does make the baseline slower to adapt.

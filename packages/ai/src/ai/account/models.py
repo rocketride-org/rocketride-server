@@ -238,9 +238,10 @@ class RequestContext:
 
     Attributes:
         account_info: The authenticated user's AccountInfo.  None only for
-                      pre-auth commands (``on_auth``) and for engine-subprocess
-                      contexts (``RequestContext.engine()`` — no account exists
-                      in that process; the storage layer sandboxes it instead).
+                      pre-auth commands (``on_auth``) and for engine contexts
+                      (``RequestContext.engine()``, a node's ``self.files`` —
+                      no account exists for a node; the storage layer
+                      sandboxes it instead).
         conn_id:      Stable identifier for the originating client connection,
                       e.g. ``"orch-1:4527"`` (pod mode) or ``"conn-5"`` (OSS).
                       Used to scope and clean up per-connection resources.
@@ -254,9 +255,10 @@ class RequestContext:
     source: str = 'local'
 
     # ── Additions on this branch (see MERGE NOTE above) ──────────────────────
-    # source == 'engine' marks an ENGINE-SUBPROCESS context (tool nodes): no
-    # account exists in that process and its paths originate from LLM tool
-    # calls, so the storage layer sandboxes it to plain user-scope paths.
+    # source == 'engine' marks an ENGINE context (a node's self.files, built
+    # by the server for a binding): no account exists for a node and its
+    # paths originate from LLM tool calls, so the storage layer sandboxes it
+    # to plain paths under the binding owner's anchor.
 
     @classmethod
     def internal(cls, subsystem: str) -> 'RequestContext':
@@ -283,17 +285,20 @@ class RequestContext:
         )
 
     @classmethod
-    def engine(cls, client_id: str) -> 'RequestContext':
-        """Identity for engine-subprocess tool nodes (most restricted).
+    def engine(cls, client_id: str, conn_id: Optional[str] = None) -> 'RequestContext':
+        """Identity for a node's ``self.files``, built by the server for a binding (most restricted).
 
-        No account exists in the subprocess and paths come from LLM tool
-        calls: the storage layer allows plain user-scope paths only — every
-        ``@`` scope and reserved subtree is rejected.
+        No account exists for a node and its paths come from LLM tool calls:
+        the storage layer allows plain user-scope paths only — every ``@``
+        scope and reserved subtree is rejected.
 
         Args:
-            client_id: The task owner's client id (path scoping only).
+            client_id: The binding owner's client id (path scoping only).
+            conn_id: Whose file handles these are (the engine they were
+                opened from, so they close with it); ``engine:<client_id>``
+                when not given.
         """
-        return cls(account_info=None, conn_id=f'engine:{client_id}', source='engine')
+        return cls(account_info=None, conn_id=conn_id or f'engine:{client_id}', source='engine')
 
 
 # =============================================================================

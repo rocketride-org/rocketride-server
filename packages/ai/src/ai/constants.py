@@ -185,6 +185,15 @@ CONST_CHANNEL_DIAL_WINDOW = 60.0  # seconds
 CONST_CHANNEL_REDIAL_DELAY = 5.0  # seconds before dialling again after a dial that failed
 
 # =============================================================================
+# Node state and files (self.state / self.files over the task channel, plan 5.7)
+# =============================================================================
+CONST_STATE_MAX_KEY_LENGTH = 512  # characters in a node's own state key
+CONST_STATE_MAX_VALUE_BYTES = 512 * 1024  # bytes of one state value, as JSON
+CONST_STATE_MAX_TTL_SECONDS = 30 * 24 * 3600  # the longest expiry a node may ask for
+CONST_STATE_MAX_LEASE_SECONDS = 300.0  # the longest a node may hold a state lock unreleased
+CONST_STATE_MAX_ENTRIES = 100_000  # values the in-process (OSS) state store keeps
+
+# =============================================================================
 # HTTP/Stream Configuration
 # =============================================================================
 CONST_HTTP_CHUNK_SIZE = 64 * 1024  # bytes per chunk for streaming data (64KB)

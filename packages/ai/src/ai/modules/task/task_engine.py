@@ -93,7 +93,7 @@ from .engine_key import CONST_CATALOG_NODE_PREFIX, IndexMap, engine_content, ind
 from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
-from . import run_log
+from . import node_doors, run_log
 from .task_metrics import TaskMetrics, TraceUsage
 
 # Serialized-size cap for one trace payload. Trace (and its derived flow)
@@ -154,6 +154,7 @@ def cap_trace_payload(trace: Any) -> Any:
 
 
 if TYPE_CHECKING:
+    from .task_control import TaskControl
     from .task_server import TaskServer
 
 
@@ -236,15 +237,13 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'PROCESSOR_IDENTIFIER',
         'PROCESSOR_LEVEL',
         'PROCESSOR_REVISION',
-        # RocketRide services the child reaches itself: the object store
-        # behind tool_filesystem (Store.create reads the URL and secret), the
-        # public address + signing key FileStore.get_url needs to mint fetch
-        # URLs the engine will accept, the child's own web server CORS policy,
-        # and the OAuth broker the Google/Microsoft nodes dial directly.
-        'RR_STORE_URL',
-        'RR_STORE_SECRET_KEY',
-        'RR_BASE_URL',
-        'RR_SIGNING_KEY',
+        # RocketRide services the child reaches itself: its own web server's
+        # CORS policy and the OAuth broker the Google/Microsoft nodes dial
+        # directly. The object store, its secret, the public address and the
+        # fetch-URL signing key stay behind: a node's files go through the
+        # server (self.files, plan 5.7), which signs its links, and so does a
+        # node's state, whose store (Redis on a hosted engine) the child never
+        # reaches either.
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
         # Operator opt-in that makes task processes hide their /proc entries
@@ -286,10 +285,9 @@ CONST_SUBPROCESS_ENV_PREFIXES = (
     # Locale and XDG base dirs
     'LC_',
     'XDG_',
-    # The S3 store backend authenticates through boto3's environment chain —
-    # static keys, or the web-identity role Kubernetes injects — and the
-    # child opens the store itself (tool_filesystem), so it needs the same
-    # AWS identity the engine has.
+    # boto3's environment chain (static keys, or the web-identity role
+    # Kubernetes injects), which the AWS nodes fall back to when their own
+    # config names no keys
     'AWS_',
     # ML runtime caches and thread tuning
     'HF_',
@@ -806,8 +804,8 @@ class TaskEngine(DAPBase):
             pipeline: Complete pipeline configuration (placeholders unexpanded)
             launch_args: Launch configuration parameters (``name``, ``args``)
             launch_type: Task creation mode (launch/attach)
-            shared: True for a cross-user engine: its task-file identity names
-                no user and it gets no storage anchor (S13)
+            shared: True for a cross-user engine: it has no single owner, so
+                unclaimed work on it reaches no one's state or files (S13)
             threads: The engine's thread count (policy outside @spec)
             trace_level: The engine's DEFAULT trace level for work outside any
                 binding (``'none'`` on a cross-user engine, the starting
@@ -845,6 +843,12 @@ class TaskEngine(DAPBase):
         # inactivity timer, or at once when the last hold drops. A ttl-0
         # holder (a listener source) keeps the engine from aging at all.
         self._holds: Dict[str, int] = {}
+
+        # Bindings: the server-minted correlationId of every binding EaaS has
+        # sent this engine and not yet ended, with its control's key. It is
+        # recorded BEFORE the first frame goes out, so a node's self.state and
+        # self.files reach their owner from the open on (plan 5.7)
+        self._bindings: Dict[str, str] = {}
 
         # Why the engine is unavailable to its holders (an ops stop), or None
         self.unavailable_reason: Optional[str] = None
@@ -979,8 +983,8 @@ class TaskEngine(DAPBase):
         # start; None if logging setup failed, which must never break the run).
         # run_kind separates the dev and deploy continua; the deploy feature's
         # trusted dispatch path sets 'deploy', everything else logs as 'dev'.
-        # Both classifications gate storage anchors, run-log scoping, and
-        # token ownership downstream — reject anything outside the closed
+        # Both classifications gate run-log scoping and token ownership
+        # downstream — reject anything outside the closed
         # vocabulary HERE, the one construction choke point, so a bad value
         # can never pick a storage scope. ('' trigger = an interactive dev
         # run: only the trusted dispatch stamps manual/schedule/process.)
@@ -1237,10 +1241,9 @@ class TaskEngine(DAPBase):
         :func:`filter_subprocess_env` (runtime baseline + ROCKETRIDE_* + the
         services the child reaches itself + operator opt-ins). Anything the
         engine process was started with that the allowlist does not name —
-        identity provider, platform database, encryption keys — stays behind.
-        Note the allowlist deliberately includes RR_STORE_SECRET_KEY,
-        RR_SIGNING_KEY and AWS_*: the child opens the object store and mints
-        fetch URLs itself, so pipeline code can read those values.
+        identity provider, platform database, encryption keys, the object
+        store and its signing key, the state store — stays behind: a node's
+        files and state go through the server (plan 5.7).
 
         Credential hygiene for the RocketRide cloud DB path (these live in the
         ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
@@ -1253,8 +1256,9 @@ class TaskEngine(DAPBase):
 
         Children only ever get the DSNs resolved here, for pipelines
         that actually contain one of the DB nodes. Identity is NOT delivered
-        through the environment (it rides the task file's 'identity' block —
-        the ROCKETRIDE_* env namespace is caller-influenced by design).
+        through the environment (the ROCKETRIDE_* env namespace is
+        caller-influenced by design): it rides each binding's server-set
+        caller context, and what persists is stamped by the server (plan 5.7).
         """
         subprocess_env = filter_subprocess_env(os.environ)
 
@@ -1412,19 +1416,9 @@ class TaskEngine(DAPBase):
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
         }
 
-        # Trusted identity for in-process tools (surfaced to nodes as
-        # IEndpoint.endpoint.jobConfig['identity']). Rides the 0600 task
-        # file — point-to-point, never the environment, so caller env can
-        # never pollute it and descendants never inherit it. It names the
-        # engine's owner only where one exists (S13): a cross-user engine has
-        # no single user, so its block is empty and nodes read the caller
-        # from the per-binding context.
-        identity = (
-            {'userId': '', 'teamId': '', 'orgId': ''}
-            if self.shared
-            else {'userId': self.client_id, 'teamId': self.team_id, 'orgId': self.org_id}
-        )
-
+        # No identity and no storage anchor ride the task file: whose state and
+        # files a node reaches is decided by the server per binding, from the
+        # control that owns it (self.state / self.files, plan 5.7)
         return {
             'config': config,
             'paths': {'base': data_path},
@@ -1433,50 +1427,7 @@ class TaskEngine(DAPBase):
             # never enters the task file
             'taskId': self.engine_key,
             'type': 'pipeline',
-            'identity': identity,
-            # Storage anchor for in-process tools (chroot semantics): node
-            # paths are always plain and relative, and resolve under this
-            # root — dev runs get the owner's whole tree (today's behavior);
-            # deploy runs get a task-specific subtree of TEAM storage so a
-            # deployed task has no user dependency and concurrent
-            # deployments never share working storage. Node-level paths are
-            # therefore identical in both modes.
-            'storage': {
-                'root': self._storage_root(),
-            },
         }
-
-    def _storage_root(self) -> str:
-        """The task's storage anchor (see the 'storage' task-file block).
-
-        Validated HERE so a malformed component — project_id is
-        client-supplied and only uuid-defaulted when absent — fails the
-        launch with a clear error instead of surfacing later inside the
-        subprocess as tool_filesystem disabling itself mid-run.
-        """
-        from ai.account.file_store import validate_storage_root
-
-        # A cross-user engine has no owner whose tree it could anchor in:
-        # per-caller storage rides the binding context (C.8), never the engine
-        if self.shared:
-            return ''
-
-        # A TEAM-owned run (a @team deploy) anchors in the team tree so
-        # teammates can watch/replay; a USER-owned run (an interactive .use or
-        # a personal @me deploy) anchors in the owner's user tree — private and
-        # never colliding with the team's @team run of the same project.
-        if self._owner_kind == 'team':
-            if not self.team_id:
-                raise ValueError('team-owned runs require a team_id for their storage anchor')
-            return validate_storage_root(f'teams/{self.team_id}/files/tasks/{self.project_id}')
-        # Anonymous dev runs (client_id='' — OSS/standalone launches) carry
-        # NO anchor instead of failing the launch: identity.userId rides
-        # empty too, so engine_file_store() yields None and the storage
-        # tools disable themselves — the same degradable posture as the
-        # run-log writer ('users//files' must never be composed).
-        if not self.client_id:
-            return ''
-        return validate_storage_root(f'users/{self.client_id}/files')
 
     async def _write_task_file(self, pipeline: Dict[str, Any], env: Optional[Dict[str, str]] = None) -> str:
         """
@@ -1874,6 +1825,65 @@ class TaskEngine(DAPBase):
         """
         return f'{self._server.node_id}.{self.engine_id}.{trace_id}'
 
+    def admit_binding(self, correlation_id: str, control_key: str) -> None:
+        """
+        Record a binding EaaS is about to send this engine, before its first frame goes out.
+
+        Args:
+            correlation_id: The binding's server-minted request id (it rides
+                the binding's ``_caller``).
+            control_key: The registry key of the control the binding runs under.
+        """
+        self._bindings[correlation_id] = control_key
+
+    def end_binding(self, correlation_id: str) -> None:
+        """
+        Forget a binding that closed (or never opened): its nodes reach no state or files after this.
+
+        Args:
+            correlation_id: The binding's request id.
+        """
+        self._bindings.pop(correlation_id, None)
+
+    def binding_control(self, correlation_id: Any) -> Optional['TaskControl']:
+        """
+        The control a binding of THIS engine works for: whose state and files its nodes reach (plan 5.7).
+
+        The identity comes from the server's own records, never from the
+        subprocess: a binding EaaS sent is named by its server-minted
+        ``correlationId`` (unguessable, recorded before the first frame went
+        out, forgotten when the binding ends), and is its control's. Work
+        without one (a source's scan, a binding the engine opened itself) is
+        the owner's only where one control holds a private engine.
+
+        Args:
+            correlation_id: The binding's request id from its frozen caller;
+                empty or absent for engine-level work.
+
+        Returns:
+            The control, or None when the binding has no owner the server
+            can name.
+        """
+        # Step 1: a binding EaaS sent is its control's while it is open; an id
+        # the server never minted, or one whose binding ended, is nobody's
+        if correlation_id:
+            control_key = self._bindings.get(correlation_id) if isinstance(correlation_id, str) else None
+            if control_key is None:
+                return None
+            try:
+                return self._server.control_by_key(control_key)
+            except TaskError:
+                return None
+
+        # Step 2: engine-level work is the owner's only where one control holds
+        # a private engine; with several, or on a shared engine, nobody's
+        if self.shared or len(self._holds) != 1:
+            return None
+        try:
+            return self._server.control_by_key(next(iter(self._holds)))
+        except TaskError:
+            return None
+
     async def _process_exit_code(self) -> Optional[int]:
         """The subprocess exit code, or None if it could not be reaped (see below).
 
@@ -2010,6 +2020,15 @@ class TaskEngine(DAPBase):
                     self._data_connected.clear()
         except Exception as e:
             self.debug_message(f'Error cleaning up data client: {e}')
+
+        # The file handles its nodes opened through self.files close with it
+        # (plan 5.7): a node that died mid-write leaves no lock behind; its
+        # bindings end with it
+        self._bindings.clear()
+        try:
+            await node_doors.release_engine(self)
+        except Exception as e:
+            self.debug_message(f'Error closing the engine file handles: {e}')
 
         # Stop metrics tracking (final metrics and tokens already in status)
         try:
@@ -3493,9 +3512,9 @@ class TaskEngine(DAPBase):
 
             await self._send_status_update()
 
-            # Launch subprocess. Identity travels in the TASK FILE (see
-            # _build_task's 'identity' block), never the environment — the
-            # ROCKETRIDE_* env namespace is caller-influenced by design.
+            # Launch subprocess. Identity never travels in the environment —
+            # the ROCKETRIDE_* env namespace is caller-influenced by design;
+            # it rides each binding's server-set caller context.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
             subprocess_env = await self._build_subprocess_env(db_access)

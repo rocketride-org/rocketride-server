@@ -22,7 +22,7 @@ from __future__ import annotations
 import sys
 import types
 from pathlib import Path
-from unittest.mock import AsyncMock
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -76,10 +76,10 @@ def _install_rocketlib_stub() -> None:
 def _install_tool_filesystem_pkg_stub() -> None:
     """Install a synthetic ``tool_filesystem`` package with a stub ``IGlobal``.
 
-    Importing the production ``tool_filesystem.IGlobal`` would pull in
-    ``ai.account.store`` and friends. We replace the submodule with a tiny
-    stand-in that mirrors the attribute surface ``IInstance`` reads
-    (``file_store``, ``allow_*``, ``path_patterns``).
+    Importing the production ``tool_filesystem.IGlobal`` would pull in the
+    real ``rocketlib``. We replace the submodule with a tiny stand-in that
+    mirrors the attribute surface ``IInstance`` reads (``allow_*``,
+    ``path_patterns``).
 
     The synthesised package's ``__path__`` points at the real node directory,
     so a subsequent ``import tool_filesystem.IInstance`` finds the production
@@ -98,8 +98,6 @@ def _install_tool_filesystem_pkg_stub() -> None:
     class _IGlobalStub:
         """Mirror of the production ``IGlobal`` attribute surface for tests."""
 
-        client_id: str | None = None
-        file_store: object | None = None
         allow_read: bool = True
         allow_write: bool = True
         allow_list: bool = True
@@ -162,35 +160,32 @@ finally:
 
 @pytest.fixture
 def file_store():
-    """Build an ``AsyncMock`` shaped like the relevant FileStore methods.
+    """Build a double of the node's ``self.files`` door.
 
-    ``read`` is an async method so we use ``AsyncMock`` — that way the
-    coroutine returned by ``read(...)`` is awaitable inside the production
-    ``_run_async`` helper. Default return is empty bytes (caller-overridable
-    per-test).
+    ``read`` returns empty bytes by default (caller-overridable per-test).
 
     Returns:
-        AsyncMock with a pre-configured ``read`` returning ``b''``.
+        MagicMock with a pre-configured ``read`` returning ``b''``.
     """
-    fs = AsyncMock()
-    fs.read = AsyncMock(return_value=b'')
+    fs = MagicMock()
+    fs.read = MagicMock(return_value=b'')
     return fs
 
 
 @pytest.fixture
 def instance(file_store):
-    """Construct an ``IInstance`` wired to a fresh stub IGlobal.
+    """Construct an ``IInstance`` wired to a fresh stub IGlobal and the files double.
 
-    The engine normally attaches ``self.IGlobal`` from C++; for unit tests
-    we set it directly. ``allow_read`` defaults to True, ``file_store`` is
-    the AsyncMock from the ``file_store`` fixture.
+    The engine normally attaches ``self.IGlobal`` from C++ and the server
+    answers ``self.files``; for unit tests a subclass takes the double as its
+    ``files`` door. ``allow_read`` defaults to True.
 
     Returns:
-        IInstance with ``self.IGlobal.file_store`` set to the mock.
+        IInstance whose ``self.files`` is the double.
     """
-    inst = IInstance()
+    inst = type('IInstanceUnderTest', (IInstance,), {'files': None})()
+    inst.files = file_store
     glb = IGlobal()
-    glb.file_store = file_store
     glb.allow_read = True
     glb.path_patterns = None
     inst.IGlobal = glb
@@ -209,8 +204,8 @@ class TestDefaultMaxBytes:
         """No ``maxBytes`` in args → FileStore.read called with the default."""
         instance.read_file({'path': 'notes.txt'})
 
-        file_store.read.assert_awaited_once()
-        _, kwargs = file_store.read.await_args
+        file_store.read.assert_called_once()
+        _, kwargs = file_store.read.call_args
         assert kwargs['max_size'] == DEFAULT_READ_LIMIT
 
     def test_default_is_under_one_megabyte(self):
@@ -229,7 +224,7 @@ class TestExplicitMaxBytes:
         """A modest explicit value flows through unchanged."""
         instance.read_file({'path': 'a.txt', 'maxBytes': 1024})
 
-        _, kwargs = file_store.read.await_args
+        _, kwargs = file_store.read.call_args
         assert kwargs['max_size'] == 1024
 
     def test_value_just_below_ceiling_forwarded(self, instance, file_store):
@@ -237,14 +232,14 @@ class TestExplicitMaxBytes:
         target = MAX_READ_LIMIT - 1
         instance.read_file({'path': 'a.txt', 'maxBytes': target})
 
-        _, kwargs = file_store.read.await_args
+        _, kwargs = file_store.read.call_args
         assert kwargs['max_size'] == target
 
     def test_value_equal_to_ceiling_forwarded(self, instance, file_store):
         """Exactly the ceiling is allowed."""
         instance.read_file({'path': 'a.txt', 'maxBytes': MAX_READ_LIMIT})
 
-        _, kwargs = file_store.read.await_args
+        _, kwargs = file_store.read.call_args
         assert kwargs['max_size'] == MAX_READ_LIMIT
 
 
@@ -265,14 +260,14 @@ class TestClampToCeiling:
         """A value 10x the ceiling is clamped down to the ceiling."""
         instance.read_file({'path': 'big.bin', 'maxBytes': MAX_READ_LIMIT * 10})
 
-        _, kwargs = file_store.read.await_args
+        _, kwargs = file_store.read.call_args
         assert kwargs['max_size'] == MAX_READ_LIMIT
 
     def test_huge_value_clamped(self, instance, file_store):
         """A nonsense-large value (1 GB) is also clamped to the ceiling."""
         instance.read_file({'path': 'big.bin', 'maxBytes': 1024 * 1024 * 1024})
 
-        _, kwargs = file_store.read.await_args
+        _, kwargs = file_store.read.call_args
         assert kwargs['max_size'] == MAX_READ_LIMIT
 
 
@@ -299,7 +294,7 @@ class TestMaxBytesValidation:
         """Anything that isn't a strict int raises ``ValueError``."""
         with pytest.raises(ValueError, match='maxBytes must be an integer'):
             instance.read_file({'path': 'a.txt', 'maxBytes': bad_value})
-        file_store.read.assert_not_awaited()
+        file_store.read.assert_not_called()
 
     def test_bool_rejected(self, instance, file_store):
         """``bool`` is an ``int`` subclass in Python — must be rejected too.
@@ -310,14 +305,14 @@ class TestMaxBytesValidation:
         """
         with pytest.raises(ValueError, match='maxBytes must be an integer'):
             instance.read_file({'path': 'a.txt', 'maxBytes': True})
-        file_store.read.assert_not_awaited()
+        file_store.read.assert_not_called()
 
     @pytest.mark.parametrize('bad_value', [0, -1, -1024], ids=['zero', 'minus_one', 'large_negative'])
     def test_non_positive_rejected(self, instance, file_store, bad_value):
         """``maxBytes`` must be at least 1."""
         with pytest.raises(ValueError, match='maxBytes must be at least 1'):
             instance.read_file({'path': 'a.txt', 'maxBytes': bad_value})
-        file_store.read.assert_not_awaited()
+        file_store.read.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -331,7 +326,7 @@ class TestReadResult:
     def test_returns_decoded_content_and_size(self, instance, file_store):
         """The returned dict carries decoded ``content`` and pre-decode ``size``."""
         payload = b'hello world'
-        file_store.read = AsyncMock(return_value=payload)
+        file_store.read = MagicMock(return_value=payload)
 
         result = instance.read_file({'path': 'greeting.txt'})
 
@@ -344,7 +339,7 @@ class TestReadResult:
     def test_decode_error_raises_value_error(self, instance, file_store):
         """A bytes payload that can't decode under the requested encoding fails clearly."""
         # 0xff is invalid in UTF-8 but valid in latin-1.
-        file_store.read = AsyncMock(return_value=b'\xff\xfe\xfd')
+        file_store.read = MagicMock(return_value=b'\xff\xfe\xfd')
 
         with pytest.raises(ValueError, match='Failed to decode'):
             instance.read_file({'path': 'binary.bin'})

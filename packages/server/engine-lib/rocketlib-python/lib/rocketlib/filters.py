@@ -23,12 +23,16 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
+import copy
 import functools
 import json
-from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
+from collections.abc import Mapping
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Dict, Any, List, NamedTuple, Optional, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
 from .config import ConfigError, ConfigView, NodeInfo, resolveConfig
+from .doors import NodeFiles, NodeState
 
 if TYPE_CHECKING:
     from ai.common.schema import Doc, Question, Answer
@@ -201,6 +205,18 @@ class IEndpointBase:
         default to prevent.
         """
         raise APERR(Ec.PreventDefault, 'No default to prevent')
+
+    @property
+    def files(self) -> NodeFiles:
+        """
+        The owner's file store for engine-level work: a source's scan (plan 5.7).
+
+        Engine-level work belongs to no binding, so the server answers it only
+        on an engine that exactly one control holds, and resolves the store
+        for that control. Work inside a binding uses the instance's own
+        ``self.files``.
+        """
+        return NodeFiles('')
 
     def beginEndpoint(self) -> None:
         """
@@ -923,6 +939,118 @@ def _avi_close_wrapper(method: Callable) -> Callable:
     return wrapper
 
 
+# =========================================================================
+# The caller of a binding (plan 4.1 rule 7)
+#
+# The server stamps who is calling on every frame (_caller, plan 5.3); the
+# engine copies it from the pipe onto each instance it constructs, ONCE,
+# before beginInstance(). The instance freezes it into a Caller: a tuple
+# whose mappings are read-only views over its own copies, so nothing a node
+# does to it reaches another instance, the pipe or a later binding. Nothing
+# that persists or bills reads identity from here: self.state and
+# self.files are stamped by the server from the binding (plan 5.7).
+# =========================================================================
+
+
+class Caller(NamedTuple):
+    """
+    Who a binding serves: the server-set caller context, frozen (plan 4.1 rule 7).
+
+    Read-only: assigning a field raises, and ``params``/``env`` are read-only
+    mapping views (``params`` is per node id, each a read-only view of that
+    node's values by leaf path, read-only at every depth: an object value is
+    a read-only view and an array value a tuple).
+    """
+
+    controlId: str  #: The control the call came through (transient; never a storage key).
+    userId: str  #: The calling user.
+    teamId: str  #: The team whose environment the control runs with.
+    orgId: str  #: The caller's organization.
+    address: str  #: The pipe address the call resolved (developerId.pipelineId[.source]).
+    rung: str  #: The rung that answered: spec, me, team or public.
+    traceLevel: str  #: The binding's trace level ('' = the engine default).
+    correlationId: str  #: The server-minted request id.
+    params: Mapping  #: Node id -> the call's admitted parameters for that node, by leaf path.
+    env: Mapping  #: The ROCKETRIDE_* values the control's spec references.
+
+
+#: The caller of a binding that has none (a scan source's own binding, a test).
+NO_CALLER = Caller(
+    controlId='',
+    userId='',
+    teamId='',
+    orgId='',
+    address='',
+    rung='',
+    traceLevel='',
+    correlationId='',
+    params=MappingProxyType({}),
+    env=MappingProxyType({}),
+)
+
+
+def _frozen(value: Any) -> Any:
+    """
+    A read-only copy of a parameter value, at every depth.
+
+    Mappings become read-only views over private dicts and lists become
+    tuples, so no part of a caller's params can be changed through the
+    caller; ``ConfigView.overlay`` takes a plain copy back.
+    """
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(name): _frozen(member) for name, member in value.items()})
+    if isinstance(value, (list, tuple)):
+        return tuple(_frozen(member) for member in value)
+    return copy.deepcopy(value)
+
+
+def freeze_caller(envelope: Any) -> Caller:
+    """
+    Freeze a server-set ``_caller`` envelope into a ``Caller``.
+
+    Args:
+        envelope: The dict the server stamped (or a ``Caller`` already frozen).
+
+    Returns:
+        Caller: Strings for the identity fields, read-only views over private
+        copies for ``params`` and ``env``.
+
+    Raises:
+        TypeError: ``envelope`` is not a mapping.
+    """
+    if isinstance(envelope, Caller):
+        return envelope
+    if not isinstance(envelope, Mapping):
+        raise TypeError(f'a caller context is a mapping, got {type(envelope).__name__}')
+
+    def text(name: str) -> str:
+        value = envelope.get(name)
+        return '' if value is None else str(value)
+
+    params = envelope.get('params') if isinstance(envelope.get('params'), Mapping) else {}
+    env = envelope.get('env') if isinstance(envelope.get('env'), Mapping) else {}
+    return Caller(
+        controlId=text('controlId'),
+        userId=text('userId'),
+        teamId=text('teamId'),
+        orgId=text('orgId'),
+        address=text('address'),
+        rung=text('rung'),
+        traceLevel=text('traceLevel'),
+        correlationId=text('correlationId'),
+        params=MappingProxyType(
+            {str(node): _frozen(values) for node, values in params.items() if isinstance(values, Mapping)}
+        ),
+        env=MappingProxyType({str(name): '' if value is None else str(value) for name, value in env.items()}),
+    )
+
+
+#: Where an instance keeps its frozen caller and its doors (instance dict keys).
+_CALLER_KEY = '_rocketlib_caller'
+_STATE_KEY = '_rocketlib_state'
+_FILES_KEY = '_rocketlib_files'
+
+
 class BindingLogger:
     """
     A node's message channel bound to ONE binding.
@@ -995,11 +1123,11 @@ class IInstanceBase:
     instance: IFilterInstance = None  #: Instance data reference.
 
     # An instance lives exactly ONE binding (plan 4.1 rule 2): the engine
-    # constructs it on the binding's first touch, copies the pipe's caller
-    # context in before beginInstance(), and drops it at putPipe(). _caller
-    # therefore never changes on a live instance and the settings view is
-    # computed once; a worker thread keeps the instance it captured.
-    _caller: Optional[Dict[str, Any]] = None  #: Server-set caller context; None = no caller.
+    # constructs it on the binding's first touch, binds the pipe's caller
+    # context in before beginInstance() (the one write to _caller), and drops
+    # it at putPipe(). The caller never changes on a live instance and the
+    # settings view is computed once; a worker thread keeps the instance it
+    # captured.
     _settings: Optional[ConfigView] = None  #: The settings view, built on first read.
 
     """
@@ -1007,23 +1135,92 @@ class IInstanceBase:
     the driver funtionality.
     """
 
+    # ------------------------------------------------------------------
+    # The caller (plan 4.1 rule 7)
+    #
+    # _caller is the engine's door in: python-instance.cpp writes the pipe's
+    # caller context to it once, and it freezes into a Caller. caller is the
+    # node's door out. A second write raises, and so does every assignment
+    # to the Caller or its mappings.
+    # ------------------------------------------------------------------
+
+    @property
+    def _caller(self) -> Optional[Caller]:
+        """The binding's caller as the engine bound it, frozen; None when the binding has none."""
+        return self.__dict__.get(_CALLER_KEY)
+
+    @_caller.setter
+    def _caller(self, envelope: Any) -> None:
+        """
+        Bind the binding's caller, once.
+
+        Args:
+            envelope: The server-set ``_caller`` dict from the pipe.
+
+        Raises:
+            AttributeError: A caller is already bound to this instance.
+            TypeError: ``envelope`` is not a caller context.
+        """
+        if _CALLER_KEY in self.__dict__:
+            raise AttributeError(
+                'the caller is bound once, by the engine, before beginInstance(); it cannot be replaced'
+            )
+        self.__dict__[_CALLER_KEY] = freeze_caller(envelope)
+
+    @property
+    def caller(self) -> Caller:
+        """
+        Who this binding serves: read-only, bound once by the engine (plan 4.1 rule 7).
+
+        For the node's own decisions and logs only: what persists is stamped by
+        the server from the binding (``self.state``, ``self.files``), never
+        from here. ``NO_CALLER`` when the binding has no caller.
+        """
+        return self._caller or NO_CALLER
+
     @property
     def settings(self) -> ConfigView:
         """
         This call's effective configuration: IGlobal.config (+) the caller's params for this node.
 
         Returns:
-            ConfigView: Flattened to the active branch; ``param``-flagged keys
-            are served here (and only here). With no caller (``_caller`` None)
-            this is the control's config unchanged.
+            ConfigView: Flattened to the active branch of THIS call (a
+            selector among the params re-resolves it, plan 5.1);
+            ``param``-flagged keys are served here (and only here). With no
+            caller this is the control's config unchanged.
         """
         if self._settings is None:
-            caller = self._caller or {}
             # The server keys a node's params by its component id: config.node.id
             config = self.IGlobal.config
-            params = (caller.get('params') or {}).get(config.node.id)
-            self._settings = config.overlay(params)
+            self._settings = config.overlay(self.caller.params.get(config.node.id))
         return self._settings
+
+    # ------------------------------------------------------------------
+    # The storage doors (plan 5.7)
+    #
+    # Each names this instance's OWN binding: the correlationId of the caller
+    # the engine froze into it at bind, never anything read off the shared
+    # pipe (which serves the next binding after putPipe()). The server ends
+    # that id with the binding, so an instance kept past it reaches nothing.
+    # ------------------------------------------------------------------
+
+    @property
+    def state(self) -> NodeState:
+        """Small JSON values that survive a call, owned by this binding's control (plan 5.7)."""
+        door = self.__dict__.get(_STATE_KEY)
+        if door is None:
+            door = NodeState(self.caller.correlationId)
+            self.__dict__[_STATE_KEY] = door
+        return door
+
+    @property
+    def files(self) -> NodeFiles:
+        """The file store rooted at this binding's owner's tree (plan 5.7)."""
+        door = self.__dict__.get(_FILES_KEY)
+        if door is None:
+            door = NodeFiles(self.caller.correlationId)
+            self.__dict__[_FILES_KEY] = door
+        return door
 
     # ------------------------------------------------------------------
     # Binding identity
@@ -1044,9 +1241,10 @@ class IInstanceBase:
 
         The sub-pipe joins this binding's tree: it reports the same ``traceId``
         and inherits its trace level, so its trace and SSE reach the same control as
-        the request that caused them. The caller context (``_caller``) is set on the
-        sub-pipe, and the engine copies it into each of its instances as it
-        constructs them, so its nodes read this call's ``settings``.
+        the request that caused them. The binding's caller context, as the server
+        set it on this pipe, is set on the sub-pipe, and the engine binds it into
+        each of its instances as it constructs them, so its nodes read this
+        call's ``settings``.
 
         Args:
             traceLevel: Ignored when inside a binding (the joined pipe inherits);
@@ -1056,7 +1254,7 @@ class IInstanceBase:
             IServiceFilterPipe: The bound pipe; return it with ``putPipe``.
         """
         pipe = self.IEndpoint.endpoint.getPipe(traceLevel, self.traceId)
-        pipe.caller = self._caller
+        pipe.caller = self.instance.caller
         return pipe
 
     def putPipe(self, pipe: IServiceFilterPipe) -> None:

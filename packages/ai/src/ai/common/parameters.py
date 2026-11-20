@@ -28,22 +28,27 @@ A ``.pipe`` exposes per-call parameters as a pure string map::
     "parameters": {"maxEdge": "depth_estimate_1.max_edge"}
 
 public name -> ``nodeId.configKey``, where the FIRST segment is a component id
-and the rest is the leaf's schema ``path`` (dotted for a leaf inside a group)
-or its short key. Only a ``param``-flagged leaf may be exposed; the resolver
-(``rocketlib.resolveConfig``) knows which those are, and it refuses selectors,
-secrets and env-valued keys at load, so the same check covers them here.
+and the rest is the leaf's schema ``path`` (dotted for a leaf inside a group
+or a selector branch) or a short key. Only a ``param``-flagged leaf may be
+exposed: any leaf, a leaf inside any branch of a selector, a selector itself
+or a whole array (plan 5.1). The resolver (``rocketlib.resolveConfig``) knows
+which those are from the engine's ``params`` descriptors, and the engine
+refuses the flag on credential-shaped leaves at load, so the same check
+covers them here.
 
 Two readers, one rule:
 
 - ``validate_parameters`` checks the MAP itself, at validate, execute and
   publish (plan 5.4 items 1, 3, 4): well-formed, public names
   ``[A-Za-z0-9_]+``, every target naming an existing component and a
-  ``param``-flagged key of it.
+  ``param``-flagged leaf of it, in whichever branch.
 - ``resolve_call_params`` turns the caller's ADMITTED params (public name ->
   value, already filtered by name against the map) into the per-node map the
-  engine applies (``{nodeId: {configKey: value}}``), validating each value
-  against the leaf's descriptor through the same resolver (plan 5.4 item 5,
-  the descriptor half; the map half is ``TaskControl.check_params``).
+  engine applies (``{nodeId: {path: value}}``) through the node's own
+  overlay: the call's selector values apply FIRST, then every leaf must be
+  one the resulting branch set reaches, and every value fits its leaf (an
+  array's elements its item). Plan 5.4 item 5, the descriptor half; the map
+  half is ``TaskControl.check_params``.
 
 Errors follow the engine's own ``errors`` shape (``id`` + ``message``), so the
 validate command appends them to the same list.
@@ -121,19 +126,6 @@ def _view_of(component: Mapping[str, Any]):
         return None
 
 
-def _key_of(view, key: str) -> Optional[str]:
-    """The view's short key for ``key`` given as a short key or a schema path, or None."""
-    # A short key names the leaf directly
-    if key in view:
-        return key
-    # Otherwise the key is a schema path ('service.customerId'): find the leaf
-    # whose path it is. Paths are unique per node (resolver invariant).
-    for short in view:
-        if view.path_of(short) == key:
-            return short
-    return None
-
-
 # ==== The map ====================================================================
 
 
@@ -180,19 +172,20 @@ def validate_parameters(pipeline: Mapping[str, Any]) -> List[Dict[str, Any]]:
         if component is None:
             errors.append({'id': 'parameters', 'message': f'parameter {label!r} targets unknown component {node_id!r}'})
             continue
-        # Step 5: the key must be a leaf of the node, and a param-flagged one;
-        # the resolver decides both (selectors, secrets and env-valued keys are
-        # never param-flagged, so one membership test covers plan 5.1's refusals)
+        # Step 5: the key must be a leaf of the node, in whichever branch, and
+        # a param-flagged one; the resolver decides both (credential-shaped
+        # leaves are never param-flagged, so one membership test covers the
+        # engine's refusals)
         if node_id not in views:
             views[node_id] = _view_of(component)
         view = views[node_id]
         if view is None:
             # The component's own config error is reported with the component
             continue
-        short = _key_of(view, key)
-        if short is None:
+        path = view.leaf_path(key)
+        if path is None:
             errors.append({'id': node_id, 'message': f'parameter {label!r}: {node_id!r} has no config key {key!r}'})
-        elif short not in view.param_keys:
+        elif path not in view.param_paths:
             errors.append(
                 {'id': node_id, 'message': f'parameter {label!r}: {node_id}.{key} is not a per-call parameter'}
             )
@@ -209,12 +202,15 @@ def resolve_call_params(
     views: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Dict[str, Any]], List[Dict[str, str]]]:
     """
-    Turn admitted per-call params into the per-node map the engine applies (plan 5.4 item 5).
+    Turn admitted per-call params into the per-node map the engine applies (plan 5.4 item 5, 5.1).
 
-    Each value is validated against its leaf's descriptor through the node's
-    resolver (type, bounds, enum); a target that is not a ``param``-flagged key
-    of its node is refused. Values are LITERAL: nothing is env-expanded here
-    (plan 0 S5).
+    A node's values go through the node's own overlay together, exactly as
+    its ``settings`` will read them: selector values apply FIRST (the view is
+    re-resolved for the call's branch set, cached on the view), then every
+    leaf must be one that branch set reaches, and every value must fit its
+    leaf (type, bounds, enum; an array's elements against its item). A
+    target that is not a ``param``-flagged leaf is refused. Values are
+    LITERAL: nothing is env-expanded here (plan 0 S5).
 
     Args:
         pipeline: The control's pipeline.
@@ -222,11 +218,12 @@ def resolve_call_params(
         admitted: The caller's params, already admitted by public name.
         views: A cache of resolved views by component id the caller keeps for
             the pipeline's life (a control's pipeline is fixed for its life),
-            so the schema is resolved once per component, not once per request.
+            so the schema is resolved once per component, not once per request
+            (and each distinct selector-moving map once per view).
             None resolves afresh.
 
     Returns:
-        ``(per_node, errors)``: ``{nodeId: {key: value}}`` keyed by the leaf's
+        ``(per_node, errors)``: ``{nodeId: {path: value}}`` keyed by the leaf's
         schema path, and ``[{name, reason}]`` for every refused value.
     """
     from rocketlib import ConfigError
@@ -236,17 +233,22 @@ def resolve_call_params(
     components = _components_by_id(pipeline)
     if views is None:
         views = {}
+
+    # Step 1: each public name -> (node, leaf path), grouped per node so a
+    # node's selector values and leaves are judged together
+    by_node: Dict[str, Dict[str, Any]] = {}
+    names: Dict[Tuple[str, str], str] = {}
     for name, value in admitted.items():
-        # Step 1: the public name -> its target. The name was admitted against
-        # the map already, so a missing or malformed target is the map's fault
-        # (an older artifact), reported by name like every other refusal
+        # The name was admitted against the map already, so a missing or
+        # malformed target is the map's fault (an older artifact), reported
+        # by name like every other refusal
         parsed = parse_target(parameters.get(name))
         if parsed is None:
             errors.append({'name': str(name), 'reason': 'the parameters map does not name a nodeId.configKey target'})
             continue
-        # Step 2: the node's resolved view: the descriptors the value is checked
-        # against. Resolved once per component into the caller's cache; a
-        # component that does not resolve is not retried per request either
+        # The node's resolved view: resolved once per component into the
+        # caller's cache; a component that does not resolve is not retried
+        # per request either
         node_id, key = parsed
         if node_id not in views:
             component = components.get(node_id)
@@ -255,18 +257,29 @@ def resolve_call_params(
         if view is None:
             errors.append({'name': str(name), 'reason': f'component {node_id!r} does not resolve'})
             continue
-        short = _key_of(view, key)
-        if short is None:
+        path = view.leaf_path(key)
+        if path is None:
             errors.append({'name': str(name), 'reason': f'{node_id!r} has no config key {key!r}'})
             continue
-        # Step 3: the resolver's own overlay validates the value (type, bounds,
-        # enum) and refuses a non-param key, so the data path and the node's
-        # settings view can never disagree about what is admissible
-        try:
-            view.overlay({short: value})
-        except ConfigError as e:
-            errors.append({'name': str(name), 'reason': str(e)})
+        # Two names for one leaf would leave only the last value to validate
+        other = names.get((node_id, path))
+        if other is not None:
+            errors.append({'name': str(name), 'reason': f'sets the same config key as {other!r}; supply one of them'})
             continue
-        # Step 4: keyed by the leaf's schema path, which settings.overlay reads
-        per_node.setdefault(node_id, {})[view.path_of(short)] = value
+        by_node.setdefault(node_id, {})[path] = value
+        names[(node_id, path)] = str(name)
+
+    # Step 2: one overlay per node, the node's settings in miniature, so the
+    # data path and the node can never disagree about what is admissible
+    for node_id, values in by_node.items():
+        try:
+            views[node_id].overlay(values)
+        except ConfigError as e:
+            problems = e.problems or {path: str(e) for path in values}
+            errors.extend(
+                {'name': names.get((node_id, path), path), 'reason': reason} for path, reason in problems.items()
+            )
+            continue
+        # Keyed by the leaf's schema path, which settings.overlay reads
+        per_node[node_id] = dict(values)
     return per_node, errors

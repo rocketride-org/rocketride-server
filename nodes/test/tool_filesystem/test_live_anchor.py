@@ -26,9 +26,10 @@
 Exercises the full production chain against a running server — the path no
 unit test covers end to end:
 
-    client.use() -> task file ('identity' + 'storage' blocks, _build_task)
-    -> engine subprocess -> rocketlib.getTask() (C++ binding)
-    -> Store.engine_file_store() (identity + anchor, zero node plumbing)
+    client.use() -> engine subprocess -> the node's self.files (plan 5.7)
+    -> fs_* request over the task channel, carrying only the binding
+    -> the server names the control that owns the binding and builds the
+       FileStore rooted at its owner's tree (Store.file_store_for_caller)
     -> anchored FileStore writes in the REAL backing store.
 
 Assertions prove the two properties the design promises:
@@ -107,7 +108,8 @@ async def test_tool_writes_land_in_the_callers_own_tree(tool_pipeline):
     the engine context anchors it at users/<uid>/files (dev run), and the
     very same path resolves to the same bytes through the session-side
     rrext_store surface. If the identity or anchor plumbing broke anywhere
-    (task file, getTask, engine_file_store), the session read 404s.
+    (the channel request, the binding's control, the caller's store), the
+    session read 404s.
     """
     client, token = tool_pipeline
     content = f'written inside the engine subprocess ({_RUN_ID})'

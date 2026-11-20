@@ -47,7 +47,11 @@ per-call parameter filter.
 
 from __future__ import annotations
 
+import copy
+import json
 import re
+import threading
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterator, List, NamedTuple, Optional, Tuple
@@ -72,6 +76,11 @@ ENGINE_OWNED_KEYS = frozenset({'secureParameters'})
 #: upload-shaped placeholders the Phase 2 gateway owns.
 UNCHECKED_TYPES = frozenset({'constant', 'oauth2', 'upload', 'secret', 'env', 'null', 'auto', 'semantic'})
 
+#: The most re-resolved views one control keeps for selector parameters (plan
+#: 5.1: settings is re-resolved per distinct params map and cached on the
+#: control). A call whose map is not cached resolves it again; nothing is lost.
+OVERLAY_CACHE_SIZE = 64
+
 #: The PROTOCOL_CAPS bit a node carries once it is certified reentrant-safe
 #: (MULTITENANT = BIT(17) in engine-core/apLib/url/Url.hpp). The resolved
 #: schema's "capabilities" is the PROTOCOL_CAPS int bitmask. Taken from the
@@ -95,7 +104,23 @@ class ConfigError(ValueError):
     Hard error at validate AND execute. Also raised, with a teaching message,
     when a node reads a ``param``-flagged key from ``IGlobal.config``: a
     parameter is per call and lives on ``IInstance.settings``.
+
+    Attributes:
+        problems: For a refused parameter overlay, the reason per key the
+            caller named (key -> reason), so a per-call filter reports each
+            one by name; empty for every other error.
     """
+
+    def __init__(self, message: str, problems: Optional[Dict[str, str]] = None):
+        """
+        Build the error.
+
+        Args:
+            message: The whole message.
+            problems: Key -> reason for a refused parameter overlay.
+        """
+        super().__init__(message)
+        self.problems: Dict[str, str] = dict(problems or {})
 
 
 # ==== The node's identity ====================================================
@@ -247,6 +272,56 @@ def _index_schema(schema: Dict[str, Any]) -> _Schema:
     return indexed
 
 
+def _param_paths(params: Any) -> frozenset:
+    """
+    Return the leaf paths the ``params`` descriptors name.
+
+    The engine strips the ``param`` flag from the resolved leaves (plan 5.1),
+    so the descriptors are the one record of which leaves are parameters: a
+    leaf is a parameter when a descriptor's ``field`` is its path.
+    """
+    if not isinstance(params, list):
+        return frozenset()
+    return frozenset(
+        str(descriptor['field'])
+        for descriptor in params
+        if isinstance(descriptor, dict) and isinstance(descriptor.get('field'), str) and descriptor['field']
+    )
+
+
+def _segments(path: str, indexed: _Schema) -> List[str]:
+    """
+    Split a leaf path into the stored tree's keys, level by level.
+
+    A declared child name may itself contain a dot (a branch named
+    ``gpt-5.2``), so each level takes the longest name it declares that the
+    rest of the path starts with; an undeclared level splits at the dot.
+    """
+    segments: List[str] = []
+    parent, rest = '', path
+    while rest:
+        names = indexed.children.get(parent, ())
+        match = max((name for name in names if rest == name or rest.startswith(f'{name}.')), key=len, default=None)
+        if match is None:
+            match = rest.split('.', 1)[0]
+        segments.append(match)
+        parent = f'{parent}.{match}' if parent else match
+        rest = rest[len(match) + 1 :]
+    return segments
+
+
+def _set_path(tree: Dict[str, Any], segments: List[str], value: Any) -> None:
+    """Write ``value`` into the stored tree at ``segments``, creating the blocks on the way."""
+    node = tree
+    for segment in segments[:-1]:
+        child = node.get(segment)
+        if not isinstance(child, dict):
+            child = {}
+            node[segment] = child
+        node = child
+    node[segments[-1]] = value
+
+
 # ==== Value helpers ==========================================================
 
 
@@ -346,10 +421,151 @@ def _validate_value(key: str, value: Any, descriptor: Dict[str, Any], problems: 
             problems.append(f'"{key}" must have at least {descriptor["minItems"]} items')
         if 'maxItems' in descriptor and len(value) > descriptor['maxItems']:
             problems.append(f'"{key}" must have at most {descriptor["maxItems"]} items')
+        # Each element against the item schema: a scalar or array item
+        # directly (an array item recurses into its own item), an item that
+        # is a group of resolved fields as an object of them
         item = descriptor.get('item') or descriptor.get('items')
-        if isinstance(item, dict) and item.get('type') not in (None, 'array', 'object'):
+        if not isinstance(item, dict):
+            return
+        fields = _group_fields(item)
+        if fields is not None:
+            for index, element in enumerate(value):
+                _validate_object(f'{key}[{index}]', element, fields, problems)
+        elif item.get('type') not in (None, 'object'):
             for index, element in enumerate(value):
                 _validate_value(f'{key}[{index}]', element, item, problems)
+
+
+def _thawed(value: Any) -> Any:
+    """A plain copy of a parameter value: read-only mappings become dicts, tuples lists, at every depth."""
+    if isinstance(value, Mapping):
+        return {str(name): _thawed(member) for name, member in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_thawed(member) for member in value]
+    return value
+
+
+def _group_fields(descriptor: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
+    """The resolved fields of a descriptor that is a group of them, else None."""
+    fields = descriptor.get('properties')
+    if isinstance(fields, list) and fields and all(isinstance(child, dict) for child in fields):
+        return fields
+    return None
+
+
+def _selector_branches(descriptor: Dict[str, Any]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """A selector's branches (name -> its resolved fields), else None."""
+    enum = descriptor.get('enum')
+    if not isinstance(enum, dict) or not any(
+        isinstance(branch, dict) and isinstance(branch.get('properties'), list) for branch in enum.values()
+    ):
+        return None
+    return {
+        str(name): [child for child in (branch.get('properties') or []) if isinstance(child, dict)]
+        if isinstance(branch, dict)
+        else []
+        for name, branch in enum.items()
+    }
+
+
+def _validate_object(key: str, value: Any, fields: List[Dict[str, Any]], problems: List[str]) -> None:
+    """
+    Check one array element whose item is a group of fields, appending any problem to ``problems``.
+
+    Step 1: the element is an object. Step 2: it names no field the item does
+    not declare (a selector's branch blocks sit beside it, named by branch).
+    Step 3: every declared field validates (required included); a field that
+    is itself a group is an object of its own fields, checked the same way
+    (an absent one as an empty object, so its required fields count). Step 4:
+    the block of the branch each selector selects is checked like a group; a
+    block of a branch it does not select is refused.
+    """
+    if not isinstance(value, dict):
+        problems.append(f'"{key}" expects object, got {type(value).__name__} {value!r}')
+        return
+    declared = {str(child['name']): child for child in fields if child.get('name')}
+    blocks = {
+        branch: (name, branch_fields)
+        for name, child in declared.items()
+        for branch, branch_fields in (_selector_branches(child) or {}).items()
+    }
+    for name in value:
+        if name not in declared and name not in blocks:
+            problems.append(f'"{key}" has no field "{name}"; declared: {sorted(declared)}')
+    for name, child in declared.items():
+        grouped = _group_fields(child)
+        if grouped is not None:
+            member = value.get(name)
+            _validate_object(f'{key}.{name}', {} if member is None else member, grouped, problems)
+        else:
+            _validate_value(f'{key}.{name}', value.get(name), child, problems)
+    for branch, (selector, branch_fields) in blocks.items():
+        member = value.get(branch)
+        if branch != value.get(selector, declared[selector].get('default')):
+            if member is not None:
+                problems.append(f'"{key}.{branch}" is the block of a branch "{selector}" does not select')
+            continue
+        _validate_object(f'{key}.{branch}', {} if member is None else member, branch_fields, problems)
+
+
+# ==== Overlay support ========================================================
+
+
+class _Overlays:
+    """
+    What a family of views shares: the schema index and the re-resolved views.
+
+    A family is one resolution and every view derived from it (the IGlobal's
+    full and restricted views, every call's settings), so a control resolves
+    each distinct selector-moving parameter map once for as long as its
+    IGlobal lives. Bounded: the oldest entry goes first.
+    """
+
+    def __init__(self, index: Optional[_Schema] = None) -> None:
+        """
+        Start with an empty cache.
+
+        Args:
+            index: The schema's index when the resolver already built it.
+        """
+        self._lock = threading.Lock()
+        self._index: Optional[_Schema] = index
+        self._views: 'OrderedDict[str, ConfigView]' = OrderedDict()
+
+    def index_of(self, schema: Dict[str, Any]) -> _Schema:
+        """Return the schema's index, built on first use."""
+        with self._lock:
+            if self._index is None:
+                self._index = _index_schema(schema)
+            return self._index
+
+    def get(self, key: str) -> Optional['ConfigView']:
+        """Return the view cached under ``key``, or None."""
+        with self._lock:
+            view = self._views.get(key)
+            if view is not None:
+                self._views.move_to_end(key)
+            return view
+
+    def put(self, key: str, view: 'ConfigView') -> None:
+        """Cache ``view`` under ``key``, dropping the oldest beyond the bound."""
+        with self._lock:
+            self._views[key] = view
+            self._views.move_to_end(key)
+            while len(self._views) > OVERLAY_CACHE_SIZE:
+                self._views.popitem(last=False)
+
+
+def _overlay_error(problems: Dict[str, str]) -> ConfigError:
+    """
+    Build the one error a refused overlay raises, naming every key.
+
+    Args:
+        problems: Key -> reason; a validator's reason already opens with the
+            quoted path it checked, any other is a phrase about the key.
+    """
+    parts = [reason if reason.startswith('"') else f'"{key}" {reason}' for key, reason in problems.items()]
+    return ConfigError('parameters: ' + '; '.join(parts), problems=problems)
 
 
 # ==== ConfigView =============================================================
@@ -371,6 +587,11 @@ class ConfigView(Mapping):
     read-only ``NodeInfo`` (plan 5.6.4), served by attribute, item and ``in``
     on every view, derived views included. It is a record, not a declared
     key: it is not iterated and not in ``to_dict()``.
+
+    A view the resolver built also keeps the schema and the stored tree it
+    came from, so ``overlay`` can re-resolve when a call's parameters move a
+    selector (plan 5.1); the re-resolutions are cached on the view per
+    distinct parameter map and shared by every view derived from it.
     """
 
     __slots__ = (
@@ -378,11 +599,15 @@ class ConfigView(Mapping):
         '_descriptors',
         '_paths',
         '_param_keys',
+        '_param_paths',
         '_env_keys',
         '_params',
         '_capabilities',
         '_node',
         '_refuse_params',
+        '_schema',
+        '_stored',
+        '_shared',
     )
 
     def __init__(
@@ -396,6 +621,9 @@ class ConfigView(Mapping):
         node: Optional[NodeInfo] = None,
         refuse_params: bool = False,
         env_keys: Optional[frozenset] = None,
+        schema: Optional[Dict[str, Any]] = None,
+        stored: Optional[Dict[str, Any]] = None,
+        shared: Optional['_Overlays'] = None,
     ):
         """
         Build a view. Callers use ``resolveConfig``; this is the resolver's constructor.
@@ -404,7 +632,9 @@ class ConfigView(Mapping):
             values (dict): Flattened short name -> resolved value.
             descriptors (dict): Short name -> the leaf descriptor it came from.
             paths (dict): Short name -> the leaf's dotted path.
-            params (list): The node's self-contained ``params`` descriptors.
+            params (list): The node's self-contained ``params`` descriptors;
+                a leaf is a parameter when one names its path (the engine
+                strips the flag from the leaf itself).
             capabilities (int): The node's PROTOCOL_CAPS bitmask.
             node (NodeInfo): The node's identity record (``config.node``);
                 ``NO_NODE`` when the view has none.
@@ -413,7 +643,13 @@ class ConfigView(Mapping):
                 derives from. A derived view (overlaid, restricted) keeps
                 them: which keys the environment decides is a fact of the
                 SPEC, not of the values currently in them.
+            schema (dict): The resolved schema the view came from; None for
+                a view built without one, which cannot move a selector.
+            stored (dict): The stored config tree the view came from.
+            shared (_Overlays): The schema index and the re-resolution cache
+                of the view this one derives from.
         """
+        param_paths = _param_paths(params)
         object.__setattr__(self, '_values', dict(values))
         object.__setattr__(self, '_descriptors', dict(descriptors))
         object.__setattr__(self, '_paths', dict(paths))
@@ -421,9 +657,8 @@ class ConfigView(Mapping):
         object.__setattr__(self, '_capabilities', int(capabilities))
         object.__setattr__(self, '_node', node if node is not None else NO_NODE)
         object.__setattr__(self, '_refuse_params', refuse_params)
-        object.__setattr__(
-            self, '_param_keys', frozenset(key for key, desc in descriptors.items() if desc.get('param'))
-        )
+        object.__setattr__(self, '_param_paths', param_paths)
+        object.__setattr__(self, '_param_keys', frozenset(key for key, path in paths.items() if path in param_paths))
         object.__setattr__(
             self,
             '_env_keys',
@@ -431,6 +666,9 @@ class ConfigView(Mapping):
             if env_keys is not None
             else frozenset(key for key, value in values.items() if _has_placeholder(value)),
         )
+        object.__setattr__(self, '_schema', schema)
+        object.__setattr__(self, '_stored', stored if stored is not None else {})
+        object.__setattr__(self, '_shared', shared if shared is not None else _Overlays())
 
     # ---- Mapping protocol ------------------------------------------------
 
@@ -490,8 +728,13 @@ class ConfigView(Mapping):
 
     @property
     def param_keys(self) -> frozenset:
-        """The keys flagged ``param`` in the schema: readable only through ``settings``."""
+        """The keys of this view flagged ``param`` in the schema: readable only through ``settings``."""
         return self._param_keys
+
+    @property
+    def param_paths(self) -> frozenset:
+        """The paths of every ``param``-flagged leaf of the schema, whichever branch holds it."""
+        return self._param_paths
 
     @property
     def env_keys(self) -> frozenset:
@@ -520,6 +763,27 @@ class ConfigView(Mapping):
             raise KeyError(self._unknown_message(key))
         return dict(self._descriptors[key])
 
+    def leaf_path(self, key: str) -> Optional[str]:
+        """
+        Return the schema path of a leaf named by ``key``, whichever branch holds it.
+
+        Args:
+            key: A leaf path (``service.customerId``), a short key of this
+                view, or a short name exactly one leaf of the schema carries.
+
+        Returns:
+            The path, or None when ``key`` names no leaf (or an ambiguous short name).
+        """
+        index = self._index()
+        if index is None:
+            return self._paths.get(key) if key in self._paths else (key if key in self._paths.values() else None)
+        if key in index.leaves:
+            return key
+        if key in self._paths:
+            return self._paths[key]
+        matches = [path for path, leaf in index.leaves.items() if leaf.name == key]
+        return matches[0] if len(matches) == 1 else None
+
     def to_dict(self) -> Dict[str, Any]:
         """Return a plain copy of every value, bypassing refusals (framework use)."""
         return dict(self._values)
@@ -537,42 +801,95 @@ class ConfigView(Mapping):
             node=self._node,
             refuse_params=refuse_params,
             env_keys=self._env_keys,
+            schema=self._schema,
+            stored=self._stored,
+            shared=self._shared,
         )
 
     def overlay(self, params: Optional[Mapping[str, Any]]) -> 'ConfigView':
         """
-        Return a view with the caller's parameters applied.
+        Return a view with the caller's parameters applied (plan 5.1).
 
         ``params`` is the server-filtered map for this node, keyed by the leaf
-        path (``service.customerId``) or its short name. Only ``param``-flagged
-        keys may be overlaid; anything else is a ``ConfigError`` because the
-        server filter should have refused it.
+        path (``service.customerId``) or a short name. Only ``param``-flagged
+        leaves may be overlaid, each value validated against its leaf (an
+        array's elements against its item). Selector parameters apply FIRST:
+        when one is among them the view is RE-RESOLVED against the schema
+        (``resolveConfig(schema, config + params)``), cached per distinct
+        parameter map, so the branch leaves a call reaches are the ones its
+        selector values select; a leaf no branch of the call reaches is
+        refused. Anything the server filter should have refused raises a
+        ``ConfigError`` whose ``problems`` name each key.
+
+        Args:
+            params: The node's admitted parameters, or None.
+
+        Returns:
+            ConfigView: The call's effective configuration, never refusing.
+
+        Raises:
+            ConfigError: A key that is not a parameter, a value that does not
+                fit, a selector value whose branch does not resolve, or a leaf
+                the call's branch set does not reach.
         """
         if not params:
             return self._with_values(self._values)
-        by_path = {path: key for key, path in self._paths.items()}
-        values = dict(self._values)
-        problems: List[str] = []
+
+        # Step 1: each key names a param-flagged leaf and its value fits the leaf
+        index = self._index()
+        problems: Dict[str, str] = {}
+        values_by_path: Dict[str, Any] = {}
+        target_of: Dict[str, str] = {}
         for target, value in params.items():
-            key = by_path.get(target, target if target in values else None)
-            if key is None:
-                problems.append(f'"{target}" is not a config key of this node')
+            # A frozen caller's value arrives as read-only views; the view
+            # keeps a plain private copy
+            value = _thawed(value)
+            path = self.leaf_path(str(target))
+            if path is None:
+                problems[str(target)] = 'is not a config key of this node'
                 continue
-            if key not in self._param_keys:
-                problems.append(f'"{key}" is not a parameter of this node')
+            if path not in self._param_paths:
+                problems[str(target)] = 'is not a parameter of this node'
                 continue
             if value is None:
                 continue
-            _validate_value(key, value, self._descriptors[key], problems)
-            values[key] = value
+            descriptor = index.leaves[path].descriptor if index is not None else self._descriptors[self._short(path)]
+            found: List[str] = []
+            _validate_value(path, value, descriptor, found)
+            if found:
+                problems[str(target)] = '; '.join(found)
+                continue
+            values_by_path[path] = value
+            target_of[path] = str(target)
         if problems:
-            raise ConfigError('parameters: ' + '; '.join(problems))
-        return self._with_values(values)
+            raise _overlay_error(problems)
+
+        # Step 2: selector values first. One among them re-resolves the view
+        # with the call's values, so the branches it reaches are the call's
+        selectors = [path for path in values_by_path if index is not None and path in index.selectors]
+        if selectors:
+            base = self._reresolved(values_by_path, [target_of[path] for path in selectors])
+        else:
+            base = self
+
+        # Step 3: every leaf must be reachable under the call's branch set; a
+        # re-resolved view already holds the values, a plain overlay sets them
+        shorts = {path: short for short, path in base._paths.items()}
+        values = dict(base._values)
+        for path, value in values_by_path.items():
+            short = shorts.get(path)
+            if short is None:
+                problems[target_of[path]] = 'is under a branch this call does not select'
+                continue
+            values[short] = value
+        if problems:
+            raise _overlay_error(problems)
+        return base._with_values(values)
 
     # ---- Internals --------------------------------------------------------
 
     def _with_values(self, values: Dict[str, Any]) -> 'ConfigView':
-        """Clone with ``values`` and no refusal (settings never refuses); the env-valued keys and the node record stay."""
+        """Clone with ``values`` and no refusal (settings never refuses); the env-valued keys, the node record and the schema stay."""
         return ConfigView(
             values,
             self._descriptors,
@@ -581,7 +898,74 @@ class ConfigView(Mapping):
             self._capabilities,
             node=self._node,
             env_keys=self._env_keys,
+            schema=self._schema,
+            stored=self._stored,
+            shared=self._shared,
         )
+
+    def _index(self) -> Optional[_Schema]:
+        """Return the schema index, built once per family of views; None without a schema."""
+        if self._schema is None:
+            return None
+        return self._shared.index_of(self._schema)
+
+    def _short(self, path: str) -> str:
+        """Return the short key of a path of this view."""
+        for short, own in self._paths.items():
+            if own == path:
+                return short
+        return path
+
+    def _reresolved(self, values_by_path: Dict[str, Any], selector_targets: List[str]) -> 'ConfigView':
+        """
+        Return the view resolved again with the call's parameters in the stored tree (cached).
+
+        Args:
+            values_by_path: The validated parameter values by leaf path.
+            selector_targets: The caller's keys of the selectors among them,
+                named when the branch they select does not resolve.
+
+        Returns:
+            ConfigView: The re-resolved view, never refusing.
+
+        Raises:
+            ConfigError: The selected branch does not resolve (a required
+                leaf without a value, for one).
+        """
+        index = self._index()
+        key = json.dumps(sorted(values_by_path.items()), default=repr)
+        cached = self._shared.get(key)
+        if cached is not None:
+            return cached
+
+        # The stored tree with the call's values written at their paths,
+        # resolved exactly as the control's own config was
+        merged = copy.deepcopy(self._stored)
+        for path, value in values_by_path.items():
+            _set_path(merged, _segments(path, index), copy.deepcopy(value))
+        try:
+            view = resolveConfig(self._schema, merged, node=self._node)
+        except ConfigError as e:
+            raise _overlay_error(
+                {target: f'selects a branch that does not resolve: {e}' for target in selector_targets}
+            )
+
+        # The re-resolved view keeps what the environment decides (a fact of
+        # the spec) and shares the cache of the view it derives from
+        derived = ConfigView(
+            view._values,
+            view._descriptors,
+            view._paths,
+            view._params,
+            view._capabilities,
+            node=view._node,
+            env_keys=self._env_keys,
+            schema=self._schema,
+            stored=self._stored,
+            shared=self._shared,
+        )
+        self._shared.put(key, derived)
+        return derived
 
     def _refuse(self, key: str) -> None:
         """Raise the teaching error for a key this view must not serve."""
@@ -739,4 +1123,17 @@ def resolveConfig(schema: Dict[str, Any], connConfig: Any, node: Optional[NodeIn
     params = schema.get('params')
     if not isinstance(params, list):
         params = []
-    return ConfigView(values, descriptors, paths, params, capabilities, node=node)
+
+    # The view keeps the schema and its own copy of the stored tree, so a
+    # call whose parameters move a selector re-resolves from them (plan 5.1)
+    return ConfigView(
+        values,
+        descriptors,
+        paths,
+        params,
+        capabilities,
+        node=node,
+        schema=schema,
+        stored=copy.deepcopy(connConfig) if isinstance(connConfig, dict) else {},
+        shared=_Overlays(indexed),
+    )
