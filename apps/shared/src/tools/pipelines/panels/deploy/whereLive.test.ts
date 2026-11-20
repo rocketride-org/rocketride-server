@@ -20,12 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/** The pipeline DEPLOY page's rung rules (mockups 2.13, 2.14, 2.15): which rows appear, in what order, and what the Publish dialog offers. */
+/** The pipeline DEPLOY page's rung rules (mockups 2.13 and 2.14): which rows appear, in what order, and what the Publish dialog offers. */
 
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { publishTargetsOf, rowOfTarget, servingOf, whereLiveRungsOf } from './whereLive';
+import { STORE_AUDIENCE, audienceOfTarget, publishTargetsOf, rowOfTarget, servingOf, whereLiveRungsOf } from './whereLive';
 import type { DeployTeamRef, TeamDeploymentRow } from './types';
 
 /** The caller's roster as the SDK resolves it: '@me' first, then the teams. */
@@ -77,19 +77,6 @@ describe('whereLiveRungsOf', () => {
 		);
 	});
 
-	it('lets only a team rung schedule its sources', () => {
-		const rungs = whereLiveRungsOf([ME, STAGING, STORE, OTHER], TEAMS);
-		assert.deepEqual(
-			rungs.map((r) => [r.row.rung, r.scheduleEditable]),
-			[
-				['me', false],
-				['personal', false],
-				['team', true],
-				['public', false],
-			]
-		);
-	});
-
 	it('puts a team outside the roster after the roster, by name', () => {
 		const zeta = row({ teamId: 'team-zeta', teamName: 'Zeta', rung: 'team' });
 		const alpha = row({ teamId: 'team-alpha', teamName: 'Alpha', rung: 'team' });
@@ -122,24 +109,49 @@ describe('servingOf', () => {
 });
 
 describe('publishTargetsOf', () => {
-	it('offers every audience the caller controls, Me first, with what it points at now', () => {
-		const targets = publishTargetsOf(TEAMS, [ME, PROD], 6);
+	it('offers every audience the caller controls, Me first, then the store, each with what it points at now', () => {
+		const targets = publishTargetsOf(TEAMS, [ME, PROD, STORE], 6, 'ready');
 		assert.deepEqual(
 			targets.map((t) => [t.id, t.label, t.note, t.disabled ?? false]),
 			[
 				['@me', 'Me', 'upgrade from v5', false],
 				['team-staging', 'Staging', 'not published yet', false],
 				['team-prod', 'Production', 'upgrade from v4', false],
+				['@public', 'Public: the store', 'upgrade from v4', false],
 			]
 		);
 	});
 
 	it('keeps the audience already on the version visible and not choosable, and names a rollback', () => {
-		const targets = publishTargetsOf(TEAMS, [ME, PROD], 4);
+		const targets = publishTargetsOf(TEAMS, [ME, PROD], 4, 'ready');
 		const byId = new Map(targets.map((t) => [t.id, t]));
 		assert.equal(byId.get('@me')?.note, 'rollback from v5');
 		assert.equal(byId.get('team-prod')?.note, 'already on v4');
 		assert.equal(byId.get('team-prod')?.disabled, true);
 		assert.match(byId.get('team-prod')?.disabledTitle ?? '', /already points at v4/);
+	});
+
+	it('keeps the store closed with the reason until the version is approved', () => {
+		for (const state of ['private', 'submit', 'rejected', undefined]) {
+			const store = publishTargetsOf(TEAMS, [], 6, state).at(-1);
+			assert.deepEqual([store?.id, store?.note, store?.disabled], ['@public', 'needs review approval', true], String(state));
+			assert.match(store?.disabledTitle ?? '', /approved \('ready'\) version/);
+		}
+		assert.deepEqual(publishTargetsOf(TEAMS, [], 6, 'ready').at(-1), { id: '@public', label: 'Public: the store', note: 'not published yet' });
+	});
+
+	it('keeps an approved version the store already serves visible and not choosable', () => {
+		const store = publishTargetsOf(TEAMS, [STORE], 4, 'ready').at(-1);
+		assert.deepEqual([store?.note, store?.disabled], ['already on v4', true]);
+	});
+});
+
+describe('audienceOfTarget', () => {
+	it('stages the store for the store row and a team of the roster for its row', () => {
+		assert.equal(audienceOfTarget(TEAMS, '@public'), STORE_AUDIENCE);
+		assert.deepEqual(STORE_AUDIENCE, { id: '@public', name: 'the store', canControl: true });
+		assert.equal(audienceOfTarget(TEAMS, 'team-prod')?.name, 'Production');
+		assert.equal(audienceOfTarget(TEAMS, '@me')?.name, 'Me');
+		assert.equal(audienceOfTarget(TEAMS, 'team-gone'), undefined);
 	});
 });

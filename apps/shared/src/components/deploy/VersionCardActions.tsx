@@ -46,9 +46,7 @@ import type { IVersionCardActions } from './reviewRules';
 export interface IVersionCardActionsProps {
 	/** The verbs this card offers (`versionCardActionsOf`). */
 	actions: IVersionCardActions;
-	/** The publish button's label: 'Publish to…', or 'Publish' when one audience is the only choice. */
-	publishLabel?: string;
-	/** Opens the audience choice (or publishes to the one audience). */
+	/** Opens the audience choice ("Publish to…"). */
 	onPublish: () => void;
 	/** Submits the version for review. */
 	onSubmit: () => void;
@@ -82,7 +80,7 @@ const S = {
  *
  * @param props - See {@link IVersionCardActionsProps}.
  */
-export const VersionCardActions: React.FC<IVersionCardActionsProps> = ({ actions, publishLabel = 'Publish to…', onPublish, onSubmit, onWithdraw, disabled = false }) => {
+export const VersionCardActions: React.FC<IVersionCardActionsProps> = ({ actions, onPublish, onSubmit, onWithdraw, disabled = false }) => {
 	if (!actions.publish && !actions.submit && !actions.withdraw) return null;
 	return (
 		// Nested real buttons: keep both event paths from bubbling into a
@@ -90,7 +88,7 @@ export const VersionCardActions: React.FC<IVersionCardActionsProps> = ({ actions
 		<div style={S.row} onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
 			{actions.publish && (
 				<Button variant="secondary" small disabled={disabled} onClick={onPublish}>
-					{publishLabel}
+					Publish to…
 				</Button>
 			)}
 			{actions.submit && (

@@ -119,6 +119,7 @@ def test_resolve_deploy_teams_admin_controls_every_team():
 def test_resolve_team_arg_maps_me_ids_and_names():
     teams = resolve_deploy_teams(ROSTER, [])
     assert resolve_team_arg('@me', teams) == '@me'
+    assert resolve_team_arg('@public', teams) == '@public'
     assert resolve_team_arg('t-qa', teams) == 't-qa'
     assert resolve_team_arg('production', teams) == 't-prod'
     assert resolve_team_arg('t-other', teams) == 't-other'
@@ -135,12 +136,16 @@ def test_team_name_of_names_personal_spaces_and_falls_back():
     teams = resolve_deploy_teams(ROSTER, [])
     assert team_name_of(teams, 'user~u1', 'u1') == 'Me'
     assert team_name_of(teams, 'user~u2', 'u1') == 'Personal'
+    assert team_name_of(teams, '~public', 'u1') == 'Store'
+    assert team_name_of(teams, '@public', 'u1') == 'Store'
     assert team_name_of(teams, 't-qa', 'u1') == 'QA'
     assert team_name_of(teams, 't-gone', 'u1') == 't-gone'
 
 
-def test_wire_team_id_of_addresses_own_space_as_me():
+def test_wire_team_id_of_addresses_own_space_as_me_and_the_store_as_public():
     assert wire_team_id_of('user~u1', 'u1') == '@me'
+    assert wire_team_id_of('~public', 'u1') == '@public'
+    assert wire_team_id_of('~public', '') == '@public'
     assert wire_team_id_of('t-qa', 'u1') == 't-qa'
 
 

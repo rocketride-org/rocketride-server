@@ -435,16 +435,21 @@ class DeployApi:
 
     async def deploy(self, project_id: str, version: int, team_id: str) -> Deployment:
         """
-        Point a team at a published version.
+        Point an audience at a published version.
 
         Promotion (Staging -> Production) and rollback (v3 -> v2) are both
-        this call — the team's pointer moves, nothing else changes. The team
-        is always explicit; requires ``task.control`` on it.
+        this call — the audience's pointer moves, nothing else changes. The
+        audience is always explicit: a team (requires ``task.control`` on
+        it), ``'@me'`` (your own space), or ``'@public'`` (the store: on a
+        server that reviews, only an approved ``'ready'`` version; your
+        organization needs a developer id). A pointer on ``'@me'`` or
+        ``'@public'`` is billed to your development team when its schedules
+        or a run-now fire it.
 
         Args:
             project_id: The project whose artifact to deploy.
-            version: The registry version to point the team at.
-            team_id: The target team (the environment).
+            version: The registry version to point the audience at.
+            team_id: The target audience: a team id, ``'@me'`` or ``'@public'``.
 
         Returns:
             The updated deployment record, registry-joined.
@@ -471,9 +476,10 @@ class DeployApi:
         Deployments visible to the caller, as the standard list envelope.
 
         Args:
-            team_id: Restrict to one team; omitted = the visibility model:
-                the caller's member teams plus their own personal space, and
-                the whole org for an org admin.
+            team_id: Restrict to one team, ``'@me'`` or ``'@public'``; omitted
+                = the visibility model: the caller's member teams, their own
+                personal space and the organization's store rows
+                (``teamId: '~public'``), and the whole org for an org admin.
             page: 1-based page number.
             page_size: Rows per page (server-clamped).
             search: Free-text search over projectId/pipelineName/teamId.
@@ -698,18 +704,19 @@ class DeployApi:
         ttl: int | None = None,
     ) -> Deployment:
         """
-        Set (or clear) one source's schedule on a team deployment.
+        Set (or clear) one source's schedule on a deployment: a team's, ``'@me'`` or ``'@public'``.
 
-        The paused flag is untouched — editing cron/ttl preserves it (a new
-        schedule starts unpaused); :meth:`pause_schedule` /
-        :meth:`resume_schedule` own it.
+        Any publication of the pipe can run on a schedule, billed to the team
+        stamped when it was published. The paused flag is untouched — editing
+        cron/ttl preserves it (a new schedule starts unpaused);
+        :meth:`pause_schedule` / :meth:`resume_schedule` own it.
 
         Args:
             project_id: The project.
             source_id: The pipeline source the schedule fires.
             schedule: 5-field cron expression; ``None`` or ``'manual'``
                 clears the schedule.
-            team_id: The team whose deployment to schedule.
+            team_id: The deployment to schedule: a team id, ``'@me'`` or ``'@public'``.
             ttl: Run window in seconds ('fixed window'); ``None`` runs each
                 task until the pipeline finishes.
 

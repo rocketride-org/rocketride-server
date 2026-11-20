@@ -72,10 +72,15 @@ from rocketlib import debug
 
 from ai.account.base import InventoryUnavailableError
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
+from ai.account.pipe_deploy import pipe_serving_block_of
 
 #: The artifact kinds that walk the store review ladder (plan S8): apps, and
 #: pipes since C.17; nodes join when the node rail publishes to the store.
 REVIEWED_KINDS = ('app', 'pipe')
+
+#: The artifact kinds whose publish rows the ``where`` verb and the version
+#: chips read: a pipe's rows read as an app's do (plan 10.1).
+PUBLISHED_KINDS = ('app', 'pipe')
 
 
 def build_of(entry: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -218,10 +223,16 @@ async def _visible_rows_of(conn: Any, account: Any, org_id: str, app_id: Optiona
 
     Visibility is inherent in the audience walk — only the caller's own
     user row, rows of teams they belong to, and public rows can match.
-    Optionally narrowed to one app id.
+    Optionally narrowed to one app id. Rows of every published kind are
+    read (a pipe's rows as an app's) and each carries the ``kind`` it was
+    read as; a name is one kind only (plan 2.3), so the kinds never mix
+    under one id.
     """
+    audiences = _audiences_of(conn)
+    rows: List[Dict[str, Any]] = []
     try:
-        rows = await account.publish_list(org_id, 'app', _audiences_of(conn))
+        for kind in PUBLISHED_KINDS:
+            rows += [{**row, 'kind': kind} for row in await account.publish_list(org_id, kind, audiences)]
     except Exception as exc:
         debug(f'[app_deploy] publish_list failed: {exc}')
         return []
@@ -788,8 +799,11 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
             for entry in sorted(entries, key=lambda e: -int(e.get('version', 0))):
                 artifact = await _artifact_of(account, home, app_id, entry)
                 rail.append(_rail_entry(entry, artifact))
-            # Audience chips: which audiences currently serve which version
-            rows = await account.publish_of_app(home, 'app', app_id)
+            # Audience chips: which audiences currently serve which version,
+            # read for the name's own kind (a pipe's rows as an app's; a rail
+            # entry without a kind stamp is a pipe, as the backends read it)
+            kind = str(entries[0].get('kind') or 'pipe') if entries else 'app'
+            rows = await account.publish_of_app(home, kind, app_id)
         else:
             # Another org's app: the publisher's rail is not the caller's to
             # browse — only versions serving on caller-visible rows appear
@@ -873,24 +887,18 @@ async def handle_deploy_app(conn: Any, request: Dict[str, Any]) -> Dict[str, Any
         artifact = await _artifact_of(account, home, app_id, {'version': version})
         if not isinstance(artifact, dict) or artifact.get('kind') != 'app':
             return conn.build_error(request, f'Registry version {version} of {app_id} is not an app artifact')
-        # DEPLOYMENT-state gate — the review state lives on the deployment, not
-        # the binding. On a review-ladder server (SaaS) a PUBLIC binding may
-        # only point at an approved ('ready') version (submit -> admin approve
-        # -> ready first); without the ladder (OSS — the developer IS the
-        # admin) @public accepts the same internal-eligible set as @me/@team.
-        # Internal bindings accept any internal-eligible version (anything but
-        # 'failed'; 'submit' is still in review but the developer can already
-        # run it on their own team). The binding created here is a pure pointer.
-        deploy_state = str(entry.get('state') or DEFAULT_REVIEW_STATE)
-        if audience['type'] == 'public' and account.review_ladder:
-            if deploy_state != 'ready':
-                return conn.build_error(
-                    request,
-                    f'Version {version} of {app_id} is not approved for the store yet '
-                    f'(state {deploy_state!r}) — submit it for review and get it to "ready" first',
-                )
-        elif deploy_state == 'failed':
-            return conn.build_error(request, f'Version {version} of {app_id} failed processing — not publishable')
+        # DEPLOYMENT-state gate (publish_block_of) — the review state lives on
+        # the deployment, not the binding. The binding created here is a pure
+        # pointer.
+        refusal = publish_block_of(
+            app_id,
+            version,
+            str(entry.get('state') or DEFAULT_REVIEW_STATE),
+            audience['type'] == 'public',
+            account.review_ladder,
+        )
+        if refusal:
+            return conn.build_error(request, refusal)
         # BUILT gate — a binding must never point at a version whose dist/
         # does not exist yet (still building) or never will (build failed):
         # the pointer would mint URLs to an empty directory.
@@ -1303,7 +1311,8 @@ async def _where_of(
     Serving truth (#2461) rides beside it, from the SAME gate the manifest
     walk applies: ``enabled`` (the binding's own state — a disabled binding
     stays listed, republishing revives it), ``serving`` plus ``reason`` (''
-    when serving, else why not: see _serving_block_of), and ``servesYou`` —
+    when serving, else why not: see _row_block_of; a pipe's rows take the
+    pipe gate), and ``servesYou`` —
     the one pin the caller's own published resolution picks: the scope-walk
     WINNER among serving pins, dropped (no fallback to a less specific pin,
     exactly as the catalog drops it) when serving enforces requiredPermissions
@@ -1316,7 +1325,7 @@ async def _where_of(
             r for r in rows if (r.get('audience') or {}).get('type') != 'public' or r.get('artifactState') == 'ready'
         ]
 
-    blocks = [_serving_block_of(row, account.review_ladder) for row in rows]
+    blocks = [_row_block_of(row, account.review_ladder) for row in rows]
     serving_rows = [row for row, block in zip(rows, blocks) if not block]
     winner = _precedence_sorted(serving_rows)[-1] if serving_rows else None
     # Only SaaS enforces requiredPermissions (the catalog + the serve
@@ -1389,6 +1398,57 @@ async def _caller_entitled_to_version(
 # =============================================================================
 # MANIFEST RESOLUTION — the scope walk
 # =============================================================================
+
+
+def publish_block_of(name: str, version: int, state: str, public: bool, review_ladder: bool) -> str:
+    """
+    Why a version may not be pointed at an audience, or '' when it may.
+
+    THE publish gate, read off the deployment's review state, for both doors:
+    the app door applies it to every audience, the pipe door to the store
+    (its internal rungs keep their own rule). On a review-ladder server
+    (SaaS) a PUBLIC binding may only point at an approved ('ready') version
+    (submit -> admin approve -> ready first); without the ladder (OSS — the
+    developer IS the admin) @public accepts the same internal-eligible set as
+    @me/@team. Internal bindings accept any internal-eligible version
+    (anything but 'failed'; 'submit' is still in review but the developer can
+    already run it on their own team).
+
+    Args:
+        name: The registry name, for the refusal sentence.
+        version: The registry version being pointed at.
+        state: The version's review state.
+        public: The audience is the store.
+        review_ladder: The server reviews store versions.
+
+    Returns:
+        The refusal sentence, or '' when the pointer may move.
+    """
+    if public and review_ladder:
+        if state != 'ready':
+            return (
+                f'Version {version} of {name} is not approved for the store yet '
+                f'(state {state!r}) — submit it for review and get it to "ready" first'
+            )
+        return ''
+    if state == 'failed':
+        return f'Version {version} of {name} failed processing — not publishable'
+    return ''
+
+
+def _row_block_of(row: Dict[str, Any], review_ladder: bool) -> str:
+    """
+    Why one publish row of either kind does not serve, or '' when it does.
+
+    An app row takes the app gate (_serving_block_of); a pipe row the pipe
+    gate (pipe_deploy.pipe_serving_block_of: no build step, and the store
+    needs 'ready' on every server). The row's ``kind`` is the one
+    _visible_rows_of read it as.
+    """
+    if row.get('kind') == 'pipe':
+        public = (row.get('audience') or {}).get('type') == 'public'
+        return pipe_serving_block_of(str(row.get('state') or ''), str(row.get('artifactState') or ''), public)
+    return _serving_block_of(row, review_ladder)
 
 
 def _serving_block_of(row: Dict[str, Any], review_ladder: bool) -> str:

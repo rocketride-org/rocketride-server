@@ -14,20 +14,19 @@
  *
  * The version cards and the Publish dialog are the App Builder's own pieces
  * (shared/components/deploy): the same badge, the same Publish to… / Submit
- * for review / Withdraw rules, the same audience dialog. A pipe walks the
+ * for review / Withdraw rules, the same audience dialog with Me, the teams
+ * and the store (closed until the version is approved). A pipe walks the
  * app's review ladder (plan 10.1); where the server has no reviewer the host
- * offers no review verb and versions are born 'ready'.
+ * offers no review verb and versions are born 'ready'. Any publication can
+ * run on a schedule: every rung row opens the schedule editor.
  *
  * CAPABILITY-FED like SourcePanel: the panel OWNS its data lifecycle. The
  * host supplies one composite `fetchLifecycle` closure (the fetchTimeline
  * precedent) — the panel fetches on mount, silently re-fetches after every
  * mutation, and re-fetches on the host's deployment-change signal (any
- * session's publish, a reviewer's verdict). LIVE data (`deployments`,
- * `teams`) flows in as props (the liveEvents precedent).
- *
- * Cardinality-driven collapsing (never an edition check): with exactly one
- * deployable audience the "Publish to…" picker becomes a plain Publish
- * button and badges reduce to a single DEPLOYED marker.
+ * session's publish, a reviewer's verdict); when those reads overlap, only
+ * the newest writes. LIVE data (`deployments`, `teams`) flows in as props
+ * (the liveEvents precedent).
  *
  * Every pointer move (deploy/rollback) is confirmed before it runs — it
  * changes what an audience is served. Publishing is gated on a SAVED,
@@ -44,9 +43,11 @@ import { ConfirmDialog } from 'shell';
 import { Card } from 'shell';
 import { formatTime, formatDayTime } from 'shell';
 import { buttonize } from 'shared/utils/buttonize';
+import { createLatestGate } from 'shared/utils/latestGate';
 import { DeleteVersionMark, PublishToDialog, ServingStateWord, VersionCardActions, VersionStateBadge, newestSubmittableOf, versionCardActionsOf } from 'shared/components/deploy';
 import { pinStatusOf, versionBadgeOf } from '../../../appdev/servingStatus';
-import { publishTargetsOf, rowOfTarget, servingOf, whereLiveRungsOf } from './whereLive';
+import { audienceOfTarget, publishTargetsOf, rowOfTarget, servingOf, whereLiveRungsOf } from './whereLive';
+import type { IWhereLiveRung } from './whereLive';
 import { SchedulePanel, describeCron, describeTtl } from './SchedulePanel';
 import { VersionRecordPanel } from './VersionRecordPanel';
 import type { IVersionRecordPanelProps } from './VersionRecordPanel';
@@ -322,27 +323,31 @@ function shortSha(sha: string): string {
 // =============================================================================
 
 /**
- * The DEPLOY-page lifecycle surface: version strip, where-live grid,
- * merged history grid. See the module docstring for the collapsing rules.
+ * The DEPLOY-page lifecycle surface: version strip and where-live table.
+ * See the module docstring for the rules.
  */
 export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deployments, teams, canPublish = true, publishDisabledReason, requiresSave = false, onSaveDocument, onPublish, onDeploy, onOpenDeployment, onRemove, onDeleteVersion, onSubmitForReview, onWithdrawReview, subscribeDeployChanged, onSetSchedule, onSetSchedulePaused, previewSchedule, pipelineName = '', fetchArtifact, servicesJson, handleValidatePipeline, isConnected = false, isSubscribed = true, serverHost = '', onOpenLink }) => {
 	// --- Panel-owned registry data (fetched, never passed in) -----------------
 
 	const [versions, setVersions] = useState<DeployVersionCard[]>([]);
 	const [loading, setLoading] = useState(true);
+	// Refreshes overlap (the mount, a deployment-change push, the refresh
+	// after a verb) and answer in any order: only the newest writes.
+	const [refreshGate] = useState(createLatestGate);
 
 	/** (Re-)fetch the registry snapshot; a failed fetch keeps the last data. */
 	const refresh = useCallback(async (): Promise<void> => {
+		const ticket = refreshGate.take();
 		try {
 			const snapshot = await fetchLifecycle();
-			setVersions(snapshot.versions);
+			if (refreshGate.isLatest(ticket)) setVersions(snapshot.versions);
 		} catch (err) {
 			// A project that was never published has no registry — empty strip.
 			console.log('[DeployPanel] fetch failed:', err);
 		} finally {
-			setLoading(false);
+			if (refreshGate.isLatest(ticket)) setLoading(false);
 		}
-	}, [fetchLifecycle]);
+	}, [fetchLifecycle, refreshGate]);
 
 	// Fetch on mount and whenever the host swaps the fetcher (new identity /
 	// reconnect) — the SourcePanel lifecycle model.
@@ -355,15 +360,13 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 	// where-live rows never go stale, as the App Builder's DEPLOY view does.
 	useEffect(() => subscribeDeployChanged?.(() => void refresh()), [subscribeDeployChanged, refresh]);
 
-	// Deploy targets = the audiences the caller controls ('@me' first). ONE
-	// target collapses the picker into a direct Publish button.
+	// Deploy targets = the audiences the caller controls ('@me' first); the
+	// Publish dialog adds the store after them.
 	const controlTeams = useMemo(() => teams.filter((t) => t.canControl), [teams]);
-	const singleTarget = controlTeams.length === 1 ? controlTeams[0] : null;
-	const multiTeam = teams.length > 1;
 
 	// The where-live rows: one per rung holding a publication, in rung order
 	// (Me, teams, the store). Soft-removed deployments never render: the
-	// where-live table and the badges share this list.
+	// where-live table and the card chips share this list.
 	const rungs = useMemo(() => whereLiveRungsOf(deployments, teams), [deployments, teams]);
 	const liveDeployments = useMemo(() => rungs.map((rung) => rung.row), [rungs]);
 
@@ -371,16 +374,17 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 	// did not fail (the server enforces the same rule).
 	const newestSubmittable = newestSubmittableOf(versions);
 
-	// version -> live teams (for the env badges on each card).
+	// version -> the rungs serving it (each card's audience chips, named as
+	// the where-live table names them: Me, a team, Store).
 	const liveByVersion = useMemo(() => {
-		const map = new Map<number, TeamDeploymentRow[]>();
-		for (const dep of liveDeployments) {
-			const rows = map.get(dep.version) ?? [];
-			rows.push(dep);
-			map.set(dep.version, rows);
+		const map = new Map<number, IWhereLiveRung[]>();
+		for (const rung of rungs) {
+			const list = map.get(rung.row.version) ?? [];
+			list.push(rung);
+			map.set(rung.row.version, list);
 		}
 		return map;
-	}, [liveDeployments]);
+	}, [rungs]);
 
 	const nextVersion = (versions[0]?.version ?? 0) + 1;
 
@@ -486,9 +490,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 					const live = liveByVersion.get(v.version) ?? [];
 					// Only legal moves render (the App Builder's rules): a pipe
 					// never builds, so its bytes can serve once deployed.
-					const legal = versionCardActionsOf({ version: v.version, state: v.state, servable: true }, newestSubmittable, { publish: controlTeams.length > 0, submit: Boolean(onSubmitForReview), withdraw: Boolean(onWithdrawReview) });
-					// One audience only: its Publish disappears once the version serves there.
-					const actions = singleTarget && rowOfTarget(liveDeployments, singleTarget.id)?.version === v.version ? { ...legal, publish: false } : legal;
+					const actions = versionCardActionsOf({ version: v.version, state: v.state, servable: true }, newestSubmittable, { publish: controlTeams.length > 0, submit: Boolean(onSubmitForReview), withdraw: Boolean(onWithdrawReview) });
 					return (
 						<div key={v.version} style={{ ...S.versionCard, ...(index === 0 ? S.versionCardNewest : {}), ...(fetchArtifact ? { cursor: 'pointer' } : {}) }} title={fetchArtifact ? 'View this version' : undefined} {...buttonize(() => openVersionDrawer(v), Boolean(fetchArtifact))}>
 							{/* The delete mark (plan 2.3): present ONLY while the server
@@ -513,31 +515,30 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 								    rejected, failed): the App Builder's badge. A pipe
 								    never builds, so there is no build word. */}
 								<VersionStateBadge badge={versionBadgeOf(v.state, '')} />
-								{/* Badge click opens the deployment record panel — the
-								    badge IS the deployment, same gesture as its
-								    where-live row. */}
-								{live.map((dep) => (
+								{/* Each chip names an audience serving this version, as
+								    the where-live table names it (Me, a team, Store); a
+								    click opens that deployment's record, the same
+								    gesture as its where-live row. */}
+								{live.map(({ row: dep, label }) => (
 									<span
 										key={dep.teamId}
 										style={{ ...S.envTag, ...(onOpenDeployment ? { cursor: 'pointer' } : {}) }}
-										title={onOpenDeployment ? `Open the ${dep.teamName} deployment (${dep.state})` : `Live on ${dep.teamName} (${dep.state})`}
+										title={onOpenDeployment ? `Open the ${label} deployment (${dep.state})` : `Live on ${label} (${dep.state})`}
 										{...buttonize((e) => {
-											// The badge IS the team deployment; the card is the version.
+											// The chip IS the deployment; the card is the version.
 											e.stopPropagation();
 											onOpenDeployment?.(dep.teamId);
 										}, Boolean(onOpenDeployment))}
 									>
-										{multiTeam ? dep.teamName : 'deployed'}
+										{label}
 									</span>
 								))}
 							</div>
-							{/* The card's verbs, the App Builder's row: Publish to…
-							    (or the one-audience Publish, gone once the version
-							    serves there), Submit for review, Withdraw. */}
+							{/* The card's verbs, the App Builder's row: Publish to…,
+							    Submit for review, Withdraw. */}
 							<VersionCardActions
 								actions={actions}
-								publishLabel={singleTarget ? 'Publish' : 'Publish to…'}
-								onPublish={() => (singleTarget ? stageDeploy(v.version, singleTarget) : setPickerVersion(v.version))}
+								onPublish={() => setPickerVersion(v.version)}
 								onSubmit={() => {
 									if (onSubmitForReview) void run(() => onSubmitForReview(v.version));
 								}}
@@ -558,7 +559,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 				<div style={S.gridWrap}>
 					<Card header="Where this project is live" noBodyPadding>
 						<div>
-							{rungs.map(({ row: dep, label, handle, scheduleEditable }) => (
+							{rungs.map(({ row: dep, label, handle }) => (
 								<React.Fragment key={dep.teamId}>
 									{/* Rung header — the publication; click opens its record. */}
 									<div style={S.liveGroupHeader(Boolean(onOpenDeployment))} title={onOpenDeployment ? 'Open the deployment' : undefined} {...buttonize(() => onOpenDeployment?.(dep.teamId), Boolean(onOpenDeployment))}>
@@ -583,21 +584,18 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 										)}
 									</div>
 									{/* Source rows — schedule pill + last run, drawer-pill grammar.
-									    Only a team rung's sources take a schedule (mockup 2.15);
-									    @me and @public sources are on demand. */}
+									    Every rung's sources take a schedule (decided 2026-11-20):
+									    any publication of a pipe can run on a timer. */}
 									{dep.sources.map((src) => (
 										<div key={`${dep.teamId}.${src.sourceId}`} style={S.liveSourceRow(Boolean(onOpenDeployment))} {...buttonize(() => onOpenDeployment?.(dep.teamId, src.sourceId), Boolean(onOpenDeployment))}>
 											<span style={S.liveSourceName}>{src.sourceName}</span>
 											<span
-												style={S.livePill(Boolean(src.cron) && !src.paused, scheduleEditable && Boolean(onSetSchedule))}
-												title={scheduleEditable && onSetSchedule ? 'Edit schedule' : undefined}
-												{...buttonize(
-													(e) => {
-														e.stopPropagation();
-														setEditSchedule({ teamId: dep.teamId, teamName: label, source: src });
-													},
-													scheduleEditable && Boolean(onSetSchedule)
-												)}
+												style={S.livePill(Boolean(src.cron) && !src.paused, Boolean(onSetSchedule))}
+												title={onSetSchedule ? 'Edit schedule' : undefined}
+												{...buttonize((e) => {
+													e.stopPropagation();
+													setEditSchedule({ teamId: dep.teamId, teamName: label, source: src });
+												}, Boolean(onSetSchedule))}
 											>
 												{src.cron ? `${describeCron(src.cron)}${src.ttl ? ` · ${describeTtl(src.ttl)}` : ''}${src.paused ? ' · paused' : ''}` : 'on demand'}
 											</span>
@@ -693,15 +691,17 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 				</Modal>
 			)}
 
-			{/* ── Publish-to audience picker (the App Builder's dialog) ─── */}
+			{/* ── Publish-to audience picker (the App Builder's dialog):
+			    Me and the teams, then the store, closed until the version
+			    is approved ─────────────────────────────────────────────── */}
 			{pickerVersion !== null && (
 				<PublishToDialog
 					title={`Publish v${pickerVersion} to…`}
-					hint={`Points the chosen audience at v${pickerVersion}. Choosing an audience already on a newer version is a rollback: same gesture, one mental model.`}
-					targets={publishTargetsOf(controlTeams, liveDeployments, pickerVersion)}
+					hint={`Points the chosen audience at v${pickerVersion}. Choosing an audience already on a newer version is a rollback: same gesture, one mental model. Internal audiences serve at once; the store takes an approved version.`}
+					targets={publishTargetsOf(controlTeams, liveDeployments, pickerVersion, versions.find((v) => v.version === pickerVersion)?.state)}
 					onChoose={(id) => {
-						const team = controlTeams.find((t) => t.id === id);
-						if (team) stageDeploy(pickerVersion, team);
+						const audience = audienceOfTarget(controlTeams, id);
+						if (audience) stageDeploy(pickerVersion, audience);
 					}}
 					onCancel={closeDialogs}
 					busy={busy}
@@ -719,7 +719,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 					title={pendingDeploy.fromVersion !== undefined && pendingDeploy.fromVersion > pendingDeploy.version ? `Roll ${pendingDeploy.team.name} back to v${pendingDeploy.version}?` : `Publish v${pendingDeploy.version} to ${pendingDeploy.team.name}?`}
 					message={
 						<>
-							{pendingDeploy.fromVersion !== undefined ? `${pendingDeploy.team.name} currently runs v${pendingDeploy.fromVersion}. Its next runs will execute v${pendingDeploy.version}. Schedules and history carry over.` : `${pendingDeploy.team.name} is not running this project yet. Its runs will execute v${pendingDeploy.version}.`}
+							{pendingDeploy.fromVersion !== undefined ? `This repoints ${pendingDeploy.team.name} from v${pendingDeploy.fromVersion} to v${pendingDeploy.version}. Nothing is rebuilt, and its schedules and history carry over.` : `This is the first publish to ${pendingDeploy.team.name}; it serves v${pendingDeploy.version} at once.`}
 							{error && <div style={S.errorText}>{error}</div>}
 						</>
 					}

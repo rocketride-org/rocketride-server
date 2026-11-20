@@ -559,6 +559,7 @@ class TestReads:
             debug_out=False,
             owner_kind='team',
             owner_user_id='',
+            rung='',
         ):
             dispatched.update(
                 pipeline=pipeline,
@@ -571,6 +572,7 @@ class TestReads:
                 debug_out=debug_out,
                 owner_kind=owner_kind,
                 owner_user_id=owner_user_id,
+                rung=rung,
             )
             return 'c0ffee00c0ffee00c0ffee00c0ffee00'
 
@@ -603,6 +605,8 @@ class TestReads:
         conn._server.control_by_key.assert_called_once_with('c0ffee00c0ffee00c0ffee00c0ffee00')
         assert dispatched['trigger'] == 'manual'
         assert dispatched['team_id'] == 'team-1'
+        # A team slot's run derives its rung from the owner (only the store slot stamps one)
+        assert dispatched['rung'] == ''
         # The run names the deployment it resolved through: disabling or
         # removing that deployment releases the run's hold
         assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.proj-1')
@@ -808,6 +812,140 @@ class TestPersonalDeploy:
         conn = _make_conn(_account_info(user_id='', teams=[]))
         with pytest.raises(PermissionError, match='authenticated'):
             await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': '@me', 'version': 1})
+
+
+class TestPublicDeploy:
+    """The @public (store) target on the pipe door (plan 10.1, 2026-11-20): the
+    owner key, the app door's store gate and rule for who, the billing stamp,
+    the list, schedules and runs.
+    """
+
+    _DEPLOY = {'projectId': 'proj-1', 'teamId': '@public', 'version': 1}
+
+    @staticmethod
+    def _rail(account_stub, state):
+        """The one-version rail the store gate reads, at a review state."""
+        account_stub.deployments_versions.return_value = [{'version': 1, 'state': state}]
+
+    @pytest.mark.asyncio
+    async def test_a_ladder_server_refuses_the_store_an_unapproved_version(self, account_stub):
+        conn = _make_conn(_account_info())
+        for state in ('private', 'submit', 'rejected', 'failed'):
+            self._rail(account_stub, state)
+            with pytest.raises(ValueError, match='not approved for the store yet'):
+                await conn._deploy_deploy({}, dict(self._DEPLOY))
+        account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_ladder_server_points_the_store_at_an_approved_version_with_the_publishers_stamp(
+        self, account_stub
+    ):
+        # The app door's rule for who: a developer organization on a name in
+        # its namespace, no team grant (this membership carries none).
+        self._rail(account_stub, 'ready')
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+        await conn._deploy_deploy({}, dict(self._DEPLOY))
+        args = account_stub.deployments_deploy.await_args.args
+        assert (args[1], args[2], args[3]) == ('~public', 'acme.proj-1', 1)
+        assert args[5] == 'team-1'  # the publisher's dev team, stamped at pointer time
+
+    @pytest.mark.asyncio
+    async def test_a_server_without_a_reviewer_takes_any_version_that_did_not_fail(self, account_stub):
+        account_stub.review_ladder = False
+        conn = _make_conn(_account_info())
+        self._rail(account_stub, 'private')
+        await conn._deploy_deploy({}, dict(self._DEPLOY))
+        assert account_stub.deployments_deploy.await_args.args[1] == '~public'
+        self._rail(account_stub, 'failed')
+        with pytest.raises(ValueError, match='failed processing'):
+            await conn._deploy_deploy({}, dict(self._DEPLOY))
+        assert account_stub.deployments_deploy.await_count == 1
+
+    @pytest.mark.asyncio
+    async def test_a_version_not_on_the_rail_is_refused_by_name(self, account_stub):
+        account_stub.deployments_versions.return_value = []
+        with pytest.raises(ValueError, match='version 1 is not published for acme.proj-1'):
+            await _make_conn(_account_info())._deploy_deploy({}, dict(self._DEPLOY))
+
+    @pytest.mark.asyncio
+    async def test_add_with_deploy_to_public_takes_the_store_gate(self, account_stub):
+        # The one-step add+deploy is a door to the store too: on a review-ladder
+        # server the version it just added is a draft, so the store refuses it
+        account_stub.deployments_versions.return_value = [{'version': 3, 'state': 'private'}]
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='not approved for the store yet'):
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '@public'})
+        account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_store_needs_a_developer_organization_and_a_dev_team(self, account_stub):
+        self._rail(account_stub, 'ready')
+        info = _account_info()
+        info.organization['developerId'] = None
+        with pytest.raises(ValueError, match='registered as a developer'):
+            _make_conn(info)._require_team({'teamId': '@public'}, 'task.control')
+        # Billing never guesses: without a dev team the store publish refuses
+        with pytest.raises(PermissionError, match='@public needs your development team'):
+            await _make_conn(_account_info(teams=[]))._deploy_deploy({}, dict(self._DEPLOY))
+        account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_member_sees_the_store_row_and_reads_it_by_its_handle(self, account_stub):
+        account_stub.deployments_list.return_value = [
+            {'teamId': 'team-1', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+            {'teamId': '~public', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+            {'teamId': 'team-x', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        ]
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'A', 'permissions': []}]))
+        result = await conn._deploy_list({}, {})
+        assert sorted(r['teamId'] for r in result['body']['rows']) == ['team-1', '~public']
+        await conn._deploy_list({}, {'teamId': '@public'})
+        assert account_stub.deployments_list.await_args.args == ('org-1', '~public')
+
+    @pytest.mark.asyncio
+    async def test_schedules_sit_on_me_and_on_the_store(self, account_stub):
+        # Any published pipe can be scheduled: @me and @public take a
+        # schedule like a team does, and the scheduler resyncs from the row
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+        for target, slot in (('@me', 'user~user-1'), ('@public', '~public')):
+            await conn._deploy_schedule_set(
+                {}, {'projectId': 'proj-1', 'teamId': target, 'sourceId': 's1', 'schedule': '0 2 * * *'}
+            )
+            args = account_stub.deployments_schedule_set.await_args.args
+            assert (args[1], args[2], args[3], args[4]) == (slot, 'acme.proj-1', 's1', '0 2 * * *')
+            conn._test_scheduler.sync.assert_called_with('org-1', account_stub.deployments_schedule_set.return_value)
+
+    @pytest.mark.asyncio
+    async def test_a_store_run_bills_the_stamp_and_never_the_slot(self, account_stub, monkeypatch):
+        dispatched = {}
+
+        async def fake_dispatch(server, pipeline, **kw):
+            dispatched.update(kw)
+            return 'd00dd00dd00dd00dd00dd00dd00dd00d'
+
+        monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        record = {
+            'teamId': '~public',
+            'projectId': 'acme.proj-1',
+            'state': 'enabled',
+            'version': 1,
+            'schedules': {},
+            'billingTeamId': 'team-1',
+        }
+        account_stub.deployments_get.return_value = record
+        conn = _make_conn(_account_info(teams=[]))
+        conn._server.control_by_key = MagicMock(
+            return_value=SimpleNamespace(address='acme.proj-1.s1', control_id='d00dd00dd00dd00dd00dd00dd00dd00d')
+        )
+        await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
+        assert dispatched['team_id'] == 'team-1'
+        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='~public', project_id='acme.proj-1')
+        # The run sits on the public rung, team-owned by the billing team
+        assert (dispatched['owner_kind'], dispatched['rung']) == ('team', 'public')
+        # An unstamped store row refuses: it never bills a team named '~public'
+        account_stub.deployments_get.return_value = {**record, 'billingTeamId': ''}
+        with pytest.raises(ValueError, match='billing'):
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
 
 
 class TestStateAndSchedules:

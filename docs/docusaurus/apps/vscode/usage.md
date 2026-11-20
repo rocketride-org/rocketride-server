@@ -98,13 +98,13 @@ When you choose another mode on the Settings page (or on the Welcome page) and s
 
 1. Open the pipeline's **DEPLOY** page from the RocketRide sidebar (the file view's DEPLOY page).
 2. Click **+ Deploy** to store the saved pipeline as the next version. Unsaved changes are saved first. A deployed version serves nobody yet, and it never changes.
-3. On the version's card, click **Publish to…** and choose an audience: **Me** (`@me`, only you) or one of your teams. Publishing points that audience at the version, so a first release, an update and a rollback are the same move, and each is confirmed before it runs.
+3. On the version's card, click **Publish to…** and choose an audience: **Me** (`@me`, only you), one of your teams, or **Public: the store** (`@public`), which opens only once the version is `ready`. Publishing points that audience at the version, so a first release, an update and a rollback are the same move, and each is confirmed before it runs.
 
 Both happen on the server the **development** connection uses, which is not necessarily RocketRide Cloud (see [Connection Modes](#connection-modes)).
 
 Each version card shows the version's review state: `draft`, `in review`, `ready`, `rejected` or `failed`. On a RocketRide Cloud server, **Submit for review** on the newest draft asks RocketRide to approve the version for the store, and **Withdraw** takes a version out of review again; review never holds up publishing to you or your teams. An open-source server has no reviewer: its versions are `ready` as soon as they are deployed, and the cards offer neither button.
 
-**Where this project is live** has one row per audience that has the pipeline: **Me** first, then your teams, each with the version it serves and the pipeline's sources. A source runs when it is called; only a team's sources can also run on a schedule. **Unpublish** stops an audience being served and keeps every version, the schedules and the history; publishing to that audience again brings it back.
+**Where this project is live** has one row per audience that has the pipeline: **Me** first, then your teams, then **Store**, each with the version it serves and the pipeline's sources. A source runs when it is called, and any row's sources can also run on a schedule; a scheduled run is billed to the team stamped when that audience was published (your development team for Me and Store). **Unpublish** stops an audience being served and keeps every version, the schedules and the history; publishing to that audience again brings it back.
 
 ## Cloud Connection — Custom Server
 

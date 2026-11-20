@@ -4,7 +4,7 @@
 // =============================================================================
 
 /**
- * The pipeline DEPLOY page's rung rules (mockups 2.13 and 2.15), pure so
+ * The pipeline DEPLOY page's rung rules (mockups 2.13 and 2.14), pure so
  * they are tested once:
  *
  * - "Where this project is live" has ONE ROW PER RUNG holding a
@@ -12,17 +12,23 @@
  *   org admin sees them), the teams in the caller's roster order, then the
  *   store (@public). A removed publication has no row.
  * - A row names its rung by label and handle: 'Me @me', 'Staging
- *   @team/Staging', 'Store @public'.
- * - Only a team rung's sources take a schedule; @me and @public sources
- *   are on demand.
+ *   @team/Staging', 'Store @public'. A version card's audience chips use
+ *   the same labels.
+ * - Every rung's sources take a schedule (decided 2026-11-20): any
+ *   publication of a pipe can run on a timer, billed to the team stamped
+ *   when it was published.
  * - A row's serving state is phrased by the App Builder's `pinStatusOf`:
  *   a serving row says nothing, a disabled or errored one says so.
  * - The Publish dialog offers each audience the caller controls with what
- *   it serves now; the audience already on the version is not choosable.
- *   Personal rows carry the raw slot `user~{uid}` while the caller's own
- *   audience is addressed '@me', so audiences match rows by rung.
+ *   it serves now, then the store; the audience already on the version is
+ *   not choosable, and the store opens only on an approved version (a
+ *   pipe's store needs 'ready' on every server; without a reviewer every
+ *   deployed version is born 'ready'). Personal rows carry the raw slot
+ *   `user~{uid}` and the store row `~public`, while the dialog addresses
+ *   them '@me' and '@public', so audiences match rows by rung.
  */
 
+import { STORE_TARGET_ID, storeTargetOf } from 'shared/components/deploy/reviewRules';
 import type { IPublishTarget } from 'shared/components/deploy';
 import type { DeployTeamRef, DeploymentRung, TeamDeploymentRow } from './types';
 
@@ -38,8 +44,6 @@ export interface IWhereLiveRung {
 	label: string;
 	/** The rung's handle: '@me', '@team/<name>', '@public'; '' for another user's space. */
 	handle: string;
-	/** Whether the row's sources take a schedule (team rungs only). */
-	scheduleEditable: boolean;
 }
 
 /** A row's serving facts in the shape `pinStatusOf` reads. */
@@ -58,6 +62,9 @@ export interface IRowServing {
 
 /** Display order of the rungs: the caller's own space first, the store last. */
 const RUNG_ORDER: Record<DeploymentRung, number> = { me: 0, personal: 1, team: 2, public: 3 };
+
+/** The store as an audience the Publish dialog's choice stages (its row label is 'Public: the store'). */
+export const STORE_AUDIENCE: DeployTeamRef = { id: STORE_TARGET_ID, name: 'the store', canControl: true };
 
 // =============================================================================
 // RULES
@@ -80,7 +87,7 @@ function handleOf(row: TeamDeploymentRow): string {
 
 /**
  * The where-live table's rows: one per rung that holds a publication, in
- * rung order, each with its label, handle and schedule rule.
+ * rung order, each with its label and handle.
  *
  * @param rows - This project's publication rows (any order).
  * @param teams - The caller's roster (its order is the team rows' order).
@@ -92,7 +99,7 @@ export function whereLiveRungsOf(rows: readonly TeamDeploymentRow[], teams: read
 	const rosterIndex = (row: TeamDeploymentRow): number => roster.get(row.teamId) ?? teams.length;
 	return rows
 		.filter((row) => row.state !== 'removed')
-		.map((row) => ({ row, label: labelOf(row), handle: handleOf(row), scheduleEditable: row.rung === 'team' }))
+		.map((row) => ({ row, label: labelOf(row), handle: handleOf(row) }))
 		.sort((a, b) => RUNG_ORDER[a.row.rung] - RUNG_ORDER[b.row.rung] || rosterIndex(a.row) - rosterIndex(b.row) || a.label.localeCompare(b.label));
 }
 
@@ -104,7 +111,7 @@ export function whereLiveRungsOf(rows: readonly TeamDeploymentRow[], teams: read
  * @returns The live row, or undefined when the audience has none.
  */
 export function rowOfTarget(rows: readonly TeamDeploymentRow[], targetId: string): TeamDeploymentRow | undefined {
-	const rung: DeploymentRung = targetId === '@me' ? 'me' : targetId === '@public' ? 'public' : 'team';
+	const rung: DeploymentRung = targetId === '@me' ? 'me' : targetId === STORE_TARGET_ID ? 'public' : 'team';
 	return rows.find((row) => row.state !== 'removed' && row.rung === rung && (rung !== 'team' || row.teamId === targetId));
 }
 
@@ -121,23 +128,49 @@ export function servingOf(row: Pick<TeamDeploymentRow, 'state'>): IRowServing {
 }
 
 /**
+ * One audience's dialog row: what it points at now; not choosable when it
+ * already points at the version.
+ *
+ * @param id - The audience as the dialog names it.
+ * @param label - The row label.
+ * @param current - The audience's live row, if any.
+ * @param version - The version being published.
+ * @returns The row.
+ */
+function targetOf(id: string, label: string, current: TeamDeploymentRow | undefined, version: number): IPublishTarget {
+	if (!current) return { id, label, note: 'not published yet' };
+	if (current.version === version) return { id, label, note: `already on v${version}`, disabled: true, disabledTitle: `${label} already points at v${version}` };
+	return { id, label, note: current.version > version ? `rollback from v${current.version}` : `upgrade from v${current.version}` };
+}
+
+/**
  * The Publish dialog's audience rows for one version: every audience the
- * caller controls ('@me' first, as the roster lists it), with what it
- * serves now. The audience already on the version stays visible and cannot
- * be chosen.
+ * caller controls ('@me' first, as the roster lists it), then the store,
+ * each with what it serves now. The audience already on the version stays
+ * visible and cannot be chosen; the store also stays closed, with the
+ * reason, until the version is approved ('ready').
  *
  * @param teams - The caller's roster with control rights.
  * @param rows - This project's publication rows.
  * @param version - The version being published.
- * @returns The rows, in roster order.
+ * @param state - The version's review state (undefined when unknown: the store stays closed).
+ * @returns The rows: the roster's, then the store's.
  */
-export function publishTargetsOf(teams: readonly DeployTeamRef[], rows: readonly TeamDeploymentRow[], version: number): IPublishTarget[] {
-	return teams
-		.filter((team) => team.canControl)
-		.map((team) => {
-			const current = rowOfTarget(rows, team.id);
-			if (!current) return { id: team.id, label: team.name, note: 'not published yet' };
-			if (current.version === version) return { id: team.id, label: team.name, note: `already on v${version}`, disabled: true, disabledTitle: `${team.name} already points at v${version}` };
-			return { id: team.id, label: team.name, note: current.version > version ? `rollback from v${current.version}` : `upgrade from v${current.version}` };
-		});
+export function publishTargetsOf(teams: readonly DeployTeamRef[], rows: readonly TeamDeploymentRow[], version: number, state: string | undefined): IPublishTarget[] {
+	const audiences = teams.filter((team) => team.canControl).map((team) => targetOf(team.id, team.name, rowOfTarget(rows, team.id), version));
+	const store = targetOf(STORE_TARGET_ID, 'Public: the store', rowOfTarget(rows, STORE_TARGET_ID), version);
+	// The review gate comes first; an open store is still not choosable when it already serves the version
+	const gate = storeTargetOf({ label: store.label, state, needsApproval: true, note: store.note });
+	return [...audiences, gate.disabled ? gate : store];
+}
+
+/**
+ * The audience a dialog choice stages: the store, or one of the caller's teams.
+ *
+ * @param teams - The caller's roster.
+ * @param id - The chosen row's id.
+ * @returns The audience, or undefined for an id the roster does not hold.
+ */
+export function audienceOfTarget(teams: readonly DeployTeamRef[], id: string): DeployTeamRef | undefined {
+	return id === STORE_TARGET_ID ? STORE_AUDIENCE : teams.find((team) => team.id === id);
 }

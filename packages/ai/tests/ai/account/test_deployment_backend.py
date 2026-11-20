@@ -873,6 +873,61 @@ class TestIterEnabled:
 
 
 # ============================================================================
+# The store slot — a pipe's @public pointer (plan 10.1, 2026-11-20)
+# ============================================================================
+
+
+class TestStoreSlot:
+    @pytest.mark.asyncio
+    async def test_a_pipe_points_the_store_at_a_version_with_its_billing_stamp(self, backend):
+        # The store is a pipe's audience like any other: the pointer lives in
+        # the public slot of the one publish map and carries its stamp.
+        await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
+        dep = await backend.deploy('org-1', '~public', 'acme.proj-1', 1, ACTOR, 'team-dev')
+        assert (dep['teamId'], dep['version'], dep['state'], dep['billingTeamId']) == (
+            '~public',
+            1,
+            'enabled',
+            'team-dev',
+        )
+        stored = await backend.get('org-1', '~public', 'acme.proj-1')
+        assert (stored['teamId'], stored['billingTeamId']) == ('~public', 'team-dev')
+        # The row is THE public publish of the map, not a team named '~public'
+        rows = await backend.publish_of_app('org-1', 'pipe', 'acme.proj-1')
+        assert [r['audience'] for r in rows] == [{'type': 'public', 'id': ''}]
+
+    @pytest.mark.asyncio
+    async def test_the_list_returns_the_store_row_beside_the_other_slots(self, backend):
+        await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', 'team-a', 'acme.proj-1', 1, ACTOR, 'team-a')
+        await backend.deploy('org-1', 'user~u1', 'acme.proj-1', 1, ACTOR, 'team-a')
+        await backend.deploy('org-1', '~public', 'acme.proj-1', 1, ACTOR, 'team-a')
+        assert sorted(d['teamId'] for d in await backend.list_team('org-1')) == ['team-a', 'user~u1', '~public']
+        assert [d['teamId'] for d in await backend.list_team('org-1', '~public')] == ['~public']
+        # An app's store publish stays out of the pipe list
+        await backend.publish('org-1', 'acme.brandy', {'kind': 'app', 'appId': 'acme.brandy', 'name': 'B'}, ACTOR)
+        await backend.publish_set('org-1', 'app', 'acme.brandy', {'type': 'public', 'id': ''}, 1, {}, ACTOR)
+        assert all(d['projectId'] == 'acme.proj-1' for d in await backend.list_team('org-1'))
+
+    @pytest.mark.asyncio
+    async def test_a_schedule_on_the_store_slot_is_kept_fed_and_billed_to_the_stamp(self, backend):
+        # Any published pipe can be scheduled: the store slot takes a
+        # schedule, the scheduler feed carries it, and the record the fire
+        # reads names the billing team stamped when it was published.
+        await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
+        await backend.deploy('org-1', '~public', 'acme.proj-1', 1, ACTOR, 'team-dev')
+        dep = await backend.schedule_set('org-1', '~public', 'acme.proj-1', 'webhook_1', '0 2 * * *', ACTOR, 3600)
+        assert dep['schedules']['webhook_1']['cron'] == '0 2 * * *'
+        fed = [d async for d in backend.iter_enabled() if d['teamId'] == '~public']
+        assert [(d['projectId'], d['schedules']['webhook_1']['cron']) for d in fed] == [('acme.proj-1', '0 2 * * *')]
+        fired = await backend.get('org-1', '~public', 'acme.proj-1')
+        assert fired['billingTeamId'] == 'team-dev'
+        # Unpublishing the store row stops the feed
+        await backend.set_state('org-1', '~public', 'acme.proj-1', 'removed', ACTOR)
+        assert [d async for d in backend.iter_enabled() if d['teamId'] == '~public'] == []
+
+
+# ============================================================================
 # The name row and the one publish map (plan 2.3, 10.1 — C.17)
 # ============================================================================
 

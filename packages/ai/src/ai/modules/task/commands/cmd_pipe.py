@@ -26,11 +26,12 @@
 # rrext_deploy_pipe carries the PIPE-specific half of deployment, over the
 # account module's deployments_* interface (OSS: files; SaaS: DB):
 #
-#   deploy        point a TEAM at a published version (promotion/rollback alike)
-#   list/get      team deployments (registry-joined)
+#   deploy        point an audience — a team, '@me' or the store '@public' — at a
+#                 published version (promotion/rollback alike)
+#   list/get      deployments (registry-joined)
 #   enable/disable  the whole-deployment kill switch (disabled = NOTHING runs)
 #   remove        SOFT remove (history and artifacts retained)
-#   schedule_set  per-source cron on a team deployment (paused flag untouched)
+#   schedule_set  per-source cron on any deployment of the pipe (paused flag untouched)
 #   schedule_pause/schedule_resume  pause ONE source's schedule (cron/ttl kept)
 #   source_config one source's execution settings (trace level + debug output)
 #   run           start one deployed source NOW (the smoke-test / run-now path)
@@ -47,8 +48,12 @@
 # Permission model (checked HERE, at the command layer — the account module is
 # mechanical). Reads follow the VISIBILITY model: an org admin sees anything
 # deployed anywhere (any team, any user's personal space); a regular user
-# sees their own personal space and the teams they are a MEMBER of.
-# Mutations, runs, and scheduling need task.control on the TARGET team.
+# sees their own personal space, the organization's store publications and
+# the teams they are a MEMBER of. Mutations, runs, and scheduling need
+# task.control on the TARGET team; '@me' needs none (your own space), and
+# '@public' takes the app door's rule for the store (a developer
+# organization, a name in its namespace) plus the store's review gate on
+# deploy.
 # =============================================================================
 
 from datetime import datetime
@@ -57,6 +62,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from croniter import croniter
 
 from ai.account import account
+from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY
 from ai.common.dap import TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -188,7 +194,7 @@ class DeployPipeCommands(_DeployBase):
     # =========================================================================
 
     async def _deploy_deploy(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Point a team at a published version — promotion and rollback alike."""
+        """Point an audience (a team, '@me' or '@public') at a published version — promotion and rollback alike."""
         project_id = self._registry_id(args.get('projectId'))
         version = args.get('version')
         if not isinstance(version, int):
@@ -197,9 +203,15 @@ class DeployPipeCommands(_DeployBase):
         team_id = self._require_team(args, 'task.control')
         org_id = self._org_id()
 
+        # The store takes the app door's gate (plan 10.1): only an approved
+        # version where the server reviews; where it has no reviewer (OSS)
+        # any version that did not fail. The internal rungs keep their rule.
+        if team_id == PUBLIC_AUDIENCE_KEY:
+            await self._require_store_publishable(org_id, project_id, version)
+
         # The billing decision happens HERE, at pointer time (absolute):
-        # team audiences bill themselves; @me stamps the publisher's dev
-        # team or refuses. Runs read the stamp and never resolve.
+        # team audiences bill themselves; @me and @public stamp the
+        # publisher's dev team or refuse. Runs read the stamp and never resolve.
         billing_team = self._billing_team_of(team_id)
         dep = await account.deployments_deploy(org_id, team_id, project_id, version, self._actor(), billing_team)
         self._scheduler.sync(org_id, dep)
@@ -222,7 +234,8 @@ class DeployPipeCommands(_DeployBase):
 
         Visibility model: an org admin sees the WHOLE org — every team and
         every user's personal space. A regular user sees their own personal
-        space plus the teams they are a member of.
+        space, the organization's store publications and the teams they are
+        a member of.
         """
         org_id = self._org_id()
         if args.get('teamId'):
@@ -236,6 +249,9 @@ class DeployPipeCommands(_DeployBase):
                 visible = set(self._member_team_ids())
                 if self._account_info.userId:
                     visible.add(f'user~{self._account_info.userId}')
+                # The store rows are the organization's own publications:
+                # public by definition, so every member sees them
+                visible.add(PUBLIC_AUDIENCE_KEY)
                 deployments = [d for d in deployments if d.get('teamId') in visible]
         # Standard list-API envelope ({rows,total,page,pageSize}): rows are
         # already materialized (bounded per-org), so the shared in-Python
@@ -297,7 +313,11 @@ class DeployPipeCommands(_DeployBase):
         return await self._set_state(request, args, 'removed', 'deploy_remove')
 
     async def _deploy_schedule_set(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Set (or clear) one source's schedule on a team deployment."""
+        """Set (or clear) one source's schedule on any deployment of the pipe: '@me', a team or '@public'.
+
+        A scheduled run is the publisher running their own publication on a
+        timer, billed to the team stamped on the pointer when it was published.
+        """
         project_id = self._registry_id(args.get('projectId'))
         source_id = args.get('sourceId')
         if not source_id:
@@ -473,8 +493,10 @@ class DeployPipeCommands(_DeployBase):
                 owner_kind, owner_user = 'user', team_id[len('user~') :]
             else:
                 owner_kind, owner_user = 'team', ''
-                # Team records from before the stamp bill their own audience.
-                billing_team = billing_team or team_id
+                # Team records from before the stamp bill their own audience;
+                # the store slot is no team, so it only ever bills its stamp.
+                if team_id != PUBLIC_AUDIENCE_KEY:
+                    billing_team = billing_team or team_id
             if not billing_team:
                 raise ValueError(
                     'This deployment has no billing team — re-publish it after setting your development team'
@@ -496,6 +518,9 @@ class DeployPipeCommands(_DeployBase):
                 debug_out=bool(sched.get('debugOut')),
                 owner_kind=owner_kind,
                 owner_user_id=owner_user,
+                # A store pointer's run sits on the public rung (team-owned by
+                # its billing team); every other slot derives its rung
+                rung='public' if team_id == PUBLIC_AUDIENCE_KEY else '',
             )
         except BaseException:
             # The start never completed — free the reservation so a retry (or

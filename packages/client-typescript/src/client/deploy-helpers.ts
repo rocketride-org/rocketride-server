@@ -210,11 +210,15 @@ export function devContainerNameOf(slug: string, developerId: string | null | un
 	return containerNameOf(`${developerId || LOCAL_DEVELOPER_ID}.${slug}`);
 }
 
+/** The owner key of the store slot: a publication's `@public` row carries it as its `teamId`. */
+const STORE_SLOT = '~public';
+
 /**
  * Resolves a team id to its display name, falling back to the id. Personal
  * (`user~`) owner keys render as "Me" for the caller's own space and
  * "Personal" for another user's (admin visibility) — the raw guid never
- * reaches a label.
+ * reaches a label. The store slot (`~public`, or `@public` as the wire
+ * addresses it) renders as "Store".
  *
  * @param teams - The resolved team refs.
  * @param teamId - The team id (or owner key) to resolve.
@@ -225,27 +229,30 @@ export function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId = '
 	if (teamId.startsWith('user~')) {
 		return ownUserId && teamId === `user~${ownUserId}` ? 'Me' : 'Personal';
 	}
+	if (teamId === STORE_SLOT || teamId === '@public') return 'Store';
 	return teams.find((t) => t.id === teamId)?.name ?? teamId;
 }
 
 /**
  * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
- * the caller's own `user~{uid}` row is addressed as '@me' (the server never
- * accepts raw owner keys); everything else passes through.
+ * the caller's own `user~{uid}` row is addressed as '@me' and the store row
+ * (`~public`) as '@public' (the server never accepts raw owner keys);
+ * everything else passes through.
  *
  * @param teamId - The row's team id / owner key.
  * @param ownUserId - The caller's user id ('' when unknown).
  * @returns The team id to put on the wire.
  */
 export function wireTeamIdOf(teamId: string, ownUserId: string): string {
+	if (teamId === STORE_SLOT) return '@public';
 	return ownUserId && teamId === `user~${ownUserId}` ? '@me' : teamId;
 }
 
 /**
- * Resolves what a person typed as a team — '@me', a team id, or a team
- * display name (case-insensitive) — to the id to send. An unknown value
- * passes through unchanged (the server validates it; an admin may address
- * a team outside their own roster).
+ * Resolves what a person typed as a team — '@me', '@public' (the store), a
+ * team id, or a team display name (case-insensitive) — to the id to send.
+ * An unknown value passes through unchanged (the server validates it; an
+ * admin may address a team outside their own roster).
  *
  * @param input - The typed team ('' = unscoped/default).
  * @param teams - The caller's resolved team refs.
@@ -254,7 +261,7 @@ export function wireTeamIdOf(teamId: string, ownUserId: string): string {
  */
 export function resolveTeamArg(input: string, teams: DeployTeamRef[]): string {
 	const typed = input.trim();
-	if (!typed || typed === '@me' || teams.some((t) => t.id === typed)) return typed;
+	if (!typed || typed === '@me' || typed === '@public' || teams.some((t) => t.id === typed)) return typed;
 	const byName = teams.filter((t) => t.name.toLowerCase() === typed.toLowerCase());
 	if (byName.length > 1) {
 		throw new Error(`Team name "${typed}" is ambiguous — use one of the ids: ${byName.map((t) => t.id).join(', ')}`);

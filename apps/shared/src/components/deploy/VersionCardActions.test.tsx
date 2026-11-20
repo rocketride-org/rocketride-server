@@ -57,12 +57,6 @@ test('each offered verb draws its button, Publish to… first', () => {
 	assert.doesNotMatch(inReview, /Submit for review/);
 });
 
-test('one audience only: the publish button says Publish', () => {
-	const markup = renderToStaticMarkup(<VersionCardActions {...propsOf([], { publishLabel: 'Publish' })} />);
-	assert.match(markup, />Publish<\/button>/);
-	assert.doesNotMatch(markup, /Publish to/);
-});
-
 test('every button is disabled while the screen is busy', () => {
 	const markup = renderToStaticMarkup(<VersionCardActions {...propsOf([], { disabled: true })} />);
 	assert.equal(markup.match(/disabled=""/g)?.length, 3);

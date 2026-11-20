@@ -54,6 +54,7 @@ from croniter import croniter
 from rocketlib import debug, error, warning
 
 from ai.account import account
+from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY
 from .deploy_events import broadcast_deploy_changed
 from .task_control import DeploymentRef
 from .task_server_facade import start_server_task_as_team
@@ -424,8 +425,10 @@ class TaskScheduler:
                 owner_kind, owner_user = 'user', team_id[len('user~') :]
             else:
                 owner_kind, owner_user = 'team', ''
-                # Team records from before the stamp bill their own audience.
-                billing_team = billing_team or team_id
+                # Team records from before the stamp bill their own audience;
+                # the store slot is no team, so it only ever bills its stamp.
+                if team_id != PUBLIC_AUDIENCE_KEY:
+                    billing_team = billing_team or team_id
             if not billing_team:
                 error(f'[SCHEDULER] {entry.key}: no billing team stamped; marking errored')
                 await self._mark_errored(org_id, team_id, project_id)
@@ -449,6 +452,9 @@ class TaskScheduler:
                     debug_out=bool(sched.get('debugOut')),
                     owner_kind=owner_kind,
                     owner_user_id=owner_user,
+                    # A store pointer's run sits on the public rung (team-owned
+                    # by its billing team); every other slot derives its rung
+                    rung='public' if team_id == PUBLIC_AUDIENCE_KEY else '',
                 )
             except PermissionError as e:
                 # Permission-shaped failures are permanent until a human acts —
