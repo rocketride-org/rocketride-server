@@ -214,15 +214,6 @@ class FileFormatError extends Error {
 }
 
 /**
- * Whether a failed read is a PROVEN not-found: the engine's file store raises
- * `StorageError('File not found: …')` (packages/ai/src/ai/account/file_store.py)
- * and the SDK exposes no structured code for it, so the message is the proof
- * (the same rule develop's saved-connections store uses).
- *
- * @param error - What the read threw.
- * @returns True for a file-not-found failure.
- */
-/**
  * Set an own data property, even for the key `__proto__` (a plain assignment
  * would change the object's prototype instead of keeping the field).
  *
@@ -234,6 +225,15 @@ function setOwn<T>(target: Record<string, T>, key: string, value: T): void {
 	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
 }
 
+/**
+ * Whether a failed read is a PROVEN not-found: the engine's file store raises
+ * `StorageError('File not found: …')` (packages/ai/src/ai/account/file_store.py)
+ * and the SDK exposes no structured code for it, so the message is the proof
+ * (the same rule develop's saved-connections store uses).
+ *
+ * @param error - What the read threw.
+ * @returns True for a file-not-found failure.
+ */
 function isNotFound(error: unknown): boolean {
 	return error instanceof Error && /file not found/i.test(error.message);
 }
@@ -333,6 +333,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 	let retries = 0;
 	let madeDir = false;
 	let disposed = false;
+	/** close() has begun: a load it waits on gives up when nobody is signed in, instead of polling for ever. */
+	let closing = false;
 	let chain: Promise<void> = Promise.resolve();
 
 	/** Arm the write timer (debounce, or a retry backoff) when a write is due. */
@@ -371,6 +373,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 			if (disposed) return 'disposed';
 			const who = ownerState();
 			if (who !== 'unknown') return who;
+			// Closing with nobody vouched for: stop waiting (the queued changes are dropped, as dispose() drops them).
+			if (closing) return 'disposed';
 			await sleep(OWNER_POLL_MS);
 		}
 	};
@@ -440,8 +444,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 				loaded = true;
 				break;
 			}
-			if (disposed) {
-				// A disposed accessor accepts nothing and writes nothing.
+			if (disposed || (closing && !loaded && lastError === null)) {
+				// A disposed (or closing, owner unknown) accessor accepts nothing and writes nothing.
 				status = 'failed';
 				return status;
 			}
@@ -600,9 +604,12 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 		},
 		flush: () => (disposed ? chain : writeNow()),
 		close: async () => {
+			closing = true;
 			// Changes made before the load reached ready are still queued: let the
-			// load apply them (it starts one when none is running) so they are written.
-			if (!disposed && (status === 'idle' || status === 'loading') && Object.keys(queued).length > 0) await load();
+			// load apply them (it starts one when none is running) so they are written,
+			// but only while the same owner remains the one signed in. Otherwise nothing
+			// is awaited (an in-flight load stops at its next owner check) and the queue is dropped.
+			if (!disposed && (status === 'idle' || status === 'loading') && Object.keys(queued).length > 0 && ownerState() === 'owner') await load();
 			if (!disposed) await writeNow();
 			dispose();
 		},

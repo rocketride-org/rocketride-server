@@ -674,6 +674,21 @@ describe('createFsPrefs — nothing the module does not understand is ever erase
 		assert.deepEqual(owners['team-A']?.prefs, { history: { q: 1 } });
 	});
 
+	it('close() while nobody is signed in resolves at once, writes nothing, and an in-flight load stops polling', async () => {
+		const { fs, writes } = storeOf({ version: PREFS_FILE_VERSION, owners: {} });
+		const { clock, opts } = options(fs, { owner: 'team-A', ownerNow: () => null });
+		const prefs = createFsPrefs(opts);
+		prefs.setPref('history', { q: 1 });
+		const inFlight = prefs.load();
+		const outcome = await Promise.race([prefs.close().then(() => 'closed'), new Promise((resolve) => setImmediate(() => resolve('hung')))]);
+		assert.equal(outcome, 'closed');
+		// The load that was polling for the owner gives up at its next check.
+		await clock.advance(1_000);
+		assert.equal(await inFlight, 'failed');
+		await clock.advance(60_000);
+		assert.deepEqual(writes, []);
+	});
+
 	it('an entry of THIS owner that is not a bag is never overwritten: the session stays in memory and nothing is written', async () => {
 		const original = { version: PREFS_FILE_VERSION, owners: { [OWNER]: ['old', 'format'], other: { at: 1, prefs: { a: 1 } } } };
 		const { fs, writes, stored } = storeOf(original);
