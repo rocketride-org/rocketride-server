@@ -118,3 +118,35 @@ describe('Question turn mode', () => {
 		expect(question.messages).toEqual([]);
 	});
 });
+
+describe('Question and Answer metadata', () => {
+	it('round-trips through toDict and fromDict', () => {
+		const question = new Question();
+		question.addQuestion('What is the capital of France?');
+		question.metadata = { expected: 'Paris', dataset_id: 'row-1' };
+
+		const dict = question.toDict();
+		expect(dict.metadata).toEqual({ expected: 'Paris', dataset_id: 'row-1' });
+		expect(Question.fromDict(dict).metadata).toEqual({ expected: 'Paris', dataset_id: 'row-1' });
+	});
+
+	it('leaves empty metadata out of the dict, so a plain Question stays as it was', () => {
+		const question = new Question();
+		question.addQuestion('hi');
+
+		expect('metadata' in question.toDict()).toBe(false);
+		expect(Question.fromDict(question.toDict()).metadata).toEqual({});
+	});
+
+	it('reads metadata from an answer entry', () => {
+		const entry = { ...FIXTURE.result.answers[0], metadata: { expected: 'Paris' } };
+		const answer = Answer.fromResult({ answers: [entry] } as never);
+
+		expect(answer.metadata).toEqual({ expected: 'Paris' });
+	});
+
+	it('gives an answer without metadata an empty object', () => {
+		expect(Answer.fromResult({ answers: ['plain'] } as never).metadata).toEqual({});
+		expect(Answer.fromResult(FIXTURE.result).metadata).toEqual({});
+	});
+});

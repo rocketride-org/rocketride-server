@@ -165,6 +165,11 @@ export class Answer {
 	error?: AnswerError;
 	/** Token usage of the turn. */
 	tokens?: Record<string, unknown>;
+	/**
+	 * Metadata carried from the question that produced this answer, e.g. a dataset
+	 * row's reference answer for an evaluator. Empty when the question had none.
+	 */
+	metadata: Record<string, unknown> = {};
 
 	constructor(expectJson = false) {
 		this.expectJson = expectJson;
@@ -185,11 +190,12 @@ export class Answer {
 			answer.setAnswer(entry);
 			return answer;
 		}
-		const turn = entry as Pick<Answer, 'message' | 'stopReason' | 'error' | 'tokens'>;
+		const turn = entry as Pick<Answer, 'message' | 'stopReason' | 'error' | 'tokens' | 'metadata'>;
 		answer.message = turn.message;
 		answer.stopReason = turn.stopReason;
 		answer.error = turn.error;
 		answer.tokens = turn.tokens;
+		answer.metadata = turn.metadata ?? {};
 		return answer;
 	}
 
@@ -326,6 +332,11 @@ export class Question {
 	messages: Message[] = [];
 	/** Tools the model may call. Turn mode only. */
 	tools: Tool[] = [];
+	/**
+	 * Pipeline metadata carried alongside the question and never rendered into the
+	 * prompt, e.g. a dataset row's reference answer for an evaluator downstream.
+	 */
+	metadata: Record<string, unknown> = {};
 
 	constructor(options: {
 		type?: QuestionType;
@@ -680,6 +691,7 @@ export class Question {
 			// Only when set, so a legacy Question's JSON stays as it was.
 			...(this.messages.length > 0 ? { messages: this.messages } : {}),
 			...(this.tools.length > 0 ? { tools: this.tools } : {}),
+			...(Object.keys(this.metadata).length > 0 ? { metadata: this.metadata } : {}),
 		};
 	}
 
@@ -704,6 +716,7 @@ export class Question {
 		question.questions = (data.questions || []) as QuestionText[];
 		question.messages = (data.messages || []) as Message[];
 		question.tools = (data.tools || []) as Tool[];
+		question.metadata = (data.metadata || {}) as Record<string, unknown>;
 		question.checkTurn();
 
 		return question;

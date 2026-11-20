@@ -187,6 +187,9 @@ class Answer(BaseModel):
     # `breakdown` list; surfaced in the Trace and the action history. Billing is
     # unaffected — it flows through the separate per-call metrics.counter path.
     tokens: Optional[Dict[str, Any]] = None
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description='Metadata carried from the originating question or pipeline context.'
+    )
     # Set only for a turn-mode Question: the model's turn and why it stopped, or the error.
     message: Optional[AssistantMessage] = None
     stopReason: Optional[StopReason] = None
@@ -202,11 +205,13 @@ class Answer(BaseModel):
 
     @model_serializer(mode='wrap')
     def _omit_unset_turn_fields(self, handler):
-        """Leave the turn fields out of a text answer's dump, so it stays as it was."""
+        """Leave unset turn fields and empty metadata out of the dump, so a plain answer stays as it was."""
         data = handler(self)
         for key in ('message', 'stopReason', 'error'):
             if data.get(key) is None:
                 data.pop(key, None)
+        if not data.get('metadata'):
+            data.pop('metadata', None)
         return data
 
     def toolCalls(self) -> List[ToolCallBlock]:
@@ -507,6 +512,7 @@ class Question(BaseModel):
         context: Additional context information
         documents: Specific documents to reference
         questions: List of questions to ask
+        metadata: Pipeline metadata carried alongside the question.
         messages: The conversation; non-empty switches the Question to turn mode
         tools: Tools the model may call (turn mode only)
 
@@ -559,6 +565,10 @@ class Question(BaseModel):
     )
     questions: Optional[List[QuestionText]] = Field(
         default_factory=list, description='List of questions to ask (usually just one).'
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description='Pipeline metadata that should not be rendered into the LLM prompt (used by evaluator/dataset nodes to carry expected values).',
     )
     messages: List[Message] = Field(
         default_factory=list,

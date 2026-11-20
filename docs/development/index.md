@@ -147,6 +147,9 @@ For VS Code extension development details, see [VS Code extension docs](../docus
 For information on writing and running node-level tests, see
 [Node Testing](nodes/testing.md).
 
+For the Cobalt evaluator suites and the `eval_cobalt` evaluator reference, see
+[Cobalt Pipeline Testing](nodes/cobalt-testing.md).
+
 ## Further Reading
 
 Contributor docs are grouped by subsystem. Everything under `docs/development/`
@@ -177,6 +180,8 @@ is unpublished — it never reaches docs.rocketride.org.
   contract
 - [Node README Schema](nodes/readme-schema.md) -- the node README contract
 - [Node Testing](nodes/testing.md) -- writing and running node tests
+- [Cobalt Pipeline Testing](nodes/cobalt-testing.md) -- the `eval_cobalt`
+  evaluator reference and the offline quality suites
 
 ### Clients and apps
 
