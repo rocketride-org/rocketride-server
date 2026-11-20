@@ -54,6 +54,18 @@ describe('buildIndex', () => {
 		assert.ok(index.indexOf('## Get Started') < index.indexOf('## Concepts'));
 	});
 
+	it('opens llms.txt with the definition, the about paragraph and the when-to-use list', async () => {
+		const index = await readFile(path.join(staticDir, 'llms.txt'), 'utf8');
+		const firstSection = index.indexOf('\n## ');
+		const header = index.slice(0, firstSection);
+		assert.match(header, /^> RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C\+\+\./m);
+		assert.match(header, /^MIT licensed\. /m);
+		// The list is free-form text before the first section: llms.txt reads every
+		// H2 as a list of links, so it must not have a heading of its own.
+		assert.match(header, /^Use RocketRide when:$/m);
+		assert.ok(!/^## When to use/m.test(index));
+	});
+
 	it('writes llms-full.txt with the generated node catalog inlined', async () => {
 		const full = await readFile(path.join(staticDir, 'llms-full.txt'), 'utf8');
 		assert.match(full, /^# RocketRide Documentation/m);

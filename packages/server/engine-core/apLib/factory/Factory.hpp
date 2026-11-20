@@ -78,10 +78,10 @@ inline ErrorOr<Ptr<T>> Factory::find(Location location, uint32_t requiredFlags,
                      "Factory flags: {} don't match required: {}",
                      factory->flags, requiredFlags);
 
-    // Instantiate then upcast
-    auto factoryCallback = _reCast<ErrorOr<Ptr<T>> (*)(
-        Location, typename T::FactoryArgs) noexcept>(factory->method);
-    auto ptr = factoryCallback(location, {std::forward<Args>(args)...});
+    // Instantiate as the root type, then cast to T
+    auto factoryCallback = _reCast<Method<T>>(factory->method);
+    auto ptr = factoryCallback(
+        location, typename T::FactoryArgs{std::forward<Args>(args)...});
     if (!ptr) return _mv(ptr.ccode());
 
     return castMovePtr<T>(_mv(*ptr));
