@@ -2531,6 +2531,30 @@ test('a blank API key connects keyless when the server does not require one', as
 	}
 });
 
+test('bootstrap keeps the key-required message when a saved keyless credential is rejected', async () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const { manager } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({
+		login: async () => { throw new AuthenticationException({ message: 'Invalid API key' }); },
+	});
+	manager._attachPromise = Promise.resolve();
+	manager.loadToken = () => KEYLESS_CREDENTIAL;
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { search: '' } },
+	});
+	try {
+		assert.equal(await manager.bootstrap(), null);
+		const status = manager.connectionStatus;
+		assert.equal(status.state, ConnectionState.AUTH_FAILED);
+		assert.equal(status.lastError, KEY_REQUIRED_MESSAGE);
+	} finally {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	}
+});
+
 test('a blank API key rejected by a key-protected server says a key is required', async () => {
 	const client = testClient({
 		login: async () => { throw new AuthenticationException({ message: 'Invalid API key' }); },

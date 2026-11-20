@@ -52,7 +52,7 @@ import type { ConnectionMode, ConnectionStatus } from '../types/connection';
 import { BaseManager } from './base-manager';
 import { RemoteManager } from './remote-manager';
 import { RocketRideClientProxy } from './RocketRideClientProxy';
-import { AUTH_REJECTED_MESSAGE, ConnectionFailure } from './errors';
+import { AUTH_REJECTED_MESSAGE, ConnectionFailure, KEY_REQUIRED_MESSAGE } from './errors';
 import { shouldReloadForTokenStorageUpdate } from './tokenStorageUpdate';
 import { createOpBus } from '../ops/busOps';
 import { CLIENT_EVENT_OP } from '../ops/clientOps';
@@ -1495,7 +1495,11 @@ export class ConnectionManager implements IConnectionManager {
 		const lastError = isNetworkFailure
 			? 'Can\'t reach the server. Check your connection and retry.'
 			: isAuthFailure
-				? 'Your session has expired. Please sign in again.'
+				// A rejected saved keyless credential means the server now needs a
+				// key; keep that guidance rather than the generic expiry copy.
+				? (error instanceof ConnectionFailure && error.message === KEY_REQUIRED_MESSAGE
+					? KEY_REQUIRED_MESSAGE
+					: 'Your session has expired. Please sign in again.')
 				: error instanceof Error ? error.message : String(error);
 		this.updateConnectionStatus({
 			state,
