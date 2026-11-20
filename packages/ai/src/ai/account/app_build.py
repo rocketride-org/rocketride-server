@@ -676,8 +676,11 @@ def _patched_workspace_yaml(
     if source_text is not None:
         try:
             data = yaml.safe_load(source_text)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
         except Exception as exc:
             raise BuildFailure('materialize', f'pnpm-workspace.yaml is not valid YAML: {exc}')
+        _refuse_yaml_cycles(data, 'pnpm-workspace.yaml')
         data = data if isinstance(data, dict) else {}
         for key in [k for k in data if k not in _WORKSPACE_YAML_KEYS]:
             data.pop(key)
@@ -723,8 +726,45 @@ def _patched_workspace_yaml(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def _unsafe_spec(spec: Any) -> bool:
+_YAML_NODE_BUDGET = 100_000
+
+
+def _refuse_yaml_cycles(data: Any, where: str) -> None:
+    """Raise BuildFailure for a recursive or exponentially aliased YAML graph.
+
+    ``yaml.safe_load`` happily builds a mapping that contains itself (``&a`` /
+    ``*a``); walking or dumping it then raises RecursionError, which would be
+    retried as an infrastructure fault. Ordinary aliases and merge keys that
+    share a node without a cycle still load. The walk is iterative and counts
+    every visit, so an alias fan-out bomb is bounded too.
+    """
+    visits = 0
+    path: set = set()
+    stack: List[Tuple[Any, bool]] = [(data, False)]
+    while stack:
+        node, leaving = stack.pop()
+        if leaving:
+            path.discard(id(node))
+            continue
+        if not isinstance(node, (dict, list)):
+            continue
+        visits += 1
+        if id(node) in path or visits > _YAML_NODE_BUDGET:
+            raise BuildFailure('materialize', f'{where} has a recursive or oversized alias structure')
+        path.add(id(node))
+        stack.append((node, True))
+        children = list(node.keys()) + list(node.values()) if isinstance(node, dict) else list(node)
+        stack.extend((child, False) for child in children)
+
+
+def _unsafe_spec(spec: Any, base: str = '') -> bool:
     """True when a dependency spec reaches outside the source tree.
+
+    ``base`` is the workspace-relative directory of the declaring importer
+    (``''`` for the workspace root and for workspace-yaml tables). A relative
+    path is resolved from ``base`` the way pnpm does, so ``file:../../.rocketride/
+    shell/shell.tgz`` declared in ``apps/x`` stays inside the workspace and is
+    accepted, while a path that climbs above the workspace root is refused.
 
     ``link:`` (any target) is refused. A local path spec — ``file:``,
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
@@ -761,10 +801,13 @@ def _unsafe_spec(spec: Any) -> bool:
     target = target.replace('\\', '/')
     if target == '~' or target.startswith('~/'):
         return True
-    return target.startswith('/') or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
+    if target.startswith('/') or re.match(r'^[a-z]:', target) is not None:
+        return True
+    resolved = posixpath.normpath(posixpath.join(base or '.', target))
+    return resolved == '..' or resolved.startswith('../')
 
 
-def _refuse_unsafe_specs(table: Any, where: str) -> None:
+def _refuse_unsafe_specs(table: Any, where: str, base: str = '') -> None:
     """Raise BuildFailure when a dependency table holds an unsafe spec.
 
     Nested tables (npm-style nested overrides) are walked.
@@ -773,8 +816,8 @@ def _refuse_unsafe_specs(table: Any, where: str) -> None:
         return
     for name, spec in table.items():
         if isinstance(spec, dict):
-            _refuse_unsafe_specs(spec, where)
-        elif _unsafe_spec(spec):
+            _refuse_unsafe_specs(spec, where, base)
+        elif _unsafe_spec(spec, base):
             raise BuildFailure(
                 'materialize',
                 f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link:, git+file: and out-of-tree path specs are not supported',
@@ -880,7 +923,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
                 if not isinstance(manifest, dict):
                     continue
                 for table in _DEPENDENCY_TABLES:
-                    _refuse_unsafe_specs(manifest.get(table), rel)
+                    _refuse_unsafe_specs(manifest.get(table), rel, posixpath.dirname(rel))
                 if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
                     for key in _NEUTRALIZED_PACKAGE_KEYS:
                         if manifest.pop(key, None) is not None:

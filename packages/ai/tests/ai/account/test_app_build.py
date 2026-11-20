@@ -35,6 +35,7 @@ import io
 import json
 import os
 import re
+import sys
 import time
 import zipfile
 from typing import Any, Dict, List
@@ -486,6 +487,65 @@ async def test_job_typecheck_failure_is_terminal_with_tsc_errors(monkeypatch, bu
     log_text = (home / 'build.log').read_text(encoding='utf-8')  # the log survives failure
     assert 'error TS2322' in log_text  # the diagnostics land in the failure tail
     assert 'app-build-' not in log_text  # the scratch dir is scrubbed to <build>
+
+
+@pytest.mark.asyncio
+async def test_saas_build_wraps_typecheck_and_bundle_in_the_sandbox_not_install(
+    monkeypatch, build_store, toolchain
+):
+    """Under --saas the compilers run through app_build_sandbox.command (the
+    filesystem boundary) while the pnpm install is not wrapped.
+    """
+    monkeypatch.setattr(sys, 'argv', [*sys.argv, '--saas'])
+    monkeypatch.delenv('RR_APP_BUILD_SANDBOX', raising=False)
+    wrapped: List[List[str]] = []
+
+    def stub_command(argv, cwd, job_dir, toolchain_dir):
+        wrapped.append(list(argv))
+        return ['sandbox-stub', *argv]
+
+    monkeypatch.setattr(app_build.app_build_sandbox, 'command', stub_command)
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    assert await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1) is False
+    assert rail.stamps[-1]['status'] == 'ok'
+
+    install = next(c['argv'] for c in fake.calls if 'install' in c['argv'])
+    typecheck = next(c['argv'] for c in fake.calls if any('tsc' in str(a) for a in c['argv']))
+    bundle = next(c['argv'] for c in fake.calls if 'build' in c['argv'])
+    assert install[0] != 'sandbox-stub'
+    assert typecheck[0] == 'sandbox-stub' and bundle[0] == 'sandbox-stub'
+    assert len(wrapped) == 2 and all('install' not in argv for argv in wrapped)
+
+
+@pytest.mark.asyncio
+async def test_saas_build_fails_closed_when_the_sandbox_is_unavailable(monkeypatch, build_store, toolchain):
+    """SandboxUnavailable ends the build in phase 'sandbox' with no compiler run."""
+    monkeypatch.setattr(sys, 'argv', [*sys.argv, '--saas'])
+    monkeypatch.delenv('RR_APP_BUILD_SANDBOX', raising=False)
+
+    def unavailable(argv, cwd, job_dir, toolchain_dir):
+        raise app_build.app_build_sandbox.SandboxUnavailable('bubblewrap is required for hosted app builds')
+
+    monkeypatch.setattr(app_build.app_build_sandbox, 'command', unavailable)
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    for _ in range(app_build._MAX_ATTEMPTS - 1):
+        assert await worker._run_job('org1', 'acme.brandy', 1) is True
+    assert await worker._run_job('org1', 'acme.brandy', 1) is False
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'sandbox')
+    compilers = [c for c in fake.calls if 'install' not in c['argv']]
+    assert compilers == [], 'a compiler ran without the boundary'
 
 
 @pytest.mark.asyncio
@@ -1282,6 +1342,52 @@ def test_package_json_allows_in_tree_file_specs(tmp_path):
     ws = tmp_path / 'ws'
     _write(ws / 'package.json', json.dumps({'dependencies': {'a': 'file:.rocketride/shell/shell.tgz', 'b': '^1.0.0'}}))
     app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+@pytest.mark.parametrize(
+    'rel, spec',
+    [
+        ('apps/x/package.json', 'file:../../.rocketride/shell/shell.tgz'),
+        ('apps/x/package.json', 'file:../shared/local.tgz'),
+        ('package.json', 'file:.rocketride/shell/shell.tgz'),
+    ],
+)
+def test_package_json_allows_in_workspace_specs_from_the_declaring_importer(tmp_path, rel, spec):
+    ws = tmp_path / 'ws'
+    _write(ws / rel, json.dumps({'dependencies': {'shell': spec}}))
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+@pytest.mark.parametrize(
+    'rel, spec',
+    [
+        ('apps/x/package.json', 'file:../../../x'),
+        ('apps/x/package.json', 'file:../../../.rocketride/shell/shell.tgz'),
+        ('apps/x/package.json', 'file:/etc/x.tgz'),
+        ('apps/x/package.json', 'link:../../.rocketride/shell'),
+    ],
+)
+def test_package_json_refuses_specs_escaping_the_workspace_root(tmp_path, rel, spec):
+    ws = tmp_path / 'ws'
+    _write(ws / rel, json.dumps({'dependencies': {'shell': spec}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_workspace_yaml_recursive_alias_is_a_build_failure_not_a_crash():
+    source = 'packages:\n  - "apps/*"\noverrides: &o\n  self: *o\n'
+    with pytest.raises(BuildFailure, match='recursive'):
+        _patched_workspace_yaml(source, 'apps/x', [])
+
+
+def test_workspace_yaml_ordinary_aliases_and_catalogs_still_load():
+    source = (
+        'packages:\n  - "apps/*"\n'
+        'catalog: &base\n  react: ^18.2.0\n'
+        'catalogs:\n  next: *base\n'
+    )
+    out = _patched_workspace_yaml(source, 'apps/x', [])
+    assert 'react' in out and 'overrides' in out
 
 
 def test_workspace_yaml_refuses_escaping_override_specs():
