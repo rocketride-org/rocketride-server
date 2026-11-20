@@ -179,6 +179,26 @@ test('T112b a host.apiKey answer that arrives after logout does not re-add the p
 	}
 });
 
+// The pairwise scans took 4.4 s here; the sweep takes about 0.1 s, so the 3 s test timeout has a 30x margin over it.
+test('T112c redacting a large engine error with many must-deny values and replaceable ids stays linear', { timeout: 3000 }, async () => {
+	const t = makeRoot();
+	try {
+		t.cm.apiKey = newKey();
+		const A = t.open(ENTRY_A, { grant: GRANT_A });
+		const run = await startRun(A);
+		const key = t.cm.apiKey;
+		const real = lastRun(t.cm).projectId;
+		const unit = `${key} ${real} `;
+		const message = unit.repeat(Math.floor((3.6 * 1024 * 1024) / unit.length));
+		t.cm.engine.failWith('terminate', { message });
+		const text = engineErrorText(await call(A, 'terminate', { token: run.token }), 'a 3.6 MB terminate failure');
+		assert.ok(!text.includes(key) && !text.includes(real), 'neither the key nor the real project id survives');
+		assert.ok(text.includes('[redacted]') && text.includes(run.projectId), 'the key is redacted and the own project is shown as its alias');
+	} finally {
+		t.cleanup();
+	}
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // T113 — inbound free strings (N1-f)
 // ─────────────────────────────────────────────────────────────────────────────
