@@ -1,0 +1,394 @@
+# =============================================================================
+# MIT License
+# Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+"""Mocked Auth0 client security and request behavior."""
+
+import sys
+import types
+from concurrent.futures import ThreadPoolExecutor
+from unittest.mock import Mock
+
+import pytest
+
+import test_configuration
+
+node = test_configuration.node
+
+
+def response(status=200, body=None, headers=None):
+    """Build a mock HTTP response with a JSON body."""
+    result = Mock(status_code=status, headers=headers or {}, content=b'json')
+    result.json.return_value = body if body is not None else {}
+    return result
+
+
+@pytest.fixture
+def client(node, monkeypatch):
+    """Create an Auth0 client with mocked HTTP transport and retry delays."""
+    package, _, _, _ = node
+    module = sys.modules[package.__name__ + '.auth0_client']
+    requests = types.ModuleType('requests')
+    requests.exceptions = types.SimpleNamespace(RequestException=Exception)
+    requests.post = Mock(
+        side_effect=lambda url, **kw: response(
+            body={'access_token': kw['json']['client_id'] + '-token', 'expires_in': 3600}
+        )
+    )
+    requests.request = Mock(return_value=response(body={'ok': True}))
+    monkeypatch.setitem(sys.modules, 'requests', requests)
+    monkeypatch.setattr(module.time, 'sleep', Mock())
+    cfg = {
+        'domain': 'tenant.us.auth0.com',
+        'clientId': 'read',
+        'clientSecret': 'read-secret',
+    }
+    return module, module.Auth0Client(cfg), requests, cfg
+
+
+@pytest.mark.parametrize(
+    'domain',
+    [
+        'auth0.com',
+        'evil-auth0.com',
+        'auth0.com.evil.net',
+        'localhost',
+        '127.0.0.1',
+        'tenant.auth0.com:443',
+        'tenant.auth0.com/path',
+        'tenant.auth0.com?x=1',
+        'tenant.auth0.com#x',
+        'user@tenant.auth0.com',
+        '-bad.auth0.com',
+        'bad-.auth0.com',
+        'a..auth0.com',
+        'a' * 64 + '.auth0.com',
+    ],
+)
+def test_rejects_unsafe_domains(client, domain):
+    """Reject invalid tenant hostnames before making an OAuth request."""
+    module, _, requests, cfg = client
+    cfg['domain'] = domain
+    with pytest.raises(module.Auth0Error) as error:
+        module.Auth0Client(cfg)
+    assert error.value.code == 'INVALID_DOMAIN'
+    requests.post.assert_not_called()
+
+
+def test_token_reuse_and_concurrency(client):
+    """Share one cached token across concurrent reads."""
+    _, auth, requests, _ = client
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: auth.request('get_user', identifier='auth0|1'), range(30)))
+    auth.request('get_user', identifier='auth0|1')
+    assert requests.post.call_count == 1
+    assert requests.post.call_args_list[0].kwargs['json']['client_id'] == 'read'
+    assert requests.request.call_args.kwargs['headers']['Authorization'] == 'Bearer read-token'
+    assert all(
+        call.kwargs['allow_redirects'] is False
+        for call in requests.post.call_args_list + requests.request.call_args_list
+    )
+    auth.close()
+    assert auth._token is None and auth._config == {}
+
+
+def test_expiry_and_401_refresh(client, monkeypatch):
+    """Refresh an expired or rejected token and retry an unauthorized read once."""
+    module, auth, requests, _ = client
+    clock = [100.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: clock[0])
+    auth.request('get_user', identifier='1')
+    clock[0] += 3600
+    auth.request('get_user', identifier='1')
+    assert requests.post.call_count == 2
+    requests.request.side_effect = [response(401), response(200)]
+    auth.request('get_user', identifier='1')
+    assert requests.post.call_count == 3
+    requests.request.side_effect = [response(401), response(401)]
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'AUTHENTICATION_FAILED'
+
+
+def test_retry_budget_and_error_sanitization(client):
+    """Bound retry delays and translate provider failures into safe errors."""
+    module, auth, requests, _ = client
+    requests.request.side_effect = [response(429, headers={'Retry-After': '3'}), response(503), response(503)]
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'AUTH0_UNAVAILABLE'
+    assert module.time.sleep.call_count == 2
+    assert sum(call.args[0] for call in module.time.sleep.call_args_list) <= 10
+    requests.request.side_effect = None
+    requests.request.return_value = response(403, {'error': 'other', 'message': 'read-secret'})
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'API_ERROR' and 'read-secret' not in str(error.value)
+    requests.request.return_value = response(403, {'error': 'insufficient_scope'})
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'MISSING_SCOPE'
+
+
+def test_route_restrictions(client):
+    """Reject writes, arbitrary destinations, and dot-segment identifiers."""
+    module, _, requests, cfg = client
+    auth = module.Auth0Client(cfg)
+    for operation, identifier in [
+        ('unblock' + '_user', '1'),
+        ('delete_user', '1'),
+        ('https://evil.test', None),
+        ('get_user', '..'),
+    ]:
+        with pytest.raises(module.Auth0Error):
+            auth.request(operation, identifier=identifier)
+    requests.post.assert_not_called()
+
+
+def test_large_retry_after_is_not_shortened(client):
+    """Report a retry delay outside the budget without attempting the retry."""
+    module, auth, requests, _ = client
+    requests.request.return_value = response(429, headers={'Retry-After': '30'})
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert requests.request.call_count == 1
+    assert error.value.retry_after_seconds == 30
+    module.time.sleep.assert_not_called()
+
+
+def test_invalid_oauth_response_and_credential_sanitization(client):
+    """Turn a malformed token response into a safe authentication error."""
+    module, auth, requests, _ = client
+    requests.post.side_effect = None
+    requests.post.return_value = response(200, {'access_token': 'private-token', 'expires_in': None})
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'AUTHENTICATION_FAILED' and 'private-token' not in str(error.value)
+    requests.request.assert_not_called()
+
+
+def test_encoded_identifiers_and_fixed_host(client):
+    """Encode identifiers as path segments on the configured tenant."""
+    _, auth, requests, _ = client
+    auth.request('get_user', identifier='auth0|one/two')
+    assert requests.request.call_args.args[1] == 'https://tenant.us.auth0.com/api/v2/users/auth0%7Cone%2Ftwo'
+
+
+@pytest.mark.parametrize('domain', ['', ' ', 'https://id:secret@tenant.auth0.com', '.auth0.com'])
+def test_invalid_domain_configuration_never_connects(client, domain):
+    """Reject malformed tenant configuration before opening any connection."""
+    module, _, requests, cfg = client
+    cfg['domain'] = domain
+    with pytest.raises(ValueError):
+        module.Auth0Client(cfg)
+    requests.post.assert_not_called()
+    requests.request.assert_not_called()
+
+
+@pytest.mark.parametrize('status', [400, 401, 403, 302])
+def test_oauth_failure_never_exposes_credentials(client, status):
+    """Hide credentials and response details when the OAuth grant fails."""
+    module, auth, requests, _ = client
+    requests.post.side_effect = None
+    requests.post.return_value = response(status, {'error_description': 'read-secret'})
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'AUTHENTICATION_FAILED'
+    assert 'read-secret' not in str(error.value)
+    requests.request.assert_not_called()
+    assert requests.post.call_args.kwargs['allow_redirects'] is False
+
+
+def test_token_grant_and_early_refresh(client, monkeypatch):
+    """Send the client-credentials grant and refresh before the token expires."""
+    module, auth, requests, _ = client
+    now = [100.0]
+    monkeypatch.setattr(module.time, 'monotonic', lambda: now[0])
+    auth.request('get_user', identifier='1')
+    assert requests.post.call_args.args == ('https://tenant.us.auth0.com/oauth/token',)
+    assert requests.post.call_args.kwargs['json'] == {
+        'grant_type': 'client_credentials',
+        'client_id': 'read',
+        'client_secret': 'read-secret',
+        'audience': 'https://tenant.us.auth0.com/api/v2/',
+    }
+    now[0] += 3539
+    auth.request('get_user', identifier='1')
+    assert requests.post.call_count == 1
+    now[0] += 2
+    auth.request('get_user', identifier='1')
+    assert requests.post.call_count == 2
+
+
+def test_non_json_and_empty_responses(client):
+    """Handle an empty success and reject invalid JSON."""
+    module, auth, requests, _ = client
+    invalid = response(200)
+    invalid.json.side_effect = ValueError('sensitive response')
+    requests.request.return_value = invalid
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'API_ERROR' and 'sensitive' not in str(error.value)
+    requests.request.return_value = response(204)
+    assert auth.request('get_user', identifier='1') == {}
+
+
+@pytest.mark.parametrize('operation', ['get_user'])
+def test_transport_errors_are_sanitized_and_not_replayed(client, operation):
+    """Return a safe error without replaying a failed transport request."""
+    module, auth, requests, _ = client
+    requests.request.side_effect = Exception('credential=read-secret token=private-token')
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request(operation, identifier='1')
+    assert error.value.code == 'AUTH0_UNAVAILABLE'
+    assert error.value.retryable is (operation == 'get_user')
+    assert 'read-secret' not in str(error.value) and 'private-token' not in str(error.value)
+    assert requests.request.call_count == 1
+
+
+@pytest.mark.parametrize(
+    'operation,args,not_found',
+    [
+        ('search_users', {'email': 'a@example.com'}, 'RESOURCE_NOT_FOUND'),
+        ('get_user', {'user_id': 'id'}, 'USER_NOT_FOUND'),
+        ('get_user_logs', {'user_id': 'id'}, 'USER_NOT_FOUND'),
+        ('get_log_event', {'log_id': 'id'}, 'RESOURCE_NOT_FOUND'),
+        ('get_user_blocks', {'user_id': 'id'}, 'USER_NOT_FOUND'),
+    ],
+)
+@pytest.mark.parametrize('status', [403, 404])
+def test_all_tools_map_remote_errors_through_flat_contract(client, node, operation, args, not_found, status):
+    """Verify the 403 and 404 result envelope for each public tool."""
+    _, auth, requests, _ = client
+    instance = node[0].IInstance()
+    instance.IGlobal = types.SimpleNamespace(client=auth)
+    requests.request.return_value = response(
+        status, {'error': 'Forbidden', 'errorCode': 'insufficient_scope', 'message': 'private-token'}
+    )
+    result = getattr(instance, operation)(args)
+    assert result == {
+        'success': False,
+        'error': 'The Auth0 application lacks a required permission.'
+        if status == 403
+        else 'The requested Auth0 resource was not found.',
+        'error_code': 'MISSING_SCOPE' if status == 403 else not_found,
+        'retryable': False,
+        'retry_after_seconds': None,
+    }
+    assert 'private-token' not in str(result)
+
+
+@pytest.mark.parametrize(
+    'operation,argument,payload,path',
+    [
+        ('search_users', {'email': 'jane@example.com'}, [], '/users-by-email'),
+        ('get_user', {'user_id': 'auth0|1'}, {'user_id': 'auth0|1'}, '/users/auth0%7C1'),
+        ('get_user_logs', {'user_id': 'auth0|1'}, [], '/users/auth0%7C1/logs'),
+        ('get_log_event', {'log_id': 'log1'}, {'log_id': 'log1'}, '/logs/log1'),
+        ('get_user_blocks', {'user_id': 'auth0|1'}, {'blocked_for': []}, '/user-blocks/auth0%7C1'),
+    ],
+)
+def test_read_tools_use_approved_http_routes_and_read_token(client, node, operation, argument, payload, path):
+    """Use the fixed read routes, bearer token, and redirect policy."""
+    _, auth, requests, _ = client
+    instance = node[0].IInstance()
+    instance.IGlobal = types.SimpleNamespace(client=auth)
+    requests.request.return_value = response(200, payload)
+    assert getattr(instance, operation)(argument)['success'] is True
+    call = requests.request.call_args
+    assert call.args == ('GET', 'https://tenant.us.auth0.com/api/v2' + path)
+    assert call.kwargs['headers']['Authorization'] == 'Bearer read-token'
+    assert call.kwargs['allow_redirects'] is False
+    assert requests.post.call_args.kwargs['json']['client_id'] == 'read'
+
+
+def test_api_redirect_is_not_followed(client):
+    """Reject a redirect without sending the token to a second host."""
+    module, auth, requests, _ = client
+    requests.request.return_value = response(302, headers={'Location': 'https://evil.example/collect'})
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'API_ERROR'
+    assert requests.request.call_count == 1
+    assert requests.request.call_args.kwargs['allow_redirects'] is False
+
+
+def test_close_during_token_refresh_waits_and_clears_credentials(client):
+    """Synchronize credential cleanup with a token request in progress."""
+    import threading
+
+    module, auth, requests, _ = client
+    entered, release = threading.Event(), threading.Event()
+
+    def post(*args, **kwargs):
+        """Pause the mock token grant until the test permits it to finish."""
+        entered.set()
+        assert release.wait(5)
+        return response(body={'access_token': 'token', 'expires_in': 3600})
+
+    requests.post.side_effect = post
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = pool.submit(auth.request, 'get_user', identifier='u')
+        assert entered.wait(5)
+        closed = pool.submit(auth.close)
+        release.set()
+        pending.result(timeout=5)
+        closed.result(timeout=5)
+    assert auth._config == {} and auth._token is None
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='u')
+    assert error.value.code == 'CLIENT_CLOSED'
+
+
+@pytest.mark.parametrize('domain', ['Tenant.US.Auth0.com', ' tenant.us.auth0.com ', 'https://tenant.us.auth0.com/'])
+def test_normalizes_valid_tenant_domain(client, domain):
+    """Accept common formatting variations of a valid tenant hostname."""
+    module, _, _, cfg = client
+    cfg['domain'] = domain
+    assert module.Auth0Client(cfg)._base == 'https://tenant.us.auth0.com'
+
+
+def test_rate_limit_reset_header_and_invalid_values(client, monkeypatch):
+    """Read the reset timestamp when Retry-After is absent and ignore invalid delays."""
+    module, _, _, _ = client
+    monkeypatch.setattr(module.time, 'time', lambda: 1000)
+    assert module._retry_after({'x-ratelimit-reset': '1007'}) == 7
+    assert module._retry_after({'Retry-After': '2', 'x-ratelimit-reset': '1007'}) == 2
+    for value in ('nan', 'inf', 'bad', '999'):
+        assert module._retry_after({'x-ratelimit-reset': value}) == 0
+
+
+@pytest.mark.parametrize(
+    'headers,delay',
+    [
+        ({'Retry-After': '4'}, 4),
+        ({'x-ratelimit-reset': '1007'}, 7),
+        ({'Retry-After': 'invalid'}, None),
+        ({}, None),
+    ],
+)
+def test_token_rate_limit_reports_retry_delay_without_retry(client, monkeypatch, headers, delay):
+    """Report OAuth rate-limit headers without repeating the token request."""
+    module, auth, requests, _ = client
+    monkeypatch.setattr(module.time, 'time', lambda: 1000)
+    requests.post.side_effect = None
+    requests.post.return_value = response(429, headers=headers)
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='id')
+    assert error.value.code == 'RATE_LIMITED' and error.value.retry_after_seconds == delay
+    assert error.value.retryable is True
+    requests.post.assert_called_once()
+    requests.request.assert_not_called()
+
+
+@pytest.mark.parametrize('field', ['error', 'errorCode'])
+@pytest.mark.parametrize('value', [[], {}, 1, True, None])
+def test_malformed_forbidden_codes_return_api_error(client, field, value):
+    """Treat malformed forbidden error codes as API errors without exposing them."""
+    module, auth, requests, _ = client
+    body = {'error': 'insufficient_scope', 'errorCode': 'feature_not_enabled'}
+    body[field] = value
+    requests.request.return_value = response(403, body)
+    with pytest.raises(module.Auth0Error) as error:
+        auth.request('get_user', identifier='1')
+    assert error.value.code == 'API_ERROR'
