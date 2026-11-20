@@ -57,16 +57,23 @@ class ArangoLaneError(RuntimeError):
     """A pipeline lane statement failed against ArangoDB; the step must fail."""
 
 
+_UNAVAILABLE_HTTP_CODES = frozenset({502, 503, 504})
+
+
 def _is_unavailable(exc: BaseException) -> bool:
     """Return True for a connection-level failure.
 
     python-arango's ``ServerConnectionError``, a socket-level ``OSError``
     (``requests``' ``ConnectionError`` and ``Timeout`` are ``OSError`` subclasses,
     so the HTTP transport is covered without importing it), or the server
-    answering HTTP 503 (``ArangoServerError.http_code``: starting up, shutting
-    down, or no leader).
+    answering HTTP 502, 503 or 504 (``ArangoServerError.http_code``: a proxy or
+    load balancer in front of it has no healthy backend or timed out, or the server
+    is starting up, shutting down or has no leader). A syntax error (400) or a
+    refused modification stays on the rejection path.
     """
-    return isinstance(exc, (ServerConnectionError, OSError)) or getattr(exc, 'http_code', None) == 503
+    return (
+        isinstance(exc, (ServerConnectionError, OSError)) or getattr(exc, 'http_code', None) in _UNAVAILABLE_HTTP_CODES
+    )
 
 
 # Map ArangoDB's numeric collection type codes to readable names.

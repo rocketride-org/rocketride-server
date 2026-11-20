@@ -927,9 +927,10 @@ class TestLanesFailClosed:
         with pytest.raises(ArangoUnavailableError):
             ig._validate_query('FOR u IN users RETURN u')
 
-    def test_validate_query_raises_when_the_server_answers_503(self):
+    @pytest.mark.parametrize('http_code', [502, 503, 504])
+    def test_validate_query_raises_when_the_server_or_its_proxy_answers_unavailable(self, http_code):
         unavailable = ArangoError('service unavailable')
-        unavailable.http_code = 503
+        unavailable.http_code = http_code
 
         def _raise(_aql):
             raise unavailable
