@@ -45,7 +45,7 @@
 // is now) without making `runTargets` change identity on every render.
 // =============================================================================
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createGeneration } from '../generation';
 import type { IGeneration } from '../generation';
 import { abandonRuns, runStatementBatch } from './batch';
@@ -173,7 +173,11 @@ export function useStatementRunner<TRun extends IStatementRunBase, TSend, TResul
 	const [patternPrompt, setPatternPrompt] = useState<IPatternPrompt<TRun> | null>(null);
 
 	const configRef = useRef(config);
-	configRef.current = config;
+	// Updated after commit, not during render: a render React discards (concurrent
+	// rendering) must not change the config the committed runner reads.
+	useLayoutEffect(() => {
+		configRef.current = config;
+	});
 	// Expiring this ticket is "Stop waiting": the late answer is dropped.
 	const generationRef = useRef(createGeneration());
 	const runningRef = useRef(false);
@@ -189,14 +193,15 @@ export function useStatementRunner<TRun extends IStatementRunBase, TSend, TResul
 	// clicking it then announced that the database might still be running a
 	// statement that had never been sent.
 	const inFlight = useMemo(() => hasStatementInFlight(runs), [runs]);
+	// Keyed on the active statement as well: each statement restarts the wait, so
+	// statement 2 never inherits "slow" from statement 1 when React batches the
+	// finish of one and the start of the next into a single in-flight stretch.
 	useEffect(() => {
-		if (!inFlight) {
-			setCanStop(false);
-			return undefined;
-		}
+		setCanStop(false);
+		if (!inFlight) return undefined;
 		const timer = setTimeout(() => setCanStop(true), STOP_WAITING_AFTER_MS);
 		return () => clearTimeout(timer);
-	}, [inFlight]);
+	}, [inFlight, activeIndex]);
 
 	/**
 	 * Commit a run list to state and to the ref the abandon path reads.
@@ -281,7 +286,10 @@ export function useStatementRunner<TRun extends IStatementRunBase, TSend, TResul
 				runningRef.current = false;
 				setRunning(false);
 				const ms = (cfg.now ?? ((): number => performance.now()))() - runStartedRef.current;
-				publishRuns(abandonRuns(runsRef.current, ms).runs);
+				const { runs: next, abandoned } = abandonRuns(runsRef.current, ms);
+				publishRuns(next);
+				// The recorder must see the statement the cleanup marks abandoned too.
+				if (abandoned) record(abandoned);
 			}
 		}
 	}, [publishRuns, record]);

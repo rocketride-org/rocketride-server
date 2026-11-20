@@ -455,10 +455,12 @@ gives the history accessor its four file-store calls. In React,
   request was not cancelled and may still complete. A late answer or failure is
   swallowed.
 
-**Errors from `terminate`.** The develop SDK's `terminate()` rethrows a plain
-`Error` with the server's message, so a `terminate` failure carries no `code`
-(`use` does: it throws a `DAPException`). The library passes errors through
-untouched and never rebuilds a code from text.
+**Errors from `terminate`.** The SDK's `terminate()` re-words a failure through
+`rewrapFailure()`: a `DAPException` keeps its server response and `code` under
+the new message, so a caller can classify it (for example `TASK_STOPPED`), and
+any other failure becomes a plain `Error` with the message and no `code`. `use`
+throws a `DAPException` as well. The library passes errors through untouched and
+never rebuilds a code from text.
 
 **`use`'s deadline** is `USE_DEADLINE_MS` = 100 s, deliberately below the bus's
 120 s default request timeout: `use` sends its request with no SDK timeout, so
