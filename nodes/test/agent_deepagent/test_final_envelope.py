@@ -52,6 +52,21 @@ _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'agent_deepagent')
 # ---------------------------------------------------------------------------
 
 
+class FakeQuestion:
+    """Stands in for ai.common.schema.Question: the role, then the question text."""
+
+    def __init__(self, role='', cachePrefix=False):
+        self.role = role
+        self.cachePrefix = cachePrefix
+        self.text = ''
+
+    def addQuestion(self, text):
+        self.text = text
+
+    def getPrompt(self):
+        return f'{self.role}\n{self.text}'
+
+
 class FakeAIMessage:
     """Stands in for langchain_core.messages.AIMessage."""
 
@@ -87,7 +102,7 @@ def _install_stubs():
     stubs['ai.common.agent'].AgentBase = object
     stubs['ai.common.agent'].AgentContext = object
     stubs['ai.common.agent.types'].AgentRunResult = object
-    stubs['ai.common.schema'].Question = object
+    stubs['ai.common.schema'].Question = FakeQuestion
     stubs['ai.common.utils'].langchain_messages_to_transcript = lambda m: ''
     stubs['ai.common.utils'].normalize_bound_tools = lambda t: t
     stubs['ai.common.utils'].safe_str = lambda v: '' if v is None else str(v)
@@ -386,7 +401,7 @@ def llm_answering(dp, monkeypatch):
         prompts = []
 
         def call_llm(context, prompt, **kwargs):
-            prompts.append(prompt)
+            prompts.append(prompt.getPrompt())
             return replies[min(len(prompts) - 1, len(replies) - 1)]
 
         return dp._build_deepagent_llm(types.SimpleNamespace(call_llm=call_llm), None), prompts

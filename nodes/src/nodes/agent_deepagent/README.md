@@ -155,6 +155,10 @@ Up to 3 attempts are made when the LLM produces malformed JSON. Each retry names
 
 Host tool descriptors are converted to LangChain `BaseTool` instances with typed Pydantic input schemas built from each tool's JSON-Schema `inputSchema`; tool execution and LLM calls are bridged off the event loop via `asyncio.to_thread` so concurrent calls do not serialize.
 
+### Prompt caching
+
+Every model call repeats the tool protocol, the tool list and the agent's system prompt. The node sends that text at the start of the prompt and sets `cachePrefix`, so `llm_anthropic` and Claude models on `llm_bedrock` can cache it. The conversation comes after it, under `### Current Task:`, and is never cached. The first call may pay the provider's cache-write price; later calls with the same tools and system prompt can read the cache while it lasts. Other LLM nodes receive the same text as one prompt.
+
 ### Hierarchical delegation
 
 Connect one or more Deep Agent Subagent nodes to the `deepagent` invoke channel to turn the Deep Agent into an orchestrator. On each run:
