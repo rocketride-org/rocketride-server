@@ -26,7 +26,15 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 
 # RocketRide Documentation
 
-> Build, run, and ship data + AI pipelines with the RocketRide toolchain.
+> RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
+
+MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, or the VS Code extension.
+
+Use RocketRide when:
+
+- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, PII anonymization) and take them to production.
+- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, the CLI, the Python and TypeScript SDKs, or your IDE.
+- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.
 
 ## Home
 
@@ -280,7 +288,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Resources & Widgets](/connect/mcp/http/resources-and-widgets.md)
 - [Self-hosting](/connect/mcp/http/self-hosting.md)
 - [Tools](/connect/mcp/http/tools.md)
-- [RocketRide MCP Server](/connect/mcp/stdio.md)
+- [Deprecated stdio MCP server (`rocketride-mcp`)](/connect/mcp/stdio.md)
 - [n8n](/connect/n8n.md)
 - [WebSocket](/connect/websocket.md)
 - [WebSocket Events](/connect/websocket/observability.md)

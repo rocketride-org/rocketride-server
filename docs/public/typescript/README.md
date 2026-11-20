@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Build, run, and manage AI pipelines from Node.js or the browser.
+  RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. TypeScript SDK and CLI.
 </p>
 
 <p align="center">
