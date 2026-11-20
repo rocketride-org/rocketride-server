@@ -15,7 +15,7 @@
 import { ConnectionManager, createToolOpServer } from 'shell';
 import type { ToolChannel } from 'shell';
 import type { RocketRideClient } from 'rocketride';
-import { describeSqlAddress, discoverSqlEndpoints, getSavedConnection, releaseDirectEndpoint, resolveEndpoint } from '../connect';
+import { getSavedConnection, releaseDirectEndpoint, resolveEndpoint } from '../connect';
 import type { SqlOps } from './types';
 
 /** The realm's connected client, or throws the standard message. */
@@ -42,7 +42,5 @@ export function serveSqlOps(channel: ToolChannel): () => void {
 	ops.serve('sql.releaseEndpoint', async ({ key }) => {
 		await releaseDirectEndpoint(needRealmClient(), key);
 	});
-	ops.serve('sql.discoverEndpoints', async () => discoverSqlEndpoints(needRealmClient()));
-	ops.serve('sql.describeAddress', async ({ address }) => describeSqlAddress(needRealmClient(), address));
 	return () => ops.dispose();
 }

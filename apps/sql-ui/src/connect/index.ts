@@ -39,10 +39,9 @@ export type {
 	SqlSession,
 	SqlProbeResult,
 } from './types';
-export { DATABASE_CLASS_TYPE, describeSqlAddress, discoverSqlEndpoints } from './discovery';
+export { DATABASE_CLASS_TYPE, endpointFromChoice } from './discovery';
+export type { SqlNodeChoice } from './discovery';
 export { createSqlSession, probeSqlEndpoint } from './session';
-export { refreshEndpoints, useSqlEndpoints } from './endpointStore';
-export type { EndpointStatus, EndpointState } from './endpointStore';
 export {
 	loadSavedConnections, resetSavedConnections, useSavedConnections, useSavedConnectionsStatus,
 	upsertSavedConnection, newConnectionId, deleteSavedConnection, getSavedConnection,

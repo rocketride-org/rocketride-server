@@ -26,14 +26,15 @@
 //
 // Every view and dialog reaches the engine through this ONE seam. Each realm
 // now holds a real RocketRideClient (the realm client's requests ride the
-// shell bus), so statement traffic, schema reads, discovery, service
-// definitions, validation and env keys all run locally on it in BOTH
-// implementations. What still differs is ENDPOINT LIFECYCLE:
+// shell bus), so statement traffic, schema reads, service definitions,
+// validation and env keys all run locally on it in BOTH implementations (the
+// connection dialog's pipe picker reads the catalog and `interfaces()` on the
+// realm's client too). What still differs is ENDPOINT LIFECYCLE:
 //
 //   LOCAL  (createLocalSqlEnv)  — the realm that owns the saved-connection
 //          list resolves/releases endpoints itself (the full app).
 //   REMOTE (createRemoteSqlEnv) — a dev-tool document frame forwards
-//          resolve/release/discover to the tool's sidebar controller, which
+//          resolve/release to the tool's sidebar controller, which
 //          refcounts direct-mode temp pipelines in ONE realm (ops/sqlOps.ts).
 //
 // The provider decides which one a subtree gets; views only ever call
@@ -43,7 +44,7 @@
 import { createContext, useContext } from 'react';
 import type { RocketRideClient } from 'rocketride';
 import type { ISqlOpsClient } from './ops';
-import { createSqlSession, describeSqlAddress, discoverSqlEndpoints, releaseDirectEndpoint, resolveEndpoint } from './connect';
+import { createSqlSession, releaseDirectEndpoint, resolveEndpoint } from './connect';
 import type { SqlEndpoint, SqlSession, SavedSqlConnection } from './connect';
 
 // =============================================================================
@@ -62,10 +63,6 @@ export interface SqlEnv {
 	/** Stop a direct connection's temp pipeline, fire-and-forget (best
 	 *  effort — the idle TTL is the backstop). */
 	releaseEndpoint(key: string): void;
-	/** Discover database endpoints in the server's running pipelines. */
-	discoverEndpoints(): Promise<SqlEndpoint[]>;
-	/** The database nodes of one pipe address (`interfaces()`), typed or linked — no engine starts. */
-	describeAddress(address: string): Promise<SqlEndpoint[]>;
 	/** One service definition (the direct path's config schema). */
 	getService(provider: string): Promise<unknown>;
 	/** Server-side single-component pipeline validation. */
@@ -151,8 +148,6 @@ export function createLocalSqlEnv(client: RocketRideClient | null): SqlEnv {
 		releaseEndpoint: (key) => {
 			if (client) void releaseDirectEndpoint(client, key);
 		},
-		discoverEndpoints: () => discoverSqlEndpoints(need()),
-		describeAddress: (address) => describeSqlAddress(need(), address),
 	};
 }
 
@@ -162,9 +157,9 @@ export function createLocalSqlEnv(client: RocketRideClient | null): SqlEnv {
 
 /**
  * The environment of a dev-tool document frame. Statement traffic runs on
- * the frame's OWN realm client; endpoint lifecycle (resolve / release /
- * discover) forwards to the sidebar controller, which refcounts direct-mode
- * temp pipelines in one realm.
+ * the frame's OWN realm client; endpoint lifecycle (resolve / release)
+ * forwards to the sidebar controller, which refcounts direct-mode temp
+ * pipelines in one realm.
  *
  * @param ops - The frame's ops client (createSqlOpsClient(peer)).
  * @param client - The frame's connected realm client, or null.
@@ -180,7 +175,5 @@ export function createRemoteSqlEnv(ops: ISqlOpsClient, client: RocketRideClient 
 		...clientBackedEnv(need),
 		resolveEndpoint: (conn) => ops.resolveEndpoint(conn.id),
 		releaseEndpoint: (key) => ops.releaseEndpoint(key),
-		discoverEndpoints: () => ops.discoverEndpoints(),
-		describeAddress: (address) => ops.describeAddress(address),
 	};
 }

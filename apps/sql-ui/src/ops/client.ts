@@ -20,9 +20,6 @@ export interface ISqlOpsClient {
 	/** Stop a direct connection's temp pipeline, fire-and-forget (a late or
 	 *  lost reply is fine — the idle TTL reaps). */
 	releaseEndpoint(key: string): void;
-	/** Discover database endpoints in the server's running pipelines. */
-	discoverEndpoints(): Promise<SqlEndpoint[]>;
-	describeAddress(address: string): Promise<SqlEndpoint[]>;
 }
 
 /**
@@ -38,7 +35,5 @@ export function createSqlOpsClient(channel: ToolChannel): ISqlOpsClient {
 		releaseEndpoint: (key) => {
 			void call('sql.releaseEndpoint', { key }).catch(() => undefined);
 		},
-		discoverEndpoints: () => call('sql.discoverEndpoints', {}),
-		describeAddress: (address) => call('sql.describeAddress', { address }),
 	};
 }

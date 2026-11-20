@@ -24,7 +24,7 @@
 // CONNECT — TYPES (the app-facing contract of the connection layer)
 // =============================================================================
 //
-// EVERYTHING that knows how SQL Explorer attaches to a database — task
+// EVERYTHING that knows how SQL Explorer attaches to a database — node
 // discovery, token resolution, node binding, tool invocation — lives in this
 // connect/ module and is consumed ONLY through the interfaces below. The
 // attach mechanics are expected to change; when they do, only connect/

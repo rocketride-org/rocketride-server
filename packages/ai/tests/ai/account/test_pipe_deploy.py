@@ -175,3 +175,186 @@ async def test_a_rejected_caller_is_nothing_but_a_failing_store_raises(monkeypat
     monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(side_effect=RuntimeError('db down')))
     with pytest.raises(RuntimeError, match='db down'):
         await resolve_pipe_version(info, 'acme.docBrain')
+
+
+# ==== The picker's walk (plan 3.6, C.16c) ======================================
+
+
+def _caller(endpoints=None, teams=('team-a', 'team-b'), order=('team-b', 'team-a')):
+    """A signed-in caller of org-1 (developer ``acme``) with a team order."""
+    return SimpleNamespace(
+        userId='u-1',
+        endpoints=endpoints,
+        teamOrder=list(order),
+        organization={
+            'id': 'org-1',
+            'developerId': 'acme',
+            'teams': [{'id': t, 'name': t.replace('team-', 'Team ').upper()} for t in teams],
+        },
+    )
+
+
+def _pub(name, audience, *, org='org-1', version=1, state='enabled', artifact_state='private', snapshot=None):
+    """One publish row as publish_list answers it."""
+    return {
+        'orgId': org,
+        'projectId': name,
+        'appId': name,
+        'kind': 'pipe',
+        'audience': audience,
+        'version': version,
+        'state': state,
+        'artifactState': artifact_state,
+        'snapshot': snapshot if snapshot is not None else {'name': name.split('.')[-1]},
+    }
+
+
+ME = {'type': 'user', 'id': 'u-1'}
+TEAM_A = {'type': 'team', 'id': 'team-a'}
+TEAM_B = {'type': 'team', 'id': 'team-b'}
+PUBLIC = {'type': 'public', 'id': ''}
+
+
+@pytest.mark.asyncio
+async def test_own_publications_walk_me_then_teams_in_team_order_each_pipe_once():
+    """@me first, then the team order (team-b before team-a); a pipe is listed at the rung that answers it."""
+    account = AsyncMock()
+    account.publish_list = AsyncMock(
+        return_value=[
+            _pub('acme.alpha', TEAM_A),
+            _pub('acme.shared', TEAM_A, version=4),
+            _pub('acme.shared', TEAM_B, version=2),
+            _pub('acme.mine', ME, version=7),
+            _pub('acme.shared', ME, version=9),
+            _pub('acme.beta', TEAM_B),
+        ]
+    )
+
+    entries = await pipe_deploy_mod.own_pipe_publications(account, _caller())
+
+    # One read, own slots only: the store is never walked here
+    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [ME, TEAM_B, TEAM_A])
+    assert [(e['pipe'], e['rung'], e['version']) for e in entries] == [
+        ('acme.mine', 'me', 7),
+        ('acme.shared', 'me', 9),
+        ('acme.beta', 'team', 1),
+        ('acme.alpha', 'team', 1),
+    ]
+    beta = entries[2]
+    assert beta == {
+        'kind': 'pipe',
+        'id': 'acme.beta',
+        'pipe': 'acme.beta',
+        'name': 'beta',
+        'publisher': 'acme',
+        'description': '',
+        'rung': 'team',
+        'version': 1,
+        'teamId': 'team-b',
+        'teamName': 'TEAM B',
+    }
+
+
+@pytest.mark.asyncio
+async def test_own_publications_skip_rows_that_do_not_serve_and_rows_of_other_orgs():
+    """A disabled or failed row is not listed; a row of another org (global user keys) never is."""
+    account = AsyncMock()
+    account.publish_list = AsyncMock(
+        return_value=[
+            _pub('acme.off', TEAM_A, state='disabled'),
+            _pub('acme.broken', TEAM_A, artifact_state='failed'),
+            _pub('zeta.elsewhere', ME, org='org-9'),
+            _pub('acme.ok', TEAM_A, artifact_state='submit'),
+        ]
+    )
+
+    entries = await pipe_deploy_mod.own_pipe_publications(account, _caller())
+
+    assert [e['pipe'] for e in entries] == ['acme.ok']
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_key_lists_its_frozen_team_and_only_the_pipes_it_may_call():
+    """A key with an endpoints scope probes its one team and drops the pipes outside the scope."""
+    account = AsyncMock()
+    account.publish_list = AsyncMock(
+        return_value=[_pub('acme.allowed', TEAM_A), _pub('acme.other', TEAM_A), _pub('acme.mine', ME)]
+    )
+    caller = _caller(endpoints=['acme.allowed.*'], teams=('team-a',), order=('team-a',))
+
+    entries = await pipe_deploy_mod.own_pipe_publications(account, caller)
+
+    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [ME, TEAM_A])
+    assert [e['pipe'] for e in entries] == ['acme.allowed']
+
+
+@pytest.mark.asyncio
+async def test_own_publications_refuse_an_anonymous_caller_and_raise_a_failing_store():
+    """No caller is a refusal; a store failure is the caller's error, never an empty list."""
+    account = AsyncMock()
+    with pytest.raises(PermissionError):
+        await pipe_deploy_mod.own_pipe_publications(account, None)
+
+    account.publish_list = AsyncMock(side_effect=RuntimeError('db down'))
+    with pytest.raises(RuntimeError, match='db down'):
+        await pipe_deploy_mod.own_pipe_publications(account, _caller())
+
+
+@pytest.mark.asyncio
+async def test_the_store_is_searched_never_listed():
+    """A blank term is refused before any read: no request answers the whole public rung."""
+    account = AsyncMock()
+    account.publish_list = AsyncMock(return_value=[])
+    for blank in ('', '   ', None):
+        with pytest.raises(ValueError, match='searched, never listed'):
+            await pipe_deploy_mod.search_public_pipes(account, _caller(), blank)
+    account.publish_list.assert_not_awaited()
+    with pytest.raises(PermissionError):
+        await pipe_deploy_mod.search_public_pipes(account, None, 'docs')
+
+
+@pytest.mark.asyncio
+async def test_a_store_search_matches_serving_public_rows_by_name_description_or_id():
+    """Case-insensitive substring over the registry name and the snapshot; only 'ready' public rows serve."""
+    account = AsyncMock()
+    account.publish_list = AsyncMock(
+        return_value=[
+            _pub('zeta.docBrain', PUBLIC, org='org-9', artifact_state='ready', snapshot={'name': 'Doc Brain'}),
+            _pub(
+                'omega.reader',
+                PUBLIC,
+                org='org-7',
+                artifact_state='ready',
+                snapshot={'name': 'Reader', 'description': 'Reads DOCS aloud'},
+            ),
+            _pub('beta.docsInReview', PUBLIC, artifact_state='submit', snapshot={'name': 'Docs in review'}),
+            _pub('gamma.weather', PUBLIC, artifact_state='ready', snapshot={'name': 'Weather'}),
+            _pub('delta.docsOff', PUBLIC, artifact_state='ready', state='disabled'),
+        ]
+    )
+
+    entries = await pipe_deploy_mod.search_public_pipes(account, _caller(), '  Doc ')
+
+    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [PUBLIC])
+    assert [(e['pipe'], e['rung'], e['name']) for e in entries] == [
+        ('zeta.docBrain', 'public', 'Doc Brain'),
+        ('omega.reader', 'public', 'Reader'),
+    ]
+    assert entries[1]['description'] == 'Reads DOCS aloud'
+    assert 'teamId' not in entries[0]
+
+
+@pytest.mark.asyncio
+async def test_a_store_search_respects_a_keys_endpoints_scope():
+    """A scoped key finds only the public pipes its scope names."""
+    account = AsyncMock()
+    account.publish_list = AsyncMock(
+        return_value=[
+            _pub('zeta.docA', PUBLIC, artifact_state='ready'),
+            _pub('zeta.docB', PUBLIC, artifact_state='ready'),
+        ]
+    )
+
+    entries = await pipe_deploy_mod.search_public_pipes(account, _caller(endpoints=['zeta.docB.chat']), 'doc')
+
+    assert [e['pipe'] for e in entries] == ['zeta.docB']

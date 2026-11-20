@@ -28,7 +28,8 @@
 # both authenticated and unauthenticated connections.
 #
 #   - rrext_public_probe   — server metadata (replaces the infoOnly auth hack)
-#   - rrext_public_catalog — browse the app catalog with pagination/filtering
+#   - rrext_public_catalog — browse the app catalog with pagination/filtering,
+#                            or (kind "pipe", signed in) the pipe picker feed
 # =============================================================================
 
 """
@@ -149,26 +150,84 @@ class PublicCommands(DAPConn):
 
     async def on_rrext_public_catalog(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Browse the app catalog with pagination and filtering.
+        Browse the catalog with pagination and filtering.
 
-        Available to both authenticated and unauthenticated connections.
-        When authenticated, the response is enriched with subscription
-        status per app.
+        ``kind`` picks what is browsed. ``'app'`` (the default) is the app
+        catalog: available to both authenticated and unauthenticated
+        connections, enriched with subscription status per app for a
+        signed-in caller, and delegated to ``account.handle_public()``
+        (SaaS: the catalog DB; OSS: the public publish rung).
 
-        Delegates to ``account.handle_public()`` which contains the
-        SaaS catalog logic. OSS returns the static apps.json list.
+        ``'pipe'`` is the pipe picker's feed (plan 3.6), edition-neutral
+        over the one publish table and signed-in only. Without a search
+        term it lists the caller's OWN-ORG publications, ``@me`` then
+        ``@team`` in team order, each pipe at the rung that answers it. With
+        one it searches the store's ``@public`` rung. The store is never
+        listed: there is no request that answers the whole public rung.
 
         Args:
             request: Raw DAP request dict with optional arguments:
-                action (str): "list" or "get" (default "list")
+                kind (str): "app" (default) or "pipe"
+                action (str): "list" or "get" (default "list"; apps)
                 offset (int): pagination offset (default 0)
                 limit (int): page size (default 20, max 100)
-                search (str): name/description substring filter
-                category (str): category filter
-                shell (str): shell compatibility filter
+                search (str): name/description substring filter; for pipes,
+                    the store search (blank = the caller's own publications)
+                category (str): category filter (apps)
+                shell (str): shell compatibility filter (apps)
                 appId (str): specific app ID (for "get" action)
 
         Returns:
-            DAP response with ``{ apps, total, offset, limit }`` in the body.
+            DAP response with ``{ apps, total, offset, limit }`` in the body;
+            a pipe entry carries ``kind: 'pipe'``, ``pipe`` (the address) and
+            ``rung``.
         """
+        args = request.get('arguments') or {}
+        kind = args.get('kind') or 'app'
+        if kind == 'pipe':
+            return await self._pipe_catalog(request, args)
+        if kind != 'app':
+            return self.build_error(request, f'Unknown catalog kind {kind!r} (use "app" or "pipe")')
         return await account.handle_public(self, request)
+
+    async def _pipe_catalog(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        The pipe picker's page: own-org publications, or a store search.
+
+        Args:
+            request: Raw DAP request dict.
+            args: Its arguments (``search``, ``offset``, ``limit``).
+
+        Returns:
+            DAP response with ``{ apps, total, offset, limit }``, or the
+            refusal (not signed in, a non-string search term).
+        """
+        from ai.account.pipe_deploy import own_pipe_publications, search_public_pipes
+
+        # Step 1: a signed-in caller and well-formed paging
+        info = getattr(self, '_account_info', None)
+        if info is None or not getattr(info, 'userId', None):
+            return self.build_error(request, 'Sign in to list pipelines')
+        search = args.get('search')
+        if search is not None and not isinstance(search, str):
+            return self.build_error(request, 'search must be a string')
+        try:
+            offset = max(int(args.get('offset') or 0), 0)
+            limit = min(max(int(args.get('limit') or 20), 1), 100)
+        except (TypeError, ValueError):
+            return self.build_error(request, 'offset and limit must be integers')
+
+        # Step 2: the store when searched, else the caller's own rungs
+        try:
+            if search and search.strip():
+                entries = await search_public_pipes(account, info, search)
+            else:
+                entries = await own_pipe_publications(account, info)
+        except PermissionError as exc:
+            return self.build_error(request, str(exc))
+
+        # Step 3: the page
+        return self.build_response(
+            request,
+            body={'apps': entries[offset : offset + limit], 'total': len(entries), 'offset': offset, 'limit': limit},
+        )

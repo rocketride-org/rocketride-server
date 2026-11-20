@@ -24,7 +24,7 @@
 // HISTORY STORE — per-connection statement history (App + Sidebar shared state)
 // =============================================================================
 //
-// Module-level store, same pattern as endpointStore/schemaStore, persisted
+// Module-level store, same pattern as schemaStore, persisted
 // through the shell's WORKSPACE preferences (server-side, per user) rather
 // than browser storage — history follows the person to another browser.
 //
