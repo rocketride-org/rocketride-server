@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-/** The PACKAGE page (named-pipes mockups 2.3–2.10): Identity, API Params, and the Step 6 side tabs. */
+/** The PACKAGE page (named-pipes mockups 2.3–2.10, 1.8b): Identity, API Params, Assets, Store, Requirements, Review. */
 export { default as PackagePanel } from './PackagePanel';
 export type { IPackagePanelProps, IPackageProject, IPackageSource, PackageSection } from './PackagePanel';
+export { callerNeedsOf, deployRequirements, publicParametersOf, requirementsLead, storeLadder } from './requirements';
+export type { IPublicParameter, IRequirementsProject, IRequirementsVersion } from './requirements';

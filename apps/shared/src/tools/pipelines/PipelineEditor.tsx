@@ -43,6 +43,8 @@ import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './panels/
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from './panels/deploy';
 import type { DeploySnapshot } from './panels/deploy';
 import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions, toWireTeamId } from './deploy/deployOps';
+import { createBusAppBuilderHost } from '../appdev/busHost';
+import type { IReviewHost } from '../appdev/views/builder/panels/review/ReviewView';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from './deploy/deployTypes';
 import { defaultStoreBlock, registryIdOf } from 'rocketride';
 
@@ -537,6 +539,20 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [isConnected]);
 
+	// --- Store review (PACKAGE › Review, the Requirements ladder) -------------
+	// The thread rides the app's verbs (rrext_deploy_app's versions/reply
+	// accept pipe artifacts since C.17), so the adapter is the one the App
+	// Builder spreads, keyed by this pipeline's registry name; the shell's
+	// account mirror supplies the developer namespace in both realms. None
+	// on a readonly surface or an unsaved document.
+	const hostReadonly = host.isReadonly === true;
+	const review = useMemo<IReviewHost | undefined>(() => {
+		if (hostReadonly || !projectId) return undefined;
+		const cm = ConnectionManager.getInstance();
+		const hasReviewLadder = !(cm.getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss');
+		return createBusAppBuilderHost({ bus: cm, appId: projectId, hasReviewLadder });
+	}, [hostReadonly, projectId]);
+
 	/** Fetch one immutable artifact (the version cards' record drawer). */
 	const fetchDeployArtifact = useCallback((version: number): Promise<IProject | undefined> => {
 		return deploymentActions.artifact(projectIdRef.current, version).then((artifact) => artifact as unknown as IProject);
@@ -769,6 +785,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 							},
 						}
 					: {})}
+				{...(review ? { review } : {})}
 			/>
 			{/* Deployment record drawer — ONE panel instance across loading →
 			    loaded (no width flash); DVR rides the brokered log sessions. */}

@@ -52,6 +52,7 @@ import { DeployTab } from './panels/deploy';
 import { PackagePanel } from './panels/package';
 import type { IAssetsHost } from '../../components/assets';
 import type { IPipelineDeploy } from './panels/deploy';
+import type { IReviewHost } from '../appdev/views/builder/panels/review/ReviewView';
 import { TASK_STATE } from './types';
 
 
@@ -185,6 +186,10 @@ export interface IProjectViewProps {
 	 *  (appdev's IAppBuilderHost shape). Its PRESENCE enables the Deploy
 	 *  tab; omitted, the tab renders the not-available state. */
 	deploy?: IPipelineDeploy;
+	/** The store-review adapter (PACKAGE › Review, the Requirements ladder):
+	 *  the same shape the app page mounts its ReviewView over. Omitted on a
+	 *  readonly host or an unsaved document; the panes say so. */
+	review?: IReviewHost;
 }
 
 // =============================================================================
@@ -267,7 +272,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -620,10 +625,11 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			content: renderDocPanel(renderSections('dev')),
 		},
 		package: {
-			// The pipeline described (named-pipes mockups 2.3–2.10): Identity and
-			// the per-call API Params (plan §5.5) write the document; the canvas
-			// takes a new map through its project reload path. Assets, Store,
-			// Requirements and Review arrive with publishing (Step 6).
+			// The pipeline described (named-pipes mockups 2.3–2.10, 1.8b): Identity
+			// and the per-call API Params (plan §5.5) write the document; the
+			// canvas takes a new map through its project reload path. Assets and
+			// Store write the store block; Requirements reads the document and
+			// the rail; Review mounts the store thread over the review adapter.
 			content: renderDocPanel(
 				project ? (
 					<PackagePanel
@@ -635,6 +641,7 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 						developerId={developerId ?? ''}
 						serverHost={serverHost}
 						assetsHost={assetsHost}
+						review={review}
 					/>
 				) : (
 					<div style={commonStyles.empty}>No pipeline loaded</div>

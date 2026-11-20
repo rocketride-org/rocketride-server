@@ -56,6 +56,7 @@ import { InputField } from 'shell';
 import { SidebarMenu } from 'shell';
 import { AssetsPane } from '../../../../../../components/assets';
 import type { IAssetPaths, IAssetsHost } from '../../../../../../components/assets';
+import { RequirementsChecklist } from '../../../../../../components/requirements';
 import { renderTemplate } from '../../../../templates';
 import type { AppBuilderStage, AppSummary, IAppBuilderHost, ListingDraft, PreflightCheck } from '../../../../types';
 import { ReviewView } from '../review/ReviewView';
@@ -266,54 +267,6 @@ const styles: Record<string, React.CSSProperties> = {
 		lineHeight: 1.5,
 		marginBottom: 8,
 	},
-	// ── Readiness ──────────────────────────────────────────────────────────
-	readyLead: {
-		fontSize: 13,
-		color: 'var(--rr-text-primary)',
-		lineHeight: 1.6,
-		marginBottom: 8,
-	},
-	checkRow: {
-		display: 'flex',
-		alignItems: 'center',
-		gap: 10,
-		padding: '6px 0',
-		fontSize: 12.5,
-		borderTop: '1px solid var(--rr-bg-widget-header)',
-	},
-	checkRowFirst: {
-		borderTop: 'none',
-	},
-	checkMark: {
-		width: 16,
-		height: 16,
-		borderRadius: '50%',
-		display: 'flex',
-		alignItems: 'center',
-		justifyContent: 'center',
-		fontSize: 10,
-		fontWeight: 800,
-		flexShrink: 0,
-	},
-	checkText: {
-		flex: 1,
-		color: 'var(--rr-text-primary)',
-	},
-	checkNote: {
-		color: 'var(--rr-text-disabled)',
-		fontSize: 11.5,
-		maxWidth: '55%',
-		overflow: 'hidden',
-		textOverflow: 'ellipsis',
-		whiteSpace: 'nowrap',
-	},
-};
-
-// Check-mark palettes per state (StoreView's exact grammar).
-const CHECK_PALETTE: Record<PreflightCheck['state'], { bg: string; fg: string; glyph: string }> = {
-	pass: { bg: 'rgba(34,153,84,0.14)', fg: 'var(--rr-color-success)', glyph: '✓' },
-	warn: { bg: 'rgba(232,185,49,0.18)', fg: 'var(--rr-color-warning)', glyph: '!' },
-	fail: { bg: 'rgba(244,67,54,0.14)', fg: 'var(--rr-color-error)', glyph: '✕' },
 };
 
 // =============================================================================
@@ -578,16 +531,8 @@ export const PackageView: React.FC<IPackageViewProps> = ({ host, app, readOnly =
 			{packageChecks.length === 0 ? (
 				<EmptyState title="No checks yet" description="Readiness runs against the app's manifest once it loads." />
 			) : (
-				<>
-					<div style={styles.readyLead}>{readyLead}</div>
-					{packageChecks.map((c, i) => (
-						<div key={c.id} style={i === 0 ? { ...styles.checkRow, ...styles.checkRowFirst } : styles.checkRow}>
-							<div style={{ ...styles.checkMark, background: CHECK_PALETTE[c.state].bg, color: CHECK_PALETTE[c.state].fg }}>{CHECK_PALETTE[c.state].glyph}</div>
-							<div style={styles.checkText}>{c.label}</div>
-							{c.note ? <div style={styles.checkNote} title={c.note}>{c.note}</div> : null}
-						</div>
-					))}
-				</>
+				// The rows the pipeline page draws too (components/requirements): one checklist, two feeds.
+				<RequirementsChecklist items={packageChecks} lead={readyLead} />
 			)}
 		</Card>
 	);
