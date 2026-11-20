@@ -531,6 +531,9 @@ def validate_isolation_config(account: Any = None) -> None:
 
 FRAME_TOKEN_TTL = 900
 _CLAIM_KEYS = frozenset({'a', 'v', 'u', 'o', 'iat', 'exp'})
+# 'd' binds a token to the dist directory its grant describes (set by every grant
+# this server mints); serving refuses the token if the version now resolves elsewhere.
+_OPTIONAL_CLAIMS = frozenset({'d'})
 _TOKEN_KEY_INFO = b'rocketride/app-frame-token/aes-256-gcm/v1'
 _NONCE_BYTES = 12
 _TAG_BYTES = 16
@@ -564,20 +567,30 @@ def _aead(key: bytes):
     return AESGCM(HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_TOKEN_KEY_INFO).derive(key))
 
 
-def _mint(app_id: str, version: int, user_id: str, org_id: str, config: IsolationConfig) -> Tuple[str, dict]:
-    """``(token, claims)`` sealed under the first configured key."""
+def _mint(
+    app_id: str, version: int, user_id: str, org_id: str, config: IsolationConfig, dist_dir: Optional[str] = None
+) -> Tuple[str, dict]:
+    """``(token, claims)`` sealed under the first configured key; ``dist_dir`` binds the deployment it opens."""
     if not config.token_keys:
         raise RuntimeError('no frame token key is configured (RR_APP_FRAME_TOKEN_KEYS)')
     kid, key = config.token_keys[0]
     iat = int(time.time())
     claims = {'a': app_id, 'v': version, 'u': user_id, 'o': org_id, 'iat': iat, 'exp': iat + FRAME_TOKEN_TTL}
+    if dist_dir is not None:
+        claims['d'] = dist_dir
     nonce = os.urandom(_NONCE_BYTES)
     sealed = _aead(key).encrypt(nonce, json.dumps(claims, separators=(',', ':')).encode('utf-8'), f'v1.{kid}'.encode())
     return f'v1.{kid}.{_b64u(nonce)}.{_b64u(sealed)}', claims
 
 
 def mint_frame_token(
-    app_id: str, version: int, user_id: str, org_id: str, *, config: Optional[IsolationConfig] = None
+    app_id: str,
+    version: int,
+    user_id: str,
+    org_id: str,
+    *,
+    config: Optional[IsolationConfig] = None,
+    dist_dir: Optional[str] = None,
 ) -> str:
     """
     Seal a frame token for one app version and one user, valid for 15 minutes.
@@ -587,12 +600,13 @@ def mint_frame_token(
         version: The registry version it opens.
         user_id: The user the entitlement is re-checked for.
         org_id: The org the entitlement is re-checked in.
+        dist_dir: The dist directory the grant describes; serving refuses the token when the version resolves elsewhere.
         config: The configuration (default: the environment's); the FIRST key seals.
 
     Returns:
         The token, URL-safe (it is a path segment of ``/_t/<token>/v<N>/``).
     """
-    return _mint(app_id, version, user_id, org_id, config or current_config())[0]
+    return _mint(app_id, version, user_id, org_id, config or current_config(), dist_dir)[0]
 
 
 def verify_frame_token(token: str, host_label: str, *, config: Optional[IsolationConfig] = None) -> dict:
@@ -631,7 +645,9 @@ def verify_frame_token(token: str, host_label: str, *, config: Optional[Isolatio
         claims = json.loads(_aead(key).decrypt(nonce, sealed, f'v1.{kid}'.encode()))
     except (InvalidTag, ValueError):
         raise FrameTokenError('bad seal') from None
-    if not isinstance(claims, dict) or set(claims) != _CLAIM_KEYS:
+    if not isinstance(claims, dict) or not _CLAIM_KEYS <= set(claims) <= _CLAIM_KEYS | _OPTIONAL_CLAIMS:
+        raise FrameTokenError('malformed claims')
+    if 'd' in claims and not isinstance(claims['d'], str):
         raise FrameTokenError('malformed claims')
     ints = [claims['v'], claims['iat'], claims['exp']]
     if not all(type(value) is int for value in ints) or not all(isinstance(claims[k], str) for k in 'auo'):
@@ -657,6 +673,10 @@ def verify_frame_token(token: str, host_label: str, *, config: Optional[Isolatio
 ENTITLEMENT_TTL = 60.0
 _CACHE_MAX = 4096
 _entitlement_cache: dict = {}
+# Bumped by drop_app. A lookup that was awaiting the registry while an app was
+# invalidated answers its own caller but does not cache what it resolved: that
+# answer may describe the deployment the invalidation just replaced.
+_drop_generation = 0
 
 
 def _cached(cache: dict, key: Any) -> Optional[dict]:
@@ -679,8 +699,17 @@ def _remember(cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, 
     return entry
 
 
+def _remember_since(generation: int, cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, **values: Any) -> dict:
+    """``_remember``, unless ``drop_app`` ran after ``generation`` was read (then the answer is returned, not stored)."""
+    if generation != _drop_generation:
+        return {**values, 'expiry': time.time() + ttl, 'appId': app_id}
+    return _remember(cache, key, app_id, ttl, **values)
+
+
 def drop_app(app_id: str) -> None:
     """Drop every cached isolation verdict of one app (called by ``invalidate_app_serving``)."""
+    global _drop_generation
+    _drop_generation += 1
     for name, cache in list(globals().items()):
         if name.endswith('_cache') and isinstance(cache, dict):
             for key in [k for k, entry in cache.items() if isinstance(entry, dict) and entry.get('appId') == app_id]:
@@ -731,6 +760,7 @@ async def token_version_dirs(user_id: str, org_id: str, app_id: str) -> dict:
     hit = _cached(_entitlement_cache, key)
     if hit is not None:
         return hit['dirs']
+    generation = _drop_generation
     if saas:
         try:
             info = await account.account_info_for(user_id, org_id)
@@ -739,7 +769,7 @@ async def token_version_dirs(user_id: str, org_id: str, app_id: str) -> dict:
         dirs = await entitled_version_dirs(info, app_id) if info is not None else {}
     else:
         dirs = await open_version_dirs(app_id)
-    return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
+    return _remember_since(generation, _entitlement_cache, key, app_id, dirs=dirs)['dirs']
 
 
 async def public_version_dirs(app_id: str, version: Optional[int] = None) -> dict:
@@ -755,8 +785,9 @@ async def public_version_dirs(app_id: str, version: Optional[int] = None) -> dic
         if saas and version is None:
             return {v: path for v, path in hit['dirs'].items() if await _app_use_allowed(None, app_id, v)}
         return hit['dirs']
+    generation = _drop_generation
     dirs = await entitled_version_dirs(None, app_id) if _is_saas() else await open_version_dirs(app_id)
-    return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
+    return _remember_since(generation, _entitlement_cache, key, app_id, dirs=dirs)['dirs']
 
 
 PUBLIC_LOOKUP_LIMIT = 120  # registry walks per client address per minute
@@ -992,16 +1023,44 @@ async def caller_of(token: str) -> Any:
     return info if hasattr(info, 'userId') else None
 
 
-async def _caller_answer(token: str, app_id: str) -> dict:
-    """``{verdict, org}``: the caller's winning stamp for ``app_id`` (None: no entry) and the caller's org."""
+class _AuthUnavailable(Exception):
+    """The auth backend raised: the caller's identity is unknown, which is not the same as anonymous."""
+
+
+_UNSET: Any = object()
+
+
+async def _caller_answer(token: str, app_id: str, info: Any = _UNSET) -> dict:
+    """
+    ``{verdict, org}``: the caller's winning stamp for ``app_id`` (None: no entry) and the caller's org.
+
+    ``info`` is the caller the request already authenticated (``None``: anonymous);
+    left out, the token is authenticated here. An auth backend that RAISES is an
+    unknown caller, never an anonymous one: nothing is resolved or cached for it.
+
+    Raises:
+        _AuthUnavailable: The token could not be authenticated because the backend failed.
+    """
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     hit = _cached(_verdict_cache, key)
     if hit is not None:
         return hit
     from ai.account.app_deploy import resolve_app_pins
 
+    generation = _drop_generation
     local = '' if _is_saas() else 'local'
-    info = await caller_of(token)
+    if info is _UNSET:
+        if token:
+            from ai.account import account
+
+            try:
+                info = await account.authenticate(token)
+            except Exception:
+                raise _AuthUnavailable() from None
+            # authenticate() returns an (int, str) error tuple for an invalid token.
+            info = info if hasattr(info, 'userId') else None
+        else:
+            info = None
     org_id = local
     if info is not None:
         user_id, caller_org, team_ids = _identity_of(info)
@@ -1013,12 +1072,20 @@ async def _caller_answer(token: str, app_id: str) -> dict:
     verdict = None
     if entry is not None and 'isolated' in entry:
         verdict = Verdict(isolated=entry['isolated'] is True, firstParty=entry.get('firstParty') is True)
-    return _remember(_verdict_cache, key, app_id, verdict=verdict, org=org_id)
+    return _remember_since(generation, _verdict_cache, key, app_id, verdict=verdict, org=org_id)
 
 
-async def version_verdict(token: str, app_id: str) -> Optional[Verdict]:
-    """The stamp of the caller's scope-walk winner for ``app_id``, or None when the caller has no entry."""
-    return (await _caller_answer(token, app_id))['verdict']
+async def version_verdict(token: str, app_id: str, info: Any = _UNSET) -> Optional[Verdict]:
+    """
+    The stamp of the caller's scope-walk winner for ``app_id``, or None when the caller has no entry.
+
+    Pass ``info`` (the already-authenticated caller, or ``None`` for an anonymous one) so the token is not
+    authenticated a second time. An auth backend failure answers None here (no stamp, so nothing is framed).
+    """
+    try:
+        return (await _caller_answer(token, app_id, info))['verdict']
+    except _AuthUnavailable:
+        return None
 
 
 async def isolated_for(token: str, app_id: str) -> bool:
@@ -1037,18 +1104,34 @@ async def isolated_for(token: str, app_id: str) -> bool:
         return False
     if not is_canonical_app_id(app_id):
         return True  # an alias spelling is never served from the main origin (R3-L3)
-    answer = await _caller_answer(token, app_id)
+    try:
+        answer = await _caller_answer(token, app_id)
+    except _AuthUnavailable:
+        return True  # fail closed: an unknown caller never gets the app on the main origin
     if answer['verdict'] is not None:
         return answer['verdict'].isolated
     fallback = await resolve_isolation(app_id, answer['org'])
     return fallback is None or fallback.isolated
 
 
+# Rate counters are never evicted while their window runs: dropping a live
+# bucket would give its caller a fresh budget, so flooding a cache with other
+# keys would lift a limit. Past this many live keys a NEW key is refused (the
+# limit fails closed) until windows end.
+_RATE_KEYS_MAX = 65536
+
+
 def _rate_ok(cache: dict, key: str, limit: int) -> bool:
     """One more request for ``key`` inside its fixed window (``FRAME_RATE_WINDOW``)."""
     hit = _cached(cache, key)
     if hit is None:
-        _remember(cache, key, '', ttl=FRAME_RATE_WINDOW, count=1)
+        if len(cache) >= _RATE_KEYS_MAX:
+            now = time.time()
+            for k in [k for k, v in cache.items() if v['expiry'] <= now]:
+                cache.pop(k, None)
+            if len(cache) >= _RATE_KEYS_MAX:
+                return False
+        cache[key] = {'count': 1, 'expiry': time.time() + FRAME_RATE_WINDOW, 'appId': ''}
         return True
     hit['count'] += 1
     return hit['count'] <= limit
@@ -1218,7 +1301,7 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
     """
     if not await _app_use_allowed(info, app_id, version):
         return None
-    verdict = await version_verdict(token if info is not None else '', app_id)
+    verdict = await version_verdict(token if info is not None else '', app_id, info)
     if verdict is None or not verdict.isolated:
         return None
     if info is not None:
@@ -1234,7 +1317,7 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
     if info is None and state != 'ready':
         return None
     if info is not None:
-        frame_token, claims = _mint(app_id, version, user_id, org_id, config)
+        frame_token, claims = _mint(app_id, version, user_id, org_id, config, dist_dir)
         entry_prefix = f'/_t/{frame_token}/v{version}/'
         expires_at = claims['exp'] * 1000
     else:

@@ -268,7 +268,12 @@ class AppHostMiddleware:
         if not await entitlement_ok(claims['u'], claims['o'], claims['a'], version):
             return _not_found()
         dirs = await token_version_dirs(claims['u'], claims['o'], claims['a'])
-        return await _read_dist(dirs.get(version), rest, _TOKEN_CACHE)
+        dist_dir = dirs.get(version)
+        # The grant the token was minted with described one deployment: a version that now
+        # resolves to another dist tree (another rail won, or it was replaced) is not that grant.
+        if 'd' in claims and dist_dir != claims['d']:
+            return _not_found()
+        return await _read_dist(dist_dir, rest, _TOKEN_CACHE)
 
     async def _serve_public(self, app_id: str, version: int, rest: list, label: str) -> Response:
         """``/_p/<appId>/v<N>/<file>``: a version an anonymous caller may load, on the app's own host."""

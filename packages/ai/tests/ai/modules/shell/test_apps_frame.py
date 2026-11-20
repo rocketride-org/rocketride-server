@@ -36,6 +36,7 @@ Tests T28, T29, T30 and T35 of ``.rr-sec/PR1_PLAN.md``.
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -554,3 +555,106 @@ def test_frame_grant_fails_closed_when_the_eligibility_check_fails(world, monkey
 
     monkeypatch.setattr(account, 'authorize_app_use', unavailable)
     assert world.frame(THIRD).status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Review round: invalidation races, rate counters, the authenticated caller, deployment binding
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_verdict_resolved_across_an_invalidation_is_not_cached(isolation_env, monkeypatch):
+    """A pin lookup in flight while ``drop_app`` runs answers its caller but never re-installs a stale verdict."""
+    import ai.account.app_deploy as deploy
+
+    ao = _ao()
+    gate = asyncio.Event()
+
+    async def slow_pins(org_id, user_id, team_ids):
+        await gate.wait()
+        return [{'id': THIRD, 'isolated': True, 'firstParty': False}]
+
+    monkeypatch.setattr(deploy, 'resolve_app_pins', slow_pins)
+    pending = asyncio.create_task(ao.version_verdict('', THIRD, None))
+    await asyncio.sleep(0)
+    ao.drop_app(THIRD)
+    gate.set()
+    verdict = await pending
+    assert verdict is not None and verdict.isolated is True
+    assert ao._verdict_cache == {}, 'the answer resolved across the invalidation was cached'
+    assert (await ao.version_verdict('', THIRD, None)) is not None
+    assert len(ao._verdict_cache) == 1, 'a lookup that started after the invalidation is cached as usual'
+
+
+def test_rate_counters_survive_a_flood_of_other_keys(clock, monkeypatch):
+    """A live bucket is never evicted to make room: other keys cannot reset a caller's budget."""
+    ao = _ao()
+    monkeypatch.setattr(ao, '_RATE_KEYS_MAX', 3)
+    cache: dict = {}
+    assert [ao._rate_ok(cache, 'a', 2) for _ in range(3)] == [True, True, False]
+    assert ao._rate_ok(cache, 'b', 2) and ao._rate_ok(cache, 'c', 2)
+    assert ao._rate_ok(cache, 'd', 2) is False, 'a full cache of live windows refuses a new key'
+    assert ao._rate_ok(cache, 'a', 2) is False, "the first caller's counter was not evicted and reset"
+    clock.advance(ao.FRAME_RATE_WINDOW + 1)
+    assert ao._rate_ok(cache, 'd', 2) is True, 'once the windows end the cache has room again'
+
+
+@pytest.mark.asyncio
+async def test_the_already_authenticated_caller_is_used_not_authenticated_again(isolation_env, monkeypatch):
+    """``frame_grant`` passes its caller on: a second ``authenticate`` that raises cannot turn it anonymous."""
+    from types import SimpleNamespace
+
+    from ai.account import account
+    import ai.account.app_deploy as deploy
+
+    ao = _ao()
+    seen = []
+
+    async def pins(org_id, user_id, team_ids):
+        seen.append((org_id, user_id))
+        return [{'id': THIRD, 'isolated': True, 'firstParty': False}]
+
+    async def broken(token):
+        raise RuntimeError('auth backend down')
+
+    monkeypatch.setattr(deploy, 'resolve_app_pins', pins)
+    monkeypatch.setattr(account, 'authenticate', broken)
+    caller = SimpleNamespace(userId='u1', organization={'id': 'acme-org', 'teams': []})
+
+    verdict = await ao.version_verdict('good-token', THIRD, caller)
+
+    assert verdict is not None and verdict.isolated is True
+    assert seen == [('acme-org', 'u1')], 'the pins were resolved for the caller, not for an anonymous one'
+
+
+@pytest.mark.asyncio
+async def test_an_auth_backend_failure_is_an_unknown_caller_never_an_anonymous_one(isolation_env, monkeypatch):
+    """No pins are resolved and nothing is cached; ``isolated_for`` fails closed."""
+    from ai.account import account
+    import ai.account.app_deploy as deploy
+
+    ao = _ao()
+    asked = []
+
+    async def pins(org_id, user_id, team_ids):
+        asked.append(user_id)
+        return []
+
+    async def broken(token):
+        raise RuntimeError('auth backend down')
+
+    monkeypatch.setattr(deploy, 'resolve_app_pins', pins)
+    monkeypatch.setattr(account, 'authenticate', broken)
+
+    assert await ao.isolated_for('good-token', THIRD) is True
+    assert await ao.version_verdict('good-token', THIRD) is None
+    assert asked == [] and ao._verdict_cache == {}
+
+
+def test_a_frame_token_is_bound_to_the_deployment_its_grant_describes(world):
+    """The grant mints ``d`` = the dist tree it described; the claim is sealed with the rest."""
+    body = world.frame(THIRD).json()
+    token = re.fullmatch(r'/_t/([^/]+)/v1/', body['entryPrefix']).group(1)
+    claims = sup.need(_ao(), 'verify_frame_token')(token, label_for(THIRD), config=world.config())
+    assert isinstance(claims['d'], str) and claims['d'], 'the token carries the deployment it opens'
+    assert claims['d'] in asyncio.run(_ao().token_version_dirs('u1', 'org-1', THIRD)).values()
