@@ -25,6 +25,7 @@
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import type { EndpointKeyMinter } from './components/pipeline-actions/endpointKey';
+import type { OpenToolHandler } from './components/pipeline-actions/PipelineActions';
 import { NewPipelineForm } from './components/NewPipelineForm';
 import { DeveloperIdBanner } from './components/DeveloperIdBanner';
 import type { NewPipelineIdentity } from './components/NewPipelineForm';
@@ -111,8 +112,16 @@ export interface IPipelineEditorHost {
 	isSubscribed: boolean;
 	/** Opens the host's subscription/checkout flow (the lock icon's click). */
 	promptSubscribe(): void;
-	/** Opens a link surface for a canvas-requested URL. */
+	/** Opens a docs URL in the host's browser (node documentation, the
+	 *  endpoint modal's links). Never a node's front end: that is `openTool`. */
 	openLink(url: string, displayName?: string): void;
+	/** Opens a node's front end (plan §3.6): the app `appId` (`rocketride.chat`,
+	 *  `rocketride.dropper`, `rocketride.sql`) as the tool document bound to
+	 *  the running control's `address` and the node `nodeId` — rocket-ui opens
+	 *  `tool:<appId>/<address>/<nodeId>`, VS Code the dev-tool panel. No URL,
+	 *  no credential. A host without a tool workbench omits it; the node's
+	 *  button is then not shown. */
+	openTool?: OpenToolHandler;
 	/** Mints the owner's scoped API key for one endpoint address (`task.data`,
 	 *  that address, the home team; plan §2.4) — the endpoint modal's Create
 	 *  API key. A host that cannot mint keys (OSS) rejects; the modal says so. */
@@ -746,7 +755,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				canRegisterDeveloper={canRegisterDeveloper}
 				onPipelineAction={host.runAction}
 				{...(host.onViewStateChange ? { onViewStateChange: host.onViewStateChange } : {})}
-				onOpenLink={host.openLink} onCreateEndpointKey={host.createEndpointKey}
+				onOpenLink={host.openLink} onOpenTool={host.openTool} onCreateEndpointKey={host.createEndpointKey}
 				{...(host.openCloudSetup ? { onOpenCloudSetup: host.openCloudSetup } : {})}
 				{...(host.oauthReturnUrl !== undefined ? { oauthReturnUrl: host.oauthReturnUrl } : {})}
 				{...(host.onOpenExternal ? { onOpenExternal: host.onOpenExternal } : {})}

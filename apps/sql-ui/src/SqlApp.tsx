@@ -43,7 +43,8 @@ import { commonStyles } from 'shell';
 import { closeDocumentByUri, connectionEditorIdFromUri, createDocs, destroyDocs, endpointKeyFromAnyUri, endpointKeyFromUri, getDocs, isConnectionEditorUri, isDesignUri, isDiagramUri, isQueryUri, isTableDataUri, parseConnectionEditorDocKey } from './docs';
 import type { QueryDocPayload } from './docs';
 import { setActiveConnection } from './navigation';
-import { loadSavedConnections, resetSavedConnections, isDirectEndpointKey, useSavedConnections, useSavedConnectionsStatus } from './connect';
+import { loadSavedConnections, resetSavedConnections, endpointForOpenTool, isDirectEndpointKey, useSavedConnections, useSavedConnectionsStatus } from './connect';
+import { parseToolDocKey } from 'shared/tools/pipelines/components/pipeline-actions/openTool';
 import type { SavedSqlConnection } from './connect';
 import { createSqlOpsClient } from './ops';
 import { attachSqlDocumentHost, localSidebarBridge, sendConnectionSave } from './sqlBridge';
@@ -238,6 +239,28 @@ const SqlConnectionDocument: React.FC<{ connId: string }> = ({ connId }) => {
 };
 
 /**
+ * A database node's workbench opened from its Explore button (plan 3.6): the
+ * document is bound to the running control's address and the node, with no
+ * saved connection behind it. Queries are tool borrows on that address; the
+ * sidebar's schema tree follows it like any other active endpoint.
+ */
+const SqlNodeDocument: React.FC<{ address: string; nodeId: string }> = ({ address, nodeId }) => {
+	const env = useSqlEnv();
+	const endpoint = useMemo(() => endpointForOpenTool(address, nodeId), [address, nodeId]);
+
+	useEffect(() => {
+		setActiveConnection(endpoint.key);
+	}, [endpoint]);
+
+	return (
+		<div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}>
+			<LiveRegion />
+			{env.ready ? <ConnectionView endpoint={endpoint} /> : <div style={styles.welcome}><EmptyState icon={<DatabaseIcon />} title="Not connected" description="Connect to a RocketRide server to open this node." /></div>}
+		</div>
+	);
+};
+
+/**
  * The connection editor as a document body, shared by both hosts: resolves
  * the editing target from the store and runs the page-chrome form. After a
  * NEW connection saves, `onOpenSaved` opens its workbench.
@@ -276,9 +299,11 @@ const ConnectionEditorBody: React.FC<{
 };
 
 /**
- * Dev-tool FRAME. With a `docKey` (a saved connection id, opened through
- * DevToolProps.documents) it renders that connection's workbench; without
- * one — the tool's generic document — it shows the landing state. The
+ * Dev-tool FRAME. With a `docKey` it renders a workbench: a saved connection
+ * id (opened through DevToolProps.documents), or `<address>/<nodeId>` (a
+ * node's Explore button, the URI `tool:rocketride.sql/<address>/<nodeId>`,
+ * plan 3.6); without one — the tool's generic document — it shows the
+ * landing state. The
  * connections list and schema tree live in the HOST's sidebar panel
  * (SqlDevToolSidebar); sidebar actions arrive over the tool channel and the
  * frame pushes the list + active key back (ref-counted: any number of
@@ -298,9 +323,12 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ channel, docKey, documents 
 	const ops = useMemo(() => createSqlOpsClient(channel), [channel]);
 	const env = useMemo(() => createRemoteSqlEnv(ops, isConnected ? client : null), [ops, client, isConnected]);
 
-	// The connection editor rides its own docKey family ('edit:…'); every
-	// other docKey is a saved connection id.
+	// The connection editor rides its own docKey family ('edit:…'); a node's
+	// Explore button opens `<address>/<nodeId>` (address-shaped, which a
+	// saved connection's UUID never is); every other docKey is a saved
+	// connection id.
 	const editorKey = docKey ? parseConnectionEditorDocKey(docKey) : null;
+	const nodeKey = docKey && !editorKey ? parseToolDocKey(docKey) : null;
 	let body: React.ReactNode;
 	if (docKey && editorKey) {
 		body = (
@@ -313,6 +341,8 @@ export const SqlDevTool: React.FC<DevToolProps> = ({ channel, docKey, documents 
 				commit={(conn) => sendConnectionSave({ channel }, conn)}
 			/>
 		);
+	} else if (docKey && nodeKey?.nodeId) {
+		body = <SqlNodeDocument address={nodeKey.address} nodeId={nodeKey.nodeId} />;
 	} else if (docKey) {
 		body = <SqlConnectionDocument connId={docKey} />;
 	} else {

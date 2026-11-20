@@ -7,16 +7,19 @@
  * Chat — the dev-tool mounts (workbench mode, plan 3.6).
  *
  * The host workbench (rocket-ui's tool documents, the VS Code dev-tool panel)
- * mounts `ChatDevTool` as a per-document frame: the document key IS the
- * address of the chat source the conversation is bound to. A node's
- * `open-tool` note opens one (`documents.open(address, title)` — the host
- * op lands with plan C.16b); nothing opens on tool activation, so the
- * sidebar controller only explains how a chat document comes to exist.
+ * mounts `ChatDevTool` as a per-document frame: the document key is
+ * `<address>/<nodeId>` (the URI `tool:rocketride.chat/<address>/<nodeId>`,
+ * plan 3.6), which a node's `open-tool` note opens through the host op
+ * `openTool`; the conversation binds to the address, and the node is the
+ * chat source the address already names. A bare address is accepted too.
+ * Nothing opens on tool activation, so the sidebar controller only explains
+ * how a chat document comes to exist.
  */
 
 import React from 'react';
 import type { DevToolProps } from 'shell';
 import { EmptyState } from 'shell';
+import { parseToolDocKey } from 'shared/tools/pipelines/components/pipeline-actions/openTool';
 import { ChatDocument } from './ChatDocument';
 
 // =============================================================================
@@ -48,16 +51,21 @@ const styles: Record<string, React.CSSProperties> = {
 // =============================================================================
 
 /**
- * The main surface: the conversation for `docKey` (an address), or the
- * generic frame when the tool was opened without a document.
+ * The main surface: the conversation for `docKey` (`<address>/<nodeId>`, or
+ * a bare address), or the generic frame when the tool was opened without a
+ * document.
  *
- * @param props - {@link DevToolProps}; `docKey` is the chat source's address.
+ * @param props - {@link DevToolProps}; `docKey` names the chat source's address.
  */
 export const ChatDevTool: React.FC<DevToolProps> = ({ docKey }) => {
 	if (docKey) {
+		// The node id is the source the address already names; a key that is
+		// not address-shaped is passed through as the address (the server is
+		// the authority and answers with its own error).
+		const address = parseToolDocKey(docKey)?.address ?? docKey;
 		return (
 			<div style={styles.fill}>
-				<ChatDocument address={docKey} />
+				<ChatDocument address={address} />
 			</div>
 		);
 	}

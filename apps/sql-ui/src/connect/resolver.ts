@@ -139,6 +139,27 @@ export function directAddressFor(key: string): string | undefined {
 // =============================================================================
 
 /**
+ * The endpoint a node's Explore button opens (plan 3.6): the tool document
+ * `tool:rocketride.sql/<address>/<nodeId>` binds to the running control's
+ * address and the database node, with no saved connection behind it. Same
+ * key shape as a pipeline-bound connection, so history and the schema tree
+ * key on it the same way.
+ *
+ * @param address - The running control's address.
+ * @param nodeId - The database node's component id.
+ * @returns The endpoint, ready to query (a tool borrow by address).
+ */
+export function endpointForOpenTool(address: string, nodeId: string): SqlEndpoint {
+	return {
+		key: `${address}:${nodeId}`,
+		address,
+		pipelineName: address,
+		nodeId,
+		nodeName: nodeId,
+	};
+}
+
+/**
  * The endpoint of a saved connection, without starting anything.
  *
  * @param conn - The saved connection.

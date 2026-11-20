@@ -250,7 +250,10 @@ const PipelineWebview: React.FC = () => {
 			// The host's run gate also signals the overlay; the lock icon's own
 			// click opens it directly.
 			promptSubscribe: () => setShowCheckout(true),
-			openLink: (url, displayName) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url, displayName }),
+			openLink: (url) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url }),
+			// A node's front end: the extension opens the dev-tool panel bound
+			// to the running control's address and the node (plan 3.6).
+			openTool: (appId, address, nodeId) => ConnectionManager.getInstance().emitOp('host.pipeline.openTool', { appId, address, nodeId }),
 			// The webview holds no client: the extension host mints the key.
 			createEndpointKey: (address) => ConnectionManager.getInstance().request('host.pipeline.createEndpointKey', { address } as never) as Promise<IMintedEndpointKey>,
 			// Developer-id onboarding: the webview has no shell identity, so the
@@ -319,7 +322,7 @@ const PipelineWebview: React.FC = () => {
 	return (
 		<>
 			<PipelineEditor project={project} host={editorHost} />
-			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => { setShowCheckout(false); setSubscribed(true); }} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url, browser: true })} />}
+			{showCheckout && stripeKey && <CheckoutModal appName="RocketRide" appDescription="Visual AI pipeline editor: run and deploy pipelines on RocketRide Cloud." stripePublishableKey={stripeKey} onFetchPlans={handleFetchPlans} onCreateCheckout={handleCreateCheckout} onConfirmPending={handleConfirmPending} onSuccess={() => { setShowCheckout(false); setSubscribed(true); }} onClose={() => setShowCheckout(false)} onActionClick={(_plan: CheckoutPlan, action: PlanAction) => ConnectionManager.getInstance().emitOp('host.pipeline.openLink', { url: action.type === 'mailto' ? `mailto:${action.url}${action.subject ? `?subject=${encodeURIComponent(action.subject)}` : ''}` : action.url })} />}
 			{showCheckout && !stripeKey && <CheckoutUnavailableNotice reason={stripeKeyReason} onClose={() => setShowCheckout(false)} />}
 		</>
 	);

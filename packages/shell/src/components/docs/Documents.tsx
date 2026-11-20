@@ -877,7 +877,7 @@ export class Documents {
 	 * the URI already exists in any group, it is focused instead of creating
 	 * a duplicate.
 	 *
-	 * @param uri     - Unique identifier for the document (e.g. "monitor", "webview:https://...").
+	 * @param uri     - Unique identifier for the document (e.g. "monitor", "tool:rocketride.sql/<docKey>").
 	 * @param label   - Display label for the tab.
 	 * @param content - Optional content payload (opaque to Documents).
 	 * @param groupId - Target editor group (defaults to active group).

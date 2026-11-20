@@ -5,11 +5,13 @@
 
 /**
  * PipelineActions — Renders action buttons derived from a running pipeline's
- * endpoint info (e.g. "Chat now", "Endpoint Info").
+ * status notes: the node's own front-end button (Open Chat / Open Dropper /
+ * Explore, from its `open-tool` note; plan 3.6) and "Endpoint Info".
  *
  * The endpoint info comes from `taskStatus.notes[0]` when the server reports
- * that a service is ready. This component extracts the button metadata and
- * renders compact action buttons.
+ * that a service is ready. A node's button opens its front end's document
+ * bound to the running control's address and the node through the host op
+ * `openTool(appId, address, nodeId)`; no URL is built for a node.
  *
  * Used on canvas source nodes and the status page header.
  *
@@ -21,6 +23,8 @@ import type { CSSProperties } from 'react';
 import { Button } from 'shell';
 import EndpointInfoModal from './EndpointInfoModal';
 import type { EndpointKeyMinter } from './endpointKey';
+import { actionButtons, openToolNotes, sourceEndpointNote } from './openTool';
+import type { IOpenToolNote } from './openTool';
 
 // =============================================================================
 // Styles
@@ -40,18 +44,26 @@ const styles: Record<string, CSSProperties> = {
 // =============================================================================
 
 /**
- * Endpoint info structure embedded in `taskStatus.notes[0]` by the server
- * when a pipeline service exposes an external endpoint (chat UI, webhook, etc.).
+ * Endpoint info structure embedded in a source's status notes by the server
+ * when its service is ready: the data door of a webhook (`url-link`), or the
+ * front end of a chat/dropper source (`open-tool`; no URL, the page servers
+ * are gone).
  */
 export interface IEndpointInfo {
-	/** Label for the primary action button (e.g. "Chat now", "Open Dropper"). */
+	/** Label for the node's front-end button (e.g. "Open Chat", "Open Dropper"). */
 	'button-text'?: string;
-	/** URL the primary button opens. May contain `{host}` placeholders. */
-	'button-link'?: string;
-	/** Label for the endpoint URL row (e.g. "Chat interface URL"). */
-	'url-text': string;
-	/** The actual endpoint URL. */
-	'url-link': string;
+	/**
+	 * The app id of the front end that talks to this node (`rocketride.chat`,
+	 * `rocketride.dropper`, `rocketride.sql`): the node's button (plan 3.6).
+	 * The host opens that app's document bound to `address` and `nodeId`.
+	 */
+	'open-tool'?: string;
+	/** The node the front end binds to: its component id in the pipeline. */
+	nodeId?: string;
+	/** Label for the endpoint URL row (e.g. "Webhook interface URL"). Absent on a source without a URL. */
+	'url-text'?: string;
+	/** The data door's URL (webhook). Absent on a chat/dropper source: nothing to POST to. */
+	'url-link'?: string;
 	/**
 	 * The control's address, `developerId.pipeId.source` — what a machine
 	 * caller POSTs to and what the minted key is scoped to (plan §2.2). The
@@ -67,14 +79,25 @@ export interface IEndpointInfo {
 	lanes?: string[];
 }
 
+/** Opens a front end's document bound to one running node (plan 3.6). */
+export type OpenToolHandler = (appId: string, address: string, nodeId: string) => void;
+
 export interface IPipelineActionsProps {
-	/** The notes array from taskStatus. Endpoint info is extracted from notes[0]. */
+	/** The notes array from taskStatus: the endpoint info (the first endpoint-shaped note) and, absent `tools`, the buttons. */
 	notes?: (string | Record<string, unknown>)[];
+	/** The node's buttons when the caller resolved them itself (a canvas node: its notes across every source's status). */
+	tools?: IOpenToolNote[];
+	/** The source component the notes belong to: tells its own endpoint note from a database node's. */
+	sourceId?: string;
+	/** Inert strip: the panel is replaying a past run and these buttons act on the LIVE task (pointer and keyboard alike). */
+	disabled?: boolean;
 	/** Host address used to replace `{host}` placeholders in URLs. */
 	host?: string;
-	/** Called when a URL needs to be opened externally. */
+	/** Called when a docs URL needs to be opened in the browser (the endpoint modal's links). */
 	onOpenLink?: (url: string, displayName?: string) => void;
-	/** Display name for the source node (used as the tab title when opening links). */
+	/** Opens the node's front end for its `open-tool` note. Absent = the host cannot; the button is not shown. */
+	onOpenTool?: OpenToolHandler;
+	/** Display name for the source node (the endpoint modal's title). */
 	displayName?: string;
 	/** Mints the owner's scoped key for the endpoint (the modal's Create API key; plan §2.4). Absent = the host cannot mint. */
 	onCreateEndpointKey?: EndpointKeyMinter;
@@ -84,52 +107,43 @@ export interface IPipelineActionsProps {
 // Helpers
 // =============================================================================
 
-/** Type guard: checks whether an unknown value is IEndpointInfo. */
-function isEndpointInfo(value: unknown): value is IEndpointInfo {
-	return value != null && typeof value === 'object' && 'url-text' in value && 'url-link' in value;
-}
-
-function getEndpointInfo(notes?: (string | Record<string, unknown>)[]): IEndpointInfo | null {
-	if (!notes || notes.length === 0) return null;
-	const first = notes[0];
-	return isEndpointInfo(first) ? first : null;
-}
-
-/** Replaces {host} placeholders in a URL. */
-function processLink(link: string | undefined, host?: string): string | undefined {
-	if (!link || !host) return link;
-	return link.replace(/{host}/g, host);
+/**
+ * The source's endpoint note: its data door (`url-link`) or its own
+ * `open-tool` note; a database node's note merged into the list is never
+ * the endpoint (see {@link sourceEndpointNote}).
+ */
+function getEndpointInfo(notes?: (string | Record<string, unknown>)[], sourceId?: string): IEndpointInfo | null {
+	return (sourceEndpointNote(notes, sourceId) as IEndpointInfo | null) ?? null;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function PipelineActions({ notes, host, onOpenLink, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
-	const endpointInfo = useMemo(() => getEndpointInfo(notes), [notes]);
+export default function PipelineActions({ notes, tools: toolsProp, sourceId, disabled = false, host, onOpenLink, onOpenTool, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
+	const endpointInfo = useMemo(() => getEndpointInfo(notes, sourceId), [notes, sourceId]);
+	// The node's own buttons: one per open-tool note the server filled. Shown
+	// only when the host can open a tool document.
+	const tools = useMemo(() => (onOpenTool ? (toolsProp ?? openToolNotes(notes)) : []), [notes, toolsProp, onOpenTool]);
+	const buttons = useMemo(() => actionButtons(tools, endpointInfo !== null, disabled), [tools, endpointInfo, disabled]);
 	const [isModalOpen, setIsModalOpen] = useState(false);
 
-	if (!endpointInfo) return null;
-
-	const buttonLink = processLink(endpointInfo['button-link'], host);
-	const hasButton = endpointInfo['button-text'] && buttonLink;
+	if (buttons.length === 0) return null;
 
 	// Stock Buttons only, at the mini (canvas-node) size — the 26px small tier
 	// overflows the node card. Clicks stop at the container so a press never
-	// bubbles into canvas node selection/drag.
+	// bubbles into canvas node selection/drag. A disabled strip (replay) is
+	// inert to the keyboard too, not only dimmed.
 	return (
 		<>
 			<div style={styles.container} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-				{hasButton && (
-					<Button mini variant="primary" onClick={() => onOpenLink?.(buttonLink, displayName)}>
-						{endpointInfo['button-text']}
+				{buttons.map((button) => (
+					<Button key={button.key} mini variant={button.kind === 'tool' ? 'primary' : 'secondary'} disabled={button.disabled} onClick={() => (button.tool ? onOpenTool?.(button.tool.appId, button.tool.address, button.tool.nodeId) : setIsModalOpen(true))}>
+						{button.label}
 					</Button>
-				)}
-				<Button mini variant="secondary" onClick={() => setIsModalOpen(true)}>
-					Endpoint Info
-				</Button>
+				))}
 			</div>
-			<EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} displayName={displayName} host={host} onCreateEndpointKey={onCreateEndpointKey} />
+			{endpointInfo && <EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} tool={tools.find((t) => t.appId === endpointInfo['open-tool'])} onOpenTool={onOpenTool} displayName={displayName} host={host} onCreateEndpointKey={onCreateEndpointKey} />}
 		</>
 	);
 }

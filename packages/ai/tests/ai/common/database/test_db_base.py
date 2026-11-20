@@ -708,6 +708,81 @@ def _sql_instance(fake_global):
     return inst
 
 
+# ---------------------------------------------------------------------------
+# The open-tool note (plan 3.6): the node's Explore button
+# ---------------------------------------------------------------------------
+
+
+def _open_tool_global(node_id='postgres_1'):
+    """A stub IGlobal carrying only the identity record the note reads."""
+    return SimpleNamespace(config=SimpleNamespace(node=SimpleNamespace(id=node_id)))
+
+
+def test_begin_instance_publishes_the_open_tool_note_once_per_control(monkeypatch):
+    """The first binding of a control publishes rocketride.sql for this node;
+    later bindings of the same control (new instances, same IGlobal) stay quiet.
+    """
+    import json
+
+    from ai.common.database import db_instance_base
+
+    sent = []
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda key, payload: sent.append((key, json.loads(payload))))
+    glb = _open_tool_global('postgres_1')
+    _sql_instance(glb).beginInstance()
+    _sql_instance(glb).beginInstance()
+    assert sent == [
+        (
+            'usr',
+            [{'button-text': 'Explore', 'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}],
+        )
+    ]
+    # Another control (its own IGlobal) announces its own node
+    other = _open_tool_global('mysql_1')
+    _sql_instance(other).beginInstance()
+    assert sent[1][1][0]['nodeId'] == 'mysql_1'
+
+
+def test_begin_instance_without_an_identity_publishes_nothing(monkeypatch):
+    """A global with no identity record (a bare fixture) costs no note and no error."""
+    from ai.common.database import db_instance_base
+
+    sent = []
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda *a: sent.append(a))
+    _sql_instance(_FakeGlobal()).beginInstance()
+    _sql_instance(_open_tool_global('')).beginInstance()
+    assert sent == []
+
+
+def test_begin_instance_marks_the_control_announced_only_after_the_note_went_out(monkeypatch):
+    """A binding that cannot publish (identity not there yet, the monitor
+    refusing) leaves the control unannounced, so a later binding publishes;
+    once one succeeded, the following bindings stay quiet.
+    """
+    from ai.common.database import db_instance_base
+
+    sent = []
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda *a: sent.append(a))
+    # No identity: nothing sent, nothing marked
+    bare = _FakeGlobal()
+    _sql_instance(bare).beginInstance()
+    assert sent == [] and not getattr(bare, 'open_tool_announced', False)
+    # The monitor refuses: swallowed, not marked
+    glb = _open_tool_global('postgres_1')
+
+    def refuse(*a):
+        raise RuntimeError('no monitor')
+
+    monkeypatch.setattr(db_instance_base, 'monitorOther', refuse)
+    _sql_instance(glb).beginInstance()
+    assert not getattr(glb, 'open_tool_announced', False)
+    # The next binding publishes and marks; the one after is a duplicate and stays quiet
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda *a: sent.append(a))
+    _sql_instance(glb).beginInstance()
+    _sql_instance(glb).beginInstance()
+    assert len(sent) == 1 and glb.open_tool_announced is True
+
+
 def test_build_sql_query_marks_invalid_after_explain_exhaustion():
     """Every EXPLAIN attempt failing must flip isValid to False, not leave the LLM's 'true'.
 

@@ -38,6 +38,7 @@ import { getLogger } from '../shared/util/output';
 // into the extension-host compile; parse.ts is pure.
 import { parsePipelineContent } from 'shared/tools/pipelines/utils/parse';
 import { mintEndpointKey } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
+import { openToolDocKey, openToolTitle } from 'shared/tools/pipelines/components/pipeline-actions/openTool';
 import { isSubscribed } from '../shared/util/subscriptionGate';
 import { isDeployRunBody } from 'shared/tools/pipelines/runKind';
 import { handleMissingEnvVars } from '../shared/util/envVarCheck';
@@ -439,7 +440,13 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				if (p.keys?.length) await handleMissingEnvVars(p.keys);
 			},
 			'host.pipeline.openLink': (p) => {
-				if (p.url) openExternalLink(p.url, p.displayName, p.browser);
+				if (p.url) openExternalLink(p.url);
+			},
+			// The node's front end (plan 3.6): the app's dev-tool panel bound to
+			// the running control's address and the node — the same command the
+			// bus peer's summon and the sidebar use (DevToolPanelProvider.show).
+			'host.pipeline.openTool': async (p) => {
+				await vscode.commands.executeCommand('rocketride.devtool.open', p.appId, openToolDocKey(p.address, p.nodeId), openToolTitle(p.address, p.nodeId));
 			},
 			// The endpoint modal's Create API key: the webview holds no client,
 			// so the extension mints on its behalf with the shared minter (one

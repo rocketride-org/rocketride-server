@@ -293,6 +293,29 @@ def test_project_status_expands_the_notes_placeholders_with_the_controls_own_add
     assert control.project_status({'notes': stored}, shared=True)['notes'] == []
 
 
+def test_project_status_fills_the_open_tool_notes_node_id_with_the_controls_source():
+    """A source's `open-tool` note (plan 3.6) names the node as `{source}`: the
+    last segment of the control's address IS the source's component id, so
+    two controls of one engine each get a button bound to their own source.
+    """
+    stored = [
+        {'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', 'nodeId': '{source}', 'address': '{address}'}
+    ]
+    control = TaskControl()
+    control.task = SimpleNamespace(dormant_reason=None, state=None, is_live=True)
+    control.engine_starting = False
+    control.address = 'acme.docBrain.chat_1'
+    control.project_id = 'docBrain'
+    assert control.project_status({'notes': stored}, shared=False)['notes'] == [
+        {
+            'button-text': 'Open Chat',
+            'open-tool': 'rocketride.chat',
+            'nodeId': 'chat_1',
+            'address': 'acme.docBrain.chat_1',
+        }
+    ]
+
+
 # =============================================================================
 # OPENER FIRST AND THE OPS GATE
 # =============================================================================

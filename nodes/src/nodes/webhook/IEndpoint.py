@@ -102,12 +102,22 @@ class IEndpoint(IEndpointBase):
             # header, and the endpoint panel mints one scoped to this address).
             # {address} is the control's address, developerId.pipeId.source,
             # which is also the one path form the data door accepts (B36).
+            #
+            # The node's button is the `open-tool` note (plan 3.6): the app id
+            # of the front end that talks to this node, with the node's own id
+            # beside it. The host opens that app's document bound to the
+            # running control's address and this node; no URL is built here
+            # (the page-path link of the button is gone with B2, and so are
+            # the chat and dropper page servers, so these two sources carry
+            # no URL at all: the SDK and the apps talk to them by address).
+            # {source} is the last segment of the control's address, which
+            # IS this source's component id; the server fills it per control
+            # (expand_note).
             if self.endpoint.logicalType == 'chat':
                 info = {
-                    'button-text': 'Chat now',
-                    'button-link': '{host}/chat/{project_id}/{source}',
-                    'url-text': 'Chat interface URL',
-                    'url-link': '{host}/chat/{project_id}/{source}',
+                    'button-text': 'Open Chat',
+                    'open-tool': 'rocketride.chat',
+                    'nodeId': '{source}',
                     'address': '{address}',
                 }
                 monitorOther('usr', json.dumps([info]))
@@ -115,10 +125,9 @@ class IEndpoint(IEndpointBase):
 
             elif self.endpoint.logicalType == 'dropper':
                 info = {
-                    'button-text': 'Drop now',
-                    'button-link': '{host}/dropper/{project_id}/{source}',
-                    'url-text': 'Dropper interface URL',
-                    'url-link': '{host}/dropper/{project_id}/{source}',
+                    'button-text': 'Open Dropper',
+                    'open-tool': 'rocketride.dropper',
+                    'nodeId': '{source}',
                     'address': '{address}',
                 }
                 monitorOther('usr', json.dumps([info]))

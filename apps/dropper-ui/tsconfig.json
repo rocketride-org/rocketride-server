@@ -11,7 +11,12 @@
     "jsx": "react-jsx",
     "strict": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "paths": {
+      "shared/*": [
+        "../shared/src/*"
+      ]
+    }
   },
   "include": [
     "src",

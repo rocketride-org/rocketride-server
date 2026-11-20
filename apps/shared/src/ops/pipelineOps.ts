@@ -86,9 +86,13 @@ export interface PipelineHostOpMap extends ShellOpMap {
 	/** ROCKETRIDE_* refs the canvas found that are not in the env — the host
 	 *  offers the add-variables flow. */
 	'host.pipeline.missingEnv': ShellOpSpec<{ keys: string[] }, void>;
-	/** Opens a URL: system browser (`browser`, scheme-allowlisted) or the
-	 *  bridged iframe panel (clipboard/file-dialog/drag bridging). */
-	'host.pipeline.openLink': ShellOpSpec<{ url: string; displayName?: string; browser?: boolean }, void>;
+	/** Opens a docs URL in the system browser (scheme-allowlisted). A node's
+	 *  front end is never a URL: that is `host.pipeline.openTool`. */
+	'host.pipeline.openLink': ShellOpSpec<{ url: string }, void>;
+	/** Opens a node's front end (plan §3.6): the dev-tool panel of `appId`
+	 *  bound to the running control's `address` and the node `nodeId`
+	 *  (document key `<address>/<nodeId>`). No URL, no credential. */
+	'host.pipeline.openTool': ShellOpSpec<{ appId: string; address: string; nodeId: string }, void>;
 	/** Mints the owner's scoped API key for one endpoint address (`task.data`,
 	 *  that address, the home team; plan §2.4) — answered by the host that
 	 *  holds the client. A host that cannot mint keys (OSS) rejects. */

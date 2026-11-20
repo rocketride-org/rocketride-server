@@ -43,6 +43,7 @@ from ai.modules.task.task_engine import (
     TaskEngine,
     cap_trace_payload,
     filter_subprocess_env,
+    merge_status_notes,
     resolve_parameter_tokens,
     saas_pipeline_violation,
 )
@@ -660,6 +661,49 @@ def test_update_status_user_event_keeps_unknown_note_types_as_is():
         },
     )
     assert t._status.notes == [42]
+
+
+def test_update_status_user_event_merges_notes_by_node_id():
+    """Every node writes the one notes slot: a database node's `open-tool` note
+    (keyed by nodeId) joins the source's note instead of replacing it, and a
+    repeat from the same node replaces only its own (plan 3.6).
+    """
+    t = _task(status=_make_status_for_update())
+    source = {'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', 'nodeId': '{source}', 'address': '{address}'}
+    db = {'button-text': 'Explore', 'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}
+    for notes in ([source], [db]):
+        TaskEngine._update_status(t, {'event': 'apaevt_status_user', 'body': {'notes': notes}})
+    assert t._status.notes == [source, db]
+    # The same node again: its note is replaced where it stands, nothing else moves
+    db2 = dict(db, **{'button-text': 'Explore again'})
+    TaskEngine._update_status(t, {'event': 'apaevt_status_user', 'body': {'notes': [db2]}})
+    assert t._status.notes == [source, db2]
+    # An empty message (a source's shutdown) clears the slot, as before
+    TaskEngine._update_status(t, {'event': 'apaevt_status_user', 'body': {'notes': []}})
+    assert t._status.notes == []
+
+
+def test_merge_status_notes_unkeyed_notes_keep_the_replace_semantics():
+    """A note without a nodeId (the webhook's door, free text) replaces every
+    earlier unkeyed note and leaves the keyed ones alone; keyed notes never
+    disturb the unkeyed ones. The inputs are not modified.
+    """
+    webhook = {'url-link': '{host}/webhook/{address}', 'address': '{address}'}
+    db = {'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}
+    existing = [webhook, 'free text', db]
+    merged = merge_status_notes(existing, [{'url-link': 'new door'}])
+    assert merged == [{'url-link': 'new door'}, db]
+    assert merge_status_notes(existing, [{'open-tool': 'x', 'nodeId': 'other'}]) == [
+        webhook,
+        'free text',
+        db,
+        {'open-tool': 'x', 'nodeId': 'other'},
+    ]
+    assert existing == [webhook, 'free text', db]
+    # A nodeId that is not a non-empty string does not key the note
+    assert merge_status_notes([webhook], [{'nodeId': '', 'x': 1}]) == [{'nodeId': '', 'x': 1}]
+    # Two keyed notes of one node in one message: one note per node, the first
+    assert merge_status_notes([], [{'nodeId': 'a', 'v': 1}, {'nodeId': 'a', 'v': 2}]) == [{'nodeId': 'a', 'v': 1}]
 
 
 def test_update_status_info_event_merges_into_info_dict():
@@ -1858,6 +1902,33 @@ async def test_on_event_engine_event_records_pipeline_activity_for_a_dev_task(ev
     await TaskEngine.on_event(t, {'event': event_type, 'body': {}})
 
     assert t._last_pipeline_event > 0.0
+
+
+@pytest.mark.asyncio
+async def test_readiness_keeps_the_notes_the_nodes_published():
+    """Readiness never touches the notes slot. A database node announces its
+    Explore button once, possibly before the source reports ready (plan 3.6),
+    so the keyed note merged before `service=True` must survive it; the
+    source's unkeyed door follows the same rule (readiness is not a writer of
+    notes at all). Only a run reset and a source's empty usr message clear.
+    """
+    t = _event_task()
+    t._task_metrics = None
+    t._channel_startup_open = True
+    t._confirm_running = MagicMock()
+    door = {'url-link': '{host}/webhook/{address}', 'address': '{address}'}
+    explore = {'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}
+    t._status.notes = [door, explore]
+
+    await TaskEngine.on_event(t, {'event': 'apaevt_status_state', 'body': {'service': True}})
+    assert t._status.notes == [door, explore]
+    assert t._status.serviceUp is True and t._confirm_running.called
+    await TaskEngine.on_event(t, {'event': 'apaevt_status_state', 'body': {'service': False}})
+    assert t._status.notes == [door, explore]
+    # The two clearing paths
+    assert merge_status_notes([door, explore], []) == []
+    TaskEngine._reset_status(t)
+    assert t._status.notes == []
 
 
 @pytest.mark.asyncio

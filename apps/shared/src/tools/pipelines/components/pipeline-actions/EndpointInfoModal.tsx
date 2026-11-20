@@ -6,16 +6,19 @@
 /**
  * EndpointInfoModal — Plain React modal showing endpoint configuration details.
  *
- * Displays URL, optional URL with `?auth=`, auth key, integration examples
- * (cURL / wget / TypeScript / Python / HTTP), and optional private token.
+ * Displays the endpoint URL and address, the minted key for the endpoint,
+ * and integration examples (cURL / wget / TypeScript / Python / HTTP). No
+ * credential rides a URL (plan §2.4); the node's front end opens from the
+ * node's own button, not from here (plan §3.6).
  */
 
 import React, { ReactElement, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { IEndpointInfo } from './PipelineActions';
+import type { IEndpointInfo, OpenToolHandler } from './PipelineActions';
+import type { IOpenToolNote } from './openTool';
 import { buildIntegrationExamples, defaultWebhookPayloadId, getWebhookPayload, WEBHOOK_PAYLOADS, type IntegrationTabId, type WebhookPayloadId } from './endpointIntegrationExamples';
 import type { EndpointKeyMinter, IMintedEndpointKey } from './endpointKey';
-import { commonStyles } from 'shell';
+import { Button, commonStyles } from 'shell';
 
 // =============================================================================
 // Styles
@@ -218,6 +221,10 @@ interface IEndpointInfoModalProps {
 	onClose: () => void;
 	/** Handler to open external URLs. */
 	onOpenLink?: (url: string, displayName?: string) => void;
+	/** The source's front end, when the note names one (a chat/dropper source; plan 3.6). */
+	tool?: IOpenToolNote;
+	/** Opens that front end; absent = the host has no tool workbench. */
+	onOpenTool?: OpenToolHandler;
 	/** Display name for the source node (used as the tab title when opening links). */
 	displayName?: string;
 	/** Host to replace {host} placeholders in all values. */
@@ -261,7 +268,7 @@ const INTEGRATION_TABS = TAB_ORDER.map((id) => ({ id, label: TAB_LABELS[id] }));
 // Component
 // =============================================================================
 
-export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, displayName, host, onCreateEndpointKey }: IEndpointInfoModalProps): ReactElement | null {
+export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpenLink, tool, onOpenTool, displayName, host, onCreateEndpointKey }: IEndpointInfoModalProps): ReactElement | null {
 	// The key minted for THIS endpoint, shown once (plan §2.4): never stored,
 	// dropped when the modal shows another endpoint.
 	const [minted, setMinted] = useState<IMintedEndpointKey | null>(null);
@@ -282,7 +289,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	onCloseRef.current = onClose;
 
 	// Drop a manual pick when the panel is showing a different endpoint.
-	const endpointKey = endpointInfo?.['url-link'] ?? null;
+	const endpointKey = endpointInfo?.['url-link'] ?? endpointInfo?.address ?? null;
 	React.useEffect(() => {
 		setPayloadOverride(null);
 		setMinted(null);
@@ -294,7 +301,9 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 	if (!endpointInfo || !isOpen) return null;
 
 	const processed = processEndpointInfo(endpointInfo, host);
-	const endpointUrl = processed['url-link'];
+	// A chat/dropper source has no URL (its page servers are gone): the modal
+	// then shows the address and the Open button, no door and no examples.
+	const endpointUrl = processed['url-link'] ?? '';
 	const address = processed.address;
 	const isLocalEndpoint = /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(endpointUrl);
 	const isWebhookEndpoint = /web[\s-]?hook/i.test(endpointUrl) || /web[\s-]?hook/i.test(processed['url-text'] ?? '');
@@ -344,11 +353,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 		...(copyFeedback === label ? styles.iconBtnSuccess : {}),
 	});
 
-	// A chat / dropper PAGE has no sign-in of its own and the task tokens it
-	// took on the URL are gone (plan §2.4); the signed-in rocketride.chat and
-	// rocketride.dropper apps replace it (plan §3.6, Step 5b). Say so rather
-	// than promise a flow the page cannot complete.
-	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : 'This page is being replaced by the signed-in Chat and Dropper apps; until they ship it cannot be opened with a key, since no credential rides a URL any more.';
+	// A chat / dropper source is used through its signed-in app: the node's
+	// own button opens it beside the canvas, and a link that names the pipe
+	// (?appid=…&pipe=<address>) opens it in the browser (plan §3.6). No
+	// credential rides a URL (plan §2.4).
+	const envHintText = isWebhookEndpoint ? (isLocalEndpoint ? 'This endpoint points to a local host. Use a public tunnel/domain before integrating external webhook providers.' : 'This endpoint uses a non-local host and can be used for external webhook integrations.') : 'This source has no URL. Open it in its app beside the canvas, or share a link that names the pipe (?appid=<app>&pipe=<address>); sign-in happens in the app, so no key rides a URL. The SDK reaches it by address.';
 
 	return createPortal(
 		/* Backdrop is inert: dismissal is deliberate-only (close button) per the
@@ -365,32 +374,46 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 
 				{/* Body */}
 				<div style={styles.body}>
-					{/* URL Section */}
-					<div style={styles.configItem}>
-						<div style={styles.envRow}>
-							<span style={styles.envLabel}>Environment</span>
-							<span style={isLocalEndpoint ? styles.envBadgeLocal : styles.envBadgeProd}>{isLocalEndpoint ? 'Local' : 'Production'}</span>
-						</div>
-						<div style={styles.envHint}>{envHintText}</div>
-						<div style={styles.configLabel}>{processed['url-text']}</div>
-						<div style={styles.configValueRow}>
-							<div style={styles.configValueLink}>
-								<a
-									href="#"
-									style={styles.link}
-									onClick={(e) => {
-										e.preventDefault();
-										onOpenLink?.(endpointUrl, displayName);
-									}}
-								>
-									{endpointUrl}
-								</a>
+					{/* URL Section — the data door of a webhook */}
+					{endpointUrl ? (
+						<div style={styles.configItem}>
+							<div style={styles.envRow}>
+								<span style={styles.envLabel}>Environment</span>
+								<span style={isLocalEndpoint ? styles.envBadgeLocal : styles.envBadgeProd}>{isLocalEndpoint ? 'Local' : 'Production'}</span>
 							</div>
-							<button style={iconBtn('url')} onClick={() => handleCopy(endpointUrl, 'url')}>
-								{copyFeedback === 'url' ? 'Copied!' : 'Copy'}
-							</button>
+							<div style={styles.envHint}>{envHintText}</div>
+							<div style={styles.configLabel}>{processed['url-text']}</div>
+							<div style={styles.configValueRow}>
+								<div style={styles.configValueLink}>
+									<a
+										href="#"
+										style={styles.link}
+										onClick={(e) => {
+											e.preventDefault();
+											onOpenLink?.(endpointUrl, displayName);
+										}}
+									>
+										{endpointUrl}
+									</a>
+								</div>
+								<button style={iconBtn('url')} onClick={() => handleCopy(endpointUrl, 'url')}>
+									{copyFeedback === 'url' ? 'Copied!' : 'Copy'}
+								</button>
+							</div>
 						</div>
-					</div>
+					) : (
+						/* A front end without a door: the node's Open button, beside the address below */
+						<div style={styles.configItem}>
+							<div style={styles.envHint}>{envHintText}</div>
+							{tool && onOpenTool && (
+								<div style={styles.configValueRow}>
+									<Button small variant="primary" onClick={() => onOpenTool(tool.appId, tool.address, tool.nodeId)}>
+										{tool.label}
+									</Button>
+								</div>
+							)}
+						</div>
+					)}
 
 					{/* Address — what a caller POSTs to and what a key is scoped to (plan §2.2) */}
 					{address && (
@@ -439,10 +462,11 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 						</div>
 					)}
 
-					{/* Integration examples */}
+					{/* Integration examples — only a door has them */}
+					{endpointUrl && (
 					<div style={styles.testBox}>
 						<div style={styles.testTitle}>Integration examples</div>
-						<div style={styles.envHint}>{isWebhookEndpoint ? `Webhook: POST with the account key in the Authorization header${minted ? '' : ' (the snippets show a placeholder until you create a key)'}.` : 'Chat / UI: the page URL, for when the signed-in Chat and Dropper apps take it over; it carries no credential.'}</div>
+						<div style={styles.envHint}>{isWebhookEndpoint ? `Webhook: POST with the account key in the Authorization header${minted ? '' : ' (the snippets show a placeholder until you create a key)'}.` : 'Chat / UI: the SDK talks to this source by address (client.chat / sendFiles); the page URL carries no credential.'}</div>
 						{isWebhookEndpoint && (
 							<>
 								<div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginBottom: 4 }}>
@@ -484,6 +508,7 @@ export default function EndpointInfoModal({ endpointInfo, isOpen, onClose, onOpe
 							</button>
 						</div>
 					</div>
+					)}
 				</div>
 			</div>
 		</div>,
