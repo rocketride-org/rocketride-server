@@ -189,6 +189,7 @@ class AgentBase(ABC):
                     llm=host.llm,
                     tools=host.tools,
                     memory=host.memory,
+                    ledger=getattr(host, 'ledger', None),
                     run_id=run_id,
                     pipe_id=iInstance.instance.pipeId if iInstance.instance else 0,
                     framework=self.FRAMEWORK,
