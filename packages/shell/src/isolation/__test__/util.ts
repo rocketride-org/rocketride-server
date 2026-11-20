@@ -42,7 +42,7 @@ import type { IOpenedRealm } from './realm';
 export const SHELL_ROOT = path.join(__dirname, '..', '..', '..');
 
 /** The shared capability table, read as data (never through the stubs). */
-export function readCapabilityJson(): { v: number; rows: Array<{ cap: string; op: string; command?: string; subcommand?: string; args: Record<string, string>; top?: string[] }> } {
+export function readCapabilityJson(): { v: number; rows: Array<{ cap: string; op: string; command?: string; subcommands?: string[]; args: Record<string, string>; top?: string[] }> } {
 	return JSON.parse(readFileSync(path.join(SHELL_ROOT, 'isolation', 'capabilities.json'), 'utf8'));
 }
 
