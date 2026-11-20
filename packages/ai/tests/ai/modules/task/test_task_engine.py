@@ -10,7 +10,6 @@ Focus areas:
 
 - ``_check_pipeline`` — source-component validation + status.name composition
 - ``_build_task`` — subprocess-config shape
-- ``_file_checksum`` — SHA-256 of a real temp file
 - ``_is_debugging`` / ``_get_attach_subprocesses`` — sys.modules probes
 - ``is_task_complete`` / ``is_attached`` / ``has_attached_debugger`` /
   ``get_connection_count`` / ``get_status`` — accessors
@@ -19,7 +18,11 @@ Focus areas:
 Two methods are already exercised by separate, security-focused tests:
 
 - ``_resolve_pipeline`` — see ``test_env_var_exfil.py``
-- ``_write_task_file`` — see ``test_temp_file_security.py``
+- ``_task_file_bytes`` with the subprocess runtime's writer — see
+  ``test_temp_file_security.py``
+
+The subprocess runtime itself (argv, python shim, ``file_checksum``) is in
+``test_launcher_subprocess.py``.
 """
 
 from __future__ import annotations
@@ -36,6 +39,7 @@ import pytest
 from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
+from ai.modules.task.launcher import SubprocessLauncher
 from ai.modules.task.task_engine import (
     CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
@@ -271,31 +275,6 @@ def test_build_task_supplies_pipeline_version_default(monkeypatch, tmp_path):
     t = _task(pipeline=pipeline)
     config = Task._build_task(t, pipeline)
     assert config['config']['pipeline']['version'] == 1
-
-
-# ---------------------------------------------------------------------------
-# _file_checksum
-# ---------------------------------------------------------------------------
-
-
-def test_file_checksum_matches_sha256_of_file_contents(tmp_path):
-    """The function returns the SHA-256 hex digest of the file body."""
-    p = tmp_path / 'sample.bin'
-    body = b'hello world\n' * 1024  # spans multiple 8 KiB reads
-    p.write_bytes(body)
-
-    t = _task()
-    result = Task._file_checksum(t, str(p))
-    assert result == hashlib.sha256(body).hexdigest()
-
-
-def test_file_checksum_empty_file_yields_empty_sha256(tmp_path):
-    """SHA-256 of an empty file is the canonical e3b0...b855."""
-    p = tmp_path / 'empty.bin'
-    p.write_bytes(b'')
-
-    t = _task()
-    assert Task._file_checksum(t, str(p)) == hashlib.sha256(b'').hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -1250,9 +1229,10 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
     t._launch_args = {}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
-    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._task_file_bytes = MagicMock(return_value=b'{}')
     t._send_status_update = AsyncMock()
     t._terminated = AsyncMock()
+    t._launcher = SubprocessLauncher(t._server)
 
     class Launched(Exception):
         pass
@@ -1264,7 +1244,7 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
     assert [request for _, request in calls['authorize']] == [target]
     assert calls['authorize'][0][0]['public_endpoint'] is public
     # The task file is the resolved pipeline too: what was checked is what runs.
-    written = t._write_task_file.call_args.args[0]['components']
+    written = t._task_file_bytes.call_args.args[0]['components']
     assert '${' not in json.dumps(written)
 
 
@@ -1285,14 +1265,15 @@ async def test_start_authorizes_the_resolved_pipeline(monkeypatch, components, e
         # The trace level is the caller's if it set one, the engine's otherwise
         (False, ['--trace=a'], [], ['--trace=a']),
         (False, ['--trace=a'], ['--trace=b'], ['--trace=b']),
+        # The order: the hosting flags, the pipeline's arguments, the engine's own options
+        (True, ['--dumps', '--trace=a'], ['--trace=b'], ['--hosted', '--shared-host', '--trace=b', '--dumps']),
     ],
 )
 async def test_start_passes_only_the_operators_options(monkeypatch, saas, startup, user, passed):
     """The task's command line carries what the operator chose: --hosted and
     --shared-host for a hosted engine, and --dumps as the engine itself was
-    started. The engine reads the first --dumps, and the operator's is written
-    before a pipeline's own arguments, so a pipeline cannot turn dumps on. The
-    pre-launch check is told the same about the shared host.
+    started. A pipeline's own --dumps is dropped, so a pipeline cannot turn
+    dumps on. The pre-launch check is told the same about the shared host.
     """
     import ai.modules.task.task_engine as engine
 
@@ -1310,9 +1291,10 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
     t._launch_args = {'args': user}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
-    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._task_file_bytes = MagicMock(return_value=b'{}')
     t._send_status_update = AsyncMock()
     t._terminated = AsyncMock()
+    t._launcher = SubprocessLauncher(t._server)
 
     class Launched(Exception):
         pass
@@ -1359,9 +1341,10 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
     t._launch_args = {}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
-    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._task_file_bytes = MagicMock(return_value=b'{}')
     t._send_status_update = AsyncMock()
     t._terminated = AsyncMock()
+    t._launcher = SubprocessLauncher(t._server)
 
     class Launched(Exception):
         pass
@@ -1375,6 +1358,43 @@ async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypat
         await Task.start_task(t)
 
     assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+
+
+@pytest.mark.asyncio
+async def test_an_isolated_task_does_not_share_the_host(monkeypatch):
+    """A hosted engine's container or pod task is hosted but does not share
+    the engine's host: the container is the boundary, so the runtime is told
+    so and the pre-launch check keeps stdio MCP allowed.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(engine, 'pipeline_opens_store', lambda *a: False)
+    checked = []
+    monkeypatch.setattr(engine, 'saas_pipeline_violation', lambda *a, **k: checked.append(k['shared_host']))
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    t._launcher = MagicMock(isolated=True, task_data_path='/opt/data', start=AsyncMock(side_effect=Launched))
+    with pytest.raises(Launched):
+        await Task.start_task(t)
+
+    spec = t._launcher.start.call_args.args[0]
+    assert (spec.hosted, spec.shared_host) == (True, False)
+    assert checked == [False]
 
 
 # ---------------------------------------------------------------------------
@@ -1932,15 +1952,50 @@ async def test_a_stop_during_the_first_start_load_ends_the_start(monkeypatch):
     t._launch_args = {}
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
-    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._task_file_bytes = MagicMock(return_value=b'{}')
     t._send_status_update = AsyncMock()
     t._terminated = AsyncMock()
-    spawn = AsyncMock()
-    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    t._launcher = MagicMock(task_data_path='/opt/data', start=AsyncMock())
 
     with pytest.raises(RuntimeError, match='stopped before it started'):
         await Task.start_task(t)
-    spawn.assert_not_awaited()
+    t._launcher.start.assert_not_awaited()
+    t._terminated.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_stop_while_the_runtime_starts_the_task_ends_it(monkeypatch):
+    """A stop that lands while the runtime starts the task finds no launch
+    yet; the start then ends the task it was given and goes through
+    _terminated() instead of leaving it running.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': 'tools'}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+    launch = MagicMock()
+
+    async def start_while_stopping(spec):
+        t._stop_requested = True  # what stop_task sets when it arrives now
+        return launch
+
+    t._launcher = MagicMock(task_data_path='/opt/data', start=start_while_stopping)
+
+    with pytest.raises(RuntimeError, match='stopped before it started'):
+        await Task.start_task(t)
+    assert t._launch is launch
+    launch.kill.assert_called_once()
     t._terminated.assert_awaited()
 
 
@@ -1963,24 +2018,22 @@ async def test_a_start_that_fails_inside_a_restart_ends_the_run(monkeypatch):
     t._server = MagicMock(_config={})
     t._is_debugging = lambda: False
 
-    async def write_while_stopping(*_):
+    async def status_while_stopping():
         t._stop_requested = True  # what stop_task sets when it arrives now
-        return '/tmp/task.json'
 
-    t._write_task_file = write_while_stopping
-    t._send_status_update = AsyncMock()
+    t._task_file_bytes = MagicMock(return_value=b'{}')
+    t._send_status_update = status_while_stopping
     seen = []
 
     async def terminated():
         seen.append(t._is_restarting)
 
     t._terminated = terminated
-    spawn = AsyncMock()
-    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    t._launcher = MagicMock(task_data_path='/opt/data', start=AsyncMock())
 
     with pytest.raises(RuntimeError, match='stopped before it started'):
         await Task.start_task(t)
-    spawn.assert_not_awaited()
+    t._launcher.start.assert_not_awaited()
     assert seen == [False]
 
 
@@ -2422,6 +2475,7 @@ def _exit_task(exit_event_seen=False):
     t._stop_requested = False
     t._crash = None
     t._process_killed = False
+    t._launch = None
     return t
 
 
@@ -2488,20 +2542,24 @@ class _ExitingProcess:
 
 @pytest.mark.asyncio
 async def test_exit_code_is_read_after_the_process_is_reaped():
+    """The exit code is the one wait() reaps, not the None the closed output leaves."""
     t = _exit_task()
-    t._engine_process = _ExitingProcess(1)
+    t._launch = _ExitingProcess(1)
     assert await Task._process_exit_code(t) == 1
 
 
 @pytest.mark.asyncio
 async def test_no_process_counts_as_failed():
+    """A task with no launch exits with 1."""
     t = _exit_task()
-    t._engine_process = None
+    t._launch = None
     assert await Task._process_exit_code(t) == 1
 
 
 class _LingeringProcess:
     """Output closed, but the process only exits once it is killed."""
+
+    lost = None
 
     def __init__(self):
         self.returncode = None
@@ -2519,13 +2577,14 @@ class _LingeringProcess:
 
 @pytest.mark.asyncio
 async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
+    """A process that outlives the wait is killed, then its exit code is reaped."""
     import ai.modules.task.task_engine as te
 
     monkeypatch.setattr(te, 'CONST_CANCEL_WAIT_TIMEOUT_SECONDS', 0.05)
     t = _exit_task()
-    t._engine_process = _LingeringProcess()
+    t._launch = _LingeringProcess()
     assert await Task._process_exit_code(t) == -9
-    assert t._engine_process.killed
+    assert t._launch.killed
 
     # The server's own kill is not a crash
     Task._apply_process_exit_code(t, -9)
@@ -2544,7 +2603,7 @@ def _ending_task(process_exit_code):
     t = _exit_task()
     t._terminated_called = False
     t._is_restarting = False
-    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._debug_stdio = t._data_client = t._task_metrics = t._launch = None
     t._status_update_task = None
     t._final_events_sent = True
     t._stop_reason = None
@@ -2572,6 +2631,93 @@ async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code,
     await Task._terminated(t)
     assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
     assert run_log.end_run.await_args.args[0] == outcome
+
+
+@pytest.mark.asyncio
+async def test_a_container_task_that_left_with_0_and_no_report_was_cut_off():
+    """A task reports every end it reaches; with its input closed it leaves with 0 and no word."""
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=True)
+    run_log = t._run_log = AsyncMock()
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        1,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    said = [str(call) for call in t._forward_task_event.await_args_list]
+    assert any('Unexpected termination: the task ended without reporting its end' in line for line in said)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'isolated, reported, stop_requested, status, outcome',
+    [
+        # It said >EXIT itself: the 0 is its own end
+        (True, True, False, 'Completed', 'ok'),
+        # The engine stopped it
+        (True, False, True, 'Stopped', 'cancelled'),
+        # No CLI process stands between a child process and the engine
+        (False, False, False, 'Completed', 'ok'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine', 'child-process'],
+)
+async def test_an_exit_code_0_with_a_known_reason_is_no_cut_off(isolated, reported, stop_requested, status, outcome):
+    t = _ending_task(0)
+    t._launcher = SimpleNamespace(isolated=isolated)
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 0, 'message': ''}})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == (status, 0)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
+
+
+@pytest.mark.asyncio
+async def test_a_task_its_runtime_lost_ends_as_stopped_unexpectedly():
+    """The runtime says what it saw; the engine's own kill of what was left does not make that a stop."""
+    lost = 'what the runtime saw of the task'
+    t = _ending_task(-9)
+    t._launch = MagicMock(lost=lost, cleanup=AsyncMock())
+    t._process_killed = True
+    run_log = t._run_log = AsyncMock()
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (
+        'Stopped unexpectedly',
+        -9,
+        'Stopped unexpectedly',
+    )
+    assert run_log.end_run.await_args.args[0] == 'error'
+    assert any(f'Unexpected termination: {lost}' in str(call) for call in t._forward_task_event.await_args_list)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'reported, stop_requested, exit_code, outcome',
+    [
+        # It reported a failure of its own before its pod went: its own code stands
+        (True, False, 3, 'cancelled'),
+        # The engine stopped it, and deleted what was left
+        (False, True, 0, 'cancelled'),
+    ],
+    ids=['reported-its-end', 'stopped-by-the-engine'],
+)
+async def test_what_the_runtime_saw_is_not_asked_of_a_task_that_reported_or_was_stopped(
+    reported, stop_requested, exit_code, outcome
+):
+    t = _ending_task(-9)
+    t._launch = MagicMock(lost='what the runtime saw of the task', cleanup=AsyncMock())
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    if reported:
+        await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'failed'}})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode) == ('Stopped', exit_code)
+    assert run_log.end_run.await_args.args[0] == outcome
+    assert not any('Unexpected termination' in str(call) for call in t._forward_task_event.await_args_list)
 
 
 # ---------------------------------------------------------------------------
@@ -2645,8 +2791,9 @@ class _LaunchStop(Exception):
 def _startable_task(monkeypatch):
     """Build a Task that start_task can drive up to the subprocess launch.
 
-    The launch itself is stubbed: ``create_subprocess_exec`` records its
-    arguments and raises ``_LaunchStop``, so no process starts.
+    The task runs the real subprocess runtime, whose launch is stubbed:
+    ``create_subprocess_exec`` records its arguments and raises
+    ``_LaunchStop``, so no process starts.
 
     Args:
         monkeypatch: pytest fixture.
@@ -2662,12 +2809,13 @@ def _startable_task(monkeypatch):
     t._launch_args = {}
     t._resolve_pipeline = AsyncMock(return_value={'components': []})
     t._check_pipeline = MagicMock()
-    t._write_task_file = AsyncMock(return_value='/tmp/task-1.json')
+    t._task_file_bytes = MagicMock(return_value=b'{}')
     t._is_debugging = MagicMock(return_value=False)
     t._send_status_update = AsyncMock()
     t._build_subprocess_env = AsyncMock(return_value={'PATH': '/usr/bin'})
     t._terminated = AsyncMock()
-    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), _config={})
+    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), release_port=MagicMock(), _config={})
+    t._launcher = SubprocessLauncher(t._server)
 
     launches = []
 
@@ -2734,9 +2882,8 @@ async def test_data_connection_presents_the_token(monkeypatch):
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
     t._data_client = None
-    t._data_port = 20001
     t._data_token = 'run-token'
-    t._engine_process = None
+    t._launch = SimpleNamespace(address='127.0.0.1:20001', returncode=None)
     t._provider = None
 
     await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
@@ -2758,9 +2905,28 @@ async def test_data_request_without_a_token_fails_at_once(monkeypatch):
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
     t._data_client = None
-    t._data_port = None
     t._data_token = None
-    t._engine_process = None
+    t._launch = SimpleNamespace(address='127.0.0.1:20001', returncode=None)
+
+    with pytest.raises(RuntimeError, match='not running'):
+        await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    transport.assert_not_called()
+
+
+async def test_data_request_before_the_launch_fails_at_once(monkeypatch):
+    """A request that arrives while the runtime still starts the task has no address to dial: it fails clearly."""
+    from ai.modules.task import task_engine
+
+    transport = MagicMock(name='TransportWebSocket')
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', transport)
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_token = 'run-token'
+    t._launch = None
 
     with pytest.raises(RuntimeError, match='not running'):
         await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})

@@ -43,8 +43,22 @@ from typing import Any, Dict
 from rocketlib import warning
 
 from ai.constants import CONST_TASK_DATA_PATH
+from ai.modules.task.launcher import RUNTIMES, default_runtime
 from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
+
+
+def runtime_of(args: argparse.Namespace) -> str:
+    """
+    The task runtime: ``--runtime`` as given, else docker with ``--saas`` and spawn without.
+
+    Args:
+        args: The parsed command line.
+
+    Returns:
+        The runtime's name.
+    """
+    return args.runtime or default_runtime(args.saas)
 
 
 def _make_engine_private() -> None:
@@ -148,6 +162,15 @@ Examples:
         help='Base port for task data/debug allocation (default: 20000, range: base to base+9999)',
     )
 
+    # Task runtime
+    parser.add_argument(
+        '--runtime',
+        choices=RUNTIMES,
+        default=None,
+        help='How tasks run: spawn (a child process of this engine), docker (a container per task) '
+        'or k8s (a Kubernetes Job per task). Default: docker with --saas, spawn otherwise',
+    )
+
     # Logging
     parser.add_argument(
         '--verbose',
@@ -191,6 +214,7 @@ async def run(config: Dict[str, Any] = None) -> None:
         config['port'] = args.port
         config['modelserver'] = args.modelserver
         config['base_port'] = args.base_port
+        config['runtime'] = runtime_of(args)
         config['verbose'] = args.verbose
         if args.node_path is not None:
             warning("--node_path is no longer read: put a custom node in the engine's nodes/ directory")
@@ -198,6 +222,8 @@ async def run(config: Dict[str, Any] = None) -> None:
     if config.get('modelserver'):
         config['modelserver'] = _normalize_modelserver(config['modelserver'])
         print(f'  Model Server: {config["modelserver"]}')
+    if config.get('runtime') and config['runtime'] != 'spawn':
+        print(f'  Task runtime: {config["runtime"]}')
     if config.get('verbose'):
         print('  Verbose logging: enabled')
 

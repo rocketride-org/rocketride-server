@@ -98,6 +98,29 @@ before the monitor is up, such as a log file that cannot be opened, differs by
 platform: on Windows it exits with code 1 and reads `Stopped`; on Linux and
 macOS it ends in `abort()` and reads `Unexpected termination: SIGABRT (code 6)`.
 
+A task in a container or a pod (`--runtime=docker`, `--runtime=k8s`) is judged
+by the container's exit code, which is 128 plus the signal number: a task
+killed there from outside the engine, without an `>EXIT`, reads `Stopped` with,
+for example, exit code 137, not `Stopped unexpectedly`. A crash the engine
+reports itself reads the same in every runtime. With `--dumps` the task writes
+its dump inside the container, which is removed when the task ends.
+
+A CLI process carries such a task's input and output. When that connection
+ends first, the task's input closes and `--autoterm` ends the task with exit
+code 0 and no `>EXIT`. The engine reads that pair as a task that was cut off:
+`Stopped unexpectedly`, with `Unexpected termination: <what happened>` in the
+console, and exit code 1 on record. A node whose own code ends the process with
+exit code 0 looks the same from outside and reads the same.
+
+A pod task can be lost in two more ways, and both read `Stopped unexpectedly`
+on every platform. Its output has ended and its pod shows no exit code: the
+engine deletes the pod. Or its pod is gone before it showed an exit code, and
+the engine had not deleted it. A pod that someone else deletes while its task
+runs gets `SIGTERM` first: the task reports its cancel and reads `Stopped`, as
+a cancel from outside does for a child process. A forced delete
+(`--grace-period=0 --force`) can remove the pod before that report arrives;
+the task then reads `Stopped unexpectedly`, as above.
+
 A stop by the server reads `Stopped` with exit code 0 and an empty exit message
 on every platform, also after a restart, whatever the engine reports while it
 stops.
