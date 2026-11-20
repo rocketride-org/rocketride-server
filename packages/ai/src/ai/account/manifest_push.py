@@ -32,6 +32,7 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
         source:  Refresh reason ('app-build', 'app-publish', ...).
     """
     from ai.account import account
+    from ai.modules.shell.app_origin import wire_view
 
     # -- Data: rebuilt account payload ---------------------------------------
     if getattr(account, '_service', None) is not None:
@@ -64,7 +65,10 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
                 info.apps = [
                     {**a, 'appStatus': a.get('appStatus', 'free'), 'onDesktop': True} for a in apps if a.get('id')
                 ]
-                await conn.send_event('apaext_account', body=info.to_push_result())
+                body = info.to_push_result()
+                if 'apps' in body:
+                    body['apps'] = wire_view(body['apps'], getattr(conn, '_shell_caps', ()))
+                await conn.send_event('apaext_account', body=body)
             except Exception as exc:
                 debug(f'[manifest_push] OSS account push failed: {exc}')
 

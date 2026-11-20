@@ -172,6 +172,21 @@ class TestPublish:
         account_stub.audit.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_publish_strips_server_owned_metadata(self, account_stub):
+        """#1022 G4 S6: the pipe door never lets a caller set platform, a grant or a build stamp."""
+        conn = _make_conn(_account_info())
+        metadata = {'platform': True, 'approvedCapabilities': ['fs.app'], 'build': {'seeded': True}, 'note': 'kept'}
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'metadata': metadata})
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'note': 'kept', 'platform': False}
+
+    @pytest.mark.asyncio
+    async def test_publish_writes_platform_false_without_caller_metadata(self, account_stub):
+        """#1022 G4 round 2 SHOULD-3: a pipe version always says it is not the seeder's."""
+        conn = _make_conn(_account_info())
+        await conn._deploy_add_pipe({}, {'pipeline': PIPE})
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'platform': False}
+
+    @pytest.mark.asyncio
     async def test_publish_denied_without_control_anywhere(self, account_stub):
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
         with pytest.raises(PermissionError):
@@ -276,15 +291,16 @@ class TestPipeDoorNamespace:
 
         stored = account_stub.deployments_publish.await_args.kwargs['metadata']
         assert 'build' not in stored
-        assert stored == {'manifest': {'name': 'Mine'}, 'projectId': 'p'}
+        # A pipe version also says it is not the seeder's (#1022).
+        assert stored == {'manifest': {'name': 'Mine'}, 'projectId': 'p', 'platform': False}
         # The caller's own dict is not mutated.
         assert 'build' in sent
 
     @pytest.mark.asyncio
-    async def test_absent_metadata_stays_absent(self, account_stub):
+    async def test_absent_metadata_carries_only_the_platform_marker(self, account_stub):
         conn = _make_conn(_account_info())
         await conn._deploy_add_pipe({}, {'pipeline': PIPE})
-        assert account_stub.deployments_publish.await_args.kwargs['metadata'] is None
+        assert account_stub.deployments_publish.await_args.kwargs['metadata'] == {'platform': False}
 
 
 # ============================================================================

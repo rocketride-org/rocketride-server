@@ -54,6 +54,7 @@
 from typing import TYPE_CHECKING, Any, Dict, List
 
 from ai.account import account
+from ai.account.deployment_backend import caller_metadata
 from ai.account.models import resolve_team_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
@@ -345,12 +346,10 @@ class DeployCommands(_DeployBase):
 
         org_id = self._org_id()
         await assert_pipe_id_outside_app_namespace(self, account, org_id, str(project_id))
-        metadata = args.get('metadata') if isinstance(args.get('metadata'), dict) else None
-        # metadata.build is the SERVER's build lifecycle (stamped by the build
-        # worker / seeder; it gates serving). The app door overwrites it; a
-        # pipe has no build, so a caller-supplied one is dropped, never stored.
-        if metadata is not None:
-            metadata = {k: v for k, v in metadata.items() if k != 'build'}
+        # Server-owned keys (platform, approvedCapabilities, build) are never
+        # the caller's: a pipe shares its rail with an app of the same id, and
+        # says explicitly that it is not the seeder's (#1022).
+        metadata = {**caller_metadata(args.get('metadata')), 'platform': False}
         entry = await account.deployments_publish(
             org_id, project_id, pipeline, self._actor(), comment=str(args.get('comment') or ''), metadata=metadata
         )

@@ -101,12 +101,17 @@ class PublicCommands(DAPConn):
         Returns:
             DAP response with server info in the body.
         """
+        from ai.modules.shell.app_origin import probe_isolation, wire_view
+
         acct = self._server._server.account
+        arguments = request.get('arguments') if isinstance(request.get('arguments'), dict) else {}
         info = {
             'version': getVersion(),
             'capabilities': acct.capabilities,
             'platform': sys.platform,
-            'apps': await acct.get_public_apps(),
+            # Isolated apps lose their load fields for a shell that does not
+            # declare shellCaps appIsolation:1 (#1022); unchanged under off.
+            'apps': wire_view(await acct.get_public_apps(), arguments.get('shellCaps')),
             # The server's public addresses. ALWAYS present, both keys, so no
             # client ever branches on absence: each value is an absolute URL
             # or the literal 'origin' = "the address you probed me at" (the
@@ -148,6 +153,11 @@ class PublicCommands(DAPConn):
         elif posthog_key:
             info['posthogPublishableKey'] = posthog_key
             info['posthogHost'] = posthog_host
+        # App isolation (#1022): mode, origin template and guest protocol
+        # range for shells that can open isolated apps. Absent under off.
+        isolation = probe_isolation()
+        if isolation is not None:
+            info['appIsolation'] = isolation
         return self.build_response(request, body=info)
 
     # ── rrext_public_catalog ────────────────────────────────────────────────
