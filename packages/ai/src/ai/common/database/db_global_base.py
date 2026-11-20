@@ -60,7 +60,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.engine import Connection
-from sqlalchemy.exc import DBAPIError, InterfaceError as SAInterfaceError, TimeoutError as SAPoolTimeoutError
+from sqlalchemy.exc import DBAPIError, InterfaceError as SAInterfaceError, SQLAlchemyError, TimeoutError as SAPoolTimeoutError
 
 from rocketlib import IGlobalBase, error, warning
 from ai.common.config import Config
@@ -152,13 +152,23 @@ def is_database_outage(exc: BaseException, *, connected: bool) -> bool:
     it (no statement attached) is an outage by itself; a setup statement that
     fails is judged like any other statement, and the ``RuntimeError`` of a
     dialect with no read-only mode is a configuration fault, so both are not
-    outages. Once the block is entered, only ``is_connection_failure`` decides.
+    outages. Neither is an exception that is not a database or transport failure
+    at all (it propagates unchanged). Once the block is entered, only ``is_connection_failure`` decides.
 
     Args:
         exc: The exception the statement raised.
         connected: Whether the ``with read_only_connection()`` block was entered.
     """
-    opening_failed = not connected and getattr(exc, 'statement', None) is None and not isinstance(exc, RuntimeError)
+    # Only a database or transport failure counts: a TypeError or KeyError raised
+    # while the connection is being opened is a bug, and must propagate as itself
+    # rather than read as "the database is unavailable".
+    is_db_or_transport = isinstance(exc, (SQLAlchemyError, OSError)) or getattr(exc, 'orig', None) is not None
+    opening_failed = (
+        not connected
+        and is_db_or_transport
+        and getattr(exc, 'statement', None) is None
+        and not isinstance(exc, RuntimeError)
+    )
     return opening_failed or is_connection_failure(exc)
 
 

@@ -41,6 +41,7 @@ appended to by more than one open pull request.
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 
@@ -236,6 +237,24 @@ def test_execute_sql_query_raises_a_lane_error_for_a_query_the_database_refuses(
 
     with pytest.raises(DatabaseLaneError) as raised:
         inst._executeSQLQuery('SELECT * FROM no_such_table')
+
+    assert not isinstance(raised.value, DatabaseUnavailableError)
+
+
+@pytest.mark.parametrize('exc', [TypeError('bug'), KeyError('bug'), ValueError('bug'), AttributeError('bug')])
+def test_execute_sql_query_lets_a_non_database_error_raised_on_connect_through(exc):
+    """A bug raised while the connection is opened is not an outage: it propagates unchanged."""
+    inst = _make(_healthy_engine())
+
+    @contextlib.contextmanager
+    def broken_connection():
+        raise exc
+        yield  # pragma: no cover
+
+    inst.IGlobal.read_only_connection = broken_connection
+
+    with pytest.raises(type(exc)) as raised:
+        inst._executeSQLQuery('SELECT 1')
 
     assert not isinstance(raised.value, DatabaseUnavailableError)
 
