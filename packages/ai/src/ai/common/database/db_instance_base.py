@@ -1247,7 +1247,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # that were never written.
             error(f'Error inserting table data: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
-                f'{self._db_display_name()} table write failed; no rows were saved (details are in the engine log)'
+                f'{self._db_display_name()} table write failed (details are in the engine log)'
             ) from None
 
     def writeAnswers(self, answer: Answer) -> None:
@@ -1264,7 +1264,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # Fail the step, same as `writeTable`.
             error(f'Error in writeAnswers: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
-                f'{self._db_display_name()} answers write failed; no rows were saved (details are in the engine log)'
+                f'{self._db_display_name()} answers write failed (details are in the engine log)'
             ) from None
 
     # ------------------------------------------------------------------
