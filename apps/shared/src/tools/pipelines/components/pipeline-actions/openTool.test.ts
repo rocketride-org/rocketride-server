@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { openToolDocKey, openToolLabel, openToolNotes, openToolNotesFor, openToolTitle, parseToolDocKey, sourceEndpointNote } from './openTool';
+import { actionButtons, openToolDocKey, openToolLabel, openToolNotes, openToolNotesFor, openToolTitle, parseToolDocKey, sourceEndpointNote } from './openTool';
 
 // ==== The note walk ==========================================================
 
@@ -102,6 +102,33 @@ test('no notes, no endpoint-shaped note, no endpoint', () => {
 	assert.equal(sourceEndpointNote(undefined, 'chat_1'), null);
 	assert.equal(sourceEndpointNote([], 'chat_1'), null);
 	assert.equal(sourceEndpointNote(['free text', 42, null, { nodeId: 'chat_1' }], 'chat_1'), null);
+});
+
+// ==== The actions strip ======================================================
+
+const CHAT_TOOL = { appId: 'rocketride.chat', nodeId: 'chat_1', address: 'acme.x.chat_1', label: 'Open Chat' };
+const SQL_TOOL = { appId: 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.chat_1', label: 'Explore' };
+
+test('the strip draws one button per tool, then Endpoint Info, all live', () => {
+	assert.deepEqual(
+		actionButtons([CHAT_TOOL, SQL_TOOL], true, false).map((b) => [b.kind, b.label, b.disabled]),
+		[
+			['tool', 'Open Chat', false],
+			['tool', 'Explore', false],
+			['endpoint', 'Endpoint Info', false],
+		]
+	);
+	assert.deepEqual(actionButtons([], false, false), []);
+	assert.equal(actionButtons([], true, false).length, 1);
+	assert.equal(actionButtons([SQL_TOOL], true, false)[0].tool, SQL_TOOL);
+});
+
+test('during a replay every button of the strip is disabled, the endpoint one included', () => {
+	const buttons = actionButtons([CHAT_TOOL, SQL_TOOL], true, true);
+	assert.equal(buttons.length, 3);
+	assert.ok(buttons.every((b) => b.disabled));
+	// A strip with only the endpoint button follows the same rule
+	assert.deepEqual(actionButtons([], true, true).map((b) => b.disabled), [true]);
 });
 
 // ==== Labels =================================================================

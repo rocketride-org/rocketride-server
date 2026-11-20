@@ -647,7 +647,7 @@ export const SourcePanel: React.FC<ISourcePanelProps> = ({ source, runKind, proj
 				headerActions={
 					<div style={styles.headerActionsColumn}>
 						<div style={{ ...styles.headerActionsRow, ...(isReplay ? styles.headerDimmed : undefined) }} aria-disabled={isReplay || undefined}>
-							<PipelineActions notes={liveTaskStatus?.notes} sourceId={source.id} host={serverHost} onOpenLink={onOpenLink} onOpenTool={onOpenTool} onCreateEndpointKey={onCreateEndpointKey} displayName={source.name} />
+							<PipelineActions notes={liveTaskStatus?.notes} sourceId={source.id} disabled={isReplay} host={serverHost} onOpenLink={onOpenLink} onOpenTool={onOpenTool} onCreateEndpointKey={onCreateEndpointKey} displayName={source.name} />
 							{runKind === 'dev' && !isReadonly && !isReplay && onPipelineAction && <StatusActions taskStatus={liveTaskStatus ?? null} onPipelineAction={(action, src) => onPipelineAction(action, src ?? source.id)} isSubscribed={isSubscribed} />}
 						</div>
 						{isReplay ? (

@@ -23,7 +23,7 @@ import type { CSSProperties } from 'react';
 import { Button } from 'shell';
 import EndpointInfoModal from './EndpointInfoModal';
 import type { EndpointKeyMinter } from './endpointKey';
-import { openToolNotes, sourceEndpointNote } from './openTool';
+import { actionButtons, openToolNotes, sourceEndpointNote } from './openTool';
 import type { IOpenToolNote } from './openTool';
 
 // =============================================================================
@@ -89,6 +89,8 @@ export interface IPipelineActionsProps {
 	tools?: IOpenToolNote[];
 	/** The source component the notes belong to: tells its own endpoint note from a database node's. */
 	sourceId?: string;
+	/** Inert strip: the panel is replaying a past run and these buttons act on the LIVE task (pointer and keyboard alike). */
+	disabled?: boolean;
 	/** Host address used to replace `{host}` placeholders in URLs. */
 	host?: string;
 	/** Called when a docs URL needs to be opened in the browser (the endpoint modal's links). */
@@ -118,31 +120,28 @@ function getEndpointInfo(notes?: (string | Record<string, unknown>)[], sourceId?
 // Component
 // =============================================================================
 
-export default function PipelineActions({ notes, tools: toolsProp, sourceId, host, onOpenLink, onOpenTool, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
+export default function PipelineActions({ notes, tools: toolsProp, sourceId, disabled = false, host, onOpenLink, onOpenTool, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
 	const endpointInfo = useMemo(() => getEndpointInfo(notes, sourceId), [notes, sourceId]);
 	// The node's own buttons: one per open-tool note the server filled. Shown
 	// only when the host can open a tool document.
 	const tools = useMemo(() => (onOpenTool ? (toolsProp ?? openToolNotes(notes)) : []), [notes, toolsProp, onOpenTool]);
+	const buttons = useMemo(() => actionButtons(tools, endpointInfo !== null, disabled), [tools, endpointInfo, disabled]);
 	const [isModalOpen, setIsModalOpen] = useState(false);
 
-	if (!endpointInfo && tools.length === 0) return null;
+	if (buttons.length === 0) return null;
 
 	// Stock Buttons only, at the mini (canvas-node) size — the 26px small tier
 	// overflows the node card. Clicks stop at the container so a press never
-	// bubbles into canvas node selection/drag.
+	// bubbles into canvas node selection/drag. A disabled strip (replay) is
+	// inert to the keyboard too, not only dimmed.
 	return (
 		<>
 			<div style={styles.container} onClick={(e: React.MouseEvent) => e.stopPropagation()}>
-				{tools.map((tool) => (
-					<Button key={`${tool.appId}/${tool.address}/${tool.nodeId}`} mini variant="primary" onClick={() => onOpenTool?.(tool.appId, tool.address, tool.nodeId)}>
-						{tool.label}
+				{buttons.map((button) => (
+					<Button key={button.key} mini variant={button.kind === 'tool' ? 'primary' : 'secondary'} disabled={button.disabled} onClick={() => (button.tool ? onOpenTool?.(button.tool.appId, button.tool.address, button.tool.nodeId) : setIsModalOpen(true))}>
+						{button.label}
 					</Button>
 				))}
-				{endpointInfo && (
-					<Button mini variant="secondary" onClick={() => setIsModalOpen(true)}>
-						Endpoint Info
-					</Button>
-				)}
 			</div>
 			{endpointInfo && <EndpointInfoModal endpointInfo={endpointInfo} isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} onOpenLink={onOpenLink} tool={tools.find((t) => t.appId === endpointInfo['open-tool'])} onOpenTool={onOpenTool} displayName={displayName} host={host} onCreateEndpointKey={onCreateEndpointKey} />}
 		</>

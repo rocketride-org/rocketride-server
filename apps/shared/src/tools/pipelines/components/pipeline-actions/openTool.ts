@@ -137,6 +137,37 @@ export function sourceEndpointNote<T>(notes: ReadonlyArray<T> | undefined, sourc
 	return door ?? own;
 }
 
+/** One button of the actions strip, as the renderer draws it. */
+export interface IActionButton {
+	/** Stable React key. */
+	key: string;
+	/** `tool`: opens a node's front end; `endpoint`: opens the Endpoint Info modal. */
+	kind: 'tool' | 'endpoint';
+	/** The button's text. */
+	label: string;
+	/** Whether the button is inert: the strip shows LIVE state while the panel replays a past run. */
+	disabled: boolean;
+	/** The note behind a `tool` button. */
+	tool?: IOpenToolNote;
+}
+
+/**
+ * The actions strip's buttons, in order: one per tool note, then Endpoint
+ * Info when the source has an endpoint note. During a replay every button
+ * is disabled — the strip acts on the live task, not on the replayed
+ * moment, and a dimmed wrapper alone stops the pointer, not the keyboard.
+ *
+ * @param tools - The node's front-end buttons.
+ * @param hasEndpointInfo - Whether the source has an endpoint note to show.
+ * @param disabled - The panel's replay state.
+ * @returns The buttons to draw; empty = nothing to render.
+ */
+export function actionButtons(tools: ReadonlyArray<IOpenToolNote>, hasEndpointInfo: boolean, disabled: boolean): IActionButton[] {
+	const out: IActionButton[] = tools.map((tool) => ({ key: `${tool.appId}/${tool.address}/${tool.nodeId}`, kind: 'tool', label: tool.label, disabled, tool }));
+	if (hasEndpointInfo) out.push({ key: 'endpoint', kind: 'endpoint', label: 'Endpoint Info', disabled });
+	return out;
+}
+
 /**
  * The document key a tool document binds under: `<address>/<nodeId>`, so the
  * tool document URI is `tool:<appId>/<address>/<nodeId>` in every host.
