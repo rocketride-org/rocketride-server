@@ -31,8 +31,8 @@ import { AuthenticationException, LoginAttemptCancelledError, RocketRideClient, 
 import { ConnectionState, AuthPhase } from '../types/connection';
 import type { ConnectionStatus } from '../types/connection';
 import { ConnectionManager } from './connection';
-import { ConnectionFailure, withTimeout } from './errors';
-import { RemoteManager } from './remote-manager';
+import { ConnectionFailure, KEY_REQUIRED_MESSAGE, withTimeout } from './errors';
+import { KEYLESS_CREDENTIAL, RemoteManager } from './remote-manager';
 import { ApiKeyAuthProvider } from '../auth/ApiKeyAuthProvider';
 import { CloudAuthProvider } from '../auth/CloudAuthProvider';
 import { CONNECT_TIMEOUT_MS, LS_TOKEN } from '../constants';
@@ -2466,6 +2466,116 @@ test('an EMPTY #rrtoken fragment (--no-auth) clears the remembered session, rese
 		assert.equal(manager.getConnectionStatus().authPhase, AuthPhase.FRESH);
 		assert.deepEqual(stripped, ['/?appid=local.alarm&rrdev=1'], 'the fragment is stripped, the query kept');
 	});
+});
+
+test('a blank API key connects keyless when the server does not require one', async () => {
+	const loginCalls: unknown[][] = [];
+	const client = testClient({
+		login: async (...args: unknown[]) => {
+			loginCalls.push(args);
+			return authenticatedResult;
+		},
+	}) as unknown as RocketRideClient;
+
+	await new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: '' });
+	// The server rejects an empty `auth` outright, so the blank key travels as
+	// the keyless placeholder an unprotected OSS server accepts.
+	assert.deepEqual(loginCalls, [[KEYLESS_CREDENTIAL]]);
+	assert.notEqual(KEYLESS_CREDENTIAL, '');
+
+	// An OSS server without ROCKETRIDE_APIKEY echoes the credential back as the
+	// session token, so the shell persists the keyless placeholder.
+	const keylessResult: ConnectResult = { ...authenticatedResult, userToken: KEYLESS_CREDENTIAL };
+	const firstLogins: unknown[][] = [];
+	const { manager, savedTokens } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({
+		login: async (...args: unknown[]) => {
+			firstLogins.push(args);
+			return keylessResult;
+		},
+		getAccountInfo: () => keylessResult,
+	});
+	assert.deepEqual(await manager.connect(''), keylessResult);
+	assert.equal(manager.connectionStatus.state, ConnectionState.CONNECTED);
+	assert.deepEqual(firstLogins, [[KEYLESS_CREDENTIAL]]);
+	assert.deepEqual(savedTokens, [KEYLESS_CREDENTIAL], 'the keyless session token is saved');
+
+	// A reload bootstraps from that saved token and reconnects keyless.
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const reloadLogins: unknown[][] = [];
+	const reload = createTestManager();
+	reload.manager.serverUri = 'https://shell.example.test';
+	reload.manager.client = testClient({
+		login: async (...args: unknown[]) => {
+			reloadLogins.push(args);
+			return keylessResult;
+		},
+		getAccountInfo: () => keylessResult,
+	});
+	reload.manager._attachPromise = Promise.resolve();
+	reload.manager.loadToken = () => savedTokens[0] ?? '';
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { search: '' } },
+	});
+	try {
+		const completed = await reload.manager.bootstrap();
+		assert.equal(completed?.result, keylessResult);
+		assert.deepEqual(reloadLogins, [[KEYLESS_CREDENTIAL]], 'the saved keyless token is replayed on reload');
+		assert.equal(reload.manager.connectionStatus.state, ConnectionState.CONNECTED);
+	} finally {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	}
+});
+
+test('bootstrap keeps the key-required message when a saved keyless credential is rejected', async () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+	const { manager } = createTestManager();
+	manager.serverUri = 'https://shell.example.test';
+	manager.client = testClient({
+		login: async () => { throw new AuthenticationException({ message: 'Invalid API key' }); },
+	});
+	manager._attachPromise = Promise.resolve();
+	manager.loadToken = () => KEYLESS_CREDENTIAL;
+	Object.defineProperty(globalThis, 'window', {
+		configurable: true,
+		value: { location: { search: '' } },
+	});
+	try {
+		assert.equal(await manager.bootstrap(), null);
+		const status = manager.connectionStatus;
+		assert.equal(status.state, ConnectionState.AUTH_FAILED);
+		assert.equal(status.lastError, KEY_REQUIRED_MESSAGE);
+		assert.equal(status.lastFailure?.lastError, KEY_REQUIRED_MESSAGE, 'the latched failure the banner reads');
+	} finally {
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else delete (globalThis as { window?: Window }).window;
+	}
+});
+
+test('a blank API key rejected by a key-protected server says a key is required', async () => {
+	const client = testClient({
+		login: async () => { throw new AuthenticationException({ message: 'Invalid API key' }); },
+	}) as unknown as RocketRideClient;
+
+	await assert.rejects(
+		new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: '' }),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'auth' && /requires an API key/.test(error.message),
+	);
+
+	// A reload replays the saved keyless session token; same guidance if the server now needs a key.
+	await assert.rejects(
+		new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: KEYLESS_CREDENTIAL }),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'auth' && /requires an API key/.test(error.message),
+	);
+
+	// A non-empty key that is rejected keeps the server's own message.
+	await assert.rejects(
+		new RemoteManager().connect(client, { uri: 'https://shell.example.test', credential: 'wrong-key' }),
+		(error: unknown) => error instanceof ConnectionFailure && error.kind === 'auth' && error.message === 'Invalid API key',
+	);
 });
 
 // =============================================================================

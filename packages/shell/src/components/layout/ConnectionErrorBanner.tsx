@@ -33,6 +33,7 @@
 
 import React, { CSSProperties, useEffect, useState } from 'react';
 import { ConnectionManager } from '../../connection/connection';
+import { failureCopy } from './connectionFailureCopy';
 import { useConnectionStatus } from '../../hooks/useConnectionStatus';
 import { Modal } from '../modal/Modal';
 import { Button } from '../button/Button';
@@ -84,11 +85,8 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 	// Phrase message + action from the failure classification.
 	const isNetworkFailure = failure.kind === 'network';
 	const isOAuthCallbackFailure = !isNetworkFailure && failure.errorKind === 'oauth-callback';
-	const defaultMessage = isNetworkFailure
-		? 'Can\'t reach the server. Check your connection and retry.'
-		: isOAuthCallbackFailure
-			? `Sign-in didn't complete: ${failure.lastError}`
-			: 'Your session has expired. Please sign in again.';
+	const copy = failureCopy(failure);
+	const defaultMessage = copy.message;
 	const action = isNetworkFailure ? 'Retry' : isOAuthCallbackFailure ? 'Try again' : 'Sign in';
 	const onAction = isNetworkFailure
 		? onRetry ?? (() => {
@@ -108,7 +106,7 @@ export const ConnectionErrorBanner: React.FC<ConnectionErrorBannerProps> = ({ me
 			ConnectionManager.getInstance().emit('shell:loginRequest', {});
 		});
 
-	const title = isNetworkFailure ? 'Connection lost' : isOAuthCallbackFailure ? 'Sign-in failed' : 'Session expired';
+	const title = copy.title;
 	return (
 		<Modal
 			title={title}
