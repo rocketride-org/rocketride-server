@@ -31,7 +31,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isAllowedWebviewUrl } from './webviewUrl';
+import { isAllowedWebviewUrl, resolveWebviewUrl } from './webviewUrl';
 
 const SHELL = 'https://shell.example';
 
@@ -111,4 +111,26 @@ test('refuses non-http(s) schemes, credentials, non-loopback http and unparsable
 	for (const url of ['javascript:alert(1)', 'data:text/html,x', `blob:${SHELL}/u`, 'file:///etc/passwd', 'ws://localhost:5565/chat/p/s', 'https://u:p@x.example', 'https://u@x.example/chat/p', 'http://evil.example', '//evil.example/x', '/chat/p/s', '', 'not a url']) {
 		assert.equal(isAllowedWebviewUrl(url, SHELL), false, JSON.stringify(url));
 	}
+});
+
+test('refuses URLs that only resolve onto the shell once the iframe applies its base', () => {
+	// `https:host/..` has no `//`, so alone it names another host but against
+	// the shell document it is a path on the shell's own origin.
+	const href = `${SHELL}/index.html`;
+	for (const url of ['https:evil.example/../apps/x/index.html', 'https:/apps/x/index.html', 'https:evil.example/chat/p/s']) {
+		assert.equal(isAllowedWebviewUrl(url, SHELL, href), false, url);
+		assert.equal(resolveWebviewUrl(url, SHELL, href), null, url);
+	}
+});
+
+test('refuses the same scheme-without-slashes form against a loopback http shell', () => {
+	const shell = 'http://localhost:5565';
+	for (const url of ['http:localhost/../apps/x/index.html', 'http:/apps/x/index.html']) {
+		assert.equal(isAllowedWebviewUrl(url, shell, `${shell}/index.html`), false, url);
+	}
+});
+
+test('hands back the canonical URL that was checked', () => {
+	assert.equal(resolveWebviewUrl('https://Docs.Example/a/../b', SHELL, `${SHELL}/index.html`), 'https://docs.example/b');
+	assert.equal(resolveWebviewUrl(`${SHELL}/chat/p/s`, SHELL, `${SHELL}/index.html`), `${SHELL}/chat/p/s`);
 });
