@@ -25,7 +25,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { callerNeedsOf, deployRequirements, publicParametersOf, requirementsLead, storeLadder } from './requirements';
+import { callerNeedsOf, deployRequirements, isShortId, publicParametersOf, requirementsLead, storeLadder } from './requirements';
 import type { IRequirementsProject, IRequirementsVersion } from './requirements';
 
 /** A complete, listable document: every deploy row passes. */
@@ -45,6 +45,16 @@ function row(items: ReturnType<typeof deployRequirements>, id: string): ReturnTy
 	assert.ok(found, `row ${id} present`);
 	return found;
 }
+
+describe('isShortId', () => {
+	it('accepts one dot-free segment and refuses dotted, empty and spaced ids', () => {
+		assert.equal(isShortId('docBrain'), true);
+		assert.equal(isShortId('doc_brain-2'), true);
+		assert.equal(isShortId('draft.docBrain'), false);
+		assert.equal(isShortId(''), false);
+		assert.equal(isShortId('doc brain'), false);
+	});
+});
 
 describe('callerNeedsOf', () => {
 	it('lists every ${ROCKETRIDE_*} placeholder once, wherever it sits in the document', () => {
@@ -99,6 +109,18 @@ describe('deployRequirements', () => {
 		const none = deployRequirements({ ...COMPLETE, parameters: undefined }, 'acme');
 		assert.equal(row(none, 'parameters').state, 'pass');
 		assert.equal(row(none, 'parameters').note, 'no public parameters');
+	});
+
+	it('rejects a parameter target without the nodeId.configKey separator, and accepts a well-formed one', () => {
+		// `llm_1x` has no separator: it must not read as component `llm_1`, field `llm_1x`.
+		const noDot = deployRequirements({ ...COMPLETE, parameters: { maxEdge: 'llm_1x' } }, 'acme');
+		assert.equal(row(noDot, 'parameters').state, 'fail');
+		assert.equal(row(noDot, 'parameters').note, 'maxEdge');
+		const trailingDot = deployRequirements({ ...COMPLETE, parameters: { maxEdge: 'llm_1.' } }, 'acme');
+		assert.equal(row(trailingDot, 'parameters').state, 'fail');
+		const ok = deployRequirements({ ...COMPLETE, parameters: { maxEdge: 'llm_1.max_edge' } }, 'acme');
+		assert.equal(row(ok, 'parameters').state, 'pass');
+		assert.equal(row(ok, 'parameters').note, '1 public parameter');
 	});
 
 	it('fails the developer row while the organization has no id', () => {

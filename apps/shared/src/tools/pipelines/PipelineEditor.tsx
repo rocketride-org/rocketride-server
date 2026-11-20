@@ -44,6 +44,7 @@ import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from './panels/deplo
 import type { DeploySnapshot } from './panels/deploy';
 import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions, toWireTeamId } from './deploy/deployOps';
 import { createBusAppBuilderHost } from '../appdev/busHost';
+import { isShortId } from './panels/package/requirements';
 import type { IReviewHost } from '../appdev/views/builder/panels/review/ReviewView';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from './deploy/deployTypes';
 import { defaultStoreBlock, registryIdOf } from 'rocketride';
@@ -544,14 +545,20 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// accept pipe artifacts since C.17), so the adapter is the one the App
 	// Builder spreads, keyed by this pipeline's registry name; the shell's
 	// account mirror supplies the developer namespace in both realms. None
-	// on a readonly surface or an unsaved document.
+	// on a readonly surface, an unsaved document, or an id that is not one
+	// dot-free segment (B5): `draft.docBrain` would otherwise compose the
+	// registry name `acme.docBrain` and show another pipeline's state.
 	const hostReadonly = host.isReadonly === true;
 	const review = useMemo<IReviewHost | undefined>(() => {
-		if (hostReadonly || !projectId) return undefined;
+		if (hostReadonly || !projectId || !isShortId(projectId)) return undefined;
 		const cm = ConnectionManager.getInstance();
 		const hasReviewLadder = !(cm.getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss');
 		return createBusAppBuilderHost({ bus: cm, appId: projectId, hasReviewLadder });
-	}, [hostReadonly, projectId]);
+		// isConnected is a deliberate dep, as on fetchDeployLifecycle: a
+		// reconnect mints a new adapter identity, and the Requirements ladder
+		// and the Review thread (both keyed on it) re-pull.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [hostReadonly, projectId, isConnected]);
 
 	/** Fetch one immutable artifact (the version cards' record drawer). */
 	const fetchDeployArtifact = useCallback((version: number): Promise<IProject | undefined> => {

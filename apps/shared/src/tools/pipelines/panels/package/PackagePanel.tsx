@@ -60,7 +60,7 @@
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ViewMenu } from 'shell';
-import { Button, Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
+import { Banner, Button, Card, commonStyles, EmptyState, InputField, SidebarMenu } from 'shell';
 import type { BillingPlan, PipeStoreBlock, StoreMode, ServiceParamDescriptor } from 'rocketride';
 import { defaultStoreBlock, pipeReadmeStub, STORE_MODES } from 'rocketride';
 import { AssetsPane } from '../../../../components/assets';
@@ -71,7 +71,7 @@ import { ReviewView } from '../../../appdev/views/builder/panels/review/ReviewVi
 import type { IReviewHost } from '../../../appdev/views/builder/panels/review/ReviewView';
 import { ParamsPanel } from '../params';
 import type { IParamsProject } from '../params';
-import { callerNeedsOf, deployRequirements, publicParametersOf, requirementsLead, storeLadder } from './requirements';
+import { callerNeedsOf, deployRequirements, isShortId, publicParametersOf, requirementsLead, SHORT_ID_PATTERN, storeLadder } from './requirements';
 import type { IRequirementsVersion } from './requirements';
 
 // =============================================================================
@@ -148,9 +148,6 @@ const SECTION_MENU: ViewMenu = {
 		{ id: 'review', label: 'Review' },
 	],
 };
-
-/** Short-id grammar (plan §2.2, B5): one dot-free segment. */
-const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
 
 /** The store modes as the select shows them (the SDK owns the values). */
 const MODE_LABELS: Record<StoreMode, string> = { free: 'Free', subscription: 'Subscription', paywall: 'Paywall' };
@@ -301,6 +298,9 @@ const styles = {
 		color: 'var(--rr-text-disabled)',
 		fontSize: 11.5,
 	} as CSSProperties,
+	railError: {
+		marginBottom: 8,
+	} as CSSProperties,
 	// The Review pane owns the pane height: the thread card flexes inside it.
 	reviewFill: {
 		display: 'flex',
@@ -373,7 +373,7 @@ function IdentitySection(props: IPackagePanelProps): React.ReactElement {
 	const { project, sources, developerId } = props;
 	const { readonly, write, writeStore } = documentWriter(props);
 	const shortId = project.project_id ?? '';
-	const idProblem = shortId && !SHORT_ID_PATTERN.test(shortId) ? 'A pipeline id is one dot-free segment: letters, digits, _ and - only (B5).' : null;
+	const idProblem = shortId && !isShortId(shortId) ? 'A pipeline id is one dot-free segment: letters, digits, _ and - only (B5).' : null;
 	const publishedAs = `${developerId || '{developerId}'}.${shortId || '{pipeId}'}`;
 	const store = project.store ?? defaultStoreBlock();
 	// The links editor keeps insertion order; an entry being renamed keeps its
@@ -622,21 +622,33 @@ function AssetsSection(props: IPackagePanelProps): React.ReactElement {
 function RequirementsSection({ project, developerId, review, onOpenSection }: IPackagePanelProps & { onOpenSection: (section: PackageSection) => void }): React.ReactElement {
 	// The rail's review states, for the ladder: fetched through the review
 	// adapter and re-pulled on a deploy change (a submit or a verdict from
-	// any session). null = no adapter (readonly host, unsaved document).
+	// any session); the adapter re-mints on reconnect, which re-runs this
+	// effect. null = no adapter (readonly host, unsaved document). A failed
+	// read keeps the last rail that loaded and raises railError instead of
+	// pretending the rail is empty. Only the newest pull commits: the mount
+	// pull resolving after a deploy event's pull must not replace the newer
+	// snapshot with the older one.
 	const [versions, setVersions] = useState<IRequirementsVersion[] | null>(null);
+	const [railError, setRailError] = useState('');
 	useEffect(() => {
 		if (!review?.listVersions) {
 			setVersions(null);
+			setRailError('');
 			return;
 		}
 		let live = true;
+		let generation = 0;
 		const pull = (): void => {
+			const current = ++generation;
 			void review.listVersions!()
 				.then((rail) => {
-					if (live) setVersions(rail);
+					if (!live || current !== generation) return;
+					setVersions(rail);
+					setRailError('');
 				})
-				.catch(() => {
-					if (live) setVersions([]);
+				.catch((e) => {
+					if (!live || current !== generation) return;
+					setRailError(e instanceof Error ? e.message : String(e));
 				});
 		};
 		pull();
@@ -689,6 +701,11 @@ function RequirementsSection({ project, developerId, review, onOpenSection }: IP
 			)}
 
 			<div style={styles.reqGroup}>To list publicly</div>
+			{railError ? (
+				<div style={styles.railError}>
+					<Banner variant="error">The version rail could not be read: {railError}. The ladder shows the last rail that loaded.</Banner>
+				</div>
+			) : null}
 			<RequirementsChecklist items={ladder} />
 			{versions === null && <div style={styles.help}>The ladder reads the version rail once the pipeline is saved and this host is connected.</div>}
 		</Card>

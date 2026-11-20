@@ -68,8 +68,20 @@ export interface IPublicParameter {
 // CONSTANTS
 // =============================================================================
 
-/** Short-id grammar (plan §2.2, B5): one dot-free segment. */
-const SEGMENT_PATTERN = /^[A-Za-z0-9_-]+$/;
+/** Short-id grammar (plan §2.2, B5): one dot-free segment — the pipeline id and every component id. */
+export const SHORT_ID_PATTERN = /^[A-Za-z0-9_-]+$/;
+
+/**
+ * Whether an id is one dot-free segment (B5). The Identity page validates
+ * typing against it; the editor refuses to address the registry with
+ * anything else (a dotted draft id would compose another pipeline's name).
+ *
+ * @param id - The candidate id.
+ * @returns True for a valid short id.
+ */
+export function isShortId(id: string): boolean {
+	return SHORT_ID_PATTERN.test(id);
+}
 
 /** Human labels for the store modes. */
 const MODE_LABELS: Record<string, string> = { free: 'Free', subscription: 'Subscription', paywall: 'Paywall' };
@@ -117,16 +129,22 @@ export function deployRequirements(project: IRequirementsProject, developerId: s
 	const shortId = project.project_id ?? '';
 
 	// step: the pipeline id and every component id are one dot-free segment (B5)
-	const badComponents = (project.components ?? []).map((c) => c.id).filter((id) => !SEGMENT_PATTERN.test(id));
+	const badComponents = (project.components ?? []).map((c) => c.id).filter((id) => !isShortId(id));
 	if (!shortId) items.push({ id: 'ids', state: 'fail', label: 'Pipeline id missing', note: 'Set it on Identity' });
-	else if (!SEGMENT_PATTERN.test(shortId)) items.push({ id: 'ids', state: 'fail', label: 'Pipeline id is not one dot-free segment', note: shortId });
+	else if (!isShortId(shortId)) items.push({ id: 'ids', state: 'fail', label: 'Pipeline id is not one dot-free segment', note: shortId });
 	else if (badComponents.length > 0) items.push({ id: 'ids', state: 'fail', label: 'Component ids must be dot-free', note: badComponents.join(', ') });
 	else items.push({ id: 'ids', state: 'pass', label: 'Pipeline id and component ids are dot-free', note: shortId });
 
-	// step: every public parameter targets a component the document has
+	// step: every public parameter targets `nodeId.configKey` on a component the
+	// document has — a target without the separator is rejected outright (on
+	// `llm_1x` the slice arithmetic would otherwise read component `llm_1`)
 	const componentIds = new Set((project.components ?? []).map((c) => c.id));
 	const params = publicParametersOf(project);
-	const dangling = params.filter(({ target }) => !componentIds.has(target.slice(0, target.lastIndexOf('.'))) || !target.slice(target.lastIndexOf('.') + 1));
+	const dangling = params.filter(({ target }) => {
+		const dot = target.lastIndexOf('.');
+		if (dot <= 0 || dot === target.length - 1) return true;
+		return !componentIds.has(target.slice(0, dot));
+	});
 	if (params.length === 0) items.push({ id: 'parameters', state: 'pass', label: 'Parameters map valid', note: 'no public parameters' });
 	else if (dangling.length > 0) items.push({ id: 'parameters', state: 'fail', label: 'Parameters map points at missing components', note: dangling.map((p) => p.name).join(', ') });
 	else items.push({ id: 'parameters', state: 'pass', label: 'Parameters map valid', note: `${params.length} public parameter${params.length === 1 ? '' : 's'}` });
