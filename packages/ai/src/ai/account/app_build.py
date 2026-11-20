@@ -700,22 +700,11 @@ def _patched_workspace_yaml(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-# A spec with one of these prefixes (or a URL scheme) is a registry, git or URL
-# form — never a local directory, even when it contains a path separator.
-_NON_PATH_SPEC_PREFIXES = (
-    'npm:',
-    'jsr:',
-    'catalog:',
-    'github:',
-    'gitlab:',
-    'bitbucket:',
-    'gist:',
-    'git:',
-    'git+',
-    'git@',
-    'http:',
-    'https:',
-)
+# Only a spec that starts with a URL scheme is a URL, never a local directory.
+# Every other spec is decided by its shape, not by a prefix: pnpm hands a spec
+# it cannot parse as a registry, git or tarball form to the local resolver, so
+# a prefix like 'git+' or 'github:' proves nothing.
+_URL_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*://')
 
 
 def _unsafe_spec(spec: Any, base: str = '.') -> bool:
@@ -724,8 +713,8 @@ def _unsafe_spec(spec: Any, base: str = '.') -> bool:
     ``link:`` (any target) is refused. A local path spec — ``file:``,
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
     that starts with ``.``, ``/``, ``~`` or a drive letter, ends in
-    ``.tgz``/``.tar``/``.tar.gz``, or holds a path separator without being a
-    registry, git or URL form, as a local path) — is refused when it is
+    ``.tgz``/``.tar``/``.tar.gz``, or holds a path separator without starting
+    with a URL scheme, as a local path) — is refused when it is
     absolute, home-relative, or, resolved against ``base`` (the declaring
     package's directory relative to the workspace root), lands above the
     workspace root. A ``..`` that stays inside the tree is allowed, so a
@@ -748,7 +737,7 @@ def _unsafe_spec(spec: Any, base: str = '.') -> bool:
                 bases = [base, '.']
             break
     else:
-        if text.startswith(_NON_PATH_SPEC_PREFIXES) or '://' in text:
+        if _URL_SCHEME.match(text):
             return False
         # '~' alone or '~/...' is a home path; '~1.2.3' is a version range.
         bare = (

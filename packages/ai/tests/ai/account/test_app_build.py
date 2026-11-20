@@ -1457,6 +1457,14 @@ def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
         ('npm:@scope/name@^1.0.0', '.', False),
         ('git+https://example.com/a/b.git', '.', False),
         ('https://example.com/a/../b.tgz', '.', False),
+        ('git@github.com:user/repo.git', '.', False),
+        # a prefix or a '://' that is not at the start does not exempt a path
+        ('git+x/../../../../y', 'apps/x', True),
+        ('git@x/../../../../y', 'apps/x', True),
+        ('http:x/../../../../y', 'apps/x', True),
+        ('github:x/../../../../y', 'apps/x', True),
+        ('npm:x/../../../../y', 'apps/x', True),
+        ('p/../../../../x/a://..', 'apps/x', True),
     ],
 )
 def test_unsafe_spec_resolves_against_the_declaring_package(spec, base, unsafe):
