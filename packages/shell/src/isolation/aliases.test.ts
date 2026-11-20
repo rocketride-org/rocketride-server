@@ -110,6 +110,9 @@ test('T105 knownProjects: foreign ids are aliased wherever they appear, short id
 			`every key is an alias, got ${brief(keys)}`
 		);
 		assert.equal(map[run.projectId]?.n, 1, 'values are kept');
+		// The foreign entry is aliased, not dropped: a scrubber that removed it would pass the checks above.
+		assert.equal(keys.length, 2, `both entries survive aliasing, got ${brief(keys)}`);
+		assert.deepEqual(Object.values(map).map((v) => v.n).sort(), [1, 2], 'the foreign entry keeps its value under an alias key');
 		assertNoReal(A, t.cm, [foreign]);
 	});
 
@@ -123,6 +126,8 @@ test('T105 knownProjects: foreign ids are aliased wherever they appear, short id
 			assert.ok(!known.has(ids[0]), 'the oldest id was evicted');
 			known.add('rag-example');
 			assert.ok(known.highEntropy().includes(ids[4999]) && !known.highEntropy().includes('rag-example'), 'a short id is held but is not high-entropy');
+			known.highEntropy().length = 0; // a caller emptying its copy does not empty the cache
+			assert.ok(known.highEntropy().includes(ids[4999]), 'highEntropy() hands out a copy');
 			known.clear();
 			assert.equal(known.size(), 0, 'clear empties it');
 		});

@@ -151,7 +151,8 @@ let rawSeq = 0;
 /** Attaches a realm for `entry` to `root` over a real structured-clone channel. */
 export function openRealm(root: IAppRoot, entry: IsolatedEntry, options: IOpenRealmOptions = {}): IOpenedRealm {
 	const channel = createChannel();
-	const grant = { caps: options.caps ?? ['core', 'pipelines.run', 'fs.app'] };
+	// `options.caps` wins, then the loader grant's own capabilities; only a test with neither gets the defaults.
+	const grant = { caps: options.caps ?? options.grant?.capabilities ?? ['core', 'pipelines.run', 'fs.app'] };
 	const realmId = root.attach(entry, channel.a, { ...options.grant, capabilities: grant.caps, viewId: options.viewId ?? `view-${entry.id}`, version: options.version ?? entry.registryVersion ?? 1 });
 	const bus = createOpBus();
 	let attachment: IRealmAttachment | null = null;

@@ -155,7 +155,7 @@ export function createKnownProjects(): IKnownProjects {
 		has: (projectId) => ids.has(projectId),
 		highEntropy() {
 			if (cache?.version !== ids.version()) cache = { version: ids.version(), list: ids.values().filter(isHighEntropy) };
-			return cache.list;
+			return cache.list.slice(); // a copy: a caller that empties or sorts it must not change the cache
 		},
 		clear: () => ids.clear(),
 		size: () => ids.size(),
