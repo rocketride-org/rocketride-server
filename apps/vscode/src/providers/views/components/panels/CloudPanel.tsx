@@ -111,18 +111,18 @@ export const CloudPanel: React.FC<CloudPanelProps> = ({ cloudSignedIn, cloudUser
 	const cm = ConnectionManager.getInstance();
 	// Only this panel's full checkout surface needs a publishable key.
 	const stripe = useStripeKey(Boolean(onFetchPlans));
-	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported } = useCheckoutSession(stripe);
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, isSessionCurrent, replaySupported } = useCheckoutSession(stripe);
 	const cloudUrl = (useCustomServer && customUrl) || defaultCloudUrl || '';
 	const expectedServer = cloudUrl ? serverIdentity(RocketRideClient.normalizeUri(cloudUrl)) : '';
 	const targetsCheckoutServer = useCallback((server: string | undefined) =>
 		!expectedServer || (!!server && serverIdentity(server) === expectedServer), [expectedServer]);
 	const targetIsCurrent = useCallback(() => targetsCheckoutServer(getCheckoutScope(cm.getClient())?.server), [cm, targetsCheckoutServer]);
 	const fetchCheckoutPlans = useCallback(async () => {
-		if (!checkout || !onFetchPlans || !isCurrent(checkout) || !targetIsCurrent()) {
+		if (!checkout || !onFetchPlans || !isSessionCurrent(checkout) || !targetIsCurrent()) {
 			throw checkoutNotDispatched();
 		}
 		return onFetchPlans();
-	}, [checkout, isCurrent, onFetchPlans, targetIsCurrent]);
+	}, [checkout, isSessionCurrent, onFetchPlans, targetIsCurrent]);
 	useEffect(() => {
 		if (checkout && !targetsCheckoutServer(checkout.scope.server)) closeCheckout(checkout);
 	}, [checkout, closeCheckout, targetsCheckoutServer]);

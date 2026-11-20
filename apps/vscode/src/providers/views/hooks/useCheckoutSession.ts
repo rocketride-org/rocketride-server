@@ -35,6 +35,11 @@ export function useCheckoutSession(stripe: StripeKeyState) {
 	const isCurrent = useCallback((expected: CheckoutSession) => active.current === expected && cm.isConnected() &&
 		matchesCheckoutScope(getCheckoutScope(cm.getClient()), expected.scope), [cm]);
 
+	// Identity only (org, user, server): catalog reads keep working after
+	// replay support is downgraded; mutations use isCurrent.
+	const isSessionCurrent = useCallback((expected: CheckoutSession) => active.current === expected && cm.isConnected() &&
+		sameCheckoutScope(getCheckoutScope(cm.getClient()), expected.scope), [cm]);
+
 	useEffect(() => {
 		const checkScope = () => {
 			const scope = getCheckoutScope(cm.getClient());
@@ -59,5 +64,5 @@ export function useCheckoutSession(stripe: StripeKeyState) {
 	// A transient disconnect clears useStripeKey. Keep the mounted attempt
 	// and its original key until this checkout's verified scope changes.
 	const checkoutStripeKey = lastKey.current?.checkout === checkout ? lastKey.current.key : matchingKey;
-	return { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported };
+	return { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, isSessionCurrent, replaySupported };
 }

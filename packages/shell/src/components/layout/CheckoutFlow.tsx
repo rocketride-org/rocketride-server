@@ -129,6 +129,11 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 
 	const isCheckoutCurrent = () => checkout !== null && activeCheckout.current === checkout && cm.isConnected() &&
 		matchesCheckoutScope(getCheckoutScope(cm.getClient()), checkout.scope);
+	// Catalog reads only need the same org/user/server identity; they stay
+	// available after replay support is downgraded (mutations keep the
+	// stricter isCheckoutCurrent guard).
+	const isCheckoutIdentityCurrent = () => checkout !== null && activeCheckout.current === checkout && cm.isConnected() &&
+		sameCheckoutScope(getCheckoutScope(cm.getClient()), checkout.scope);
 	const replaySupported = checkout?.scope.replaySupported === true && liveReplaySupported;
 	const matchingKey = checkout && (!stripeServer || stripeServer === checkout.scope.server) && isCheckoutCurrent() &&
 		(!checkout.scope.replaySupported || replaySupported) ? stripeKey : '';
@@ -149,6 +154,11 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 		if (!client || !isCheckoutCurrent()) throw checkoutNotDispatched();
 		return client;
 	};
+	const needReadClient = () => {
+		const client = cm.getClient();
+		if (!client || !isCheckoutIdentityCurrent()) throw checkoutNotDispatched();
+		return client;
+	};
 
 	return (
 		<CheckoutModal
@@ -163,7 +173,7 @@ export const CheckoutFlow: React.FC<CheckoutFlowProps> = ({ stripeKey, stripeSer
 			supportsCheckoutReplay={replaySupported}
 			requireCheckoutStatus
 			onFetchPlans={async () => {
-				return needClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;
+				return needReadClient().billing.getProductPrices(checkoutApp.id) as Promise<CheckoutPlan[]>;
 			}}
 			onCreateCheckout={async (priceId, promotionCode, attemptId) => {
 				return needClient().billing.createCheckoutSession(orgId, checkoutApp.id, priceId, promotionCode, attemptId);
