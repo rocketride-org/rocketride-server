@@ -342,6 +342,8 @@ import type { PipeInterfaceMap as Frozen_PipeInterfaceMap } from '../contract/ve
 import type { PipeInterfaceMap as Current_PipeInterfaceMap } from './client/index.js';
 import type { PipeInterfaces as Frozen_PipeInterfaces } from '../contract/versions/v1.6';
 import type { PipeInterfaces as Current_PipeInterfaces } from './client/index.js';
+import type { DeployDeleteResult as Frozen_DeployDeleteResult } from '../contract/versions/v1.6';
+import type { DeployDeleteResult as Current_DeployDeleteResult } from './client/index.js';
 import type { ServiceProperty as Frozen_ServiceProperty } from '../contract/versions/v1.6';
 import type { ServiceProperty as Current_ServiceProperty } from './client/index.js';
 import type { ServiceParamValue as Frozen_ServiceParamValue } from '../contract/versions/v1.6';
@@ -690,6 +692,8 @@ const _t_PipeInterfaceMap: Frozen_PipeInterfaceMap = {} as Current_PipeInterface
 void _t_PipeInterfaceMap;
 const _t_PipeInterfaces: Frozen_PipeInterfaces = {} as Current_PipeInterfaces;
 void _t_PipeInterfaces;
+const _t_DeployDeleteResult: Frozen_DeployDeleteResult = {} as Current_DeployDeleteResult;
+void _t_DeployDeleteResult;
 const _t_ServiceProperty: Frozen_ServiceProperty = {} as Current_ServiceProperty;
 void _t_ServiceProperty;
 const _t_ServiceParamValue: Frozen_ServiceParamValue = {} as Current_ServiceParamValue;
