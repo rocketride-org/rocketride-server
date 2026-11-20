@@ -27,7 +27,7 @@ Public surface:
   — image/ndarray (de)serialization helpers.
 - ``validate_public_url`` — reject non-public/SSRF-prone URLs.
 - ``LoaderCache`` — the module-scope cache of model handles keyed by model id,
-  shared by every control (plan 4.1 rule 1).
+  shared by the controls holding them and dropped by the last (plan 4.1 rule 1).
 - ``stub_matplotlib_pyplot``, ``register_debugger_thread`` — process-wide hooks
   node code may not perform itself (plan 4.3: no ``sys.modules`` of another package).
 

@@ -333,6 +333,256 @@ def test_gc_inspect_stack_and_sys_modules_are_refused(tmp_path):
 
 
 # =============================================================================
+# Edges of each rule (review of PR #3392)
+# =============================================================================
+
+
+def test_jsonc_trailing_commas_go_but_commas_inside_strings_stay(tmp_path):
+    node = write_node(tmp_path, {'IGlobal.py': 'X = 1\n'})
+    (node / 'services.json').write_text(
+        '{\n'
+        '  // a comment\n'
+        '  "propertyDefinitions": {"fixture.edge,}": {"type": "integer", "param": true,},},\n'
+        '  "properties": ["fixture.edge,}",],\n'
+        '}\n',
+        encoding='utf-8',
+    )
+    assert LINT.param_names(node) == {'edge,}'}
+
+
+def test_config_taint_crosses_a_branch_assignment(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                from functools import lru_cache
+
+                @lru_cache(maxsize=8)
+                def _client(address):
+                    return object()
+
+                class IGlobal:
+                    def beginGlobal(self):
+                        host = 'localhost'
+                        if self.enabled:
+                            host = self.config.host
+                        address = host
+                        self.handle = _client(address)
+
+                    def endGlobal(self):
+                        self.handle = None
+            """
+        },
+    )
+    assert rules(node) == ['module-cache']
+
+
+def test_a_resource_built_twice_is_reported_at_its_earliest_line(tmp_path):
+    source = """
+        class IGlobal:
+            def _first(self):
+                self.client = connect_client(1)
+
+            def _second(self):
+                self.client = connect_client(2)
+
+            def beginGlobal(self):
+                self._second()
+                self._first()
+    """
+    node = write_node(tmp_path, {'IGlobal.py': source})
+    findings = LINT.lint_node(node)
+    lines = (node / 'IGlobal.py').read_text(encoding='utf-8').splitlines()
+    first = next(i for i, line in enumerate(lines, 1) if 'connect_client(1)' in line)
+    assert [(f.rule, f.line) for f in findings] == [('global-unclosed', first)]
+
+
+def test_a_chained_module_cache_write_is_refused(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                _CLIENTS = {}
+
+                def remember(host, client):
+                    local = {}
+                    _CLIENTS[host] = local[host] = client
+                    return local
+            """
+        },
+    )
+    assert rules(node) == ['module-cache']
+
+
+def test_a_parameter_or_local_named_like_a_module_container_is_not_the_module(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                _CLIENTS = {}
+
+                def remember(_CLIENTS, key):
+                    _CLIENTS[key] = 1
+
+                def outer():
+                    _CLIENTS = {}
+
+                    def inner(key):
+                        _CLIENTS[key] = 1
+
+                    return inner
+            """
+        },
+    )
+    assert rules(node) == []
+
+
+def test_an_annotated_bag_write_is_refused(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'chat.py': """
+                class Chat:
+                    def __init__(self, bag):
+                        bag['chat']: object = self
+            """
+        },
+    )
+    assert rules(node) == ['bag-write']
+
+
+def test_unpacked_class_level_mutables_are_refused_one_by_one(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    rows, seen, name = [], {}, ''
+            """
+        },
+    )
+    findings = LINT.lint_node(node)
+    assert [f.rule for f in findings] == ['class-mutable', 'class-mutable']
+    assert {f.message.split(' ')[0] for f in findings} == {'IInstance.rows', 'IInstance.seen'}
+
+
+def test_an_annotated_resource_end_global_never_drops_is_refused(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                class IGlobal:
+                    client: object
+
+                    def beginGlobal(self):
+                        self.client: Client = Client(self.config.host)
+            """
+        },
+    )
+    assert rules(node) == ['global-unclosed']
+
+
+def test_cleanup_in_an_uncalled_nested_function_does_not_count(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                class IGlobal:
+                    def beginGlobal(self):
+                        self.client = Client(self.config.host)
+
+                    def endGlobal(self):
+                        def later():
+                            self.client.close()
+
+                        return later
+            """
+        },
+    )
+    assert rules(node) == ['global-unclosed']
+
+
+def test_a_config_alias_ends_at_its_reassignment(tmp_path):
+    services = {
+        'title': 'Fixture',
+        'protocol': 'fixture://',
+        'properties': [{'name': 'maxEdge', 'type': 'integer', 'param': True}],
+    }
+    node = write_node(
+        tmp_path,
+        {
+            'IGlobal.py': """
+                class IGlobal:
+                    def beginGlobal(self):
+                        cfg = self.config
+                        self.a = cfg.maxEdge
+                        cfg = {'maxEdge': 640}
+                        self.b = cfg.get('maxEdge')
+            """
+        },
+        services,
+    )
+    findings = LINT.lint_node(node)
+    assert [f.rule for f in findings] == ['param-in-global']
+    assert 'self.a' in (node / 'IGlobal.py').read_text(encoding='utf-8').splitlines()[findings[0].line - 1]
+
+
+def test_caller_writes_are_found_inside_unpacking_and_annotations_are_not_writes(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    caller: object
+
+                    def run(self, values):
+                        self.caller: object
+                        self.caller, self.name = values
+            """
+        },
+    )
+    assert rules(node) == ['caller-write']
+
+
+def test_sys_modules_of_the_module_itself_is_allowed(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                import sys
+
+                def me():
+                    return sys.modules[__name__], sys.modules.get(__name__)
+            """
+        },
+    )
+    assert rules(node) == []
+
+
+def test_a_glb_write_is_not_a_read_but_an_augmented_one_is(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'helper.py': """
+                def stamp(payload, value):
+                    payload.glb = value
+                    del payload.pipeType
+                    payload.glb += 1
+            """
+        },
+    )
+    assert rules(node) == ['glb-pipetype']
+
+
+@pytest.mark.parametrize('argv', [['--all'], ['no-such-node-dir'], ['--all', 'no-such-root']])
+def test_the_cli_refuses_what_it_cannot_lint(monkeypatch, argv):
+    monkeypatch.setattr(LINT.sys, 'argv', ['lint-node-code.py', *argv])
+    with pytest.raises(SystemExit) as stopped:
+        LINT.main()
+    assert stopped.value.code == 2
+
+
+# =============================================================================
 # What the lint accepts
 # =============================================================================
 
@@ -359,7 +609,7 @@ def test_a_conforming_node_is_clean(tmp_path):
                         self.provider = self.config.node.provider
                         self.mode = _MODES[self.config.mode]
                         self.client = Client(self.config.host)
-                        self.model = _MODELS.get(self.config.model, lambda: object())
+                        self.model = _MODELS.acquire(self.config.model, lambda: object())
                         debug('ready')
 
                     def endGlobal(self):

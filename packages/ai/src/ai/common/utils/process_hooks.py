@@ -58,11 +58,11 @@ def stub_matplotlib_pyplot() -> None:
 
 # ==== debugger ===============================================================
 
-#: Thread idents already registered with a loaded debugger. Failed
-#: registrations are recorded too, so a broken debugger produces one warning
-#: instead of one per call.
-_DEBUGGER_THREADS: set[int] = set()
-_DEBUGGER_LOCK = threading.Lock()
+#: Per-thread mark: set once the thread has registered with a loaded debugger.
+#: It lives and dies with its thread, so a later thread that reuses an exited
+#: thread's ident still registers. A failed registration is marked too, so a
+#: broken debugger produces one warning per thread instead of one per call.
+_DEBUGGER_REGISTERED = threading.local()
 
 
 def register_debugger_thread() -> None:
@@ -84,12 +84,10 @@ def register_debugger_thread() -> None:
     if pydevd is None:
         return
 
-    # Step 2: once per thread, for the life of the process.
-    ident = threading.get_ident()
-    with _DEBUGGER_LOCK:
-        if ident in _DEBUGGER_THREADS:
-            return
-        _DEBUGGER_THREADS.add(ident)
+    # Step 2: once per thread, for the life of that thread.
+    if getattr(_DEBUGGER_REGISTERED, 'done', False):
+        return
+    _DEBUGGER_REGISTERED.done = True
 
     # Step 3: register; a failure is reported once and the call runs untraced.
     try:

@@ -44,7 +44,7 @@ pre-seeded directory to run fully offline.
 import re
 from typing import Any, ClassVar, Dict, List, Optional
 
-from ai.common.utils import LoaderCache, config_int
+from ai.common.utils import config_int
 from rocketlib import warning
 
 #: Absolute floor for the unknown-model budget. Only reached if *both* the live
@@ -56,9 +56,6 @@ CONSERVATIVE_MODEL_LIMIT_FLOOR = 8192
 #: Model id assumed when ``model_name`` is absent or is not a non-empty string.
 #: Matches the ``model_name`` default declared in ``services.json``.
 DEFAULT_MODEL_NAME = 'gpt-5'
-
-#: The tiktoken encodings every control of this engine shares, keyed by encoding name.
-_ENCODINGS = LoaderCache()
 
 
 class ContextOptimizer:
@@ -593,21 +590,22 @@ class ContextOptimizer:
         return self._encoding_name
 
     def _get_encoding(self, encoding_name: Optional[str] = None):
-        """Return the tiktoken encoding, from the module-scope loader cache.
+        """Return the tiktoken encoding, from tiktoken's own process-wide cache.
 
         When *encoding_name* is ``None`` the encoding is resolved from the
         configured model (see :meth:`_resolve_encoding_name`). tiktoken is
         imported lazily so that module-level import does not fail before
-        ``depends()`` has installed the package at runtime. The cache is keyed
-        by encoding name and shared by every control, so concurrent calls
-        asking for different encodings never swap one under the other.
+        ``depends()`` has installed the package at runtime. ``get_encoding``
+        caches by encoding name under its own lock, and nothing is stored on
+        the optimizer, so concurrent calls asking for different encodings
+        never swap one under the other.
         """
         import tiktoken
 
         if encoding_name is None:
             encoding_name = self._resolve_encoding_name()
 
-        return _ENCODINGS.get(encoding_name, lambda: tiktoken.get_encoding(encoding_name))
+        return tiktoken.get_encoding(encoding_name)
 
     def count_tokens(self, text: Optional[str], encoding: Optional[str] = None) -> int:
         """Count tokens in *text* using the model's tiktoken encoding.

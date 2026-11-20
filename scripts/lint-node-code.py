@@ -172,7 +172,7 @@ class Finding:
 
 
 def strip_jsonc(s: str) -> str:
-    """Remove ``//`` comments and trailing commas from a JSONC document."""
+    """Remove ``//`` comments and trailing commas from a JSONC document (never inside a string)."""
     out, i, n, instr = [], 0, len(s), False
     while i < n:
         c = s[i]
@@ -197,7 +197,36 @@ def strip_jsonc(s: str) -> str:
             continue
         out.append(c)
         i += 1
-    return re.sub(r',(\s*[}\]])', r'\1', ''.join(out))
+    return _drop_trailing_commas(''.join(out))
+
+
+def _drop_trailing_commas(s: str) -> str:
+    """Drop each comma that only whitespace separates from a closing brace or bracket, outside strings."""
+    out, i, n, instr = [], 0, len(s), False
+    while i < n:
+        c = s[i]
+        if instr:
+            out.append(c)
+            if c == '\\' and i + 1 < n:
+                out.append(s[i + 1])
+                i += 2
+                continue
+            if c == '"':
+                instr = False
+            i += 1
+            continue
+        if c == '"':
+            instr = True
+        elif c == ',':
+            j = i + 1
+            while j < n and s[j].isspace():
+                j += 1
+            if j < n and s[j] in '}]':
+                i += 1
+                continue
+        out.append(c)
+        i += 1
+    return ''.join(out)
 
 
 def param_names(node_dir: Path) -> Set[str]:
@@ -290,18 +319,120 @@ def assigned_names(target: ast.AST) -> Iterator[str]:
             yield from assigned_names(elt)
 
 
+def flat_targets(target: ast.AST) -> Iterator[ast.AST]:
+    """Yield each single target of an assignment target, descending into unpacking."""
+    if isinstance(target, (ast.Tuple, ast.List)):
+        for elt in target.elts:
+            yield from flat_targets(elt)
+    elif isinstance(target, ast.Starred):
+        yield from flat_targets(target.value)
+    else:
+        yield target
+
+
+def write_targets(stmt: ast.AST) -> List[ast.AST]:
+    """Return every single target a statement writes (an annotation without a value writes nothing)."""
+    if isinstance(stmt, (ast.Assign, ast.Delete)):
+        roots = stmt.targets
+    elif isinstance(stmt, ast.AugAssign):
+        roots = [stmt.target]
+    elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+        roots = [stmt.target]
+    else:
+        return []
+    return [t for root in roots for t in flat_targets(root)]
+
+
+def assigned_value(stmt: ast.AST) -> Optional[ast.AST]:
+    """Return the value an Assign / AnnAssign stores, else None."""
+    if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+        return stmt.value
+    return None
+
+
+def own_nodes(scope: ast.AST) -> Iterator[ast.AST]:
+    """Yield the nodes of ``scope``'s own body, never entering a nested function, lambda or class."""
+    todo = list(ast.iter_child_nodes(scope))
+    while todo:
+        sub = todo.pop()
+        yield sub
+        if not isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            todo.extend(ast.iter_child_nodes(sub))
+
+
+def local_names(func: ast.AST) -> Set[str]:
+    """Return the names ``func`` binds in its own scope: parameters, assignments, imports, defs."""
+    names: Set[str] = set()
+    args = func.args
+    for a in args.posonlyargs + args.args + args.kwonlyargs + [args.vararg, args.kwarg]:
+        if a is not None:
+            names.add(a.arg)
+    declared: Set[str] = set()
+    for sub in own_nodes(func):
+        if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            names.add(sub.id)
+        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(sub.name)
+        elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+            names.update((a.asname or a.name).split('.')[0] for a in sub.names)
+        elif isinstance(sub, ast.Global):
+            declared.update(sub.names)
+    return names - declared
+
+
+def function_scopes(node: ast.AST, enclosing: frozenset = frozenset()) -> Iterator[tuple]:
+    """
+    Yield ``(function, bound)`` for every function under ``node``.
+
+    ``bound`` holds the names the function or an enclosing function binds: a
+    name outside it resolves to the module. Class scopes are not enclosing.
+    """
+    for sub in own_nodes(node):
+        if isinstance(sub, ast.ClassDef):
+            yield from function_scopes(sub, enclosing)
+        elif isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            bound = enclosing | local_names(sub)
+            yield sub, bound
+            yield from function_scopes(sub, bound)
+
+
 def function_taint(func: ast.AST) -> Set[str]:
-    """Return the local names of ``func`` assigned from config (one pass, in order)."""
+    """Return the names of ``func`` assigned from config, iterated until no new name is tainted."""
     tainted: Set[str] = set()
-    for sub in ast.walk(func):
-        if isinstance(sub, ast.Assign) and mentions_config(sub.value, tainted):
-            for t in sub.targets:
-                tainted.update(assigned_names(t))
-        elif isinstance(sub, ast.AnnAssign) and sub.value is not None and mentions_config(sub.value, tainted):
-            tainted.update(assigned_names(sub.target))
-        elif isinstance(sub, (ast.For, ast.comprehension)) and mentions_config(sub.iter, tainted):
-            tainted.update(assigned_names(sub.target))
-    return tainted
+    while True:
+        before = len(tainted)
+        for sub in ast.walk(func):
+            value = assigned_value(sub)
+            if value is not None and mentions_config(value, tainted):
+                for t in write_targets(sub):
+                    tainted.update(assigned_names(t))
+            elif isinstance(sub, (ast.For, ast.comprehension)) and mentions_config(sub.iter, tainted):
+                tainted.update(assigned_names(sub.target))
+        if len(tainted) == before:
+            return tainted
+
+
+def paired_values(target: ast.AST, value: ast.AST) -> Iterator[tuple]:
+    """
+    Yield ``(name, value)`` for each plain name an assignment binds.
+
+    A literal unpacking (``a, b = [], {}``) pairs each name with its own value;
+    any other unpacking yields the names with the whole value, which is mutable
+    only when the value itself is a container.
+    """
+    if isinstance(target, ast.Name):
+        yield target.id, value
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        if (
+            isinstance(value, (ast.Tuple, ast.List))
+            and len(value.elts) == len(target.elts)
+            and not any(isinstance(e, ast.Starred) for e in target.elts + value.elts)
+        ):
+            for t, v in zip(target.elts, value.elts):
+                yield from paired_values(t, v)
+        else:
+            for name in assigned_names(target):
+                yield name, None
 
 
 def functions(tree: ast.AST) -> Iterator[ast.AST]:
@@ -312,19 +443,19 @@ def functions(tree: ast.AST) -> Iterator[ast.AST]:
 
 
 def self_attrs(node: ast.AST) -> Set[str]:
-    """Return every ``self.<attr>`` referenced anywhere under ``node``."""
+    """Return every ``self.<attr>`` a method's own body references (not an uncalled nested function's)."""
     return {
         sub.attr
-        for sub in ast.walk(node)
+        for sub in own_nodes(node)
         if isinstance(sub, ast.Attribute) and isinstance(sub.value, ast.Name) and sub.value.id == 'self'
     }
 
 
 def self_calls(node: ast.AST) -> Set[str]:
-    """Return the names of ``self.<method>(...)`` calls under ``node``."""
+    """Return the names of the ``self.<method>(...)`` calls a method's own body makes."""
     return {
         sub.func.attr
-        for sub in ast.walk(node)
+        for sub in own_nodes(node)
         if isinstance(sub, ast.Call)
         and isinstance(sub.func, ast.Attribute)
         and isinstance(sub.func.value, ast.Name)
@@ -341,7 +472,7 @@ def method_closure(methods: Dict[str, ast.AST], start: str) -> List[ast.AST]:
             continue
         seen.add(name)
         order.append(methods[name])
-        todo.extend(self_calls(methods[name]))
+        todo.extend(sorted(self_calls(methods[name]), reverse=True))
     return order
 
 
@@ -420,30 +551,31 @@ class FileLint:
                     containers[name] = stmt
 
         # Step 2: any function that writes one of them keeps state at module scope.
+        # A name the function (or an enclosing one) binds itself is not the module's.
         reported: Set[str] = set()
-        for func in functions(self.tree):
-            for sub in ast.walk(func):
-                name = None
-                if isinstance(sub, (ast.Assign, ast.AugAssign, ast.Delete)):
-                    targets = sub.targets if isinstance(sub, (ast.Assign, ast.Delete)) else [sub.target]
-                    for t in targets:
-                        if isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name):
-                            name = t.value.id
-                elif (
+        for func, bound in function_scopes(self.tree):
+            for sub in own_nodes(func):
+                written = [
+                    t.value.id
+                    for t in write_targets(sub)
+                    if isinstance(t, ast.Subscript) and isinstance(t.value, ast.Name)
+                ]
+                if (
                     isinstance(sub, ast.Call)
                     and isinstance(sub.func, ast.Attribute)
                     and sub.func.attr in MUTATORS
                     and isinstance(sub.func.value, ast.Name)
                 ):
-                    name = sub.func.value.id
-                if name in containers and name not in reported:
-                    reported.add(name)
-                    self.add(
-                        'module-cache',
-                        sub,
-                        f'module-level container "{name}" is written from function code: module scope is shared '
-                        'by every control; keep per-control objects on the IGlobal',
-                    )
+                    written.append(sub.func.value.id)
+                for name in written:
+                    if name in containers and name not in bound and name not in reported:
+                        reported.add(name)
+                        self.add(
+                            'module-cache',
+                            sub,
+                            f'module-level container "{name}" is written from function code: module scope is '
+                            'shared by every control; keep per-control objects on the IGlobal',
+                        )
 
         # Step 3: a module global rebound from config inside a function.
         for func in functions(self.tree):
@@ -503,12 +635,7 @@ class FileLint:
             )
 
         for sub in ast.walk(self.tree):
-            targets: List[ast.AST] = []
-            if isinstance(sub, (ast.Assign, ast.Delete)):
-                targets = list(sub.targets)
-            elif isinstance(sub, ast.AugAssign):
-                targets = [sub.target]
-            for t in targets:
+            for t in write_targets(sub):
                 if isinstance(t, ast.Subscript) and is_bag(t.value):
                     self.add('bag-write', sub, 'write into the endpoint bag: keep the object on the IGlobal')
             if (
@@ -529,16 +656,19 @@ class FileLint:
             if not isinstance(cls, ast.ClassDef) or not cls.name.endswith(NODE_CLASSES):
                 continue
             for stmt in cls.body:
-                value = stmt.value if isinstance(stmt, (ast.Assign, ast.AnnAssign)) else None
-                if is_mutable(value):
-                    targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
-                    names = ', '.join(n for t in targets for n in assigned_names(t))
-                    self.add(
-                        'class-mutable',
-                        stmt,
-                        f'{cls.name}.{names} is a class-level mutable shared by every control and binding: '
-                        'initialise it in __init__ / begin*',
-                    )
+                value = assigned_value(stmt)
+                if value is None:
+                    continue
+                roots = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+                for root in roots:
+                    for name, item in paired_values(root, value):
+                        if is_mutable(item):
+                            self.add(
+                                'class-mutable',
+                                stmt,
+                                f'{cls.name}.{name} is a class-level mutable shared by every control and binding: '
+                                'initialise it in __init__ / begin*',
+                            )
 
     # -------------------------------------------------------------------------
     # print-logging
@@ -572,10 +702,14 @@ class FileLint:
             for method in method_closure(methods, 'beginGlobal'):
                 tainted = function_taint(method)
                 for sub in ast.walk(method):
-                    if isinstance(sub, ast.Assign) and opens(sub.value, tainted):
-                        for t in sub.targets:
-                            if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == 'self':
-                                built.setdefault(t.attr, sub)
+                    value = assigned_value(sub)
+                    if value is None or not opens(value, tainted):
+                        continue
+                    for t in write_targets(sub):
+                        if isinstance(t, ast.Attribute) and isinstance(t.value, ast.Name) and t.value.id == 'self':
+                            # The earliest build of an attribute is the one reported, whatever the visit order
+                            if t.attr not in built or sub.lineno < built[t.attr].lineno:
+                                built[t.attr] = sub
             if not built:
                 continue
 
@@ -606,28 +740,29 @@ class FileLint:
                 if not isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) or method.name != 'beginGlobal':
                     continue
 
-                # Step 1: names bound to self.config inside beginGlobal.
-                aliases = set()
-                for sub in ast.walk(method):
-                    if (
-                        isinstance(sub, ast.Assign)
-                        and isinstance(sub.value, ast.Attribute)
-                        and sub.value.attr == 'config'
-                        and isinstance(sub.value.value, ast.Name)
-                        and sub.value.value.id == 'self'
-                    ):
-                        for t in sub.targets:
-                            aliases.update(assigned_names(t))
-
-                def is_config(expr: ast.AST) -> bool:
-                    if isinstance(expr, ast.Name):
-                        return expr.id in aliases
+                def is_self_config(expr: ast.AST) -> bool:
                     return (
                         isinstance(expr, ast.Attribute)
                         and expr.attr == 'config'
                         and isinstance(expr.value, ast.Name)
                         and expr.value.id == 'self'
                     )
+
+                # Step 1: every binding of a plain name in beginGlobal, and whether it binds self.config.
+                bindings: Dict[str, List[tuple]] = {}
+                for sub in ast.walk(method):
+                    value = assigned_value(sub)
+                    for t in write_targets(sub):
+                        if isinstance(t, ast.Name):
+                            aliased = isinstance(sub, ast.Assign) and value is not None and is_self_config(value)
+                            bindings.setdefault(t.id, []).append((sub.lineno, aliased))
+
+                def is_config(expr: ast.AST) -> bool:
+                    if not isinstance(expr, ast.Name):
+                        return is_self_config(expr)
+                    # An alias holds where the latest binding before the read bound self.config
+                    earlier = [b for b in bindings.get(expr.id, []) if b[0] < expr.lineno]
+                    return bool(earlier) and max(earlier)[1]
 
                 # Step 2: attribute, item and get() reads of a param key.
                 for sub in ast.walk(method):
@@ -664,22 +799,11 @@ class FileLint:
         for sub in ast.walk(self.tree):
             if isinstance(sub, ast.ClassDef):
                 for stmt in sub.body:
-                    targets = (
-                        stmt.targets
-                        if isinstance(stmt, ast.Assign)
-                        else [stmt.target]
-                        if isinstance(stmt, ast.AnnAssign)
-                        else []
-                    )
-                    for t in targets:
-                        if any(n in names for n in assigned_names(t)):
-                            self.add('caller-write', stmt, f'class-level caller on {sub.name}: the engine binds it')
-            targets = []
-            if isinstance(sub, ast.Assign):
-                targets = sub.targets
-            elif isinstance(sub, (ast.AugAssign, ast.AnnAssign)):
-                targets = [sub.target]
-            for t in targets:
+                    if any(isinstance(t, ast.Name) and t.id in names for t in write_targets(stmt)):
+                        self.add('caller-write', stmt, f'class-level caller on {sub.name}: the engine binds it')
+            for t in write_targets(sub):
+                if isinstance(sub, ast.Delete):
+                    continue
                 if isinstance(t, ast.Attribute) and t.attr in names:
                     self.add('caller-write', sub, f'assignment to .{t.attr}: the caller is bound once by the engine')
             if (
@@ -698,6 +822,34 @@ class FileLint:
 
     def introspection(self) -> None:
         """gc, inspect.stack and sys.modules reaching another package."""
+
+        def is_sys_modules(expr: ast.AST) -> bool:
+            return (
+                isinstance(expr, ast.Attribute)
+                and expr.attr == 'modules'
+                and isinstance(expr.value, ast.Name)
+                and expr.value.id == 'sys'
+            )
+
+        def is_own_name(expr: Optional[ast.AST]) -> bool:
+            return isinstance(expr, ast.Name) and expr.id == '__name__'
+
+        # Step 1: sys.modules[__name__] and sys.modules.get(__name__) look up this module itself.
+        own: Set[int] = set()
+        for sub in ast.walk(self.tree):
+            if isinstance(sub, ast.Subscript) and is_sys_modules(sub.value) and is_own_name(sub.slice):
+                own.add(id(sub.value))
+            elif (
+                isinstance(sub, ast.Call)
+                and isinstance(sub.func, ast.Attribute)
+                and sub.func.attr == 'get'
+                and is_sys_modules(sub.func.value)
+                and sub.args
+                and is_own_name(sub.args[0])
+            ):
+                own.add(id(sub.func.value))
+
+        # Step 2: everything else.
         for sub in ast.walk(self.tree):
             if isinstance(sub, ast.Import) and any(a.name == 'gc' for a in sub.names):
                 self.add('introspection', sub, 'gc in node code: a node never walks other objects')
@@ -713,12 +865,7 @@ class FileLint:
                 and sub.value.id == 'inspect'
             ):
                 self.add('introspection', sub, 'inspect.stack in node code: a node never reads other frames')
-            elif (
-                isinstance(sub, ast.Attribute)
-                and sub.attr == 'modules'
-                and isinstance(sub.value, ast.Name)
-                and sub.value.id == 'sys'
-            ):
+            elif is_sys_modules(sub) and id(sub) not in own:
                 self.add('introspection', sub, 'sys.modules in node code: a node never reaches another package')
 
     # -------------------------------------------------------------------------
@@ -726,9 +873,14 @@ class FileLint:
     # -------------------------------------------------------------------------
 
     def glb_pipetype(self) -> None:
-        """Any .glb or .pipeType read."""
+        """Any .glb or .pipeType read; a plain write or delete reads nothing, an augmented one does."""
+        augmented = {id(sub.target) for sub in ast.walk(self.tree) if isinstance(sub, ast.AugAssign)}
         for sub in ast.walk(self.tree):
-            if isinstance(sub, ast.Attribute) and sub.attr in ('glb', 'pipeType'):
+            if (
+                isinstance(sub, ast.Attribute)
+                and sub.attr in ('glb', 'pipeType')
+                and (isinstance(sub.ctx, ast.Load) or id(sub) in augmented)
+            ):
                 self.add(
                     'glb-pipetype',
                     sub,
@@ -772,8 +924,13 @@ def node_dirs(root: Path) -> List[Path]:
 def main() -> None:
     """Lint the named node directories (or ``--all <root>``); exit 1 on any finding."""
     args = sys.argv[1:]
-    if not args:
+    if not args or (args[0] == '--all' and len(args) != 2):
         print(__doc__)
+        sys.exit(2)
+    roots = args[1:] if args[0] == '--all' else args
+    missing = [a for a in roots if not Path(a).is_dir()]
+    if missing:
+        print(f'not a directory: {", ".join(missing)}', file=sys.stderr)
         sys.exit(2)
     dirs = node_dirs(Path(args[1])) if args[0] == '--all' else [Path(a) for a in args]
 

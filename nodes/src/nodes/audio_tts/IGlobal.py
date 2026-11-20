@@ -22,8 +22,9 @@ _KOKORO_SAMPLE_RATE = 24000
 _INT16_MAX = 32767
 _WAV_MIME = 'audio/wav'
 
-#: The local Kokoro pipelines every control of this engine shares, keyed by
+#: The local Kokoro pipelines the controls of this engine share, keyed by
 #: (repo, language): the weights depend on nothing else; the voice is per call.
+#: The last control to release one frees it.
 _PIPELINES = LoaderCache()
 
 
@@ -39,6 +40,7 @@ class IGlobal(IGlobalBase):
     _voice: str
     _lang: str
     _pipeline: Optional[Any] = None
+    _pipeline_key: Optional[tuple] = None
     _remote_client: Optional[Any] = None
 
     def beginGlobal(self):
@@ -65,7 +67,9 @@ class IGlobal(IGlobalBase):
 
             depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
 
-            self._pipeline = _PIPELINES.get((_KOKORO_REPO_ID, self._lang), self._load_pipeline)
+            key = (_KOKORO_REPO_ID, self._lang)
+            self._pipeline = _PIPELINES.acquire(key, self._load_pipeline)
+            self._pipeline_key = key
 
     def _load_pipeline(self) -> Any:
         """Build the local ``KPipeline`` for this control's language (once per process, via the cache)."""
@@ -158,8 +162,11 @@ class IGlobal(IGlobalBase):
             raise
 
     def endGlobal(self):
-        """Drop the local pipeline (it stays in the loader cache) and disconnect the remote client, if any."""
+        """Release the local pipeline to the loader cache and disconnect the remote client, if any."""
         self._pipeline = None
+        if self._pipeline_key is not None:
+            _PIPELINES.release(self._pipeline_key)
+            self._pipeline_key = None
         client = self._remote_client
         if client is not None:
             try:
