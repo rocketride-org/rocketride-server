@@ -5,33 +5,35 @@
 import ipaddress
 import socket
 
+from ai.common.utils.url_utils import is_public_address
+
 from .redis_client import RedisNodeError
 
-_NAT64_PREFIX = ipaddress.IPv6Network('64:ff9b::/96')
-_NAT64_LOCAL_PREFIX = ipaddress.IPv6Network('64:ff9b:1::/48')
-_IPV4_COMPATIBLE_PREFIX = ipaddress.IPv6Network('::/96')
+
+def public_ip(address: str) -> bool:
+    """Check an IP string using the same address policy as the HTTP client.
+
+    Args:
+        address: IPv4 or IPv6 text, optionally including a zone suffix.
+    Returns:
+        Whether the address and any embedded IPv4 addresses are public.
+    Raises:
+        ValueError: If the address is malformed.
+    """
+    return is_public_address(ipaddress.ip_address(address.split('%')[0]))
 
 
-def public_ip(address):
-    ip = ipaddress.ip_address(address.split('%')[0])
-    if isinstance(ip, ipaddress.IPv6Address):
-        if ip.is_site_local or ip in _IPV4_COMPATIBLE_PREFIX or ip in _NAT64_LOCAL_PREFIX:
-            return False
-        embedded = []
-        if ip.ipv4_mapped is not None:
-            embedded.append(ip.ipv4_mapped)
-        if ip.sixtofour is not None:
-            embedded.append(ip.sixtofour)
-        if ip.teredo is not None:
-            embedded.extend(ip.teredo)
-        if ip in _NAT64_PREFIX:
-            embedded.append(ipaddress.IPv4Address(ip.packed[-4:]))
-        if any(not item.is_global or item.is_multicast for item in embedded):
-            return False
-    return ip.is_global and not ip.is_multicast
+def validate_public_host(host: str, port: int) -> list[str]:
+    """Resolve a Redis host to unique public connection destinations.
 
-
-def validate_public_host(host, port):
+    Args:
+        host: Redis hostname or IP address.
+        port: Redis port used for resolution.
+    Returns:
+        Unique numeric addresses in resolver order.
+    Raises:
+        RedisNodeError: If resolution fails or any address is non-public.
+    """
     try:
         addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
         if not addresses or any(not public_ip(item[4][0]) for item in addresses):
@@ -63,9 +65,13 @@ def public_connection(base):
             for destination in destinations:
                 try:
                     self.host = destination
-                    # SSLConnection._connect also sends the TLS handshake.
-                    # Open only TCP here so the peer check comes first.
-                    sock = Connection._connect(self) if isinstance(self, SSLConnection) else super()._connect()
+                    if isinstance(self, SSLConnection):
+                        # redis-py private connection hooks require the redis<8
+                        # pin. Bypass SSLConnection._connect until the TCP peer
+                        # is checked; wrap the socket only after that check.
+                        sock = Connection._connect(self)
+                    else:
+                        sock = super()._connect()
                 except OSError as exc:
                     last_error = exc
                     continue
@@ -74,7 +80,9 @@ def public_connection(base):
                 try:
                     if not public_ip(sock.getpeername()[0]):
                         raise RedisNodeError('invalid_host', 'Redis connected to a non-public destination.')
-                    return self._wrap_socket_with_ssl(sock) if isinstance(self, SSLConnection) else sock
+                    if isinstance(self, SSLConnection):
+                        return self._wrap_socket_with_ssl(sock)
+                    return sock
                 except Exception:
                     sock.close()
                     raise

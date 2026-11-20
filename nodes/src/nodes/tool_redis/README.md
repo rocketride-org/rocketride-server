@@ -44,7 +44,7 @@ Use a hostname/IP plus Port (1–65535), or `rediss://host:port` to enable TLS. 
 
 ### Key prefix
 
-Required, 1–128 literal ASCII characters from `[A-Za-z0-9:_-]`. Choose an app/environment namespace such as `rr:answer-cache:dev:`. With `rr:demo:` configured, logical `item` means `rr:demo:item`; logical `rr:demo:item` means `rr:demo:rr:demo:item`. No prefix is auto-stripped from input.
+Required, 1 to 128 literal ASCII characters from `[A-Za-z0-9:_-]`, ending in `:`. The separator keeps a namespace such as `app:` distinct from `app2:`. Choose an app/environment namespace such as `rr:answer-cache:dev:`. With `rr:demo:` configured, logical `item` means `rr:demo:item`; logical `rr:demo:item` means `rr:demo:rr:demo:item`. No prefix is auto-stripped from input.
 
 ### Allow writes
 
@@ -81,6 +81,14 @@ Keep writes disabled for unverified agents. An agent can choose to call a tool
 more than once even with client retries disabled, and each successful
 `redis_incr` call increments again.
 
+For this experimental release, INCR remains behind the existing `allow_writes`
+setting rather than adding an idempotency key or a second write flag. Its tool
+description explicitly tells agents to call once and inspect with GET. This is a
+warning, not an exactly-once guarantee: applications requiring that guarantee must
+control invocation themselves. Unit tests run without a server with
+`engine -m pytest test/tool_redis -q --rootdir .` from `nodes/`, using a built engine
+with the current node sources and test dependencies installed.
+
 ## Upstream docs
 
 - [Redis SCAN](https://redis.io/docs/latest/commands/scan/)
@@ -101,7 +109,7 @@ more than once even with client retries disabled, and each successful
 | `tool_redis.db` | `integer` | **Database**<br/>Standalone logical database index; must exist on the server. | `0` |
 | `tool_redis.default_ttl_seconds` | `integer` | **Default TTL (seconds)**<br/>Expiry when SET omits ttl_seconds; 0 means persistent. SET replaces an existing expiry. | `3600` |
 | `tool_redis.host` | `string` | **Host**<br/>Redis host reachable from the engine, or rediss://host:port for TLS. Cloud requires TLS and exclusively public addresses; local engines allow localhost. | `"localhost"` |
-| `tool_redis.key_prefix` | `string` | **Key prefix**<br/>Required literal app/environment namespace using letters, digits, colon, underscore or hyphen. Always prepended; not per-user authorization. | `"rr:"` |
+| `tool_redis.key_prefix` | `string` | **Key prefix**<br/>Required literal app/environment namespace ending in a colon, using letters, digits, colon, underscore or hyphen. Always prepended; not per-user authorization. | `"rr:"` |
 | `tool_redis.max_connections` | `integer` | **Maximum connections**<br/>Finite pool size per node/pipeline; exhausted pools return an error rather than waiting indefinitely. | `10` |
 | `tool_redis.max_value_bytes` | `integer` | **Maximum value bytes**<br/>UTF-8 payload cap, at most 64 KiB. Serialized results are additionally capped at 128 KiB. | `65536` |
 | `tool_redis.password` | `string` | **Password**<br/>Redis password or a RocketRide secret reference. Stored as a secure credential field. | `""` |

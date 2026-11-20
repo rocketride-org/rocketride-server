@@ -3,6 +3,10 @@
 
 """Per-pipeline Redis configuration and owned connection pool."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from hosting import is_hosted, is_shared_host
 
 from ai.common.config import Config
@@ -11,9 +15,20 @@ from rocketlib import IGlobalBase, OPEN_MODE, warning
 from .host_policy import public_connection, validate_public_host
 from .redis_client import RedisNodeError, RedisStore, Settings, redis_call
 
+if TYPE_CHECKING:
+    from redis import ConnectionPool, Redis
 
-def create_client(settings: Settings):
-    """Create an explicitly bounded pool with no automatic command retries."""
+
+def create_client(settings: Settings) -> tuple[Redis, ConnectionPool]:
+    """Create a bounded Redis client and its owned pool, without connecting.
+
+    Args:
+        settings: Validated connection settings.
+    Returns:
+        The Redis client and the connection pool its caller must close.
+    Raises:
+        RedisNodeError: If hosted settings lack TLS or resolve privately.
+    """
     import redis
     from redis.backoff import NoBackoff
     from redis.retry import Retry
@@ -62,11 +77,20 @@ class IGlobal(IGlobalBase):
     def validateConfig(self) -> None:
         """Validate offline; never connect while editing the node."""
         try:
-            self._settings()
+            settings = self._settings()
+            if (is_hosted() or is_shared_host()) and not settings.use_tls:
+                warning('Hosted Redis requires TLS with certificate and hostname verification.')
         except RedisNodeError as exc:
             warning(str(exc))
 
     def beginGlobal(self) -> None:
+        """Initialize the pipeline's Redis store outside editor CONFIG mode.
+
+        Returns:
+            None after the client is connected and the store is ready.
+        Raises:
+            RedisNodeError: If configuration, connectivity or authentication fails.
+        """
         if self.IEndpoint.endpoint.openMode == OPEN_MODE.CONFIG:
             return
         from depends import load_depends

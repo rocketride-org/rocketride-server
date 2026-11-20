@@ -59,7 +59,8 @@
 			"title": "Database",
 			"default": 0,
 			"description": "Standalone logical database index; must exist on the server.",
-			"minimum": 0
+			"minimum": 0,
+			"maximum": 2147483647
 		},
 		"tool_redis.username": {
 			"type": "string",
@@ -89,10 +90,10 @@
 			"type": "string",
 			"title": "Key prefix",
 			"default": "rr:",
-			"description": "Required literal app/environment namespace using letters, digits, colon, underscore or hyphen. Always prepended; not per-user authorization.",
+			"description": "Required literal app/environment namespace ending in a colon, using letters, digits, colon, underscore or hyphen. Always prepended; not per-user authorization.",
 			"minLength": 1,
 			"maxLength": 128,
-			"pattern": "^[A-Za-z0-9:_-]+$"
+			"pattern": "^[A-Za-z0-9:_-]{0,127}:$"
 		},
 		"tool_redis.allow_writes": {
 			"type": "boolean",

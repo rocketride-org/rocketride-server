@@ -12,12 +12,11 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from ai.common.utils import config_int, parse_bool
-
 MAX_VALUE_BYTES = 64 * 1024
 MAX_RESULT_BYTES = 128 * 1024
 MAX_KEY_BYTES = 256
 MAX_TTL_SECONDS = 2**31 - 1
+MAX_DATABASE_INDEX = 2**31 - 1
 _MAX_REDIS_INTEGER = 2**63 - 1
 
 
@@ -70,14 +69,8 @@ class Settings:
         """Validate UI settings again at runtime; never echo credential values."""
         cfg = {name: config[name] for name in cls.__dataclass_fields__ if name in config}
         for name in ('use_tls', 'allow_writes'):
-            value = cfg.get(name, False)
-            if type(value) is not bool:
+            if name in cfg and type(cfg[name]) is not bool:
                 raise RedisNodeError('invalid_input', f'{name} must be a boolean.')
-            cfg[name] = parse_bool(value)
-        for name, default in (('max_connections', 10), ('max_value_bytes', MAX_VALUE_BYTES)):
-            if name in cfg:
-                integer(cfg[name], name, 1, 100 if name == 'max_connections' else MAX_VALUE_BYTES)
-            cfg[name] = config_int(cfg, name, default)
         host = cfg.get('host', 'localhost')
         if isinstance(host, str) and host.startswith('rediss://'):
             try:
@@ -107,21 +100,18 @@ class Settings:
         ):
             raise RedisNodeError('invalid_input', 'host must be a nonempty hostname or IP address, not a URL.')
         integer(result.port, 'port', 1, 65535)
-        integer(result.db, 'db', 0, MAX_TTL_SECONDS)
+        integer(result.db, 'db', 0, MAX_DATABASE_INDEX)
         integer(result.default_ttl_seconds, 'default_ttl_seconds', 0, MAX_TTL_SECONDS)
         integer(result.max_connections, 'max_connections', 1, 100)
         integer(result.max_value_bytes, 'max_value_bytes', 1, MAX_VALUE_BYTES)
-        for name in ('use_tls', 'allow_writes'):
-            if type(getattr(result, name)) is not bool:
-                raise RedisNodeError('invalid_input', f'{name} must be a boolean.')
         for name in ('socket_connect_timeout', 'socket_timeout'):
             value = getattr(result, name)
             if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 120:
                 raise RedisNodeError('invalid_input', f'{name} must be a finite number greater than 0 and at most 120.')
-        if not isinstance(result.key_prefix, str) or not re.fullmatch(r'[A-Za-z0-9:_-]{1,128}', result.key_prefix):
+        if not isinstance(result.key_prefix, str) or not re.fullmatch(r'[A-Za-z0-9:_-]{0,127}:', result.key_prefix):
             raise RedisNodeError(
                 'invalid_input',
-                'key_prefix must be 1–128 literal ASCII characters (letters, digits, _, :, -).',
+                'key_prefix must be 1 to 128 literal ASCII characters (letters, digits, _, :, -), ending in :.',
             )
         for name in ('username', 'password'):
             value = getattr(result, name)
@@ -153,13 +143,12 @@ def redis_call(operation: Callable, *, mutation: bool = False):
     except MaxConnectionsError:
         raise RedisNodeError('connection_error', 'All Redis connections in the pool are in use.') from None
     except (ConnectionError, TimeoutError):
-        raise RedisNodeError(
-            'connection_error',
-            'Redis could not complete the request. A write may have been applied; verify before retrying.'
-            if mutation
-            else 'Redis could not complete the request.',
-            'unknown' if mutation else 'not_applied',
-        ) from None
+        message = 'Redis could not complete the request.'
+        outcome = 'not_applied'
+        if mutation:
+            message = 'Redis could not complete the request. A write may have been applied; verify before retrying.'
+            outcome = 'unknown'
+        raise RedisNodeError('connection_error', message, outcome) from None
     except DataError:
         raise RedisNodeError('invalid_input', 'Redis rejected an argument.') from None
     except ResponseError:
@@ -167,9 +156,10 @@ def redis_call(operation: Callable, *, mutation: bool = False):
             'invalid_operation', 'Redis rejected the operation; check the key type and server permissions.'
         ) from None
     except RedisError:
-        raise RedisNodeError(
-            'redis_error', 'Redis could not complete the operation.', 'unknown' if mutation else 'not_applied'
-        ) from None
+        outcome = 'not_applied'
+        if mutation:
+            outcome = 'unknown'
+        raise RedisNodeError('redis_error', 'Redis could not complete the operation.', outcome) from None
 
 
 class RedisStore:
@@ -213,17 +203,15 @@ class RedisStore:
 
     def set(self, key: Any, value: Any, ttl_seconds: Any = None, condition: Any = None) -> dict:
         """Store a UTF-8 string with atomic SET expiry and optional NX/XX."""
-        if not self.settings.allow_writes:
-            raise RedisNodeError('permission_denied', 'Redis node is read-only. Enable allow_writes to store values.')
+        self.require_writes()
         scoped = self.scope_key(key)
         encoded = utf8(value, 'value')
         if len(encoded) > self.settings.max_value_bytes:
             raise RedisNodeError('value_too_large', 'value exceeds the configured UTF-8 byte limit.')
-        ttl = (
-            self.settings.default_ttl_seconds
-            if ttl_seconds is None
-            else integer(ttl_seconds, 'ttl_seconds', 0, MAX_TTL_SECONDS)
-        )
+        if ttl_seconds is None:
+            ttl = self.settings.default_ttl_seconds
+        else:
+            ttl = integer(ttl_seconds, 'ttl_seconds', 0, MAX_TTL_SECONDS)
         if condition is not None and condition not in ('NX', 'XX'):
             raise RedisNodeError('invalid_input', 'condition must be NX or XX when supplied.')
         # Leave enough room to read the value back even if its expiry changes.
@@ -242,11 +230,28 @@ class RedisStore:
         ttl = redis_call(lambda: self.client.ttl(self.scope_key(key)))
         return {'key': key, 'exists': ttl != -2, 'has_expiry': ttl >= 0, 'ttl_seconds': ttl}
 
-    def require_writes(self):
+    def require_writes(self) -> None:
+        """Require the pipeline's write permission before any mutation.
+
+        Returns:
+            None when writes are enabled.
+        Raises:
+            RedisNodeError: If the node is read-only.
+        """
         if not self.settings.allow_writes:
             raise RedisNodeError('permission_denied', 'Redis node is read-only. Enable allow_writes to mutate keys.')
 
     def expire(self, key: Any, ttl_seconds: Any) -> dict:
+        """Set a positive expiry on one logical key.
+
+        Args:
+            key: Logical key within this store's namespace.
+            ttl_seconds: Integer expiry from 1 through MAX_TTL_SECONDS.
+        Returns:
+            The key, whether it existed, and the requested expiry.
+        Raises:
+            RedisNodeError: If writes are disabled, input is invalid or Redis fails.
+        """
         self.require_writes()
         scoped = self.scope_key(key)
         ttl = integer(ttl_seconds, 'ttl_seconds', 1, MAX_TTL_SECONDS)
@@ -254,6 +259,16 @@ class RedisStore:
         return {'key': key, 'updated': bool(updated), 'requested_ttl_seconds': ttl}
 
     def incr(self, key: Any, amount: Any = '1') -> dict:
+        """Increment a counter once without retrying a failed command.
+
+        Args:
+            key: Logical counter key.
+            amount: Signed 64-bit decimal string, defaulting to one.
+        Returns:
+            The key and its exact new value as a decimal string.
+        Raises:
+            RedisNodeError: If writes are disabled, input is invalid or Redis fails.
+        """
         self.require_writes()
         scoped = self.scope_key(key)
         # Decimal strings preserve the full signed 64-bit range through JS.
@@ -266,6 +281,16 @@ class RedisStore:
         return {'key': key, 'value_decimal': str(value)}
 
     def scan(self, cursor: Any = '0', count: Any = 100) -> dict:
+        """Read one namespace page, skipping invalid keys without losing its cursor.
+
+        Args:
+            cursor: Unsigned 64-bit decimal cursor; zero starts an iteration.
+            count: Integer work hint between 1 and 500.
+        Returns:
+            Logical keys, next cursor, completion flag and skipped-key count.
+        Raises:
+            RedisNodeError: If input or the result is oversized/invalid, or Redis fails.
+        """
         if not isinstance(cursor, str) or not re.fullmatch(r'0|[1-9][0-9]{0,19}', cursor) or int(cursor) > 2**64 - 1:
             raise RedisNodeError('invalid_input', 'cursor must be an unsigned 64-bit decimal string.')
         integer(count, 'count', 1, 500)
@@ -288,6 +313,15 @@ class RedisStore:
         return bounded_result({'cursor': str(next_cursor), 'keys': keys, 'done': next_cursor == 0, 'skipped': skipped})
 
     def delete(self, keys: Any) -> dict:
+        """Delete an explicit list of namespaced keys, treating glob characters literally.
+
+        Args:
+            keys: List of 1 to 100 logical keys.
+        Returns:
+            The number of keys deleted, excluding missing keys and duplicates.
+        Raises:
+            RedisNodeError: If writes are disabled, input is invalid or Redis fails.
+        """
         self.require_writes()
         if not isinstance(keys, list) or not 1 <= len(keys) <= 100:
             raise RedisNodeError('invalid_input', 'keys must be an array of 1–100 explicit logical keys.')
@@ -306,6 +340,16 @@ def bounded_result(
     *,
     error_message: str = 'Serialized result exceeds 128 KiB; narrow the data or reduce the SCAN count hint.',
 ) -> dict:
+    """Return a result only when its serialized envelope fits the transport limit.
+
+    Args:
+        result: JSON-compatible result dictionary.
+        error_message: Safe operation-specific advice for an oversized result.
+    Returns:
+        The unchanged result dictionary.
+    Raises:
+        RedisNodeError: If ASCII-escaped JSON exceeds MAX_RESULT_BYTES.
+    """
     # Use ASCII escaping: the cap also covers JSON transports that escape every
     # non-ASCII character, including UTF-16 surrogate pairs.
     if len(json.dumps(result, ensure_ascii=True).encode('utf-8')) > MAX_RESULT_BYTES:

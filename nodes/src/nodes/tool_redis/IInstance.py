@@ -33,6 +33,25 @@ def _output(properties):
     return {'type': 'object', 'properties': {**_COMMON, **properties}, 'required': ['success']}
 
 
+def _as_object(raw) -> dict:
+    """Convert JSON or model input to an object without exposing conversion errors."""
+    if isinstance(raw, dict):
+        return raw
+    try:
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        else:
+            convert = getattr(raw, 'model_dump', None) or getattr(raw, 'dict', None)
+            if not callable(convert):
+                raise TypeError('Unsupported tool input')
+            raw = convert()
+    except Exception:
+        raise RedisNodeError('invalid_input', 'Tool arguments must be an object.') from None
+    if not isinstance(raw, dict):
+        raise RedisNodeError('invalid_input', 'Tool arguments must be an object.')
+    return raw
+
+
 class IInstance(IInstanceBase):
     """Expose only the seven explicitly supported Redis operations."""
 
@@ -43,18 +62,7 @@ class IInstance(IInstanceBase):
             # The shared normalizer deliberately returns {} on invalid input.
             # Validate the object first so SCAN cannot mistake that for a
             # legitimate request using its default cursor and count.
-            if not isinstance(raw, dict):
-                try:
-                    if isinstance(raw, str):
-                        raw = json.loads(raw)
-                    else:
-                        convert = getattr(raw, 'model_dump', None) or getattr(raw, 'dict', None)
-                        raw = convert() if callable(convert) else None
-                except Exception:
-                    raise RedisNodeError('invalid_input', 'Tool arguments must be an object.') from None
-            if not isinstance(raw, dict):
-                raise RedisNodeError('invalid_input', 'Tool arguments must be an object.')
-            args = normalize_tool_input(raw, tool_name=f'redis_{operation}')
+            args = normalize_tool_input(_as_object(raw), tool_name=f'redis_{operation}')
             if set(args).difference(allowed) or any(args.get(name) is None for name in required):
                 raise RedisNodeError('invalid_input', 'Missing required arguments or unsupported argument names.')
             # Some agents send JSON null for omitted optional arguments.
