@@ -31,7 +31,7 @@ import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import test from 'node:test';
-import { GROUP_LENGTHS, createMatcher, matcherShape, scan } from './match';
+import { GROUP_LENGTHS, createMatcher, matcherShape, scan, windowPoolStats } from './match';
 import type { IMatch } from './match';
 import { assertWithin } from './__test__/util';
 
@@ -110,4 +110,13 @@ test('T132 200 lengths sharing a 16-char prefix: each group holds a bounded numb
 	}
 	tt.diagnostic(`T132 8 MiB shared-prefix flood: ${best.toFixed(1)} ms`);
 	assertWithin(best, 200, 'the scan');
+});
+
+test('the hash-buffer pool is bounded by bytes: a scan of a very large string does not stay in memory', () => {
+	const m = createMatcher([['needle-needle-needle', 1]]);
+	const text = 'x'.repeat(3_000_000); // a 12 MB window buffer, over the pool's per-buffer cap
+	scan(text, [m], () => undefined);
+	scan('a small string with needle-needle-needle inside', [m], () => undefined);
+	const { buffers, bytes } = windowPoolStats();
+	assert.ok(bytes <= 4 * 1024 * 1024, `the pool holds ${bytes} bytes in ${buffers} buffers`);
 });

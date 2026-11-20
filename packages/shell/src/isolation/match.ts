@@ -216,6 +216,14 @@ export interface IWindows {
 /** Spare hash buffers (ints only, never a string). A nested scan takes its own, so scans are re-entrant. */
 const spare: Int32Array[] = [];
 const SPARE_MAX = 4;
+/** A buffer larger than this is dropped after its scan, and the pool holds at most this much in all: retained memory never follows the largest string scanned. */
+const SPARE_MAX_BYTES = 4 * 1024 * 1024;
+let spareBytes = 0;
+
+/** The pool's size, for tests: buffers held and their total bytes. */
+export function windowPoolStats(): { buffers: number; bytes: number } {
+	return { buffers: spare.length, bytes: spareBytes };
+}
 
 /**
  * Computes the window hashes of `s` into a pooled buffer. Give it back with
@@ -223,7 +231,11 @@ const SPARE_MAX = 4;
  */
 export function hashWindows(s: string): IWindows {
 	const count = Math.max(0, s.length - PREFIX + 1);
-	let h = spare.length > 0 && spare[spare.length - 1].length >= count ? spare.pop()! : new Int32Array(Math.max(count, 1024));
+	let h: Int32Array;
+	if (spare.length > 0 && spare[spare.length - 1].length >= count) {
+		h = spare.pop()!;
+		spareBytes -= h.byteLength;
+	} else h = new Int32Array(Math.max(count, 1024));
 	if (count > 0) {
 		let x = hashAt(s, 0);
 		h[0] = x;
@@ -237,7 +249,10 @@ export function hashWindows(s: string): IWindows {
 
 /** Returns a buffer from {@link hashWindows} to the pool. */
 export function releaseWindows(w: IWindows): void {
-	if (spare.length < SPARE_MAX) spare.push(w.h);
+	if (spare.length < SPARE_MAX && w.h.byteLength <= SPARE_MAX_BYTES && spareBytes + w.h.byteLength <= SPARE_MAX_BYTES) {
+		spare.push(w.h);
+		spareBytes += w.h.byteLength;
+	}
 }
 
 /**
