@@ -670,11 +670,12 @@ def _patched_workspace_yaml(
                         'materialize',
                         f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree',
                     )
+        seen: set = set()
         for table in ('overrides', 'catalog'):
-            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}')
+            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
         catalogs = data.get('catalogs')
         for named in catalogs.values() if isinstance(catalogs, dict) else ():
-            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs')
+            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
     else:
         packages = [app_root or '.'] + [inc for inc in include_roots if inc]
         data = {'packages': packages}
@@ -699,58 +700,89 @@ def _patched_workspace_yaml(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-def _unsafe_spec(spec: Any) -> bool:
+# A spec with one of these prefixes (or a URL scheme) is a registry, git or URL
+# form — never a local directory, even when it contains a path separator.
+_NON_PATH_SPEC_PREFIXES = (
+    'npm:',
+    'jsr:',
+    'catalog:',
+    'github:',
+    'gitlab:',
+    'bitbucket:',
+    'gist:',
+    'git:',
+    'git+',
+    'git@',
+    'http:',
+    'https:',
+)
+
+
+def _unsafe_spec(spec: Any, base: str = '.') -> bool:
     """True when a dependency spec reaches outside the source tree.
 
     ``link:`` (any target) is refused. A local path spec — ``file:``,
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
-    that starts with ``.``, ``/``, ``~`` or a drive letter, or ends in
-    ``.tgz``/``.tar``/``.tar.gz``, as a local path) — is refused when it is
-    absolute or has a ``..`` segment, since it would pull developer-chosen
-    directories (the toolchain env, other jobs' scratch, pod files) into
-    the install.
+    that starts with ``.``, ``/``, ``~`` or a drive letter, ends in
+    ``.tgz``/``.tar``/``.tar.gz``, or holds a path separator without being a
+    registry, git or URL form, as a local path) — is refused when it is
+    absolute, home-relative, or, resolved against ``base`` (the declaring
+    package's directory relative to the workspace root), lands above the
+    workspace root. A ``..`` that stays inside the tree is allowed, so a
+    package under ``apps/x`` can name ``file:../../.rocketride/shell/shell.tgz``.
+    A ``workspace:`` path is also resolved against the root, since which of
+    the two pnpm uses is not worth guessing.
     """
     text = str(spec).strip().lower()
     if text.startswith(('link:', 'git+file:')):
         return True
+    bases = [base]
     for prefix in ('file:', 'workspace:'):
         if text.startswith(prefix):
             target = text[len(prefix) :].strip()
             # workspace:^ / workspace:~ / workspace:* / workspace:1.2.3 are
             # version ranges; only a path-shaped target is a local path.
-            if prefix == 'workspace:' and not (
-                target.startswith(('.', '/')) or re.match(r'^[a-z]:', target) is not None
-            ):
-                return False
+            if prefix == 'workspace:':
+                if not (target.startswith(('.', '/')) or re.match(r'^[a-z]:', target) is not None):
+                    return False
+                bases = [base, '.']
             break
     else:
+        if text.startswith(_NON_PATH_SPEC_PREFIXES) or '://' in text:
+            return False
         # '~' alone or '~/...' is a home path; '~1.2.3' is a version range.
         bare = (
             text.startswith(('.', '/'))
             or text in ('~',)
             or text.startswith('~/')
             or re.match(r'^[a-z]:', text) is not None
+            or '/' in text
+            or '\\' in text
         )
         if not (bare or text.endswith(('.tgz', '.tar', '.tar.gz'))):
             return False
         target = text
-    target = target.replace('\\', '/')
-    if target == '~' or target.startswith('~/'):
-        return True
-    return target.startswith('/') or re.match(r'^[a-z]:', target) is not None or '..' in target.split('/')
+    return any(_lock_path_escapes(target, b) for b in bases)
 
 
-def _refuse_unsafe_specs(table: Any, where: str) -> None:
+def _refuse_unsafe_specs(table: Any, where: str, base: str = '.', _seen: Optional[set] = None) -> None:
     """Raise BuildFailure when a dependency table holds an unsafe spec.
 
-    Nested tables (npm-style nested overrides) are walked.
+    Nested tables (npm-style nested overrides) are walked. A table object
+    already walked is skipped: YAML aliases hand the same mapping out under
+    several keys (or, for a self-referential anchor, back to itself), so an
+    unmarked walk is exponential or unbounded.
     """
     if not isinstance(table, dict):
         return
+    seen = _seen if _seen is not None else set()
+    if id(table) in seen:
+        return
+    seen.add(id(table))
     for name, spec in table.items():
         if isinstance(spec, dict):
-            _refuse_unsafe_specs(spec, where)
-        elif _unsafe_spec(spec):
+            _refuse_unsafe_specs(spec, where, base, seen)
+        elif _unsafe_spec(spec, base):
             raise BuildFailure(
                 'materialize',
                 f'{where}: dependency {str(name)!r} uses {str(spec)!r}; link:, git+file: and out-of-tree path specs are not supported',
@@ -807,9 +839,36 @@ def _place_platform_tgzs(ws_dir: str) -> None:
         shutil.copyfile(src, dest)
 
 
-def _inert_config(name: str) -> str:
-    """Inert content for one neutralized config name (by its loader)."""
+def _package_is_module(path: str, ws_dir: str) -> bool:
+    """True when the nearest package.json at or above ``path`` (within
+    ``ws_dir``) sets ``"type": "module"`` — Node then loads a ``.js`` file as
+    ESM, where ``module.exports`` is a ReferenceError.
+    """
+    here = os.path.dirname(path)
+    root = os.path.abspath(ws_dir)
+    while True:
+        candidate = os.path.join(here, 'package.json')
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, 'r', encoding='utf-8-sig') as handle:
+                    manifest = json.load(handle)
+            except (OSError, UnicodeDecodeError, ValueError):
+                return False
+            return isinstance(manifest, dict) and manifest.get('type') == 'module'
+        if os.path.abspath(here) == root or os.path.dirname(here) == here:
+            return False
+        here = os.path.dirname(here)
+
+
+def _inert_config(name: str, module_package: bool = False) -> str:
+    """Inert content for one neutralized config name (by its loader).
+
+    A ``.js`` file follows its package's ``type``: ESM syntax under
+    ``"type": "module"``, CommonJS otherwise.
+    """
     ext = os.path.splitext(name)[1] if name not in ('.postcssrc', '.babelrc') else ''
+    if ext == '.js' and module_package:
+        return 'export default {};\n'
     if ext in ('.js', '.cjs', '.cts'):
         return 'module.exports = {};\n'
     if ext in ('.mjs', '.ts', '.mts'):
@@ -843,7 +902,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
             path = os.path.join(dirpath, name)
             if name in names:
                 with open(path, 'w', encoding='utf-8') as handle:
-                    handle.write(_inert_config(name))
+                    handle.write(_inert_config(name, _package_is_module(path, ws_dir)))
                 neutralized.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
             elif name == 'package.json':
                 rel = os.path.relpath(path, ws_dir).replace(os.sep, '/')
@@ -855,8 +914,9 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
                     raise BuildFailure('materialize', f'{rel} is not valid UTF-8 JSON: {exc}')
                 if not isinstance(manifest, dict):
                     continue
+                package_dir = posixpath.dirname(rel) or '.'
                 for table in _DEPENDENCY_TABLES:
-                    _refuse_unsafe_specs(manifest.get(table), rel)
+                    _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
                 if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
                     for key in _NEUTRALIZED_PACKAGE_KEYS:
                         if manifest.pop(key, None) is not None:
@@ -1905,9 +1965,16 @@ class AppBuildWorker:
         log_parts.append(f'== install ==\n$ {" ".join(argv)}\n{out}')
         if code != 0:
             raise BuildFailure('install', f'pnpm install failed (exit {code})', _tail_errors('install', out))
-        if pins_before and os.path.isfile(lock_path):
-            with open(lock_path, 'r', encoding='utf-8') as handle:
-                drift = _drift_of(pins_before, _lockfile_importer_pins(handle.read()))
+        # The install wrote the lockfile the typecheck and bundle will use;
+        # it must resolve nothing outside the tree (the packed one was checked
+        # above, but the install re-resolves). Missing = fail closed.
+        if not os.path.isfile(lock_path):
+            raise BuildFailure('install', 'pnpm install did not write pnpm-lock.yaml')
+        with open(lock_path, 'r', encoding='utf-8') as handle:
+            installed_lock = handle.read()
+        _refuse_lockfile_paths(installed_lock)
+        if pins_before:
+            drift = _drift_of(pins_before, _lockfile_importer_pins(installed_lock))
             if drift:
                 raise BuildFailure(
                     'install',

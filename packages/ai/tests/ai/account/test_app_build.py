@@ -363,12 +363,17 @@ class _FakeExec:
         self.install_hook = None  # optional callable(cwd) run at install
         self.typecheck_exit = 0
         self.typecheck_out = ''
+        self.write_lock = True  # real pnpm writes pnpm-lock.yaml on install
 
     async def __call__(self, argv: List[str], cwd: str, timeout: int, on_line=None) -> 'tuple[int, str]':
         self.calls.append({'argv': list(argv), 'cwd': cwd, 'timeout': timeout})
         if 'install' in argv:
             if self.install_hook:
                 self.install_hook(cwd)
+            lock_path = os.path.join(cwd, 'pnpm-lock.yaml')
+            if self.write_lock and not os.path.isfile(lock_path):
+                with open(lock_path, 'w', encoding='utf-8') as handle:
+                    handle.write("lockfileVersion: '9.0'\n")
             return 0, 'install ok'
         if any('tsc' in str(a) for a in argv):
             return self.typecheck_exit, self.typecheck_out or 'typecheck ok'
@@ -1401,6 +1406,82 @@ def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
     assert app_build._unsafe_spec(spec) is unsafe
 
 
+@pytest.mark.parametrize(
+    'spec,base,unsafe',
+    [
+        ('file:../../.rocketride/shell/shell.tgz', 'apps/x', False),
+        ('file:../../../x', 'apps/x', True),
+        ('file:../x', '.', True),
+        ('../../.rocketride/shell/shell.tgz', 'apps/x', False),
+        ('../../../x.tgz', 'apps/x', True),
+        ('file:/etc/x', 'apps/x', True),
+        # a bare spec with a separator is a path unless it is a registry/git/URL form
+        ('pkgs/../../x', '.', True),
+        ('pkgs\\..\\..\\x', '.', True),
+        ('foo/../../x', 'apps/x', False),
+        ('foo/../../../../x', 'apps/x', True),
+        ('user/repo', '.', False),
+        ('github:user/repo', '.', False),
+        ('npm:@scope/name@^1.0.0', '.', False),
+        ('git+https://example.com/a/b.git', '.', False),
+        ('https://example.com/a/../b.tgz', '.', False),
+    ],
+)
+def test_unsafe_spec_resolves_against_the_declaring_package(spec, base, unsafe):
+    assert app_build._unsafe_spec(spec, base) is unsafe
+
+
+def test_scaffolded_shell_spec_builds(tmp_path):
+    """The scaffold writes file:../../.rocketride/shell/shell.tgz into an app
+    package.json; it resolves inside the workspace and must not be refused.
+    """
+    ws = tmp_path / 'ws'
+    spec = 'file:../../.rocketride/shell/shell.tgz'
+    _write(ws / 'apps' / 'x' / 'package.json', json.dumps({'name': 'x', 'dependencies': {'shell': spec}}))
+    app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'x'))
+    # one level too deep a climb leaves the workspace and is refused
+    _write(
+        ws / 'apps' / 'y' / 'package.json', json.dumps({'name': 'y', 'dependencies': {'shell': 'file:../../../x.tgz'}})
+    )
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws / 'apps' / 'y'))
+
+
+def test_workspace_yaml_alias_heavy_catalog_is_walked_quickly():
+    import time
+
+    lines = ['packages:', '  - "apps/*"', 'x-anchors:']
+    lines.append('  l0: &l0 {a: "^1.0.0", b: "^1.0.0"}')
+    for i in range(1, 25):
+        lines.append(f'  l{i}: &l{i} {{a: *l{i - 1}, b: *l{i - 1}}}')
+    lines += ['catalog:', '  top: *l24']
+    started = time.monotonic()
+    _patched_workspace_yaml('\n'.join(lines) + '\n', 'apps/x', [])
+    assert time.monotonic() - started < 2.0
+
+
+def test_workspace_yaml_self_referential_catalog_alias_is_not_a_crash():
+    text = 'packages:\n  - "apps/*"\ncatalog: &c\n  self: *c\n  dep: "^1.0.0"\n'
+    _patched_workspace_yaml(text, 'apps/x', [])
+
+
+def test_workspace_yaml_alias_still_checks_the_shared_spec():
+    text = 'packages:\n  - "apps/*"\ncatalog:\n  ok: &s "file:../x"\ncatalogs:\n  n:\n    dep: *s\n'
+    with pytest.raises(BuildFailure):
+        _patched_workspace_yaml(text, 'apps/x', [])
+
+
+def test_inert_postcss_config_follows_the_package_module_type(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'apps' / 'esm' / 'package.json', json.dumps({'name': 'e', 'type': 'module'}))
+    _write(ws / 'apps' / 'esm' / '.postcssrc.js', 'MARKER\n')
+    _write(ws / 'apps' / 'cjs' / 'package.json', json.dumps({'name': 'c'}))
+    _write(ws / 'apps' / 'cjs' / '.postcssrc.js', 'MARKER\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert (ws / 'apps' / 'esm' / '.postcssrc.js').read_text(encoding='utf-8') == 'export default {};\n'
+    assert (ws / 'apps' / 'cjs' / '.postcssrc.js').read_text(encoding='utf-8') == 'module.exports = {};\n'
+
+
 def test_under_refuses_a_symlink_out_of_the_root(tmp_path):
     """Harvest containment: a file inside a root that links elsewhere is out."""
     root = tmp_path / 'out'
@@ -1543,3 +1624,33 @@ def test_patched_dependency_paths_are_checked():
     with pytest.raises(app_build.BuildFailure):
         app_build._refuse_lockfile_paths(lock)
     app_build._refuse_lockfile_paths('patchedDependencies:\n  x@1.0.0:\n    hash: abc\n    path: patches/x.patch\n')
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('mode', ['missing', 'escaping'])
+async def test_install_lockfile_is_checked_before_typecheck_and_bundle(monkeypatch, build_store, toolchain, mode):
+    """The lockfile the install wrote is checked for out-of-tree paths, and a
+    missing one fails closed — before the typecheck or bundle run.
+    """
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    if mode == 'missing':
+        fake.write_lock = False
+    else:
+
+        def escaping_install(cwd):
+            with open(os.path.join(cwd, 'pnpm-lock.yaml'), 'w', encoding='utf-8') as handle:
+                handle.write(
+                    "lockfileVersion: '9.0'\npackages:\n  evil@1.0.0:\n    resolution: {directory: ../../outside, type: directory}\n"
+                )
+
+        fake.install_hook = escaping_install
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    await worker._run_job('org1', 'acme.brandy', 1)
+
+    assert rail.stamps[-1]['status'] == 'failed'
+    assert not any(any('tsc' in str(a) for a in c['argv']) or 'build' in c['argv'] for c in fake.calls)
