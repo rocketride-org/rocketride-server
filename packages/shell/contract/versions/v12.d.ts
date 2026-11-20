@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-20T04:27:43.302Z
-// Source commit: 373340036e856e63eaebe3641f315e1428da1905
+// Generated:     2026-11-20T10:02:18.101Z
+// Source commit: 0902ef834610e0c083e5d94d7719f28ac6333af3
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1059,6 +1059,27 @@ export interface UsageRollup {
     id: string;
     /** Resolved display name of the user or team, or null when unresolvable. */
     name?: string | null;
+    /** Consumption per resource type (absolute values — always positive). */
+    credits: Record<string, number>;
+}
+/**
+ * One publication's share of the org's own named-pipe usage, returned by
+ * usage_by_publication. Computed from the VIEWER's org rows only: the org's
+ * calls through each publication, never other orgs' calls to it.
+ */
+export interface PublicationUsage {
+    /** Published pipe name, `developerId.pipeId`. */
+    pipe: string;
+    /** Rung that answered: `dev`, `me`, `team` or `public`. */
+    rung: string;
+    /** Answering team (the publication's audience slot), or null for a development run. */
+    team: string | null;
+    /** Display name of the answering team when it is one of the org's own teams, else null. */
+    teamName: string | null;
+    /** Artifact version that answered, or null for a development run. */
+    version: number | null;
+    /** Requests served in the period. */
+    requestCount: number;
     /** Consumption per resource type (absolute values — always positive). */
     credits: Record<string, number>;
 }
@@ -4407,6 +4428,19 @@ declare class BillingApi {
      * @returns Array of usage rollup rows ordered by total consumption descending.
      */
     getUsageByTeam(orgId: string): Promise<UsageRollup[]>;
+    /**
+     * Fetches the org's own named-pipe usage grouped by the publication that
+     * served it (pipe, rung, answering team, version). Only the org's rows
+     * are read, so a publisher never sees other orgs' calls.
+     *
+     * @param orgId - Organisation UUID.
+     * @param options - Period: `since` (first UTC day counted) and `until` (first UTC day not counted), ISO datetimes.
+     * @returns One row per publication, ordered by total consumption descending.
+     */
+    getUsageByPublication(orgId: string, options?: {
+        since?: string;
+        until?: string;
+    }): Promise<PublicationUsage[]>;
     /**
      * Creates a one-off Stripe Checkout session for a credit pack purchase
      * and returns the redirect URL.
@@ -15700,6 +15734,10 @@ interface IAccountViewProps {
     usageByUser?: UsageRollup[];
     /** Per-team usage rollup. */
     usageByTeam?: UsageRollup[];
+    /** The org's own usage by the publication that served it (plan 8.3). */
+    usageByPublication?: PublicationUsage[];
+    /** Label of the period the publication breakdown covers (e.g. "November 2026"). */
+    publicationPeriod?: string;
     /** Currently running tasks with live token data. */
     activeTasks?: ActiveTask[];
     /** Whether dashboard data is still loading. */

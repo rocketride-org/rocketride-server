@@ -326,6 +326,8 @@ import type { DeployTeamRef as Frozen_DeployTeamRef } from '../contract/versions
 import type { DeployTeamRef as Current_DeployTeamRef } from './client/index.js';
 import type { InvitedMember as Frozen_InvitedMember } from '../contract/versions/v1.6';
 import type { InvitedMember as Current_InvitedMember } from './client/index.js';
+import type { PublicationUsage as Frozen_PublicationUsage } from '../contract/versions/v1.6';
+import type { PublicationUsage as Current_PublicationUsage } from './client/index.js';
 import type { BillingPlan as Frozen_BillingPlan } from '../contract/versions/v1.6';
 import type { BillingPlan as Current_BillingPlan } from './client/index.js';
 import type { StoreKey as Frozen_StoreKey } from '../contract/versions/v1.6';
@@ -676,6 +678,8 @@ const _t_DeployTeamRef: Frozen_DeployTeamRef = {} as Current_DeployTeamRef;
 void _t_DeployTeamRef;
 const _t_InvitedMember: Frozen_InvitedMember = {} as Current_InvitedMember;
 void _t_InvitedMember;
+const _t_PublicationUsage: Frozen_PublicationUsage = {} as Current_PublicationUsage;
+void _t_PublicationUsage;
 const _t_BillingPlan: Frozen_BillingPlan = {} as Current_BillingPlan;
 void _t_BillingPlan;
 const _t_StoreKey: Frozen_StoreKey = {} as Current_StoreKey;
