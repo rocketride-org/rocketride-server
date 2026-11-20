@@ -467,10 +467,21 @@ async def test_r972_1b_run_sweeps_until_stopped(monkeypatch):
     server._authz = AuthzRecheck(server, account)
     make_conn(server, identity('admin', ADMIN))
 
+    # Wait for the milestone (three sweeps happened), not for a duration: a busy loop may need longer than any sleep.
+    third_sweep = asyncio.Event()
+    original = account.live_authority
+
+    async def counted(user_ids):
+        result = await original(user_ids)
+        if len(account.reads) >= 3:
+            third_sweep.set()
+        return result
+
+    account.live_authority = counted
     runner = asyncio.create_task(server._authz.run())
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(third_sweep.wait(), 30)
     await server._authz.stop()
-    await asyncio.wait_for(runner, 1)
+    await asyncio.wait_for(runner, 30)
 
     assert len(account.reads) >= 3
     assert all(batch == ['admin'] for batch in account.reads)
