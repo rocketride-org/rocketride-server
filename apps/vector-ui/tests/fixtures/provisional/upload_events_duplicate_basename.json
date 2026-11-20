@@ -1,0 +1,98 @@
+{
+	"files": [
+		{
+			"relPath": "a/report.pdf",
+			"objectId": "84676437-9562-5be8-8a82-cd34fc466492",
+			"size": 120000
+		},
+		{
+			"relPath": "b/report.pdf",
+			"objectId": "d00965ce-bb6d-5136-8c2b-de707504c360",
+			"size": 64000
+		}
+	],
+	"events": [
+		{
+			"action": "open",
+			"filepath": "report.pdf",
+			"bytes_sent": 0,
+			"file_size": 120000,
+			"upload_time": 0
+		},
+		{
+			"action": "write",
+			"filepath": "report.pdf",
+			"bytes_sent": 60000,
+			"file_size": 120000,
+			"upload_time": 0.05
+		},
+		{
+			"action": "write",
+			"filepath": "report.pdf",
+			"bytes_sent": 120000,
+			"file_size": 120000,
+			"upload_time": 0.1
+		},
+		{
+			"action": "close",
+			"filepath": "report.pdf",
+			"bytes_sent": 120000,
+			"file_size": 120000,
+			"upload_time": 0.11
+		},
+		{
+			"action": "complete",
+			"filepath": "report.pdf",
+			"bytes_sent": 120000,
+			"file_size": 120000,
+			"upload_time": 0.96,
+			"result": {
+				"name": "report.pdf",
+				"path": "",
+				"objectId": "84676437-9562-5be8-8a82-cd34fc466492",
+				"result_types": {}
+			}
+		},
+		{
+			"action": "open",
+			"filepath": "report.pdf",
+			"bytes_sent": 0,
+			"file_size": 64000,
+			"upload_time": 0
+		},
+		{
+			"action": "write",
+			"filepath": "report.pdf",
+			"bytes_sent": 32000,
+			"file_size": 64000,
+			"upload_time": 0.05
+		},
+		{
+			"action": "write",
+			"filepath": "report.pdf",
+			"bytes_sent": 64000,
+			"file_size": 64000,
+			"upload_time": 0.1
+		},
+		{
+			"action": "close",
+			"filepath": "report.pdf",
+			"bytes_sent": 64000,
+			"file_size": 64000,
+			"upload_time": 0.11
+		},
+		{
+			"action": "complete",
+			"filepath": "report.pdf",
+			"bytes_sent": 64000,
+			"file_size": 64000,
+			"upload_time": 0.96,
+			"result": {
+				"name": "report.pdf",
+				"path": "",
+				"objectId": "d00965ce-bb6d-5136-8c2b-de707504c360",
+				"result_types": {}
+			}
+		}
+	]
+}

@@ -1,0 +1,89 @@
+{
+	"calibrated": true,
+	"note": "Measured by scripts/acceptance/vector-explorer/calibrate_chunking.py on the demo corpus (40 documents, demo/gen_corpus.py); the design asks for a median chunk of 400-1,200 characters. Every template carries this chunk_1 configuration.",
+	"target_median_chars": [
+		400,
+		1200
+	],
+	"measured": {
+		"documents": 40,
+		"chunks": 306,
+		"median_chars": 806,
+		"p10_chars": 530,
+		"p90_chars": 914,
+		"max_chars": 1000,
+		"single_chunk_documents": 4,
+		"long_document_chunks": 160,
+		"in_target": true
+	},
+	"candidates": {
+		"512": {
+			"documents": 40,
+			"chunks": 791,
+			"median_chars": 233,
+			"p10_chars": 89,
+			"p90_chars": 504,
+			"max_chars": 511,
+			"single_chunk_documents": 0,
+			"long_document_chunks": 481,
+			"in_target": false
+		},
+		"800": {
+			"documents": 40,
+			"chunks": 399,
+			"median_chars": 650,
+			"p10_chars": 217,
+			"p90_chars": 788,
+			"max_chars": 798,
+			"single_chunk_documents": 3,
+			"long_document_chunks": 218,
+			"in_target": true
+		},
+		"1000": {
+			"documents": 40,
+			"chunks": 306,
+			"median_chars": 806,
+			"p10_chars": 530,
+			"p90_chars": 914,
+			"max_chars": 1000,
+			"single_chunk_documents": 4,
+			"long_document_chunks": 160,
+			"in_target": true
+		},
+		"1200": {
+			"documents": 40,
+			"chunks": 277,
+			"median_chars": 818,
+			"p10_chars": 700,
+			"p90_chars": 1075,
+			"max_chars": 1192,
+			"single_chunk_documents": 5,
+			"long_document_chunks": 160,
+			"in_target": true
+		},
+		"1500": {
+			"documents": 40,
+			"chunks": 197,
+			"median_chars": 1248,
+			"p10_chars": 944,
+			"p90_chars": 1444,
+			"max_chars": 1495,
+			"single_chunk_documents": 8,
+			"long_document_chunks": 107,
+			"in_target": false
+		}
+	},
+	"chunk_1": {
+		"provider": "preprocessor_langchain",
+		"config": {
+			"profile": "default",
+			"default": {
+				"mode": "strlen",
+				"splitter": "RecursiveCharacterTextSplitter",
+				"strlen": 1000
+			},
+			"parameters": {}
+		}
+	},
+	"effective": true
+}

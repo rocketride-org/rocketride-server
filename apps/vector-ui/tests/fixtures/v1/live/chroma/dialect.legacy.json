@@ -1,0 +1,102 @@
+{
+  "__scrub__": [
+    "backend_version"
+  ],
+  "success": true,
+  "dialect": "vector",
+  "contract": "vector/1",
+  "provider": "chroma",
+  "backend": "chroma",
+  "backend_version": "<scrubbed>",
+  "collection": "vx_tp_wire_legacy",
+  "metric": "cosine",
+  "model": "sentence-transformers/all-MiniLM-L6-v2",
+  "dimension": 384,
+  "index": {
+    "type": "hnsw",
+    "params": {
+      "space": "cosine",
+      "m": 16,
+      "ef_construction": 100,
+      "ef_search": 100
+    }
+  },
+  "score": {
+    "formula": "(2 - cosine_distance) / 2",
+    "range": [
+      0,
+      1
+    ],
+    "higher_is_better": true,
+    "floor": 0.2,
+    "threshold": 0.65
+  },
+  "support": "supported",
+  "allow_writes": true,
+  "writes_scope": "tools_source",
+  "write_tools": [
+    "upsert",
+    "delete",
+    "soft_delete",
+    "restore"
+  ],
+  "capabilities": {
+    "describe": true,
+    "count": true,
+    "count_documents": false,
+    "documents": true,
+    "documents_distinct": true,
+    "documents_sorted": false,
+    "chunks": true,
+    "vectors": true,
+    "sample": true,
+    "sample_light": true,
+    "sample_stratified_native": false,
+    "knn_native": false,
+    "project": true,
+    "neighbors": true,
+    "search_vector": true,
+    "search_keyword": true,
+    "remove": true,
+    "remove_count": true,
+    "soft_delete": true,
+    "clusters": true,
+    "documents_filter": true,
+    "recommend_best_score": false,
+    "projection": [
+      "pca"
+    ]
+  },
+  "limits": {
+    "documents_page": 500,
+    "chunks_page": 200,
+    "vectors_keys_max": 2,
+    "sample_default": 1000,
+    "sample_max": 2000,
+    "sample_max_light": 5000,
+    "snippet_chars": 120,
+    "knn_k_max": 30,
+    "neighbors_k_max": 50,
+    "project_keys_max": 200,
+    "scope_keys_max": 2000,
+    "top_k_max": 100,
+    "write_ids_max": 100,
+    "sample_budget_ms": 60000,
+    "statement_timeout_ms": null,
+    "counts_cached_s": 60,
+    "recommend_examples_max": 10,
+    "matrix_keys_max": 100,
+    "max_components": 200
+  },
+  "health": {
+    "collection_exists": true,
+    "control_record": true,
+    "model_mismatch": null,
+    "meta_column": null
+  },
+  "caveats": [
+    "score_scale_inverted_fixed"
+  ],
+  "size_bytes": null,
+  "keyword_match": "substring"
+}

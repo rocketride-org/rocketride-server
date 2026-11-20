@@ -1,0 +1,56 @@
+{
+  "__scrub__": [
+    "ingestedAt",
+    "pointId"
+  ],
+  "success": true,
+  "items": [
+    {
+      "chunkId": 0,
+      "content": "# Falcon Station handbook\n\n## Water\n\nWalking alone beyond the marker cairns needs the duty officer's approval and a handheld radio. Every visitor signs the arrival book and attends the safety briefing before leaving the main hut. Polar foxes visit the rubbish store at night, so its door stays latched at all times. Diesel for the backup generator arrives by snow tractor twice a winter and by boat once in late summer. The satellite terminal carries email and weather files only; voice calls go through the radio or the emergency beacon.",
+      "length": 538,
+      "isTable": false,
+      "tableId": 0,
+      "isDeleted": false,
+      "pointId": "<scrubbed>",
+      "metadata": {
+        "objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        "chunkId": 0,
+        "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+        "parent": "C:/demo/handbooks/falcon_handbook.md",
+        "permissionId": 0,
+        "isDeleted": false,
+        "isTable": false,
+        "tableId": 0,
+        "signature": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "size": 4143,
+        "ingestedAt": "<scrubbed>"
+      }
+    },
+    {
+      "chunkId": 1,
+      "content": "Drinking water at Falcon Station comes from the Glassbrook spring, piped two kilometres downhill to the settling tank behind the generator shed. Every visitor signs the arrival book and attends the safety briefing before leaving the main hut. Walking alone beyond the marker cairns needs the duty officer's approval and a handheld radio. Waste is sorted into burnables, recyclables and return-to-base; nothing is buried on site. The settling tank holds about eleven thousand litres; the duty officer reads the float gauge every morning and writes the level in the water log. All drinking water passes the ceramic filter bank and the ultraviolet lamp before it reaches the kitchen tap.\n\n## Power",
+      "length": 694,
+      "isTable": false,
+      "tableId": 0,
+      "isDeleted": false,
+      "pointId": "<scrubbed>",
+      "metadata": {
+        "objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+        "chunkId": 1,
+        "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+        "parent": "C:/demo/handbooks/falcon_handbook.md",
+        "permissionId": 0,
+        "isDeleted": false,
+        "isTable": false,
+        "tableId": 0,
+        "signature": "00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+        "size": 4143,
+        "ingestedAt": "<scrubbed>"
+      }
+    }
+  ],
+  "has_more": true,
+  "next_after": 1,
+  "total": 7
+}

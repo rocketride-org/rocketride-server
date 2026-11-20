@@ -144,9 +144,33 @@ def test_convert_filter_is_deleted_false_excludes_deleted() -> None:
     assert converted == {'isDeleted': {'$ne': True}}
 
 
-def test_convert_filter_is_deleted_true_includes_only_deleted() -> None:
-    """isDeleted=True -> {'isDeleted': {'$eq': True}}."""
+def test_convert_filter_is_deleted_true_includes_every_row() -> None:
+    """isDeleted=True -> no isDeleted clause: every row, as the shared resolveDeleted reads it (and Qdrant does)."""
     Store = _load_store_class()
     store = Store.__new__(Store)
     converted = store._convertFilter(_doc_filter(isDeleted=True))
+    assert converted is None
+
+
+def test_convert_filter_deleted_only() -> None:
+    """deleted='deleted' -> {'isDeleted': {'$eq': True}}."""
+    Store = _load_store_class()
+    store = Store.__new__(Store)
+    converted = store._convertFilter(_doc_filter(deleted='deleted'))
     assert converted == {'isDeleted': {'$eq': True}}
+
+
+def test_convert_filter_deleted_all_wins_over_is_deleted() -> None:
+    """deleted='all' -> no isDeleted clause, whatever isDeleted says."""
+    Store = _load_store_class()
+    store = Store.__new__(Store)
+    converted = store._convertFilter(_doc_filter(deleted='all', isDeleted=False, chunkIds=[0]))
+    assert converted == {'chunkId': {'$in': [0]}}
+
+
+def test_convert_filter_is_table_false_is_kept() -> None:
+    """isTable=False is an explicit filter (it was dropped as falsy)."""
+    Store = _load_store_class()
+    store = Store.__new__(Store)
+    converted = store._convertFilter(_doc_filter(isTable=False))
+    assert converted == {'$and': [{'isTable': {'$eq': False}}, {'isDeleted': {'$ne': True}}]}

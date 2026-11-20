@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "WRITES_SOURCE",
+	"error": "Only a Tools source may remove documents."
+}

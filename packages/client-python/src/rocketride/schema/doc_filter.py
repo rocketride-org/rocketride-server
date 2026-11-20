@@ -45,7 +45,7 @@ Usage:
 """
 
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Literal, Optional, List
 
 
 class DocFilter(BaseModel):
@@ -121,6 +121,22 @@ class DocFilter(BaseModel):
 
     isDeleted: Optional[bool] = Field(
         None, description='Include (True) or exclude (False) deleted documents. None includes both.'
+    )
+
+    deleted: Optional[Literal['active', 'deleted', 'all']] = Field(
+        None,
+        description=(
+            "Which rows to cover, stated exactly: 'active' (not deleted), 'deleted' (only deleted) or "
+            "'all'. When set it takes precedence over isDeleted, whose meaning varies between stores."
+        ),
+    )
+
+    minScore: Optional[float] = Field(
+        None,
+        description=(
+            "Lowest score a search keeps. None applies the store's own floor; float('-inf') keeps "
+            'every row the search returns.'
+        ),
     )
 
     objectIds: Optional[List[str]] = Field(

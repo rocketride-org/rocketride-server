@@ -1,0 +1,19 @@
+{
+	"success": true,
+	"count": 0,
+	"model": "",
+	"vector_size": 0,
+	"collection_exists": false,
+	"documents": null,
+	"documents_without_first_chunk": null,
+	"chunks": null,
+	"deleted_chunks": null,
+	"deleted_documents": null,
+	"raw_count": null,
+	"tables": null,
+	"avg_chunks_per_document": null,
+	"dimension": null,
+	"metric": null,
+	"computed_at": "2026-10-08T18:31:03Z",
+	"counts_as_of": null
+}

@@ -1,0 +1,152 @@
+{
+	"success": true,
+	"items": [
+		{
+			"key": [
+				"ef35cb9c-f98f-e472-d795-298a40a5cb2b",
+				92
+			],
+			"sim": 0.93,
+			"score": 0.93,
+			"below_floor": false,
+			"path": "C:/demo/ops/ops_005.pdf",
+			"chunkId": 92,
+			"preview": "Confidential. This document is the property of the Falcon Station operators; do not distribute without…"
+		},
+		{
+			"key": [
+				"cf4d318a-103a-3e37-21b4-94feaa693a35",
+				26
+			],
+			"sim": 0.905,
+			"score": 0.905,
+			"below_floor": false,
+			"path": "C:/demo/support/support_007.txt",
+			"chunkId": 26,
+			"preview": "Confidential. This document is the property of the Falcon Station operators; do not distribute without…"
+		},
+		{
+			"key": [
+				"04f2dd23-1465-2002-b971-dcab04d65f63",
+				21
+			],
+			"sim": 0.88,
+			"score": 0.88,
+			"below_floor": false,
+			"path": "C:/demo/legal/legal_004.md",
+			"chunkId": 21,
+			"preview": "Confidential. This document is the property of the Falcon Station operators; do not distribute without…"
+		},
+		{
+			"key": [
+				"0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				16
+			],
+			"sim": 0.855,
+			"score": 0.855,
+			"below_floor": false,
+			"path": "C:/demo/finance/ocr_scan_junk.txt",
+			"chunkId": 16,
+			"preview": "finance ocr scan junk part 17: nesting kestrel water sample nesting nesting water pressure schedule nesting invoice…"
+		},
+		{
+			"key": [
+				"cf4d318a-103a-3e37-21b4-94feaa693a35",
+				17
+			],
+			"sim": 0.83,
+			"score": 0.83,
+			"below_floor": false,
+			"path": "C:/demo/support/support_007.txt",
+			"chunkId": 17,
+			"preview": "support support 007 part 18: spring filter rotation invoice contract pressure report schedule spring rotation invoice…"
+		},
+		{
+			"key": [
+				"4bbe410d-202b-a5fa-9780-3bb9cf28a9b1",
+				18
+			],
+			"sim": 0.805,
+			"score": 0.805,
+			"below_floor": false,
+			"path": "C:/demo/support/support_039.txt",
+			"chunkId": 18,
+			"preview": "support support 039 part 19: season schedule invoice kestrel contract survey station survey orchid filter nesting…"
+		},
+		{
+			"key": [
+				"f125ceda-c892-4560-e2bc-f6e16c2034b6",
+				5
+			],
+			"sim": 0.78,
+			"score": 0.78,
+			"below_floor": false,
+			"path": "C:/demo/finance/finance_009.pdf",
+			"chunkId": 5,
+			"preview": "finance finance 009 part 6: orchid valve sample falcon protocol contract report pressure kestrel rotation water…"
+		},
+		{
+			"key": [
+				"0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				39
+			],
+			"sim": 0.755,
+			"score": 0.755,
+			"below_floor": false,
+			"path": "C:/demo/finance/ocr_scan_junk.txt",
+			"chunkId": 39,
+			"preview": "finance ocr scan junk part 40: sample contract rotation invoice station filter report trial water clause report…"
+		},
+		{
+			"key": [
+				"cf4d318a-103a-3e37-21b4-94feaa693a35",
+				12
+			],
+			"sim": 0.73,
+			"score": 0.73,
+			"below_floor": false,
+			"path": "C:/demo/support/support_007.txt",
+			"chunkId": 12,
+			"preview": "support support 007 part 13: ticket report budget budget spring sample rotation orchid season pressure spring…"
+		},
+		{
+			"key": [
+				"cf4d318a-103a-3e37-21b4-94feaa693a35",
+				11
+			],
+			"sim": 0.705,
+			"score": 0.705,
+			"below_floor": false,
+			"path": "C:/demo/support/support_007.txt",
+			"chunkId": 11,
+			"preview": "support support 007 part 12: maintenance water trial valve nesting maintenance report sensor falcon kestrel nesting…"
+		},
+		{
+			"key": [
+				"a7620eb4-e354-695e-d7f7-ef461770898f",
+				5
+			],
+			"sim": 0.68,
+			"score": 0.68,
+			"below_floor": false,
+			"path": "C:/demo/research/research_030.docx",
+			"chunkId": 5,
+			"preview": "research research 030 part 6: humidity ledger invoice budget season trial contract harvest station station survey…"
+		},
+		{
+			"key": [
+				"f125ceda-c892-4560-e2bc-f6e16c2034b6",
+				4
+			],
+			"sim": 0.655,
+			"score": 0.655,
+			"below_floor": false,
+			"path": "C:/demo/finance/finance_009.pdf",
+			"chunkId": 4,
+			"preview": "finance finance 009 part 5: valve sensor schedule report spring audit maintenance filter humidity schedule invoice…"
+		}
+	],
+	"metric": "cosine",
+	"scope": "collection",
+	"k_requested": 12
+}

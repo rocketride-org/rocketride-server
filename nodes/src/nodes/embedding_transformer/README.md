@@ -8,7 +8,7 @@ Hugging Face develops open-source libraries and repositories for machine-learnin
 
 ## What it does
 
-The node embeds the `documents` and `questions` lanes, storing each result as a float list and recording the producing model. Choose it over `embedding_openai` when using a locally loaded sentence-transformer model and over the image or video embedders for text. Documents are buffered in groups of 64 and remaining documents flush when the input closes, while questions are encoded immediately.
+The node embeds the `documents` and `questions` lanes, storing each result as a float list and recording the producing model. Choose it over `embedding_openai` when using a locally loaded sentence-transformer model and over the image or video embedders for text. Documents are buffered in groups of 64 and remaining documents flush when the input closes, while questions are encoded immediately. It also answers the `embed` tool for external tool calls, which returns the vectors for texts a caller sends (see Notes).
 
 ## Lanes
 
@@ -47,6 +47,40 @@ The node prepends `document_prefix` to every document and `query_prefix` to ever
 ## Requirements
 
 The node declares GPU capability. It loads a `SentenceTransformer` through the model provider; the source does not specify a CPU-only fallback, so provision the compatible model runtime.
+
+## Notes
+
+### The `embed` tool
+
+When a Tools source controls this node, as in the Vector Explorer templates, a
+tool call such as `client.tool(token=..., tool='embed', node_id='embed_1',
+input={'texts': ['kestrel nesting']})` returns the vectors this node makes for
+the texts, so a caller can search a vector store, or place a query on Vector
+Explorer's map, with exactly the vector the pipeline would produce. The tool is
+for external tool calls only; agents never see it.
+
+| Input | Description |
+|---|---|
+| `texts` | 1 to 8 strings, each at most 8,000 characters and not blank. |
+| `kind` | `query` (default) encodes the texts the way the `questions` lane does; `document` the way the `documents` lane does. |
+
+The answer carries `model`, `dimension`, `vectors` (values rounded to six
+decimals), `prefix_applied` and `ms`. A refusal is an answer with
+`success: false` and a `code`, never an error: `INVALID_INPUT`, `NO_EMBEDDER`
+(no model loaded), `RATE_LIMITED` with `retry_after_s` (each task allows 30
+calls a minute, in bursts of up to 5), `BUSY` (the model stayed busy for 60
+seconds) or `STORE_ERROR` (the model failed; the message names only the error
+type and the server log has the detail). A call from a connection signed in
+with a pipeline's Public Authorization Key (`pk_…`) is refused with
+`READS_PUBLIC` before the model runs.
+
+The tool shares the model with the node's lanes: a call waits for the batches
+already being embedded and then runs alone, and batches that arrive while it
+waits go after it. The lanes' own batches still run side by side.
+
+A task started from a Tools source that controls this node loads the model as
+well, which adds to that task's start time and memory. `prefix_applied` is the
+query or document prefix the call used, or null when none is set.
 
 ## Upstream docs
 

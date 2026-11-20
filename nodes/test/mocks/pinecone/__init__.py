@@ -30,7 +30,10 @@ without requiring a real Pinecone instance.
 Mocked Components:
     - PineconeGRPC (aliased as Pinecone) - Main client class
     - ServerlessSpec, PodSpec - Index specifications
-    - Index operations (query, upsert, delete, describe_index_stats)
+    - Index operations (query, upsert, delete, describe_index_stats, fetch, fetch_by_metadata)
+    - The server limits that matter to the driver: ``top_k`` at most 1000 when metadata
+      or values are returned, and metadata values that are never null or objects
+    - Metadata numbers come back as floats, as the service stores them
 
 Storage:
     - Uses class-level storage to persist data across operations within a test
@@ -39,6 +42,22 @@ Storage:
 
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
+
+
+# =============================================================================
+# Errors
+# =============================================================================
+
+
+class PineconeApiException(Exception):
+    """The client's error for a request the service rejected (``status`` is the HTTP status)."""
+
+    def __init__(self, status: int = 400, reason: str = 'Bad Request', body: str = '') -> None:
+        """Keep the status and reason as the client does."""
+        super().__init__(f'({status})\nReason: {reason}\nHTTP response body: {body}')
+        self.status = status
+        self.reason = reason
+        self.body = body
 
 
 # =============================================================================
@@ -98,6 +117,8 @@ class MockIndex:
         include_values: bool = False,
     ) -> Dict[str, Any]:
         """Query the index for similar vectors."""
+        if (include_metadata or include_values) and top_k > 1000:
+            raise ValueError('top_k must be at most 1000 when include_metadata or include_values is true')
         matches = []
 
         for id, data in self._storage.items():
@@ -133,6 +154,9 @@ class MockIndex:
             vec_id = vec['id']
             values = vec['values']
             metadata = vec.get('metadata', {})
+            for key, value in (metadata or {}).items():
+                if value is None or isinstance(value, dict):
+                    raise ValueError(f'Metadata value for {key!r} must be a string, number, boolean or list of strings')
 
             # Store dimension if not set
             if self.name not in MockIndex._dimensions and values:
@@ -153,6 +177,54 @@ class MockIndex:
                     to_delete.append(id)
             for id in to_delete:
                 del self._storage[id]
+
+    def fetch(self, ids: List[str], namespace: str = '', **kwargs) -> Dict[str, Any]:
+        """Fetch vectors by id; ids that do not exist are absent from ``vectors``."""
+        if not ids:
+            raise ValueError('ids must be a non-empty list')
+        vectors = {}
+        for vec_id in ids:
+            data = self._storage.get(vec_id)
+            if data is not None:
+                vectors[vec_id] = {
+                    'id': vec_id,
+                    'values': list(data.get('values', [])),
+                    'metadata': self._serialize_metadata(data.get('metadata', {})),
+                }
+        return {'vectors': vectors, 'namespace': namespace}
+
+    def fetch_by_metadata(
+        self,
+        filter: Dict,
+        namespace: str = '',
+        limit: Optional[int] = None,
+        pagination_token: Optional[str] = None,
+        **kwargs,
+    ) -> Dict[str, Any]:
+        """Fetch one page of the vectors matching a metadata filter (storage order)."""
+        if not filter:
+            raise ValueError('filter must contain at least one condition')
+        if limit is not None and not 1 <= limit <= 10000:
+            raise ValueError('limit must be between 1 and 10000')
+        size = limit or 100
+        if pagination_token is not None and not str(pagination_token).isdigit():
+            # The service rejects a token it did not issue
+            raise PineconeApiException(status=400, body='{"error": {"message": "invalid pagination token"}}')
+        start = int(pagination_token or 0)
+        ids = [
+            vec_id for vec_id, data in self._storage.items() if self._matches_filter(data.get('metadata', {}), filter)
+        ]
+        page = ids[start : start + size]
+        vectors = {
+            vec_id: {
+                'id': vec_id,
+                'values': list(self._storage[vec_id].get('values', [])),
+                'metadata': self._serialize_metadata(self._storage[vec_id].get('metadata', {})),
+            }
+            for vec_id in page
+        }
+        more = start + size < len(ids)
+        return {'vectors': vectors, 'namespace': namespace, 'pagination': {'next': str(start + size)} if more else None}
 
     def update(self, id: str, set_metadata: Dict = None):
         """Update vector metadata."""
@@ -229,12 +301,14 @@ class MockIndex:
         return dot_product / (norm1 * norm2)
 
     def _serialize_metadata(self, metadata: Dict) -> Dict:
-        """Serialize metadata, handling special types and excluding None values."""
+        """Serialize metadata as the service returns it: no None values, every number a float."""
         result = {}
         for key, value in metadata.items():
             if value is None:
                 continue  # Skip None values
-            if hasattr(value, 'model_dump'):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                result[key] = float(value)  # Pinecone stores metadata numbers as doubles
+            elif hasattr(value, 'model_dump'):
                 result[key] = value.model_dump(exclude_none=True)
             elif isinstance(value, dict):
                 result[key] = {k: v for k, v in value.items() if v is not None}
@@ -267,6 +341,26 @@ class MockPinecone:
         MockPinecone._indexes[name] = {'dimension': dimension, 'metric': metric, 'spec': spec}
         MockIndex._dimensions[name] = dimension
         MockIndex._all_storage[name] = {}
+
+    def describe_index(self, name: str) -> Dict[str, Any]:
+        """Describe an index as the control plane does (the host is part of the real answer)."""
+        if name not in MockPinecone._indexes:
+            raise Exception(f'Resource {name} not found')
+        info = MockPinecone._indexes[name]
+        spec = info.get('spec')
+        if isinstance(spec, PodSpec):
+            spec_dict = {'serverless': None, 'pod': {'environment': spec.environment, 'pod_type': spec.pod_type}}
+        else:
+            spec_dict = {'serverless': {'cloud': 'aws', 'region': 'us-east-1'}, 'pod': None}
+        return {
+            'name': name,
+            'dimension': info['dimension'],
+            'metric': info['metric'],
+            'host': f'{name}-mock.svc.example.invalid',
+            'spec': spec_dict,
+            'status': {'ready': True, 'state': 'Ready'},
+            'vector_type': 'dense',
+        }
 
     def Index(self, name: str) -> MockIndex:
         """Get an index by name."""

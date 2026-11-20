@@ -9,7 +9,7 @@ within the call, and the store's control row cannot be overwritten.
 
 import pytest
 
-from ._vectordb_tool_harness import Tools, make_store
+from ._vectordb_tool_harness import Tools, core, make_store
 
 
 def _doc(object_id, content, chunk_id=None, **metadata):
@@ -31,7 +31,7 @@ def test_chunks_sent_without_numbers_are_numbered_in_order_per_object():
 
     result = Tools(store).upsert({'documents': [_doc('a', 'a0'), _doc('b', 'b0'), _doc('a', 'a1'), _doc('a', 'a2')]})
 
-    assert result == {'success': True, 'count': 4, 'skipped': 0}
+    assert core(result) == {'success': True, 'count': 4, 'skipped': 0}
     assert _written(store) == [('a', 0, 'a0'), ('b', 0, 'b0'), ('a', 1, 'a1'), ('a', 2, 'a2')]
 
 
@@ -121,7 +121,9 @@ def test_the_control_row_cannot_be_overwritten():
 
     result = Tools(store).upsert({'documents': [_doc('a', 'fine'), _doc('schema', 'x')]})
 
-    assert result['success'] is False and 'reserved' in result['error']
+    # Refused before any write, with the contract's RESERVED_ID code.
+    assert result['success'] is False and result['code'] == 'RESERVED_ID'
+    assert "'schema' is the collection's control record" in result['error']
     store.addChunks.assert_not_called()
 
 
@@ -132,7 +134,7 @@ def test_skipped_documents_take_no_number():
         {'documents': [_doc('a', 'a0'), {'content': '', 'object_id': 'a'}, 'not a document', _doc('a', 'a1')]}
     )
 
-    assert result == {'success': True, 'count': 2, 'skipped': 2}
+    assert core(result) == {'success': True, 'count': 2, 'skipped': 2}
     assert _written(store) == [('a', 0, 'a0'), ('a', 1, 'a1')]
 
 

@@ -23,7 +23,12 @@ def test_an_unknown_object_id_is_a_failure():
 
     result = Tools(store).get({'object_id': 'obj-9'})
 
-    assert result == {'success': False, 'error': "get: no document with object_id 'obj-9'", 'object_id': 'obj-9'}
+    assert result == {
+        'success': False,
+        'code': 'NOT_FOUND',
+        'error': "get: no document with object_id 'obj-9'",
+        'object_id': 'obj-9',
+    }
     # Two reads: the active chunks, then one row with the trash included.
     assert store.get.call_count == 2
     probe = store.get.call_args_list[1].args[0]
@@ -49,6 +54,7 @@ def test_the_trash_message_points_to_restore_only_where_it_is_offered():
 
     assert result == {
         'success': False,
+        'code': 'IN_TRASH',
         'error': "get: document 'obj-1' is soft-deleted; this node does not offer restore while writes through tools are off",
         'object_id': 'obj-1',
     }

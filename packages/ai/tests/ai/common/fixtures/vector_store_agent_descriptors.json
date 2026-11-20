@@ -1,0 +1,671 @@
+[
+ {
+  "description": "Demo corpus Delete documents from the vector database by their object IDs.",
+  "inputSchema": {
+   "properties": {
+    "object_ids": {
+     "description": "List of object IDs to delete.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "object_ids"
+   ],
+   "type": "object"
+  },
+  "name": "delete",
+  "outputSchema": {
+   "properties": {
+    "deleted_count": {
+     "description": "The distinct object IDs the request named, not the documents found.",
+     "type": "integer"
+    },
+    "object_ids": {
+     "description": "The distinct object IDs the request named, in the order given.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "success": {
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus Retrieve document chunks by objectId from the vector database, in pages of up to 100 ordered by chunk ID; `total` is the document's chunk count and `has_more` says whether another page follows. A document is read up to 10000 chunks; `truncated` is true when that ceiling was hit. An unknown object ID, or one in the trash, returns {\"success\": false, \"error\": \"...\"}.",
+  "inputSchema": {
+   "properties": {
+    "limit": {
+     "description": "Maximum number of chunks to return (default and cap 100).",
+     "minimum": 1,
+     "type": "integer"
+    },
+    "object_id": {
+     "description": "The objectId of the document to retrieve.",
+     "type": "string"
+    },
+    "offset": {
+     "description": "Number of chunks to skip (default 0); pages are ordered by chunk ID on every store.",
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "object_id"
+   ],
+   "type": "object"
+  },
+  "name": "get",
+  "outputSchema": {
+   "properties": {
+    "chunks": {
+     "items": {
+      "properties": {
+       "chunkId": {
+        "type": "integer"
+       },
+       "content": {
+        "type": "string"
+       },
+       "metadata": {
+        "type": "object"
+       }
+      },
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "has_more": {
+     "description": "Whether a page follows this one.",
+     "type": "boolean"
+    },
+    "offset": {
+     "type": "integer"
+    },
+    "success": {
+     "type": "boolean"
+    },
+    "total": {
+     "description": "Chunks the document has (up to 10000).",
+     "type": "integer"
+    },
+    "truncated": {
+     "description": "True when the document hit the 10000-chunk read ceiling: total and the last page may be incomplete.",
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus List the documents in this vector database one by one (equal paths are not collapsed), each with its path and chunk count, in pages ordered by path. Follow next_cursor for the next page. deleted='deleted' (or true) lists the trash; parent keeps one exact path.",
+  "inputSchema": {
+   "properties": {
+    "cursor": {
+     "description": "next_cursor of the previous page (null for the first).",
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "deleted": {
+     "anyOf": [
+      {
+       "enum": [
+        "active",
+        "deleted",
+        "all"
+       ],
+       "type": "string"
+      },
+      {
+       "type": "boolean"
+      }
+     ],
+     "description": "'active' (default), 'deleted' (the trash: documents with a chunk in it) or 'all'; true and false stand for deleted and active."
+    },
+    "filter": {
+     "description": "Restrict the listing; the answer says how much of it the store applied.",
+     "properties": {
+      "file_types": {
+       "items": {
+        "type": "string"
+       },
+       "type": [
+        "array",
+        "null"
+       ]
+      },
+      "has_first_chunk": {
+       "type": [
+        "boolean",
+        "null"
+       ]
+      },
+      "has_tables": {
+       "type": [
+        "boolean",
+        "null"
+       ]
+      },
+      "ingested_after": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "ingested_before": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "max_chunks": {
+       "type": [
+        "integer",
+        "null"
+       ]
+      },
+      "min_chunks": {
+       "type": [
+        "integer",
+        "null"
+       ]
+      },
+      "path_contains": {
+       "type": [
+        "string",
+        "null"
+       ]
+      },
+      "path_prefix": {
+       "type": [
+        "string",
+        "null"
+       ]
+      }
+     },
+     "type": [
+      "object",
+      "null"
+     ]
+    },
+    "limit": {
+     "description": "Documents per page (default 100, at most 1,000; below 1 is refused).",
+     "type": "integer"
+    },
+    "object_ids": {
+     "items": {
+      "type": "string"
+     },
+     "type": [
+      "array",
+      "null"
+     ]
+    },
+    "parent": {
+     "description": "Only documents stored under exactly this parent path (a page may then hold fewer rows).",
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "sort": {
+     "enum": [
+      "path"
+     ],
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "name": "list_documents",
+  "outputSchema": {
+   "properties": {
+    "caveats": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "code": {
+     "type": "string"
+    },
+    "counts_exact": {
+     "type": "boolean"
+    },
+    "distinct": {
+     "type": "boolean"
+    },
+    "documents": {
+     "description": "The same rows in #2704's shape (object_id, parent, chunk_count), an alias of items kept for its callers.",
+     "items": {
+      "properties": {
+       "chunk_count": {
+        "type": [
+         "integer",
+         "null"
+        ]
+       },
+       "object_id": {
+        "type": "string"
+       },
+       "parent": {
+        "type": [
+         "string",
+         "null"
+        ]
+       }
+      },
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "error": {
+     "type": "string"
+    },
+    "filter_applied": {
+     "enum": [
+      "server",
+      "partial",
+      "none"
+     ],
+     "type": "string"
+    },
+    "filter_ignored": {
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "has_more": {
+     "description": "Whether a page follows (next_cursor is not null).",
+     "type": "boolean"
+    },
+    "items": {
+     "description": "One row per document: objectId, path, chunks, has_first_chunk, tables, deleted, nodeId, size, modifyTime, ingestedAt, pointId, max_chunk_id, deleted_chunks.",
+     "items": {
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "next_cursor": {
+     "description": "Pass it as cursor for the next page; null at the end.",
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "offset": {
+     "description": "Always 0: the listing pages with cursor.",
+     "type": "integer"
+    },
+    "sorted": {
+     "type": "boolean"
+    },
+    "success": {
+     "type": "boolean"
+    },
+    "total": {
+     "description": "Documents in the whole listing, where the store counts them.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus List unique document paths stored in this vector database.",
+  "inputSchema": {
+   "properties": {
+    "limit": {
+     "description": "Maximum number of results to return (default and cap 1000).",
+     "minimum": 1,
+     "type": "integer"
+    },
+    "offset": {
+     "description": "Number of results to skip (default 0).",
+     "minimum": 0,
+     "type": "integer"
+    },
+    "parent": {
+     "description": "Optional parent path; lists documents stored under exactly this parent (Atlas matches it as a case-insensitive pattern).",
+     "type": "string"
+    }
+   },
+   "type": "object"
+  },
+  "name": "objdir",
+  "outputSchema": {
+   "properties": {
+    "paths": {
+     "description": "Map of unique parent paths to their object IDs.",
+     "type": "object"
+    },
+    "success": {
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus Take documents out of the trash by object ID, so their chunks are searchable and readable again. A document not in the trash is left as it is; one removed with delete cannot be restored.",
+  "inputSchema": {
+   "properties": {
+    "object_ids": {
+     "description": "Object IDs of the documents to take out of the trash.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "object_ids"
+   ],
+   "type": "object"
+  },
+  "name": "restore",
+  "outputSchema": {
+   "properties": {
+    "audit": {
+     "type": "object"
+    },
+    "matched_chunks": {
+     "description": "Chunk rows the store holds for those IDs in either state (0 when none of them exists), or null when the store does not report a count.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "moved_chunks": {
+     "description": "Chunks the call took out of the trash (0 for documents not in it), or null when the store does not count.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "not_found": {
+     "description": "Object IDs with nothing stored.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "object_ids": {
+     "description": "The distinct object IDs the request named, in the order given.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "success": {
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus Search for documents in the vector database. Requires an embedding provider bound to this node (via IGlobal.embed_query) for semantic similarity search. Returns matching documents with their content, metadata, and scores. Returns {\"success\": false, \"error\": \"...\"} on failure (missing embedder, empty query, store error).",
+  "inputSchema": {
+   "properties": {
+    "filter": {
+     "additionalProperties": false,
+     "description": "Optional metadata filter. Only objectId, nodeId and parent are supported; unrecognized keys are rejected. Example: {\"nodeId\": \"my-node\", \"parent\": \"/docs\"}",
+     "properties": {
+      "nodeId": {
+       "description": "Match documents written by this node ID.",
+       "type": "string"
+      },
+      "objectId": {
+       "anyOf": [
+        {
+         "type": "string"
+        },
+        {
+         "items": {
+          "type": "string"
+         },
+         "type": "array"
+        }
+       ],
+       "description": "Match documents with this object ID. A string or an array of strings."
+      },
+      "parent": {
+       "description": "Match documents under this parent path.",
+       "type": "string"
+      }
+     },
+     "type": "object"
+    },
+    "query": {
+     "description": "The search query text. Will be matched against stored documents using semantic similarity.",
+     "type": "string"
+    },
+    "top_k": {
+     "default": 10,
+     "description": "Maximum number of results to return (default: 10).",
+     "type": "integer"
+    }
+   },
+   "required": [
+    "query"
+   ],
+   "type": "object"
+  },
+  "name": "search",
+  "outputSchema": {
+   "properties": {
+    "error": {
+     "type": "string"
+    },
+    "results": {
+     "items": {
+      "properties": {
+       "content": {
+        "type": "string"
+       },
+       "metadata": {
+        "type": "object"
+       },
+       "score": {
+        "type": "number"
+       }
+      },
+      "type": "object"
+     },
+     "type": "array"
+    },
+    "success": {
+     "type": "boolean"
+    },
+    "total": {
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus Move documents to the trash by object ID: their chunks stay stored but leave search, objdir, get and the active listing until restore. delete removes them for good instead.",
+  "inputSchema": {
+   "properties": {
+    "object_ids": {
+     "description": "Object IDs of the documents to move to the trash.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "object_ids"
+   ],
+   "type": "object"
+  },
+  "name": "soft_delete",
+  "outputSchema": {
+   "properties": {
+    "audit": {
+     "type": "object"
+    },
+    "matched_chunks": {
+     "description": "Chunk rows the store holds for those IDs in either state (0 when none of them exists), or null when the store does not report a count.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "moved_chunks": {
+     "description": "Chunks the call moved to the trash (0 for documents already there), or null when the store does not count.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "not_found": {
+     "description": "Object IDs with nothing stored.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "object_ids": {
+     "description": "The distinct object IDs the request named, in the order given.",
+     "items": {
+      "type": "string"
+     },
+     "type": "array"
+    },
+    "success": {
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus Return statistics about this vector store collection: the row count, the number of active documents where the store can tell, the embedding model and the vector size.",
+  "inputSchema": {
+   "properties": {},
+   "type": "object"
+  },
+  "name": "stats",
+  "outputSchema": {
+   "properties": {
+    "count": {
+     "description": "Rows (chunks) in the collection, as the store counts them.",
+     "type": "integer"
+    },
+    "document_count": {
+     "description": "Active documents, or null where the store cannot count them.",
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "model": {
+     "description": "Embedding model name.",
+     "type": "string"
+    },
+    "success": {
+     "type": "boolean"
+    },
+    "vector_size": {
+     "description": "Embedding vector dimension.",
+     "type": "integer"
+    }
+   },
+   "type": "object"
+  }
+ },
+ {
+  "description": "Demo corpus Add or update documents in the vector database. Each document requires content text and an object ID. For each object ID, a call that includes chunk 0 replaces the chunks stored for it, and a call without chunk 0 adds to them. Documents without metadata.chunkId are numbered 0, 1, 2 ... per object ID, so such a call replaces. A call without chunk 0 that repeats a stored chunk number can store a second copy of it: to change one chunk, send the whole object from chunk 0. Embeddings are computed automatically when an embedding provider is bound to this node (via IGlobal.embed_query). Alternatively, supply pre-computed \"embedding\" (float array) and \"embedding_model\" (string) per document to skip auto-computation. Several documents with one object ID are stored as that document's chunks. Returns {\"success\": false, \"error\": \"...\"} when embeddings cannot be obtained.",
+  "inputSchema": {
+   "properties": {
+    "documents": {
+     "description": "Array of documents to upsert.",
+     "items": {
+      "properties": {
+       "content": {
+        "description": "The text content of the document.",
+        "type": "string"
+       },
+       "embedding": {
+        "description": "Pre-computed embedding vector. If provided together with embedding_model, skips automatic embedding computation.",
+        "items": {
+         "type": "number"
+        },
+        "type": "array"
+       },
+       "embedding_model": {
+        "description": "Name of the model used to compute the supplied embedding vector.",
+        "type": "string"
+       },
+       "metadata": {
+        "additionalProperties": false,
+        "description": "Optional metadata. Only nodeId, parent and chunkId are stored; unrecognized keys are rejected.",
+        "properties": {
+         "chunkId": {
+          "description": "Chunk index recorded on the document. Without it, the chunks sent for one object ID are numbered 0, 1, 2 ... in the order given; an explicit index may not repeat within one call.",
+          "minimum": 0,
+          "type": "integer"
+         },
+         "nodeId": {
+          "description": "Writing node ID recorded on the document (default: \"vectordb_tool\").",
+          "type": "string"
+         },
+         "parent": {
+          "description": "Parent path recorded on the document (default: \"/\").",
+          "type": "string"
+         }
+        },
+        "type": "object"
+       },
+       "object_id": {
+        "description": "Identifier of the document the text belongs to. A call that includes the document's chunk 0 replaces what is stored for it.",
+        "type": "string"
+       }
+      },
+      "required": [
+       "content",
+       "object_id"
+      ],
+      "type": "object"
+     },
+     "type": "array"
+    }
+   },
+   "required": [
+    "documents"
+   ],
+   "type": "object"
+  },
+  "name": "upsert",
+  "outputSchema": {
+   "properties": {
+    "count": {
+     "type": "integer"
+    },
+    "skipped": {
+     "type": "integer"
+    },
+    "success": {
+     "type": "boolean"
+    }
+   },
+   "type": "object"
+  }
+ }
+]

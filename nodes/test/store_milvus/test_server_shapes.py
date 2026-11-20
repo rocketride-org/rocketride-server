@@ -140,9 +140,12 @@ def test_render_orders_chunks_by_the_chunk_id_in_meta(monkeypatch):
 def test_marks_read_the_rows_they_change_strong(monkeypatch, method):
     """The rows a mark rewrites include other processes' writes, so a mark never misses a chunk and changes nothing."""
     store = _store(monkeypatch)
-    store.client.query.return_value = [{'id': 1, 'vector': [1.0, 0.0, 0.0], 'content': '', 'meta': {'objectId': 'a'}}]
+    # The row is in the state the mark moves it out of; a count(*) read answers the count, any other read the row.
+    row = {'id': 1, 'vector': [1.0, 0.0, 0.0], 'content': '', 'meta': {'objectId': 'a', 'chunkId': 0}}
+    row['meta']['isDeleted'] = method == 'markActive'
+    store.client.query.side_effect = lambda **kw: [{'count(*)': 1}] if kw['output_fields'] == ['count(*)'] else [row]
     getattr(store, method)(['a'])
-    assert store.client.query.call_args.kwargs['consistency_level'] == 'Strong'
+    assert [call.kwargs['consistency_level'] for call in store.client.query.call_args_list] == ['Strong', 'Strong']
     assert store.client.upsert.call_count == 1
 
 

@@ -56,6 +56,7 @@ Finding What Models to Mock:
 4. Start minimal and add types as tests fail
 """
 
+from enum import Enum
 from typing import List, Any, Optional
 from dataclasses import dataclass
 
@@ -368,6 +369,167 @@ class PointsList:
     """
 
     points: List[PointStruct]
+
+
+# =============================================================================
+# Vector Explorer additions (explorer hooks on the Qdrant store)
+# =============================================================================
+# The store's explorer hooks use these as well: conditions on ids and nulls,
+# ordered scrolls, random sampling, counts, facets and the distance matrix.
+# Field names match the real qdrant_client models.
+
+
+class MatchExcept:
+    """Match any value NOT in a list (``FieldCondition(match=MatchExcept(**{'except': [...]}))``)."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Accept the real model's ``except`` keyword (a Python keyword, hence the alias)."""
+        self.except_ = list(kwargs.get('except', kwargs.get('except_', [])) or [])
+
+
+@dataclass
+class HasIdCondition:
+    """Match points whose id is in ``has_id``."""
+
+    has_id: List[Any]
+
+
+@dataclass
+class PayloadField:
+    """A payload key, as used by ``IsNullCondition`` / ``IsEmptyCondition``."""
+
+    key: str
+
+
+@dataclass
+class IsNullCondition:
+    """Match points whose payload value at ``is_null.key`` is null."""
+
+    is_null: PayloadField
+
+
+@dataclass
+class IsEmptyCondition:
+    """Match points whose payload value at ``is_empty.key`` is missing, null or an empty list."""
+
+    is_empty: PayloadField
+
+
+class Direction:
+    """Constants for the ordering direction of ``OrderBy``."""
+
+    ASC = 'asc'
+    DESC = 'desc'
+
+
+@dataclass
+class OrderBy:
+    """Order a scroll by a payload key (real Qdrant needs a range index on it)."""
+
+    key: str
+    direction: Optional[str] = None
+    start_from: Optional[Any] = None
+
+
+class Sample:
+    """Constants for ``SampleQuery``."""
+
+    RANDOM = 'random'
+
+
+@dataclass
+class SampleQuery:
+    """``query_points(query=SampleQuery(sample=Sample.RANDOM))`` draws random points."""
+
+    sample: str
+
+
+class RecommendStrategy(str, Enum):
+    """How a recommendation combines its examples (the real model is a string enum too)."""
+
+    AVERAGE_VECTOR = 'average_vector'
+    BEST_SCORE = 'best_score'
+    SUM_SCORES = 'sum_scores'
+
+
+@dataclass
+class RecommendInput:
+    """Examples of a recommendation: point ids or raw vectors on each side, and the strategy.
+
+    ``strategy`` may be a :class:`RecommendStrategy` or its string value (the real model
+    coerces one into the other); None is ``average_vector``.
+    """
+
+    positive: Optional[List[Any]] = None
+    negative: Optional[List[Any]] = None
+    strategy: Optional[Any] = None
+
+
+@dataclass
+class RecommendQuery:
+    """``query_points(query=RecommendQuery(recommend=RecommendInput(...)))`` recommends from examples."""
+
+    recommend: RecommendInput
+
+
+@dataclass
+class CountResult:
+    """Result of ``count()``."""
+
+    count: int
+
+
+@dataclass
+class FacetValueHit:
+    """One facet value and the number of matching points that carry it."""
+
+    value: Any
+    count: int
+
+
+@dataclass
+class FacetResponse:
+    """Result of ``facet()``: hits sorted by count (descending), then value."""
+
+    hits: List[FacetValueHit]
+
+
+@dataclass
+class SearchMatrixOffsetsResponse:
+    """Result of ``search_matrix_offsets()``: a sparse matrix in coordinate form.
+
+    ``offsets_row[i]`` and ``offsets_col[i]`` index ``ids``; ``scores[i]`` is their score.
+    """
+
+    offsets_row: List[int]
+    offsets_col: List[int]
+    scores: List[float]
+    ids: List[Any]
+
+
+@dataclass
+class PointIdsList:
+    """Selects points by id."""
+
+    points: List[Any]
+
+
+class Distance:
+    """Constants for the distance of a collection's vectors."""
+
+    COSINE = 'Cosine'
+    EUCLID = 'Euclid'
+    DOT = 'Dot'
+    MANHATTAN = 'Manhattan'
+
+
+@dataclass
+class VersionInfo:
+    """Result of ``info()``."""
+
+    title: str = 'qdrant - vector search engine'
+    version: str = 'mock'
+    commit: Optional[str] = None
 
 
 # =============================================================================

@@ -8,7 +8,9 @@ reports them.
 
 import pytest
 
-from ._vectordb_tool_harness import Tools, make_store
+from ai.common.store.errors import StoreUnsupported
+
+from ._vectordb_tool_harness import Tools, core, make_store
 
 TRASH_TOOLS = [('soft_delete', 'markDeleted'), ('restore', 'markActive')]
 
@@ -20,7 +22,10 @@ def test_the_tool_calls_the_driver_once_with_clean_distinct_ids(tool, method):
 
     result = getattr(Tools(store), tool)({'object_ids': [' a ', 'a', 'b', '', '  ']})
 
-    assert result == {'success': True, 'object_ids': ['a', 'b'], 'matched_chunks': 5}
+    # The explorer's answer adds not_found and the audit block; matched_chunks (a store that cannot count answers
+    # what its driver reported) and moved_chunks (always the driver's report) are 5 here.
+    assert core(result) == {'success': True, 'object_ids': ['a', 'b'], 'matched_chunks': 5}
+    assert result['moved_chunks'] == 5
     getattr(store, method).assert_called_once_with(['a', 'b'])
 
 
@@ -33,9 +38,23 @@ def test_the_tool_calls_the_driver_once_with_clean_distinct_ids(tool, method):
 def test_matched_chunks_is_only_what_the_driver_reports(tool, method, reported, expected):
     """A driver that returns nothing (every store before this change) yields null, never a made-up count."""
     store = make_store()
+    store.countChunks.side_effect = StoreUnsupported('no filtered count')  # this store cannot count
     getattr(store, method).return_value = reported
 
-    assert getattr(Tools(store), tool)({'object_ids': ['a']})['matched_chunks'] == expected
+    answer = getattr(Tools(store), tool)({'object_ids': ['a']})
+    assert answer['matched_chunks'] == expected and answer['moved_chunks'] == expected
+
+
+@pytest.mark.parametrize('tool, method', TRASH_TOOLS)
+def test_a_store_that_counts_answers_the_rows_it_holds_and_the_rows_it_moved(tool, method):
+    """matched_chunks is every chunk row stored for the ids, in either state; moved_chunks is what changed."""
+    store = make_store()
+    store.countChunks.return_value = 5  # five rows for the ids ...
+    getattr(store, method).return_value = 2  # ... of which two changed state
+
+    answer = getattr(Tools(store), tool)({'object_ids': ['a']})
+
+    assert (answer['matched_chunks'], answer['moved_chunks']) == (5, 2)
 
 
 @pytest.mark.parametrize('tool, method', TRASH_TOOLS)
@@ -92,7 +111,12 @@ def test_bad_ids_fail_without_reaching_the_driver(tool, method, object_ids, mess
     result = getattr(Tools(store), tool)(args)
 
     assert result['success'] is False
-    assert result['error'].startswith(f'{tool}') and message in result['error']
+    if message.startswith("object_id 'schema'"):
+        # The control record is refused with the contract's code and its own sentence.
+        assert result['code'] == 'RESERVED_ID' and "'schema' is the collection's control record" in result['error']
+    else:
+        assert result['code'] == 'INVALID_INPUT'
+        assert result['error'].startswith(f'{tool}') and message in result['error']
     getattr(store, method).assert_not_called()
 
 
@@ -113,6 +137,9 @@ def test_a_json_string_payload_is_normalized(tool, method):
 
 
 @pytest.mark.parametrize('tool, method', TRASH_TOOLS)
-def test_an_unbound_store_raises_like_the_other_tools(tool, method):
-    with pytest.raises(RuntimeError, match='store not initialized'):
-        getattr(Tools(None), tool)({'object_ids': ['a']})
+def test_an_unbound_store_is_a_failure_like_the_other_tools(tool, method):
+    """The tool boundary answers a store that is not open with STORE_ERROR instead of raising."""
+    result = getattr(Tools(None), tool)({'object_ids': ['a']})
+
+    assert result['success'] is False and result['code'] == 'STORE_ERROR'
+    assert Tools(None).delete({'object_ids': ['a']})['code'] == 'STORE_ERROR'

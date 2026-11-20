@@ -1,0 +1,93 @@
+{
+	"files": [
+		{
+			"relPath": "memo_q3.docx",
+			"objectId": "b395a648-f2f3-5113-94f1-8094314c0e89",
+			"size": 22016
+		},
+		{
+			"relPath": "scan_unreadable.pdf",
+			"objectId": "bd4dd486-2c1e-525b-9380-abba81ce95a9",
+			"size": 4096
+		}
+	],
+	"events": [
+		{
+			"action": "open",
+			"filepath": "memo_q3.docx",
+			"bytes_sent": 0,
+			"file_size": 22016,
+			"upload_time": 0
+		},
+		{
+			"action": "write",
+			"filepath": "memo_q3.docx",
+			"bytes_sent": 7339,
+			"file_size": 22016,
+			"upload_time": 0.05
+		},
+		{
+			"action": "write",
+			"filepath": "memo_q3.docx",
+			"bytes_sent": 14678,
+			"file_size": 22016,
+			"upload_time": 0.1
+		},
+		{
+			"action": "write",
+			"filepath": "memo_q3.docx",
+			"bytes_sent": 22016,
+			"file_size": 22016,
+			"upload_time": 0.15
+		},
+		{
+			"action": "close",
+			"filepath": "memo_q3.docx",
+			"bytes_sent": 22016,
+			"file_size": 22016,
+			"upload_time": 0.16
+		},
+		{
+			"action": "complete",
+			"filepath": "memo_q3.docx",
+			"bytes_sent": 22016,
+			"file_size": 22016,
+			"upload_time": 1.01,
+			"result": {
+				"name": "memo_q3.docx",
+				"path": "",
+				"objectId": "b395a648-f2f3-5113-94f1-8094314c0e89",
+				"result_types": {}
+			}
+		},
+		{
+			"action": "open",
+			"filepath": "scan_unreadable.pdf",
+			"bytes_sent": 0,
+			"file_size": 4096,
+			"upload_time": 0
+		},
+		{
+			"action": "write",
+			"filepath": "scan_unreadable.pdf",
+			"bytes_sent": 4096,
+			"file_size": 4096,
+			"upload_time": 0.05
+		},
+		{
+			"action": "close",
+			"filepath": "scan_unreadable.pdf",
+			"bytes_sent": 4096,
+			"file_size": 4096,
+			"upload_time": 0.06
+		},
+		{
+			"action": "error",
+			"filepath": "scan_unreadable.pdf",
+			"bytes_sent": 4096,
+			"file_size": 4096,
+			"upload_time": 0.45,
+			"error": "Pipe closed with an error"
+		}
+	]
+}

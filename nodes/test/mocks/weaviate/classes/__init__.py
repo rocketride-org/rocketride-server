@@ -25,8 +25,9 @@
 Mock Weaviate classes submodule.
 """
 
+from . import aggregate
 from . import init
 from . import query
 from . import config
 
-__all__ = ['init', 'query', 'config']
+__all__ = ['aggregate', 'init', 'query', 'config']

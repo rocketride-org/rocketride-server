@@ -1,0 +1,37 @@
+{
+	"success": true,
+	"items": [
+		{
+			"objectId": "7598ec68-b5a3-51a8-bdd3-7200638f85db",
+			"path": "C:/demo/ops/shift_rota.docx",
+			"chunks": 5,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 22016,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "1dfa32e5-89bf-5dd5-8506-e303d3ebb97a"
+		},
+		{
+			"objectId": "b7d9f0ed-3e89-583f-9dbe-195a39648e40",
+			"path": "report.pdf",
+			"chunks": 19,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 1048211,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "d9a3b0c6-544b-56a9-96a7-f9a991a42054"
+		}
+	],
+	"next_cursor": null,
+	"total": 7,
+	"counts_exact": true,
+	"distinct": true,
+	"sorted": true,
+	"caveats": []
+}

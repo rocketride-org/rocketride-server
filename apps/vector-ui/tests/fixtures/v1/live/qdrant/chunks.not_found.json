@@ -1,0 +1,6 @@
+{
+  "__scrub__": [],
+  "success": false,
+  "code": "NOT_FOUND",
+  "error": "No document with objectId 'schema' is stored in this collection."
+}

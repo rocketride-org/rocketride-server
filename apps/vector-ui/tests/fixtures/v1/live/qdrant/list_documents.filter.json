@@ -1,0 +1,87 @@
+{
+  "__scrub__": [
+    "ingestedAt",
+    "next_cursor",
+    "pointId"
+  ],
+  "success": true,
+  "items": [
+    {
+      "objectId": "fd5a9a5d-ec71-5bd1-9b0a-68abdf2ca88b",
+      "path": "C:/demo/kitchen/winter_stew.md",
+      "chunks": 2,
+      "has_first_chunk": true,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": 1202,
+      "modifyTime": null,
+      "ingestedAt": "<scrubbed>",
+      "pointId": "<scrubbed>",
+      "max_chunk_id": null,
+      "deleted_chunks": null
+    },
+    {
+      "objectId": "dcfda41e-afa5-5f8d-b1c7-860cc0e03189",
+      "path": "C:/demo/greenhouse/orchid_notes.txt",
+      "chunks": 4,
+      "has_first_chunk": true,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": 2737,
+      "modifyTime": null,
+      "ingestedAt": "<scrubbed>",
+      "pointId": "<scrubbed>",
+      "max_chunk_id": null,
+      "deleted_chunks": null
+    },
+    {
+      "objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+      "path": "C:/demo/field/kestrel_field_guide.md",
+      "chunks": 5,
+      "has_first_chunk": true,
+      "tables": 0,
+      "deleted": false,
+      "nodeId": "9a0b9f66-f693-4b3b-a85b-bb810261c26e",
+      "size": 3538,
+      "modifyTime": null,
+      "ingestedAt": "<scrubbed>",
+      "pointId": "<scrubbed>",
+      "max_chunk_id": null,
+      "deleted_chunks": null
+    }
+  ],
+  "next_cursor": "<scrubbed>",
+  "total": 8,
+  "counts_exact": true,
+  "distinct": true,
+  "sorted": false,
+  "documents": [
+    {
+      "object_id": "fd5a9a5d-ec71-5bd1-9b0a-68abdf2ca88b",
+      "parent": "C:/demo/kitchen/winter_stew.md",
+      "chunk_count": 2
+    },
+    {
+      "object_id": "dcfda41e-afa5-5f8d-b1c7-860cc0e03189",
+      "parent": "C:/demo/greenhouse/orchid_notes.txt",
+      "chunk_count": 4
+    },
+    {
+      "object_id": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+      "parent": "C:/demo/field/kestrel_field_guide.md",
+      "chunk_count": 5
+    }
+  ],
+  "offset": 0,
+  "has_more": true,
+  "filter_applied": "none",
+  "filter_ignored": [
+    "path_prefix"
+  ],
+  "caveats": [
+    "documents_unsorted",
+    "documents_filter_client"
+  ]
+}

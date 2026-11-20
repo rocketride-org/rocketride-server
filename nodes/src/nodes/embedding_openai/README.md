@@ -8,7 +8,7 @@ OpenAI develops AI services and APIs. This node uses its embedding API through t
 
 ## What it does
 
-The node adds an `embedding` and `embedding_model` to documents and questions. Choose it over `embedding_transformer` when the selected embedding model should be called through OpenAI rather than loaded as a local sentence transformer. Documents in one write are sent to `embed_documents` as a batch; questions use `embed_query`.
+The node adds an `embedding` and `embedding_model` to documents and questions. Choose it over `embedding_transformer` when the selected embedding model should be called through OpenAI rather than loaded as a local sentence transformer. Documents in one write are sent to `embed_documents` as a batch; questions use `embed_query`. It also answers the `embed` tool for external tool calls, which returns the vectors for texts a caller sends (see Notes).
 
 ## Lanes
 
@@ -53,6 +53,41 @@ resolves this field as `apikey` and passes it to `OpenAIEmbeddings`. If no
 configured key is available, `langchain-openai` can fall back to the engine
 process's `OPENAI_API_KEY` environment variable. The startup probe fails when
 neither source provides a usable key.
+
+## Notes
+
+### The `embed` tool
+
+When a Tools source controls this node, as in the Vector Explorer templates, a
+tool call such as `client.tool(token=..., tool='embed', node_id='embed_1',
+input={'texts': ['kestrel nesting']})` returns the vectors this node makes for
+the texts, so a caller can search a vector store, or place a query on Vector
+Explorer's map, with exactly the vector the pipeline would produce. The tool is
+for external tool calls only; agents never see it.
+
+| Input | Description |
+|---|---|
+| `texts` | 1 to 8 strings, each at most 8,000 characters and not blank. |
+| `kind` | `query` (default) encodes the texts the way the `questions` lane does; `document` the way the `documents` lane does. |
+
+The answer carries `model`, `dimension`, `vectors` (values rounded to six
+decimals), `prefix_applied` and `ms`. A refusal is an answer with
+`success: false` and a `code`, never an error: `INVALID_INPUT`, `NO_EMBEDDER`
+(no model loaded), `RATE_LIMITED` with `retry_after_s` (each task allows 30
+calls a minute, in bursts of up to 5), `BUSY` (the model stayed busy for 60
+seconds) or `STORE_ERROR` (the model failed; the message names only the error
+type and the server log has the detail). A call from a connection signed in
+with a pipeline's Public Authorization Key (`pk_…`) is refused with
+`READS_PUBLIC` before the model runs.
+
+The tool shares the model with the node's lanes: a call waits for the batches
+already being embedded and then runs alone, and batches that arrive while it
+waits go after it. The lanes' own batches still run side by side.
+
+Each call goes to OpenAI on the configured key like the lanes' requests: a
+`query` call makes one embeddings request per text, a `document` call one
+request for all of its texts. `prefix_applied` is always null, because this
+node adds no prefixes.
 
 ## Upstream docs
 

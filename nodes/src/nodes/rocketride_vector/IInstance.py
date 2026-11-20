@@ -24,10 +24,11 @@
 # ------------------------------------------------------------------------------
 # This class controls the data for each thread of the task.
 #
-# The lane handlers (questions, documents, render) and the agent tools (search,
-# objdir, list_documents, get, stats, and the write tools behind
-# IGlobal.allow_write) come from the shared store base; nothing here is
-# driver-specific.
+# The lane handlers (questions, documents, render) and the store tools come
+# from the shared store base; nothing here is driver-specific. The tools sit
+# behind IGlobal.expose_tools, the write tools (upsert, delete, soft_delete,
+# restore) also behind IGlobal.allow_write, and every write then runs
+# the store write gate (vx_write_gate.check_write), which fails closed.
 # ------------------------------------------------------------------------------
 from ai.common.store import StoreInstanceBase
 

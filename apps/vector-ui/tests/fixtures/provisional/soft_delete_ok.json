@@ -1,0 +1,20 @@
+{
+	"success": true,
+	"object_ids": ["91ae15d4-3f6e-589f-bb81-72301f2ca1b6"],
+	"matched_chunks": 12,
+	"moved_chunks": 12,
+	"not_found": [],
+	"audit": {
+		"action": "vector.soft_delete",
+		"node": "store_1",
+		"provider": "postgres",
+		"collection": "vx_demo_docs",
+		"object_ids": ["91ae15d4-3f6e-589f-bb81-72301f2ca1b6"],
+		"rows": 12,
+		"caller": {
+			"auth": "account",
+			"userId": "u-0001",
+			"teamId": "t-0001"
+		}
+	}
+}

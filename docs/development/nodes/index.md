@@ -20,7 +20,10 @@ thing.
 >
 > For the file format, see [Node Service Definitions](services-schema.md); for the
 > README contract, [Node README Schema](readme-schema.md); for testing,
-> [Node Testing](testing.md).
+> [Node Testing](testing.md). Before changing a vector store driver, the store
+> tools or the `embed` tool on an embedding node, read the
+> [Vector store tool contract](vector-tool-contract.md): Vector Explorer calls
+> those tools and depends on their JSON.
 
 ---
 

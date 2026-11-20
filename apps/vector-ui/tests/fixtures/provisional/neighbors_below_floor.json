@@ -1,0 +1,152 @@
+{
+	"success": true,
+	"items": [
+		{
+			"key": [
+				"0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				19
+			],
+			"sim": 0.31,
+			"score": 0.31,
+			"below_floor": false,
+			"path": "C:/demo/finance/ocr_scan_junk.txt",
+			"chunkId": 19,
+			"preview": "finance ocr scan junk part 20: rotation valve orchid water orchid schedule water report clause spring nesting sample…"
+		},
+		{
+			"key": [
+				"d40a5026-0b32-8930-4448-a992b58efc9e",
+				18
+			],
+			"sim": 0.27,
+			"score": 0.27,
+			"below_floor": false,
+			"path": "C:/demo/research/research_006.docx",
+			"chunkId": 18,
+			"preview": "research research 006 part 19: ticket budget pressure humidity water ticket water orchid maintenance maintenance…"
+		},
+		{
+			"key": [
+				"d40a5026-0b32-8930-4448-a992b58efc9e",
+				36
+			],
+			"sim": 0.23,
+			"score": 0.23,
+			"below_floor": false,
+			"path": "C:/demo/research/research_006.docx",
+			"chunkId": 36,
+			"preview": "research research 006 part 37: trial station pressure humidity trial schedule report report report schedule protocol…"
+		},
+		{
+			"key": [
+				"4bbe410d-202b-a5fa-9780-3bb9cf28a9b1",
+				0
+			],
+			"sim": 0.19,
+			"score": 0.19,
+			"below_floor": true,
+			"path": "C:/demo/support/support_039.txt",
+			"chunkId": 0,
+			"preview": "support support 039 part 1: clause season invoice budget season maintenance spring station valve ticket sensor…"
+		},
+		{
+			"key": [
+				"4bbe410d-202b-a5fa-9780-3bb9cf28a9b1",
+				50
+			],
+			"sim": 0.15,
+			"score": 0.15,
+			"below_floor": true,
+			"path": "C:/demo/support/support_039.txt",
+			"chunkId": 50,
+			"preview": "support support 039 part 51: rotation budget pressure clause clause nesting humidity valve water audit season report…"
+		},
+		{
+			"key": [
+				"d40a5026-0b32-8930-4448-a992b58efc9e",
+				37
+			],
+			"sim": 0.11,
+			"score": 0.11,
+			"below_floor": true,
+			"path": "C:/demo/research/research_006.docx",
+			"chunkId": 37,
+			"preview": "research research 006 part 38: ledger invoice spring water survey ledger report orchid harvest season station budget…"
+		},
+		{
+			"key": [
+				"d40a5026-0b32-8930-4448-a992b58efc9e",
+				43
+			],
+			"sim": 0.07,
+			"score": 0.07,
+			"below_floor": true,
+			"path": "C:/demo/research/research_006.docx",
+			"chunkId": 43,
+			"preview": "research research 006 part 44: maintenance survey valve season station ticket humidity maintenance maintenance orchid…"
+		},
+		{
+			"key": [
+				"4bbe410d-202b-a5fa-9780-3bb9cf28a9b1",
+				40
+			],
+			"sim": 0.03,
+			"score": 0.03,
+			"below_floor": true,
+			"path": "C:/demo/support/support_039.txt",
+			"chunkId": 40,
+			"preview": "support support 039 part 41: harvest nesting rotation protocol schedule season nesting ledger nesting contract trial…"
+		},
+		{
+			"key": [
+				"c27ee25b-cbe0-1024-c112-d7093148e0b6",
+				7
+			],
+			"sim": -0.01,
+			"score": -0.01,
+			"below_floor": true,
+			"path": "C:/demo/ops/ops_013.pdf",
+			"chunkId": 7,
+			"preview": "ops ops 013 part 8: kestrel invoice protocol filter maintenance trial station kestrel report maintenance falcon…"
+		},
+		{
+			"key": [
+				"d40a5026-0b32-8930-4448-a992b58efc9e",
+				28
+			],
+			"sim": -0.05,
+			"score": -0.05,
+			"below_floor": true,
+			"path": "C:/demo/research/research_006.docx",
+			"chunkId": 28,
+			"preview": "research research 006 part 29: contract kestrel sensor water season invoice trial ticket greenhouse contract clause…"
+		},
+		{
+			"key": [
+				"d40a5026-0b32-8930-4448-a992b58efc9e",
+				16
+			],
+			"sim": -0.09,
+			"score": -0.09,
+			"below_floor": true,
+			"path": "C:/demo/research/research_006.docx",
+			"chunkId": 16,
+			"preview": "research research 006 part 17: spring kestrel report report ledger harvest ledger maintenance falcon orchid schedule…"
+		},
+		{
+			"key": [
+				"4bbe410d-202b-a5fa-9780-3bb9cf28a9b1",
+				20
+			],
+			"sim": -0.13,
+			"score": -0.13,
+			"below_floor": true,
+			"path": "C:/demo/support/support_039.txt",
+			"chunkId": 20,
+			"preview": "support support 039 part 21: station invoice survey survey sensor clause trial protocol nesting kestrel budget spring…"
+		}
+	],
+	"metric": "cosine",
+	"scope": "collection",
+	"k_requested": 12
+}

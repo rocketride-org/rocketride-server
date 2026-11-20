@@ -205,7 +205,7 @@
 		},
 		"postgres.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.local.user", "vector.local.password", "vector.local.database", "vector.collection", "vector.score", "vector.similarity", "postgres.serverName"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.local.user", "vector.local.password", "vector.local.database", "vector.collection", "vector.score", "vector.similarity", "postgres.serverName", "vector.allow_writes"]
 		},
 		"postgres.profile": {
 			"hidden": true,

@@ -182,11 +182,11 @@
 		},
 		"qdrant.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "qdrant.serverName"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "qdrant.serverName", "vector.allow_writes"]
 		},
 		"qdrant.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "qdrant.serverName"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "qdrant.serverName", "vector.allow_writes"]
 		},
 		"qdrant.profile": {
 			"title": "Type of Qdrant host",

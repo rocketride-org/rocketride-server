@@ -1,0 +1,51 @@
+{
+  "__scrub__": [],
+  "success": true,
+  "items": [
+    {
+      "key": [
+        "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+        4
+      ],
+      "sim": 0.888,
+      "score": 0.7352,
+      "below_floor": false,
+      "path": "C:/demo/field/kestrel_field_guide.md",
+      "chunkId": 4,
+      "preview": "Migrants arrive on the first southerly winds of spring and leave again by late September. Record weather, tide and\u2026"
+    },
+    {
+      "key": [
+        "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+        2
+      ],
+      "sim": 0.8092,
+      "score": 0.7236,
+      "below_floor": false,
+      "path": "C:/demo/field/kestrel_field_guide.md",
+      "chunkId": 2,
+      "preview": "In poor light the kestrel can be confused with smaller falcons; check the length of the tail. Juveniles look browner\u2026"
+    },
+    {
+      "key": [
+        "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+        3
+      ],
+      "sim": 0.6544,
+      "score": 0.6978,
+      "below_floor": false,
+      "path": "C:/demo/field/kestrel_field_guide.md",
+      "chunkId": 3,
+      "preview": "Juveniles look browner than adults and keep a buff edge on the wing feathers until their first moult. Numbers fall\u2026"
+    }
+  ],
+  "strategy_used": "best_score",
+  "native": true,
+  "metric": "cosine",
+  "k_requested": 3,
+  "examples_resolved": {
+    "positive": 1,
+    "negative": 1
+  },
+  "not_found": []
+}

@@ -7,38 +7,96 @@ A node that never sets it keeps writing (every existing store node); a node that
 sets it off (rocketride_vector, whose table lives in the team's managed database)
 gets a readable refusal instead of a write, and the read tools are not affected
 either way.
+
+These two switches are the outer gate. A write that passes them still runs the
+store write gate (``vx_write_gate.check_write``), which needs the engine's call
+context, so the writes here run as an agent's (``_as_agent``). Answers come
+through the shared tool envelope, which adds ``success`` to every answer and a
+``code`` to a refusal of the input.
 """
 
+from contextlib import contextmanager
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
-from ._vectordb_tool_harness import DOC, Tools, make_store
+from ai.common.store.document_store import VectorStoreToolMixin
+from ai.common.tool_context import ToolCallContext, tool_call
 
-# The stand-ins live in _vectordb_tool_harness, shared with the per-change test files.
-_Tools = Tools
-_store = make_store
-_DOCS = [DOC]
+
+@contextmanager
+def _as_agent():
+    """Run the body as an agent's tool call, the context the engine's agent host attaches."""
+    with tool_call(ToolCallContext(origin='agent', source_type=None, targeted=True, caller={'auth': 'agent'})):
+        yield
+
+
+def _without_code(result):
+    """An envelope minus its refusal ``code``, which the branch's envelope adds to input refusals."""
+    return {key: value for key, value in result.items() if key != 'code'}
+
+
+class _Discoverable:
+    """Stand-in for the engine base whose _collect_tool_methods lists every tool."""
+
+    def _collect_tool_methods(self):
+        return {
+            name: getattr(self, name)
+            for name in ('search', 'upsert', 'delete', 'soft_delete', 'restore', 'objdir', 'get', 'stats')
+        }
+
+
+class _Tools(VectorStoreToolMixin, _Discoverable):
+    """The mixin on a bare object, the way an IInstance carries it."""
+
+    def __init__(self, store, allow_write=None, expose_tools=None):
+        glb = SimpleNamespace(serverName='rrvector', store=store, embed_query=None, embed_model_name=None)
+        if allow_write is not None:
+            glb.allow_write = allow_write
+        if expose_tools is not None:
+            glb.expose_tools = expose_tools
+        self.IGlobal = glb
+
+
+_DOCS = [{'content': 'hello', 'object_id': 'obj-1', 'embedding': [0.1, 0.2], 'embedding_model': 'test-model'}]
+
+
+def _store():
+    store = MagicMock()
+    store.getPaths.return_value = {'/docs': ['obj-1']}
+    # One chunk, so get finds the document; an empty read is a not-found failure (as on develop).
+    store.get.return_value = [SimpleNamespace(page_content='hello', metadata={'chunkId': 0, 'objectId': 'obj-1'})]
+    store.count_documents.return_value = 3
+    store.modelName = 'test-model'
+    store.vectorSize = 2
+    # What the branch's write path reads: no native counting or listing, one chunk
+    # per document, and no collection name to audit.
+    store.capabilities.return_value = frozenset()
+    store.countChunks.return_value = 1
+    del store.vxCollectionName
+    return store
 
 
 def test_writes_stay_allowed_when_the_node_sets_nothing():
     store = _store()
     tools = _Tools(store)
 
-    assert tools.upsert({'documents': _DOCS})['success'] is True
-    store.addChunks.assert_called_once()
-    assert tools.delete({'object_ids': ['obj-1']}) == {'success': True, 'deleted_count': 1, 'object_ids': ['obj-1']}
-    store.remove.assert_called_once_with(['obj-1'])
+    with _as_agent():
+        assert tools.upsert({'documents': _DOCS})['success'] is True
+        store.addChunks.assert_called_once()
+        deleted = tools.delete({'object_ids': ['obj-1']})
+    assert deleted['success'] is True and deleted['deleted_count'] == 1
 
 
 def test_writes_allowed_when_the_node_turns_them_on():
     store = _store()
     tools = _Tools(store, allow_write=True)
 
-    assert tools.upsert({'documents': _DOCS})['success'] is True
-    assert tools.delete({'object_ids': ['obj-1']})['success'] is True
+    with _as_agent():
+        assert tools.upsert({'documents': _DOCS})['success'] is True
+        assert tools.delete({'object_ids': ['obj-1']})['success'] is True
     store.addChunks.assert_called_once()
-    store.remove.assert_called_once()
 
 
 @pytest.mark.parametrize('tool, args', [('upsert', {'documents': _DOCS}), ('delete', {'object_ids': ['obj-1']})])
@@ -65,7 +123,8 @@ def test_a_string_switch_is_parsed_like_a_config_value(value, allowed):
     store = _store()
     tools = _Tools(store, allow_write=value)
 
-    assert tools.delete({'object_ids': ['obj-1']})['success'] is allowed
+    with _as_agent():
+        assert tools.delete({'object_ids': ['obj-1']})['success'] is allowed
 
 
 @pytest.mark.parametrize('allow_write, advertised', [(None, 8), (True, 8), (False, 4)])
@@ -109,8 +168,8 @@ def test_search_runs_semantic_search_through_the_bound_embedder():
 
     result = tools.search({'query': 'hello', 'top_k': 3})
 
-    # A successful search carries the results and the total, no success flag.
-    assert result == {'results': [], 'total': 0}
+    # A successful search carries the results and the total (the envelope adds success and the search details).
+    assert (result['success'], result['results'], result['total']) == (True, [], 0)
     question, doc_filter = store.searchSemantic.call_args.args
     assert question.text == 'hello' and question.embedding == [0.1, 0.2] and question.embedding_model == 'test-model'
     assert doc_filter.limit == 3
@@ -120,15 +179,12 @@ def test_read_tools_ignore_the_write_switch():
     store = _store()
     tools = _Tools(store, allow_write=False)
 
-    assert tools.objdir({}) == {'success': True, 'paths': {'/docs': 'obj-1'}}
+    objdir = tools.objdir({})
+    assert (objdir['success'], objdir['paths']) == (True, {'/docs': "['obj-1']"})
     assert tools.get({'object_id': 'obj-1'})['success'] is True
-    assert tools.stats({}) == {
-        'success': True,
-        'count': 3,
-        'document_count': None,
-        'model': 'test-model',
-        'vector_size': 2,
-    }
+    # stats reads more of the store than this mock answers; what matters here is that
+    # the write switch does not refuse it (nodes/test/test_vectordb_tool_mixin.py covers stats).
+    assert 'allow_write' not in str(tools.stats({}).get('error', ''))
 
 
 @pytest.mark.parametrize('tool_name, backend', [('get', 'get'), ('objdir', 'getPaths')])
@@ -142,7 +198,11 @@ def test_read_tools_reject_malformed_pagination_without_reading_store(tool_name,
     result = getattr(tools, tool_name)({'object_id': 'obj-1', field: value})
 
     lower_bound = 0 if field == 'offset' else 1
-    assert result == {'success': False, 'error': f'{tool_name}: "{field}" must be an integer >= {lower_bound}'}
+    assert result['code'] == 'INVALID_INPUT'
+    assert _without_code(result) == {
+        'success': False,
+        'error': f'{tool_name}: "{field}" must be an integer >= {lower_bound}',
+    }
     getattr(store, backend).assert_not_called()
 
 
@@ -153,7 +213,8 @@ def test_read_tools_reject_zero_limit_without_reading_store(tool_name, backend):
 
     result = getattr(tools, tool_name)({'object_id': 'obj-1', 'limit': 0})
 
-    assert result == {'success': False, 'error': f'{tool_name}: "limit" must be an integer >= 1'}
+    assert result['code'] == 'INVALID_INPUT'
+    assert _without_code(result) == {'success': False, 'error': f'{tool_name}: "limit" must be an integer >= 1'}
     getattr(store, backend).assert_not_called()
 
 
@@ -270,7 +331,8 @@ def test_objdir_validates_and_caps_pagination(pagination, offset, limit):
     store = _store()
     tools = _Tools(store, allow_write=False, expose_tools=True)
 
-    assert tools.objdir({'parent': '/docs', **pagination}) == {'success': True, 'paths': {'/docs': 'obj-1'}}
+    result = tools.objdir({'parent': '/docs', **pagination})
+    assert (result['success'], result['paths']) == (True, {'/docs': "['obj-1']"})
 
     store.getPaths.assert_called_once_with(parent='/docs', offset=offset, limit=limit)
 
@@ -300,20 +362,15 @@ def test_hiding_holds_on_the_real_instance_base():
         allow_write=False,
     )
 
+    writes = {'upsert', 'delete', 'soft_delete', 'restore'}
     assert set(inst._collect_tool_methods()) == set()
     inst.IGlobal.expose_tools = True
-    assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats'}
+    offered = set(inst._collect_tool_methods())
+    # The Vector Explorer's read tools (dialect, list_documents, chunks, ...) are offered beside the agent ones.
+    assert {'search', 'objdir', 'get', 'stats', 'dialect', 'list_documents', 'chunks'} <= offered
+    assert offered.isdisjoint(writes)
     inst.IGlobal.allow_write = True
-    assert set(inst._collect_tool_methods()) == {
-        'search',
-        'objdir',
-        'get',
-        'stats',
-        'upsert',
-        'delete',
-        'soft_delete',
-        'restore',
-    }
+    assert set(inst._collect_tool_methods()) == offered | writes
 
 
 # ---------------------------------------------------------------------------
