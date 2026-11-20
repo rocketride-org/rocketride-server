@@ -31,6 +31,26 @@ def test_shared_host_alone_does_nothing(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    'argv',
+    [
+        ['engine', 'eaas.py', '--saas'],
+        ['engine', 'node.py', '--modelserver=wss://model.rocketride.dev'],
+        ['engine', 'eaas.py', '--saas', '--modelserver=wss://model.rocketride.dev'],
+    ],
+)
+def test_front_server_refuses_torch(monkeypatch, argv):
+    """The cloud engine and a model-server client must not install the CUDA stack (#1697)."""
+    monkeypatch.setattr(sys, 'argv', argv)
+    with pytest.raises(RuntimeError, match='never installed'):
+        HOOKS.excludes(['torch', 'nvidia-cublas-cu12'])
+
+
+def test_empty_modelserver_flag_does_nothing(monkeypatch):
+    monkeypatch.setattr(sys, 'argv', ['engine', 'node.py', '--modelserver='])
+    assert HOOKS.excludes(['torch', 'numpy']) is None
+
+
+@pytest.mark.parametrize(
     'packages',
     [
         ['requests', 'numpy'],  # not resolved yet: pre-excluded as a race guard
