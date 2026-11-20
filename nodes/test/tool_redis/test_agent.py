@@ -48,6 +48,8 @@ async def test_agent_performs_each_requested_operation_once(client, attempt):
         }
     else:
         assert os.environ.get('ROCKETRIDE_GEMINI_KEY'), 'Set ROCKETRIDE_GEMINI_KEY in the engine environment'
+        # The acceptance model is explicit, independent of the example's preset.
+        llm['config'].update(profile='custom', modelTotalTokens=16384, modelOutputTokens=1024)
     llm['config']['model'] = MODEL
     parts = urlsplit(URL)
     prefix = 'rr:agent-test:' + uuid.uuid4().hex + ':'
