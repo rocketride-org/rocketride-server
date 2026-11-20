@@ -39,7 +39,8 @@ and treats an ``OSError`` as "WMI unavailable": it then reads
 Workaround for the CPython 3.12 ``_wmi`` timeout race (python/cpython#130727):
 after a query times out, its helper thread can close an unrelated handle of the
 process. Fixed in 3.13 by python/cpython#134313. Remove this module, its
-``.pth`` file and the workflow step once the engine runs Python 3.13 or later.
+``.pth`` file, its test and the workflow steps once the engine runs Python 3.13
+or later.
 """
 
 import sys
