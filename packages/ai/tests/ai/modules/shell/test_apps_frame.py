@@ -45,7 +45,7 @@ from fastapi.testclient import TestClient
 import ai.modules.shell.shell as shell_mod
 
 from . import isolation_support as sup
-from .isolation_support import label_for
+from .isolation_support import csp_directives, label_for
 
 THIRD = 'acme.thirdparty'
 FIRST = 'rocketride.home'
@@ -519,6 +519,19 @@ def test_e8_refusal_is_not_an_existence_oracle(world):
     assert same.text == other.text
 
 
+def _csp_blocks_scripts(csp: str) -> bool:
+    """A sandbox without allow-scripts, or default-src 'none' with no script source that re-opens it.
+
+    ``default-src 'none'; script-src 'unsafe-inline'`` would still run the script inside an SVG document.
+    """
+    directives = csp_directives(csp)
+    sandboxed = 'sandbox' in directives and 'allow-scripts' not in directives['sandbox']
+    closed = directives.get('default-src') == ["'none'"] and all(
+        directives.get(name, ["'none'"]) == ["'none'"] for name in ('script-src', 'script-src-elem', 'script-src-attr')
+    )
+    return sandboxed or closed
+
+
 def test_e8_isolated_icon_is_not_a_script_vector(world):
     """T35: an isolated app's versioned icon may still feed an ``<img>`` but must not be a navigable script on the shell origin.
 
@@ -528,7 +541,7 @@ def test_e8_isolated_icon_is_not_a_script_vector(world):
     resp = world.client.get(f'/apps/{THIRD}/v1/icon.svg', headers=COOKIE)
     if resp.status_code == 200:
         csp = resp.headers.get('content-security-policy', '')
-        assert 'sandbox' in csp or "default-src 'none'" in csp
+        assert _csp_blocks_scripts(csp), csp
         assert resp.headers.get('x-content-type-options') == 'nosniff'
     else:
         assert resp.status_code == 404
@@ -677,3 +690,20 @@ def test_apps_frame_deeply_nested_body_is_a_bad_request_not_a_500(world):
     resp = world.post(raw=raw, headers={'content-type': 'application/json'})
     assert resp.status_code == 400
     assert resp.json()['error'] == 'bad_request'
+
+
+@pytest.mark.parametrize(
+    'csp,ok',
+    [
+        ("default-src 'none'; sandbox", True),
+        ("default-src 'none'", True),
+        ('sandbox', True),
+        ("default-src 'none'; script-src 'unsafe-inline'", False),
+        ("default-src 'none'; script-src-elem 'self'", False),
+        ('sandbox allow-scripts', False),
+        ("default-src 'self'", False),
+    ],
+)
+def test_the_icon_policy_check_rejects_a_csp_that_permits_scripts(csp, ok):
+    """The icon test's predicate itself: a CSP that re-opens scripts must not pass it."""
+    assert _csp_blocks_scripts(csp) is ok
