@@ -93,7 +93,7 @@ test('G4R2-M1b an unregister the rate bucket refused still releases the op at th
 	for (let i = 0; i < 130; i++) R.post({ __rrbus: 'response', id: `nope-${i}`, ok: true, result: 1 });
 	await settle();
 	const refused = await R.rawRequest(`app.${keyB}.x`, {});
-	assert.equal(codeOf({ __rrbus: 'response', ...refused }), 'rate', 'the realm\'s bucket is empty');
+	assert.equal(codeOf({ __rrbus: 'response', ...refused }), 'rate', "the realm's bucket is empty");
 	R.post({ __rrbus: 'unregister', ops: [op] });
 	await settle();
 	void C.request(op, {}, 50).catch(() => undefined);

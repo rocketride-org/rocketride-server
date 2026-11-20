@@ -358,7 +358,7 @@ test('R-gate a request waiting on the API key is not sent once its realm detache
 		release();
 		await pending;
 		await settle();
-		assert.equal(t.cm.engine.messagesFor('execute').length, 0, 'the detached realm\'s request never reaches the engine');
+		assert.equal(t.cm.engine.messagesFor('execute').length, 0, "the detached realm's request never reaches the engine");
 	});
 	await tt.test('logout', async (st) => {
 		const t = makeRoot();
@@ -374,7 +374,7 @@ test('R-gate a request waiting on the API key is not sent once its realm detache
 		t.cm.emit('shell:logout', {});
 		release();
 		assertDenied(await pending, 'capability', 'a status request sent before logout');
-		assert.equal(t.cm.engine.received.length, before, 'nothing is sent for the earlier session\'s run');
+		assert.equal(t.cm.engine.received.length, before, "nothing is sent for the earlier session's run");
 	});
 });
 

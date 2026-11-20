@@ -313,12 +313,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	 * is retried on the lost-run schedule, then logged.
 	 */
 	const endOrphanRun = (token: string, retriesLeft: number[] = [...LOST_RUN_RETRY_MS]): void => {
-		track(
-			sendEngine('terminate', { token }).then(
-				terminated,
-				() => false
-			)
-		).then((done) => {
+		track(sendEngine('terminate', { token }).then(terminated, () => false)).then((done) => {
 			if (done) return;
 			if (retriesLeft.length === 0) {
 				opts.log('warn', '[isolation] could not end an unrecorded run');
