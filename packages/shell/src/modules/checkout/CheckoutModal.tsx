@@ -377,7 +377,7 @@ const PaymentForm: React.FC<PaymentFormProps> = ({ plan, promo, isCurrent, onSuc
 				});
 
 				const status = (error?.payment_intent ?? paymentIntent)?.status;
-				if ((!status && error?.type === 'validation_error') || status === 'requires_payment_method') {
+				if ((!status && (error?.type === 'validation_error' || error?.type === 'card_error')) || status === 'requires_payment_method') {
 					if (isCurrent()) onError(error?.message ?? 'Payment failed. Please try again.');
 					return;
 				}
@@ -650,6 +650,10 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 			if (isCheckoutNotDispatched(err)) {
 				if (mounted.current) {
 					setError(retryCheckout ? 'Checkout recovery is unavailable. Check your subscriptions before starting again.' : err.message);
+					// The catalog read that raced this undispatched checkout was
+					// discarded (checkoutInFlight); restart it so PlanPicker always
+					// ends up with plans or a retry control. Needs no replay support.
+					if (!retryCheckout) setPlanFetchRetry((count) => count + 1);
 				}
 			} else if (attempt && !canReplay) {
 				finishCheckout('pending');
