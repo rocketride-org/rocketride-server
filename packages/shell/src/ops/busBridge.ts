@@ -60,7 +60,7 @@ import type { IRetainedPort, IRetainedRegistry, RetainedSubscriber } from './ret
 import { CapabilityDeniedError } from '../isolation/capabilityDenied';
 import { deniedMessage, deny } from '../isolation/denial';
 import { QUOTAS, SIZES } from '../isolation/rate';
-import { measure, walk } from '../isolation/walk';
+import { measure, walk, WalkTooLargeError } from '../isolation/walk';
 import type { RealmContext } from '../isolation/types';
 
 /** The envelope key (coexists with other traffic on a shared transport). */
@@ -446,8 +446,9 @@ function defaultAdmit(lane: string, value: unknown): unknown {
 	let copy: unknown;
 	try {
 		copy = walk(value);
-	} catch {
-		throw deny('schema', lane);
+	} catch (err) {
+		// A value over the walker's size budget is too_large, as at the gate; anything else is a bad shape.
+		throw deny(err instanceof WalkTooLargeError ? 'too_large' : 'schema', lane);
 	}
 	const size = measure(copy);
 	if (size.json + size.bin > SIZES.request) throw deny('too_large', lane);
@@ -470,6 +471,8 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 		privTopics?: Set<string>;
 		/** Gated realms only: this realm's `app.<appKey>.*` requests still waiting on an owner. */
 		appInflight?: number;
+		/** Gated realms only: hops this realm's own `app.*` requests started in OWNER realms, by hop id (dropped if this realm detaches first). */
+		outHops?: Map<string, IRealm>;
 		/** Requests this router forwarded INTO the realm, by hop id. */
 		inflight: Map<string, { respond: (m: IBusResponseMessage) => void; timer: ReturnType<typeof setTimeout> }>;
 		unsubscribe: () => void;
@@ -667,6 +670,15 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 			if (opOwners.get(op) === realm) opOwners.delete(op);
 			if (appOwners.get(op) === realm) appOwners.delete(op);
 		}
+		// Hops this realm started in owner realms: nobody will read the answer, so drop them (and their timers) now.
+		for (const [hopId, owner] of realm.outHops ?? []) {
+			const entry = owner.inflight.get(hopId);
+			if (entry) {
+				owner.inflight.delete(hopId);
+				clearTimeout(entry.timer);
+			}
+		}
+		realm.outHops?.clear();
 		// A dead realm answers nothing: reject everything in flight to it.
 		for (const [, entry] of realm.inflight) {
 			clearTimeout(entry.timer);
@@ -689,12 +701,22 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 				if (message[ENVELOPE] === 'response') {
 					const denial = err instanceof CapabilityDeniedError ? err : deny('credential', 'bus.response');
 					endpoint.post({ [ENVELOPE]: 'response', id: message.id, ok: false, error: deniedMessage(denial) } satisfies IBusResponseMessage);
+				} else if (message[ENVELOPE] === 'request') {
+					// A request routed INTO this realm that its outbound filter refused never reaches it: settle the hop now
+					// so the requester gets the denial and the reserved hop and its timer are released, not held to the timeout.
+					const entry = realm.inflight.get(message.id);
+					if (entry) {
+						realm.inflight.delete(message.id);
+						clearTimeout(entry.timer);
+						const denial = err instanceof CapabilityDeniedError ? err : deny('credential', 'bus.request');
+						entry.respond({ [ENVELOPE]: 'response', id: '', ok: false, error: deniedMessage(denial) });
+					}
 				}
 				return;
 			}
 			endpoint.post(out);
 		};
-		const realm: IRealm = { endpoint, post, label: ctx.info.label, ops: new Set(), topics: new Set(), privTopics: new Set(), gated: ctx, appInflight: 0, inflight: new Map(), unsubscribe: () => {} };
+		const realm: IRealm = { endpoint, post, label: ctx.info.label, ops: new Set(), topics: new Set(), privTopics: new Set(), gated: ctx, appInflight: 0, outHops: new Map(), inflight: new Map(), unsubscribe: () => {} };
 		const refuse = (id: string, op: string, code: 'namespace' | 'unknown_op' | CapabilityDeniedError): void => post({ [ENVELOPE]: 'response', id, ok: false, error: deniedMessage(code instanceof CapabilityDeniedError ? code : deny(code, op)) });
 		/** Rate, walk and size budget for the router's own lanes; throws a denial. */
 		const admit = (lane: string, value: unknown): unknown => {
@@ -748,19 +770,22 @@ function buildRouter(rootBus: IOpBus, options?: IBusRouterOptions): IGatedBusRou
 						if (!owner) return refuse(m.id, m.op, 'unknown_op');
 						realm.appInflight!++;
 						let done = false;
+						const hopId = `h${++hopSeq}`;
+						realm.outHops!.set(hopId, owner);
 						routeToRealm(
 							owner,
 							m.op,
 							admitted.value,
 							timeoutMs,
 							(resp) => {
+								realm.outHops!.delete(hopId);
 								if (!done) {
 									done = true;
 									realm.appInflight!--;
 								}
 								respond(resp);
 							},
-							`h${++hopSeq}`
+							hopId
 						);
 						return;
 					}
