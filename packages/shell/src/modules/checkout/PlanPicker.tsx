@@ -367,6 +367,15 @@ export interface PlanPickerProps {
 	/** Content rendered below the plan cards (e.g. a "Continue" button). */
 	footer?: React.ReactNode;
 
+	/** Keep the selected plan visible if the catalog introduces an interval toggle. */
+	keepSelectedPlanVisible?: boolean;
+
+	/** Disable the billing-interval toggle while a host operation is in progress. */
+	intervalDisabled?: boolean;
+
+	/** Called when the user changes the visible billing interval. */
+	onIntervalChange?: (interval: 'month' | 'year') => void;
+
 	/** Default interval on first render. Default: ``'month'``. */
 	defaultInterval?: 'month' | 'year';
 
@@ -438,6 +447,9 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	ctaConfig,
 	currentPriceId,
 	footer,
+	keepSelectedPlanVisible = false,
+	intervalDisabled = false,
+	onIntervalChange,
 	defaultInterval = 'month',
 	autoSelectDefault = false,
 	cardImageSrc,
@@ -448,15 +460,15 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// ── Internal interval state ──────────────────────────────────────────
 	const [interval, setInterval] = useState<'month' | 'year'>(defaultInterval);
 
-	// Reset interval when plans change (e.g. different app loaded)
+	// Keep the selected interval while the refreshed catalog still offers it.
 	useEffect(() => {
 		const hasMonth = plans.some((p) => p.interval === 'month');
 		const hasYear = plans.some((p) => p.interval === 'year');
-		if (!hasMonth && hasYear) {
-			setInterval('year');
-		} else if (hasMonth) {
-			setInterval('month');
-		}
+		setInterval((current) => {
+			if (current === 'month' && !hasMonth && hasYear) return 'year';
+			if (current === 'year' && !hasYear && hasMonth) return 'month';
+			return current;
+		});
 	}, [plans]);
 
 	// ── Derived data ─────────────────────────────────────────────────────
@@ -477,13 +489,21 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 		return false;
 	}, [plans]);
 
+	// In a plan change, keep the chosen card visible even when a catalog
+	// refresh introduces a toggle that was absent when the choice was made.
+	const selectedInterval = selectedPlan?.interval;
+	const displayedInterval = keepSelectedPlanVisible && (selectedInterval === 'month' || selectedInterval === 'year') &&
+		plans.some((plan) => plan.stripePriceId === selectedPlan?.stripePriceId)
+		? selectedInterval
+		: interval;
+
 	// Plans visible at the current interval, sorted by order ascending.
 	const visiblePlans = useMemo(() => {
 		const filtered = showToggle
-			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === interval)
+			? plans.filter((p) => !p.interval || p.interval === 'one_time' || p.interval === displayedInterval)
 			: plans;
 		return [...filtered].sort((a, b) => planOrder(a) - planOrder(b));
-	}, [plans, interval, showToggle]);
+	}, [plans, displayedInterval, showToggle]);
 
 	// Largest description length across ALL plans (both intervals). Drives the
 	// ``uniformCardHeight`` spacer padding so a card reserves the tallest feature
@@ -522,7 +542,9 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	/** Switch interval and try to keep the same tier selected. */
 	const handleToggle = useCallback(
 		(newInterval: 'month' | 'year') => {
+			if (intervalDisabled) return;
 			setInterval(newInterval);
+			onIntervalChange?.(newInterval);
 
 			if (!onSelectPlan) return;
 
@@ -548,7 +570,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 				.sort((a, b) => planOrder(a) - planOrder(b))[0];
 			if (fallback) onSelectPlan(fallback);
 		},
-		[plans, selectedPlan, onSelectPlan, autoSelectDefault]
+		[plans, selectedPlan, onSelectPlan, autoSelectDefault, intervalDisabled, onIntervalChange]
 	);
 
 	// ── Render ───────────────────────────────────────────────────────────
@@ -569,10 +591,10 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 			{showToggle && (
 				<div style={S.toggleRow}>
 					<div style={S.toggleBar}>
-						<button style={S.toggleBtn(interval === 'month')} onClick={() => handleToggle('month')}>
+						<button style={S.toggleBtn(displayedInterval === 'month')} disabled={intervalDisabled} onClick={() => handleToggle('month')}>
 							Monthly
 						</button>
-						<button style={S.toggleBtn(interval === 'year')} onClick={() => handleToggle('year')}>
+						<button style={S.toggleBtn(displayedInterval === 'year')} disabled={intervalDisabled} onClick={() => handleToggle('year')}>
 							Annual
 						</button>
 					</div>
