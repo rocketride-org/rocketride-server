@@ -29,6 +29,8 @@ import React, { useState, useCallback, useRef, useMemo, useEffect, CSSProperties
 import type { EndpointKeyMinter } from 'shared/tools/pipelines/components/pipeline-actions/endpointKey';
 import type { OpenToolHandler } from 'shared/tools/pipelines/components/pipeline-actions/PipelineActions';
 import { DeveloperIdBanner } from './components/DeveloperIdBanner';
+import { ConversionBanner } from './components/ConversionBanner';
+import type { IConversionBanner } from './convertOnOpen';
 
 import { TabPanel } from 'shell';
 import { ContentHeader } from 'shell';
@@ -99,6 +101,12 @@ export interface IProjectViewProps {
 	onRegisterDeveloper?: (developerId: string) => Promise<string>;
 	/** Whether the viewer may claim (org admin): false shows the member guidance, undefined = unknown (the form shows, the server decides). */
 	canRegisterDeveloper?: boolean;
+	/** The canvas found nodes with keys their schema does not declare (plan §5.6.8); the frame converts through the server. */
+	onUnknownConfigKeys?: (nodeIds: string[]) => void;
+	/** The red gear's hover text per node id: the converter's refusal, or "connect to convert". */
+	configMessages?: Record<string, string>;
+	/** The last conversion's report (the banner below the strip); null = none. */
+	conversion?: IConversionBanner | null;
 	/** The files beside the pipeline file (PACKAGE › Assets); absent = the host cannot reach them. */
 	assetsHost?: IAssetsHost;
 	/** Whether the document has unsaved changes. */
@@ -275,7 +283,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, onOpenTool, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, onOpenTool, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, onUnknownConfigKeys, configMessages, conversion = null, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -616,6 +624,8 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 								onExport={isReadonly ? undefined : onExport}
 								isReadonly={isReadonly}
 								envKeys={envKeys}
+								onUnknownConfigKeys={isReadonly ? undefined : onUnknownConfigKeys}
+								configMessages={configMessages}
 							/>
 						)}
 						</AppStateProvider>
@@ -681,6 +691,9 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 			{/* Developer-id onboarding (plan §2.1): while the org has no id the
 			    server refuses every run, deploy and publish; claim it here. */}
 			{!isReadonly && <DeveloperIdBanner developerId={knownDeveloperId} onRegister={onRegisterDeveloper} canRegister={canRegisterDeveloper} />}
+			{/* Convert-on-open (plan §5.6.8): what the server's converter changed
+			    or refused in a pre-format-switch pipeline; the next save keeps it. */}
+			{!isReadonly && <ConversionBanner conversion={conversion} />}
 			{/* Page title, PINNED with the strip — canvas (Design) has none;
 			    only the panel bodies below scroll. */}
 			{documentTitle && activeMode !== 'design' && <ContentHeader title={documentTitle} subtitle={DOC_SUBVIEW_SUBTITLES[activeMode as DocSubView]} />}

@@ -157,6 +157,12 @@ export interface IFlowContainerProps {
 	/** Available ROCKETRIDE_* environment variable key names for autocomplete in config fields. */
 	envKeys?: string[];
 
+	/** Nodes with keys their schema does not declare changed (see FlowProjectProvider). */
+	onUnknownConfigKeys?: (nodeIds: string[]) => void;
+
+	/** The red gear's hover text per node id (see FlowProjectProvider). */
+	configMessages?: Record<string, string>;
+
 	/** Child components (typically the Canvas grid). */
 	children?: ReactNode;
 }
@@ -171,7 +177,7 @@ export interface IFlowContainerProps {
  * Uses `key` on the outer Box to force a clean re-mount when the project
  * ID changes, ensuring no stale graph state leaks between projects.
  */
-export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, onOpenTool, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, children }: IFlowContainerProps): ReactElement {
+export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, isReadonly, taskStatuses, componentPipeCounts, totalPipes, servicesJson, servicesJsonError, getNodeSchema, inventory, inventoryConnectorTitleMap, handleValidatePipeline, onContentChanged, onViewportChange, onUndo, onRedo, onOpenLink, googlePickerDeveloperKey, googlePickerClientId, onRunPipeline, onStopPipeline, onOpenStatus, serverHost, onCreateEndpointKey, onOpenTool, isConnected, cloudConnectionConfigured, isSubscribed, initialViewport, isDirty, isNew, onSave, onOpenCloudSetup, onExport, envKeys, onUnknownConfigKeys, configMessages, children }: IFlowContainerProps): ReactElement {
 	return (
 		<ReactFlowProvider>
 			{/* Re-key on project ID to force clean re-mount between projects */}
@@ -215,6 +221,8 @@ export default function FlowContainer({ project, oauth2RootUrl, oauthReturnUrl, 
 					onOpenCloudSetup={onOpenCloudSetup}
 					onExport={onExport}
 					envKeys={envKeys}
+					onUnknownConfigKeys={onUnknownConfigKeys}
+					configMessages={configMessages}
 				>
 					{children}
 				</FlowProvider>

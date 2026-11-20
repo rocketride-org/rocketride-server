@@ -118,7 +118,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 	const { nodes, edges, parameters } = useFlowGraph();
 	const { taskStatuses, componentPipeCounts, totalPipes, servicesJson } = useFlowProject();
 	const { setQuickAddState } = useFlowGraph();
-	const { onOpenStatus, onOpenLink, onOpenTool, serverHost, onCreateEndpointKey } = useFlowProject();
+	const { onOpenStatus, onOpenLink, onOpenTool, serverHost, onCreateEndpointKey, configMessages } = useFlowProject();
 	const { isLocked } = useFlowPreferences();
 
 	// =========================================================================
@@ -229,7 +229,7 @@ export default function NodeComponent({ id, data, type, parentId, children, layo
 			<NodeTop id={id} edges={edges} isInvocable={isInvocable} setQuickAddState={isLocked ? undefined : setQuickAddState} />
 
 			{/* Header — icon, title, class type, gear, overflow menu, error badge */}
-			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} isExperimental={isExperimental} paramCount={paramCount} />
+			<NodeHeader id={id} icon={icon} title={displayTitle} handleClick={handleClick} nodeType={type} hideEdit={false} formDataValid={data.formDataValid} formDataMessage={configMessages?.[id]} description={displayDescription} documentation={documentation} parentId={mostRecentParentId} classType={classType} errorCount={isSourceNode ? errorCount : undefined} warningCount={isSourceNode ? warningCount : undefined} onBadgeClick={isSourceNode && onOpenStatus ? () => onOpenStatus(id) : undefined} isExperimental={isExperimental} paramCount={paramCount} />
 			{children}
 
 			{/* Data lanes — input/output handles */}

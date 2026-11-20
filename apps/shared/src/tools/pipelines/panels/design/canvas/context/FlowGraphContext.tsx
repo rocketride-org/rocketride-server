@@ -60,6 +60,8 @@ import { useFlowPreferences } from './FlowPreferencesContext';
 import { useFlowProject } from './FlowProjectContext';
 import { deepEquals, hasConfigurableSchema } from '../util/helpers';
 import { constantMarkers, validateConfig } from 'shared/components/node-config';
+import type { INodeSchema } from 'shared/components/node-config';
+import { unknownConfigKeyNodes } from 'shared/tools/pipelines/convertOnOpen';
 
 // =============================================================================
 // Quick-add state (click handle → popup → create + connect)
@@ -310,7 +312,7 @@ function projectContentSig(project?: { components?: unknown } | null): string {
  */
 export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactElement {
 	const { isLocked, projectLayout, updateProjectLayout } = useFlowPreferences();
-	const { currentProject, initialViewport, servicesJson, requestNodeSchema, onContentChanged, patchToolchainState } = useFlowProject();
+	const { currentProject, initialViewport, servicesJson, requestNodeSchema, onContentChanged, patchToolchainState, onUnknownConfigKeys } = useFlowProject();
 
 	// --- ReactFlow hooks ---------------------------------------------------
 
@@ -1165,6 +1167,27 @@ export function FlowGraphProvider({ children }: IFlowGraphProviderProps): ReactE
 			}
 		}
 	}, [nodes, servicesJson, requestNodeSchema]);
+
+	// --- Report nodes whose config carries keys their schema does not declare ---
+	// The pre-format-switch shape (plan §5.6.8, B20) shows up as unknown keys
+	// once a provider's full definition is in; the editor frame takes the list
+	// to the server's converter. Reported only when the list changes, so the
+	// frame's once-per-revision rule never sees a repeat for the same nodes.
+	const reportedUnknownRef = useRef<string>('');
+	useEffect(() => {
+		if (!onUnknownConfigKeys) return;
+		const ids = unknownConfigKeyNodes(
+			nodes.map((node) => {
+				const data = node.data as Record<string, unknown>;
+				return { id: node.id, provider: data?.provider as string | undefined, config: data?.config as Record<string, unknown> | undefined };
+			}),
+			servicesJson as Record<string, Partial<INodeSchema> | undefined>
+		);
+		const key = ids.join('\n');
+		if (key === reportedUnknownRef.current) return;
+		reportedUnknownRef.current = key;
+		onUnknownConfigKeys(ids);
+	}, [nodes, servicesJson, onUnknownConfigKeys]);
 
 	// --- Restore viewport + clear loading guard when flow is ready ----------
 	useEffect(() => {

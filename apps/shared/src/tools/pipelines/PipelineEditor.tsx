@@ -29,6 +29,8 @@ import type { OpenToolHandler } from './components/pipeline-actions/PipelineActi
 import { NewPipelineForm } from './components/NewPipelineForm';
 import { DeveloperIdBanner } from './components/DeveloperIdBanner';
 import type { NewPipelineIdentity } from './components/NewPipelineForm';
+import { INITIAL_CONVERT_STATE, applyConvertResult, currentBanner, documentSig, gearMessages, markAttempted, shouldConvert } from './convertOnOpen';
+import type { IConvertOnOpenState, IConversionBanner } from './convertOnOpen';
 
 import type { IProject } from 'shell';
 import { createMirroredPrefsStore, ConnectionManager, PrefsProvider, useAuthUser } from 'shell';
@@ -481,6 +483,84 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		return (await client.getService(provider)) as Record<string, any> | undefined;
 	}, []);
 
+	// --- Convert-on-open (plan §5.6.8, B20) -------------------------------------
+	// The canvas reports the nodes whose stored config carries keys their schema
+	// does not declare — the pre-format-switch shape. When any does and a client
+	// can reach the server, the converter runs ONCE for this document text and
+	// the converted pipeline is written through the document (the API Params
+	// page's path: a docRevision bump the canvas reloads instead of serializing
+	// its stale tree over it). The next save writes the new shape. The decision
+	// is the pure module's; this frame only holds the memory and makes the call.
+	const [unknownKeyNodes, setUnknownKeyNodes] = useState<string[]>([]);
+	const [conversion, setConversion] = useState<IConversionBanner | null>(null);
+	const [conversionErrors, setConversionErrors] = useState<Record<string, string>>({});
+	const convertStateRef = useRef<IConvertOnOpenState>(INITIAL_CONVERT_STATE);
+	const projectRef = useRef(project);
+	projectRef.current = project;
+	// A reply that lands after this frame is gone must not write through a
+	// host that no longer has the document. Mount-scoped on purpose: a
+	// dependency-driven re-run of the convert effect leaves pending replies
+	// alone (their own signature check decides).
+	const mountedRef = useRef(true);
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
+	const docSig = useMemo(() => documentSig(project), [project]);
+	const handleUnknownConfigKeys = useCallback((nodeIds: string[]) => setUnknownKeyNodes(nodeIds), []);
+	// Another document in this frame starts with a clean memory.
+	useEffect(() => {
+		convertStateRef.current = INITIAL_CONVERT_STATE;
+		setConversion(null);
+		setConversionErrors({});
+	}, [projectId]);
+	useEffect(() => {
+		if (host.isReadonly) return;
+		const current = projectRef.current;
+		if (!current || typeof current !== 'object') return;
+		if (!shouldConvert(convertStateRef.current, docSig, unknownKeyNodes.length, isConnected)) return;
+		const client = ConnectionManager.getInstance().getClient();
+		if (!client) return;
+		// Held before the call so a re-render during the round trip never sends
+		// the same text twice; a failed call is not retried until the text changes.
+		convertStateRef.current = markAttempted(convertStateRef.current, docSig);
+		const sent = current as Record<string, unknown>;
+		void client
+			.convert({ pipeline: sent })
+			.then((result) => {
+				// The frame unmounted: nobody holds the document any more.
+				if (!mountedRef.current) return;
+				// The author edited meanwhile (a node, the name, the parameters
+				// map): this reply describes a text that is gone, and the new
+				// text triggers its own call.
+				if (documentSig(projectRef.current) !== docSig) return;
+				const applied = applyConvertResult(convertStateRef.current, sent, result);
+				convertStateRef.current = applied.state;
+				setConversion(applied.banner);
+				setConversionErrors(applied.nodeErrors);
+				if (applied.nextProject) host.onContentChanged(applied.nextProject);
+			})
+			.catch(() => {
+				// The converter could not be reached or refused the request: the
+				// red gears stay, the next text change asks again.
+			});
+		// `unknownKeyNodes` only changes identity when the canvas reports a new
+		// list and `host` is the host's memoized seam; a re-run for any other
+		// reason is a no-op under shouldConvert's memory.
+	}, [docSig, unknownKeyNodes, isConnected, host]);
+	// "Save to keep it": the save the banner asks for retires it. A refusal
+	// banner is keyed to the text it answered and retires with the author's
+	// next edit (currentBanner), repaired by hand or re-converted alike.
+	const wasDirtyRef = useRef(host.isDirty);
+	useEffect(() => {
+		if (wasDirtyRef.current && !host.isDirty) setConversion((shown) => (shown?.variant === 'warning' ? null : shown));
+		wasDirtyRef.current = host.isDirty;
+	}, [host.isDirty]);
+	const shownBanner = useMemo(() => currentBanner(conversion, docSig), [conversion, docSig]);
+	const configMessages = useMemo(() => gearMessages(unknownKeyNodes, isConnected, conversionErrors), [unknownKeyNodes, isConnected, conversionErrors]);
+
 	// --- Run-log DVR (the brokered session family — identical in every realm) --
 
 	const logSessionCounter = useRef(0);
@@ -753,6 +833,9 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				knownDeveloperId={knownDeveloperId}
 				onRegisterDeveloper={registerDeveloper}
 				canRegisterDeveloper={canRegisterDeveloper}
+				onUnknownConfigKeys={handleUnknownConfigKeys}
+				configMessages={configMessages}
+				conversion={shownBanner}
 				onPipelineAction={host.runAction}
 				{...(host.onViewStateChange ? { onViewStateChange: host.onViewStateChange } : {})}
 				onOpenLink={host.openLink} onOpenTool={host.openTool} onCreateEndpointKey={host.createEndpointKey}
