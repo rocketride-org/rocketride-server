@@ -44,6 +44,24 @@ if (input.xml !== undefined) {
     out.counts = lane.countJunitResults(input.xml);
     out.error = attempt(() => lane.checkRequiredDbResults(input.xml, input.suites));
 }
+if (input.relaxed !== undefined) {
+    out.relaxedError = attempt(() => lane.checkRequiredDbResults(input.relaxed, input.suites, 'junit.xml', { requirePassed: false }));
+}
+if (input.selected) {
+    const fs = require('fs'), os = require('os'), path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'selnothing-'));
+    const file = path.join(dir, 'junit.xml');
+    out.selected = (async () => {
+        const res = [];
+        for (const c of input.selected) {
+            fs.rmSync(file, { force: true });
+            if (c.xml !== null) fs.writeFileSync(file, c.xml);
+            res.push(await lane.selectedNothing(file, new Error(c.message)));
+        }
+        fs.rmSync(dir, { recursive: true, force: true });
+        return res;
+    })();
+}
 if (input.pooled !== undefined) {
     out.pooledError = attempt(() => lane.checkPooledCases(input.pooled, input.suites));
 }
@@ -86,7 +104,10 @@ if (input.validate) {
         });
     });
 }
-process.stdout.write(JSON.stringify(out));
+(async () => {
+    if (out.selected) out.selected = await out.selected;
+    process.stdout.write(JSON.stringify(out));
+})();
 """
 
 
@@ -156,6 +177,34 @@ def test_an_unexpected_skip_fails_the_lane_even_when_the_suite_has_passes():
     assert 'skipped without a NOT RUN: reason' in out['error']
     assert 'test_a_full::test_limits' in out['error']
     assert 'RESULTSET_SIZE' in out['error']
+
+
+def test_a_selection_may_leave_a_suite_without_passes_but_not_with_an_unreasoned_skip():
+    no_passes = _xml(_case('test_a_full', 't1'), _case('test_b_full', 't1', _skip('NOT RUN: role')))
+    assert _lane({'relaxed': no_passes, 'suites': SUITES})['relaxedError'] is None
+    unreasoned = _xml(_case('test_a_full', 't1', _skip('server too old')))
+    out = _lane({'relaxed': unreasoned, 'suites': SUITES})
+    assert 'skipped without a NOT RUN: reason' in out['relaxedError']
+
+
+def test_a_suite_missing_from_the_report_does_not_crash_the_checks():
+    xml = _xml(_case('test_a_full', 't1'))
+    assert _lane({'relaxed': xml, 'suites': SUITES})['relaxedError'] is None
+    assert 'no test passed in: test_b_full' in _lane({'xml': xml, 'suites': SUITES})['error']
+
+
+def test_an_empty_report_is_an_empty_selection_only_for_pytest_exit_5():
+    empty = '<?xml version="1.0"?><testsuites><testsuite name="pytest" tests="0"></testsuite></testsuites>'
+    ran = '<?xml version="1.0"?><testsuites><testsuite name="pytest" tests="2"></testsuite></testsuites>'
+    cases = [
+        {'xml': empty, 'message': 'Command failed (exit 5)'},
+        {'xml': empty, 'message': 'Command failed (exit 5):\nno tests ran'},
+        {'xml': empty, 'message': 'Command failed (exit 4)'},
+        {'xml': empty, 'message': 'Command failed (exit 1)'},
+        {'xml': ran, 'message': 'Command failed (exit 5)'},
+        {'xml': None, 'message': 'Command failed (exit 5)'},
+    ]
+    assert _lane({'selected': cases})['selected'] == [True, True, False, False, False, False]
 
 
 def test_escaped_skip_messages_are_read():

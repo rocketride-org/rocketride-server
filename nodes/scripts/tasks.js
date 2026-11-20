@@ -619,8 +619,9 @@ function makeRunDbPytestAction(options = {}) {
 					} catch (err) {
 						// A selector that matches nothing in these suites (the usual
 						// case: a mocked-only test) makes pytest exit 5. That is not a
-						// failure of a selected run; any other failure still is.
-						if (selectors.length === 0 || !(await selectedNothing(report))) throw err;
+						// failure of a selected run; any other exit code (a malformed
+						// selector is exit 4) still is.
+						if (selectors.length === 0 || !(await selectedNothing(report, err))) throw err;
 						notes.push(`No test in ${pass.report}'s suites matches the selection: pass skipped`);
 						continue;
 					}
@@ -643,11 +644,14 @@ function makeRunDbPytestAction(options = {}) {
 }
 
 /**
- * True when pytest wrote a junit report that records no test at all: the
- * selection (-k / -m) matched nothing. A missing or unreadable report (pytest
- * died before writing it) is not an empty selection.
+ * True when pytest exited 5 ("no tests collected") and wrote a junit report
+ * that records no test at all: the selection (-k / -m) matched nothing. Any
+ * other exit code (a malformed selector is exit 4 and still writes a report
+ * with tests="0") and a missing or unreadable report are not an empty selection.
+ * `err` is the rejection from execCommand ("Command failed (exit N)").
  */
-async function selectedNothing(report) {
+async function selectedNothing(report, err) {
+	if (!/^Command failed \(exit 5\)/.test(String(err && err.message))) return false;
 	let xml;
 	try {
 		xml = await fs.promises.readFile(report, 'utf8');
@@ -973,6 +977,7 @@ module.exports.dbLane = {
 	countJunitResults,
 	checkRequiredDbResults,
 	checkPooledCases,
+	selectedNothing,
 };
 
 // Export paths for external use
