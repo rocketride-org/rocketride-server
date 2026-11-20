@@ -247,6 +247,13 @@ const S = {
 		gap: 6,
 	} as CSSProperties,
 
+	// A flex item defaults to min-width: auto, so a long unbroken word (a URL, a model name) would overflow the
+	// clipping card instead of wrapping.
+	featureText: {
+		minWidth: 0,
+		overflowWrap: 'anywhere',
+	} as CSSProperties,
+
 	featureCheck: {
 		color: 'var(--rr-color-success)',
 		fontSize: 11,
@@ -409,9 +416,7 @@ export interface PlanPickerProps {
 	/**
 	 * Overrides the feature-line font size (in px). Default undefined → the base
 	 * 11px (checkout/upgrade modals). The pricing page passes a larger value for
-	 * bigger bullets. Lines wrap in a card too narrow for them: the card clips
-	 * (overflow: hidden), so a single-line rule cut them off mid-word on phones,
-	 * tablets and 1024 px laptops.
+	 * bigger bullets. Lines wrap in a card too narrow for them.
 	 */
 	featureFontSize?: number;
 }
@@ -488,7 +493,9 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 	// Largest description length across ALL plans (both intervals). Drives the
 	// ``uniformCardHeight`` spacer padding so a card reserves the tallest feature
 	// list even when the current interval's own list is shorter — the height
-	// stays constant across the Monthly/Annual toggle.
+	// stays constant across the Monthly/Annual toggle. It counts entries, not
+	// wrapped lines, so in a narrow card where the two intervals' copy wraps
+	// differently the height can still shift by a line.
 	const maxDescLines = useMemo(
 		() => (uniformCardHeight ? plans.reduce((m, p) => Math.max(m, planDescription(p)?.length ?? 0), 0) : 0),
 		[plans, uniformCardHeight],
@@ -658,7 +665,7 @@ export const PlanPicker: React.FC<PlanPickerProps> = ({
 									{(desc ?? []).map((line, i) => (
 										<div key={i} style={featureFontSize ? { ...S.featureLine, fontSize: featureFontSize } : S.featureLine}>
 											<span style={S.featureCheck}>&#10003;</span>
-											<span>{line}</span>
+											<span style={S.featureText}>{line}</span>
 										</div>
 									))}
 									{uniformCardHeight && Array.from({ length: Math.max(0, maxDescLines - (desc?.length ?? 0)) }).map((_, i) => (
