@@ -1447,13 +1447,22 @@ async def test_paid_use_denial_blocks_visible_versions_and_developer_rail(regist
 
 
 @pytest.mark.asyncio
-async def test_saas_overlay_without_a_commerce_gate_fails_closed(monkeypatch):
+async def test_saas_overlay_without_a_commerce_gate_serves_until_isolation_is_on(monkeypatch):
     from ai.account.base import AccountBase
 
     legacy_saas = SimpleNamespace(capabilities=('saas',))
     oss = SimpleNamespace(capabilities=())
+    monkeypatch.delenv('RR_APP_ISOLATION', raising=False)
+    # Isolation off (the default): an overlay without the override must not deny every app.
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is True
+    assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+    # Isolation on: the base fails closed (startup check d requires the override).
+    monkeypatch.setenv('RR_APP_ISOLATION', 'enforce')
     assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
     assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+    # An unreadable isolation configuration also fails closed.
+    monkeypatch.setenv('RR_APP_ISOLATION', 'bogus')
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
 
 
 @pytest.mark.asyncio

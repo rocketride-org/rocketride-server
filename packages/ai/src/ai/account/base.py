@@ -225,10 +225,22 @@ class AccountBase(ABC):
     async def authorize_app_use(self, info: Any, app_id: str, version: Optional[int] = None) -> bool:
         """Authorize app delivery/use independently of catalog visibility.
 
-        OSS has no paid seats. A SaaS overlay must supply its live commerce
-        check; an older overlay must not silently inherit open serving.
+        OSS has no paid seats. A SaaS overlay supplies its live commerce check
+        by overriding this. An overlay that has not yet done so keeps its
+        pre-isolation behaviour while ``RR_APP_ISOLATION`` is ``off`` (the
+        default): serving rests on the entitled-version walk alone, so adopting
+        this method does not deny every app. With isolation on the override is
+        required (startup check d refuses to boot without it), so the base
+        fails closed there, and on an unreadable isolation configuration.
         """
-        return 'saas' not in getattr(self, 'capabilities', ())
+        if 'saas' not in getattr(self, 'capabilities', ()):
+            return True
+        from ai.modules.shell.app_origin import current_config
+
+        try:
+            return current_config().mode == 'off'
+        except RuntimeError:
+            return False
 
     def get_billing_rates(self) -> dict[str, float]:
         """
