@@ -3283,8 +3283,9 @@ class TaskServer(DAPBase):
                 # Step 3b: a predecessor whose deployment was revoked meanwhile
                 # is not kept: it goes the way the kill switch takes every hold
                 if self._revoked_after(control.deployment, control.registered_at):
+                    held = control.task
                     self._unregister_control(control, keep_hold=True)
-                    await self.release_hold(old_engine, control.key, 'unpublished')
+                    await self.release_hold(held, control.key, 'unpublished')
                     raise
                 # Otherwise it is as it was: it never left the registry, its
                 # hold was never released, its request trees never forgotten,
@@ -3294,9 +3295,15 @@ class TaskServer(DAPBase):
 
             # Step 4: the successor is committed: the predecessor leaves the
             # registry with its request trees, and its hold goes through the
-            # hold rule (the engine stops only when that was its last hold)
+            # hold rule (the engine stops only when that was its last hold).
+            # The hold released is the one the predecessor holds NOW: a request
+            # naming its id while the successor was set up may have restarted
+            # a dormant engine and moved the hold onto the replacement
+            # (ensure_engine), so old_engine is kept for the convergence
+            # comparison only
+            held = control.task
             self._unregister_control(control, keep_hold=True)
-            await self.release_hold(old_engine, control.key, 'restart')
+            await self.release_hold(held, control.key, 'restart')
             new_control = self.control_by_key(result['token'])
             converged = 'none' if new_control.task is old_engine else 'started'
             self.debug_message(f'Task "{control.id}" restarted as {new_control.control_id}: {converged}')

@@ -2392,3 +2392,40 @@ def test_engine_sharing_names_the_decision(catalog):
     unknown = _pipeline()
     unknown['components'][1]['provider'] = 'no_such_node'
     assert engine_sharing(unknown) is None
+
+
+@pytest.mark.asyncio
+async def test_a_restart_releases_the_engine_the_predecessor_holds_at_commit(catalog, engines, clock):
+    """A request on the dormant predecessor during the setup moves its hold; the commit releases THAT hold, not the stale one."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a', ttl=3600)
+    stopped = dev.task
+    await _idle_out(ts, clock)
+    assert dev.dormant
+    resolve_env = ts._resolve_control_env
+    moved = {}
+
+    async def during_setup(control):
+        # An id-based request reaches the dormant predecessor while its
+        # successor is being set up: ensure_engine starts the key again and
+        # the predecessor's hold moves onto the replacement engine
+        if not moved:
+            moved['engine'] = await ts.ensure_engine(dev)
+            assert dev.task is moved['engine'] and moved['engine'] is not stopped
+        return await resolve_env(control)
+
+    ts._resolve_control_env = during_setup
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': _pipeline()}}, conn=conn)
+
+    successor = ts._task_control[result['token']]
+    replacement = moved['engine']
+    assert dev.key not in ts._task_control
+    # The successor shares the replacement engine; the predecessor's hold on
+    # it is gone, so the successor's terminate is the last hold
+    assert successor.task is replacement
+    assert replacement.holds == {successor.key}
+    assert stopped.holds == frozenset()
+    await ts.stop_task(successor.key)
+    assert (replacement, 'user') in engines
