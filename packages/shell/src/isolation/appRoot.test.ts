@@ -131,6 +131,8 @@ test('T31 prefs ops are confined to the app partition and bounded', async (tt) =
 	await settle();
 	t.clock.advance(60_000);
 	const count = emitted().length;
+	const heldKeys = new Set(emitted().filter((o) => o.op === 'shell.setPref').map((o) => (o.params as { key: string }).key));
+	assert.equal(heldKeys.size, 256, `the partition holds 256 distinct keys before the overflow is tried, got ${heldKeys.size}`);
 	A.emit('shell.setPref', { partition: 'app:acme.alpha', key: 'key-257', value: 1 });
 	await settle();
 	assert.equal(emitted().length, count, 'the 257th key is dropped');

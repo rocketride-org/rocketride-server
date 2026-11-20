@@ -103,7 +103,7 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		const reached = engine.messagesFor('execute').length;
 		release();
 		const results = await Promise.all(calls);
-		assert.ok(reached <= 8, `at most 8 executes may reach the engine at once, ${reached} did`);
+		assert.equal(reached, 8, `valid executes must fill the run quota of 8 at the engine, ${reached} did`);
 		assert.ok(results.filter((r) => r.ok).length <= 8, 'at most 8 runs start');
 		assert.ok(results.filter((r) => denialOf(r)?.code === 'quota').length >= 24, `the rest are quota denials, got ${brief(results.map((r) => denialOf(r)?.code ?? 'ok'))}`);
 	});
@@ -119,7 +119,7 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		const reached = engine.messagesFor('rrext_process').length;
 		release();
 		await Promise.all(calls);
-		assert.ok(reached <= 16, `at most 16 pipe opens may reach the engine, ${reached} did`);
+		assert.equal(reached, 16, `valid pipe opens must fill the pipe quota of 16 at the engine, ${reached} did`);
 	});
 	await tt.test('store handles', async (st) => {
 		const t = makeRoot();
@@ -155,7 +155,7 @@ test('G4-F2 quotas hold under concurrency', async (tt) => {
 		await settle();
 		open();
 		await Promise.all(calls);
-		assert.ok(reached <= 16, `at most 16 monitor keys may reach the engine, ${reached} did`);
+		assert.equal(reached, 16, `valid monitor keys must fill the monitor quota of 16 at the engine, ${reached} did`);
 	});
 });
 
