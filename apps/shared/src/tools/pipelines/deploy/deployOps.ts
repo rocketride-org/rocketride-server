@@ -18,12 +18,17 @@
 // Team identity: rows carry their RAW owner key (`user~{uid}` for personal
 // space); the WIRE only accepts '@me' for the caller's own space —
 // wireTeamIdOf translates once at this boundary, exactly as the host did.
+//
+// Store review (plan 10.1): a pipe walks the app's review ladder, so its
+// review state and its submit/withdraw verbs are the App Builder's
+// (`rrext_deploy_app` reads pipe artifacts since C.17), addressed by the
+// pipe's registry name `developerId.pipeId`.
 // =============================================================================
 
 import { ConnectionManager } from 'shell';
 import type { DeployArtifact, DeployHistoryEntry, RocketRideClient } from 'rocketride';
 import { registryIdOf, resolveDeployTeams, teamNameOf, wireTeamIdOf } from 'rocketride';
-import { mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, mapDeploymentInfo } from './deployMapping';
+import { mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, mapDeploymentInfo, withReviewStates } from './deployMapping';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeploymentLoadPayload } from './deployTypes';
 
 const cm = (): ConnectionManager => ConnectionManager.getInstance();
@@ -43,6 +48,38 @@ function ownUid(): string {
 /** RAW row id → the wire id the deploy API accepts. */
 export function toWireTeamId(rawTeamId: string): string {
 	return wireTeamIdOf(rawTeamId, ownUid());
+}
+
+/**
+ * The pipe's registry name for a verb addressed by it, or the claim message.
+ *
+ * @param projectId - The pipe's short id.
+ * @returns `developerId.pipeId`.
+ * @throws Error when the organization has no developer id yet.
+ */
+function needRegistryId(projectId: string): string {
+	const id = registryIdOf(projectId, cm().getAccountInfo()?.organization?.developerId);
+	if (!id) throw new Error("A pipeline's store review needs your organization's developer id, and it has none yet. Claim one in the banner above.");
+	return id;
+}
+
+/**
+ * The version rail's review states. A rail that cannot be read leaves the
+ * cards without a state (no badge, no review verb) instead of failing the
+ * whole DEPLOY snapshot.
+ *
+ * @param client - The realm's connected client.
+ * @param registryId - The pipe's registry name ('' = unknown).
+ * @returns The rail rows, or none.
+ */
+async function reviewRailOf(client: RocketRideClient, registryId: string): Promise<Array<{ registryVersion: number; state?: string }>> {
+	if (!registryId) return [];
+	try {
+		return await client.listDeployments(registryId);
+	} catch (err) {
+		console.log('[deployOps] review states unavailable:', err);
+		return [];
+	}
 }
 
 // =============================================================================
@@ -71,17 +108,19 @@ export async function fetchDeployLifecycle(projectId: string | undefined): Promi
 	const info = bus.getAccountInfo();
 	try {
 		const client = needClient();
-		const [versions, list] = await Promise.all([
-			client.deploy.versions(projectId),
-			client.deploy.list(),
-		]);
-		const deploymentRows = list.rows ?? [];
-		const teams = resolveDeployTeams({ getAccountInfo: () => info }, deploymentRows);
 		// Rows carry the registry name (`developerId.pipeId`); the editor
 		// knows the file's short id, so the match is on the composed name.
 		const registryId = registryIdOf(projectId, info?.organization?.developerId);
+		const [versions, list, rail] = await Promise.all([
+			client.deploy.versions(projectId),
+			client.deploy.list(),
+			// The review state per version rides the rail, not the registry rows.
+			reviewRailOf(client, registryId),
+		]);
+		const deploymentRows = list.rows ?? [];
+		const teams = resolveDeployTeams({ getAccountInfo: () => info }, deploymentRows);
 		return {
-			versions: mapVersionCards((versions.rows ?? []) as DeployArtifact[]),
+			versions: withReviewStates(mapVersionCards((versions.rows ?? []) as DeployArtifact[]), rail),
 			deployments: mapTeamDeploymentRows(deploymentRows, registryId, teams, info?.userId ?? ''),
 			teams,
 		};
@@ -219,6 +258,13 @@ export const deploymentActions = {
 	/** Delete one deployed version from the server (plan 2.3); the server
 	 *  refuses by name while a rung pins it, it is in review, or it builds. */
 	deleteVersion: (projectId: string, version: number) => needClient().deploy.delete(projectId, version),
+	/** Submit one deployed version for store review ('private' → 'submit'):
+	 *  the App Builder's verb on the pipe's registry name. The server takes
+	 *  only the newest version that did not fail. */
+	submitForReview: (projectId: string, version: number) => needClient().submitApp(needRegistryId(projectId), version),
+	/** Withdraw a pending review ('submit' → 'private'), the developer's own
+	 *  cancel; the version is a draft again. */
+	withdrawReview: (projectId: string, version: number) => needClient().withdrawApp(needRegistryId(projectId), version),
 	runSource: (projectId: string, rawTeamId: string, sourceId: string) => needClient().deploy.run(projectId, sourceId, toWireTeamId(rawTeamId)),
 	stopSource: async (projectId: string, rawTeamId: string, sourceId: string) => {
 		// Existing task machinery: resolve the live task, terminate it. teamId

@@ -46,11 +46,12 @@ import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './panels/
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from './panels/deploy';
 import type { DeploySnapshot } from './panels/deploy';
 import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions, toWireTeamId } from './deploy/deployOps';
+import { createLatestGate } from '../../utils/latestGate';
 import { createBusAppBuilderHost } from '../appdev/busHost';
 import { isShortId } from './panels/package/requirements';
 import type { IReviewHost } from '../appdev/views/builder/panels/review/ReviewView';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from './deploy/deployTypes';
-import { defaultStoreBlock, registryIdOf } from 'rocketride';
+import { defaultStoreBlock, registryIdOf, teamNameOf } from 'rocketride';
 
 // =============================================================================
 // CONSTANTS
@@ -617,17 +618,24 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// ProjectView composes the DeployPanel itself (capability-fed); this frame
 	// supplies the closures over the realm client's deploy surface.
 
+	// Lifecycle reads overlap (the page's refreshes, the verbs' own) and
+	// answer in any order: only the newest writes the live rows.
+	const [lifecycleGate] = useState(createLatestGate);
+
 	/** Registry snapshot fetch (each caller awaits ITS result). Applies the
-	 *  LIVE rows as it resolves. */
+	 *  LIVE rows as it resolves, unless a newer read has started since. */
 	const fetchDeployLifecycle = useCallback(async (): Promise<DeploySnapshot> => {
+		const ticket = lifecycleGate.take();
 		const snapshot = await fetchLifecycleOp(projectIdRef.current);
-		setDeployTeams(snapshot.teams);
-		setTeamDeployments(snapshot.deployments);
+		if (lifecycleGate.isLatest(ticket)) {
+			setDeployTeams(snapshot.teams);
+			setTeamDeployments(snapshot.deployments);
+		}
 		return { versions: snapshot.versions };
 		// isConnected is a deliberate dep: a reconnect mints a new fetcher
 		// identity, which makes the panel re-fetch (its mount effect keys on it).
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [isConnected]);
+	}, [isConnected, lifecycleGate]);
 
 	// --- Store review (PACKAGE › Review, the Requirements ladder) -------------
 	// The thread rides the app's verbs (rrext_deploy_app's versions/reply
@@ -638,16 +646,19 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// dot-free segment (B5): `draft.docBrain` would otherwise compose the
 	// registry name `acme.docBrain` and show another pipeline's state.
 	const hostReadonly = host.isReadonly === true;
+	// The store review ladder (plan 10.1): every server but OSS reviews store
+	// versions; OSS has no reviewer, so its pipes are born 'ready' and nothing
+	// is submitted or withdrawn there. Re-read on reconnect (a new server).
+	// eslint-disable-next-line react-hooks/exhaustive-deps
+	const hasReviewLadder = useMemo(() => !(ConnectionManager.getInstance().getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss'), [isConnected]);
 	const review = useMemo<IReviewHost | undefined>(() => {
 		if (hostReadonly || !projectId || !isShortId(projectId)) return undefined;
-		const cm = ConnectionManager.getInstance();
-		const hasReviewLadder = !(cm.getClient()?.getAccountInfo()?.capabilities ?? []).includes('oss');
-		return createBusAppBuilderHost({ bus: cm, appId: projectId, hasReviewLadder });
+		return createBusAppBuilderHost({ bus: ConnectionManager.getInstance(), appId: projectId, hasReviewLadder });
 		// isConnected is a deliberate dep, as on fetchDeployLifecycle: a
 		// reconnect mints a new adapter identity, and the Requirements ladder
 		// and the Review thread (both keyed on it) re-pull.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [hostReadonly, projectId, isConnected]);
+	}, [hostReadonly, projectId, hasReviewLadder, isConnected]);
 
 	/** Fetch one immutable artifact (the version cards' record drawer). */
 	const fetchDeployArtifact = useCallback((version: number): Promise<IProject | undefined> => {
@@ -874,6 +885,27 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 									await deploymentActions.deleteVersion(projectIdRef.current, version);
 									void fetchDeployLifecycle();
 								},
+								// Store review (plan 10.1): the App Builder's verbs on the
+								// pipe's registry name, offered only where the server
+								// reviews, as the App Builder's host does, and only for a
+								// short id (the review adapter's rule): a dotted id would
+								// name another registry entry.
+								...(hasReviewLadder && isShortId(projectId)
+									? {
+											submitForReview: async (version: number) => {
+												await deploymentActions.submitForReview(projectIdRef.current, version);
+												void fetchDeployLifecycle();
+											},
+											withdrawReview: async (version: number) => {
+												await deploymentActions.withdrawReview(projectIdRef.current, version);
+												void fetchDeployLifecycle();
+											},
+										}
+									: {}),
+								// Any session's change to this pipe's registry (a
+								// verdict, a publish) re-fetches the page: the review
+								// adapter's signal, keyed by the registry name.
+								...(review?.subscribeDeployChanged ? { subscribeDeployChanged: review.subscribeDeployChanged } : {}),
 								setSchedule: async (teamId: string, sourceId: string, cron: string | null, ttl: number | null) => {
 									await deploymentActions.setSchedule(projectIdRef.current, teamId, sourceId, cron, ttl);
 									void fetchDeployLifecycle();
@@ -897,7 +929,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 					key={`team:${openDeployment.teamId}`}
 					open
 					onClose={() => setOpenDeployment(null)}
-					fallbackTitle={`${deployTeams.find((t) => t.id === openDeployment.teamId)?.name ?? openDeployment.teamId} / ${projectId}`}
+					fallbackTitle={`${teamNameOf(deployTeams, openDeployment.teamId, ConnectionManager.getInstance().getAccountInfo()?.userId ?? '')} / ${projectId}`}
 					{...(deploymentError ? { loadError: deploymentError } : {})}
 					{...(deploymentData
 						? {
@@ -944,7 +976,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 					key={`${openDeployment.teamId}:${openDeployment.sourceId}`}
 					open
 					onClose={() => setOpenDeployment(null)}
-					fallbackTitle={`${deployTeams.find((t) => t.id === openDeployment.teamId)?.name ?? openDeployment.teamId} / ${projectId}`}
+					fallbackTitle={`${teamNameOf(deployTeams, openDeployment.teamId, ConnectionManager.getInstance().getAccountInfo()?.userId ?? '')} / ${projectId}`}
 					{...(deploymentError ? { loadError: deploymentError } : {})}
 					{...(deploymentData
 						? {

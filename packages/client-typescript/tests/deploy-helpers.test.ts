@@ -87,9 +87,10 @@ describe('teams', () => {
 		expect(teams.map((t) => t.id)).toEqual(['@me', 'local']);
 	});
 
-	it('resolveTeamArg maps @me, ids, and names (case-insensitive); unknowns pass through', () => {
+	it('resolveTeamArg maps @me, @public, ids, and names (case-insensitive); unknowns pass through', () => {
 		const teams = resolveDeployTeams(roster, []);
 		expect(resolveTeamArg('@me', teams)).toBe('@me');
+		expect(resolveTeamArg('@public', teams)).toBe('@public');
 		expect(resolveTeamArg('t-qa', teams)).toBe('t-qa');
 		expect(resolveTeamArg('production', teams)).toBe('t-prod');
 		expect(resolveTeamArg('t-other', teams)).toBe('t-other');
@@ -101,16 +102,20 @@ describe('teams', () => {
 		expect(() => resolveTeamArg('OPS', teams)).toThrow(/ambiguous.*a, b/);
 	});
 
-	it('teamNameOf names personal spaces and falls back to the id', () => {
+	it('teamNameOf names personal spaces and the store, and falls back to the id', () => {
 		const teams = resolveDeployTeams(roster, []);
 		expect(teamNameOf(teams, 'user~u1', 'u1')).toBe('Me');
 		expect(teamNameOf(teams, 'user~u2', 'u1')).toBe('Personal');
+		expect(teamNameOf(teams, '~public', 'u1')).toBe('Store');
+		expect(teamNameOf(teams, '@public', 'u1')).toBe('Store');
 		expect(teamNameOf(teams, 't-qa', 'u1')).toBe('QA');
 		expect(teamNameOf(teams, 't-gone', 'u1')).toBe('t-gone');
 	});
 
-	it("wireTeamIdOf addresses the caller's own space as @me", () => {
+	it("wireTeamIdOf addresses the caller's own space as @me and the store as @public", () => {
 		expect(wireTeamIdOf('user~u1', 'u1')).toBe('@me');
+		expect(wireTeamIdOf('~public', 'u1')).toBe('@public');
+		expect(wireTeamIdOf('~public', '')).toBe('@public');
 		expect(wireTeamIdOf('t-qa', 'u1')).toBe('t-qa');
 	});
 });

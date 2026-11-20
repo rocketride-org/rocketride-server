@@ -62,9 +62,11 @@ from typing import TYPE_CHECKING, Any, Dict, List
 from rocketlib import debug
 
 from ai.account import account
-from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required
+from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required, publish_block_of
+from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
 from ai.account.models import resolve_team_permissions
 from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, validate_store_block, write_pipe_content
+from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -199,6 +201,13 @@ class _DeployBase(DAPConn):
         contain '~'). No team permission applies to your own space — the
         run's billing/secrets team is the ABSOLUTE stamp written at pointer
         time (``_billing_team_of``), never resolved at fire time.
+
+        The sentinel ``teamId='@public'`` targets the store (plan 10.1): the
+        owner key is ``~public``, the slot the resolver's ``@public`` rung
+        reads. Who may act on it is the app door's rule for the store
+        (``app_deploy._resolve_target``): an organization registered as a
+        developer, on a name in its own namespace (``_registry_id``); no team
+        grant applies.
         """
         team_id = args.get('teamId')
         if not team_id:
@@ -207,6 +216,10 @@ class _DeployBase(DAPConn):
             if not self._account_info.userId:
                 raise PermissionError('Personal (@me) deployments require an authenticated user')
             return f'user~{self._account_info.userId}'
+        if team_id == '@public':
+            if not _developer_id_of(self):
+                raise ValueError('Public publishing requires the organization to be registered as a developer')
+            return PUBLIC_AUDIENCE_KEY
         self.verify_team_permission(team_id, perm)
         return team_id
 
@@ -234,21 +247,62 @@ class _DeployBase(DAPConn):
                 out.append(team_id)
         return out
 
+    async def _require_store_publishable(self, org_id: str, project_id: str, version: int) -> None:
+        """Refuse pointing the store at ``version`` unless the store gate passes.
+
+        The gate is the app door's (``app_deploy.publish_block_of``), read off
+        the version's review state, tightened to what the pipe serving gate
+        serves: the store serves a pipe only a 'ready' version on every server
+        (``pipe_serving_block_of``). With a review ladder that is the approved
+        version; without one the pipe door promotes each version to 'ready' as
+        it is stored, so a version in any other state never finished its
+        deploy. Only a pipe version takes this door: an app reaches the store
+        through the app door, which keeps its manifest. Every door that can
+        point ``~public`` calls this first (``rrext_deploy_pipe deploy`` and
+        ``add``'s ``deployTo``).
+
+        Raises:
+            ValueError: The version is not on the rail, is an app's, or the
+                gate refuses it.
+        """
+        entries = await account.deployments_versions(org_id, project_id)
+        entry = next((e for e in entries if int(e.get('version', 0)) == version), None)
+        if entry is None:
+            raise ValueError(f'version {version} is not published for {project_id}')
+        if str(entry.get('kind') or 'pipe') != 'pipe':
+            raise ValueError(
+                f'Version {version} of {project_id} is an app: point the store at an app with the app door '
+                '(rrext_deploy_app publish), which keeps its manifest'
+            )
+        state = str(entry.get('state') or DEFAULT_REVIEW_STATE)
+        refusal = publish_block_of(project_id, version, state, True, bool(account.review_ladder))
+        if not refusal and state != 'ready':
+            refusal = (
+                f'Version {version} of {project_id} is not ready for the store (state {state!r}): '
+                'its deploy did not finish, so deploy it again'
+            )
+        if refusal:
+            raise ValueError(refusal)
+
     def _billing_team_of(self, team_id: str) -> str:
         """The ABSOLUTE billing/secrets team stamped onto a publish at pointer time.
 
         A team audience bills itself — unambiguous by construction. A
-        personal (``user~``) audience bills the PUBLISHER's dev team, which
-        must be one of their membership teams in the session org; without
-        one the @me publish REFUSES — billing never guesses, and runs only
-        ever read the stamp (they never resolve).
+        personal (``user~``) audience and the store (``~public``) bill the
+        PUBLISHER's dev team, which must be one of their membership teams in
+        the session org; without one the @me or @public publish REFUSES —
+        billing never guesses, and runs only ever read the stamp (they never
+        resolve). On the store the stamp pays only for the publisher's own
+        runs of the publication (its schedules, run-now); every caller of a
+        public pipe pays for their own calls.
         """
-        if not team_id.startswith('user~'):
+        if not team_id.startswith('user~') and team_id != PUBLIC_AUDIENCE_KEY:
             return team_id
         dev_team = getattr(self._account_info, 'devTeam', '') or ''
         if not dev_team or dev_team not in self._member_team_ids():
+            handle = '@public' if team_id == PUBLIC_AUDIENCE_KEY else '@me'
             raise PermissionError(
-                'Publishing to @me needs your development team set in this organization — pick one in your profile'
+                f'Publishing to {handle} needs your development team set in this organization — pick one in your profile'
             )
         return dev_team
 
@@ -257,9 +311,10 @@ class _DeployBase(DAPConn):
 
         An org admin can see anything deployed anywhere — any team, any
         user's personal space. A regular user can see their OWN personal
-        space (``teamId='@me'``, mapped to ``user~{userId}``) and the teams
-        they are a MEMBER of — membership alone grants read visibility; the
-        task.* grants gate actions, not sight.
+        space (``teamId='@me'``, mapped to ``user~{userId}``), the
+        organization's store publications (``teamId='@public'``, mapped to
+        ``~public``) and the teams they are a MEMBER of — membership alone
+        grants read visibility; the task.* grants gate actions, not sight.
         """
         team_id = args.get('teamId')
         if not team_id:
@@ -268,6 +323,8 @@ class _DeployBase(DAPConn):
             if not self._account_info.userId:
                 raise PermissionError('Personal (@me) deployments require an authenticated user')
             return f'user~{self._account_info.userId}'
+        if team_id == '@public':
+            return PUBLIC_AUDIENCE_KEY
         team_id = str(team_id)
         if self._is_org_admin():
             return team_id
@@ -528,6 +585,10 @@ class DeployCommands(_DeployBase):
             # one authorization rule in a single place (it reads teamId off the
             # args mapping it is handed).
             team_id = self._require_team({'teamId': str(args['deployTo'])}, 'task.control')
+            # The store takes its gate on this door too: on a review-ladder
+            # server the version just added is a draft, so it cannot go public
+            if team_id == PUBLIC_AUDIENCE_KEY:
+                await self._require_store_publishable(org_id, project_id, int(entry['version']))
             billing_team = self._billing_team_of(team_id)
             dep = await account.deployments_deploy(
                 org_id, team_id, project_id, entry['version'], self._actor(), billing_team

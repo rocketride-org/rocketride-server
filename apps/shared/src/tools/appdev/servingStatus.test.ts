@@ -66,6 +66,14 @@ test('pinStatusOf: each reason names why the audience is not served', () => {
 	}
 });
 
+test('pinStatusOf: a pipeline row phrases its own state from its serving facts alone', () => {
+	// The pipeline DEPLOY table has no pin, only a deployment state: enabled
+	// serves, an operator's disable is muted, a broken deployment errors.
+	assert.deepEqual(pinStatusOf({ serving: true, reason: '', state: 'enabled' }), { word: 'serving', tone: 'ok' });
+	assert.deepEqual(pinStatusOf({ serving: false, reason: 'disabled', state: 'enabled' }), { word: 'disabled', tone: 'muted' });
+	assert.deepEqual(pinStatusOf({ serving: false, reason: 'errored', state: 'enabled' }), { word: 'errored', tone: 'error' });
+});
+
 test("pinStatusOf: an older server keeps today's words", () => {
 	assert.deepEqual(pinStatusOf(legacyPin({ state: 'pending' })), { word: 'in review', tone: 'warn' });
 	assert.deepEqual(pinStatusOf(legacyPin({ state: 'enabled' })), { word: 'enabled', tone: 'ok' });

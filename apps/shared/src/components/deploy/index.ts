@@ -24,3 +24,17 @@
 export { DeleteVersionMark } from './DeleteVersionMark';
 export { deleteConfirmPropsOf } from './DeleteVersionMark';
 export type { IDeleteConfirmInput, IDeleteVersionMarkProps } from './DeleteVersionMark';
+export { VersionStateBadge } from './VersionStateBadge';
+export type { IVersionStateBadge, IVersionStateBadgeProps } from './VersionStateBadge';
+export { VersionCardActions } from './VersionCardActions';
+export type { IVersionCardActionsProps } from './VersionCardActions';
+export { newestSubmittableOf, versionCardActionsOf, storeOpenFor, storeTargetOf, STORE_TARGET_ID } from './reviewRules';
+export type { IReviewVersion, IVersionCardAbilities, IVersionCardActions, IStoreTargetInput } from './reviewRules';
+
+// The "Publish vN to…" dialog both screens open from a card.
+export { PublishToDialog } from './PublishToDialog';
+export type { IPublishTarget, IPublishToDialogProps } from './PublishToDialog';
+
+// The where-live row's state word both screens draw.
+export { ServingStateWord } from './ServingStateWord';
+export type { IServingStatus, IServingStateWordProps } from './ServingStateWord';

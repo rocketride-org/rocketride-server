@@ -1550,7 +1550,9 @@ class TaskServer(DAPBase):
 
         # Step 4: @team, the first team in the caller's team order (or the
         # team= override, or a scoped key's frozen team) with a team-owned
-        # run of the address: one owner-index probe per team and address
+        # run of the address: one owner-index probe per team and address. A
+        # store pointer's deploy-rail run is team-owned too (its billing
+        # team) but sits on the public rung, and never answers here
         if _wanted('team'):
             rungs.append('@team')
             for team_id in teams_to_probe(account_info, team):
@@ -1560,6 +1562,7 @@ class TaskServer(DAPBase):
                     for c in registry.owned(a, team_id)
                     if c.run_kind == 'deploy'
                     and c.owner_kind != 'user'
+                    and c.rung != 'public'
                     and _usable(c)
                     and resolve_run_permissions(account_info, c)
                 ]
@@ -2732,12 +2735,16 @@ class TaskServer(DAPBase):
         # team for @team) rides owner_id, and the rung separates a user's
         # spec run from their @me deploy of the same pipeline — the only pair
         # that shares an owner. A published rung stamped by the trusted
-        # dispatch must fit the run: @me and @public are user-owned
-        # deployment runs, @team a team-owned one. The control id is minted
-        # here and is the registry key; it leaves with the result only when
-        # this call creates the control (plan section 1)
+        # dispatch must fit the run: @me is a user-owned deployment run,
+        # @team a team-owned one, and @public either: a caller's own control
+        # on a store publication is user-owned, the publisher's deploy-rail
+        # run of its store pointer (a schedule, run-now) team-owned by the
+        # stamped billing team. The control id is minted here and is the
+        # registry key; it leaves with the result only when this call creates
+        # the control (plan section 1)
         derived = rung_of(control.run_kind, control.owner_kind)
-        if rung and (rung not in RUNGS or derived != ('me' if rung == 'public' else rung) or derived == 'spec'):
+        fits = ('me', 'team') if rung == 'public' else (rung,)
+        if rung and (rung not in RUNGS or derived not in fits or derived == 'spec'):
             raise ValueError(f'rung {rung!r} does not fit a {control.owner_kind}-owned {control.run_kind} run')
         control.rung = rung or derived
         control.control_id = control.key = mint_control_id()

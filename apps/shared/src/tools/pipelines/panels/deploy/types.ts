@@ -47,7 +47,17 @@ export interface DeployVersionCard {
 	 *  pins it, not in review, not building) — computed by the server on
 	 *  every read. The card shows its delete mark only when true. */
 	deletable?: boolean;
+	/** The version's review state on the store ladder (plan 10.1): 'private'
+	 *  (a draft), 'submit' (in review), 'ready' (approved for the store),
+	 *  'rejected', or 'failed'. Absent when the rail could not be read: the
+	 *  card then shows no badge and offers no review verb. */
+	state?: 'private' | 'submit' | 'ready' | 'rejected' | 'failed';
 }
+
+/** Which rung a deployment row is, from the caller's side: 'me' (their own
+    personal space, addressed '@me'), 'personal' (another user's personal
+    space, which only an org admin sees), 'team', or 'public' (the store). */
+export type DeploymentRung = 'me' | 'personal' | 'team' | 'public';
 
 /** Per-source schedule facts on a live deployment (keyed by sourceId). */
 export interface TeamDeploymentSchedule {
@@ -68,6 +78,8 @@ export interface TeamDeploymentSchedule {
 export interface TeamDeployment {
 	teamId: string;
 	teamName: string;
+	/** The rung the row's slot is (stamped by the host, which knows the caller). */
+	rung: DeploymentRung;
 	version: number;
 	/** 'disabled' is the whole-deployment kill switch — nothing runs. */
 	state: 'enabled' | 'disabled' | 'errored' | 'removed';

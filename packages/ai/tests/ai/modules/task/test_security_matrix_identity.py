@@ -117,8 +117,9 @@ def _control(
     developer_id='acme',
     project_id='docBrain',
     source='parsePDF',
+    rung='',
 ) -> TaskControl:
-    """Register a live control on ``ts`` the way start_task stamps one."""
+    """Register a live control on ``ts`` the way start_task stamps one (``rung`` = a trusted dispatch's stamp)."""
     control = TaskControl()
     control.run_kind = run_kind
     control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
@@ -130,7 +131,7 @@ def _control(
     control.source = source
     control.address = build_address(developer_id, project_id, source)
     control.id = control.address
-    control.rung = rung_of(control.run_kind, control.owner_kind)
+    control.rung = rung or rung_of(control.run_kind, control.owner_kind)
     control.control_id = control.key = mint_control_id()
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
@@ -292,6 +293,22 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
     assert ts.resolve_control(run_1.address, member('team-1', ['team-2', 'team-1']), 'task.monitor') is run_2
     with pytest.raises(PermissionError):
         ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-9')
+
+
+def test_s4_a_store_pointers_deploy_rail_run_never_answers_the_team_rung():
+    """A store schedule or run-now is team-owned by the stamped billing team but sits on the public rung:
+    a member of that team calling the address is never served through it on @team (nor on @public, which
+    answers only the caller's own control).
+    """
+    ts = _server()
+    store = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1', rung='public')
+    member = _account(user_id='user-a', team_id='team-1')
+    with pytest.raises(TaskError) as err:
+        ts.resolve_control(store.address, member, 'task.monitor')
+    assert err.value.rungsTried == ['@spec', '@me', '@team', '@public']
+    # The team's own deploy of the address still answers on @team
+    own = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
+    assert ts.resolve_control(own.address, member, 'task.monitor') is own
 
 
 def test_the_resolver_can_be_held_to_one_rung():

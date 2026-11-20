@@ -966,10 +966,10 @@ class FileDeploymentBackend:
             meta = await self._read_meta(org_id, project_id)
             if meta is None:
                 continue
-            # Pipe pointer rows only: a team or personal slot, never the
-            # public row and never an app's publish.
+            # Pipe pointer rows only: a team, personal or store slot (the
+            # store is a pipe's audience like any other), never an app's publish.
             for key, dep in self._publishes_of(meta).items():
-                if key == _PUBLIC_KEY or dep.get('state') == 'removed':
+                if dep.get('state') == 'removed':
                     continue
                 if team_id is not None and key != self._slot_key(team_id):
                     continue
@@ -1120,8 +1120,8 @@ class FileDeploymentBackend:
 
     @staticmethod
     def _slot_key(team_id: str) -> str:
-        """The publish-map key of a pointer slot: 'user~{uid}' stays, a team id becomes 'team~{id}'."""
-        return team_id if team_id.startswith('user~') else f'team~{team_id}'
+        """The publish-map key of a pointer slot: 'user~{uid}' and the store's '~public' stay, a team id becomes 'team~{id}'."""
+        return team_id if team_id.startswith('user~') or team_id == _PUBLIC_KEY else f'team~{team_id}'
 
     @staticmethod
     def _slot_of_key(key: str) -> str:
@@ -1611,9 +1611,11 @@ class FileDeploymentBackend:
         return artifact
 
     async def iter_enabled(self) -> 'AsyncGenerator[Dict[str, Any], None]':
-        """Yield every ENABLED team deployment across all orgs (scheduler feed).
+        """Yield every ENABLED pipe deployment across all orgs (scheduler feed).
 
-        Each item: {orgId, teamId, projectId, version, state, schedules}.
+        Every slot, the store's included: a schedule may sit on any
+        publication of a pipe. Each item: {orgId, teamId, projectId, version,
+        state, schedules}.
         """
         # Same guard as _project_ids: a fresh store has no orgs/ tree yet —
         # the scheduler feed yields nothing rather than raising.
@@ -1628,7 +1630,7 @@ class FileDeploymentBackend:
                 if meta is None:
                     continue
                 for key, dep in self._publishes_of(meta).items():
-                    if key == _PUBLIC_KEY or dep.get('state') != 'enabled' or self._row_kind(meta, dep) != 'pipe':
+                    if dep.get('state') != 'enabled' or self._row_kind(meta, dep) != 'pipe':
                         continue
                     yield {
                         'orgId': org_id,

@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 7e67a79d79e3e7a3ff098131d07265b89a13c6b9
+// Source commit: 01940f750ddc1a5d83dd78b8e1940b7286679be0
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -4942,15 +4942,19 @@ declare class DeployApi {
         workspaceRoot?: string;
     }): Promise<AppVerifyReport>;
     /**
-     * Points a team at a published version.
+     * Points an audience at a published version.
      *
      * Promotion (Staging → Production) and rollback (v3 → v2) are both this
-     * call — the team's pointer moves, nothing else changes. The team is
-     * always explicit; requires `task.control` on it.
+     * call — the audience's pointer moves, nothing else changes. The audience
+     * is always explicit: a team (requires `task.control` on it), `'@me'`
+     * (your own space), or `'@public'` (the store: on a server that reviews,
+     * only an approved `'ready'` version; your organization needs a developer
+     * id). A pointer on `'@me'` or `'@public'` is billed to your development
+     * team when its schedules or a run-now fire it.
      *
      * @param projectId - The project whose artifact to deploy.
-     * @param version - The registry version to point the team at.
-     * @param teamId - The target team (the environment).
+     * @param version - The registry version to point the audience at.
+     * @param teamId - The target audience: a team id, `'@me'` or `'@public'`.
      * @returns The updated deployment record, registry-joined.
      */
     deploy(projectId: string, version: number, teamId: string): Promise<Deployment>;
@@ -4958,9 +4962,10 @@ declare class DeployApi {
      * Deployments visible to the caller, as the standard list envelope.
      *
      * @param params - Optional team scope + list-API params.
-     * @param params.teamId - Restrict to one team; omitted = the visibility
-     *   model: the caller's member teams plus their own personal space, and
-     *   the whole org for an org admin.
+     * @param params.teamId - Restrict to one team, `'@me'` or `'@public'`;
+     *   omitted = the visibility model: the caller's member teams, their own
+     *   personal space and the organization's store rows (`teamId: '~public'`),
+     *   and the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
     list(params?: DeployListParams & {
@@ -5081,7 +5086,9 @@ declare class DeployApi {
      */
     delete(projectId: string, version: number): Promise<DeployDeleteResult>;
     /**
-     * Sets (or clears) one source's schedule on a team deployment.
+     * Sets (or clears) one source's schedule on a deployment: a team's,
+     * `'@me'` or `'@public'` — any publication of the pipe can run on a
+     * schedule, billed to the team stamped when it was published.
      *
      * The paused flag is untouched — editing cron/ttl preserves it (a new
      * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
@@ -5091,7 +5098,7 @@ declare class DeployApi {
      * @param sourceId - The pipeline source the schedule fires.
      * @param schedule - 5-field cron expression; `null` or `'manual'` clears
      *   the schedule.
-     * @param teamId - The team whose deployment to schedule.
+     * @param teamId - The deployment to schedule: a team id, `'@me'` or `'@public'`.
      * @param options - Optional schedule options.
      * @param options.ttl - Run window in seconds ('fixed window'); omitted
      *   runs each task until the pipeline finishes.
@@ -7013,7 +7020,8 @@ export declare function devContainerNameOf(slug: string, developerId: string | n
  * Resolves a team id to its display name, falling back to the id. Personal
  * (`user~`) owner keys render as "Me" for the caller's own space and
  * "Personal" for another user's (admin visibility) — the raw guid never
- * reaches a label.
+ * reaches a label. The store slot (`~public`, or `@public` as the wire
+ * addresses it) renders as "Store".
  *
  * @param teams - The resolved team refs.
  * @param teamId - The team id (or owner key) to resolve.
@@ -7023,8 +7031,9 @@ export declare function devContainerNameOf(slug: string, developerId: string | n
 export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId?: string): string;
 /**
  * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
- * the caller's own `user~{uid}` row is addressed as '@me' (the server never
- * accepts raw owner keys); everything else passes through.
+ * the caller's own `user~{uid}` row is addressed as '@me' and the store row
+ * (`~public`) as '@public' (the server never accepts raw owner keys);
+ * everything else passes through.
  *
  * @param teamId - The row's team id / owner key.
  * @param ownUserId - The caller's user id ('' when unknown).
@@ -7032,10 +7041,10 @@ export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUs
  */
 export declare function wireTeamIdOf(teamId: string, ownUserId: string): string;
 /**
- * Resolves what a person typed as a team — '@me', a team id, or a team
- * display name (case-insensitive) — to the id to send. An unknown value
- * passes through unchanged (the server validates it; an admin may address
- * a team outside their own roster).
+ * Resolves what a person typed as a team — '@me', '@public' (the store), a
+ * team id, or a team display name (case-insensitive) — to the id to send.
+ * An unknown value passes through unchanged (the server validates it; an
+ * admin may address a team outside their own roster).
  *
  * @param input - The typed team ('' = unscoped/default).
  * @param teams - The caller's resolved team refs.

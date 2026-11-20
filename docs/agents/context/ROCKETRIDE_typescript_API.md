@@ -859,11 +859,11 @@ await client.deploy.addPipe(created.pipePath);
 
 ##### `client.deploy.deploy(projectId: string, version: number, teamId: string): Promise<Deployment>`
 
-Point a team at a published version. Promotion (Staging → Production) and rollback (v3 → v2) are both this call. The team is always explicit; requires `task.control` on it.
+Point an audience at a published version. Promotion (Staging → Production) and rollback (v3 → v2) are both this call. The audience is always explicit: a team id (requires `task.control` on it), `'@me'` (your own space), or `'@public'` (the store: your organization needs a developer id, and on a server that reviews only an approved `'ready'` version is accepted; a server without a reviewer takes any version that did not fail). A pointer on `'@me'` or `'@public'` is stamped with your development team, which its schedules and run-now bill; every caller of a public pipe pays for their own calls.
 
 **Reads** (list envelopes are `{ rows, total, page, pageSize }`; `params` takes `page`, `pageSize`, `search`, `filters`, `sort`):
 
-- `list(params?): Promise<DeployListEnvelope<Deployment>>` — deployments visible to the caller; `params.teamId` restricts to one team
+- `list(params?): Promise<DeployListEnvelope<Deployment>>` — deployments visible to the caller: their teams, their own space and the organization's store rows (`teamId: '~public'`); `params.teamId` restricts to one team, `'@me'` or `'@public'`
 - `get(projectId, teamId): Promise<Deployment>` — one team's deployment, registry-joined (version, state, schedules, actors)
 - `versions(projectId, params?): Promise<DeployListEnvelope<DeployArtifact>>` — the org-registry versions (the version strip), newest first. Each row carries `deletable`: whether `delete` would take it right now (no rung pins it, not in review, not building)
 - `artifact(projectId, version): Promise<PipelineConfig>` — one immutable artifact's pipeline JSON, sha256-verified server-side on load; the source of truth for rendering a deployed version
@@ -878,7 +878,7 @@ Point a team at a published version. Promotion (Staging → Production) and roll
 
 **Schedules:**
 
-- `setSchedule(projectId, sourceId, schedule, teamId, options?): Promise<Deployment>` — set (or clear) one source's schedule. `schedule` is a 5-field cron expression (`null` or `'manual'` clears it); `options.ttl` is the run window in seconds (omitted = each run executes until the pipeline finishes). Editing cron/ttl preserves the paused flag — `pauseSchedule`/`resumeSchedule` own it
+- `setSchedule(projectId, sourceId, schedule, teamId, options?): Promise<Deployment>` — set (or clear) one source's schedule on any publication of the pipe: a team, `'@me'` or `'@public'`; a scheduled run is billed to the team stamped on the pointer when it was published. `schedule` is a 5-field cron expression (`null` or `'manual'` clears it); `options.ttl` is the run window in seconds (omitted = each run executes until the pipeline finishes). Editing cron/ttl preserves the paused flag — `pauseSchedule`/`resumeSchedule` own it
 - `setSourceConfig(projectId, sourceId, teamId, options?): Promise<Deployment>` — per-source settings riding every deploy run: `options.traceLevel?: 'none' | 'metadata' | 'summary' | 'full' | null` (null/omitted = deploy default, full) and `options.debugOut?: boolean`. Editing the schedule never touches them
 - `pauseSchedule(projectId, sourceId, teamId)` / `resumeSchedule(...)` — pause ONE source's schedule (cron/ttl stay configured, it just stops firing) / resume it
 - `preview(schedule, count?): Promise<SchedulePreview>` — validate a cron expression and get its next occurrences (`{ valid, error?, next? }`). THE cron evaluator: render "next run" lines from it rather than parsing cron client-side, so previews never disagree with what the scheduler fires
@@ -942,7 +942,7 @@ The automation layer under the App Builder UI: the same scaffold, version rail, 
 - `disableAppPublish(appId, target): Promise<{ publish }>` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it
 - `whereApp(appId): Promise<Array<{ rung, handle, version, appVersion, state, deployedAt? }>>` — the reverse index: which audiences serve which version
 - `waitForAppBuild(appId, registryVersion, { timeoutMs?, intervalMs?, onStatus? })` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Throws on a failed build, an unknown version, or the timeout
-- Pure helpers exported from `rocketride` (shared with the CLI and the VS Code panels; the Python SDK exports snake_case twins): `parseRegistryVersion(value)`, `pickPublishVersion(rail)` (newest non-failed version), `resolveDeployTeams(client, deployments)`, `teamNameOf(teams, teamId, ownUserId)`, `wireTeamIdOf(teamId, ownUserId)`, `resolveTeamArg(input, teams)` ('@me' / name / id → wire id), `pipelineNameFromPath(path)`
+- Pure helpers exported from `rocketride` (shared with the CLI and the VS Code panels; the Python SDK exports snake_case twins): `parseRegistryVersion(value)`, `pickPublishVersion(rail)` (newest non-failed version), `resolveDeployTeams(client, deployments)`, `teamNameOf(teams, teamId, ownUserId)`, `wireTeamIdOf(teamId, ownUserId)`, `resolveTeamArg(input, teams)` ('@me' / '@public' / name / id → wire id; a row's `user~{uid}` and `~public` keys go on the wire as '@me' and '@public' through `wireTeamIdOf`, and `teamNameOf` names the store row 'Store'), `pipelineNameFromPath(path)`
 - Live preview (Node.js, `rocketride/app-dev`): `new DevSession({ app, workspaceRoot, client })` runs one app's dev loop — `start()` resolves the dev server origin, `stop()` kills the tree and drops your dev overlay; `devPreviewUrl(serverBase, appId)` is the preview to open. The `rocketride app dev` command is this loop in the foreground
 - `developerStatus(): Promise<{ developerId, stripeAccountId, stripeAccountStatus }>` — the caller org's developer namespace (the `<developerId>` half of its app ids); `developerId` is `null` until an org admin registers one
 - `registerDeveloper(developerId): Promise<Record<string, unknown>>` — claim the org's developer id slug (org.admin, SaaS only)

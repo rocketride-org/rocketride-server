@@ -258,6 +258,35 @@ class TestStartRun:
         dispatch.assert_not_awaited()
         assert not scheduler._entries
 
+    @pytest.mark.asyncio
+    async def test_a_store_schedule_fires_on_the_public_rung_billed_to_its_stamp(
+        self, scheduler, account_stub, dispatch
+    ):
+        # Any published pipe can be scheduled (2026-11-20): the store slot's
+        # run is team-owned by the stamped billing team and sits on the public rung
+        entry = _entry(scheduler, team='~public')
+        account_stub.deployments_get.return_value = {**_dep(team='~public'), 'billingTeamId': 'team-dev'}
+        await scheduler._start_run(entry)
+        kwargs = dispatch.await_args.kwargs
+        assert (kwargs['team_id'], kwargs['owner_kind'], kwargs['rung']) == ('team-dev', 'team', 'public')
+        assert kwargs['deployment'].team_id == '~public'
+        # A team slot keeps deriving its rung
+        dispatch.reset_mock()
+        await scheduler._start_run(_entry(scheduler))
+        assert dispatch.await_args.kwargs['rung'] == ''
+
+    @pytest.mark.asyncio
+    async def test_an_unstamped_store_row_is_errored_never_billed_to_a_team_named_public(
+        self, scheduler, account_stub, dispatch
+    ):
+        # The legacy "bill your own audience" fallback is for team slots only
+        entry = _entry(scheduler, team='~public')
+        account_stub.deployments_get.return_value = _dep(team='~public')
+        await scheduler._start_run(entry)
+        dispatch.assert_not_awaited()
+        account_stub.deployments_set_state.assert_awaited_once()
+        assert account_stub.deployments_set_state.await_args.args[1:4] == ('~public', 'proj-1', 'errored')
+
 
 # ============================================================================
 # Overlap guard (loop-level state exercised directly)

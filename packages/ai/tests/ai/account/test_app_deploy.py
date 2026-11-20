@@ -58,6 +58,7 @@ from ai.account.app_deploy import (
     handle_deploy_app,
     namespace_of,
     open_version_dirs,
+    publish_block_of,
     resolve_app_pins,
 )
 from ai.account.store import Store
@@ -129,6 +130,8 @@ class _FakeRegistry:
         self.versions.append(
             {
                 'version': version,
+                # Both real rails stamp the version's kind on its entry
+                'kind': kind,
                 'sha256': f'sha-{version}',
                 'state': state,
                 'metadata': metadata,
@@ -190,6 +193,7 @@ class _FakeRegistry:
             version = len(self.versions) + 1
             entry = {
                 'version': version,
+                'kind': str(artifact.get('kind') or 'pipe'),
                 'sha256': 'sha-new',
                 'state': state or ('private' if artifact.get('kind') == 'app' else 'ready'),
                 'metadata': metadata or {},
@@ -210,6 +214,13 @@ class _FakeRegistry:
                 if int(v.get('version', 0)) == int(version):
                     return str(v.get('state') or '')
             return ''
+
+        def _row_kind(row):
+            """A publish row's kind: the kind of the version it points at, as both real backends read it."""
+            for v in self.versions:
+                if int(v.get('version', 0)) == int(row.get('version') or 0):
+                    return str(v.get('kind') or 'pipe')
+            return 'pipe'
 
         def _art_build(version):
             """The deployment's build status (from the rail), for publish rows."""
@@ -274,10 +285,11 @@ class _FakeRegistry:
             return None if not row or row.get('state') == 'removed' else _with_state(row)
 
         async def publish_of_app(org_id, kind, app_id):
+            # The real readers filter by kind; so does the fake
             return [
                 _with_state(r)
                 for (aid, _), r in self.publishes.items()
-                if aid == app_id and r.get('state') != 'removed'
+                if aid == app_id and r.get('state') != 'removed' and _row_kind(r) == kind
             ]
 
         async def publish_list(org_id, kind, audiences):
@@ -285,7 +297,7 @@ class _FakeRegistry:
             return [
                 _with_state(r)
                 for (aid, key), r in self.publishes.items()
-                if key in keys and r.get('state') != 'removed'
+                if key in keys and r.get('state') != 'removed' and _row_kind(r) == kind
             ]
 
         async def publish_set_state(org_id, kind, app_id, audience, state, actor):
@@ -1332,6 +1344,46 @@ async def test_where_serves_you_follows_precedence(registry):
     registry.publishes[('acme.brandy', registry._key(AUD_USER))]['state'] = 'disabled'
     pins = (await handle_deploy_app(conn, _request('where')))['body']['pins']
     assert [p['rung'] for p in pins if p['servesYou']] == ['public']
+
+
+@pytest.mark.asyncio
+async def test_where_and_the_version_chips_read_a_pipes_rows(registry):
+    """A pipe's publish rows read as an app's (plan 10.1): ``where`` lists them
+    under the pipe gate (no build step, so an unbuilt pipe version serves; the
+    store needs 'ready'), and the version chips name the audiences.
+    """
+    registry.add_version(1, '', kind='pipe', state='ready', build=None)
+    registry.add_version(2, '', kind='pipe', state='submit', build=None)
+    registry.seed_publish(AUD_USER, 2)
+    registry.seed_publish(AUD_PUBLIC, 1)
+    conn = _FakeConn(teams=_TEAMS)
+
+    pins = {p['rung']: p for p in (await handle_deploy_app(conn, _request('where')))['body']['pins']}
+    assert {rung: (p['version'], p['serving'], p['reason']) for rung, p in pins.items()} == {
+        'personal': (2, True, ''),
+        'public': (1, True, ''),
+    }
+
+    rail = (await handle_deploy_app(conn, _request('versions')))['body']['versions']
+    assert {r['registryVersion']: r['rungs'] for r in rail} == {2: ['user'], 1: ['public']}
+
+    # The store row of a version that left review the wrong way stops serving
+    registry.versions[0]['state'] = 'rejected'
+    pins = {p['rung']: p for p in (await handle_deploy_app(conn, _request('where')))['body']['pins']}
+    assert (pins['public']['serving'], pins['public']['reason']) == (False, 'rejected')
+
+
+def test_publish_block_of_is_the_one_publish_gate():
+    """THE publish gate both doors apply (the pipe door to the store only)."""
+    approved = 'not approved for the store yet'
+    # A review-ladder server: the store takes only 'ready'
+    assert publish_block_of('acme.p', 3, 'ready', True, True) == ''
+    for state in ('private', 'submit', 'rejected', 'failed'):
+        assert approved in publish_block_of('acme.p', 3, state, True, True)
+    # No ladder, or an internal audience: anything but a failed version
+    for public, ladder in ((True, False), (False, True), (False, False)):
+        assert publish_block_of('acme.p', 3, 'private', public, ladder) == ''
+        assert 'failed processing' in publish_block_of('acme.p', 3, 'failed', public, ladder)
 
 
 @pytest.mark.asyncio

@@ -160,12 +160,18 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
     return me + list(seen.values())
 
 
+#: The owner key of the store slot: a publication's ``@public`` row carries it as its ``teamId``.
+_STORE_SLOT = '~public'
+
+
 def team_name_of(teams: List[DeployTeamRef], team_id: str, own_user_id: str = '') -> str:
     """
     Resolve a team id to its display name, falling back to the id.
 
     Personal (``user~``) owner keys render as "Me" for the caller's own space
     and "Personal" for another user's — the raw guid never reaches a label.
+    The store slot (``~public``, or ``@public`` as the wire addresses it)
+    renders as "Store".
 
     Args:
         teams: The resolved team refs.
@@ -177,6 +183,8 @@ def team_name_of(teams: List[DeployTeamRef], team_id: str, own_user_id: str = ''
     """
     if team_id.startswith('user~'):
         return 'Me' if own_user_id and team_id == f'user~{own_user_id}' else 'Personal'
+    if team_id in (_STORE_SLOT, '@public'):
+        return 'Store'
     return next((t['name'] for t in teams if t['id'] == team_id), team_id)
 
 
@@ -184,8 +192,9 @@ def wire_team_id_of(team_id: str, own_user_id: str) -> str:
     """
     Translate a row's owner key into the addressable team ref for API calls.
 
-    The caller's own ``user~{uid}`` row is addressed as ``'@me'`` (the server
-    never accepts raw owner keys); everything else passes through.
+    The caller's own ``user~{uid}`` row is addressed as ``'@me'`` and the
+    store row (``~public``) as ``'@public'`` (the server never accepts raw
+    owner keys); everything else passes through.
 
     Args:
         team_id: The row's team id / owner key.
@@ -194,16 +203,18 @@ def wire_team_id_of(team_id: str, own_user_id: str) -> str:
     Returns:
         The team id to put on the wire.
     """
+    if team_id == _STORE_SLOT:
+        return '@public'
     return '@me' if own_user_id and team_id == f'user~{own_user_id}' else team_id
 
 
 def resolve_team_arg(value: str, teams: List[DeployTeamRef]) -> str:
     """
-    Resolve what a person typed as a team — ``'@me'``, a team id, or a display name — to the id to send.
+    Resolve what a person typed as a team — ``'@me'``, ``'@public'``, a team id, or a display name — to the id to send.
 
-    Names match case-insensitively. An unknown value passes through unchanged
-    (the server validates it; an admin may address a team outside their own
-    roster).
+    Names match case-insensitively. ``'@public'`` is the store. An unknown
+    value passes through unchanged (the server validates it; an admin may
+    address a team outside their own roster).
 
     Args:
         value: The typed team ('' = unscoped/default).
@@ -216,7 +227,7 @@ def resolve_team_arg(value: str, teams: List[DeployTeamRef]) -> str:
         ValueError: When a name matches more than one team.
     """
     typed = value.strip()
-    if not typed or typed == '@me' or any(t['id'] == typed for t in teams):
+    if not typed or typed in ('@me', '@public') or any(t['id'] == typed for t in teams):
         return typed
     by_name = [t for t in teams if t['name'].lower() == typed.lower()]
     if len(by_name) > 1:

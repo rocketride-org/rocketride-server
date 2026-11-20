@@ -319,7 +319,10 @@ rocketride app deploy ./apps/reports-ui --comment "ci: $GITHUB_SHA"
 Deployment-target verbs (the `ROCKETRIDE_DEPLOY_*` pair), following the
 platform vocabulary — **deploy** = version to the server's registry,
 **publish** = bind a rung to a version. Every `--team` / `--deploy-to`
-takes `@me` (your personal space), a team name, or a team id, and output
+takes `@me` (your personal space), `@public` (the store: a `ready`
+version, which on a server that reviews means approved), a team name, or a
+team id. The exception is `deploy interfaces`: its `--team` names one of
+your teams only, and leaving it out lets your team order decide. Output
 names teams instead of printing raw ids (`--json` keeps `teamId` and adds
 `teamName`). An unnamed pipeline deploys under its file name.
 

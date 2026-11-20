@@ -12,12 +12,13 @@
  * undefined, which is fine for the component smoke tests — except for
  * module-scope style spreads like `...commonStyles.textEllipsis`, which need
  * commonStyles to be an object. This stub returns a module whose commonStyles
- * hands back an empty style fragment for any name, renders the two controls
- * a smoke test may draw (Button as a native button carrying its accessible
+ * hands back an empty style fragment for any name, renders the controls a
+ * smoke test may draw (Button as a native button carrying its accessible
  * name, title and disabled state; ConfirmDialog as nothing, since a closed
- * dialog draws nothing), and leaves every other export undefined, matching
- * what the tests already tolerate. Loaded via `--require` before tsx starts
- * resolving test files.
+ * dialog draws nothing; StatusBadge as a span carrying its variant; Modal
+ * inline as its title, body and footer, since an open dialog draws them),
+ * and leaves every other export undefined, matching what the tests already
+ * tolerate. Loaded via `--require` before tsx starts resolving test files.
  *
  * 'rocketride' is NOT stubbed: it is a workspace dependency (the SDK's own
  * build), and pure modules under test (the Assets model's path and README
@@ -37,6 +38,11 @@ const stub = {
 		React.createElement('button', { type: 'button', 'aria-label': ariaLabel, title, disabled, onClick }, children),
 	// The real dialog portals nothing until opened; the stand-in draws nothing.
 	ConfirmDialog: () => null,
+	// The state pill: its label, with the variant a smoke test asserts on.
+	StatusBadge: ({ variant, children }) => React.createElement('span', { 'data-variant': variant }, children),
+	// An open dialog, drawn in place (the real one portals): title, body, footer.
+	Modal: ({ title, children, footer }) =>
+		React.createElement('div', { role: 'dialog' }, React.createElement('h2', null, title), children, footer),
 };
 
 // step: intercept CJS loads of the shell specifier before tsx resolves it

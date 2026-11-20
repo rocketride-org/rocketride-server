@@ -313,15 +313,19 @@ export class DeployApi {
 	// =========================================================================
 
 	/**
-	 * Points a team at a published version.
+	 * Points an audience at a published version.
 	 *
 	 * Promotion (Staging → Production) and rollback (v3 → v2) are both this
-	 * call — the team's pointer moves, nothing else changes. The team is
-	 * always explicit; requires `task.control` on it.
+	 * call — the audience's pointer moves, nothing else changes. The audience
+	 * is always explicit: a team (requires `task.control` on it), `'@me'`
+	 * (your own space), or `'@public'` (the store: on a server that reviews,
+	 * only an approved `'ready'` version; your organization needs a developer
+	 * id). A pointer on `'@me'` or `'@public'` is billed to your development
+	 * team when its schedules or a run-now fire it.
 	 *
 	 * @param projectId - The project whose artifact to deploy.
-	 * @param version - The registry version to point the team at.
-	 * @param teamId - The target team (the environment).
+	 * @param version - The registry version to point the audience at.
+	 * @param teamId - The target audience: a team id, `'@me'` or `'@public'`.
 	 * @returns The updated deployment record, registry-joined.
 	 */
 	async deploy(projectId: string, version: number, teamId: string): Promise<Deployment> {
@@ -341,9 +345,10 @@ export class DeployApi {
 	 * Deployments visible to the caller, as the standard list envelope.
 	 *
 	 * @param params - Optional team scope + list-API params.
-	 * @param params.teamId - Restrict to one team; omitted = the visibility
-	 *   model: the caller's member teams plus their own personal space, and
-	 *   the whole org for an org admin.
+	 * @param params.teamId - Restrict to one team, `'@me'` or `'@public'`;
+	 *   omitted = the visibility model: the caller's member teams, their own
+	 *   personal space and the organization's store rows (`teamId: '~public'`),
+	 *   and the whole org for an org admin.
 	 * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
 	 */
 	async list(params: DeployListParams & { teamId?: string } = {}): Promise<DeployListEnvelope<Deployment>> {
@@ -540,7 +545,9 @@ export class DeployApi {
 	// =========================================================================
 
 	/**
-	 * Sets (or clears) one source's schedule on a team deployment.
+	 * Sets (or clears) one source's schedule on a deployment: a team's,
+	 * `'@me'` or `'@public'` — any publication of the pipe can run on a
+	 * schedule, billed to the team stamped when it was published.
 	 *
 	 * The paused flag is untouched — editing cron/ttl preserves it (a new
 	 * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
@@ -550,7 +557,7 @@ export class DeployApi {
 	 * @param sourceId - The pipeline source the schedule fires.
 	 * @param schedule - 5-field cron expression; `null` or `'manual'` clears
 	 *   the schedule.
-	 * @param teamId - The team whose deployment to schedule.
+	 * @param teamId - The deployment to schedule: a team id, `'@me'` or `'@public'`.
 	 * @param options - Optional schedule options.
 	 * @param options.ttl - Run window in seconds ('fixed window'); omitted
 	 *   runs each task until the pipeline finishes.
