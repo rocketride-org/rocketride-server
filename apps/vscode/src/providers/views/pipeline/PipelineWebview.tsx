@@ -59,7 +59,7 @@ const PipelineWebview: React.FC = () => {
 	// Server-supplied Stripe publishable key — matches the connected server's
 	// Stripe account instead of a build-time value.
 	const stripe = useStripeKey();
-	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, replaySupported } = useCheckoutSession(stripe);
+	const { checkout, checkoutStripeKey, openCheckout, closeCheckout, isCurrent, isSessionCurrent, replaySupported } = useCheckoutSession(stripe);
 	const [cloudConnectionConfigured, setCloudConnectionConfigured] = useState(false);
 	// Host-pushed env-key updates (the Variables page saved) — delivered into
 	// the shared editor through the seam's feed.
@@ -266,9 +266,17 @@ const PipelineWebview: React.FC = () => {
 		return client;
 	}, [checkout, isCurrent]);
 
+	// Catalog reads check identity only, so a retry still works after replay
+	// support is downgraded; mutations keep needBillingClient.
+	const needBillingReadClient = useCallback(() => {
+		const client = ConnectionManager.getInstance().getClient();
+		if (!client || !checkout || !isSessionCurrent(checkout)) throw checkoutNotDispatched();
+		return client;
+	}, [checkout, isSessionCurrent]);
+
 	const handleFetchPlans = useCallback((): Promise<CheckoutPlan[]> => {
-		return needBillingClient().billing.getProductPrices(PIPE_BUILDER_APP_ID) as Promise<CheckoutPlan[]>;
-	}, [needBillingClient]);
+		return needBillingReadClient().billing.getProductPrices(PIPE_BUILDER_APP_ID) as Promise<CheckoutPlan[]>;
+	}, [needBillingReadClient]);
 
 	const handleCreateCheckout = useCallback((priceId: string, promotionCode?: string, attemptId?: string) => {
 		if (!checkout) return Promise.reject(new Error('No checkout session found'));

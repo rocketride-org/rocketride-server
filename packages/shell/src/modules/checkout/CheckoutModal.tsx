@@ -831,7 +831,9 @@ export const CheckoutModal: React.FC<CheckoutModalProps> = ({
 							<button
 								style={S.continueBtn(plansLoading)}
 								disabled={plansLoading}
-								onClick={() => { if (isCurrent()) setPlanFetchRetry((count) => count + 1); }}
+								// Identity is enforced by onFetchPlans itself; the replay-aware
+								// isCurrent would make this a no-op after a replay downgrade.
+								onClick={() => { if (mounted.current) setPlanFetchRetry((count) => count + 1); }}
 							>
 								Retry plans
 							</button>
