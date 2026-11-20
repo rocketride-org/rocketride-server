@@ -53,7 +53,11 @@ const IMPLEMENTED = ((): boolean => {
 async function driveSdk(_t: ITestRoot, realm: IOpenedRealm): Promise<{ token: string; projectId: string; pipeId: number }> {
 	const key = refAppKey(ENTRY_A.id);
 	const p = (name: string): string => `apps/${key}/${name}`;
-	const client = new RocketRideClientProxy({ request: (op, params, timeoutMs) => realm.bus.request(op, params, timeoutMs === undefined ? undefined : { timeoutMs }) }, {});
+	// The shell realm is a browser: the SDK has no process.env there. In Node it copies every
+	// environment variable and `use()` then ships the ROCKETRIDE_* ones as `execute.env`, which the
+	// gate refuses (schema) on any runner that exports them. An empty `env` is the browser's
+	// view; every other SDK default stays as shipped.
+	const client = new RocketRideClientProxy({ request: (op, params, timeoutMs) => realm.bus.request(op, params, timeoutMs === undefined ? undefined : { timeoutMs }) }, { env: {} });
 
 	const run = await client.use({ pipeline: { components: [], source: 'chat_1', project_id: 'caller-chosen' } as never, source: 'chat_1', ttl: 60 });
 	const token = run.token;
@@ -87,6 +91,16 @@ async function driveSdk(_t: ITestRoot, realm: IOpenedRealm): Promise<{ token: st
 }
 
 test('T8 the real SDK client works through the root with its defaults', async (tt) => {
+	// A runner that exports ROCKETRIDE_* (CI does) must not change what the browser-shaped client sends.
+	const saved = { uri: process.env.ROCKETRIDE_URI, key: process.env.ROCKETRIDE_APIKEY };
+	process.env.ROCKETRIDE_URI = 'http://runner.invalid';
+	process.env.ROCKETRIDE_APIKEY = 'runner-key';
+	tt.after(() => {
+		for (const [name, value] of [['ROCKETRIDE_URI', saved.uri], ['ROCKETRIDE_APIKEY', saved.key]] as const) {
+			if (value === undefined) delete process.env[name];
+			else process.env[name] = value;
+		}
+	});
 	const t = makeRoot();
 	tt.after(() => t.cleanup());
 	const realm = t.open(ENTRY_A);
