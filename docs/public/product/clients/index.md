@@ -6,7 +6,7 @@ description: Official client libraries for the RocketRide Engine. The TypeScript
 
 # RocketRide Client Libraries
 
-Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The MCP client provides AI assistant integration via the Model Context Protocol. A pipeline's chat and dropper front ends are platform apps (`rocketride.chat`, `rocketride.dropper`), not an embeddable widget.
+Official client libraries for the RocketRide Engine. The TypeScript and Python clients communicate with the server over DAP (Debug Adapter Protocol) on WebSocket and offer the same capabilities. The engine's built-in MCP server lets AI assistants build, run and observe pipelines over the Model Context Protocol. A pipeline's chat and dropper front ends are platform apps (`rocketride.chat`, `rocketride.dropper`), not an embeddable widget.
 
 ---
 
@@ -29,7 +29,7 @@ URIs: clients accept `http`/`https` or `ws`/`wss` and convert to WebSocket (`htt
 | **TypeScript** | `rocketride`     | [TypeScript SDK](/clients/typescript)       |
 | **Python**     | `rocketride`     | [Python SDK](/clients/python)               |
 | **VS Code**    | `rocketride` (extension) | [VS Code Extension](/clients/vscode) |
-| **MCP**        | `rocketride-mcp` (deprecated) | [MCP server](/connect/mcp/stdio) |
+| **MCP**        | built into the engine (`/mcp`) | [MCP server](/connect/mcp/http) |
 
 Each document lists every constructor option, method, type, and usage example for that client.
 

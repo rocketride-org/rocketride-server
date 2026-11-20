@@ -1,7 +1,7 @@
 {
 	"name": "rocketride",
 	"displayName": "RocketRide",
-	"description": "RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.",
+	"description": "RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production. VS Code extension.",
 	"version": "2.0.0",
 	"publisher": "rocketride",
 	"repository": {
