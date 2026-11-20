@@ -68,7 +68,13 @@ import type { INodeData } from '../types';
 export function claimPostReadyBatch(handled: { current: readonly string[] | null }, pendingIds: readonly string[], isFlowReady: boolean, nodes: readonly Pick<Node, 'id' | 'measured'>[]): boolean {
 	if (!isFlowReady || pendingIds.length === 0) return false;
 	if (handled.current === pendingIds) return false;
-	if (!pendingIds.every((id) => nodes.find((n) => n.id === id)?.measured?.width != null)) return false;
+
+	// Every pending node must exist and have been measured
+	for (const id of pendingIds) {
+		const node = nodes.find((n) => n.id === id);
+		if (node?.measured?.width == null) return false;
+	}
+
 	handled.current = pendingIds;
 	return true;
 }
