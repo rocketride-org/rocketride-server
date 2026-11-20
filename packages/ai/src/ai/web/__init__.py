@@ -80,7 +80,6 @@ __all__ = [
     'File',
     'formatException',
     'Header',
-    'ObjectPipe',
     'Query',
     'Request',
     'response',
