@@ -66,6 +66,12 @@ from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchEr
 # Mirrors the store's own retry posture for read-modify-write records.
 _CAS_ATTEMPTS = 5
 
+# The restart-recovery scan's retries of an org whose tree could not be read:
+# the seconds to wait before each further pass over the failed orgs. The
+# startup sweep is the build worker's only scan, so a transient outage on one
+# org is retried here, in the same process, a bounded number of times.
+_SCAN_RETRY_DELAYS = (2.0, 10.0)
+
 # Deployment states a team pointer can be in. 'disabled' is the user's
 # whole-deployment kill switch (nothing runs); 'removed' is the soft-delete
 # terminal state: invisible in listings, history retained forever.
@@ -1450,27 +1456,63 @@ class FileDeploymentBackend:
         org trees is acceptable here — this runs once at startup, never on a
         request path.
 
+        One org's unreadable tree never costs the others their recovery: the
+        failure is logged by org and cause, the walk goes on, and the failed
+        orgs get a bounded number of further passes (``_SCAN_RETRY_DELAYS``)
+        in this process, because the startup sweep is the build worker's
+        only scan. An org still failing after the last pass is logged as
+        not recovered; what the other orgs yielded is returned either way.
+        The request-path listings (``publish_list``, ``list_team``) keep
+        raising: there a failure must not read as "nothing".
+
         Returns:
             ``[{'orgId', 'projectId', 'version'}]`` for each match.
         """
-        out: List[Dict[str, Any]] = []
+        # Step 1: the orgs present (none on a fresh store)
         try:
             orgs = await self._store.list_entries('orgs/', recursive=False, include_files=False)
-        except StorageError:
-            return out
-        for org_prefix in orgs:
-            org_id = org_prefix.rstrip('/').rsplit('/', 1)[-1]
-            for project_id in await self._project_ids(org_id):
-                meta = await self._read_meta(org_id, project_id)
-                if meta is None:
+        except StorageNotFoundError:
+            return []
+        except StorageError as exc:
+            error(f'deployments: build recovery could not list the orgs: {exc}')
+            return []
+        pending = [org_prefix.rstrip('/').rsplit('/', 1)[-1] for org_prefix in orgs]
+
+        # Step 2: every org once, then the failed ones again, a bounded number of times
+        out: List[Dict[str, Any]] = []
+        for attempt, delay in enumerate((0.0,) + tuple(_SCAN_RETRY_DELAYS)):
+            if not pending:
+                break
+            if delay:
+                await asyncio.sleep(delay)
+            failed: List[str] = []
+            for org_id in pending:
+                try:
+                    out.extend(await self._scan_org_builds(org_id, statuses))
+                except Exception as exc:
+                    error(f'deployments: build recovery could not read org {org_id} (pass {attempt + 1}): {exc}')
+                    failed.append(org_id)
+            pending = failed
+        for org_id in pending:
+            error(
+                f'deployments: build recovery gave up on org {org_id}; its interrupted builds stay queued until restart'
+            )
+        return out
+
+    async def _scan_org_builds(self, org_id: str, statuses: 'tuple[str, ...]') -> List[Dict[str, Any]]:
+        """One org's app versions whose build status matches (raises on a storage failure)."""
+        out: List[Dict[str, Any]] = []
+        for project_id in await self._project_ids(org_id):
+            meta = await self._read_meta(org_id, project_id)
+            if meta is None:
+                continue
+            for entry in meta['versions']:
+                if str(entry.get('kind') or 'pipe') != 'app':
                     continue
-                for entry in meta['versions']:
-                    if str(entry.get('kind') or 'pipe') != 'app':
-                        continue
-                    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
-                    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
-                    if str(build.get('status') or '') in statuses:
-                        out.append({'orgId': org_id, 'projectId': project_id, 'version': int(entry.get('version', 0))})
+                metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+                build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+                if str(build.get('status') or '') in statuses:
+                    out.append({'orgId': org_id, 'projectId': project_id, 'version': int(entry.get('version', 0))})
         return out
 
     async def history_append(

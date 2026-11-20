@@ -222,6 +222,26 @@ export function applyStorePage(prev: IStoreSearchState, generation: number, curr
 	return { ...prev, value: [...prev.value, ...added], total: page.total, loading: false, error: null };
 }
 
+/**
+ * The "More results" request the displayed results allow, or null.
+ *
+ * The request is owned by the generation that produced the DISPLAYED
+ * results (`state.generation`, stamped when they were set), never by the
+ * generation now. Inside the debounce window after the term changes (A to
+ * B) the generation has already advanced while A's rows are still shown;
+ * a More click there would fetch A's next page under B's generation and
+ * append A rows to B, so no request is made until B's results land.
+ *
+ * @param state - The displayed store search.
+ * @param current - The generation now.
+ * @returns The request (generation, term, offset), or null when the shown
+ *   results are not the current search's, or there is no term.
+ */
+export function storePageRequest(state: IStoreSearchState, current: number): { generation: number; term: string; offset: number } | null {
+	if (state.generation !== current || !state.term) return null;
+	return { generation: state.generation, term: state.term, offset: state.value.length };
+}
+
 // =============================================================================
 // THE INTERFACE
 // =============================================================================

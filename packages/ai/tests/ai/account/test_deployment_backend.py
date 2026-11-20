@@ -1065,6 +1065,94 @@ class TestNameRow:
         assert await fresh.publish_list('org-1', 'pipe', [AUD_PUBLIC]) == []
         assert await fresh.list_team('org-1', None) == []
 
+
+# ============================================================================
+# Build recovery scan: one org's failure never costs the others
+# ============================================================================
+
+
+class TestScanBuilds:
+    @staticmethod
+    async def _queued_app(backend, org_id):
+        """One app version in ``org_id`` whose build was left 'queued'."""
+        await backend.publish(org_id, 'acme.brandy', APP, ACTOR)
+        await backend.set_build(org_id, 'acme.brandy', 1, {'status': 'queued'})
+
+    @staticmethod
+    def _down_for(store, broken, attempts):
+        """A store whose deployments listing fails for the orgs in ``broken`` (each call counted)."""
+
+        class _PartlyDown(type(store)):
+            """The throwaway store with some orgs' deployments trees unreadable."""
+
+            async def list_entries(self, prefix, *args, **kwargs):
+                for org_id in broken:
+                    if prefix.startswith(f'orgs/{org_id}/'):
+                        attempts.append(org_id)
+                        raise StorageError(f'{org_id} unavailable')
+                return await super().list_entries(prefix, *args, **kwargs)
+
+        return _PartlyDown(f'filesystem://{store._root_path}')
+
+    @pytest.mark.asyncio
+    async def test_a_later_orgs_failure_keeps_the_earlier_orgs_matches_and_is_logged(self, store, backend, monkeypatch):
+        """org-a's queued build is returned although org-b's tree cannot be listed; the failure is logged by org."""
+        import ai.account.deployment_backend as backend_mod
+
+        await self._queued_app(backend, 'org-a')
+        await self._queued_app(backend, 'org-b')
+        logged = []
+        monkeypatch.setattr(backend_mod, 'error', lambda message: logged.append(message))
+        monkeypatch.setattr(backend_mod, '_SCAN_RETRY_DELAYS', (0.0, 0.0))
+        attempts = []
+
+        scanning = FileDeploymentBackend(self._down_for(store, {'org-b'}, attempts))
+        rows = await scanning.scan_builds(('queued', 'building'))
+
+        assert rows == [{'orgId': 'org-a', 'projectId': 'acme.brandy', 'version': 1}]
+        # One pass plus the two bounded retries, then it gives up and says so
+        assert attempts == ['org-b', 'org-b', 'org-b']
+        assert any('org org-b' in m and 'org-b unavailable' in m for m in logged)
+        assert any('gave up on org org-b' in m for m in logged)
+
+    @pytest.mark.asyncio
+    async def test_an_org_that_recovers_on_a_retry_pass_is_returned(self, store, backend, monkeypatch):
+        """A transient failure is retried in the same process; the org's builds come back on the next pass."""
+        import ai.account.deployment_backend as backend_mod
+
+        await self._queued_app(backend, 'org-a')
+        await self._queued_app(backend, 'org-b')
+        monkeypatch.setattr(backend_mod, 'error', lambda message: None)
+        monkeypatch.setattr(backend_mod, '_SCAN_RETRY_DELAYS', (0.0, 0.0))
+        attempts = []
+        broken = {'org-b'}
+
+        class _Recovering(type(store)):
+            """org-b's listing fails once, then answers."""
+
+            async def list_entries(self, prefix, *args, **kwargs):
+                if prefix.startswith('orgs/org-b/') and 'org-b' in broken:
+                    broken.discard('org-b')
+                    attempts.append('org-b')
+                    raise StorageError('org-b unavailable')
+                return await super().list_entries(prefix, *args, **kwargs)
+
+        scanning = FileDeploymentBackend(_Recovering(f'filesystem://{store._root_path}'))
+        rows = await scanning.scan_builds(('queued',))
+
+        assert sorted(r['orgId'] for r in rows) == ['org-a', 'org-b']
+        assert attempts == ['org-b']
+
+    @pytest.mark.asyncio
+    async def test_the_request_path_listings_still_raise(self, store, backend):
+        """publish_list and list_team are not the recovery scan: a listing failure raises there."""
+        await self._queued_app(backend, 'org-b')
+        down = FileDeploymentBackend(self._down_for(store, {'org-b'}, []))
+        with pytest.raises(StorageError, match='org-b unavailable'):
+            await down.publish_list('org-b', 'app', [AUD_PUBLIC])
+        with pytest.raises(StorageError, match='org-b unavailable'):
+            await down.list_team('org-b', None)
+
     @pytest.mark.asyncio
     async def test_concurrent_first_publishes_cannot_both_take_the_name(self, backend):
         """Two first publishes of one name race: one fixes the kind and takes v1, the other kind is refused."""

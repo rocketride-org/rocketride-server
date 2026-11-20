@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { PIPE_PAGE_LIMIT, applyStorePage, fetchOwnPipes, hrefWithPipeLink, interfaceNodes, looksLikeAddress, matchesTerm, pipeLinkFromSearch, rungLabel, searchStorePipes } from './pipePickerLogic';
+import { PIPE_PAGE_LIMIT, applyStorePage, fetchOwnPipes, storePageRequest, hrefWithPipeLink, interfaceNodes, looksLikeAddress, matchesTerm, pipeLinkFromSearch, rungLabel, searchStorePipes } from './pipePickerLogic';
 import type { IPipeEntry, IPipePage, IStoreSearchState } from './pipePickerLogic';
 
 // ==== Helpers ================================================================
@@ -117,6 +117,26 @@ test('a current page never shows a pipe twice, and a current failure is kept', (
 	assert.equal(failed.error, 'store down');
 	assert.equal(failed.loading, false);
 	assert.equal(failed.value.length, 1);
+});
+
+// ==== storePageRequest =======================================================
+
+test('More asks for the next page of the shown search, under the generation that produced it', () => {
+	assert.deepEqual(storePageRequest(storeState(3, ['zeta.a', 'zeta.b']), 3), { generation: 3, term: 'doc', offset: 2 });
+});
+
+test('More inside the debounce window asks for nothing: the term moved on while the old rows are shown', () => {
+	// A's results (generation 3) are on screen; typing B advanced the
+	// generation to 4 before B's search fired. A More click must not fetch
+	// A's next page under B's generation.
+	const showingA = storeState(3, ['zeta.a', 'zeta.b']);
+	assert.equal(storePageRequest(showingA, 4), null);
+	// Once B's results land under generation 4, More works again
+	assert.deepEqual(storePageRequest(storeState(4, ['omega.x'], { term: 'B' }), 4), { generation: 4, term: 'B', offset: 1 });
+});
+
+test('More with no term asks for nothing', () => {
+	assert.equal(storePageRequest(storeState(2, [], { term: '' }), 2), null);
 });
 
 // ==== searchStorePipes =======================================================

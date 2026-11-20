@@ -30,7 +30,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Button, EmptyState, InputField, Section, useShellConnection } from 'shell';
 import type { RocketRideClient } from 'rocketride';
-import { STORE_PAGE_LIMIT, applyStorePage, fetchOwnPipes, interfaceNodes, looksLikeAddress, matchesTerm, rungLabel, searchStorePipes, writePipeLinkToLocation } from './pipePickerLogic';
+import { STORE_PAGE_LIMIT, applyStorePage, fetchOwnPipes, interfaceNodes, looksLikeAddress, matchesTerm, rungLabel, searchStorePipes, storePageRequest, writePipeLinkToLocation } from './pipePickerLogic';
 import type { IInterfaceNode, IInterfacesAnswer, IPipeChoice, IPipeEntry, IPipePage, IStoreSearchState } from './pipePickerLogic';
 
 // =============================================================================
@@ -395,14 +395,15 @@ export const PipePicker: React.FC<IPipePickerProps> = ({ interfaceType, interfac
 
 	/** The next page of the current store search, applied only while that search is current. */
 	const loadMore = useCallback(() => {
-		const generation = storeGeneration.current;
-		const searched = store.term;
-		const offset = store.value.length;
+		// Owned by the generation that produced the shown rows; none while a newer search is pending
+		const request = storePageRequest(store, storeGeneration.current);
+		if (!request) return;
+		const { generation, term: searched, offset } = request;
 		setStore((prev) => (prev.generation === generation ? { ...prev, loading: true, error: null } : prev));
 		searchStorePipes(call, searched, offset, STORE_PAGE_LIMIT)
 			.then((page) => setStore((prev) => applyStorePage(prev, generation, storeGeneration.current, page)))
 			.catch((err: unknown) => setStore((prev) => applyStorePage(prev, generation, storeGeneration.current, { error: err instanceof Error ? err.message : String(err) })));
-	}, [call, store.term, store.value.length]);
+	}, [call, store]);
 
 	// -- Step 2: the picked pipe's interface ----------------------------------
 	useEffect(() => {
