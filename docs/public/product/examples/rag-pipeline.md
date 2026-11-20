@@ -119,21 +119,25 @@ Save this as `rag.pipe`:
 rocketride start --pipeline ./rag.pipe
 ```
 
-The engine prints the webhook URL and public auth key:
+When the source node reports `Webhook ready`, its Endpoint Info shows the
+webhook URL: the run's address `developerId.pipelineId.source` in one path
+segment. For developer id `acme`, this pipeline (`project_id: rag-example`,
+source `source_1`) is reached at:
 
 ```text
-Webhook ready - system is ready to accept requests
-  URL:  http://localhost:5567/webhook/rag-example/source_1
-  Auth: abc123...
+http://localhost:5567/webhook/acme.rag-example.source_1
 ```
+
+Requests authenticate with your API key (`rr_...`); see
+[Endpoint authentication](/operate/security#endpoint-authentication).
 
 ## Ingest documents
 
 POST a document to the webhook URL. The pipeline embeds and stores it:
 
 ```bash
-curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
-  -H "Authorization: Bearer abc123..." \
+curl -X POST http://localhost:5567/webhook/acme.rag-example.source_1 \
+  -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -F "file=@./my-document.pdf"
 ```
 
@@ -142,8 +146,8 @@ curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
 Send a plain-text question to the same endpoint:
 
 ```bash
-curl -X POST http://localhost:5567/webhook/rag-example/source_1 \
-  -H "Authorization: Bearer abc123..." \
+curl -X POST http://localhost:5567/webhook/acme.rag-example.source_1 \
+  -H "Authorization: Bearer $ROCKETRIDE_APIKEY" \
   -H "Content-Type: text/plain" \
   -d "What does the document say about refund policy?"
 ```

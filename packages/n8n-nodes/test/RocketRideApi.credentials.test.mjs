@@ -15,9 +15,9 @@ describe('RocketRideApi credential', () => {
 		expect(headers.Authorization).toBe('=Bearer {{$credentials.apiKey}}');
 	});
 
-	it('tests connectivity against the public GET /version route', () => {
+	it('tests the Base URL and the key together against the authenticated GET /status route', () => {
 		expect(cred.test.request.method).toBe('GET');
-		expect(cred.test.request.url).toBe('/version');
+		expect(cred.test.request.url).toBe('/status');
 		expect(cred.test.request.baseURL).toBe('={{$credentials.baseUrl}}');
 	});
 
@@ -27,6 +27,12 @@ describe('RocketRideApi credential', () => {
 		expect(cred.test.request.skipSslCertificateValidation).toBe(
 			'={{$credentials.ignoreSslIssues}}',
 		);
+	});
+
+	it('describes the key as an rr_ account key, never a pipeline or task key', () => {
+		const apiKey = cred.properties.find((p) => p.name === 'apiKey');
+		expect(apiKey.description).toContain('rr_');
+		expect(apiKey.description).not.toMatch(/(pk|tk)_/);
 	});
 
 	it('exposes baseUrl, a masked apiKey, and an SSL toggle', () => {

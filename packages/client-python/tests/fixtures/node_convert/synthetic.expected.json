@@ -1,0 +1,177 @@
+{
+	"definition": {
+		"title": "Synthetic",
+		"protocol": "synthetic://",
+		"classType": [
+			"text"
+		],
+		"capabilities": [],
+		"register": "filter",
+		"node": "python",
+		"path": "nodes.synthetic",
+		"lanes": {
+			"text": [
+				"text"
+			]
+		},
+		"propertyDefinitions": {
+			"synthetic.apikey": {
+				"type": "string",
+				"title": "API key",
+				"secret": true
+			},
+			"synthetic.limit": {
+				"type": "integer",
+				"title": "Limit",
+				"default": 10
+			},
+			"synthetic.prompt": {
+				"type": "string",
+				"title": "Prompt",
+				"format": "textarea"
+			},
+			"synthetic.color": {
+				"type": "string",
+				"title": "Color"
+			},
+			"synthetic.login": {
+				"type": "oauth2",
+				"title": "Sign in"
+			},
+			"synthetic.upload": {
+				"type": "upload",
+				"title": "Key file",
+				"options": {
+					"accept": ".json"
+				}
+			},
+			"synthetic.kind": {
+				"type": "constant",
+				"default": "synthetic"
+			},
+			"synthetic.username": {
+				"type": "string",
+				"title": "Username"
+			},
+			"synthetic.password": {
+				"type": "string",
+				"title": "Password",
+				"secret": true
+			},
+			"synthetic.token": {
+				"type": "string",
+				"title": "Token",
+				"secret": true
+			},
+			"synthetic.retries": {
+				"type": "integer",
+				"title": "Retries",
+				"default": 3
+			},
+			"synthetic.verbose": {
+				"type": "boolean",
+				"title": "Verbose",
+				"default": false,
+				"enum": [
+					[
+						true,
+						"On"
+					],
+					[
+						false,
+						"Off"
+					]
+				]
+			},
+			"synthetic.logLevel": {
+				"type": "string",
+				"title": "Log level",
+				"default": "info"
+			}
+		},
+		"properties": [
+			"synthetic.apikey",
+			{
+				"base": "synthetic.limit",
+				"default": 25
+			},
+			"synthetic.prompt",
+			"synthetic.color",
+			"synthetic.login",
+			"synthetic.upload",
+			"synthetic.kind",
+			{
+				"name": "auth",
+				"title": "Authentication",
+				"type": "string",
+				"default": "password",
+				"enum": {
+					"password": {
+						"title": "Username and password",
+						"properties": [
+							"synthetic.username",
+							"synthetic.password"
+						]
+					},
+					"token": {
+						"title": "Access token",
+						"properties": [
+							"synthetic.token"
+						]
+					}
+				}
+			},
+			{
+				"name": "advanced",
+				"title": "Advanced",
+				"properties": [
+					"synthetic.retries",
+					"synthetic.verbose",
+					"synthetic.logLevel"
+				]
+			},
+			{
+				"name": "note",
+				"type": "string",
+				"title": "Note",
+				"secret": true
+			},
+			"shared.flag",
+			{
+				"name": "mode",
+				"type": "constant",
+				"default": "fast"
+			}
+		],
+		"legacy": {
+			"selector": "profile",
+			"default": "standard",
+			"profiles": {
+				"standard": {
+					"title": "Standard",
+					"mode": "fast",
+					"limit": 25,
+					"apikey": "",
+					"deprecated": false
+				}
+			},
+			"dropped": [
+				"deprecated",
+				"store",
+				"unused"
+			]
+		}
+	},
+	"warnings": [
+		"the \"Transform\" section has no counterpart and was dropped",
+		"synthetic.limit: the type list [\"integer\",\"string\"] became \"integer\"",
+		"synthetic.color: the ui widget \"ColorPicker\" has no counterpart and was dropped",
+		"synthetic.login: the GoogleButtonWidget became an \"oauth2\" property; add its \"options\" (scopes) by hand",
+		"synthetic.store: a \"combo\" (sub-provider) field has no counterpart and was dropped",
+		"synthetic.verbose: the conditional on a non-string value is flattened; its properties are always shown",
+		"the \"config\" member is refused by the current engine and was dropped; mark fields \"secret\" or \"readonly\" instead",
+		"not reached from the node's section, so not carried over: synthetic.unused",
+		"kept as references to shared definitions (check each exists in the current catalog): shared.flag"
+	],
+	"legacy": true
+}

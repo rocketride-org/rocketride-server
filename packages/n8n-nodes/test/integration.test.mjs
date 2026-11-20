@@ -20,12 +20,12 @@ beforeAll(async () => {
 				headers: req.headers,
 				bodyText: body.toString('utf8'),
 			});
-			if (req.method === 'GET' && req.url === '/version') {
+			if (req.method === 'GET' && req.url === '/status') {
 				res.writeHead(200, { 'Content-Type': 'application/json' });
 				res.end(JSON.stringify({ version: 'test' }));
 				return;
 			}
-			if (req.method === 'POST' && req.url === '/webhook') {
+			if (req.method === 'POST' && req.url.startsWith('/webhook')) {
 				res.writeHead(200, { 'Content-Type': 'application/json' });
 				res.end(
 					JSON.stringify({
@@ -52,7 +52,7 @@ afterAll(() => new Promise((resolve) => server.close(resolve)));
 
 // Faithful-enough IExecuteFunctions: httpRequestWithAuthentication applies the
 // credential's Bearer header (as n8n does) and performs a REAL fetch.
-function makeRealCtx({ params, apiKey = 'pk_test', binaries = {} }) {
+function makeRealCtx({ params, apiKey = 'rr_test', binaries = {} }) {
 	const credentials = { baseUrl, apiKey, ignoreSslIssues: false };
 	return {
 		getInputData: () => [{ json: {}, binary: {} }],
@@ -86,10 +86,21 @@ describe('integration — RocketRide node against a real HTTP stub', () => {
 		const req = received.find((r) => r.url === '/webhook');
 		expect(req.method).toBe('POST');
 		expect(req.headers['content-type']).toContain('text/plain');
-		expect(req.headers.authorization).toBe('Bearer pk_test');
+		expect(req.headers.authorization).toBe('Bearer rr_test');
 		expect(req.bodyText).toBe('hello');
 		expect(out[0][0].json.out).toBe('echoed');
 		expect(out[0][0].json._rocketride.object).toBe('body');
+	});
+
+	it('Run names the pipeline in the path when the address is set', async () => {
+		received = [];
+		const ctx = makeRealCtx({
+			params: { operation: 'run', payloadMode: 'text', text: 'hello', address: 'acme.docBrain.webhook_1' },
+		});
+		await RocketRide.prototype.execute.call(ctx);
+		const req = received.find((r) => r.method === 'POST');
+		expect(req.url).toBe('/webhook/acme.docBrain.webhook_1');
+		expect(req.headers.authorization).toBe('Bearer rr_test');
 	});
 
 	it('Chat sends the rocketride-question content type and question text', async () => {

@@ -26,8 +26,8 @@ schedule, scaffold — and write SDK code only for what the command cannot
 do. It reads the workspace `.env`, works against a local engine with no
 network, and needs no client configuration of any kind.
 
-**Common options** (every command except `app verify`, `diff`, and `otel`;
-`app verify` needs no connection and takes only `--json` of these, and
+**Common options** (every command except `app verify`, `node convert`, `diff`, and `otel`;
+`app verify` and `node convert` need no connection and take only `--json` of these, and
 [Python-only commands](#python-only-commands) covers the other two): `--uri <uri>` (default:
 `ROCKETRIDE_URI` or `http://localhost:5565`), `--apikey <key>` (default:
 `ROCKETRIDE_APIKEY`), and `--json [file]` — the command's entire result
@@ -49,6 +49,7 @@ exported in your shell takes precedence over the same one in `.env`.
 | Read run logs and traces | No CLI verb — use the SDK (`client.log`, API doc §Templates & Run Logs) or ROCKETRIDE_OBSERVABILITY.md |
 | Files in the account store | `rocketride store` with `dir`, `type`, `write`, `rm`, `mkdir`, or `stat` |
 | Start a new pipeline | `rocketride pipe new <id> [--name <text>]` — `pipelines/<id>/<id>.pipe` with its `store` block, `icon.svg`, `README.md` and `assets/` (no connection) |
+| Move a custom node to the current `services.json` format | `rocketride node convert nodes/<node>/services*.json` — rewrites an old-format definition in place and adds its `legacy` block (no connection) |
 | Deploy, publish, schedule | `rocketride deploy …` (deployment target); a pipeline deploys from its `.pipe`: `rocketride deploy add pipelines/<id>/<id>.pipe` |
 | Apps | `rocketride app` with `create`, `dev`, `verify`, `deploy`, `publish`, `versions`, `where`, and more (`dev` uses the development connection; lifecycle verbs use the deployment target; the Python package has only `create`, `verify`, and `deploy`) |
 | Review what changed in a pipeline | `rocketride diff old.pipe new.pipe` (Python package only) |
@@ -166,6 +167,49 @@ HTML `<img src>`), laid out as they sit beside the pipe. A declared or
 referenced file that is missing, or that resolves outside the pipe's
 directory, fails the deploy by name (ROCKETRIDE_PIPELINES.md, "The
 `store` block").
+
+## Node commands (`rocketride node ...`)
+
+Workspace operations on custom nodes. Both packages ship the command, with
+the same rules (the two converters are checked against one set of fixtures).
+
+- `rocketride node convert <files...> [--out <file>] [--dry-run]` — convert
+  a node definition written in the old format (`preconfig`, `fields`,
+  `shape`) to the current one (`propertyDefinitions`, `properties`). The
+  engine loads only the current format, so a custom node from before the
+  switch must be converted once. Each file is rewritten in place;
+  `--out` writes one file elsewhere, `--dry-run` prints the result and
+  writes nothing. Needs no connection. A file already in the current format
+  is reported and left alone (exit 1).
+
+What the conversion does:
+
+- `fields` become `propertyDefinitions`, the `Pipe` section of `shape` (else
+  `Source`) becomes `properties`; other sections are dropped.
+- `secure` becomes `secret`, `const` a `constant`, `enum` + `enumNames`
+  `[[value, label], ...]`, `items` `item`; old widget hints map to
+  `hidden`, `format: "textarea"`, `secret`, `type: "upload"` or
+  `type: "oauth2"` and are otherwise dropped.
+- The profile field becomes a `profile` selector with one branch per
+  profile. A profile's values become defaults of its branch's properties,
+  and a profile key with no property becomes a `constant`, so the node
+  reads the same config it read before.
+- A conditional on a string becomes a selector; a conditional on a boolean
+  cannot (branch keys are strings) and is flattened, its properties always
+  shown.
+- The node's `legacy` block is added last, the way the server's own nodes
+  carry it, so pipelines saved against the old definition are converted
+  when they are validated, started or published.
+
+Every change the converter could not carry over is printed as a warning:
+dropped sections, a `combo` field, an unknown widget, references to shared
+definitions it cannot check offline. Read them, and load the node once
+(validate a pipeline that uses it) before deploying it.
+
+```bash
+rocketride node convert nodes/my_node/services.json
+rocketride node convert nodes/my_node/services.json --dry-run --json
+```
 
 ## App commands (`rocketride app ...`)
 

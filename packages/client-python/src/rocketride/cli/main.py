@@ -35,6 +35,7 @@ Command surface (kept in exact parity with the TypeScript client's CLI):
     store dir/type/write/...   File store operations
     app create/deploy/verify   App lifecycle
     pipe new                   Pipeline scaffold (no connection)
+    node convert <files...>    Convert an old-format node definition (no connection)
     deploy add/list/publish/.. Deploy lifecycle (deployment target)
     profile run/start/tree/..  Profile the server process or a pipeline
 
@@ -560,6 +561,23 @@ def setup_parser() -> argparse.ArgumentParser:
     pipe_new_parser.add_argument('--dir', help='Pipelines directory, relative to the workspace (default: pipelines)')
     pipe_new_parser.add_argument('--workspace', help='Workspace root (default: current directory)')
 
+    # ── node ─────────────────────────────────────────────────────────────
+    node_parser = subparsers.add_parser('node', help='Custom node operations (no connection)')
+    node_subparsers = node_parser.add_subparsers(dest='node_subcommand', help='Node commands', metavar='COMMAND')
+
+    node_convert_parser = node_subparsers.add_parser(
+        'convert',
+        help='Convert an old-format services.json (preconfig/fields/shape) to the current format and add its legacy block',
+    )
+    _add_json_arg(node_convert_parser)
+    node_convert_parser.add_argument(
+        'files', nargs='+', help='The services*.json files to convert (rewritten in place)'
+    )
+    node_convert_parser.add_argument('--out', help='Write the converted definition here instead (one input file only)')
+    node_convert_parser.add_argument(
+        '--dry-run', action='store_true', help='Print the converted definition instead of writing it'
+    )
+
     # ── deploy ───────────────────────────────────────────────────────────
     deploy_parser = subparsers.add_parser('deploy', help='Deploy lifecycle operations (deployment target)')
     deploy_subparsers = deploy_parser.add_subparsers(
@@ -693,6 +711,7 @@ async def _dispatch(args) -> int:
     from .commands.auth import run_init, run_login
     from .commands.deploy import run_deploy
     from .commands.diff import run_diff
+    from .commands.node import run_node
     from .commands.otel import run_otel
     from .commands.pipe import run_pipe
     from .commands.profile import run_profile
@@ -741,6 +760,11 @@ async def _dispatch(args) -> int:
             print('Error: Pipe subcommand is required (new)', file=sys.stderr)
             return 1
         return await run_pipe(args)
+    if args.command == 'node':
+        if not getattr(args, 'node_subcommand', None):
+            print('Error: Node subcommand is required (convert)', file=sys.stderr)
+            return 1
+        return await run_node(args)
     if args.command == 'deploy':
         if not getattr(args, 'deploy_subcommand', None):
             print(
@@ -757,7 +781,7 @@ async def _dispatch(args) -> int:
 
 
 # Commands that never connect to the engine and read no configuration.
-_LOCAL_ONLY_COMMANDS = frozenset({'diff'})
+_LOCAL_ONLY_COMMANDS = frozenset({'diff', 'node'})
 
 
 def _is_local_only_command(argv: list) -> bool:

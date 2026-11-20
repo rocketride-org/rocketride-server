@@ -1,0 +1,121 @@
+{
+	// A made-up old-format node exercising the rules no shipped node did
+	"title": "Synthetic",
+	"protocol": "synthetic://",
+	"classType": ["text"],
+	"capabilities": [],
+	"register": "filter",
+	"node": "python",
+	"path": "nodes.synthetic",
+	"lanes": { "text": ["text"] },
+	"config": { "apikey": "secure" },
+	"preconfig": {
+		"default": "standard",
+		"profiles": {
+			"standard": {
+				"title": "Standard",
+				"mode": "fast",
+				"limit": 25,
+				"apikey": "",
+				"deprecated": false
+			}
+		}
+	},
+	"fields": {
+		"synthetic.apikey": {
+			"type": "string",
+			"title": "API key",
+			"secure": true,
+			"ui": { "ui:widget": "ApiKeyWidget" },
+		},
+		"synthetic.limit": {
+			"type": ["integer", "string"],
+			"title": "Limit",
+			"default": 10,
+			"optional": true
+		},
+		"synthetic.prompt": {
+			"type": "string",
+			"title": "Prompt",
+			"ui:widget": "textarea"
+		},
+		"synthetic.color": {
+			"type": "string",
+			"title": "Color",
+			"ui": { "ui:widget": "ColorPicker" }
+		},
+		"synthetic.login": {
+			"type": "string",
+			"title": "Sign in",
+			"ui": { "ui:widget": "GoogleButtonWidget" }
+		},
+		"synthetic.upload": {
+			"type": "string",
+			"format": "data-url",
+			"title": "Key file",
+			"ui:options:accept": ".json"
+		},
+		"synthetic.kind": {
+			"type": "string",
+			"const": "synthetic"
+		},
+		"synthetic.store": {
+			"title": "Store",
+			"combo": "store"
+		},
+		"synthetic.auth": {
+			"type": "string",
+			"title": "Authentication",
+			"default": "password",
+			"enum": ["password", "token"],
+			"enumNames": ["Username and password", "Access token"],
+			"conditional": [
+				{ "value": "password", "properties": ["synthetic.username", "synthetic.password"] },
+				{ "value": "token", "properties": ["synthetic.token"] }
+			]
+		},
+		"synthetic.username": { "type": "string", "title": "Username" },
+		"synthetic.password": { "type": "string", "title": "Password", "ui": { "ui:widget": "password" } },
+		"synthetic.token": { "type": "string", "title": "Token", "secure": true },
+		"synthetic.advanced": {
+			"object": "advanced",
+			"title": "Advanced",
+			"properties": ["synthetic.retries", "synthetic.verbose"]
+		},
+		"synthetic.retries": { "type": "integer", "title": "Retries", "default": 3 },
+		"synthetic.verbose": {
+			"type": "boolean",
+			"title": "Verbose",
+			"default": false,
+			"enum": [[true, "On"], [false, "Off"]],
+			"conditional": [{ "value": true, "properties": ["synthetic.logLevel"] }]
+		},
+		"synthetic.logLevel": { "type": "string", "title": "Log level", "default": "info" },
+		"synthetic.unused": { "type": "string", "title": "Never listed" }
+	},
+	"shape": [
+		{
+			"section": "Pipe",
+			"title": "Synthetic",
+			"properties": [
+				"synthetic.apikey",
+				"synthetic.limit",
+				"synthetic.prompt",
+				"synthetic.color",
+				"synthetic.login",
+				"synthetic.upload",
+				"synthetic.kind",
+				"synthetic.store",
+				"synthetic.auth",
+				"synthetic.advanced",
+				{ "name": "note", "type": "string", "title": "Note", "secure": true },
+				"shared.flag"
+			]
+		},
+		{
+			"section": "Transform",
+			"title": "Synthetic",
+			"properties": ["type"]
+		}
+	]
+}

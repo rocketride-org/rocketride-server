@@ -200,7 +200,8 @@ in the DEVELOPMENT panel) shows:
   scoped to `task.data` on exactly this address, frozen to your home team, shown once.
   It is listed in Settings › Account › API Keys, where you revoke it.
 
-The notes carry no credential: there are no public (`pk_`) or private (`tk_`) task tokens.
+The notes carry no credential: the endpoint is reached with an account API key, never a
+per-run key.
 
 ### Authentication
 
@@ -309,14 +310,14 @@ Any pipeline with a `webhook` (or `chat`/`dropper`) source is callable with n8n'
 | Setting | Value |
 |---|---|
 | Method | `POST` |
-| URL | the pipeline's webhook interface URL (from the Project Log) |
-| Header | `Authorization: <public authorization key>` |
+| URL | the pipeline's webhook interface URL, `<server>/webhook/<developerId>.<pipelineId>.<source>` (from the source node's Endpoint Info) |
+| Header | `Authorization: Bearer rr_...`: an account key, or one scoped to this endpoint (§Authentication) |
 | Body | JSON payload (or multipart / raw, as above) |
 
 The pipeline's `response_*` nodes determine what the HTTP Request node receives back, so a
 typical n8n workflow is `Webhook trigger -> HTTP Request (RocketRide) -> Respond to
-Webhook`. Remember the run must be up — a stopped pipeline answers
-`Your pipeline is not running`.
+Webhook`. A deployed pipeline that is not running is started by the call; a Play'd control
+that is not up falls through to the next rung (§Authentication).
 
 ### Calling n8n from a pipeline (`tool_n8n`)
 
@@ -693,7 +694,7 @@ Notes for reliable CI runs:
   For richer assertions drive the SDK directly (ROCKETRIDE_typescript_API.md §8 Events &
   Monitoring).
 - An alternative HTTP-level smoke for an always-on deployment: `curl` its webhook URL with
-  the `pk_` key (§Webhooks) and assert on the JSON response.
+  an `rr_` key scoped to that endpoint (§Webhooks) and assert on the JSON response.
 
 ---
 

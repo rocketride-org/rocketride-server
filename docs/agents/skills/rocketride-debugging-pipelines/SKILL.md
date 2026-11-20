@@ -41,9 +41,10 @@ fix to the right phase. No re-running until the cause is identified and the fix 
 - `The service <provider> was not found` → misspelled `provider`; check the index.
 - `input has unknown lane` (validate) → lane mismatch; add a converter or pick compatible nodes.
 - `KeyError: '<key>'` → response key vs `laneName` mismatch; read `result_types`.
-- `Pipeline is already running (task <id>) ...` → `use_existing=True` or `terminate()` first; a
-  second instance of the same pipe needs its own unguessable `tk_` token (SDK `use()` or
-  `rocketride start --token`; not MCP).
+- `Pipeline is already running (task <id>) ...` → a deployed run already holds that address:
+  `terminate()` it first; a second instance of the same pipe needs its own pipeline id
+  (`token` in SDK `use()`, or `rocketride start --token <id>`; not MCP), which gives it its own
+  address `developerId.<id>.source`.
 - `Invalid API key` / a `project_id` rejection → config fix.
 
 ## Red flags

@@ -35,6 +35,8 @@
  *   start / stop / upload      Task lifecycle
  *   store dir/type/write/...   File store operations
  *   app create/deploy/verify   App lifecycle
+ *   pipe new                   Pipeline scaffold (no connection)
+ *   node convert <files...>    Convert an old-format node definition (no connection)
  *   deploy add/list/publish/.. Deploy lifecycle (deployment target)
  *   profile run/start/tree/..  Profile the server process or a pipeline
  *
@@ -60,6 +62,7 @@ import { registerValidateCommands } from './commands/validate';
 import { registerAppCommands } from './commands/app';
 import { registerDeployCommands } from './commands/deploy';
 import { registerPipeCommands } from './commands/pipe';
+import { registerNodeCommands } from './commands/node';
 import { registerProfileCommands } from './commands/profile';
 import { disconnectAll, takeInterrupt } from './common';
 import { SDK_VERSION } from '../client/constants';
@@ -126,7 +129,7 @@ Getting started:
 Connections (.env, written by 'rocketride login' / 'init'):
   ROCKETRIDE_URI / ROCKETRIDE_APIKEY                 development: start, upload, validate,
                                                      store, profile, app create, app dev
-                                                     (pipe new needs no connection)
+                                                     (pipe new and node convert need no connection)
   ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY_APIKEY   deployment target: deploy *, app deploy,
                                                      publish, versions, and other lifecycle verbs
 
@@ -138,6 +141,7 @@ Run 'rocketride <command> --help' for details, e.g. 'rocketride app --help'.`,
 	registerStoreCommands(program);
 	registerAppCommands(program);
 	registerPipeCommands(program);
+	registerNodeCommands(program);
 	registerDeployCommands(program);
 	registerProfileCommands(program);
 	return program;

@@ -21,7 +21,7 @@ Two identities matter, and they do different jobs:
 
 | Identity | What it is | What it's for |
 | --- | --- | --- |
-| **Task token** (`tk_...`) | The live control handle a run returns when started | Send data, poll status, terminate — dies with the run |
+| **Control id** (`token`) | The opaque live handle `use()` returns beside the run's address (`developerId.pipelineId.source`) | Send data, poll status, terminate — dies with the control; never persist it |
 | **`projectId` + `source` (+ `teamId`)** | The pipeline's durable log identity | Monitoring subscriptions and everything recorded — outlives the run, works after it finished |
 
 Omitting `teamId` addresses your own **dev stream**; passing it addresses

@@ -71,13 +71,16 @@ The output lane of one node must match an input lane the next node accepts.
 Check both ends against the [node catalog](/nodes) and the lane table on
 [Execution Model](/concepts/execution-model).
 
-### Which API key goes where — `rr_` vs `tk_`/`pk_`?
+### Which API key goes where?
 
-`rr_` account keys authenticate the SDKs and MCP. Task-scoped `tk_`/`pk_`
-keys control a single task and are refused at the MCP endpoint; `pk_` is the
-task's public key, seen in dropper/upload URLs and webhook Bearer
-credentials. See
-[MCP authentication](/connect/mcp/http/connect#authentication).
+There is one kind of API key, the `rr_` account key. It authenticates the
+SDKs, the CLI, MCP and the webhook door (`Authorization: Bearer rr_...`), and
+whose key is on a request is who pays. For an external system that should
+reach one pipeline and nothing else, mint a key scoped to that endpoint
+(`developerId.pipelineId.source`) from the source node's Endpoint Info. Runs
+are addressed by name, so there is no per-run key to copy. See
+[MCP authentication](/connect/mcp/http/connect#authentication) and
+[Endpoint authentication](/operate/security#endpoint-authentication).
 
 ### How do I set up credentials for an integration node?
 

@@ -34,7 +34,7 @@ export class RocketRideApi implements ICredentialType {
 			default: '',
 			required: true,
 			description:
-				"The pipeline's public authorization key (pk_…), shown in the RocketRide IDE while the pipeline is running. Sent as a Bearer token.",
+				"Your RocketRide API key (rr_…). An account key reaches every pipeline your account may call; a key scoped to one pipeline endpoint (minted from that pipeline's endpoint info) reaches only that endpoint. Sent as a Bearer token; runs are billed to the key's account.",
 		},
 		{
 			displayName: 'Ignore SSL Issues (Insecure)',
@@ -55,15 +55,14 @@ export class RocketRideApi implements ICredentialType {
 		},
 	};
 
-	// Reachability check against RocketRide's public, unauthenticated `GET /version`
-	// route. This confirms the gateway Base URL is correct and reachable — the most
-	// common misconfiguration. The API key itself is exercised when a node runs
-	// against a live pipeline: a `pk_` key only resolves while its pipeline is
-	// running, so it cannot be meaningfully validated at credential-config time.
+	// Checks the gateway Base URL and the key together: `GET /status` is an
+	// authenticated route, so it answers only when the Base URL is reachable AND
+	// the rr_ key authenticates. An account key does not depend on any pipeline
+	// running, so it can be validated here, at credential-config time.
 	test: ICredentialTestRequest = {
 		request: {
 			baseURL: '={{$credentials.baseUrl}}',
-			url: '/version',
+			url: '/status',
 			method: 'GET',
 			// Honor the same `Ignore SSL Issues` toggle a node run applies, so Test
 			// and Run make identical TLS decisions on self-signed HTTPS gateways.

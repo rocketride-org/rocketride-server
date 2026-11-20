@@ -21,6 +21,7 @@ import {
 	normalizeRunResult,
 	parseRocketRideResponse,
 	reachabilityMessage,
+	webhookUrl,
 	type RocketRideDocument,
 	type RocketRidePayloadMode,
 } from './helpers';
@@ -74,6 +75,15 @@ export class RocketRide implements INodeType {
 						description: 'Send binary files (multipart) to a deployed RocketRide pipeline',
 					},
 				],
+			},
+			{
+				displayName: 'Pipeline Address',
+				name: 'address',
+				type: 'string',
+				default: '',
+				placeholder: 'acme.docBrain.webhook',
+				description:
+					"The address of the deployed pipeline to call: developerId.pipelineId.source, shown in the pipeline's endpoint info in RocketRide. Leave it empty only when the credential's API key is scoped to exactly one pipeline endpoint.",
 			},
 			{
 				displayName: 'Send',
@@ -207,6 +217,15 @@ export class RocketRide implements INodeType {
 			try {
 				const operation = this.getNodeParameter('operation', i) as string;
 
+				// The address rides the path; the credential's rr_ key rides the
+				// Authorization header (the server's HTTP door reads it nowhere else)
+				let url: string;
+				try {
+					url = webhookUrl(baseUrl, this.getNodeParameter('address', i, '') as string);
+				} catch (error) {
+					throw new NodeOperationError(this.getNode(), (error as Error).message, { itemIndex: i });
+				}
+
 				let requestOptions: IHttpRequestOptions;
 
 				if (operation === 'run') {
@@ -233,7 +252,7 @@ export class RocketRide implements INodeType {
 
 					requestOptions = {
 						method: 'POST',
-						url: `${baseUrl}/webhook`,
+						url,
 						headers: { 'Content-Type': contentType, Accept: 'application/json' },
 						body,
 						json: false,
@@ -295,7 +314,7 @@ export class RocketRide implements INodeType {
 
 					requestOptions = {
 						method: 'POST',
-						url: `${baseUrl}/webhook`,
+						url,
 						body: form,
 						json: false,
 						skipSslCertificateValidation: skipSsl,
@@ -309,7 +328,7 @@ export class RocketRide implements INodeType {
 
 					requestOptions = {
 						method: 'POST',
-						url: `${baseUrl}/webhook`,
+						url,
 						headers: { 'Content-Type': contentType, Accept: 'application/json' },
 						body,
 						json: false,

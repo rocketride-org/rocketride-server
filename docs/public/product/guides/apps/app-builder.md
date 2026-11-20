@@ -218,8 +218,10 @@ const { token } = await client.use({ pipeline: summarizer, useExisting: true });
 Every signed-in user gets their own instance. Start it once per session and
 keep the token; `useExisting: true` re-attaches after a reload instead of
 failing because the pipeline is already running. To run two instances for the
-same user at once, give each `use()` its own unguessable `token` (keep the
-`tk_` prefix). The instance stops by itself after about `ttl` seconds with
+same user at once, give each `use()` its own `token`: it replaces the
+pipeline-id segment of the run's address (`developerId.<token>.source`), one
+segment of letters, digits, `_` and `-`, and is not a credential. The
+instance stops by itself after about `ttl` seconds with
 no pipeline data request and no pipeline activity event (`apaevt_*`).
 The default is 15 minutes; `ttl: 0` disables the timeout. Status polling
 and raw stdout/debugger events do not reset the timer. The check runs once
