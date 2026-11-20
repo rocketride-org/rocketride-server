@@ -172,7 +172,10 @@ def _local_whisper(monkeypatch, model):
 
 
 class _Client:
-    """Model-server client stand-in: records the requested fields and answers with ``reply``."""
+    """Model-server client stand-in: records the requested fields and answers with those fields of ``reply``.
+
+    Like the server's field filter, it returns a field only when the request asks for it.
+    """
 
     sent: list = []
     reply: dict = {}
@@ -185,7 +188,7 @@ class _Client:
 
     def send_command(self, command, args):
         _Client.sent.append(args['output_fields'])
-        return {'result': [dict(_Client.reply)]}
+        return {'result': [{key: value for key, value in _Client.reply.items() if key in args['output_fields']}]}
 
     def disconnect(self):
         pass
@@ -232,6 +235,40 @@ def test_proxy_success_keeps_the_callers_fields(monkeypatch):
     assert _Client.sent == [['$text', '$segments', 'error']]
     assert result == {'$text': '', '$segments': []}
     assert whisper.output_fields == ['$text', '$segments']
+
+
+def test_proxy_failure_raises_with_per_call_fields(monkeypatch):
+    """A call's own ``output_fields`` replaces the instance's list in the request, but cannot drop ``error``."""
+    whisper = _proxy_whisper(monkeypatch, {'$text': '', '$segments': [], 'error': 'remote decode failed'})
+
+    with pytest.raises(RuntimeError, match='Whisper inference failed: remote decode failed'):
+        whisper.transcribe(_PCM, output_fields=['$text'])
+    assert _Client.sent == [['$text', 'error']]
+
+
+@pytest.mark.parametrize(
+    'fields, expected',
+    [(['$text'], {'$text': 'hello'}), (['$text', 'error'], {'$text': 'hello', 'error': None})],
+    ids=['error-not-asked', 'error-asked'],
+)
+def test_proxy_success_keeps_the_per_call_fields(monkeypatch, fields, expected):
+    """A successful call with its own ``output_fields`` returns those fields; ``error`` stays only when it asked."""
+    whisper = _proxy_whisper(monkeypatch, {'$text': 'hello', '$segments': [], 'error': None})
+
+    result = whisper.transcribe(_PCM, output_fields=fields)
+
+    assert _Client.sent == [['$text', 'error']]
+    assert result == expected
+
+
+def test_proxy_empty_per_call_fields_keep_the_instance_list(monkeypatch):
+    """An empty per-call list is no list, as in the constructor: the instance's fields are requested."""
+    whisper = _proxy_whisper(monkeypatch, {'$text': 'hello', '$segments': [], 'error': None})
+
+    result = whisper.transcribe(_PCM, output_fields=[])
+
+    assert _Client.sent == [['$text', '$segments', 'error']]
+    assert result == {'$text': 'hello', '$segments': []}
 
 
 class _FailsSecondAudio:
