@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Build, debug, and deploy AI pipelines - without leaving your IDE.
+  RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
 </p>
 
 <p align="center">
