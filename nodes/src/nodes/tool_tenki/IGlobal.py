@@ -278,14 +278,27 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
 
 def _host_of(base_url: str) -> str:
     """base_url's host in lower case, or '' when it is not a URL (building the SDK's client reports that)."""
+    url = base_url
+    if '://' not in url:
+        url = f'https://{url}'
     try:
-        return (urllib.parse.urlsplit(base_url if '://' in base_url else f'https://{base_url}').hostname or '').lower()
-    except ValueError:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:  # a stray [ or ], or a bracketed host that is not an IP address
         return ''
+    return parts.hostname or ''  # hostname is already lower case
+
+
+def _effective_base_url(base_url: str) -> str:
+    """The URL the node connects to: Tenki's API host is read as Luxor's, the same service, which outlives it."""
+    if _host_of(base_url) == _TENKI_API_HOST:
+        return _DEFAULT_BASE_URL
+    return base_url
 
 
 def _retired_names(apikey: str, base_url: str) -> list[str]:
     """A warning for each Tenki-era name configured: Luxor retires tk_ keys and tenki.cloud hosts on 2027-01-01."""
+    # TODO: once 2027-01-01 has passed, drop the tk_ handling and the dated warnings. Keep _effective_base_url's
+    # swap: pipelines saved with api.tenki.cloud need it most once that host stops answering.
     retired = []
     if apikey.startswith('tk_'):
         retired.append(
@@ -293,10 +306,11 @@ def _retired_names(apikey: str, base_url: str) -> list[str]:
             'dashboard and use it instead'
         )
     host = _host_of(base_url)
-    if host == _TENKI_API_HOST:
+    effective = _effective_base_url(base_url)
+    if effective != base_url:
         retired.append(
             f'tenki.base_url points at {host}, which stops working on 2027-01-01, so the node connects to '
-            f'{_DEFAULT_BASE_URL}, the same service, instead: clear tenki.base_url to drop this warning'
+            f'{effective}, the same service, instead: clear tenki.base_url to drop this warning'
         )
     elif host == 'tenki.cloud' or host.endswith('.tenki.cloud'):
         retired.append(
@@ -445,8 +459,8 @@ class IGlobal(IGlobalBase):
         base_url = str(cfg.get('base_url') or '').strip() or _DEFAULT_BASE_URL
         for retired in _retired_names(apikey, base_url):
             warning(f'tool_tenki: {retired}')
-        if _host_of(base_url) == _TENKI_API_HOST:
-            base_url = _DEFAULT_BASE_URL  # a deployed pipeline shows nobody the warning, and would break on 2027-01-01
+        # Swapped, not only warned about: a deployed pipeline shows nobody the warning, and would break on 2027-01-01.
+        base_url = _effective_base_url(base_url)
         self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def validateConfig(self) -> None:
