@@ -312,7 +312,10 @@ def test_seed_artifact_fallback_name_uses_the_derivation():
     container name as a deployed one ('-' maps to '_' too).
     """
     assert seed_apps.seed_artifact_of({'id': 'rocketride.my-app'})['moduleId'] == 'rocketride_my_app'
-    assert seed_apps.seed_artifact_of({'id': 'rocketride.x', 'moduleId': 'rocketride_x'})['moduleId'] == 'rocketride_x'
+    # An explicit seed moduleId that differs from the derived fallback is kept.
+    assert seed_apps.seed_artifact_of({'id': 'rocketride.x', 'moduleId': 'rocketride_legacy_x'})['moduleId'] == (
+        'rocketride_legacy_x'
+    )
 
 
 # =============================================================================
