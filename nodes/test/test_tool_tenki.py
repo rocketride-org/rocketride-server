@@ -785,6 +785,16 @@ def test_an_allowlist_with_an_address_and_a_refused_entry_names_both_in_one_erro
     assert '(entries 2, 4)' in str(refused.value).split('*', 1)[0]
 
 
+def test_one_address_beside_a_refused_entry_is_named_in_the_singular(monkeypatch, logs):
+    glb, _ = _global(monkeypatch, {'apikey': _KEY, 'allow_domains': ['*.*.org', '127.1']})
+    with pytest.raises(ValueError) as refused:
+        glb.beginGlobal()
+    assert str(refused.value).endswith(
+        "It also lists an IP address (entry 2), which the sandbox's egress filter never matches: it matches "
+        'hostnames only, so list the hostname instead. Refused: *.*.org; IP address: 127.1'
+    )
+
+
 def test_a_hostname_that_only_looks_numeric_is_allowed(monkeypatch, logs):
     _, client = _used(monkeypatch, _Session(), cfg={'allow_domains': '1password.com, 0x.org, a1.b2.io, *.0x.org'})
     assert client.created[0]['allow_domains'] == ['1password.com', '0x.org', 'a1.b2.io', '*.0x.org']

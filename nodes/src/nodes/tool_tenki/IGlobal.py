@@ -183,14 +183,14 @@ def _allowed_domains(raw) -> list[str]:
         )
         lists.append(f'Refused: {", ".join(refused)}')
     if addresses:
+        if len(addresses) > 1:
+            noun, entry, label = 'IP addresses', 'entries', 'IP addresses'
+        else:
+            noun, entry, label = 'an IP address', 'entry', 'IP address'
         if refused:
-            opening, label = 'It also lists', 'IP addresses'
+            opening = 'It also lists'
         else:
             opening, label = 'tenki.allow_domains lists', 'Refused'
-        if len(addresses) > 1:
-            noun, entry = 'IP addresses', 'entries'
-        else:
-            noun, entry = 'an IP address', 'entry'
         rules.append(
             f"{opening} {noun} ({entry} {', '.join(address_positions)}), which the sandbox's egress filter never "
             'matches: it matches hostnames only, so list the hostname instead.'
