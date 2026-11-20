@@ -154,3 +154,41 @@ socket.once('timeout', () => { console.log('denied'); socket.destroy(); });
         result = subprocess.run(wrapped, cwd=job, capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     assert result.stdout.strip() == 'denied'
+
+
+@pytest.mark.parametrize(
+    'argv,code,output,expected',
+    [
+        (['/usr/bin/bwrap', '--', 'node'], 1, 'bwrap: No permissions to create new namespace\n', 'No permissions to create new namespace'),
+        (['/usr/bin/sandbox-exec', '-p', 'x'], 71, 'sandbox-exec: sandbox_apply: Operation not permitted\n', 'sandbox_apply: Operation not permitted'),
+        (['/usr/bin/bwrap'], 1, "src/a.ts(1,1): error TS2304: Cannot find name 'x'.\n", None),
+        (['/usr/bin/bwrap'], 0, 'bwrap: noise on a successful run\n', None),
+        (['/usr/bin/node', 'tsc'], 1, 'bwrap: written by the app itself\n', None),
+    ],
+)
+def test_a_sandbox_that_cannot_start_is_not_a_compile_error(argv, code, output, expected):
+    assert sandbox.startup_failure(argv, code, output) == expected
+
+
+async def test_exec_compiler_raises_an_infrastructure_failure_when_the_sandbox_cannot_start(monkeypatch, tmp_path):
+    from ai.account import app_build
+
+    job, tools = tmp_path / 'job', tmp_path / 'tools'
+    job.mkdir()
+    tools.mkdir()
+    monkeypatch.setattr(app_build.app_build_sandbox, 'command', lambda argv, cwd, job_dir, env_dir: ['/usr/bin/bwrap', '--', *argv])
+
+    async def fake_exec(argv, cwd, timeout, on_line=None):
+        return 1, 'bwrap: No permissions to create new namespace\n'
+
+    monkeypatch.setattr(app_build, '_exec', fake_exec)
+    with pytest.raises(app_build.BuildInfraFailure) as raised:
+        await app_build._exec_compiler(['/usr/bin/node', 'rsbuild'], str(job), 5, str(job), str(tools))
+    assert raised.value.phase == 'sandbox'
+    assert 'No permissions to create new namespace' in str(raised.value)
+
+    async def compile_error(argv, cwd, timeout, on_line=None):
+        return 2, "error TS2304: Cannot find name 'x'.\n"
+
+    monkeypatch.setattr(app_build, '_exec', compile_error)
+    assert await app_build._exec_compiler(['/usr/bin/node', 'tsc'], str(job), 5, str(job), str(tools)) == (2, "error TS2304: Cannot find name 'x'.\n")

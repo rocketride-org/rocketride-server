@@ -483,7 +483,13 @@ async def _exec_compiler(
         isolated = app_build_sandbox.command(argv, cwd, job_dir, env_dir)
     except app_build_sandbox.SandboxUnavailable as exc:
         raise BuildInfraFailure('sandbox', str(exc)) from exc
-    return await _exec(isolated, cwd, timeout, on_line=on_line)
+    code, out = await _exec(isolated, cwd, timeout, on_line=on_line)
+    # The sandbox itself failed to start (e.g. a kernel that denies user namespaces):
+    # an infrastructure failure to retry or alert on, not a compile error for the developer.
+    failure = app_build_sandbox.startup_failure(isolated, code, out)
+    if failure is not None:
+        raise BuildInfraFailure('sandbox', f'app build sandbox could not start: {failure}')
+    return code, out
 
 
 # =============================================================================

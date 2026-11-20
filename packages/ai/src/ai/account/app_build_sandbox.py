@@ -10,10 +10,11 @@ Hosted engines require the boundary; an unavailable provider fails the build.
 
 import json
 import os
+import re
 import shutil
 import sys
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 
 class SandboxUnavailable(RuntimeError):
@@ -128,3 +129,28 @@ def command(argv: List[str], cwd: str, job_dir: str, toolchain_dir: str) -> List
         )
         return [provider, '-p', profile, '/usr/bin/env', f'HOME={home}', f'TMPDIR={temporary}', node, *argv[1:]]
     raise SandboxUnavailable('no filesystem sandbox provider is available on this platform')
+
+
+# Providers print their own startup failures as `<provider>: <message>` on stderr,
+# which the build merges into its transcript. A compiler diagnostic never begins
+# a line that way.
+_STARTUP_ERROR = re.compile(r'^(?:bwrap|sandbox-exec): (?P<message>.+)$', re.MULTILINE)
+
+
+def startup_failure(argv: List[str], code: int, output: str) -> Optional[str]:
+    """The provider's own message when the sandbox failed to start, else None.
+
+    A kernel that denies user namespaces (or a Seatbelt refusal) makes the
+    provider exit non-zero before the compiler runs. That is the platform's
+    fault, not the app's: callers raise an infrastructure failure, never a
+    compile error the developer is asked to fix.
+
+    Args:
+        argv: The command line that ran (the sandboxed one, or the bare one).
+        code: Its exit code.
+        output: Its merged stdout and stderr.
+    """
+    if code == 0 or not argv or os.path.basename(argv[0]) not in ('bwrap', 'sandbox-exec'):
+        return None
+    found = _STARTUP_ERROR.search(output)
+    return found.group('message').strip()[:500] if found else None
