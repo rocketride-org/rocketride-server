@@ -1,6 +1,7 @@
 ---
 title: Understanding RocketRide
 sidebar_label: Understanding RocketRide
+description: RocketRide has a few moving parts. Once you know how they fit together, the rest of the docs map cleanly onto them.
 ---
 
 # Understanding RocketRide
@@ -38,8 +39,8 @@ You start and feed pipelines through one of two protocols:
   [TypeScript](/clients/typescript) and [Python](/clients/python) SDKs speak it for you:
   `use()` to start a pipeline, `send()`/`pipe()` to stream data, `chat()` for conversational
   flows, `terminate()` to stop.
-- **[MCP](/connect/mcp/stdio)**: expose a pipeline as a tool for AI assistants like Claude and
-  Cursor.
+- **[MCP](/connect/mcp/http)**: the engine's built-in MCP server, to build, run and
+  observe pipelines.
 
 ## How you build
 
@@ -48,6 +49,8 @@ You start and feed pipelines through one of two protocols:
 - **In code**: author or run the same pipeline from your application with the SDKs.
 - **As an app**: wrap a pipeline in a UI that runs inside the RocketRide
   shell and deploy it to your team. See [Apps](/concepts/apps).
+- **Over MCP**: connect any MCP client to the engine's built-in [MCP server](/connect/mcp/http)
+  to build, run and observe pipelines.
 
 ## Putting it together
 

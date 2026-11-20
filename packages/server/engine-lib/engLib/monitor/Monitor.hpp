@@ -42,6 +42,9 @@ public:
     //	Factory info
     //-----------------------------------------------------------------
     _const auto FactoryType = "Monitor";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = Monitor;
     struct FactoryArgs {
         Text type;
     };
@@ -181,11 +184,11 @@ protected:
     ///		Fatal error handler
     ///	@param[in]	location
     ///		Where it happened
-    ///	@param[in]	msg
-    ///		Message to output
+    ///	@param[in]	ccode
+    ///		Error to output
     //-----------------------------------------------------------------
-    void onFatality(Location location, std::string_view msg) noexcept {
-        exit(APERR(Ec::Fatality, msg));
+    void onFatality(Location location, Error ccode) noexcept {
+        exit(_mv(ccode));
     }
 
     //-----------------------------------------------------------------

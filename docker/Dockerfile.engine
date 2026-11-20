@@ -14,7 +14,18 @@
 ARG ENGINE_BASE=rocketride/engine-base:local
 FROM ${ENGINE_BASE}
 
+# Image metadata. io.modelcontextprotocol.server.name is how the MCP Registry
+# verifies ownership of an OCI package; the value must equal "name" in
+# server.json.
+LABEL org.opencontainers.image.source="https://github.com/rocketride-org/rocketride-server" \
+      org.opencontainers.image.description="RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++." \
+      org.opencontainers.image.licenses="MIT" \
+      io.modelcontextprotocol.server.name="io.github.rocketride-org/rocketride"
+
 COPY --chown=rocketride:rocketride dist/server/static/ /opt/rocketride/static/
+
+# The node archive EaaS hands runs their nodes from, beside the server where it reads it
+COPY --chown=rocketride:rocketride dist/nodes/ /opt/nodes/
 
 # The server's task data persists; engine-base created it writable. See #1295.
 VOLUME /opt/data

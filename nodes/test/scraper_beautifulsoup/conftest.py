@@ -21,11 +21,30 @@
 # SOFTWARE.
 # =============================================================================
 
-import os
+"""Install this node's dependencies before the tests import them.
 
-requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
+Node tests run under the built engine's interpreter, where ``beautifulsoup4``
+is only installed when the engine imports the node (``depends()`` in
+``__init__.py``). Load it here, as ``nodes/test/media_inspect`` does, so a
+missing dependency fails the run instead of skipping every test.
+"""
 
-# Load any dependencies
-from depends import depends  # type: ignore
+from pathlib import Path
 
-depends(requirements)
+import pytest
+
+# Capture the real loader before sibling test modules are collected (some
+# stock tests replace sys.modules['depends'] with a no-op mock).
+from depends import load_depends
+
+_NODE_DIR = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'scraper_beautifulsoup'
+
+# Module-level so it runs before collection imports bs4 in the test modules.
+load_depends(str(_NODE_DIR / 'IGlobal.py'))
+
+
+@pytest.fixture(scope='session', autouse=True)
+def scraper_dependencies():
+    """Fail loudly if the node's dependencies are still missing."""
+    import bs4  # noqa: F401
+    import requests  # noqa: F401

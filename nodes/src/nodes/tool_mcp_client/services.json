@@ -70,6 +70,12 @@
 			"description": "Command line to launch MCP server (stdio transport). Example: python -m rocketride_mcp",
 			"default": "python -m rocketride_mcp"
 		},
+		"mcp_client.env": {
+			"type": "object",
+			"title": "Environment variables",
+			"description": "Environment variables for the server process, such as the API key a server reads at startup. Example: GITHUB_PERSONAL_ACCESS_TOKEN",
+			"default": {}
+		},
 		"mcp_client.endpoint": {
 			"type": "string",
 			"title": "Endpoint",
@@ -88,6 +94,22 @@
 			"description": "Extra HTTP headers for streamable-http/sse transports",
 			"default": {}
 		},
+		"mcp_client.toolName": {
+			"type": "string",
+			"title": "Tool name",
+			"description": "Name of the tool as the server lists it, without the server name prefix",
+			"default": ""
+		},
+		"mcp_client.allowedTools": {
+			"type": "array",
+			"title": "Allowed tools",
+			"description": "Expose only these tools from the server to the agent. Leave empty to expose every tool.",
+			"minItems": 0,
+			"items": {
+				"type": "object",
+				"properties": ["mcp_client.toolName"]
+			}
+		},
 		"mcp_client.bearer": {
 			"type": "string",
 			"title": "Bearer token",
@@ -103,7 +125,7 @@
 		"mcp_client.stdio": {
 			"object": "stdio",
 			"title": "STDIO (subprocess)",
-			"properties": ["mcp_client.commandLine"]
+			"properties": ["mcp_client.commandLine", "mcp_client.env"]
 		},
 		"mcp_client.http": {
 			"object": "http",
@@ -120,7 +142,7 @@
 		{
 			"section": "Pipe",
 			"title": "MCP Client",
-			"properties": ["type", "mcp_client.serverName", "mcp_client.transport"]
+			"properties": ["type", "mcp_client.serverName", "mcp_client.transport", "mcp_client.allowedTools"]
 		}
 	]
 }

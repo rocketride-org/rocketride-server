@@ -1,5 +1,6 @@
 ---
 title: Self-hosting
+description: Run the RocketRide engine on your own machine when you want full control over where data and model calls go. It is the same engine that powers Cloud.
 ---
 
 # Self-hosting
@@ -10,7 +11,9 @@ powers [Cloud](/operate/cloud); only the operator changes.
 
 > **Fastest path:** the [VS Code extension](/clients/vscode) manages a
 > local runtime for you while you build, with no manual setup. Use the steps below
-> when you want to run the engine as a standalone service.
+> when you want to run the engine as a standalone service. Setting it up from a
+> coding agent? The [coding-agents start page](/quickstart/coding-agents) has the
+> copy-paste Docker commands to run the engine, check it and connect over MCP.
 
 ## Get the engine
 
@@ -30,6 +33,13 @@ Download a release build, no build toolchain required.
 
 3. Extract it. The folder is your **runtime directory**: it contains the `engine`
    binary and its `ai/` runtime.
+
+The archive carries the engine and the nodes it needs itself. The other nodes
+are in `rocketride-nodes-<version>.zip` on the same release. Download it too and
+put it in a `nodes/` folder beside the runtime directory
+(`rocketride-engine/../nodes/`): a run gets the nodes its pipeline names from
+there, so no node code is downloaded at run time. A node's Python packages and
+models still install on first use; provision them in advance for an offline host.
 
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
@@ -83,17 +93,19 @@ curl http://localhost:5565/version
 
 ## Connect a client
 
-Point any [SDK](/clients/typescript) or the [CLI](/connect/cli) at the engine. A local
-engine typically needs no auth token:
+Point any [SDK](/clients/typescript) or the [CLI](/connect/cli) at the engine. The
+client must send a key. Use the key the engine was started with; an engine started
+without `ROCKETRIDE_APIKEY` accepts any non-empty value:
 
 ```bash
 ROCKETRIDE_URI=ws://localhost:5565
+ROCKETRIDE_APIKEY=rr_local
 ```
 
 ```typescript
 import { RocketRideClient } from 'rocketride';
 
-const client = new RocketRideClient({ uri: 'ws://localhost:5565' });
+const client = new RocketRideClient({ uri: 'ws://localhost:5565', auth: 'rr_local' });
 await client.connect();
 ```
 

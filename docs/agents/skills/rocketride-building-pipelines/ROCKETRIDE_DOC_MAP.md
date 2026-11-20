@@ -26,7 +26,15 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 
 # RocketRide Documentation
 
-> Build, run, and ship data + AI pipelines with the RocketRide toolchain.
+> RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Build, test and publish durable agents that scale in production.
+
+MIT licensed. Run the engine free on your own machine with Docker, the VS Code extension or a native download, or use RocketRide Cloud. Use it from MCP, the CLI, the Python or TypeScript SDK, or the VS Code extension.
+
+Use RocketRide when:
+
+- You want to build, test and run agents and AI pipelines (LLM calls, RAG, document processing, OCR, PII anonymization) and take them to production.
+- You want one runtime you can self-host or run on RocketRide Cloud, used from MCP, the CLI, the Python and TypeScript SDKs, or your IDE.
+- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.
 
 ## Home
 
@@ -127,14 +135,13 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Transcribe](/nodes/audio_transcribe.md)
 - [Text To Speech](/nodes/audio_tts.md)
 - [Authoritative Overlay](/nodes/authoritative_overlay.md)
-- [Parse/Process/Embed](/nodes/autopipe.md)
 - [Background Removal](/nodes/background_removal.md)
 - [Caption](/nodes/caption.md)
 - [Text Chunker](/nodes/chunker.md)
 - [Text To Speech (ElevenLabs)](/nodes/cloud_tts.md)
 - [Core](/nodes/core.md)
-- [Fingerprinter](/nodes/core/hash.md)
-- [Parser](/nodes/core/parser.md)
+- [Fingerprinter](/nodes/hash.md)
+- [Parser](/nodes/parse.md)
 - [Currency Convert (Explicit)](/nodes/currency_convert_explicit.md)
 - [ClickHouse](/nodes/db_clickhouse.md)
 - [Firestore](/nodes/db_firestore.md)
@@ -266,7 +273,6 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Vertex AI Vector Search](/nodes/tool_vertex_search.md)
 - [xTrace Memory](/nodes/tool_xtrace_memory.md)
 - [TwelveLabs](/nodes/twelvelabs.md)
-- [Vectorizer](/nodes/vectorizer.md)
 - [Video Composer](/nodes/video_composer.md)
 - [Webhook](/nodes/webhook.md)
 - [Chat](/nodes/webhook/chat.md)
@@ -282,7 +288,7 @@ Base URL: `https://docs.rocketride.org`  ·  Pinned: 2026-09-11 from a local `./
 - [Resources & Widgets](/connect/mcp/http/resources-and-widgets.md)
 - [Self-hosting](/connect/mcp/http/self-hosting.md)
 - [Tools](/connect/mcp/http/tools.md)
-- [RocketRide MCP Server](/connect/mcp/stdio.md)
+- [Deprecated stdio MCP server (`rocketride-mcp`)](/connect/mcp/stdio.md)
 - [n8n](/connect/n8n.md)
 - [WebSocket](/connect/websocket.md)
 - [WebSocket Events](/connect/websocket/observability.md)

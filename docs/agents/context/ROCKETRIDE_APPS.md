@@ -536,6 +536,9 @@ interface AppDescriptor {
 	/** Optional cross-app component catalog. Never mounted by the shell —
 	 * entries are loadable by other apps via useAppComponent(). */
 	components?: { [key: string]: React.ComponentType<any> | undefined };
+	/** First-party apps only: the `app` value stamped on telemetry instead
+	 * of `id`. Ignored for other apps. See Telemetry below. */
+	telemetryId?: string;
 }
 ```
 
@@ -837,7 +840,8 @@ from `'shell'`). The full set:
 | `shell:themeChange` | `{ tokens }` | Theme changed; `tokens` is the full `--rr-*` map. |
 | `shell:viewActivated` | `{ viewId }` | A view/tab became active — lazy panels init here. |
 | `shell:manifestRefresh` | `{ source }` | Server-side app manifest changed (publish, expiry). |
-| `shell:telemetry` | `{ event, props, ts, id }` | A telemetry fact the shell observed (`auth:complete`) for the active app to forward; `auth:start` and other held facts come from `cm.drainTelemetry()`. |
+| `shell:telemetry` | `{ event, props, ts, id }` | DEPRECATED — never emitted (the shell owns the telemetry transport; see Telemetry below). Typed only for frozen-floor compatibility. |
+| `shell:consentChange` | `{ state, origin }` | The device's analytics-consent state changed ('local' = this tab, 'external' = another tab). |
 | `app:statusChanged` | `{ appId, version?, status, notes? }` | Store review status changed. |
 | `store:changed` | `{ prefix, paths }` | Files changed under a watched store prefix. |
 
@@ -849,19 +853,27 @@ Optional `signupProperties` is consent-gated PKCE credential context for sign-up
 The native auth telemetry facts contain no signup attribution; the encoded credential alone
 uses the snake_case `signup_properties` key. See the public Shell API signup attribution guide.
 
-**Telemetry facts.** The shell has no analytics SDK: it raises `auth:start`
-and `auth:complete` (with `is_new`, `waitlisted` and `duration_ms`, the OAuth
-round trip from the redirect, null when unknown) as `shell:telemetry` for the
-active app to forward to its own analytics. `auth:start` is always held (the
-OAuth redirect follows at once), and so is a fact raised while no app listens
-(32 facts, 30 minutes, in the tab's sessionStorage), until the app calls
-`cm.drainTelemetry?.()` (optional: older shells lack it): drain once at
-analytics init, then subscribe, and forward each fact once by its `id` with
-`ts` as its time. On the waitlist
-screen, where no app renders, the shell loads the home app's exposed
-`./telemetry` module and calls its no-argument default export once per page
-load; it starts the home analytics and must not render. Only the home app
-exposes it.
+**Telemetry.** The shell owns the ONE product-telemetry transport: the key
+arrives from the server's pre-auth probe at runtime (never baked into any
+bundle), consent and delivery are the shell's, and the shell reports its own
+auth facts (`auth:start` with `is_authed: false`, `auth:complete` with
+`is_authed: true`) and consent facts, stamped `app: 'shell'`. Your app
+receives a bound reporter from the shell (`useReport()` from `'shell'`) and
+calls `report(event, props?, options?)`. Every event is stamped with an `app`
+property, fixed at creation: the descriptor's `telemetryId` when the app is
+first-party (id `rocketride` or starting `rocketride.`) and the alias matches
+`^[A-Za-z0-9._-]{1,128}$`, is not `shell` and is not another registered app's
+id. Otherwise it is the app's `id`, with no warning. SDK-generated events
+(`$pageleave`, `$web_vitals`, `$autocapture` and the like) carry no `app`.
+Events sent through `getConsentedCapture(...).report` are tagged internally
+and dropped at send time unless consent is still accepted and no DNT/GPC
+signal is on; without consent they are always dropped. Ordinary events are
+never dropped for their property names, and apps cannot set the tag. Event
+names are your app's own taxonomy. `useConsent()`
+reads the visitor's consent state (plus `openSettings()`); with no telemetry
+configured on the server, every call is a silent no-op. The old
+`cm.drainTelemetry()` / `shell:telemetry` channel is deprecated and drains
+empty; no app exposes a `./telemetry` module any more.
 
 ### Debug log
 
@@ -1046,8 +1058,8 @@ before authoring the `.pipe` content itself, and
 
 **Catalog nodes only.** A store app's pipelines may use only catalog nodes:
 the nodes that ship with the engine (`nodes/src/nodes` in the server repo;
-the node catalog on the docs site). A custom node (`local_nodes`, loaded
-with `--node_path`) exists only on the engine that loads it. RocketRide
+the node catalog on the docs site). A custom node (written into an
+engine's `nodes/` directory) exists only on that engine. RocketRide
 Cloud loads none, and also refuses the few catalog nodes marked `nosaas`,
 so being in the catalog is necessary, not sufficient. Store reviewers
 reject a submission whose pipelines reference a provider outside the
@@ -1055,7 +1067,7 @@ catalog, and nothing before review checks it: the Package and Store
 preflights do not read `.pipe` providers, and
 `.rocketride/services-catalog.json` mirrors whichever engine the workspace
 last synced from, local nodes included, so on a self-hosted engine with
-`--node_path` that file is not the catalog. Decide this before building.
+custom nodes that file is not the catalog. Decide this before building.
 If the catalog has no node for a step, keep that logic in the app (the app
 already sends documents, controls pipes and makes decisions), or give an
 agent step bounded Python through `tool_python` (sandboxed: allowlisted
