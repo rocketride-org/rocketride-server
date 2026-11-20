@@ -113,6 +113,7 @@ def test_public_routes_contains_home_ui_pages():
     for route in (
         '/',
         '/pricing',
+        '/catalog',
         '/marketplace',
         '/build-publish-earn',
         '/store',
@@ -199,22 +200,23 @@ def test_mcp_api_paths_are_not_shell_pages():
 
 
 def test_unlisted_routes_are_served_but_not_listed():
-    # routes.ts marks /oss, /mcp-server, /marketplace and /build-publish-earn
-    # `unlisted` (client stamps noindex), and /store is the legacy alias
-    # canonicalized to /marketplace — all of them must keep serving while
-    # staying out of the advertised subset.
+    # routes.ts marks /oss, /mcp-server, /catalog and /build-publish-earn
+    # `unlisted` (client stamps noindex), and /marketplace and /store are the
+    # legacy aliases canonicalized to /catalog — all of them must keep serving
+    # while staying out of the advertised subset.
     for route in UNLISTED_ROUTES:
         assert route in PUBLIC_ROUTES
         assert route not in LISTED_ROUTES
 
 
-def test_marketplace_pair_is_hidden_for_now():
-    # The Marketplace pair (browse page + its /store alias, and the producer-side
-    # /build-publish-earn page) is pulled from the site until it relaunches:
-    # still served on a hard reload, absent from /sitemap.xml and /llms.txt.
-    # Named explicitly so the hide cannot be undone server-side by accident;
-    # re-launching means dropping these three from UNLISTED_ROUTES on purpose.
-    for route in ('/marketplace', '/store', '/build-publish-earn'):
+def test_catalog_pair_is_hidden_for_now():
+    # The Catalog pair (browse page + its /marketplace and /store aliases, and
+    # the producer-side /build-publish-earn page) is pulled from the anonymous
+    # site until it relaunches: still served on a hard reload, absent from
+    # /sitemap.xml and /llms.txt. Named explicitly so the hide cannot be undone
+    # server-side by accident; re-launching means dropping the canonical pair
+    # from UNLISTED_ROUTES on purpose (the aliases stay unlisted regardless).
+    for route in ('/catalog', '/marketplace', '/store', '/build-publish-earn'):
         assert route in PUBLIC_ROUTES
         assert route in UNLISTED_ROUTES
         assert route not in LISTED_ROUTES

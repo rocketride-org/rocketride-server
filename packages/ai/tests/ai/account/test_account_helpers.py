@@ -18,7 +18,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai.account.base import AccountBase
+from ai.account.desktop import FileDesktopBackend
 from ai.account.report import Reporter
+from ai.account.store_providers.memory import MemoryStore
 
 
 # ---------------------------------------------------------------------------
@@ -69,11 +71,14 @@ def _req(sub: str, **extra):
 
 @pytest.mark.asyncio
 async def test_handle_app_list_serves_oss_with_login_decoration():
-    """OSS serves the marketplace READ surface: the login walk's entries,
-    decorated exactly as OSS login decorates (free + onDesktop) so the
-    catalog and the handshake can never disagree.
+    """OSS serves the catalog READ surface: the login walk's entries,
+    decorated exactly as OSS login decorates (free + the user's stored
+    desktop, seeded with the inventory on the first read) so the catalog
+    and the handshake can never disagree. The desktop writes themselves are
+    covered in test_desktop.py.
     """
     acct = _ConcreteAccount()
+    acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
 
     async def fake_apps(user_id, organizations):
         return [{'id': 'rocketride.sql', 'name': 'SQL', 'shells': None}]
@@ -88,7 +93,9 @@ async def test_handle_app_list_serves_oss_with_login_decoration():
 
 @pytest.mark.asyncio
 async def test_handle_app_list_anonymous_uses_public_walk():
-    """Anonymous callers get the public walk, same decoration."""
+    """Anonymous callers get the public walk; nothing is on a desktop and
+    every action needs a sign-in first (the SaaS catalog's anonymous shape).
+    """
     acct = _ConcreteAccount()
 
     async def fake_public():
@@ -96,25 +103,14 @@ async def test_handle_app_list_anonymous_uses_public_walk():
 
     acct.get_public_apps = fake_public
     result = await acct.handle_app(_conn(), _req('list'))
-    assert [a['id'] for a in result['body']['apps']] == ['rocketride.hello']
-
-
-@pytest.mark.asyncio
-async def test_handle_app_desktop_writes_are_acknowledged_no_ops():
-    """desktop_add/remove are acknowledged without error on OSS (decision
-    2026-10-19): everything on an OSS server is implicitly on the desktop,
-    so shared surfaces need no edition branch.
-    """
-    acct = _ConcreteAccount()
-    added = await acct.handle_app(_conn(authenticated=True), _req('desktop_add', appId='x'))
-    removed = await acct.handle_app(_conn(authenticated=True), _req('desktop_remove', appId='x'))
-    assert added['body'] == {'added': True, 'appId': 'x'}
-    assert removed['body'] == {'removed': True, 'appId': 'x'}
+    assert [(a['id'], a['appStatus'], a['onDesktop']) for a in result['body']['apps']] == [
+        ('rocketride.hello', 'auth', False)
+    ]
 
 
 @pytest.mark.asyncio
 async def test_handle_app_admin_surface_stays_saas_only():
-    """The genuinely SaaS-only marketplace half (admin/pricing/list_mine)
+    """The genuinely SaaS-only catalog half (admin/pricing/list_mine)
     still raises — emulating the review ladder or Stripe would be inventing
     features, not parity.
     """

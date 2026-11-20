@@ -53,7 +53,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 from rocketlib import debug
 
-from ..base import ENV_MASK, ENV_NAME, AccountBase
+from ..base import ENV_MASK, ENV_NAME, AccountBase, InventoryUnavailableError
 
 
 def _env_line(name: str, value: str) -> str:
@@ -201,6 +201,14 @@ class Account(AccountBase):
             # Key is configured but the credential doesn't match — reject.
             return (401, 'Invalid API key')
 
+        # The app list: a registry that cannot answer must never block
+        # sign-in — the connect proceeds with no apps (the shell has nothing
+        # to register), and the desktop is NOT seeded from the outage.
+        try:
+            apps = await self._assemble_apps()
+        except InventoryUnavailableError:
+            apps = []
+
         # Credential matched — synthesise a local AccountInfo that grants the
         # connecting developer full admin access to the single 'local' team.
         return AccountInfo(
@@ -251,11 +259,12 @@ class Account(AccountBase):
                     }
                 ],
             },
-            # OSS: all apps are on the desktop and free — return full manifest
-            # entries so the shell can register MF remotes after auth. The
+            # OSS: full manifest entries, free, with the user's real desktop
+            # membership (seeded with the whole inventory on the first
+            # sign-in) — so the shell can register MF remotes after auth. The
             # scope walk resolves EVERY app (built-ins are seeded registry
             # rows) so the INITIAL connect sees them, not just refreshes.
-            apps=await self._assemble_apps(),
+            apps=apps,
             capabilities=self.capabilities,
         )
 
@@ -267,26 +276,43 @@ class Account(AccountBase):
         apps.json: every app — seeded or user-published — resolves through
         the ONE scope walk over the publish bindings. Dev previews are
         LOCAL-FIRST (client-side registration in the preview page) — no
-        server-side overlay exists. OSS decoration: everything is free and
-        on the desktop.
+        server-side overlay exists. OSS decoration (``decorate_desktop``):
+        everything is free; ``onDesktop`` is the local user's stored desktop,
+        seeded with this whole inventory on the first sign-in.
+
+        Raises:
+            InventoryUnavailableError: The registry did not answer. Distinct
+                from an empty inventory so no caller seeds a desktop from an
+                outage; the first successful assembly seeds.
         """
         from ai.account.app_deploy import resolve_app_pins
 
         try:
-            entries = await resolve_app_pins('local', 'local', ['local'])
+            # strict: the resolver's own publish_list guard answers [] to
+            # every other caller; here an outage must stay distinguishable
+            # from an empty inventory (the desktop seeds from this list).
+            entries = await resolve_app_pins('local', 'local', ['local'], strict=True)
+        except InventoryUnavailableError:
+            raise
         except Exception as exc:
-            # A broken publish store must never block sign-in — but say so.
+            # A broken publish store must never block sign-in — but say so,
+            # and say it as a failure, never as "no apps".
             debug(f'[oss] app pin resolution failed: {exc}')
-            entries = []
-        apps: List[Dict] = []
-        for entry in entries:
-            if not entry.get('id'):
-                # Skip ONE malformed pin, not the whole set.
-                continue
-            entry['appStatus'] = 'free'
-            entry['onDesktop'] = True
-            apps.append(entry)
-        return apps
+            raise InventoryUnavailableError(str(exc)) from exc
+        # Skip ONE malformed pin, not the whole set. A genuinely empty
+        # inventory still seeds (an empty desktop is a real answer).
+        apps: List[Dict] = [entry for entry in entries if entry.get('id')]
+        try:
+            return await self.decorate_desktop('local', 'local', apps)
+        except Exception as exc:
+            # A desktop store that cannot be read must not block sign-in
+            # either: the inventory is shown, nothing is marked on the
+            # desktop, and the next read seeds again.
+            debug(f'[oss] desktop read failed: {exc}')
+            for entry in apps:
+                entry['appStatus'] = 'free'
+                entry['onDesktop'] = False
+            return apps
 
     # =========================================================================
     # INIT — seed built-ins into the registry (apps.json is the seed)
@@ -528,7 +554,8 @@ class Account(AccountBase):
 
         Registry-only: the SAME single scope walk as the login assembly —
         built-ins are seeded rows, so there is no static merge and the two
-        paths can never disagree.
+        paths can never disagree. Raises ``InventoryUnavailableError`` when
+        the registry did not answer (callers decorate without seeding).
 
         Args:
             user_id:       Internal user ID (always 'local' in OSS).

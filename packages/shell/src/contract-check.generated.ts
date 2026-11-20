@@ -863,10 +863,14 @@ import type { PipeInterfaceMap as Frozen_PipeInterfaceMap } from '../contract/ve
 import type { PipeInterfaceMap as Current_PipeInterfaceMap } from './api';
 import type { PipeInterfaces as Frozen_PipeInterfaces } from '../contract/versions/v12';
 import type { PipeInterfaces as Current_PipeInterfaces } from './api';
+import type { DeployDeleteResult as Frozen_DeployDeleteResult } from '../contract/versions/v12';
+import type { DeployDeleteResult as Current_DeployDeleteResult } from './api';
 import type { ConvertResult as Frozen_ConvertResult } from '../contract/versions/v12';
 import type { ConvertResult as Current_ConvertResult } from './api';
 import type { CreatedPipe as Frozen_CreatedPipe } from '../contract/versions/v12';
 import type { CreatedPipe as Current_CreatedPipe } from './api';
+import type { ICatalogPickerProps as Frozen_ICatalogPickerProps } from '../contract/versions/v12';
+import type { ICatalogPickerProps as Current_ICatalogPickerProps } from './api';
 
 // VALUE floors — the live surface must still satisfy every frozen version.
 const _floor_v0: ShellApiV0 = {} as ShellApiShape;
@@ -1735,7 +1739,11 @@ const _t_PipeInterfaceMap: Frozen_PipeInterfaceMap = {} as Current_PipeInterface
 void _t_PipeInterfaceMap;
 const _t_PipeInterfaces: Frozen_PipeInterfaces = {} as Current_PipeInterfaces;
 void _t_PipeInterfaces;
+const _t_DeployDeleteResult: Frozen_DeployDeleteResult = {} as Current_DeployDeleteResult;
+void _t_DeployDeleteResult;
 const _t_ConvertResult: Frozen_ConvertResult = {} as Current_ConvertResult;
 void _t_ConvertResult;
 const _t_CreatedPipe: Frozen_CreatedPipe = {} as Current_CreatedPipe;
 void _t_CreatedPipe;
+const _t_ICatalogPickerProps: Frozen_ICatalogPickerProps = {} as Current_ICatalogPickerProps;
+void _t_ICatalogPickerProps;

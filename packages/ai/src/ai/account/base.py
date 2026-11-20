@@ -30,10 +30,11 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -73,6 +74,17 @@ class OutOfCreditsError(RuntimeError):
     """The org is out of credit; ``code`` is what clients receive."""
 
     code = 'OUT_OF_CREDITS'
+
+
+class InventoryUnavailableError(RuntimeError):
+    """
+    The caller's app inventory could not be assembled (the publish registry
+    did not answer). Distinct from a genuinely EMPTY inventory on purpose:
+    a desktop is seeded from the inventory on a user's first read, and an
+    outage must never be written down as "this user chose no apps". Callers
+    that decorate catch it and decorate WITHOUT seeding; sign-in catches it
+    and proceeds with no apps.
+    """
 
 
 class AccountBase(ABC):
@@ -688,6 +700,161 @@ class AccountBase(ABC):
             org_id, project_id, pipeline, actor, comment, metadata=metadata, state=state
         )
 
+    # =========================================================================
+    # DESKTOP — the per-user desktop list (OSS default; SaaS overrides via
+    # ``app_handler`` over its ``app_desktop`` table)
+    # =========================================================================
+
+    # Cache slot for the lazily-created OSS desktop backend — declared here so
+    # the attribute is part of the documented class state.
+    _desktop_backend_instance = None
+
+    def _desktop_backend(self):
+        """The lazily-created file backend holding the OSS desktop lists."""
+        if self._desktop_backend_instance is None:
+            from .desktop import FileDesktopBackend
+            from .store import Store
+
+            self._desktop_backend_instance = FileDesktopBackend(Store.instance().raw_store())
+        return self._desktop_backend_instance
+
+    def _desktop_lock(self, org_id: str, user_id: str) -> asyncio.Lock:
+        """
+        The per-(org, user) lock every desktop read-modify-write holds.
+
+        The list is one document rewritten whole, with awaits between its
+        read and its write (the seed, the reachability walk, the change), so
+        two concurrent requests for one user would lose an update without it.
+        Same shape as the deployment backend's per-project ``_meta_locks``.
+
+        Args:
+            org_id:  The organization.
+            user_id: The user.
+
+        Returns:
+            The lock for that desktop (created on first use).
+        """
+        locks = self.__dict__.setdefault('_desktop_locks', {})
+        key = f'{org_id}/{user_id}'
+        lock = locks.get(key)
+        if lock is None:
+            lock = locks[key] = asyncio.Lock()
+        return lock
+
+    async def _desktop_ids_unlocked(self, user_id: str, org_id: str, inventory: list) -> list:
+        """``desktop_app_ids`` for a caller already holding ``_desktop_lock``."""
+        backend = self._desktop_backend()
+        ids = await backend.read(org_id, user_id)
+        if ids is None:
+            ids = [app_id for app_id in inventory if app_id]
+            await backend.write(org_id, user_id, ids)
+        return ids
+
+    async def desktop_app_ids(self, user_id: str, org_id: str, inventory: list) -> list:
+        """
+        The user's desktop app ids, seeding the list on the first read.
+
+        A user with no stored desktop gets ``inventory`` — every app the
+        caller can reach today — written as their first desktop, so an
+        existing user's first sign-in after the upgrade shows the same tiles
+        as before (plan 9.1, B41). Later reads return the stored list as is,
+        whether or not an id is still reachable; an existing list, an empty
+        one included, is never re-seeded.
+
+        Args:
+            user_id:   The user.
+            org_id:    The organization.
+            inventory: The reachable app ids, used only as the first desktop.
+
+        Returns:
+            The desktop app ids in stored order.
+        """
+        async with self._desktop_lock(org_id, user_id):
+            return await self._desktop_ids_unlocked(user_id, org_id, inventory)
+
+    async def desktop_mutate(self, user_id: str, org_id: str, inventory: list, mutate: Callable[[list], list]) -> list:
+        """
+        Change the user's desktop list atomically.
+
+        Under the desktop lock: read (seeding from ``inventory`` when the
+        user has no list yet), apply ``mutate`` to a copy, and write the
+        result back when it differs. Callers push the refreshed identity
+        AFTER this returns — the push reads the stored list, so it must see
+        the write.
+
+        Args:
+            user_id:   The user.
+            org_id:    The organization.
+            inventory: The reachable app ids (the seed for a first write).
+            mutate:    The change: takes the current list, returns the new one.
+
+        Returns:
+            The desktop after the change.
+        """
+        async with self._desktop_lock(org_id, user_id):
+            current = await self._desktop_ids_unlocked(user_id, org_id, inventory)
+            changed = list(dict.fromkeys(mutate(list(current))))
+            if changed != current:
+                await self._desktop_backend().write(org_id, user_id, changed)
+            return changed
+
+    async def desktop_app_ids_stored(self, user_id: str, org_id: str) -> list:
+        """
+        The user's stored desktop app ids WITHOUT seeding: ``[]`` when none.
+
+        For callers whose inventory assembly failed (``InventoryUnavailableError``):
+        they still answer from whatever is stored, but must not write a first
+        desktop from an outage.
+
+        Args:
+            user_id: The user.
+            org_id:  The organization.
+
+        Returns:
+            The stored list, or an empty list when the user has none yet.
+        """
+        async with self._desktop_lock(org_id, user_id):
+            return await self._desktop_backend().read(org_id, user_id) or []
+
+    async def decorate_desktop(
+        self, user_id: str, org_id: str, apps: list, inventory: Optional[list] = None, seed: bool = True
+    ) -> list:
+        """
+        Stamp ``appStatus`` and the real ``onDesktop`` on manifest entries.
+
+        The ONE decoration every OSS surface uses — the login assembly,
+        ``rrext_app`` list/get, ``rrext_public_catalog`` and the account push
+        — so the handshake and the catalog can never disagree. There is no
+        billing on a standalone server, so everything reachable is ``free``.
+
+        Args:
+            user_id:   The user.
+            org_id:    The organization.
+            apps:      Manifest entries (mutated in place and returned).
+            inventory: The ids the FIRST desktop is seeded from when the user
+                       has none yet — the caller's whole reachable set. Omitted,
+                       ``apps`` is that set; a caller decorating a SUBSET (the
+                       public catalog) must pass the full inventory, or the
+                       apps outside the subset never reach the seeded desktop.
+            seed:      False when the caller's inventory could not be assembled:
+                       the stored desktop (or nothing) decides membership and
+                       nothing is written.
+
+        Returns:
+            ``apps``, decorated.
+        """
+        if seed:
+            ids = await self.desktop_app_ids(
+                user_id, org_id, inventory if inventory is not None else [a.get('id') for a in apps]
+            )
+        else:
+            ids = await self.desktop_app_ids_stored(user_id, org_id)
+        desktop = set(ids)
+        for entry in apps:
+            entry['appStatus'] = 'free'
+            entry['onDesktop'] = entry.get('id') in desktop
+        return apps
+
     async def deployments_deploy(
         self, org_id: str, team_id: str, project_id: str, version: int, actor: dict, billing_team_id: str = ''
     ) -> dict:
@@ -936,19 +1103,17 @@ class AccountBase(ABC):
 
     async def handle_app(self, conn, request):
         """
-        Dispatch an app-family DAP command to the app/marketplace handler.
+        Dispatch an app-family DAP command to the app/catalog handler.
 
-        The marketplace READ surface (``rrext_app`` list/get) is served on
-        BOTH editions with one shape, so clients never branch per edition:
-        this base implementation answers from the same scope walk the login
-        assembly uses, decorated exactly as OSS login decorates
-        (``appStatus: 'free'``, ``onDesktop: True`` — the catalog and the
-        handshake can never disagree). The desktop WRITES (``desktop_add`` /
-        ``desktop_remove``) are acknowledged as no-ops: OSS has no desktop
-        concept — every app the operator brought onto the server is
-        implicitly on it, so adding is vacuously satisfied and removing is
-        impossible (the tile stays; a UI should not offer Remove where every
-        entry is on the desktop). The rest of the marketplace
+        The catalog READ surface (``rrext_app`` list/get) is served on BOTH
+        editions with one shape, so clients never branch per edition: this
+        base implementation answers from the same scope walk the login
+        assembly uses, decorated by ``decorate_desktop`` exactly as OSS login
+        decorates (``appStatus: 'free'``, ``onDesktop`` from the user's
+        stored desktop — the catalog and the handshake can never disagree).
+        The desktop WRITES (``desktop_add`` / ``desktop_remove``) change the
+        per-user desktop list and push the refreshed identity to the user's
+        connections, as SaaS does (plan 9.1, B41). The rest of the catalog
         (``list_mine``/``admin_*``/``pricing_*`` — developer rails, the
         review ladder, Stripe) is genuinely SaaS-only and raises
         NotImplementedError. ``rrext_deploy_app`` is
@@ -992,28 +1157,38 @@ class AccountBase(ABC):
 
             return await handle_deploy_app(conn, request)
 
-        # ── rrext_app: the marketplace surface, OSS emulation ────────────────
+        # ── rrext_app: the catalog surface, OSS ──────────────────────────────
         args = request.get('arguments', {}) or {}
+        info = getattr(conn, '_account_info', None)
+        user_id = getattr(info, 'userId', None) if info else None
+        org_id = self._org_id_of(info)
 
         if sub in ('list', 'get'):
             # The caller's reachable set — the SAME walk the login assembly
             # uses (public + the local team/user rails when authenticated;
             # public only when anonymous), so the picker sees @me/@team rows.
-            info = getattr(conn, '_account_info', None)
-            if info and getattr(info, 'userId', None):
+            if user_id:
                 # AccountInfo carries ONE org (models.py); the walk wants a
                 # list. The OSS override ignores it (registry-only), so this
                 # exists for signature fidelity, not behaviour.
                 org = getattr(info, 'organization', None)
                 orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
-                apps = await self.get_apps_for_user(info.userId, orgs)
+                try:
+                    apps = await self.get_apps_for_user(user_id, orgs)
+                except InventoryUnavailableError:
+                    # The registry did not answer: an empty answer for now,
+                    # and NO first desktop written from the outage.
+                    apps = []
+                # OSS decoration — the login assembly's, so the catalog and
+                # the handshake agree by construction.
+                await self.decorate_desktop(user_id, org_id, apps, seed=bool(apps))
             else:
+                # Anonymous: nothing is on a desktop and every action needs a
+                # sign-in first (the SaaS catalog's anonymous shape).
                 apps = await self.get_public_apps()
-            # OSS decoration — identical to the login assembly's, so the
-            # catalog and the handshake agree by construction.
-            for entry in apps:
-                entry['appStatus'] = 'free'
-                entry['onDesktop'] = True
+                for entry in apps:
+                    entry['appStatus'] = 'auth'
+                    entry['onDesktop'] = False
             # Shell-compatibility narrowing, shape parity with SaaS.
             shell = args.get('shell')
             if shell:
@@ -1029,24 +1204,61 @@ class AccountBase(ABC):
                 return conn.build_response(request, body={'app': entry, 'prices': []})
             return conn.build_response(request, body={'apps': apps})
 
-        if sub == 'desktop_add':
-            # Vacuously satisfied: everything on an OSS server is on the
-            # desktop already. Acknowledged so shared surfaces need no
-            # edition branch; nothing changes, so no account push follows.
-            app_id = args.get('appId', '')
-            if not app_id:
-                return conn.build_error(request, 'appId is required')
-            return conn.build_response(request, body={'added': True, 'appId': app_id})
+        if sub in ('desktop_add', 'desktop_remove'):
+            # The desktop writes: change the user's stored list, then push the
+            # refreshed identity to every connection of the user (the SaaS
+            # handler's shape — ``push_account_update`` after the row change).
+            from .manifest_push import push_account
 
-        if sub == 'desktop_remove':
-            # Accepted without error by decision (2026-10-19): the desktop IS
-            # the server inventory on OSS — nothing can leave it.
             app_id = args.get('appId', '')
             if not app_id:
                 return conn.build_error(request, 'appId is required')
+            if not user_id:
+                return conn.build_error(request, 'Authentication required')
+            # The gate: anything the caller's reachable catalog returns is
+            # installable (publish visibility IS the access rule). The walk
+            # runs OUTSIDE the desktop lock — on OSS it decorates through
+            # ``desktop_app_ids``, which takes this same non-reentrant lock.
+            # The read, the seed, the change and the write sit under the
+            # lock, so two requests for one user cannot lose an update; the
+            # identity push follows the write.
+            org = getattr(info, 'organization', None)
+            orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
+            try:
+                reachable = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
+            except InventoryUnavailableError:
+                # No gate without the registry — and no first desktop written
+                # from an outage either.
+                return conn.build_error(request, 'The app catalog is unavailable; try again.')
+            if sub == 'desktop_add' and app_id not in reachable:
+                return conn.build_error(request, 'App not found')
+            async with self._desktop_lock(org_id, user_id):
+                desktop = await self._desktop_ids_unlocked(user_id, org_id, reachable)
+                changed = [*desktop, app_id] if sub == 'desktop_add' else [a for a in desktop if a != app_id]
+                changed = list(dict.fromkeys(changed))
+                if changed != desktop:
+                    await self._desktop_backend().write(org_id, user_id, changed)
+            await push_account(conn._server, user_id)
+            if sub == 'desktop_add':
+                return conn.build_response(request, body={'added': True, 'appId': app_id})
             return conn.build_response(request, body={'removed': True, 'appId': app_id})
 
-        raise NotImplementedError('App marketplace administration requires SaaS mode')
+        raise NotImplementedError('App catalog administration requires SaaS mode')
+
+    @staticmethod
+    def _org_id_of(info) -> str:
+        """
+        The organization id a session's desktop belongs to.
+
+        Args:
+            info: The connection's ``AccountInfo`` (or None when anonymous).
+
+        Returns:
+            The org id; ``'local'`` when the session carries none (OSS).
+        """
+        org = getattr(info, 'organization', None) if info else None
+        org_id = org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)
+        return str(org_id or 'local')
 
     async def handle_public(self, conn, request):
         """
@@ -1057,19 +1269,44 @@ class AccountBase(ABC):
         ``PublicCommands``; this method handles ``rrext_public_catalog``
         and any future public commands that need account-layer logic.
 
-        OSS returns the static apps.json catalog.
-        SaaS queries the marketplace DB with pagination and optional
+        OSS answers from the public publish rung, decorated for an
+        authenticated caller with ``appStatus`` and the real ``onDesktop``
+        (``decorate_desktop``) so the catalog picker needs no reconciliation;
+        anonymous callers see ``appStatus: 'auth'`` and nothing on a desktop.
+        SaaS queries the catalog DB with pagination and optional
         subscription overlay for authenticated callers.
 
         Args:
             conn:    ``TaskConn`` instance.
             request: Raw DAP request dict.
         """
-        # Default OSS implementation: return public apps from static manifest
         args = request.get('arguments') or {}
         offset = args.get('offset', 0)
         limit = min(args.get('limit', 20), 100)
         apps = await self.get_public_apps()
+        info = getattr(conn, '_account_info', None)
+        user_id = getattr(info, 'userId', None) if info else None
+        if user_id:
+            # The public rung is a SUBSET of what the caller can reach: a
+            # first desktop seeded from it would leave the team-only apps
+            # off, so the seed is the caller's whole reachable inventory.
+            org = getattr(info, 'organization', None)
+            orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
+            try:
+                inventory = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
+                await self.decorate_desktop(user_id, self._org_id_of(info), apps, inventory)
+            except InventoryUnavailableError:
+                # The registry did not answer: membership from the stored
+                # desktop (or none), and no first desktop written.
+                await self.decorate_desktop(user_id, self._org_id_of(info), apps, seed=False)
+        else:
+            for entry in apps:
+                entry['appStatus'] = 'auth'
+                entry['onDesktop'] = False
+        # Shell-compatibility narrowing, shape parity with SaaS.
+        shell = args.get('shell')
+        if shell:
+            apps = [a for a in apps if a.get('shells') is None or shell in (a.get('shells') or [])]
 
         # Basic client-side pagination for OSS
         total = len(apps)

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-19T22:42:47.277Z
-// Source commit: 0dc2c1491a3f027c495b549601af588eee0c8438
+// Generated:     2026-11-20T04:27:43.302Z
+// Source commit: 373340036e856e63eaebe3641f315e1428da1905
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1423,6 +1423,27 @@ export interface DeployArtifact {
     publishedAt?: number;
     /** Optional "what changed" note supplied at publish time. */
     comment?: string;
+    /**
+     * Whether `deploy.delete` would take this version right now: no rung pins
+     * it, it is not in review, its build is not queued/running. Computed by
+     * the server on every read; the version card shows its delete mark only
+     * when this is true.
+     */
+    deletable?: boolean;
+}
+/** Body of `deploy.delete`: what was removed from the server. */
+export interface DeployDeleteResult {
+    projectId?: string;
+    version?: number;
+    /** 'pipe' | 'app' | 'node' */
+    kind?: string;
+    /** The deleted artifact's content hash — the history row carries it too. */
+    sha256?: string;
+    deleted?: boolean;
+    /** Unix timestamp (seconds). */
+    deletedAt?: number;
+    /** The organization whose registry the version left. */
+    orgId?: string;
 }
 /** Per-source schedule on a team deployment. */
 export interface DeploymentSchedule {
@@ -5071,6 +5092,23 @@ declare class DeployApi {
      */
     remove(projectId: string, teamId: string): Promise<Deployment>;
     /**
+     * Deletes one deployed version from the server (apps and pipes alike).
+     *
+     * Allowed only while nothing points at the version: refused with a clear
+     * message when any rung pins it (unpublish it first), when it is in the
+     * review queue (withdraw it first), or while its build is queued or
+     * running. What goes is ALL of the version's server storage (the registry
+     * JSON, its content dir, its registry entry); the history keeps the
+     * deploy line and gains a delete line, and the version number is never
+     * reused. {@link versions} rows carry `deletable`: whether this call
+     * would succeed right now.
+     *
+     * @param projectId - The project (a pipe's short id, or an app id).
+     * @param version - The registry version to delete.
+     * @returns What was removed (`{ projectId, version, kind, sha256, deleted, orgId }`).
+     */
+    delete(projectId: string, version: number): Promise<DeployDeleteResult>;
+    /**
      * Sets (or clears) one source's schedule on a team deployment.
      *
      * The paused flag is untouched — editing cron/ttl preserves it (a new
@@ -6394,6 +6432,7 @@ export declare class RocketRideClient extends DAPClient {
         buildPhase: string;
         buildEndedAt?: number | null;
         rungs: string[];
+        deletable?: boolean;
     }>>;
     /**
      * Submit a deployed version for store review — flips the DEPLOYMENT's own
@@ -12418,7 +12457,7 @@ export declare class Documents {
      * the URI already exists in any group, it is focused instead of creating
      * a duplicate.
      *
-     * @param uri     - Unique identifier for the document (e.g. "monitor", "webview:https://...").
+     * @param uri     - Unique identifier for the document (e.g. "monitor", "tool:rocketride.sql/<docKey>").
      * @param label   - Display label for the tab.
      * @param content - Optional content payload (opaque to Documents).
      * @param groupId - Target editor group (defaults to active group).
@@ -15932,6 +15971,37 @@ export interface DesktopViewProps {
  * @param props - {@link DesktopViewProps}.
  */
 export declare const DesktopView: React$1.FC<DesktopViewProps>;
+/** Props for the {@link CatalogPicker} component. */
+export interface ICatalogPickerProps {
+    /**
+     * Shell-compatibility filter sent to the catalog ('saas', 'oss',
+     * 'vscode'); omitted, every app the caller can reach is listed.
+     */
+    shell?: string;
+    /** App ids never shown (the host launcher itself, e.g. 'rocketride.hello'). */
+    excludeIds?: string[];
+    /**
+     * Launch handler for a tile that is already on the desktop. Default:
+     * emit `shell:switchApp` on the connection manager.
+     */
+    onLaunch?: (appId: string) => void;
+    /** Called once the server accepted an add (the identity push follows). */
+    onAdded?: (appId: string) => void;
+    /** Heading above the grid (default 'Catalog'); an empty string hides it. */
+    title?: string;
+    /** Line under the heading (default 'Add apps to your desktop.'). */
+    subtitle?: string;
+    /** Show the search field (default true). */
+    showSearch?: boolean;
+    /** Extra styles merged onto the root (padding/width belong to the host). */
+    style?: React$1.CSSProperties;
+}
+/**
+ * The catalog picker: every reachable app as a tile with Open / Add / Adding.
+ *
+ * @param props - {@link ICatalogPickerProps}.
+ */
+export declare const CatalogPicker: React$1.FC<ICatalogPickerProps>;
 /** Possible environment scope levels. */
 export type EnvironmentScope = "org" | "team" | "user";
 /** Connection state and permissions for a single connection slot. */
@@ -16353,6 +16423,7 @@ export declare const shellApi: {
     readonly BxFolderOpen: IconComponent;
     readonly AppLayout: import("react").FC<AppLayoutProps>;
     readonly DesktopView: import("react").FC<DesktopViewProps>;
+    readonly CatalogPicker: import("react").FC<ICatalogPickerProps>;
     readonly getAppVersionOverride: typeof getAppVersionOverride;
     readonly applyAppVersionOverride: typeof applyAppVersionOverride;
     readonly versionedEntryUrl: typeof versionedEntryUrl;

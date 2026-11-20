@@ -101,17 +101,25 @@ PUBLIC_ROUTE_MANIFEST = [
         'lock-in.',
     ),
     (
-        '/marketplace',
-        'Marketplace',
+        '/catalog',
+        'Catalog',
         'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
         'instantly, and deploy them on managed infrastructure.',
     ),
     (
-        # Legacy alias for /marketplace (the pre-rename App Store URL). Kept so
+        # Legacy alias for /catalog (the pre-rename Marketplace URL). Kept so
         # old links and bookmarks survive a hard reload; the client route
-        # manifest (routes.ts) canonicalizes the address bar to /marketplace.
+        # manifest (routes.ts) canonicalizes the address bar to /catalog.
+        '/marketplace',
+        'Catalog',
+        'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
+        'instantly, and deploy them on managed infrastructure.',
+    ),
+    (
+        # Older alias for /catalog (the pre-pre-rename App Store URL), kept
+        # for the same reason and canonicalized the same way.
         '/store',
-        'Marketplace',
+        'Catalog',
         'Ready-to-run AI apps built on RocketRide. Browse the catalog, try apps '
         'instantly, and deploy them on managed infrastructure.',
     ),
@@ -248,16 +256,17 @@ PUBLIC_ROUTES = [route for route, _, _ in PUBLIC_ROUTE_MANIFEST]
 # hard-reloading must keep working) while being excluded from /sitemap.xml and
 # /llms.txt: /oss and /mcp-server are `unlisted` in the client route manifest
 # (routes.ts stamps them noindex — listing them here would hand crawlers the
-# very URLs the client tells them to drop), and /store is the legacy alias the
-# client canonicalizes to /marketplace, so listing it publishes a duplicate of
-# its own canonical.
+# very URLs the client tells them to drop), and /marketplace and /store are the
+# legacy aliases the client canonicalizes to /catalog, so listing either
+# publishes a duplicate of its own canonical.
 #
-# HIDDEN FOR NOW: /marketplace and /build-publish-earn are `unlisted` in
-# routes.ts as well (the Marketplace pair is pulled from nav, footers and the
-# index until it relaunches). They keep serving the SPA on a hard reload — only
-# the sitemap/llms.txt listing goes. To re-launch, remove them (and /store stays
-# unlisted regardless, as the alias) alongside dropping `unlisted` in routes.ts.
-UNLISTED_ROUTES = frozenset({'/oss', '/mcp-server', '/store', '/marketplace', '/build-publish-earn'})
+# HIDDEN FOR NOW: /catalog and /build-publish-earn are `unlisted` in routes.ts
+# as well (the Catalog pair is pulled from the anonymous nav, footers and the
+# index until it relaunches; signed-in users reach /catalog from the desktop).
+# They keep serving the SPA on a hard reload — only the sitemap/llms.txt
+# listing goes. To re-launch, remove them (the two aliases stay unlisted
+# regardless) alongside dropping `unlisted` in routes.ts.
+UNLISTED_ROUTES = frozenset({'/oss', '/mcp-server', '/store', '/marketplace', '/catalog', '/build-publish-earn'})
 
 # The advertised subset — what /sitemap.xml and /llms.txt enumerate.
 LISTED_ROUTE_MANIFEST = [entry for entry in PUBLIC_ROUTE_MANIFEST if entry[0] not in UNLISTED_ROUTES]
@@ -454,6 +463,7 @@ async def _apps_for_token(token: str) -> list:
     pre-auth landing/home) resolve without a session, private ones do not.
     """
     from ai.account import account
+    from ai.account.base import InventoryUnavailableError
 
     info = await _authenticated(token)
     if info is not None:
@@ -467,7 +477,13 @@ async def _apps_for_token(token: str) -> list:
             return await account.get_apps_for_user(info.userId, organizations, sys_perms)
         except TypeError:
             # Older signature without sys_permissions.
-            return await account.get_apps_for_user(info.userId, organizations)
+            try:
+                return await account.get_apps_for_user(info.userId, organizations)
+            except InventoryUnavailableError:
+                # The registry did not answer: nothing resolves for this caller.
+                return []
+        except InventoryUnavailableError:
+            return []
     return await account.get_public_apps()
 
 

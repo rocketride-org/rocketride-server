@@ -16,24 +16,23 @@ from typing import Any
 from rocketlib import debug
 
 
-async def push_refresh(server: Any, user_id: str, source: str) -> None:
+async def push_account(server: Any, user_id: str) -> None:
     """
-    Push the refreshed app manifest to every open connection of ONE user.
+    Push the rebuilt account payload to every open connection of ONE user.
 
-    Data first, signal second: on SaaS the account is rebuilt and pushed
-    via ``push_account_update``; on OSS (no DB-backed account service) the
-    connection's ``AccountInfo.apps`` is rebuilt in place and pushed as
-    ``apaext_account``. Then a ``shell:manifestRefresh`` event tells
-    consumers WHY the manifest moved.
+    On SaaS the account is rebuilt and pushed via ``push_account_update``;
+    on OSS (no DB-backed account service) the connection's
+    ``AccountInfo.apps`` is rebuilt in place — decorated by the account
+    layer with the user's real desktop — and pushed as ``apaext_account``.
+    The desktop writes (``desktop_add`` / ``desktop_remove``) call this
+    directly: the manifest did not move, only the user's membership did.
 
     Args:
         server:  TaskServer instance (holds the connection registry).
         user_id: The only user whose connections receive the push.
-        source:  Refresh reason ('app-build', 'app-publish', ...).
     """
     from ai.account import account
 
-    # -- Data: rebuilt account payload ---------------------------------------
     if getattr(account, '_service', None) is not None:
         # SaaS: one rebuild+push per connection of this user
         try:
@@ -55,14 +54,29 @@ async def push_refresh(server: Any, user_id: str, source: str) -> None:
             if apps is None or not info or info.userId != user_id:
                 continue
             try:
-                # Mirror the OSS authenticate() decoration: everything is
-                # free and on the desktop on a local engine.
-                info.apps = [
-                    {**a, 'appStatus': a.get('appStatus', 'free'), 'onDesktop': True} for a in apps if a.get('id')
-                ]
+                # The OSS authenticate() decoration already rode in with the
+                # rebuilt list (free + the user's real desktop membership).
+                info.apps = [a for a in apps if a.get('id')]
                 await conn.send_event('apaext_account', body=info.to_push_result())
             except Exception as exc:
                 debug(f'[manifest_push] OSS account push failed: {exc}')
+
+
+async def push_refresh(server: Any, user_id: str, source: str) -> None:
+    """
+    Push the refreshed app manifest to every open connection of ONE user.
+
+    Data first, signal second: ``push_account`` rebuilds and pushes the
+    account payload, then a ``shell:manifestRefresh`` event tells consumers
+    WHY the manifest moved.
+
+    Args:
+        server:  TaskServer instance (holds the connection registry).
+        user_id: The only user whose connections receive the push.
+        source:  Refresh reason ('app-build', 'app-publish', ...).
+    """
+    # -- Data: rebuilt account payload ---------------------------------------
+    await push_account(server, user_id)
 
     # -- Signal: why the manifest moved ---------------------------------------
     for conn in list(server._connections.values()):
