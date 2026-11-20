@@ -33,7 +33,7 @@ import type { DAPMessage } from 'rocketride';
 import { ENTRY_A, makeRoot, refAppKey } from './__test__/fixtures';
 import { transcript } from './__test__/n1';
 import { clientRequest, dap, settle } from './__test__/realm';
-import { assertDenied, assertDeniedOp, assertNotForwarded, brief, outcome, startRun, trackSettled, openFs, openPipe } from './__test__/util';
+import { assertDenied, assertDeniedOp, assertNotForwarded, outcome, startRun, trackSettled, openFs, openPipe } from './__test__/util';
 
 const key = refAppKey(ENTRY_A.id);
 
