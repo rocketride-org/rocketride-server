@@ -288,7 +288,7 @@ Use RocketRide when:
 - [Resources & Widgets](/connect/mcp/http/resources-and-widgets.md)
 - [Self-hosting](/connect/mcp/http/self-hosting.md)
 - [Tools](/connect/mcp/http/tools.md)
-- [RocketRide MCP Server](/connect/mcp/stdio.md)
+- [Deprecated stdio MCP server (`rocketride-mcp`)](/connect/mcp/stdio.md)
 - [n8n](/connect/n8n.md)
 - [WebSocket](/connect/websocket.md)
 - [WebSocket Events](/connect/websocket/observability.md)
