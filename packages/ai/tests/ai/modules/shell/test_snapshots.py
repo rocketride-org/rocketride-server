@@ -828,6 +828,16 @@ def engine(monkeypatch, shell_root):
     home = copy.deepcopy(HOME_MANIFEST)
     home['publicPages'][1]['snapshot'] = 'pages/pricing.html'
     install(monkeypatch, hostile_account(home=home, home_version=3))
+
+    # This fixture's only anonymously usable runtime is the public home
+    # version. The production commerce hook is independently verified; here
+    # the account's storage/eligibility surface is the seeded fixture.
+    async def public_home_use(info, app_id, version=None):
+        return info is None and app_id == 'rocketride.home' and version == 3
+
+    from ai.account import account
+
+    monkeypatch.setattr(account, 'authorize_app_use', public_home_use)
     _seed()
     FILES[f'{DIST}/seo-assets/logo.svg'] = ASSET
     FILES[f'{dist_of(PLATFORM, "rocketride.preview")}/seo-assets/logo.svg'] = ASSET

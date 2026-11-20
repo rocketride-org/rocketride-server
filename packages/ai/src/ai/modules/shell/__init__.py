@@ -43,6 +43,7 @@ Routes registered:
     GET  /                          — the root public page (or the shell SPA entry point)
     GET  /shell/{file_path:path}    — shell assets (JS, CSS, themes)
     POST /apps/session              — mint the /apps auth cookie
+    POST /apps/frame                — open an isolated app's frame (#1022)
     GET  /apps/{file_path:path}     — app serving, three shapes:
         <appId>/v<N>/<file>         — versioned MF bundle (store-backed)
         <appId>                     — resolution info: what a bundle fetch
@@ -67,12 +68,14 @@ from ai.web import WebServer
 from rocketlib import warning
 
 from . import indexnow, pages, public_pages
+from .app_origin import validate_isolation_config
 from .pages import public_page, register_public_pages
 from .shell import (
     app_url,
     shell_static,
     apps_static,
     apps_session,
+    apps_frame,
     sitemap_xml,
     robots_txt,
     llms_txt,
@@ -92,7 +95,15 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     Args:
         server: The WebServer instance where routes will be registered.
         config: Configuration settings (currently unused).
+
+    Raises:
+        RuntimeError: When ``RR_APP_ISOLATION`` is not ``off`` and the
+            isolation setup is incomplete (see ``validate_isolation_config``).
     """
+    # Refuse a half-built isolation setup before any route exists. Off mode
+    # does not require guest artifacts or origin configuration.
+    validate_isolation_config()
+
     # ── Shell SPA entry point + public pages ────────────────────────────
     # "/" keeps a dedicated route (the shell's HTML entry point). Every other
     # public page is served by ONE catch-all that consults the page aggregate
@@ -152,6 +163,17 @@ def initModule(server: WebServer, config: Dict[str, Any]):
     server.add_route(
         path='/apps/session',
         routeHandler=apps_session,
+        methods=['POST'],
+        public=True,
+    )
+
+    # ── Isolated app frames (#1022) ─────────────────────────────────────
+    # POST /apps/frame answers what the shell needs to open an isolated
+    # app on its own origin (409 while RR_APP_ISOLATION is off). Registered
+    # BEFORE the catch-all, like /apps/session.
+    server.add_route(
+        path='/apps/frame',
+        routeHandler=apps_frame,
         methods=['POST'],
         public=True,
     )

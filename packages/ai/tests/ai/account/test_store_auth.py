@@ -31,6 +31,7 @@ leak), the normalization-bypass fuzz family, and cross-user write-lock
 exclusion on shared team paths.
 """
 
+import os
 import shutil
 import tempfile
 from types import SimpleNamespace
@@ -734,3 +735,170 @@ class TestSignedFetchUrls:
 
         response = await handle_fetch(request)
         assert response.status_code == 401, label
+
+
+def _set_signing_key(monkeypatch, key: str) -> None:
+    """Set RR_SIGNING_KEY as the UTF-8 bytes an operator's environment holds.
+
+    monkeypatch.setenv encodes a str with the filesystem encoding, which is
+    ASCII when the engine's Python runs under the C locale, so a non-ASCII key
+    could not even be set. The bytes view takes the UTF-8 key on any locale;
+    Windows has no bytes view and keeps the environment as text.
+    """
+    if os.supports_bytes_environ:
+        monkeypatch.setitem(os.environb, b'RR_SIGNING_KEY', key.encode('utf-8'))
+    else:
+        monkeypatch.setenv('RR_SIGNING_KEY', key)
+
+
+class TestFetchSigningKeyStaysInTheEngine:
+    """Issue #1070: pipeline code must not be able to mint /task/fetch tokens.
+
+    The fetch claim is a capability for any path under the store root, so the
+    key that signs it stays in the engine process: unset, it is random per
+    process rather than a value printed in the source, and a task process
+    asks the engine to sign instead of signing itself.
+    """
+
+    # The public development default develop fell back to when RR_SIGNING_KEY
+    # was unset (constants.CONST_DEFAULT_SIGNING_KEY): anyone could read it.
+    _PUBLIC_DEFAULT = '<your signing key here -- replace in production>'
+
+    @pytest.mark.parametrize('key', ['weak-secret', 'x' * 31, 'é' * 15])
+    def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, key):
+        from ai.modules import task
+
+        _set_signing_key(monkeypatch, key)
+        started = []
+        monkeypatch.setattr(task, 'TaskServer', lambda *args, **kwargs: started.append(True))
+        with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32') as error:
+            task.initModule(None, {})
+        assert key not in str(error.value)
+        assert not started
+
+    def test_warning_about_an_ephemeral_key_never_raises_and_validation_is_separate(self, monkeypatch):
+        """The warn function only warns: refusing a weak key is ``validate_signing_key``'s job."""
+        from ai.modules.task import fetch
+
+        _set_signing_key(monkeypatch, 'weak-secret')
+        fetch.warn_if_signing_key_is_ephemeral()  # a configured key is not ephemeral: nothing to say, nothing raised
+        with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32'):
+            fetch.validate_signing_key()
+        monkeypatch.delenv('RR_SIGNING_KEY', raising=False)
+        monkeypatch.setenv('RR_STORE_URL', 'filesystem:///tmp/x')
+        warned = []
+        monkeypatch.setattr(fetch, 'warning', warned.append)
+        fetch.warn_if_signing_key_is_ephemeral()
+        assert len(warned) == 1 and 'RR_SIGNING_KEY is not set' in warned[0]
+        fetch.validate_signing_key()  # unset is valid: the process signs with its own key
+
+    @pytest.mark.parametrize('key', ['x' * 32, 'é' * 16])
+    def test_minimum_configured_key_is_accepted(self, monkeypatch, key):
+        _set_signing_key(monkeypatch, key)
+        assert file_store.fetch_signing_key() == key
+
+    @pytest.fixture(autouse=True)
+    def _engine_env(self, monkeypatch, store):
+        """No configured key, a base URL, and the fixture store as the process singleton."""
+        monkeypatch.delenv('RR_SIGNING_KEY', raising=False)
+        monkeypatch.setenv('RR_BASE_URL', 'http://localhost:5565')
+        monkeypatch.setattr(Store, '_instance', store)
+
+    @staticmethod
+    def _request(url: str) -> SimpleNamespace:
+        """The request handle_fetch reads: only its query_params."""
+        return SimpleNamespace(query_params={'token': url.split('token=', 1)[1]})
+
+    @pytest.mark.asyncio
+    async def test_unset_key_refuses_a_token_signed_with_the_public_default(self, store):
+        import time
+
+        import jwt
+
+        from ai.account.file_store import FETCH_CLAIM_VERSION
+        from ai.modules.task.fetch import handle_fetch
+
+        await _fs(store, _account(user_id='victim')).write('secret.txt', b'private')
+        claim = {
+            'sub': 'attacker',
+            'path': 'users/victim/files/secret.txt',
+            'v': FETCH_CLAIM_VERSION,
+            'exp': int(time.time()) + 600,
+        }
+        forged = jwt.encode(claim, self._PUBLIC_DEFAULT, algorithm='HS256')
+
+        response = await handle_fetch(SimpleNamespace(query_params={'token': forged}))
+
+        assert response.status_code == 401
+
+    @pytest.mark.asyncio
+    async def test_unset_key_still_serves_a_url_this_process_signed(self, store):
+        from ai.modules.task.fetch import handle_fetch
+
+        fs = _fs(store, _account())
+        await fs.write('reports/q1.csv', b'data')
+
+        response = await handle_fetch(self._request(await fs.get_url('reports/q1.csv')))
+
+        assert response.status_code == 200
+        assert str(response.path).replace('\\', '/').endswith('users/user-1/files/reports/q1.csv')
+
+    @pytest.mark.asyncio
+    async def test_a_task_process_asks_the_engine_to_sign(self, monkeypatch, store):
+        """A task never signs, even when the key is in its environment."""
+        from ai.modules.data import channel
+        from ai.modules.data.channel import ChannelReply
+
+        monkeypatch.setenv('RR_SIGNING_KEY', _SIGNING_KEY)
+        asked = []
+
+        def request_sync(command, arguments=None, **kwargs):
+            asked.append((command, arguments))
+            return ChannelReply(body={'url': 'http://engine/task/fetch?token=signed-by-engine'})
+
+        monkeypatch.setattr(channel.task_channel, 'available', True)
+        monkeypatch.setattr(channel.task_channel, 'request_sync', request_sync)
+        fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1', root='users/user-1/files')
+
+        url = await fs.get_url('reports/q1.csv', 600, download_name='q1.csv')
+
+        assert url == 'http://engine/task/fetch?token=signed-by-engine'
+        assert asked == [('store.url', {'path': 'reports/q1.csv', 'expires_in': 600, 'download_name': 'q1.csv'})]
+
+    @pytest.mark.asyncio
+    async def test_a_task_with_no_channel_refuses_rather_than_sign_a_dead_link(self, monkeypatch, store):
+        """No --data_port means no channel; a URL signed with the task's own random key would only 401."""
+        from ai.modules.data import channel
+
+        monkeypatch.setattr(channel.task_channel, 'available', False)
+        task_file = {'identity': {'userId': 'user-1'}, 'storage': {'root': 'users/user-1/files'}}
+        monkeypatch.setattr(Store, '_get_current_task', staticmethod(lambda: task_file))
+        fs = Store.engine_file_store()
+
+        with pytest.raises(RuntimeError, match='no channel'):
+            await fs.get_url('reports/q1.csv')
+
+    @pytest.mark.asyncio
+    async def test_a_direct_run_with_its_own_signing_key_keeps_its_download_urls(self, monkeypatch, store):
+        """No channel, but the operator put RR_SIGNING_KEY in this process: a server with that key verifies the URL."""
+        from ai.modules.data import channel
+        from ai.modules.task.fetch import handle_fetch
+
+        monkeypatch.setattr(channel.task_channel, 'available', False)
+        monkeypatch.setenv('RR_SIGNING_KEY', _SIGNING_KEY)
+        task_file = {'identity': {'userId': 'user-1'}, 'storage': {'root': 'users/user-1/files'}}
+        monkeypatch.setattr(Store, '_get_current_task', staticmethod(lambda: task_file))
+        fs = Store.engine_file_store()
+        await fs.write('reports/q1.csv', b'data')
+
+        url = await fs.get_url('reports/q1.csv')
+
+        assert '/task/fetch?token=' in url
+        assert (await handle_fetch(self._request(url))).status_code == 200
+
+    @pytest.mark.asyncio
+    async def test_the_engine_signs_with_no_channel_and_no_task(self, store):
+        # The engine side of store.url: a view not built from a task file signs locally
+        fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1', root='users/user-1/files')
+
+        assert '/task/fetch?token=' in await fs.get_url('reports/q1.csv')

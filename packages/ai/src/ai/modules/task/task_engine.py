@@ -237,13 +237,12 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         'PROCESSOR_REVISION',
         # RocketRide services the child reaches itself: the object store
         # behind tool_filesystem (Store.create reads the URL and secret), the
-        # public address + signing key FileStore.get_url needs to mint fetch
-        # URLs the engine will accept, the child's own web server CORS policy,
-        # and the OAuth broker the Google/Microsoft nodes dial directly.
+        # public address, the child's own web server CORS policy, and the
+        # OAuth broker the Google/Microsoft nodes dial directly. Not the fetch
+        # signing key: the engine signs a task's fetch URLs (store.url).
         'RR_STORE_URL',
         'RR_STORE_SECRET_KEY',
         'RR_BASE_URL',
-        'RR_SIGNING_KEY',
         'RR_CORS_ORIGINS',
         'RR_OAUTH_BROKER_URL',
         # Operator opt-in that makes task processes hide their /proc entries
@@ -322,14 +321,17 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 
 # Engine secrets no task subprocess ever gets, whatever RR_SUBPROCESS_ENV opts
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
-# token key would let pipeline code mint any run's private token. The datacore
-# grant key would let it mint a grant for any tenant's database, and the broker
-# token is the provisioner's bearer under the name production sets today
+# token key would let pipeline code mint any run's private token, and the fetch
+# signing key a /task/fetch claim for any path under the store root (#1070). The
+# datacore grant key would let it mint a grant for any tenant's database, and the
+# broker token is the provisioner's bearer under the name production sets today
 # (ROCKETRIDE_DB_BROKER_TOKEN, also popped in _build_subprocess_env) and the
 # operator-only name it is moving to (RR_DB_BROKER_TOKEN). rocketride-saas #975.
 CONST_SUBPROCESS_ENV_NEVER = frozenset(
     {
         CONST_TASK_TOKEN_KEY_ENV,
+        'RR_SIGNING_KEY',
+        'RR_MODEL_SERVER_ADMIN_TOKEN',
         'RR_DATACORE_GRANT_KEY',
         'RR_DB_BROKER_TOKEN',
         'ROCKETRIDE_DB_BROKER_TOKEN',
@@ -506,6 +508,56 @@ async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[b
 
 
 register_channel_command('spend.check', _check_spend)
+
+
+def _authority_gate_ok(conn: Any) -> bool:
+    """False when this debugger connection may not receive events (#972).
+
+    A connection that is no longer authenticated (deauthed or revoked)
+    receives nothing; an authenticated subject the live re-check refuses
+    receives nothing either.
+    """
+    if not getattr(conn, '_authenticated', False):
+        return False
+    authz = getattr(getattr(conn, '_server', None), '_authz', None)
+    return authz is None or authz.gate_ok(conn)
+
+
+async def _sign_store_url(task: 'Task', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
+    """Sign a /task/fetch URL for a path in the task's own storage view.
+
+    The task has no signing key (#1070), so its FileStore.get_url asks here.
+    The path is resolved again under the identity and storage root the engine
+    gave the task, the same engine-context view the task's tool_filesystem
+    has, so a URL never reaches a file the task could not read itself.
+    """
+    from ai.account.models import RequestContext
+    from ai.account.store import StorageError, Store
+
+    path = arguments.get('path')
+    expires_in = arguments.get('expires_in', 3600)
+    download_name = arguments.get('download_name')
+    if (
+        not isinstance(path, str)
+        or not path
+        or not isinstance(expires_in, int)
+        or isinstance(expires_in, bool)
+        or not (download_name is None or isinstance(download_name, str))
+    ):
+        raise ChannelRefused('bad arguments')
+    if not task.client_id:
+        raise ChannelRefused('no storage')
+
+    try:
+        root = task._storage_root() or None
+        file_store = Store.file_store(RequestContext.engine(task.client_id), client_id=task.client_id, root=root)
+        url = await file_store.get_url(path, expires_in, download_name=download_name)
+    except (PermissionError, ValueError, StorageError):
+        raise ChannelRefused('not allowed') from None
+    return ChannelReply(body={'url': url})
+
+
+register_channel_command('store.url', _sign_store_url)
 
 
 class Task(DAPBase):
@@ -1184,9 +1236,10 @@ class Task(DAPBase):
         services the child reaches itself + operator opt-ins). Anything the
         engine process was started with that the allowlist does not name —
         identity provider, platform database, encryption keys — stays behind.
-        Note the allowlist deliberately includes RR_STORE_SECRET_KEY,
-        RR_SIGNING_KEY and AWS_*: the child opens the object store and mints
-        fetch URLs itself, so pipeline code can read those values.
+        Note the allowlist deliberately includes RR_STORE_SECRET_KEY and
+        AWS_*: the child opens the object store itself, so pipeline code can
+        read those values. It never gets RR_SIGNING_KEY: the engine signs the
+        child's /task/fetch URLs (``store.url`` on the task channel).
 
         Credential hygiene for the RocketRide cloud DB path (these live in the
         ROCKETRIDE_* namespace, so the allowlist alone does not cover them):
@@ -1957,7 +2010,8 @@ class Task(DAPBase):
         try:
             # Clean up attached debugger
             if self._debugger:
-                await self._debugger.send_event('terminated', id=self.id)
+                if _authority_gate_ok(self._debugger):
+                    await self._debugger.send_event('terminated', id=self.id)
                 await self._debugger._transport.disconnect()
 
                 self._debugger = None
@@ -2324,7 +2378,7 @@ class Task(DAPBase):
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
             # If we have an attach debugger
-            if self._debugger is not None:
+            if self._debugger is not None and _authority_gate_ok(self._debugger):
                 try:
                     event = message.get('event', '')
                     body = message.get('body', {})

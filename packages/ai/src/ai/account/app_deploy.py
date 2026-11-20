@@ -69,7 +69,7 @@ from typing import Any, Dict, List, Optional
 
 from rocketlib import debug
 
-from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
+from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir, caller_metadata
 from ai.account.app_rows import (
     RUNG_RANK,
     dist_dir_of,
@@ -440,7 +440,10 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         return conn.build_error(request, 'data is not a valid zip archive')
     # appRoot names the app folder inside a workspace-relative zip; its shape
     # is guarded like a zip entry (it becomes a path inside the source tree).
-    caller_meta = metadata_of(args)
+    # Server-owned keys are never the caller's (#1022): 'platform' is the
+    # seeder's first-party marker, 'approvedCapabilities' an admin's grant and
+    # 'build' the server's own stamp (written below).
+    caller_meta = caller_metadata(metadata_of(args))
     app_root = str(caller_meta.get('appRoot') or '')
     if app_root and (
         app_root.startswith('/')
@@ -465,6 +468,9 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         _assert_owns_namespace(conn, app_id)
     except ValueError as exc:
         return conn.build_error(request, str(exc))
+    manifest_error = _isolation_manifest_error(manifest)
+    if manifest_error:
+        return conn.build_error(request, manifest_error)
     guard_error = _zip_guard(archive)
     if guard_error:
         return conn.build_error(request, guard_error)
@@ -485,6 +491,9 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         **caller_meta,
         'manifest': manifest,
         'build': {'status': 'queued', 'queuedAt': time.time(), 'attempt': 0},
+        # A deploy is never the seeder's (#1022): said explicitly, so the
+        # first-party rule and the seeder's self-heal never guess.
+        'platform': False,
     }
     entry = await account.deployments_publish(
         org_id,
@@ -619,6 +628,31 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     debug(f'[app_deploy] deployed {app_id} v{artifact["appVersion"]} as registry v{version} (private, build queued)')
     # One generic response shape for every kind: rrext_deploy add -> {artifact}
     return conn.build_response(request, body={'artifact': _rail_entry(entry, artifact)})
+
+
+def _isolation_manifest_error(manifest: Dict[str, Any]) -> str:
+    """
+    Why the appManifest's isolation fields refuse the deploy, or '' (#1022).
+
+    ``network`` must pass ``validate_network`` (it becomes CSP sources);
+    ``capabilities`` (the app's REQUEST, not a grant) must be a list of names
+    from ``capabilities.json``. An absent field is unchanged behaviour.
+    """
+    from ai.modules.shell.app_origin import known_capabilities, validate_network
+
+    if 'network' in manifest:
+        try:
+            validate_network(manifest['network'])
+        except ValueError as exc:
+            return f'appManifest.network: {exc}'
+    if 'capabilities' in manifest:
+        caps = manifest['capabilities']
+        known = known_capabilities()
+        if known is None:
+            return 'appManifest.capabilities cannot be checked: capabilities.json is not available on this server'
+        if not isinstance(caps, list) or not all(isinstance(c, str) and c in known for c in caps):
+            return f'appManifest.capabilities must be a list of {", ".join(sorted(known))}'
+    return ''
 
 
 def _manifest_of_zip(archive: Any, app_root: str = '') -> 'tuple[Dict[str, Any], str]':
@@ -1333,6 +1367,8 @@ async def _caller_entitled_to_version(
     exactly here), or when the caller deployed that registry version (the
     developer flow — a fresh version is published nowhere yet).
     """
+    if not await account.authorize_app_use(conn._account_info, app_id, version):
+        return False
     user_id = conn._account_info.userId
     rows = await _visible_rows_of(conn, account, org_id, app_id)
     for row in rows:
@@ -1428,6 +1464,7 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
     # Precedence: sorted so each app id's winner lands LAST and the blind
     # dict-overwrite below keeps it (see precedence_sorted).
     resolved: Dict[str, Dict[str, Any]] = {}
+    binding_orgs: Dict[str, str] = {}
     for row in precedence_sorted(rows):
         # The SERVING gate (binding live, deployment serveable for the rung,
         # build 'ok') — shared with the owner's where-list so App Builder
@@ -1500,6 +1537,15 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
         if snapshot.get('configuration'):
             entry['configuration'] = snapshot.get('configuration')
         resolved[app_id] = entry
+        binding_orgs[app_id] = row_org
+
+    # The isolation stamp (#1022): decided ONCE, here, from the WINNER's
+    # binding org, which never leaves this function. Adds nothing while
+    # RR_APP_ISOLATION is off.
+    from ai.modules.shell.app_origin import resolve_isolation, stamp_isolation
+
+    for app_id, entry in resolved.items():
+        stamp_isolation(entry, await resolve_isolation(app_id, binding_orgs[app_id]))
     return list(resolved.values())
 
 
@@ -1577,7 +1623,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
             continue
         version = row.get('version')
         artifact_path = str(row.get('artifactPath') or '')
-        if isinstance(version, int) and artifact_path:
+        if isinstance(version, int) and artifact_path and await account.authorize_app_use(info, app_id, version):
             dirs[version] = dist_dir_of(artifact_path)
 
     # Developer-org entitlement: the caller org's OWN rail (rail rows exist
@@ -1595,7 +1641,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
                 continue
             version = int(entry.get('version', 0))
             artifact_path = str(entry.get('artifactPath') or '')
-            if version and artifact_path:
+            if version and artifact_path and await account.authorize_app_use(info, app_id, version):
                 dirs[version] = dist_dir_of(artifact_path)
     return dirs
 

@@ -30,7 +30,7 @@
  * Actions:
  *   shell:test    — run node:test against co-located TypeScript tests
  *   shell:bundle  — run rsbuild build
- *   shell:copy    — sync build/shell → dist/server/static/shell
+ *   shell:copy    — sync build/shell → dist/server/static/shell (+ isolation/capabilities.json)
  *   shell:build   — full build: client-typescript → test → bundle → copy
  *   shell:dev     — start rsbuild dev server on port 3000
  *   shell:clean   — remove build artifacts
@@ -40,6 +40,7 @@ const { readdir } = require('node:fs/promises');
 const {
 	execCommand,
 	syncDir,
+	syncFile,
 	formatSyncStats,
 	removeDir,
 	BUILD_ROOT,
@@ -61,6 +62,10 @@ const SERVER_STATIC_DIR = path.join(DIST_ROOT, 'server', 'static', 'shell');
 // consumers install from there, so the platform package tracks the
 // CONNECTED server.
 const SERVER_CLIENTS_DIR = path.join(DIST_ROOT, 'server', 'static', 'clients', 'shell');
+// The app-isolation capability table (#1022): source data, not bundle output.
+// The server reads it from static/shell/isolation/ (startup check, deploy
+// validation, the frame grant) and the guest runtime pins its sha256.
+const CAPABILITIES_JSON = path.join(APP_ROOT, 'isolation', 'capabilities.json');
 
 // Source directories and files that affect the shell build output.
 const SRC_DIR = path.join(APP_ROOT, 'src');
@@ -132,8 +137,9 @@ function makeBundleAction() {
 			const { changed, hash } = await hasBuildInputChanged(
 				BUILD_HASH_KEY,
 				[SRC_DIR, SDK_SRC_DIR, CLIENT_COMMON_SRC_DIR],
-				[PKG_JSON, RSBUILD_CONFIG, SDK_PKG_JSON]
+				[PKG_JSON, RSBUILD_CONFIG, SDK_PKG_JSON, CAPABILITIES_JSON]
 			);
+			// The capability table is copied beside the shell below, so an edit to it alone must rebuild.
 			// The cache skip must also verify the CANONICAL artifact: on a
 			// fresh clone the invoking root's .rocketride/shell/shell.tgz is
 			// the pre-install stub (marked by the shell.tgz.stub file the
@@ -201,9 +207,17 @@ function makeCopyAction() {
 			// removes the retired dev/shell.tgz and dev/types loose files
 			// from older deployments.
 			const stats = await syncDir(BUILD_DIR, SERVER_STATIC_DIR, {
-				ignore: ['**/__pycache__/**', 'apps/**'],
+				ignore: ['**/__pycache__/**', 'apps/**', 'isolation/**'],
 				package: true,
 			});
+			// isolation/ is not in the bundle output (the mirror above leaves
+			// it alone): copy the capability table beside the shell.
+			await syncFile(
+				CAPABILITIES_JSON,
+				path.join(SERVER_STATIC_DIR, 'isolation', 'capabilities.json'),
+				{ package: true },
+				stats
+			);
 			task.output = formatSyncStats(stats);
 		},
 	};

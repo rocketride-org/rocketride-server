@@ -149,3 +149,41 @@ def test_an_unpublished_root_app_stops_serving_its_pages_after_the_rebuild(world
     llms = client.get('/llms.txt').text
     assert 'The blurb.' not in llms
     assert_no_leak(llms)
+
+
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_rendered_public_pages_keep_shell_document_protection(world, ua):
+    """The new public-page renderer must not bypass the shell's framing policy."""
+    _, client = world
+    # Compared with the shell's own configured policy, not a copy of its default: an operator's
+    # RR_SHELL_FRAME_ANCESTORS_EXTRA changes both sides together.
+    policy = shell_mod._SHELL_DOCUMENT_HEADERS['Content-Security-Policy']
+    assert policy.startswith('frame-ancestors '), policy
+    for path in ('/', '/pricing', '/marketplace'):
+        for _ in range(2):  # both the render and its warm-cache response
+            response = client.get(path, headers={'User-Agent': ua})
+            assert response.status_code == 200
+            assert response.headers['content-security-policy'] == policy
+            assert response.headers['cross-origin-opener-policy'] == 'same-origin-allow-popups'
+    missing = client.get('/missing', headers={'User-Agent': ua, 'Accept': 'text/html'})
+    assert missing.status_code == 404
+    assert missing.headers['content-security-policy'] == policy
+    assert missing.headers['cross-origin-opener-policy'] == 'same-origin-allow-popups'
+
+
+def test_the_shell_policy_follows_the_operators_extra_sources():
+    """The configured policy is what the pages must carry: an extra source lands in it (and the default stays)."""
+    built = shell_mod._frame_ancestor_sources('https://front.example')
+    assert built.split()[:3] == ["'self'", 'vscode-webview:', 'vscode-file:']
+    assert 'https://front.example' in built.split()
+
+
+def test_rendered_public_pages_keep_the_active_app_origin_report_policy(world, isolation_env):
+    """The page renderer carries the same active-origin report policy as shell_static."""
+    _, client = world
+    expected = f"frame-src 'self' {isolation_env.config().frame_src_wildcard()}"
+    for ua in (GOOGLEBOT, BROWSER):
+        for _ in range(2):
+            response = client.get('/pricing', headers={'User-Agent': ua})
+            assert response.status_code == 200
+            assert response.headers['content-security-policy-report-only'] == expected

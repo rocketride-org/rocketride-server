@@ -51,6 +51,7 @@ from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _home_org_of,
     _publisher_of,
+    _caller_entitled_to_version,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
@@ -1428,6 +1429,46 @@ async def test_entitled_dirs_from_visible_publishes(registry):
     # A caller outside the team AND outside the developer org has no road
     # to it (org2 has no rail for the app; the binding is team-scoped).
     assert await entitled_version_dirs(_info(user_id='u2', org_id='org2', teams=[]), 'acme.brandy') == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('audience', [AUD_PUBLIC, AUD_TEAM, AUD_USER])
+async def test_paid_use_denial_blocks_visible_versions_and_developer_rail(registry, monkeypatch, audience):
+    """A visible publish or own rail does not override a live commerce denial."""
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+    registry.seed_publish(audience, 1)
+
+    async def denied(info, app_id, version=None):
+        return False
+
+    monkeypatch.setattr(account_singleton, 'authorize_app_use', denied)
+    assert await entitled_version_dirs(_info(), 'acme.brandy') == {}
+    assert await _caller_entitled_to_version(_FakeConn(), account_singleton, 'org1', 'org1', 'acme.brandy', 1) is False
+
+
+@pytest.mark.asyncio
+async def test_saas_overlay_without_a_commerce_gate_fails_closed(monkeypatch):
+    from ai.account.base import AccountBase
+
+    legacy_saas = SimpleNamespace(capabilities=('saas',))
+    oss = SimpleNamespace(capabilities=())
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
+    assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+
+
+@pytest.mark.asyncio
+async def test_commerce_gate_is_specific_to_each_registry_version(registry, monkeypatch):
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+    registry.add_version(2, '2.0.0', publisher_id='u1')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.seed_publish(AUD_USER, 2)
+
+    async def only_free_version(info, app_id, version=None):
+        return version == 1
+
+    monkeypatch.setattr(account_singleton, 'authorize_app_use', only_free_version)
+    assert await entitled_version_dirs(_info(), 'acme.brandy') == {1: _V1_DIST}
+    assert await _caller_entitled_to_version(_FakeConn(), account_singleton, 'org1', 'org1', 'acme.brandy', 2) is False
 
 
 @pytest.mark.asyncio

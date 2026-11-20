@@ -416,6 +416,52 @@ def _authorize_via_loopback(
     return {'code': result['code'], 'redirectUri': redirect_uri}, finish
 
 
+def utc_day(iso: str) -> str:
+    """
+    The UTC calendar day of a server timestamp.
+
+    The server sends naive UTC (``2027-02-03T10:00:00.123456``, no offset); an
+    offset-bearing value is converted to UTC first.
+
+    Args:
+        iso: The server's ISO timestamp.
+
+    Returns:
+        ``YYYY-MM-DD`` (UTC), or the input unchanged when it cannot be read.
+    """
+    from datetime import datetime, timezone
+
+    try:
+        when = datetime.fromisoformat(iso.replace('Z', '+00:00'))
+    except (TypeError, ValueError):
+        return iso
+    if when.tzinfo is not None:
+        when = when.astimezone(timezone.utc)
+    return when.date().isoformat()
+
+
+def describe_login_key_expiry(expires_at: Optional[str]) -> str:
+    """
+    How ``rocketride login`` describes the expiry of the API key it mints.
+
+    The key is minted over the sign-in connection, whose credential is a
+    session key, and a key minted that way expires no later than that session
+    (the server caps it and reports the granted expiry). So the CLI prints the
+    real expiry instead of claiming the key never expires.
+
+    Args:
+        expires_at: The granted expiry from ``account.create_key()``: an ISO
+            timestamp, or None when the key does not expire. (When the server
+            did not report one at all, the caller prints nothing.)
+
+    Returns:
+        A sentence to append to the "minted API key" line.
+    """
+    if expires_at is None:
+        return ' It does not expire.'
+    return f' It expires on {utc_day(expires_at)} (bounded by your sign-in session); run `rocketride login` again before then.'
+
+
 async def _sign_in_saas(uri: str, out: Output) -> str:
     """
     Sign in to a saas server and mint a durable API key for ``.env``.
@@ -424,8 +470,9 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
     VS Code extension's id) — the client package a server serves was
     built from the same tree as that server. The PKCE exchange returns a
     90-day session key; the durable credential is a freshly minted
-    personal API key (never expires), created over the same
-    authenticated connection.
+    personal API key, created over the same authenticated connection. It
+    expires no later than that sign-in session (the server caps it), and the
+    real expiry is printed.
 
     Args:
         uri: The server URI.
@@ -476,8 +523,9 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
         if not result.get('userToken'):
             raise RuntimeError('Sign-in succeeded but the server returned no token')
 
-        # step: mint the durable credential — a personal API key that,
-        # unlike the session key, never expires and survives sign-outs.
+        # step: mint the credential for .env — a personal API key that survives
+        # sign-outs. It is minted over this session, so the server caps its
+        # expiry at the session's bound; print what was granted.
         # permissions=None inherits everything from the user (full PAT).
         key_name = f'CLI on {socket.gethostname()}'
         minted = await client.account.create_key(name=key_name) or {}
@@ -485,7 +533,8 @@ async def _sign_in_saas(uri: str, out: Output) -> str:
         if not key:
             raise RuntimeError('Sign-in succeeded but the server minted no API key')
         display = result.get('displayName', '')
-        out.line(f'Signed in{f" as {display}" if display else ""}; minted API key {key_name!r}.')
+        expiry = describe_login_key_expiry(minted['expiresAt']) if 'expiresAt' in minted else ''
+        out.line(f'Signed in{f" as {display}" if display else ""}; minted API key {key_name!r}.{expiry}')
         page = _render_callback_page(True, web_url=web_url)
         return key
     except Exception as err:
