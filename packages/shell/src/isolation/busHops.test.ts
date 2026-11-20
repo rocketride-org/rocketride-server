@@ -36,10 +36,10 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createGatedBusRouter } from './busBridge';
-import { createOpBus } from './busOps';
-import { WALK_MAX_STRING_CHARS } from '../isolation/walk';
-import type { RealmContext, RealmInfo } from '../isolation/types';
+import { createGatedBusRouter } from '../ops/busBridge';
+import { createOpBus } from '../ops/busOps';
+import { WALK_MAX_STRING_CHARS } from './walk';
+import type { RealmContext, RealmInfo } from './types';
 
 const KEY = 'k1';
 const OP = `app.${KEY}.work`;
