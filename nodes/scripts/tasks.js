@@ -588,8 +588,10 @@ function makeRunDbPytestAction(options = {}) {
 				...(options.pytestPattern ? ['-k', options.pytestPattern] : []),
 			];
 			// A selection can leave a suite with no test to run, so the
-			// every-suite-passed check applies only to a full pass.
-			const checkResults = required && selectors.length === 0;
+			// every-suite-passed and pooled-case checks apply only to a full
+			// pass. The skip-reason check ("NOT RUN:") still applies to what a
+			// selection did run, so an unreachable database fails, not skips.
+			const fullPass = selectors.length === 0;
 			const pytestTokens = splitPytestOpts(options.pytest);
 			try {
 				for (const pass of passes) {
@@ -622,11 +624,13 @@ function makeRunDbPytestAction(options = {}) {
 						notes.push(`No test in ${pass.report}'s suites matches the selection: pass skipped`);
 						continue;
 					}
-					if (checkResults) {
+					if (required) {
 						const xml = await fs.promises.readFile(report, 'utf8');
-						checkRequiredDbResults(xml, pass.suites, pass.report);
-						for (const { lane, suites: pooledSuites } of pass.pooled) {
-							checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+						checkRequiredDbResults(xml, pass.suites, pass.report, { requirePassed: fullPass });
+						if (fullPass) {
+							for (const { lane, suites: pooledSuites } of pass.pooled) {
+								checkPooledCases(xml, pooledSuites, pass.report, lane.poolerEnv);
+							}
 						}
 					}
 				}
@@ -658,14 +662,14 @@ async function selectedNothing(report) {
  * Throw unless every suite passed at least one test and every skip in the
  * report is a deliberate "NOT RUN:" one.
  */
-function checkRequiredDbResults(xml, suites, label = 'junit.xml') {
+function checkRequiredDbResults(xml, suites, label = 'junit.xml', { requirePassed = true } = {}) {
 	const counts = countJunitResults(xml);
 	const names = suites.map((suite) => path.basename(suite, '.py'));
-	const empty = names.filter((name) => !(counts[name]?.passed > 0));
+	const empty = requirePassed ? names.filter((name) => !(counts[name]?.passed > 0)) : [];
 	if (empty.length > 0) {
 		throw new Error(`The live databases are required but no test passed in: ${empty.join(', ')} (${label})`);
 	}
-	const unexpected = names.flatMap((name) => counts[name].unexpectedSkips);
+	const unexpected = names.flatMap((name) => counts[name]?.unexpectedSkips ?? []);
 	if (unexpected.length > 0) {
 		throw new Error(
 			`The live databases are required but ${unexpected.length} test(s) skipped without a ` +

@@ -456,9 +456,10 @@ gives the history accessor its four file-store calls. In React,
   swallowed.
 
 **Errors from `terminate`.** The develop SDK's `terminate()` rethrows a server
-failure as a `DAPException` with the server's code kept; only a failure that is not a `DAPException` (a transport error, say)
-arrives as a plain `Error` with no `code`. The library passes errors through
-untouched and never rebuilds a code from text.
+failure as a `DAPException` with the server's code kept; only a failure that is
+not a `DAPException` (a transport error, say) arrives as a plain `Error` with no
+`code`. The library passes errors through untouched and never rebuilds a code
+from text.
 
 **`use`'s deadline** is `USE_DEADLINE_MS` = 100 s, deliberately below the bus's
 120 s default request timeout: `use` sends its request with no SDK timeout, so
@@ -846,7 +847,10 @@ per workspace, mirrored to every realm and republished whole on each write.
   answer and the write's arrival at the server (one round trip, at most the
   15 s fs deadline) another window's write can still land and be reverted for
   that one write; the owner's next write repairs it, and no entry is ever
-  corrupted. Closing it needs a server-side compare-and-swap on `fs_put_json`. Drafts and captions stay session-only.
+  corrupted. Closing it needs a server-side compare-and-swap on `fs_put_json`.
+  Accessors that share one fs object (one core's parked and current owners) are
+  serialised in process, so they never interleave their reads and writes; that
+  does not reach other windows, which are separate JS realms. Drafts and captions stay session-only.
 
 **Rules a controller must follow** (they come from the shell's `busPeer.ts`,
 `toolChannel.ts` and `toolOps.ts`):

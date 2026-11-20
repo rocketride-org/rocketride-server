@@ -91,10 +91,15 @@
 //     is bounded by an application deadline (engineClient.ts createPrefsFs,
 //     PREFS_FS_DEADLINE_MS): the SDK's file calls have no timeout of their own.
 //   NO LOST UPDATES ACROSS OWNERS. Each write re-reads the file first and
-//     merges (see `write`), so two windows of one user under different
-//     identities do not revert each other. Within one process the whole
-//     read-merge-write is also serialised per file (see `serialiseByFile`), so
-//     two accessors on the same file cannot interleave their reads and writes.
+//     merges (see `write`). Accessors that share one fs object (for example
+//     one core's parked and current owners) have the whole read-merge-write
+//     serialised per file (see `serialiseByFile`), so they cannot interleave
+//     their reads and writes. Across windows (separate JS realms) that
+//     serialisation does not reach: the re-read and merge narrow the race
+//     but do not close it, and another window's write can still land between
+//     the fresh read and the write for that one write. Closing it needs a
+//     server-side compare-and-swap; see the Known limit under "No lost
+//     updates across owners" in docs/development/apps/explorer-library.md.
 //     Two windows under the SAME owner still keep only the later one's bag for
 //     that owner (last writer wins; that scope is deliberate).
 // =============================================================================
