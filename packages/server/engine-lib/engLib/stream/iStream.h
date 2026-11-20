@@ -34,6 +34,9 @@ public:
     ///		The factory class type
     //-----------------------------------------------------------------
     _const auto FactoryType = "iStream";
+    // Interfaces derived from this class share its factory registry, and every
+    // method stored in it returns a pointer to this root
+    using FactoryRoot = iStream;
 
     //-----------------------------------------------------------------
     ///	@details
