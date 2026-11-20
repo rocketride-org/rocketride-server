@@ -8,6 +8,10 @@ Mock elasticsearch for index_search node tests.
 When ROCKETRIDE_MOCK is set, this module shadows the real elasticsearch package
 so the Elasticsearch store uses in-memory storage. Supports indices.exists/create/
 delete, index(), search(), bulk(), scan(), cluster.health(), and close().
+
+search() applies the term and range clauses under bool.must, a sort on fields,
+from/size, and the server's index.max_result_window limit. Other query clauses
+match every document.
 """
 
 from typing import Any, Dict, List, Optional
@@ -19,6 +23,48 @@ _indices = _store_data._indices
 
 # index.max_result_window on an index with default settings
 MAX_RESULT_WINDOW = 10000
+
+
+def _field(source: Dict[str, Any], path: str) -> Any:
+    """The value at a dotted path such as 'meta.chunkId', or None."""
+    value: Any = source
+    for part in path.split('.'):
+        value = value.get(part) if isinstance(value, dict) else None
+    return value
+
+
+def _sort_key(value: Any) -> tuple:
+    """Sort missing values last, as Elasticsearch does for an ascending sort."""
+    return (value is None, value)
+
+
+def _matches(source: Dict[str, Any], clause: Dict[str, Any]) -> bool:
+    """
+    Whether a document matches one bool.must clause.
+
+    Only term and range are applied. Any other clause (match, knn, ...) matches
+    every document, as this mock did before it applied filters at all.
+    """
+    if not isinstance(clause, dict) or len(clause) != 1:
+        return True
+    ((kind, condition),) = clause.items()
+    if kind not in ('term', 'range') or not isinstance(condition, dict) or len(condition) != 1:
+        return True
+    ((path, expected),) = condition.items()
+    actual = _field(source, path)
+    if kind == 'term':
+        if isinstance(expected, dict):
+            expected = expected.get('value')
+        return actual == expected
+    if actual is None:
+        return False
+    checks = {
+        'gte': lambda b: actual >= b,
+        'gt': lambda b: actual > b,
+        'lte': lambda b: actual <= b,
+        'lt': lambda b: actual < b,
+    }
+    return all(checks[op](bound) for op, bound in expected.items() if op in checks)
 
 
 class IndicesMock:
@@ -74,6 +120,8 @@ class Elasticsearch:
         hits = []
         for i, d in enumerate(docs):
             src = d.get('_source', {})
+            if not all(_matches(src, clause) for clause in body.get('query', {}).get('bool', {}).get('must', [])):
+                continue
             hits.append(
                 {
                     '_index': index,
@@ -82,7 +130,20 @@ class Elasticsearch:
                     '_source': src,
                 }
             )
-        return {'hits': {'total': {'value': len(hits)}, 'hits': hits}}
+        total = len(hits)
+
+        # Sort on fields (stable, so equal values keep storage order); '_score' and the like are left alone
+        for sort in reversed(body.get('sort', [])):
+            if isinstance(sort, dict):
+                ((path, order),) = sort.items()
+                descending = (order.get('order') if isinstance(order, dict) else order) == 'desc'
+                hits.sort(key=lambda hit, path=path: _sort_key(_field(hit['_source'], path)), reverse=descending)
+
+        # A request that names a size gets that page only
+        if 'size' in body:
+            start = int(body.get('from', 0) or 0)
+            hits = hits[start : start + int(body['size'] or 0)]
+        return {'hits': {'total': {'value': total}, 'hits': hits}}
 
     def delete_by_query(
         self, index: str, body: Optional[Dict] = None, wait_for_completion: bool = True, **kwargs: Any

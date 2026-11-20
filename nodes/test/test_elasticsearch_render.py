@@ -8,8 +8,9 @@
 render sent ``'size': self.renderChunkSize`` (33554432 by default), and
 Elasticsearch rejects a search whose from + size exceeds
 index.max_result_window (10000 by default), so every render failed with HTTP
-400. The client here is a fake that applies the query's term and range
-filters, its sort and size, and that limit.
+400. The client is the shared mock in ``nodes/test/mocks/elasticsearch``,
+which applies the query's term and range filters, its sort and size, and that
+limit.
 """
 
 from __future__ import annotations
@@ -26,11 +27,13 @@ from pathlib import Path
 
 import pytest
 
-_NODE_DIR = Path(__file__).resolve().parent.parent / 'src' / 'nodes' / 'store_elasticsearch'
+_TEST_DIR = Path(__file__).resolve().parent
+_NODE_DIR = _TEST_DIR.parent / 'src' / 'nodes' / 'store_elasticsearch'
+_MOCK_DIR = _TEST_DIR / 'mocks' / 'elasticsearch'
 _PACKAGE = 'es_render_under_test'
+_MOCK_PACKAGE = 'es_render_mock'
 _STUB_MODULE_NAMES = ('elasticsearch', 'elasticsearch.helpers', 'numpy', _PACKAGE)
-
-MAX_RESULT_WINDOW = 10000
+_INDEX = 'test-index'
 
 
 @contextmanager
@@ -60,80 +63,42 @@ def _scoped_stubs() -> Iterator[None]:
                 sys.modules[name] = module
 
 
+def _load_module(name: str, path: Path, package_dir: Path | None = None) -> types.ModuleType:
+    """Load a module from a file under a private name, so the real packages are left alone."""
+    locations = [str(package_dir)] if package_dir else None
+    spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=locations)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(name, None)
+    return module
+
+
 def _load_store_class() -> type:
     with _scoped_stubs():
-        name = f'{_PACKAGE}.elasticsearch_store'
-        spec = importlib.util.spec_from_file_location(name, _NODE_DIR / 'elasticsearch_store.py')
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        sys.modules[name] = module
-        try:
-            spec.loader.exec_module(module)
-        finally:
-            sys.modules.pop(name, None)
-        return module.Store
+        return _load_module(f'{_PACKAGE}.elasticsearch_store', _NODE_DIR / 'elasticsearch_store.py').Store
 
 
-class _FakeIndices:
-    def exists(self, index):
-        return True
+def _load_mock() -> types.ModuleType:
+    """A fresh copy of the shared mock, with its own in-memory index."""
+    for name in [name for name in sys.modules if name.startswith(_MOCK_PACKAGE)]:
+        sys.modules.pop(name)
+    return _load_module(_MOCK_PACKAGE, _MOCK_DIR / '__init__.py', _MOCK_DIR)
 
 
-class _FakeClient:
-    """An Elasticsearch client reduced to the search render sends.
-
-    Applies term and range clauses under bool.must, a sort on one field
-    (stable, so equal values keep storage order), size, and the server's
-    from + size limit.
-    """
-
-    def __init__(self, docs):
-        self.docs = list(docs)
-        self.indices = _FakeIndices()
-        self.searches = []
-
-    def search(self, index, body=None, **kwargs):
-        body = body or {}
-        self.searches.append(body)
-        window = body.get('from', 0) + body.get('size', 10)
-        if window > MAX_RESULT_WINDOW:
-            raise ValueError(
-                f'Result window is too large, from + size must be less than or equal to: [10000] but was [{window}]'
-            )
-
-        def field(source, path):
-            for part in path.split('.'):
-                source = (source or {}).get(part)
-            return source
-
-        def matches(source, clause):
-            ((kind, condition),) = clause.items()
-            ((path, value),) = condition.items()
-            actual = field(source, path)
-            if kind == 'term':
-                return actual == value
-            assert kind == 'range'
-            if actual is None:
-                return False
-            return all(
-                {'gte': actual >= bound, 'gt': actual > bound, 'lte': actual <= bound, 'lt': actual < bound}[op]
-                for op, bound in value.items()
-            )
-
-        must = body.get('query', {}).get('bool', {}).get('must', [])
-        hits = [doc for doc in self.docs if all(matches(doc['_source'], clause) for clause in must)]
-        for sort in reversed(body.get('sort', [])):
-            ((path, order),) = sort.items()
-            hits.sort(key=lambda doc, path=path: field(doc['_source'], path), reverse=order.get('order') == 'desc')
-        hits = hits[body.get('from', 0) : body.get('from', 0) + body.get('size', 10)]
-        return {'hits': {'total': {'value': len(hits)}, 'hits': [dict(doc, _score=None) for doc in hits]}}
+_mock = _load_mock()
+MAX_RESULT_WINDOW = _mock.MAX_RESULT_WINDOW
+_CONTENT_FIELD = _load_module(f'{_PACKAGE}_constants', _NODE_DIR / 'constants.py').CONTENT_FIELD
 
 
-def _doc(object_id, chunk, content=None):
+def _doc(object_id, chunk, content=None, copy=0):
     return {
-        '_id': f'{object_id}-{chunk}-{random.random()}',
+        '_id': f'{object_id}-{chunk}-{copy}',
         '_source': {
-            'content': f'chunk {chunk}' if content is None else content,
+            _CONTENT_FIELD: f'chunk {chunk}' if content is None else content,
             'meta': {'objectId': object_id, 'chunkId': chunk},
         },
     }
@@ -151,10 +116,26 @@ def _shuffled(docs):
 
 
 def _store(docs):
+    """The driver on the shared mock, holding ``docs`` in one index, with every search body recorded."""
+    mock = _load_mock()
+    client = mock.Elasticsearch()
+    client.indices.create(index=_INDEX)
+    mock._store[_INDEX] = list(docs)
+
+    client.searches = []
+    search = client.search
+
+    def recorded_search(index, body=None, **kwargs):
+        client.searches.append(body)
+        assert len(client.searches) <= 20, 'render is not making progress'
+        return search(index=index, body=body, **kwargs)
+
+    client.search = recorded_search
+
     store_cls = _load_store_class()
     driver = store_cls.__new__(store_cls)  # no connection: render uses the client object only
-    driver.client = _FakeClient(docs)
-    driver.index = 'test-index'
+    driver.client = client
+    driver.index = _INDEX
     return driver
 
 
@@ -166,19 +147,6 @@ def _render(driver, object_id):
 
 def _expected(stop, start=0):
     return ''.join(f'chunk {chunk}' for chunk in range(start, stop))
-
-
-def _content_field_is_content():
-    """The fake stores text under 'content'; check the driver reads it from there."""
-    with _scoped_stubs():
-        spec = importlib.util.spec_from_file_location(f'{_PACKAGE}.constants', _NODE_DIR / 'constants.py')
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module.CONTENT_FIELD == 'content'
-
-
-def test_the_fake_stores_text_where_the_driver_reads_it():
-    assert _content_field_is_content()
 
 
 def test_render_joins_every_chunk_in_order():
@@ -195,6 +163,14 @@ def test_render_pages_past_the_result_window():
 
     assert _render(driver, 'o1') == [_expected(10_500)]
     assert [search['size'] for search in driver.client.searches] == [10_000, 10_000]
+
+
+def test_render_stops_beside_many_other_documents():
+    """Other documents in the index must not fill render's pages: the search filters by objectId."""
+    driver = _store(_shuffled(_docs('o1', 3) + [_doc(f'other-{i}', 0) for i in range(10_000)]))
+
+    assert _render(driver, 'o1') == [_expected(3)]
+    assert len(driver.client.searches) == 1
 
 
 def test_render_hands_over_one_render_chunk_size_group_at_a_time():
@@ -218,24 +194,18 @@ def test_render_reaches_a_chunk_past_a_wide_gap():
     assert _render(driver, 'o1') == ['chunk 0chunk 20000']
 
 
-def test_render_passes_a_full_page_of_copies_of_one_chunk(monkeypatch):
+def test_render_passes_a_full_page_of_copies_of_one_chunk():
     """More copies of one chunk number than a page holds must not hide the chunks after it."""
-    docs = _docs('o1', 4) + [_doc('o1', 1) for _ in range(9)]
+    docs = _docs('o1', 4) + [_doc('o1', 1, copy=copy) for copy in range(1, 10)]
     driver = _store(_shuffled(docs))
-    monkeypatch.setitem(driver.render.__globals__, '_RENDER_PAGE_SIZE', 4)
-    search = driver.client.search
-
-    def counted_search(**kwargs):
-        assert len(driver.client.searches) < 10, 'render is not making progress'
-        return search(**kwargs)
-
-    monkeypatch.setattr(driver.client, 'search', counted_search)
+    driver.renderPageSize = 4
 
     assert _render(driver, 'o1') == [_expected(4)]
+    assert all(search['size'] == 4 for search in driver.client.searches)
 
 
 def test_render_keeps_one_copy_when_a_chunk_number_is_stored_twice():
-    driver = _store(_docs('o1', 4) + [_doc('o1', 1, 'chunk 1 again')])
+    driver = _store(_docs('o1', 4) + [_doc('o1', 1, 'chunk 1 again', copy=1)])
     driver.renderChunkSize = 4
 
     assert _render(driver, 'o1') in ([_expected(4)], ['chunk 0chunk 1 againchunk 2chunk 3'])
@@ -263,10 +233,19 @@ def test_render_of_an_unknown_document_calls_nothing():
 
 
 @pytest.mark.parametrize('size', [MAX_RESULT_WINDOW, MAX_RESULT_WINDOW + 1])
-def test_the_fake_enforces_the_result_window(size):
-    client = _FakeClient([])
+def test_the_mock_enforces_the_result_window(size):
+    client = _load_mock().Elasticsearch()
     if size > MAX_RESULT_WINDOW:
         with pytest.raises(ValueError, match='Result window is too large'):
-            client.search(index='i', body={'size': size})
+            client.search(index=_INDEX, body={'size': size})
     else:
-        assert client.search(index='i', body={'size': size})['hits']['hits'] == []
+        assert client.search(index=_INDEX, body={'size': size})['hits']['hits'] == []
+
+
+def test_the_mock_ignores_clauses_it_does_not_model():
+    """A match or knn query still sees every document, as before the mock applied filters."""
+    mock = _load_mock()
+    mock._store[_INDEX] = _docs('o1', 3)
+    body = {'query': {'bool': {'must': [{'match': {_CONTENT_FIELD: 'anything'}}]}}}
+
+    assert len(mock.Elasticsearch().search(index=_INDEX, body=body)['hits']['hits']) == 3

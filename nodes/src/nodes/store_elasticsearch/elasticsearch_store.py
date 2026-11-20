@@ -48,10 +48,6 @@ from .constants import (
     ELASTICSEARCH_DEFAULT_PORT,
 )
 
-# The most hits render asks for in one search. Elasticsearch rejects a search
-# whose from + size exceeds index.max_result_window (10000 by default).
-_RENDER_PAGE_SIZE = 10000
-
 
 def _build_highlight_config(field: str, fragment_size: int) -> Dict[str, Any]:
     """Highlight configuration for text search (Elasticsearch/OpenSearch DSL)."""
@@ -83,6 +79,9 @@ class Store(DocumentStoreBase):
     port: int = 0
     vectorSize: int = 0
     renderChunkSize: int = 32 * 1024 * 1024
+    # The most hits render asks for in one search. Elasticsearch rejects a search
+    # whose from + size exceeds index.max_result_window (10000 by default).
+    renderPageSize: int = 10000
     payload_limit: int = 32 * 1024 * 1024
     similarity: str = 'cosine'
     threshold_search: float = 0.0
@@ -672,7 +671,7 @@ class Store(DocumentStoreBase):
         # A document may hold tens of thousands of chunks, and Elasticsearch
         # rejects a search whose from + size exceeds index.max_result_window
         # (10000 by default). So page through the document in chunkId order
-        # with a cursor, at most _RENDER_PAGE_SIZE hits a page. ChunkIds need
+        # with a cursor, at most renderPageSize hits a page. ChunkIds need
         # not be contiguous, and a chunk number can be stored more than once
         # (an upsert without chunk 0 that repeats one), so neither a gap nor a
         # page's chunkId span says where the document ends; only a short page
@@ -685,14 +684,9 @@ class Store(DocumentStoreBase):
         # copy only replaces it in place. The callback gets the joined text one
         # renderChunkSize group of chunkIds at a time.
         groupSize = max(1, self.renderChunkSize)
+        pageSize = max(1, self.renderPageSize)
         groupStart = 0
         pieces: Dict[int, str] = {}
-
-        def handOver() -> None:
-            # In chunkId order; a missing chunk adds no text, and the join walks
-            # only the chunks present, not the gaps between them
-            if pieces:
-                callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
 
         cursor = 0
         while True:
@@ -705,7 +699,7 @@ class Store(DocumentStoreBase):
                         ]
                     }
                 },
-                'size': _RENDER_PAGE_SIZE,
+                'size': pageSize,
                 'sort': [{'meta.chunkId': {'order': 'asc'}}],
                 '_source': [CONTENT_FIELD, 'meta.chunkId'],
             }
@@ -724,18 +718,36 @@ class Store(DocumentStoreBase):
 
                 # Hits arrive in chunkId order, so a chunk past the current group completes it
                 if chunk >= groupStart + groupSize:
-                    handOver()
+                    self._handOverRenderGroup(pieces, callback)
                     pieces = {}
                     groupStart = chunk - chunk % groupSize
 
                 # Of several copies of one chunk number, the last one read is kept
                 pieces[chunk] = source.get(CONTENT_FIELD) or ''
 
-            if len(hits) < _RENDER_PAGE_SIZE:
+            if len(hits) < pageSize:
                 break
-            cursor = lastChunk if lastChunk > cursor else cursor + 1
 
-        handOver()
+            # Every full page moves the cursor forward, so render always ends
+            if lastChunk > cursor:
+                # Start at the page's last chunkId: its copies may not all have fit
+                cursor = lastChunk
+            else:
+                # A full page of copies of one chunkId: step past it
+                cursor += 1
+
+        self._handOverRenderGroup(pieces, callback)
+
+    @staticmethod
+    def _handOverRenderGroup(pieces: Dict[int, str], callback: Callable[[str], None]) -> None:
+        """
+        Send one render group's text to the callback, joined in chunkId order.
+
+        A missing chunk adds no text, and the join walks only the chunks present,
+        not the gaps between them.
+        """
+        if pieces:
+            callback(''.join(pieces[chunk] for chunk in sorted(pieces)))
 
     # -------------------------------------------------------------------------
     # Text/Index mode (BM25, no embeddings)
