@@ -30,7 +30,14 @@ from rocketride.core.constants import SUBMIT_INLINE_MAX
 from rocketride.mixins import execution
 from rocketride.mixins.execution import ExecutionMixin
 
-STAMPS = {'token': 'acme.docBrain.webhook_1', 'resolved': '@team', 'converged': 'none', 'ignored': []}
+# The token slot carries the control id (32 hex); the address rides beside it.
+STAMPS = {
+    'token': '1234abcd1234abcd1234abcd1234abcd',
+    'address': 'acme.docBrain.webhook_1',
+    'resolved': '@team',
+    'converged': 'none',
+    'ignored': [],
+}
 
 
 class _Client(ExecutionMixin):
@@ -115,12 +122,23 @@ def test_over_the_inline_limit_streams(monkeypatch):
     assert 'data' not in client.calls[0][1] and len(client.sent) == 1
 
 
-def test_a_spec_call_sends_on_change_and_the_rocketride_env():
+def test_a_spec_call_sends_the_rocketride_env_and_no_change_policy():
+    """A spec call carries the spec and the env; there is no on_change (a changed spec is a new control)."""
     client = _Client()
-    _run(client.submit(pipeline={'components': []}, on_change='auto', pipeline_trace_level='full'))
+    _run(client.submit(pipeline={'components': [], 'project_id': 'docBrain'}, pipeline_trace_level='full'))
     arguments = client.calls[0][1]
-    assert arguments['onChange'] == 'auto' and arguments['pipelineTraceLevel'] == 'full'
+    assert arguments['pipelineTraceLevel'] == 'full' and 'onChange' not in arguments
     assert arguments['env'] == {'ROCKETRIDE_TONE': 'dry'}
+
+    with pytest.raises(TypeError):
+        _run(client.submit(pipeline={'components': [], 'project_id': 'docBrain'}, on_change='auto'))
+
+
+def test_a_streamed_payload_is_sent_on_the_control_id_the_server_answered():
+    """The data path names the control by its id, the token slot of the stamps, not by the address."""
+    client = _Client()
+    _run(client.submit(name='acme.docBrain', data=b'0' * (SUBMIT_INLINE_MAX + 1)))
+    assert client.sent[0][0] == STAMPS['token'] and client.sent[0][0] != STAMPS['address']
 
 
 def test_an_old_server_says_submit_is_not_supported():

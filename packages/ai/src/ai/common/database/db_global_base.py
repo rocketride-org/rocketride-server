@@ -45,7 +45,7 @@ import threading
 from abc import ABC, abstractmethod
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
-from typing import Mapping, Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sqlalchemy import (
     Column,
@@ -901,36 +901,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def engine_for(self, settings: Mapping):
-        """
-        The SQLAlchemy engine for one call's effective configuration (plan 6.2, 12 A).
-
-        A call whose connection values equal the global's own uses the shared
-        engine; otherwise an engine is created for that call's values through
-        ``provider_client`` and reused for every call with the same values.
-
-        Args:
-            settings: The binding's ``IInstanceBase.settings``.
-
-        Returns:
-            The engine for these values.
-        """
-        # Step 1: the shared engine when nothing per-caller differs
-        params = self._connection_params(settings)
-        if params == getattr(self, '_engine_params', None):
-            return self.engine
-        # Step 2: otherwise one engine per distinct set of per-caller values
-        keys = set(getattr(settings, 'env_keys', ())) | set(getattr(settings, 'param_keys', ()))
-        return self.provider_client(
-            settings,
-            keys,
-            lambda view: create_engine(
-                self._build_connection_url(self._connection_params(view)),
-                pool_size=self.POOL_SIZE,
-                max_overflow=self.MAX_OVERFLOW,
-            ),
-        )
-
     def beginGlobal(self) -> None:
         # One reflection lock per node. Created before anything can reflect, so
         # `refresh_schema` and `_insertData` always find a real lock here.
@@ -977,9 +947,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # POOL_SIZE + MAX_OVERFLOW cap the node's concurrent connections
         # (30 by default; a subclass may override both).
         self.engine = create_engine(db_url, pool_size=self.POOL_SIZE, max_overflow=self.MAX_OVERFLOW)
-        # The shared engine's identity: a call whose connection values match it
-        # reuses it (engine_for)
-        self._engine_params = dict(params)
 
         from ai.common.database.tx_registry import TransactionRegistry
 

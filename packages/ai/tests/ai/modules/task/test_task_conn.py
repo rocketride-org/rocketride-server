@@ -13,7 +13,7 @@ Focus areas:
 - ``on_auth`` — info-only probe, attempt cap, auth success / failure flow
 - ``has_permission`` / ``verify_permission`` — permission gating
 - ``verify_plans`` — pipeline plan validation
-- ``get_task_address`` — the address from the token slot
+- ``get_token_slot`` — the control id from the token slot
 - ``get_task`` — resolution under the caller's account
 - ``send`` — message-counter bookkeeping
 - ``on_rrext_ping`` — sanity ping
@@ -487,35 +487,37 @@ def test_verify_plans_raises_when_validation_fails(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# get_task_address
+# get_token_slot
 # ---------------------------------------------------------------------------
 
+CONTROL_ID = '0123456789abcdef0123456789abcdef'
 
-def test_get_task_address_unauthenticated_raises():
-    """get_task_address without auth raises PermissionError."""
+
+def test_get_token_slot_unauthenticated_raises():
+    """get_token_slot without auth raises PermissionError."""
     conn = _make_conn(account_info=None)
     with pytest.raises(PermissionError, match='Not authenticated'):
-        conn.get_task_address({})
+        conn.get_token_slot({})
 
 
-def test_get_task_address_reads_the_token_slot_of_arguments():
-    """The address rides ``arguments.token``; a root-level token is not read."""
+def test_get_token_slot_reads_the_token_slot_of_arguments():
+    """The control id rides ``arguments.token``; a root-level token is not read."""
     conn = _make_conn(account_info=_make_account_info(auth='ak_user-key'))
 
-    assert conn.get_task_address({'arguments': {'token': 'acme.pipe.src'}}) == 'acme.pipe.src'
-    assert conn.get_task_address({'token': 'acme.pipe.src', 'arguments': {}}) == ''
-    assert conn.get_task_address({}) == ''
+    assert conn.get_token_slot({'arguments': {'token': CONTROL_ID}}) == CONTROL_ID
+    assert conn.get_token_slot({'token': CONTROL_ID, 'arguments': {}}) == ''
+    assert conn.get_token_slot({}) == ''
 
 
 # ---------------------------------------------------------------------------
-# get_task / get_control — resolution under the caller's account
+# get_task / get_control — the control by its id, re-checked against the caller
 # ---------------------------------------------------------------------------
 
 
-def test_get_task_propagates_the_resolvers_refusal():
-    """The resolver's verdict is the access check: a refusal propagates unchanged."""
+def test_get_task_propagates_the_lookups_refusal():
+    """The lookup's verdict is the access check: a refusal propagates unchanged."""
     server = MagicMock()
-    server.resolve_control = MagicMock(side_effect=PermissionError('Access denied: no permissions for this task'))
+    server.control_by_id = MagicMock(side_effect=PermissionError('Access denied: not your control'))
 
     conn = _make_conn(
         account_info=_make_account_info(auth='ak_user-1', user_id='user-1'),
@@ -523,30 +525,42 @@ def test_get_task_propagates_the_resolvers_refusal():
     )
 
     with pytest.raises(PermissionError, match='Access denied'):
-        conn.get_task({'arguments': {'token': 'acme.pipe.src'}}, permissions='task.control')
-    server.resolve_control.assert_called_once_with('acme.pipe.src', conn._account_info, 'task.control')
+        conn.get_task({'arguments': {'token': CONTROL_ID}}, permissions='task.control')
+    server.control_by_id.assert_called_once_with(CONTROL_ID, conn._account_info, 'task.control')
 
 
-def test_get_task_returns_the_resolved_controls_task():
-    """The address, the caller's account and the required permission reach the
-    resolver on every call; the resolved control's task comes back.
+def test_get_task_returns_the_controls_task():
+    """The control id, the caller's account and the required permission reach the
+    lookup on every call; the control's task comes back.
     """
     target_task = SimpleNamespace(name='target')
     server = MagicMock()
-    server.resolve_control = MagicMock(
-        return_value=SimpleNamespace(teamId='team-1', owner_id='team-1', task=target_task)
-    )
+    server.control_by_id = MagicMock(return_value=SimpleNamespace(teamId='team-1', owner_id='team-1', task=target_task))
 
     conn = _make_conn(
         account_info=_make_account_info(auth='ak_user-1', user_id='user-1'),
         server=server,
     )
 
-    assert conn.get_task({'arguments': {'token': 'acme.pipe.src'}}, permissions='task.control') is target_task
-    server.resolve_control.assert_called_once_with('acme.pipe.src', conn._account_info, 'task.control')
-    # No permission named: the resolver still runs with the account (reachability only).
-    conn.get_control({'arguments': {'token': 'acme.pipe.src'}})
-    assert server.resolve_control.call_args.args == ('acme.pipe.src', conn._account_info, None)
+    assert conn.get_task({'arguments': {'token': CONTROL_ID}}, permissions='task.control') is target_task
+    server.control_by_id.assert_called_once_with(CONTROL_ID, conn._account_info, 'task.control')
+    # No permission named: the lookup still runs with the account (reachability only).
+    conn.get_control({'arguments': {'token': CONTROL_ID}})
+    assert server.control_by_id.call_args.args == (CONTROL_ID, conn._account_info, None)
+
+
+def test_get_control_refuses_an_address_in_the_token_slot():
+    """The control verbs take the control id only (hard break inside the branch): an address is refused."""
+    from ai.modules.task.task_server import TaskServer
+
+    server = MagicMock()
+    server.control_by_id = MagicMock(
+        side_effect=lambda token, account, require: TaskServer.control_by_id(server, token, account, require)
+    )
+    conn = _make_conn(account_info=_make_account_info(auth='ak_user-1', user_id='user-1'), server=server)
+
+    with pytest.raises(PermissionError, match='control id'):
+        conn.get_control({'arguments': {'token': 'acme.pipe.src'}})
 
 
 # ---------------------------------------------------------------------------

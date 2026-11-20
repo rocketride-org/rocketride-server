@@ -65,17 +65,17 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 fixture = json.loads(sys.argv[2])
 wiring = {c['id']: module.connections_of(c) for c in fixture['components']}
-args = (fixture['resolved_config'], fixture['types'], wiring, fixture['source'])
-print(json.dumps([module.engine_key(*args, shareable=True, owner_id='user-a'),
-                  module.engine_key(*args, shareable=False, owner_id='user-a')]))
+args = (fixture['types'], wiring, fixture['source'])
+print(json.dumps([module.engine_key(*args, rung='spec', owner_id=''),
+                  module.engine_key(*args, rung='spec', owner_id='user-a')]))
 """
 
 
 def _server_keys():
-    """Both key kinds computed in this process."""
+    """Both key kinds (bare, owner-qualified) computed in this process."""
     wiring = {c['id']: connections_of(c) for c in FIXTURE['components']}
-    args = (FIXTURE['resolved_config'], FIXTURE['types'], wiring, FIXTURE['source'])
-    return [engine_key(*args, shareable=True, owner_id='user-a'), engine_key(*args, shareable=False, owner_id='user-a')]
+    args = (FIXTURE['types'], wiring, FIXTURE['source'])
+    return [engine_key(*args, rung='spec', owner_id=''), engine_key(*args, rung='spec', owner_id='user-a')]
 
 
 def test_engine_key_parity_between_the_server_and_a_bare_interpreter():
@@ -112,7 +112,7 @@ def test_avoid_mocks_is_part_of_the_content_identity():
     """A spec that strips ROCKETRIDE_MOCK from its engine (avoidMocks) is another engine."""
     from ai.modules.task.engine_key import content_hash, engine_content
 
-    parts = dict(resolved_config={'a': {}}, types={'a': 'webhook'}, connections={'a': connections_of({})}, source='a')
+    parts = dict(types={'a': 'webhook'}, connections={'a': connections_of({})}, source='a')
     assert content_hash(**parts) == content_hash(**parts, avoid_mocks=False)
     assert content_hash(**parts) != content_hash(**parts, avoid_mocks=True)
 
@@ -125,3 +125,26 @@ def test_avoid_mocks_is_part_of_the_content_identity():
     mocked = engine_content({**spec, 'avoidMocks': True}, 'a', facts)
     assert (plain.avoid_mocks, mocked.avoid_mocks) == (False, True)
     assert plain.content_hash != mocked.content_hash
+
+
+def test_configuration_is_out_of_the_engine_key_and_kept_for_the_control():
+    """Plan 7.2: the key is the shape; the resolved config is kept, by id and by stack index, never hashed."""
+    from ai.modules.task.engine_key import engine_content
+
+    def facts(provider, stored):
+        return {'provider': provider, **stored}, True
+
+    spec = {
+        'source': 'a',
+        'components': [
+            {'id': 'a', 'provider': 'webhook', 'config': {}},
+            {'id': 'b', 'provider': 'prompt', 'config': {'tone': 'dry'}, 'input': [{'lane': 'x', 'from': 'a'}]},
+        ],
+    }
+    other = {**spec, 'components': [spec['components'][0], {**spec['components'][1], 'config': {'tone': 'wet'}}]}
+    dry, wet = engine_content(spec, 'a', facts), engine_content(other, 'a', facts)
+    assert dry.content_hash == wet.content_hash
+    assert dry.config_by_index == [{'provider': 'webhook'}, {'provider': 'prompt', 'tone': 'dry'}]
+    assert dry.stored_by_index == [{}, {'tone': 'dry'}]
+    assert wet.config_by_index[1]['tone'] == 'wet'
+    assert dry.resolved_config['b'] is dry.config_by_index[1]

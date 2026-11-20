@@ -337,7 +337,7 @@ class EventMixin(DAPClient):
         network traffic and processing overhead.
 
         Args:
-            token: Your pipeline or session token for authentication
+            token: The control id (a ``use()``/``submit()`` result's ``token``) whose events you want
             event_types: List of event type names to subscribe to
 
         Raises:
@@ -391,8 +391,9 @@ class EventMixin(DAPClient):
         user-owned, the one case team-presence cannot express).
 
         Args:
-            key: Monitor key — ``{"token": "..."}`` for a running task,
-                 or ``{"project_id": "...", "source": "..."}`` (optionally
+            key: Monitor key — ``{"token": "..."}`` (the control id; a
+                 restart mints a new one, so resubscribe after one) for one
+                 control, or ``{"project_id": "...", "source": "..."}`` (optionally
                  with ``"pipe_id"``, ``"team_id"``, and/or ``"run_kind"``).
             types: Event types to subscribe to (e.g. ``['summary', 'flow']``).
         """

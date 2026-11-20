@@ -25,26 +25,26 @@ SubmitCommands: the DAP ``submit`` command (plan section 3).
 
 ``submit()`` is ``use()`` plus one request, sharing one resolver:
 
-1. resolve to a control: a NAME walks the rungs (``@dev`` attach-only, then
+1. resolve to a control: a NAME walks the rungs (``@spec`` attach-only, then
    ``@me``, ``@team`` in the caller's team order, ``@public``) and starts a
    published rung from its artifact when nothing is live; a SPEC addresses
-   the caller's own ``@dev`` presence, created when absent and otherwise
-   reused, refused or REPOINTED per ``onChange`` (plan 3.4);
+   the caller's own ``@spec`` control of that identity (``project_id`` and
+   resolved config), created when absent and otherwise reused (plan 3.4: a
+   different config is another control on the same engine);
 2. hold the control's engine (started again if it stopped);
 3. with ``data`` (at most ``CONST_SUBMIT_INLINE_MAX`` bytes): open a pipe,
    write, close it, all in process through the engine's data path, and
    return the close body; without ``data`` return the address so the SDK
-   streams through the ordinary pipe open/write/close (a large payload, or
-   any call with ``on_sse``, which ALWAYS streams so the SDK can subscribe
-   by ``traceId`` before the first event);
+   streams through the ordinary pipe open/write/close against the control
+   id (a large payload, or any call with ``on_sse``, which ALWAYS streams so
+   the SDK can subscribe by ``traceId`` before the first event);
 4. leave the hold in place: the control expires on its own idle ttl.
 
-The result carries the stamps of plan 3.1: ``token`` (the address),
-``resolved`` (the rung, ``team`` names the answering team), ``version``
-(absent on ``@dev``), ``engineKey``, ``specMatch``, ``converged``
-(``none``/``started``/``repointed``), ``ignored`` (server-controlled
-arguments a NAME call passed: ``threads``, ``args``, ``env``, ``ttl``) and
-``warnings`` (``repoint_storm``) when any.
+The result carries the stamps of plan 3.1: ``token`` (the control id),
+``address``, ``resolved`` (the rung, ``team`` names the answering team),
+``version`` (absent on ``@spec``), ``engineKey``, ``converged``
+(``none``/``started``) and ``ignored`` (server-controlled arguments a NAME
+call passed: ``threads``, ``args``, ``env``, ``ttl``).
 
 The server adds no deadline of its own (plan 3.1): a request runs until the
 pipeline answers, fails, or the caller cancels its pipe. How long to wait is
@@ -61,7 +61,6 @@ from .engine_access import engine_for, wait_running
 from ai.constants import CONST_SUBMIT_CLOSE_SECONDS, CONST_SUBMIT_INLINE_MAX
 
 from ..address import build_address, parse_address
-from ..task_control import control_key
 from ..types import TaskError
 
 if TYPE_CHECKING:
@@ -103,18 +102,17 @@ class SubmitCommands(DAPConn):
             request: The DAP request. ``arguments`` carry exactly one of
                 ``name`` (the address) or ``pipeline`` (an inline spec), and
                 optionally ``source``, ``team``, ``data`` (inline payload),
-                ``objinfo``, ``mimetype``, ``onChange`` (spec calls),
-                ``pipelineTraceLevel``, and the spec-only ``threads``/
-                ``args``/``env``/``ttl``.
+                ``objinfo``, ``mimetype``, ``pipelineTraceLevel``, and the
+                spec-only ``threads``/``args``/``env``/``ttl``.
 
         Returns:
             The response: the close body (inline delivery) plus the stamps,
             or the stamps alone when the SDK streams.
 
         Raises:
-            TaskError: TASK_INVALID_ARGUMENT, TASK_NOT_REGISTERED,
-                TASK_SOURCE_REQUIRED, TASK_SPEC_CHANGED, TASK_PAYLOAD_TOO_LARGE,
-                TASK_ENGINE_UNAVAILABLE.
+            TaskError: TASK_INVALID_ARGUMENT (a spec without ``project_id``
+                names the field), TASK_NOT_REGISTERED, TASK_SOURCE_REQUIRED,
+                TASK_PAYLOAD_TOO_LARGE, TASK_ENGINE_UNAVAILABLE.
             PermissionError: No permission, or outside a scoped key's endpoints.
         """
         # Step 1: exactly one of name / pipeline
@@ -153,7 +151,7 @@ class SubmitCommands(DAPConn):
         # fallback carries them on the SDK's own open.
         params = control.resolve_params(control.check_params(args.get('params')))
 
-        # Step 4: deliver inline, or hand the address back for streaming
+        # Step 4: deliver inline, or hand the control id back for streaming
         body: Dict[str, Any] = {}
         if data is not None:
             body = await self._deliver(control, args, data, params)
@@ -164,7 +162,7 @@ class SubmitCommands(DAPConn):
 
     async def _resolve_name(self, args: Dict[str, Any]) -> 'tuple[TaskControl, Dict[str, Any]]':
         """
-        A NAME call: the rungs, attach-only on ``@dev``, published rungs started when needed.
+        A NAME call: the rungs, attach-only on ``@spec``, published rungs started when needed.
 
         Server-controlled arguments are not applied; they are listed in
         ``ignored`` so the same source runs unchanged in dev and production.
@@ -187,44 +185,30 @@ class SubmitCommands(DAPConn):
         self, request: Dict[str, Any], args: Dict[str, Any]
     ) -> 'tuple[TaskControl, Dict[str, Any]]':
         """
-        A SPEC call: the caller's ``@dev`` presence for the spec's address (plan 3.3).
+        A SPEC call: the caller's ``@spec`` control of the spec's identity (plan 3.3, 3.4).
 
         Runs the ordinary dev execute path (dev team, plans, env, the address
-        grammar) with ``onChange`` (default ``'error'``), so an existing
-        presence is reused, refused or repointed, never replaced.
+        grammar): the caller's control with the same ``project_id`` and
+        resolved config is reused, any other spec gets a control of its own.
         """
-        # Step 1: execute as a dev run, onChange deciding over a live presence
+        # Step 1: execute as a dev run; the token slot of the result is the control id
         execute_args = {key: value for key, value in args.items() if key not in ('name', 'data', 'team')}
-        execute_args['onChange'] = args.get('onChange') or 'error'
         execute = {**request, 'command': 'execute', 'arguments': execute_args}
         response = await self.on_execute(execute)
         result = response.get('body') or {}
 
-        # Step 2: the caller's own @dev control under that address
-        control = self._server.control_by_key(control_key('dev', self._account_info.userId, result['token']))
-        stamps = self._stamps(
-            control,
-            converged=result.get('converged', 'none'),
-            spec_match=result.get('specMatch', True),
-            warnings=result.get('warnings'),
-        )
-        return control, stamps
+        # Step 2: the control that answered, by its id
+        control = self._server.control_by_key(result['token'])
+        return control, self._stamps(control, converged=result.get('converged', 'none'))
 
     @staticmethod
-    def _stamps(
-        control: 'TaskControl',
-        *,
-        converged: str,
-        spec_match: bool = True,
-        ignored: Optional[List[str]] = None,
-        warnings: Optional[List[Dict[str, Any]]] = None,
-    ) -> Dict[str, Any]:
-        """The ``SUBMIT_RESULT`` stamps of plan 3.1 for ``control``."""
+    def _stamps(control: 'TaskControl', *, converged: str, ignored: Optional[List[str]] = None) -> Dict[str, Any]:
+        """The ``SUBMIT_RESULT`` stamps of plan 3.1 for ``control``: the control id in the token slot."""
         stamps: Dict[str, Any] = {
-            'token': control.address,
+            'token': control.control_id,
+            'address': control.address,
             'resolved': f'@{control.rung}',
             'engineKey': control.task.engine_key if control.task is not None else '',
-            'specMatch': spec_match,
             'converged': converged,
             'ignored': list(ignored or []),
         }
@@ -232,8 +216,6 @@ class SubmitCommands(DAPConn):
             stamps['team'] = control.owner_id
         if control.version is not None:
             stamps['version'] = control.version
-        if warnings:
-            stamps['warnings'] = list(warnings)
         return stamps
 
     # ==== Delivery ===============================================================

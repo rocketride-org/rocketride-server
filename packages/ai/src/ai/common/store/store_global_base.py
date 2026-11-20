@@ -87,10 +87,10 @@ class StoreGlobalBase(IGlobalBase, ABC):
     def _open_store(self, logical_type: str, config: Mapping, bag: Dict[str, Any]) -> DocumentStoreBase:
         """Instantiate and return the driver's ``DocumentStoreBase`` for this node.
 
-        Called once per pipeline start. Must raise if the store cannot be
-        constructed so the failure surfaces at pipeline start. ``config`` is
-        the resolved ``ConfigView``: defaults applied, the active branch
-        flattened, keys read by their short name.
+        Called once per control, from ``beginGlobal``. Must raise if the store
+        cannot be constructed so the failure surfaces on the control's first
+        request. ``config`` is the resolved ``ConfigView``: defaults applied,
+        the active branch flattened, keys read by their short name.
         """
 
     # The config fields holding what the driver sends its server to sign in.
@@ -137,38 +137,8 @@ class StoreGlobalBase(IGlobalBase, ABC):
         # A key left as an unfilled ${ROCKETRIDE_...} fails here, before the driver sends it.
         self._check_credentials(config)
 
-        # Open the driver's store on the resolved view
+        # Open the driver's store on the resolved view: the control's own
         self.store = self._open_store(self.glb.logicalType, config, bag)
-
-    def store_for(self, settings: Mapping) -> DocumentStoreBase:
-        """
-        The store for one call's effective configuration (plan 6.2, 12 A).
-
-        The global's own store serves a call whose per-caller keys (env-valued,
-        param-flagged) match the shared config; otherwise a store is opened for
-        that call's values through ``provider_client`` and reused for every
-        call with the same values.
-
-        Args:
-            settings: The binding's ``IInstanceBase.settings``.
-
-        Returns:
-            The driver's store for these values.
-        """
-        keys = set(getattr(settings, 'env_keys', ())) | set(getattr(settings, 'param_keys', ()))
-        if not keys or self.store is None:
-            return (
-                self.store
-                if self.store is not None
-                else self._open_store(self.glb.logicalType, settings, self.IEndpoint.endpoint.bag)
-            )
-        bag = self.IEndpoint.endpoint.bag
-        return self.provider_client(settings, keys, lambda view: self._opened_store(view, bag))
-
-    def _opened_store(self, config: Mapping, bag: Dict[str, Any]) -> DocumentStoreBase:
-        """Open a store for ``config`` after the credential check the global's own store had."""
-        self._check_credentials(config)
-        return self._open_store(self.glb.logicalType, config, bag)
 
     def endGlobal(self) -> None:
         """Drop the store."""

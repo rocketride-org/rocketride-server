@@ -184,8 +184,10 @@ class TestDeploy:
         try:
             await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             result = await self.client.deploy.run(project, 'webhook_1', TEAM)
-            assert result['token']
-            # The UI's stop path: resolve the live task and terminate it.
+            # The control id in the token slot, the address beside it: both required.
+            assert len(result['token']) == 32 and all(c in '0123456789abcdef' for c in result['token'])
+            assert result['address'] == f'{self.registry_id(project)}.webhook_1'
+            # The UI's stop path: resolve the live control and terminate it.
             # team_id addresses the TEAM's deploy run — an unscoped lookup
             # resolves the caller's own dev run and finds nothing here.
             token = await self.client.get_task_token(project_id=project, source='webhook_1', team_id=TEAM)

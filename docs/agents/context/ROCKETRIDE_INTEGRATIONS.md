@@ -214,11 +214,11 @@ on the request.
 | Account key with an `endpoints` list (Settings › Account › API Keys) | `task.data` on the listed addresses or `developerId.pipelineId.*` | several webhooks of one integration |
 | Full account key | your whole account | first-party callers and your own automation |
 
-The server resolves the address through the caller's rungs: your Play'd run (`@dev`),
+The server resolves the address through the caller's rungs: your Play'd control (`@spec`),
 your personal deployment (`@me`), the first team in your team order that publishes it
 (`@team`), then the store (`@public`). A key with an `endpoints` scope starts at `@me`: a
-production webhook never lands on a Play'd run. A published pipe that is not running is
-started by the call; a Play'd run that is not up falls through to the next rung, and a
+production webhook never lands on a Play'd control. A published pipe that is not running is
+started by the call; a Play'd control that is not up falls through to the next rung, and a
 name nothing publishes fails with `not_found` listing the rungs tried.
 
 ### Calling it

@@ -29,7 +29,7 @@ from __future__ import annotations
 import copy
 
 import pytest
-from rocketlib.config import ConfigError, ConfigView, TenancyViolation, resolveConfig
+from rocketlib.config import ConfigError, ConfigView, NodeInfo, resolveConfig
 
 from tests.rocketlib.schemas import CAP_GPU, CAP_MULTITENANT, DEPTH_ESTIMATE, GOOGLE_WORKSPACE, QDRANT, multitenant
 
@@ -292,36 +292,27 @@ class TestConfigView:
         assert resolveConfig(multitenant(DEPTH_ESTIMATE), {}).capabilities & CAP_MULTITENANT
 
     def test_restricted_refuses_param_always(self, view):
-        restricted = view.restricted(refuse_params=True, refuse_env=False)
-        with pytest.raises(TenancyViolation, match='"maxEdge" is a parameter; read it from self.settings in IInstance'):
+        restricted = view.restricted(refuse_params=True)
+        with pytest.raises(ConfigError, match='"maxEdge" is a parameter; read it from self.settings in IInstance'):
             restricted.maxEdge
-        with pytest.raises(TenancyViolation):
+        with pytest.raises(ConfigError):
             restricted['maxEdge']
         assert restricted.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
+        assert restricted.restricted(refuse_params=False).maxEdge == 640
 
-    def test_restricted_refuses_env_when_asked(self, view):
-        restricted = view.restricted(refuse_params=True, refuse_env=True)
-        with pytest.raises(TenancyViolation, match='"apikey" is set from the caller\'s environment'):
-            restricted.apikey
-        assert restricted.model == 'tiny'
-
-    def test_expand_env(self, view):
-        expanded = view.expand_env({'ROCKETRIDE_DEPTH_APIKEY': 'sk-123'})
+    def test_env_keys_are_a_fact_of_the_spec(self, view):
+        # Which keys the environment decides is a fact of the spec, not of the
+        # values in them: a view the server already expanded still knows them
+        expanded = resolveConfig(DEPTH_ESTIMATE, {'model': 'tiny', 'apikey': 'sk-123'})
         assert expanded.apikey == 'sk-123'
-        # Which keys the caller's environment decides is a fact of the spec: the
-        # per-call client caches (provider_client) key on it after expansion
-        assert expanded.env_keys == frozenset({'apikey'})
-        assert expanded.overlay({'maxEdge': 320}).env_keys == frozenset({'apikey'})
-        assert view.apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
+        assert expanded.env_keys == frozenset()
+        assert view.overlay({'maxEdge': 320}).env_keys == frozenset({'apikey'})
+        assert view.restricted(refuse_params=True).env_keys == frozenset({'apikey'})
 
-    def test_expand_env_leaves_unknown_names(self, view):
-        assert view.expand_env({'ROCKETRIDE_OTHER': 'x'}).apikey == '${ROCKETRIDE_DEPTH_APIKEY}'
-
-    def test_expand_env_coerces_and_validates(self):
+    def test_a_placeholder_value_is_not_validated(self):
         view = resolveConfig(DEPTH_ESTIMATE, {'maxEdge': '${ROCKETRIDE_EDGE}'})
-        assert view.expand_env({'ROCKETRIDE_EDGE': '1024'}).maxEdge == 1024
-        with pytest.raises(ConfigError, match='"maxEdge" must be <= 4096'):
-            view.expand_env({'ROCKETRIDE_EDGE': '9000'})
+        assert view.maxEdge == '${ROCKETRIDE_EDGE}'
+        assert view.env_keys == frozenset({'apikey', 'maxEdge'})
 
     def test_overlay_params_by_path_or_name(self, view):
         assert view.overlay({'maxEdge': 1024}).maxEdge == 1024
@@ -348,3 +339,63 @@ class TestConfigView:
         schema['properties'].append({'name': 'threads', 'path': 'threads', 'type': 'integer', 'default': 1})
         with pytest.raises(ConfigError, match='both resolve to "threads"'):
             resolveConfig(schema, {})
+
+
+class TestNodeGroup:
+    """``config.node``: the reserved identity record on every view (plan 5.6.4)."""
+
+    NODE = NodeInfo(
+        id='depth_1',
+        name='Depth',
+        provider='depth_estimate',
+        physicalType='python',
+        capabilities=CAP_GPU,
+        controlId='control-1',
+    )
+
+    def test_record_by_attribute_item_and_in(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        assert view.node is self.NODE
+        assert view['node'] is self.NODE
+        assert 'node' in view
+        assert (
+            view.node.id,
+            view.node.name,
+            view.node.provider,
+            view.node.physicalType,
+            view.node.capabilities,
+            view.node.controlId,
+        ) == ('depth_1', 'Depth', 'depth_estimate', 'python', CAP_GPU, 'control-1')
+
+    def test_record_is_not_a_declared_key(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        assert 'node' not in list(view)
+        assert 'node' not in view.to_dict()
+        assert len(view) == len(view.to_dict())
+
+    def test_record_is_read_only(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        with pytest.raises(AttributeError):
+            view.node.id = 'other'
+        with pytest.raises(TypeError):
+            view.node = self.NODE
+
+    def test_record_rides_derived_views(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {}, node=self.NODE)
+        assert view.restricted(refuse_params=True).node is self.NODE
+        assert view.overlay({'maxEdge': 1024}).node is self.NODE
+        assert view.overlay(None).node is self.NODE
+
+    def test_no_identity_is_the_empty_record(self):
+        view = resolveConfig(DEPTH_ESTIMATE, {})
+        assert view.node == NodeInfo(id='', name='', provider='', physicalType='', capabilities=0, controlId='')
+
+    def test_schema_leaf_named_node_is_refused(self):
+        # The one reserved name: a services.json declaring it is refused at
+        # load, naming the service, whatever the stored values
+        schema = copy.deepcopy(DEPTH_ESTIMATE)
+        schema['properties'].append({'name': 'node', 'path': 'node', 'type': 'string', 'title': 'Node'})
+        with pytest.raises(ConfigError, match=r'"node".*Depth estimate.*reserved'):
+            resolveConfig(schema, {})
+        with pytest.raises(ConfigError, match=r'reserved'):
+            resolveConfig(schema, {'node': 'x'}, node=self.NODE)

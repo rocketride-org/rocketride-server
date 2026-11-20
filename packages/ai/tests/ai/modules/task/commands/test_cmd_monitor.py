@@ -37,14 +37,14 @@ def _make_conn(*, account_info=None, server=None, monitors=None, connection_id=1
     conn.debug_message = MagicMock()
     conn.verify_permission = MagicMock()
     conn.get_connection_id = MagicMock(return_value=connection_id)
-    conn.get_task_address = MagicMock(return_value='')
+    conn.get_token_slot = MagicMock(return_value='')
     return conn
 
 
-# The one control every helper describes: the address clients send in the
-# token slot, and the registry key the engine reports events under.
+# The one control every helper describes: its address, and the registry key
+# (its control id) the engine reports events under.
 ADDRESS = 'acme.proj-1.src-1'
-KEY = 'dev.user-1.acme.proj-1.src-1'
+KEY = '1234abcd1234abcd1234abcd1234abcd'
 
 
 def _account_info(*, user_id='user-1', team_id='team-1', sys_permissions=()):
@@ -163,6 +163,8 @@ def _control(
         id=task_id,
         address=ADDRESS,
         key=KEY,
+        control_id=KEY,
+        index_key=f'spec.{user_id}.{ADDRESS}',
         run_kind=run_kind,
         owner_kind=kind,
         owner_id=team_id if kind == 'team' else user_id,
@@ -394,7 +396,7 @@ async def test_set_monitor_wildcard_token():
 async def test_set_monitor_with_token_resolves_to_project_key():
     """When an address is supplied, the registry key is built from the resolved control."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control())
+    server.resolve_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     event_id = await MonitorCommands.set_monitor(conn, token=ADDRESS, type=EVENT_TYPE.SUMMARY)
@@ -406,7 +408,7 @@ async def test_set_monitor_with_token_resolves_to_project_key():
 async def test_set_monitor_unsubscribe_removes_key():
     """Setting EVENT_TYPE.NONE deletes the key from the registry."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control())
+    server.resolve_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(
         account_info=_account_info(),
@@ -437,7 +439,7 @@ async def test_set_monitor_rejects_no_target():
 async def test_set_monitor_with_pipe_id_narrows_key():
     """A pipe_id appends '.<pipe_id>' to the registry key."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control())
+    server.resolve_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     await MonitorCommands.set_monitor(conn, token=ADDRESS, type=EVENT_TYPE.SUMMARY, pipe_id=42)
@@ -450,11 +452,11 @@ async def test_set_monitor_cross_tenant_token_raises():
     and registers nothing — the resolver's verdict is final here.
     """
     server = MagicMock()
-    server.resolve_control = MagicMock(side_effect=PermissionError('Access denied: no permissions for this task'))
+    server.resolve_token = MagicMock(side_effect=PermissionError('Access denied: no permissions for this task'))
     conn = _make_conn(account_info=_account_info(user_id='user-1'), server=server)
     with pytest.raises(PermissionError, match='Access denied'):
         await MonitorCommands.set_monitor(conn, token=ADDRESS, type=EVENT_TYPE.SUMMARY)
-    server.resolve_control.assert_called_once_with(ADDRESS, conn._account_info, 'task.monitor')
+    server.resolve_token.assert_called_once_with(ADDRESS, conn._account_info, 'task.monitor')
     assert conn._monitors == {}
 
 
@@ -467,10 +469,10 @@ async def test_set_monitor_cross_tenant_token_raises():
 async def test_on_rrext_monitor_with_string_list_types():
     """A list of EVENT_TYPE name strings is converted to a bitmask."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control())
+    server.resolve_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_address = MagicMock(return_value=ADDRESS)
+    conn.get_token_slot = MagicMock(return_value=ADDRESS)
 
     request = {'arguments': {'types': ['SUMMARY', 'TASK']}}
     await MonitorCommands.on_rrext_monitor(conn, request)
@@ -485,10 +487,10 @@ async def test_on_rrext_monitor_with_string_list_types():
 async def test_on_rrext_monitor_with_int_types():
     """An int `types` value is used directly as the bitmask."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control())
+    server.resolve_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_address = MagicMock(return_value=ADDRESS)
+    conn.get_token_slot = MagicMock(return_value=ADDRESS)
 
     request = {'arguments': {'types': EVENT_TYPE.SUMMARY.value}}
     await MonitorCommands.on_rrext_monitor(conn, request)
@@ -499,10 +501,10 @@ async def test_on_rrext_monitor_with_int_types():
 async def test_on_rrext_monitor_with_unknown_string_in_list_is_ignored():
     """An unknown name in the string list is silently skipped (warning printed)."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control())
+    server.resolve_token = MagicMock(return_value=_control())
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_address = MagicMock(return_value=ADDRESS)
+    conn.get_token_slot = MagicMock(return_value=ADDRESS)
 
     request = {'arguments': {'types': ['SUMMARY', 'NOPE_NOT_AN_EVENT']}}
     await MonitorCommands.on_rrext_monitor(conn, request)
@@ -590,7 +592,7 @@ async def test_set_monitor_team_scope_binds_team_as_owner():
 async def test_set_monitor_token_for_deploy_run_builds_team_key():
     """An address subscription to a deploy run lands on the team-scoped key."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=_control(run_kind='deploy'))
+    server.resolve_token = MagicMock(return_value=_control(run_kind='deploy'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
     await MonitorCommands.set_monitor(conn, token=ADDRESS, type=EVENT_TYPE.SUMMARY)
@@ -604,7 +606,7 @@ async def test_on_rrext_monitor_passes_team_id_through():
     server.resolve_control = MagicMock(return_value=_control(run_kind='deploy'))
     server.broadcast_server_event = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_address = MagicMock(return_value='')
+    conn.get_token_slot = MagicMock(return_value='')
 
     request = {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1', 'types': ['SUMMARY']}}
     await MonitorCommands.on_rrext_monitor(conn, request)
@@ -669,3 +671,18 @@ def test_monitor_commands_init_creates_empty_monitor_registry():
     conn = MonitorCommands.__new__(MonitorCommands)
     MonitorCommands.__init__(conn, connection_id=1, server=None, transport=None)
     assert conn._monitors == {}
+
+
+@pytest.mark.asyncio
+async def test_set_monitor_with_a_control_id_in_the_token_slot_finds_the_control_by_id():
+    """The monitor key builders send the control id they were handed or an address (plan 7.5): both resolve."""
+    server = MagicMock()
+    server.resolve_token = MagicMock(return_value=_control())
+    server.broadcast_server_event = AsyncMock()
+    conn = _make_conn(account_info=_account_info(), server=server)
+
+    event_id = await MonitorCommands.set_monitor(conn, token=KEY, type=EVENT_TYPE.SUMMARY)
+
+    assert event_id == 'task-1'
+    server.resolve_token.assert_called_once_with(KEY, conn._account_info, 'task.monitor')
+    assert 'p.dev.user-1.proj-1.src-1' in conn._monitors

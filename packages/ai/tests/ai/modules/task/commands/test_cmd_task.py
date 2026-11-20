@@ -21,6 +21,9 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai.modules.task.commands.cmd_task import TaskCommands
+
+#: The control id the requests name in their token slot.
+CONTROL_ID = '0123456789abcdef0123456789abcdef'
 from ai.modules.task.commands.cmd_store import StoreCommands
 
 
@@ -56,9 +59,9 @@ def _make_conn(*, account_info=None, server=None, connection_id=1):
     conn.verify_plans = MagicMock(return_value=True)
     conn.get_task = MagicMock()
     conn.get_control = MagicMock()
-    # on_launch replies via send_response; on_terminate resolves its address.
+    # on_launch replies via send_response; on_terminate reads its token slot.
     conn.send_response = AsyncMock()
-    conn.get_task_address = MagicMock(return_value='acme.pipe.x')
+    conn.get_token_slot = MagicMock(return_value=CONTROL_ID)
     # Bind the REAL org resolver (defined on TaskConn, next to
     # verify_team_permission) so on_execute exercises real membership-based
     # resolution against the stub AccountInfo's organization.
@@ -471,19 +474,18 @@ async def test_on_launch_checks_task_debug_on_dev_team():
 
 
 @pytest.mark.asyncio
-async def test_on_terminate_stops_task_with_request_address():
-    """on_terminate stops the control the request's address resolves to, by its key."""
+async def test_on_terminate_stops_the_control_the_request_names():
+    """on_terminate stops the control the request's token slot names, by its key (its id)."""
     server = MagicMock()
     server.stop_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_address = MagicMock(return_value='acme.pipe.active')
-    conn.get_control = MagicMock(return_value=SimpleNamespace(key='dev.user-1.acme.pipe.active'))
+    conn.get_control = MagicMock(return_value=SimpleNamespace(key=CONTROL_ID))
 
-    request = {'arguments': {'token': 'acme.pipe.active'}}
+    request = {'arguments': {'token': CONTROL_ID}}
     response = await TaskCommands.on_terminate(conn, request)
 
     conn.get_control.assert_called_once_with(request, 'task.control')
-    server.stop_task.assert_awaited_once_with('dev.user-1.acme.pipe.active')
+    server.stop_task.assert_awaited_once_with(CONTROL_ID)
     assert response['type'] == 'response'
 
 
@@ -498,10 +500,9 @@ async def test_on_terminate_denied_does_not_stop_the_task():
     server = MagicMock()
     server.stop_task = AsyncMock()
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn.get_task_address = MagicMock(return_value='acme.pipe.foreign')
     conn.get_control = MagicMock(side_effect=PermissionError("Permission 'task.control' denied"))
 
-    request = {'arguments': {'token': 'acme.pipe.foreign'}}
+    request = {'arguments': {'token': CONTROL_ID}}
     with pytest.raises(PermissionError, match='denied'):
         await TaskCommands.on_terminate(conn, request)
 
@@ -595,12 +596,28 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
     task.shared = False
     # A private engine's status passes through the projection unchanged
     conn.get_control = MagicMock(
-        return_value=SimpleNamespace(task=task, engine_state='running', project_status=lambda body, shared: body)
+        return_value=SimpleNamespace(
+            task=task,
+            engine_state='running',
+            project_status=lambda body, shared: body,
+            control_id=CONTROL_ID,
+            address='acme.pipe.x',
+        )
     )
 
-    response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': 'acme.pipe.x'}})
-    conn.get_control.assert_called_once_with({'arguments': {'token': 'acme.pipe.x'}}, 'task.monitor')
-    assert response == {'type': 'response', 'body': {'name': 'task-1', 'state': 3, 'engineState': 'running'}}
+    response = await TaskCommands.on_rrext_get_task_status(conn, {'arguments': {'token': CONTROL_ID}})
+    conn.get_control.assert_called_once_with({'arguments': {'token': CONTROL_ID}}, 'task.monitor')
+    # The body names the control: its id and its address beside the status
+    assert response == {
+        'type': 'response',
+        'body': {
+            'name': 'task-1',
+            'state': 3,
+            'engineState': 'running',
+            'controlId': CONTROL_ID,
+            'address': 'acme.pipe.x',
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -612,11 +629,11 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
 async def test_on_rrext_get_token_resolves_the_address_through_the_one_resolver():
     """The handler forms the address from the caller's developer id and resolves it like every verb."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1'))
+    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
 
     conn = _make_conn(account_info=_account_info(), server=server)
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
-    assert response == {'type': 'response', 'body': {'token': 'acme.proj-1.src-1'}}
+    assert response == {'type': 'response', 'body': {'token': CONTROL_ID, 'address': 'acme.proj-1.src-1'}}
     server.resolve_control.assert_called_once_with('acme.proj-1.src-1', conn._account_info, 'task.monitor', team=None)
 
 
@@ -624,14 +641,14 @@ async def test_on_rrext_get_token_resolves_the_address_through_the_one_resolver(
 async def test_on_rrext_get_token_team_scope_is_the_resolvers_team_override():
     """A teamId argument scopes the permission check and the resolution to that team."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1'))
+    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
 
     conn = _make_conn(account_info=_account_info(), server=server)
     conn.verify_team_permission = MagicMock()
     response = await TaskCommands.on_rrext_get_token(
         conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': 'team-1'}}
     )
-    assert response == {'type': 'response', 'body': {'token': 'acme.proj-1.src-1'}}
+    assert response == {'type': 'response', 'body': {'token': CONTROL_ID, 'address': 'acme.proj-1.src-1'}}
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
     server.resolve_control.assert_called_once_with(
         'acme.proj-1.src-1', conn._account_info, 'task.monitor', team='team-1'
@@ -673,6 +690,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
         owner_id = team_id if run_kind == 'deploy' else 'user-1'
         return SimpleNamespace(
             address=token,
+            control_id=f'{abs(hash(token)):032x}'[:32],
             userId='user-1',
             teamId=team_id,
             run_kind=run_kind,
@@ -703,9 +721,11 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     conn = _make_conn(account_info=_account_info(user_id='user-1', organization=organization), server=server)
     response = await TaskCommands.on_rrext_get_tasks(conn, {})
 
-    tokens = [t['token'] for t in response['body']['tasks']]
-    assert tokens == ['acme.pipe.running_mine']
-    assert response['body']['tasks'][0]['name'] == 'my-pipeline'
+    assert [t['address'] for t in response['body']['tasks']] == ['acme.pipe.running_mine']
+    # The token slot carries the control id, and the row names it beside the address
+    (row,) = response['body']['tasks']
+    assert row['token'] == row['controlId'] == server._task_control['acme.pipe.running_mine'].control_id
+    assert row['name'] == 'my-pipeline'
     # Run classification rides every row — clients must not infer deploy-ness
     # from a non-empty teamId (dev runs carry an attribution team too).
     assert response['body']['tasks'][0]['runKind'] == 'dev'
@@ -722,6 +742,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
     task.get_status = MagicMock(return_value=status)
     control = SimpleNamespace(
         address='acme.pipe.1',
+        control_id=CONTROL_ID,
         userId='user-1',
         teamId='team-1',
         run_kind='dev',

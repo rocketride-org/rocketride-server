@@ -703,20 +703,21 @@ class TaskConn(
 
         return True
 
-    def get_task_address(self, request: Dict[str, Any]) -> str:
+    def get_token_slot(self, request: Dict[str, Any]) -> str:
         """
-        Read the task address from a command request's token slot.
+        Read a command request's token slot.
 
-        Clients send the address (``developerId.pipelineId[.source]``) in
-        ``arguments.token`` — the slot that once carried a task token. No
-        credential type locks a connection to a task: every request names
-        its task and is authorized against it.
+        Clients send the control id (plan section 1) in ``arguments.token``,
+        the slot that once carried a task token; the verbs that also take an
+        address (a standalone ``tool`` borrow, a monitor subscription) tell
+        the two apart by shape. No credential type locks a connection to a
+        task: every request names its control and is authorized against it.
 
         Args:
             request (Dict[str, Any]): The command request.
 
         Returns:
-            str: The address as sent (validated by the resolver).
+            str: The token slot as sent (checked by the lookup).
 
         Raises:
             PermissionError: The connection is not authenticated.
@@ -728,46 +729,39 @@ class TaskConn(
 
     def get_control(self, request: Dict[str, Any], permissions: str = '') -> 'TaskControl':
         """
-        Resolve the control a command request addresses, under this connection's account.
+        The control a command request names by its id, under this connection's account.
 
-        ONE path for every task-addressed command: the address from the
-        token slot, the request's account, and the required permission go
-        through ``TaskServer.resolve_control`` — which walks the caller's
-        rungs, checks the run-scoped permission on EVERY call (sys.admin
-        passes inside the resolver) and enforces a scoped key's endpoints.
+        ONE path for every control-addressed command (send/pipe, terminate,
+        status, pipeline, restart, the profiler): the control id from the
+        token slot, the request's account and the required permission go
+        through ``TaskServer.control_by_id``, which re-checks the caller on
+        EVERY call (the owner, team membership, sys.admin) and enforces a
+        scoped key's endpoints. An address in the slot is refused: a name is
+        resolved by ``submit()`` and the ``tool`` borrow only (plan section 1).
 
         Args:
             request (Dict[str, Any]): The command request.
             permissions (str): The permission the command needs.
 
         Returns:
-            TaskControl: The resolved control.
+            TaskControl: The control.
 
         Raises:
-            TaskError: Bad address grammar, or no rung answered.
-            PermissionError: Unauthenticated, no permission, or outside the
-                key's endpoints scope.
+            PermissionError: Unauthenticated, not a control id, not the
+                caller's control, no permission, or outside the key's
+                endpoints scope.
         """
-        address = self.get_task_address(request)
-        # A data request may name the team it must resolve through: submit()
-        # passes on the team that answered it, so a streamed payload lands on
-        # the control the stamps describe, never on another team's run that
-        # comes first in the caller's team order
-        arguments = request.get('arguments')
-        team = arguments.get('team') if isinstance(arguments, dict) else None
-        if team:
-            return self._server.resolve_control(address, self._account_info, permissions or None, team=str(team))
-        return self._server.resolve_control(address, self._account_info, permissions or None)
+        return self._server.control_by_id(self.get_token_slot(request), self._account_info, permissions or None)
 
     async def resolve_control_or_start(self, request: Dict[str, Any], permissions: str = '') -> 'TaskControl':
         """
-        Resolve the control a DATA request addresses, starting its publication when nothing is live.
+        Resolve the ADDRESS a request names, starting its publication when nothing is live.
 
-        ``send``/``pipe`` (and the HTTP door, which rides them) resolve the
-        way ``submit()`` does (plan 3.2, one resolver for every verb): the
-        caller's rungs in order, ``@dev`` attach-only, a published rung
-        answered by its live control or started from its artifact. ``team``
-        in the arguments overrides the caller's team order for the call.
+        A standalone ``tool`` borrow (plan 3.6) and ``submit(name)`` resolve
+        the same way (plan 3.2, one resolver for every verb): the caller's
+        rungs in order, ``@spec`` attach-only, a published rung answered by
+        its live control or started from its artifact. ``team`` in the
+        arguments overrides the caller's team order for the call.
 
         Args:
             request (Dict[str, Any]): The command request.
@@ -781,7 +775,7 @@ class TaskConn(
             PermissionError: Unauthenticated, no permission, or outside the
                 key's endpoints scope.
         """
-        address = self.get_task_address(request)
+        address = self.get_token_slot(request)
         arguments = request.get('arguments')
         team = arguments.get('team') if isinstance(arguments, dict) else None
         return await self._server.resolve_or_start(
@@ -793,16 +787,14 @@ class TaskConn(
         Retrieve the task instance a command request addresses.
 
         Args:
-            request (Dict[str, Any]): The command request (address in ``arguments.token``).
+            request (Dict[str, Any]): The command request (the control id in ``arguments.token``).
             permissions (str): The permission the command needs.
 
         Returns:
-            TaskEngine: The engine the resolved control holds.
+            TaskEngine: The engine the control holds.
 
         Raises:
-            TaskError: Bad address grammar, or no rung answered.
-            PermissionError: Unauthenticated, no permission, or outside the
-                key's endpoints scope.
+            PermissionError: As ``get_control``.
         """
         return self.get_control(request, permissions).task
 

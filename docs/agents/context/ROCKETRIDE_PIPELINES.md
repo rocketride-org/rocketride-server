@@ -1219,10 +1219,13 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 
 ### Driving pipelines from code (pointers)
 
-- Start once with `client.use(filepath='...')` and reuse the returned token; pass
-  `use_existing=True` in long-running services to avoid `Pipeline is already running`. A task
-  is keyed by owner + `project_id` + source, so to run the same pipe more than once at a
-  time give each `use()` its own unguessable `tk_` token.
+- Start once with `client.use(filepath='...')` and reuse the returned token (the CONTROL ID:
+  transient, valid for the life of the control, never persisted; the address rides beside it
+  as `address`). The same spec reuses your live control; `use_existing=True` attaches to the
+  control live for the `project_id` whatever its configuration. A control is keyed by owner +
+  `project_id` + resolved configuration, so to run the same pipe more than once at a time give
+  each `use()` its own `token=` segment (it becomes that instance's `project_id`). `project_id`
+  is required on every spec.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
   blocked loop starves the websocket keepalive and the connection dies after ~60s idle with
   `Connection closed` / `Connection timeout`. Use the async I/O patterns in
@@ -1283,7 +1286,7 @@ Runtime errors:
 | --- | --- |
 | `Connection closed` / `Connection timeout` | **Blocked async event loop** — async I/O only; see the SDK docs |
 | `KeyError: 'answers'` | Custom `laneName` changed the response key — read keys via `result_types` |
-| `Pipeline is already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
+| `Pipeline is already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token=` segment per instance |
 | `Component not found` / `Lane not supported` | Provider or lane not in the catalog — check spelling and `lanes` |
 | `Connection refused` / `Invalid API key` | External service down, or wrong `.env` values — check hosts, ports, `${ROCKETRIDE_*}` names |
 

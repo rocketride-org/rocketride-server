@@ -20,17 +20,19 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Named-pipes runtime model: TaskControl / TaskEngine split (plan section 14, Step 3).
+"""Named-pipes runtime model: TaskControl / TaskEngine split (plan section 14, Step 3; C.22).
 
-One engine per content: controls are the callers' views (owner, rung,
-billing, ttl, parameters), engines are processes keyed by the hash of the
-resolved spec. Identical specs share an engine; a spec differing only in what
-is per control (the parameters map, trace level, ttl, names) shares too; one
-config value apart is another engine. Cross-user sharing needs a
-request/response source and every node certified ``multitenant``; anything
-else is shared per owner. Terminate releases a hold; the engine stops with
-its last hold; publisher disable
-releases the deployment's holds; an operator may stop an engine outright.
+One engine per SHAPE per owner: controls are the callers' views (owner, rung,
+``project_id``, resolved config, billing, ttl, parameters), handled by a
+control id and identified by their configuration; engines are processes
+keyed by the shape of the spec (providers, wiring, source) qualified by the
+owner on every rung in this PR. Specs of one owner that share a shape share
+an engine whatever their configuration; a spec differing in configuration
+under the same ``project_id`` is another control on that engine; another
+user's identical spec is another engine. Terminate releases a hold; the
+engine stops with its last hold; publisher disable releases the
+deployment's holds; an operator, or the owner the key names, may stop an
+engine outright.
 A control entitles its caller to an engine but does not keep it running: the
 engine stops on its own inactivity timer (``CONST_ENGINE_IDLE_TTL``; a ttl-0
 holder pins it) or at once with its last hold, and a request through a
@@ -54,7 +56,7 @@ import rocketlib
 
 from ai.account.models import AccountInfo
 from ai.common import node_config
-from ai.constants import CONST_ENGINE_IDLE_TTL
+from ai.constants import CONST_DEFAULT_MAX_THREADS, CONST_ENGINE_IDLE_TTL
 from ai.modules.task import deploy_events, task_control, task_engine, task_server
 from ai.modules.task.commands.cmd_data import DataCommands
 from ai.modules.task.commands.cmd_task import TaskCommands
@@ -75,19 +77,22 @@ from ai.modules.task.trace_owner import TraceOwners
 #: ``nodes.``), so it can never run on a cross-user engine.
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     'webhook': {'type': 'webhook', 'mode': 'Source', 'hideForm': True},
-    'prompt': {'instructions': ['Answer the question.']},
+    'prompt': {'instructions': ['Answer the question.'], 'maxTokens': 1024, 'stream': False, 'label': ''},
     'local_tool': {'depth': 1},
 }
 PATHS = {'webhook': 'nodes.webhook', 'prompt': 'nodes.prompt', 'local_tool': 'local_nodes.local_tool'}
 #: The keys each provider flags ``param`` (what a pipeline may expose per call).
 PARAMS = {'prompt': ('instructions',)}
+#: The declared type of each leaf, as a leaf descriptor would say it.
+TYPES = {bool: 'boolean', int: 'integer', float: 'number', str: 'string', list: 'array'}
 
 
 class _View:
-    """The slice of a resolved ConfigView the server reads: values, param keys, paths, overlay."""
+    """The slice of a resolved ConfigView the server reads: values, param keys, paths, descriptors, overlay."""
 
     def __init__(self, provider, config):
-        self._values = {**DEFAULTS[provider], **(config or {})}
+        self._defaults = DEFAULTS[provider]
+        self._values = {**self._defaults, **(config or {})}
         self.param_keys = frozenset(PARAMS.get(provider, ()))
 
     def to_dict(self):
@@ -101,6 +106,9 @@ class _View:
 
     def path_of(self, key):
         return key
+
+    def descriptor_of(self, key):
+        return {'type': TYPES.get(type(self._defaults.get(key)), 'string')}
 
     def overlay(self, params):
         for key, value in params.items():
@@ -196,7 +204,6 @@ def _server() -> TaskServer:
     ts._launched = {}
     ts._engine_restarts = {}
     ts._restart_tasks = set()
-    ts._repoints = {}
     ts._connections = {}
     ts._connection_id = 0
     ts._unauthed_by_ip = {}
@@ -259,9 +266,13 @@ async def _start(
         developer_id='acme',
         deployment=deployment,
     )
-    rung = 'dev' if run_kind == 'dev' else ('me' if owner_kind == 'user' else 'team')
-    owner = team if rung == 'team' else user
-    return ts._task_control[f'{rung}.{owner}.{result["token"]}']
+    # The token slot carries the control id: the registry key
+    return ts._task_control[result['token']]
+
+
+def _copy(**kwargs):
+    """The same shape under another project id: another control of the owner on the same engine."""
+    return _pipeline(project_id='docBrainCopy', **kwargs)
 
 
 # =============================================================================
@@ -291,11 +302,22 @@ def test_the_parameters_map_names_and_order_stay_out_of_the_key(catalog):
         assert engine_content(other, 'webhook_1', component_facts).content_hash == base
 
 
-def test_one_config_value_apart_is_another_engine(catalog):
-    """A different resolved value is different content."""
-    a = engine_content(_pipeline(instructions=['Be brief.']), 'webhook_1', component_facts).content_hash
-    b = engine_content(_pipeline(instructions=['Be thorough.']), 'webhook_1', component_facts).content_hash
-    assert a != b
+def test_one_config_value_apart_is_the_same_shape_and_another_configuration(catalog):
+    """Configuration is out of the engine key (plan 7.2) and in the control's identity (plan section 1)."""
+    a = engine_content(_pipeline(instructions=['Be brief.']), 'webhook_1', component_facts)
+    b = engine_content(_pipeline(instructions=['Be thorough.']), 'webhook_1', component_facts)
+    assert a.content_hash == b.content_hash
+    assert a.config_by_index != b.config_by_index
+    assert task_control.config_hash(a.config_by_index) != task_control.config_hash(b.config_by_index)
+    # By stack index: the component order of the spec, the configs resolved
+    assert a.config_by_index[0]['instructions'] == ['Be brief.']
+    assert a.config_by_index[1] == DEFAULTS['webhook']
+    # The open carries the STORED form (the engine resolves it); the identity hashes the resolved one
+    assert a.stored_by_index == [{'instructions': ['Be brief.']}, {}]
+    spelled = engine_content(_pipeline(instructions=['Answer the question.']), 'webhook_1', component_facts)
+    assert task_control.config_hash(spelled.config_by_index) == task_control.config_hash(
+        engine_content(_pipeline(), 'webhook_1', component_facts).config_by_index
+    )
 
 
 def test_the_source_and_the_wiring_are_content(catalog):
@@ -307,12 +329,14 @@ def test_the_source_and_the_wiring_are_content(catalog):
     assert engine_content(_pipeline(), 'prompt_1', component_facts).content_hash != base
 
 
-def test_placeholders_stay_unexpanded_in_the_key(catalog):
-    """The key holds the placeholder, so it never depends on whose env fills it."""
+def test_placeholders_stay_unexpanded_in_the_resolved_config(catalog):
+    """The configuration identity holds the placeholder, so it never depends on whose env fills it."""
     spec = _pipeline(instructions=['${ROCKETRIDE_TONE}'])
-    first = engine_content(spec, 'webhook_1', component_facts).content_hash
-    assert engine_content(copy.deepcopy(spec), 'webhook_1', component_facts).content_hash == first
-    assert first != engine_content(_pipeline(instructions=['friendly']), 'webhook_1', component_facts).content_hash
+    first = task_control.config_hash(engine_content(spec, 'webhook_1', component_facts).config_by_index)
+    again = task_control.config_hash(engine_content(copy.deepcopy(spec), 'webhook_1', component_facts).config_by_index)
+    assert again == first
+    other = engine_content(_pipeline(instructions=['friendly']), 'webhook_1', component_facts).config_by_index
+    assert first != task_control.config_hash(other)
 
 
 def test_shareable_needs_a_request_source_certified_nodes_and_the_catalog(catalog):
@@ -346,15 +370,16 @@ def test_the_real_resolver_applies_schema_defaults():
     empty = {'source': 'w', 'components': [{'id': 'w', 'provider': 'webhook', 'config': {}}]}
     spelled = {'source': 'w', 'components': [{'id': 'w', 'provider': 'webhook', 'config': dict(defaults)}]}
     assert (
-        engine_content(empty, 'w', component_facts).content_hash
-        == engine_content(spelled, 'w', component_facts).content_hash
+        engine_content(empty, 'w', component_facts).config_by_index
+        == engine_content(spelled, 'w', component_facts).config_by_index
     )
 
 
-def test_engine_key_is_the_hash_or_the_hash_qualified_by_owner():
-    """A cross-user engine is keyed by content alone; a private one by content and owner."""
-    assert qualified_key('abc', shareable=True, owner_id='user-a') == 'abc'
-    assert qualified_key('abc', shareable=False, owner_id='user-a') == 'abc:user-a'
+def test_engine_key_is_the_hash_qualified_by_owner_on_every_rung():
+    """Every rung keys its engine by shape and owner in this PR (C.25 leaves the published rungs bare)."""
+    for rung in ('spec', 'me', 'team', 'public'):
+        assert qualified_key('abc', rung=rung, owner_id='user-a') == 'abc:user-a'
+    assert qualified_key('abc', rung='spec', owner_id='') == 'abc'
 
 
 # =============================================================================
@@ -363,20 +388,68 @@ def test_engine_key_is_the_hash_or_the_hash_qualified_by_owner():
 
 
 @pytest.mark.asyncio
-async def test_two_users_identical_specs_one_engine_two_controls_two_bills(catalog, engines):
-    """Identical specs from two users land on ONE engine, held by two controls billed separately."""
+async def test_two_users_identical_specs_are_two_engines_in_this_pr(catalog, engines):
+    """Engines are owner-qualified on every rung (plan 13 Step 3c PR 1): a second user's identical spec is a second engine."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a', team='team-a', org='org-a')
     b = await _start(ts, _pipeline(), user='user-b', team='team-b', org='org-b')
 
-    assert a is not b
-    assert a.task is b.task
-    assert a.task.engine_key == engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
-    assert a.task.holds == {a.key, b.key}
-    assert list(ts._engines) == [a.task.engine_key]
+    content = engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
+    assert a is not b and a.task is not b.task
+    assert (a.task.engine_key, b.task.engine_key) == (f'{content}:user-a', f'{content}:user-b')
+    assert a.task.holds == {a.key} and b.task.holds == {b.key}
     assert a.billing != b.billing
     assert (a.billing.org_id, a.billing.user_id) == ('org-a', 'user-a')
     assert (b.billing.org_id, b.billing.user_id) == ('org-b', 'user-b')
+
+
+@pytest.mark.asyncio
+async def test_a_different_configuration_is_another_control_on_the_same_engine(catalog, engines):
+    """Plan 3.4: one owner, one project_id, two configs: two controls, two ids, ONE engine."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    b = await _start(ts, _pipeline(instructions=['Be thorough.']), user='user-a')
+
+    assert a is not b and a.control_id != b.control_id
+    assert a.task is b.task and len(ts._engines) == 1
+    assert a.task.holds == {a.key, b.key}
+    assert a.config_hash != b.config_hash
+    assert a.index_key == b.index_key and {id(c) for c in ts._task_control.lookup(a.index_key)} == {id(a), id(b)}
+    assert a.task.engine_key == f'{engine_content(_pipeline(), "webhook_1", component_facts).content_hash}:user-a'
+
+
+@pytest.mark.asyncio
+async def test_the_same_configuration_reuses_the_control(catalog, engines):
+    """The identity is (owner, rung, project_id, hash(resolved config)): a repeated spec call answers with the same id."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    again = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+
+    assert again is a and len(ts._task_control) == 1
+
+
+@pytest.mark.asyncio
+async def test_use_existing_attaches_to_the_live_control_of_the_project_whatever_its_config(catalog, engines):
+    """useExisting: the caller's live @spec control of that project_id answers, its running spec kept, stamped reused."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+
+    request = {'command': 'execute', 'arguments': {'pipeline': _pipeline(instructions=['Other.']), 'useExisting': True}}
+    result = await ts.start_task(
+        request,
+        MagicMock(),
+        client_id='user-a',
+        user_id='user-a',
+        team_id='team-1',
+        org_id='org-1',
+        developer_id='acme',
+    )
+
+    assert (result['token'], result['reused'], result['converged']) == (a.control_id, True, 'none')
+    assert len(ts._task_control) == 1 and a.pipeline['components'][1]['config']['instructions'] == ['Be brief.']
+    # Without useExisting the differing configuration is another control
+    b = await _start(ts, _pipeline(instructions=['Other.']), user='user-a')
+    assert b is not a and len(ts._task_control) == 2
 
 
 @pytest.mark.asyncio
@@ -384,7 +457,7 @@ async def test_specs_differing_only_in_parameters_share_one_engine(catalog, engi
     """The parameters map is per control: one engine, each control keeps its own map."""
     ts = _server()
     a = await _start(ts, _pipeline(parameters={'tone': 'prompt_1.instructions'}), user='user-a')
-    b = await _start(ts, _pipeline(parameters={}), user='user-b')
+    b = await _start(ts, _copy(parameters={}), user='user-a')
 
     assert a.task is b.task
     assert a.parameters == {'tone': 'prompt_1.instructions'}
@@ -392,27 +465,16 @@ async def test_specs_differing_only_in_parameters_share_one_engine(catalog, engi
 
 
 @pytest.mark.asyncio
-async def test_one_config_value_apart_starts_two_engines(catalog, engines):
-    """A spec one value apart is another engine."""
-    ts = _server()
-    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
-    b = await _start(ts, _pipeline(instructions=['Be thorough.']), user='user-b')
-
-    assert a.task is not b.task
-    assert len(ts._engines) == 2
-
-
-@pytest.mark.asyncio
-async def test_an_uncertified_node_shares_per_owner_only(catalog, engines):
-    """Uncertified: the key is (hash, owner). The owner's runs share; another user does not."""
+async def test_every_engine_is_the_owners(catalog, engines):
+    """The key is (shape, owner) whatever the catalog certifies: the owner's runs share; another user does not."""
     catalog.discard('prompt')
     ts = _server()
 
     mine = await _start(ts, _pipeline(), user='user-a')
-    # The owner's second connection attaches to the same control ...
-    again = await _start(ts, _pipeline(), user='user-a', useExisting=True)
+    # The owner's second call answers with the same control ...
+    again = await _start(ts, _pipeline(), user='user-a')
     # ... and the owner's identically-built copy under another name shares the engine
-    copy_of_mine = await _start(ts, _pipeline(project_id='docBrainCopy'), user='user-a')
+    copy_of_mine = await _start(ts, _copy(), user='user-a')
     theirs = await _start(ts, _pipeline(), user='user-b')
 
     content = engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
@@ -424,8 +486,8 @@ async def test_an_uncertified_node_shares_per_owner_only(catalog, engines):
 
 
 @pytest.mark.asyncio
-async def test_threads_on_a_dev_spec_call_make_the_engine_private(catalog, engines):
-    """A @dev spec call that moves threads off policy gets an engine of its own."""
+async def test_threads_on_a_spec_call_are_the_starters(catalog, engines):
+    """A @spec call may set the thread count; the starter's value holds for the engine's life."""
     ts = _server()
     custom = await _start(ts, _pipeline(), user='user-a', threads=4)
     stock = await _start(ts, _pipeline(), user='user-b')
@@ -433,8 +495,8 @@ async def test_threads_on_a_dev_spec_call_make_the_engine_private(catalog, engin
     content = engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
     assert custom.task.engine_key == f'{content}:user-a'
     assert custom.task._threads == 4
-    assert stock.task.engine_key == content
-    assert custom.task is not stock.task
+    assert stock.task.engine_key == f'{content}:user-b'
+    assert stock.task._threads == CONST_DEFAULT_MAX_THREADS
 
 
 @pytest.mark.asyncio
@@ -449,7 +511,7 @@ async def test_concurrent_starters_of_one_key_start_one_engine(catalog, monkeypa
     monkeypatch.setattr(TaskEngine, 'start_task', slow_start)
     ts = _server()
 
-    controls = await asyncio.gather(*(_start(ts, _pipeline(), user=f'user-{n}') for n in range(5)))
+    controls = await asyncio.gather(*(_start(ts, _pipeline(project_id=f'pipe{n}'), user='user-a') for n in range(5)))
 
     assert len(created) == 1
     assert {id(c.task) for c in controls} == {id(created[0])}
@@ -462,7 +524,7 @@ async def test_stop_on_dev_releases_only_that_hold(catalog, engines):
     """Terminate is a release: the engine keeps serving the other holder."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a')
-    b = await _start(ts, _pipeline(), user='user-b')
+    b = await _start(ts, _copy(), user='user-a')
 
     await ts.stop_task(a.key)
 
@@ -475,7 +537,7 @@ async def test_stop_on_dev_releases_only_that_hold(catalog, engines):
 
 @pytest.mark.asyncio
 async def test_stop_on_the_last_hold_stops_the_engine(catalog, engines):
-    """The last hold's Stop takes the engine with it, and a @dev control is gone."""
+    """The last hold's Stop takes the engine with it, and a @spec control is gone."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a')
     engine = a.task
@@ -492,7 +554,7 @@ async def test_the_last_control_dropping_stops_the_engine_at_once(catalog, engin
     """No linger: when the last control goes, by terminate or by its own ttl, the engine stops with it."""
     ts = _server()
     long_lived = await _start(ts, _pipeline(), user='user-a', ttl=600)
-    short_lived = await _start(ts, _pipeline(), user='user-b', ttl=60)
+    short_lived = await _start(ts, _copy(), user='user-a', ttl=60)
     engine = long_lived.task
 
     # The long-ttl holder leaves first; the engine serves the other
@@ -541,7 +603,7 @@ async def test_activity_through_any_holder_keeps_the_engine_running(catalog, eng
     """Any request through any hold restarts the engine's timer; the deadline moves with it."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a', ttl=24 * 3600)
-    b = await _start(ts, _pipeline(), user='user-b', ttl=24 * 3600)
+    b = await _start(ts, _copy(), user='user-a', ttl=24 * 3600)
     engine = a.task
 
     # b is active at 600s: at the first deadline the engine is re-pushed
@@ -564,7 +626,7 @@ async def test_a_zero_ttl_holder_keeps_the_engine_from_aging(catalog, engines, c
     """A ttl-0 holder (a listener) is never scheduled, and the engine it holds does not age."""
     ts = _server()
     forever = await _start(ts, _pipeline(), user='user-a', ttl=0)
-    other = await _start(ts, _pipeline(), user='user-b', ttl=24 * 3600)
+    other = await _start(ts, _copy(), user='user-a', ttl=24 * 3600)
     engine = forever.task
 
     for _ in range(100):
@@ -589,7 +651,7 @@ async def test_a_busy_holder_never_keeps_an_idle_holder_alive(catalog, engines, 
     """Idle time is per control: the idle holder lapses on its own ttl while the busy one stays."""
     ts = _server()
     idle = await _start(ts, _pipeline(), user='user-a', ttl=120)
-    busy = await _start(ts, _pipeline(), user='user-b', ttl=60)
+    busy = await _start(ts, _copy(), user='user-a', ttl=60)
     assert idle.task is busy.task
 
     # The busy holder sends a request every 30s; the idle one sends none
@@ -615,7 +677,7 @@ async def test_a_busy_engine_outlives_a_patient_holder_and_stops_with_the_last(c
     """A holder lapses on its own clock while the engine is busy; the engine stops with the last hold."""
     ts = _server()
     patient = await _start(ts, _pipeline(), user='user-a', ttl=600)
-    busy = await _start(ts, _pipeline(), user='user-b', ttl=60)
+    busy = await _start(ts, _copy(), user='user-a', ttl=60)
     engine = busy.task
 
     # Busy for 1000s: the patient holder lapses at 600 on its own clock
@@ -658,7 +720,7 @@ async def test_a_zero_ttl_holder_outlives_a_lapsing_sibling(catalog, engines, cl
     """A ttl-0 control never expires by idle, even beside a holder that does."""
     ts = _server()
     forever = await _start(ts, _pipeline(), user='user-a', ttl=0)
-    brief = await _start(ts, _pipeline(), user='user-b', ttl=60)
+    brief = await _start(ts, _copy(), user='user-a', ttl=60)
 
     clock.advance(60_000)
     await ts._ttl_cycle()
@@ -719,7 +781,7 @@ async def test_a_data_request_is_activity_of_its_own_control_only(catalog, engin
     """A pipe request through one control restarts that control's clock and no other."""
     ts = _server()
     caller = await _start(ts, _pipeline(), user='user-a', ttl=60)
-    other = await _start(ts, _pipeline(), user='user-b', ttl=60)
+    other = await _start(ts, _copy(), user='user-a', ttl=60)
     engine = caller.task
     engine.wait_for_running = AsyncMock()
     engine._send_data = AsyncMock(return_value={'body': {'ok': True}})
@@ -818,7 +880,7 @@ async def test_concurrent_requests_after_a_stop_start_one_engine(catalog, engine
     """Concurrent restarters, through one control or several, attach to the one new engine."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a', ttl=3600)
-    b = await _start(ts, _pipeline(), user='user-b', ttl=3600)
+    b = await _start(ts, _copy(), user='user-a', ttl=3600)
     stopped = a.task
     await _idle_out(ts, clock)
 
@@ -896,7 +958,7 @@ async def test_a_failed_restart_leaves_the_control_dormant(catalog, engines, clo
 
 @pytest.mark.asyncio
 async def test_terminate_on_a_dormant_dev_control_means_gone(catalog, engines, clock):
-    """Stop means gone: a dormant @dev control is removed, its stopped engine is not stopped twice."""
+    """Stop means gone: a dormant @spec control is removed, its stopped engine is not stopped twice."""
     ts = _server()
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     engine = control.task
@@ -909,14 +971,14 @@ async def test_terminate_on_a_dormant_dev_control_means_gone(catalog, engines, c
 
 
 @pytest.mark.asyncio
-async def test_use_existing_restarts_a_dormant_control(catalog, engines, clock):
-    """Play with useExisting on a dormant control reuses the control and starts its engine."""
+async def test_a_spec_call_on_a_dormant_control_reuses_it_and_starts_its_engine(catalog, engines, clock):
+    """Play on a dormant control of the same identity answers with that control and starts its engine."""
     ts = _server()
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     stopped = control.task
     await _idle_out(ts, clock)
 
-    again = await _start(ts, _pipeline(), user='user-a', useExisting=True)
+    again = await _start(ts, _pipeline(), user='user-a')
 
     assert again is control
     assert control.task is not stopped and control.engine_state == 'running'
@@ -947,8 +1009,8 @@ def _lister(ts, user):
 
 
 def _listed(response) -> List[tuple]:
-    """The (token, engineState) pairs of an rrext_get_tasks response."""
-    return [(task['token'], task['engineState']) for task in response['body']['tasks']]
+    """The (address, engineState) pairs of an rrext_get_tasks response (the token slot is the control id)."""
+    return [(task['address'], task['engineState']) for task in response['body']['tasks']]
 
 
 @pytest.mark.asyncio
@@ -956,7 +1018,7 @@ async def test_a_crash_after_running_leaves_the_controls_dormant_and_restarts(ca
     """A crash after the running confirmation is a timer stop: holders stay, the next request restarts the key."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a', ttl=3600)
-    b = await _start(ts, _pipeline(), user='user-b', ttl=3600)
+    b = await _start(ts, _copy(), user='user-a', ttl=3600)
     crashed = a.task
     assert crashed.state is EngineState.RUNNING
 
@@ -1036,7 +1098,7 @@ async def test_an_operator_stop_never_restarts(catalog, engines):
 
 @pytest.mark.asyncio
 async def test_terminate_after_a_crash_still_means_gone(catalog, engines):
-    """Stop means gone: terminate on a crash-dormant @dev control removes it without a second stop."""
+    """Stop means gone: terminate on a crash-dormant @spec control removes it without a second stop."""
     ts = _server()
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     await _crash(control.task)
@@ -1083,7 +1145,7 @@ async def test_status_shows_starting_while_in_the_start_gate(catalog, engines, c
     """The status body reads 'starting' while a request waits in the gate for its stopped engine."""
     ts = _server()
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
-    other = await _start(ts, _pipeline(), user='user-b', ttl=3600)
+    other = await _start(ts, _copy(), user='user-a', ttl=3600)
     conn = SimpleNamespace(
         get_control=MagicMock(return_value=control),
         resolve_control_or_start=AsyncMock(return_value=control),
@@ -1231,161 +1293,293 @@ async def test_a_spec_that_cannot_be_keyed_is_refused_at_start(catalog, engines)
 
 
 @pytest.mark.asyncio
-async def test_a_repoint_whose_engine_never_confirms_running_is_rolled_back(catalog, engines, monkeypatch):
-    """Readiness is inside the rollback: the control stays on its still-running old engine; the replacement is stopped."""
-    catalog.discard('prompt')
-    ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
-    dev = await _start(ts, _pipeline(), user='user-a')
-    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
-    old_engine = dev.task
-    old_pipeline = dev.pipeline
-    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
-
-    conn = MagicMock()
-    conn._account_info = _account('user-a')
-    with pytest.raises(TimeoutError):
-        await ts.restart_task(
-            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
-            conn=conn,
-            wait_for_running=True,
-        )
-
-    assert dev.task is old_engine and deployed.task is old_engine
-    assert old_engine.holds == {dev.key: 0, deployed.key: 0} or set(old_engine.holds) == {dev.key, deployed.key}
-    assert dev.pipeline == old_pipeline
-    assert [reason for engine, reason in engines if engine is not old_engine] == ['repoint failed']
-    assert all(engine is not old_engine for engine, _ in engines), 'the old engine was never stopped'
-
-
-@pytest.mark.asyncio
-async def test_a_rolled_back_repoint_restores_the_declared_parameters(catalog, engines, monkeypatch):
-    """A submit during the readiness window cached views of the replacement's components; the rollback drops them."""
-    catalog.discard('prompt')
-    ts = _server()
-    exposed = {'tone': 'prompt_1.instructions'}
-    dev = await _start(ts, _pipeline(parameters=exposed), user='user-a')
-
-    async def resolve_then_fail(self):
-        # The window: the new pipeline is installed, a per-call submit resolves against it
-        dev.param_views['prompt_1'] = 'a view of the replacement'
-        raise TimeoutError('silent')
-
-    monkeypatch.setattr(TaskEngine, 'wait_for_running', resolve_then_fail)
-    conn = MagicMock()
-    conn._account_info = _account('user-a')
-    with pytest.raises(TimeoutError):
-        await ts.restart_task(
-            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
-            conn=conn,
-            wait_for_running=True,
-        )
-
-    assert dev.pipeline.get('parameters') == exposed
-    assert dev.parameters == exposed
-    assert dev.param_views == {}, 'no view of the replacement serves the restored pipeline'
-
-
-@pytest.mark.asyncio
-async def test_the_old_engine_survives_another_holder_leaving_during_readiness(catalog, engines, monkeypatch):
-    """The repointing control keeps its old hold through readiness: the other holder's terminate cannot stop the engine a rollback returns to."""
-    catalog.discard('prompt')
-    ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
-    dev = await _start(ts, _pipeline(), user='user-a')
-    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
-    old_engine = dev.task
-
-    async def leave_then_fail(self):
-        # The other holder terminates while the replacement is confirming
-        await ts.remove_task(deployed.key)
-        raise TimeoutError('silent')
-
-    monkeypatch.setattr(TaskEngine, 'wait_for_running', leave_then_fail)
-
-    conn = MagicMock()
-    conn._account_info = _account('user-a')
-    with pytest.raises(TimeoutError):
-        await ts.restart_task(
-            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
-            conn=conn,
-            wait_for_running=True,
-        )
-
-    assert dev.task is old_engine
-    assert set(old_engine.holds) == {dev.key}, 'the repointing control never let go of its old hold'
-    assert all(engine is not old_engine for engine, _ in engines), 'the old engine kept running'
-    assert [reason for engine, reason in engines if engine is not old_engine] == ['repoint failed']
-
-
-@pytest.mark.asyncio
-async def test_repoints_of_one_control_are_serialized_through_readiness(catalog, engines, monkeypatch):
-    """A second restart of the same control waits for the first transition, rollback included."""
-    catalog.discard('prompt')
-    ts = _server()
-    dev = await _start(ts, _pipeline(), user='user-a')
-    order: List[str] = []
-    gate = asyncio.Event()
-
-    async def slow_readiness(self):
-        order.append('first:in')
-        await gate.wait()
-        order.append('first:out')
-
-    monkeypatch.setattr(TaskEngine, 'wait_for_running', slow_readiness)
-    conn = MagicMock()
-    conn._account_info = _account('user-a')
-
-    first = asyncio.create_task(
-        ts.restart_task(
-            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}},
-            conn=conn,
-            wait_for_running=True,
-        )
-    )
-    await asyncio.sleep(0)
-    assert order == ['first:in']
-
-    # The second restart cannot enter until the first transition is final
-    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=lambda: order.append('second:ran')))
-    second = asyncio.create_task(
-        ts.restart_task(
-            {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='third draft')}},
-            conn=conn,
-            wait_for_running=True,
-        )
-    )
-    await asyncio.sleep(0)
-    assert order == ['first:in'], 'the second restart is waiting on the transition lock'
-
-    gate.set()
-    first_result, second_result = await asyncio.gather(first, second)
-    assert order == ['first:in', 'first:out', 'second:ran']
-    assert dev.pipeline['components'][1]['config']['instructions'] == 'third draft'
-
-
-@pytest.mark.asyncio
-async def test_a_restart_on_a_shared_engine_repoints_the_control(catalog, engines):
-    """The other holder keeps its engine unchanged; this control moves to the new spec's engine (plan 3.4)."""
-    catalog.discard('prompt')  # per-owner engine: the owner's dev run and @me deploy share it
+async def test_a_restart_is_a_successor_with_a_new_id_on_the_same_engine_when_the_shape_holds(catalog, engines):
+    """Plan 7.3: Play on an existing run terminates the control and creates its successor; the engine stays when the shape did."""
     ts = _server()
     deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
     dev = await _start(ts, _pipeline(), user='user-a')
     deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
     assert dev.task is deployed.task
-    old_engine = dev.task
+    engine = dev.task
 
     conn = MagicMock()
     conn._account_info = _account('user-a')
     result = await ts.restart_task(
-        {'arguments': {'token': dev.address, 'pipeline': _pipeline(instructions='second draft')}}, conn=conn
+        {'arguments': {'token': dev.control_id, 'pipeline': _pipeline(instructions='second draft')}}, conn=conn
     )
 
-    assert result['converged'] == 'repointed'
-    assert dev.task is not old_engine and deployed.task is old_engine
-    assert dev.task.holds == {dev.key} and old_engine.holds == {deployed.key}
+    successor = ts._task_control[result['token']]
+    assert successor is not dev and successor.control_id != dev.control_id
+    assert result['converged'] == 'none' and result['address'] == dev.address
+    assert dev.key not in ts._task_control
+    assert successor.task is engine and deployed.task is engine
+    assert engine.holds == {successor.key, deployed.key}
+    assert engines == [], 'the engine the successor holds was never stopped'
+    assert successor.pipeline['components'][1]['config']['instructions'] == 'second draft'
+    assert successor.config_hash != dev.config_hash
+
+
+@pytest.mark.asyncio
+async def test_a_restart_whose_shape_changed_moves_to_another_engine_and_stops_the_old_one_when_last(catalog, engines):
+    """A spec of another shape is another engine; the predecessor's hold goes through the hold rule."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    old_engine = dev.task
+    rewired = _pipeline()
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn)
+
+    successor = ts._task_control[result['token']]
+    assert result['converged'] == 'started'
+    assert successor.task is not old_engine and successor.task.holds == {successor.key}
+    assert engines == [(old_engine, 'restart')]
+    assert list(ts._engines) == [successor.task.engine_key]
+
+
+@pytest.mark.asyncio
+async def test_a_restart_whose_engine_never_confirms_running_leaves_the_predecessor_in_place(
+    catalog, engines, monkeypatch
+):
+    """A failed create puts the predecessor back as it was: its hold, its pipeline, its registration."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    old_engine = dev.task
+    old_pipeline = dev.pipeline
+    rewired = _pipeline()
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TaskError) as err:
+        await ts.restart_task(
+            {'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn, wait_for_running=True
+        )
+
+    assert err.value.code == TaskError.ENGINE_START_FAILED
+    assert ts._task_control[dev.key] is dev and dev.task is old_engine
+    assert old_engine.holds == {dev.key} and dev.pipeline == old_pipeline
+    assert [reason for engine, reason in engines if engine is not old_engine] == ['user']
+    assert all(engine is not old_engine for engine, _ in engines), 'the old engine was never stopped'
+    assert list(ts._engines) == [old_engine.engine_key]
+
+
+@pytest.mark.asyncio
+async def test_a_restart_keeps_the_other_holder_and_the_subscriptions(catalog, engines):
+    """The other holder keeps its engine unchanged; the monitors keyed by the project stay for the successor."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    dev = await _start(ts, _pipeline(), user='user-a')
+    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    old_engine = dev.task
+    rewired = _pipeline()
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+    watcher = MagicMock()
+    watcher._monitors = {'p.dev.user-a.docBrain.webhook_1': 4}
+    ts._connections = {1: watcher}
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn)
+
+    successor = ts._task_control[result['token']]
+    assert successor.task is not old_engine and deployed.task is old_engine
+    assert old_engine.holds == {deployed.key}
     assert engines == [], 'nothing was stopped for the other holder'
-    assert dev.pipeline['components'][1]['config']['instructions'] == 'second draft'
+    assert watcher._monitors == {'p.dev.user-a.docBrain.webhook_1': 4}
+
+
+@pytest.mark.asyncio
+async def test_a_restart_refuses_a_foreign_control_id(catalog, engines):
+    """Every verb that names a control id re-checks the caller (plan section 1)."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    conn = MagicMock()
+    conn._account_info = _account('user-b')
+
+    with pytest.raises(PermissionError):
+        await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': _pipeline()}}, conn=conn)
+    assert ts._task_control[dev.key] is dev and engines == []
+
+
+@pytest.mark.asyncio
+async def test_a_restart_carries_the_predecessors_deployment_epoch(catalog, engines):
+    """A deployment revoked since the predecessor registered refuses the successor; the predecessor is not restored."""
+    ts = _server()
+    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    run = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    old_engine = run.task
+    resolve_env = ts._resolve_control_env
+
+    async def revoked_during_setup(control):
+        # The kill switch lands while the successor is set up: the predecessor
+        # has already left the registry, so the release pass never saw it
+        await asyncio.sleep(0.05)  # a monotonic tick is 15 ms on Windows
+        ts._deployment_revoked[deployment] = time.monotonic()
+        return await resolve_env(control)
+
+    ts._resolve_control_env = revoked_during_setup
+
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    with pytest.raises(TaskError) as err:
+        await ts.restart_task(
+            {'arguments': {'token': run.control_id, 'pipeline': _pipeline(instructions='second draft')}}, conn=conn
+        )
+
+    assert (err.value.code, err.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'unpublished')
+    assert ts._task_control == {}, 'neither a successor nor the revoked predecessor is registered'
+    assert engines == [(old_engine, 'unpublished')], 'the predecessor was the last hold'
+
+
+@pytest.mark.asyncio
+async def test_a_failed_restart_keeps_the_predecessors_request_trees(catalog, engines, monkeypatch):
+    """The predecessor's open pipes keep their trace routing through a rollback; a commit forgets them."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    ts.trace_owners.claim('trace-1', dev.key, 7)
+    rewired = _pipeline()
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
+    with pytest.raises(TaskError):
+        await ts.restart_task(
+            {'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn, wait_for_running=True
+        )
+    assert ts._task_control[dev.key] is dev
+    assert ts.trace_owners.owner('trace-1').control_key == dev.key
+
+    monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock())
+    await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': rewired}}, conn=conn)
+    assert dev.key not in ts._task_control and ts.trace_owners.owner('trace-1') is None
+
+
+@pytest.mark.asyncio
+async def test_a_control_whose_engine_is_stopping_is_passed_over_not_reused(catalog, engines):
+    """An engine in teardown takes no new hold: a matching spec call creates the replacement on a new engine."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    stopping = a.task
+    stopping.state = EngineState.STOPPING
+
+    again = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+
+    assert again is not a and again.task is not stopping
+    # The stopping control stays registered: its terminal events are delivered
+    # through it, and the stop that began the teardown removes it afterwards
+    assert set(ts._task_control) == {a.key, again.key} and stopping.holds == {a.key}
+    assert again.task.is_live and again.task.holds == {again.key}
+
+
+@pytest.mark.asyncio
+async def test_a_restarts_predecessor_stays_registered_while_its_successor_is_set_up(catalog, engines):
+    """An event in flight still routes to the predecessor during the setup; the successor's lookup never answers with it."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a')
+    seen = {}
+    resolve_env = ts._resolve_control_env
+
+    async def during_setup(control):
+        # The successor's start is under way: the predecessor is still the
+        # registered control of its key, marked for the lookup to pass over
+        seen['registered'] = ts._task_control.get(dev.key) is dev
+        seen['restarting'] = dev.restarting
+        return await resolve_env(control)
+
+    ts._resolve_control_env = during_setup
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': _pipeline()}}, conn=conn)
+
+    assert seen == {'registered': True, 'restarting': True}
+    # The same pipeline restarted is a successor, never the predecessor reused
+    assert dev.key not in ts._task_control and list(ts._task_control) == [result['token']]
+    assert ts._task_control[result['token']] is not dev and result['converged'] == 'none'
+
+
+@pytest.mark.asyncio
+async def test_the_same_configuration_rewired_is_another_control_on_another_engine(catalog, engines):
+    """Reuse means the same configuration ON THE ENGINE OF THIS SHAPE: a wiring change is never served by the old control."""
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    rewired = _pipeline(instructions=['Be brief.'])
+    rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
+
+    b = await _start(ts, rewired, user='user-a')
+
+    assert b is not a and b.config_hash == a.config_hash and b.task is not a.task
+    assert len(ts._task_control) == 2 and len(ts._engines) == 2
+    # useExisting stays the explicit path onto the running spec, whatever it runs
+    request = {'command': 'execute', 'arguments': {'pipeline': rewired, 'useExisting': True}}
+    result = await ts.start_task(
+        request,
+        MagicMock(),
+        client_id='user-a',
+        user_id='user-a',
+        team_id='team-1',
+        org_id='org-1',
+        developer_id='acme',
+    )
+    assert result['reused'] is True and result['token'] in (a.control_id, b.control_id)
+
+
+@pytest.mark.asyncio
+async def test_concurrent_identical_launches_share_one_control(catalog, monkeypatch):
+    """Two identical launches that pass the lookup together are one control: the gate rechecks before registering."""
+    release = asyncio.Event()
+
+    async def held_start(self):
+        await release.wait()
+        self.state = EngineState.STARTING
+        self._confirm_running()
+
+    monkeypatch.setattr(TaskEngine, 'start_task', held_start)
+    ts = _server()
+    arrivals: List[str] = []
+    try_start_lock = ts._engines.try_start_lock
+
+    async def counting(key):
+        arrivals.append(key)
+        return await try_start_lock(key)
+
+    monkeypatch.setattr(ts._engines, 'try_start_lock', counting)
+
+    # Another project of the same shape holds the engine's start gate while
+    # the two identical launches pass the lookup (no control of theirs exists
+    # yet) and queue behind it; only then is the gate released
+    holder = asyncio.ensure_future(_start(ts, _copy(), user='user-a'))
+    launches = [asyncio.ensure_future(_start(ts, _pipeline(), user='user-a')) for _ in range(2)]
+    while len(arrivals) < 3:
+        await asyncio.sleep(0)
+    release.set()
+    other, *controls = await asyncio.gather(holder, *launches)
+
+    assert len({id(c) for c in controls}) == 1 and set(ts._task_control) == {other.key, controls[0].key}
+    assert controls[0].task is other.task and other.task.holds == {other.key, controls[0].key}
+
+
+@pytest.mark.asyncio
+async def test_the_hosted_policy_holds_for_a_control_attaching_to_a_warm_engine(catalog, engines, monkeypatch):
+    """A config the hosted policy refuses never holds an engine, warm or cold: the engine's own start is not the gate."""
+    monkeypatch.setattr(task_engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(
+        task_engine,
+        'saas_pipeline_violation',
+        lambda pipeline, *args, **kwargs: (
+            'stdio' if pipeline['components'][1]['config'].get('instructions') == ['stdio'] else None
+        ),
+    )
+    ts = _server()
+    a = await _start(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+
+    with pytest.raises(ValueError, match='stdio'):
+        await _start(ts, _pipeline(instructions=['stdio']), user='user-a')
+    assert list(ts._task_control) == [a.key] and a.task.holds == {a.key}
 
 
 @pytest.mark.asyncio
@@ -1467,12 +1661,36 @@ def _conn(sys_permissions):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize('sys_permissions', [[], ['sys.app']])
-async def test_engine_stop_requires_sys_admin(sys_permissions):
-    """Only sys.admin / internal may stop an engine."""
+async def test_engine_stop_of_a_shared_engine_requires_sys_admin(sys_permissions):
+    """A key without an owner (none exist before C.25) is an operator's only."""
     conn = _conn(sys_permissions)
     with pytest.raises(PermissionError):
         await TaskCommands.on_rrext_engine_stop(conn, {'arguments': {'engineKey': 'abc'}})
     conn._server.stop_engine.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_an_owner_may_stop_the_engine_their_key_names(sys_permissions=()):
+    """Plan 7.1: the owner stops their own (shape, owner) engine; another owner's is refused."""
+    conn = _conn(list(sys_permissions))
+    await TaskCommands.on_rrext_engine_stop(conn, {'arguments': {'engineKey': 'abc:ops-1', 'reason': 'gpu'}})
+    conn._server.stop_engine.assert_awaited_once_with('abc:ops-1', 'gpu')
+
+    conn.verify_team_permission = MagicMock(side_effect=PermissionError('no permissions for team'))
+    with pytest.raises(PermissionError):
+        await TaskCommands.on_rrext_engine_stop(conn, {'arguments': {'engineKey': 'abc:someone-else'}})
+    conn.verify_team_permission.assert_called_once_with('someone-else', 'task.control')
+    assert conn._server.stop_engine.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_team_member_with_task_control_may_stop_the_teams_engine():
+    """A team-owned engine's key names the team: task.control on it is the owner case."""
+    conn = _conn([])
+    conn.verify_team_permission = MagicMock()
+    await TaskCommands.on_rrext_engine_stop(conn, {'arguments': {'engineKey': 'abc:team-1'}})
+    conn.verify_team_permission.assert_called_once_with('team-1', 'task.control')
+    conn._server.stop_engine.assert_awaited_once_with('abc:team-1', 'ops')
 
 
 @pytest.mark.asyncio
@@ -1504,13 +1722,13 @@ async def test_every_holder_is_told_engine_unavailable_once(catalog, engines):
     """Each holder's next request gets TASK_ENGINE_UNAVAILABLE; the one after re-resolves."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a')
-    b = await _start(ts, _pipeline(), user='user-b')
+    b = await _start(ts, _copy(), user='user-a')
     key = a.task.engine_key
 
     await ts.stop_engine(key, 'maintenance')
     assert engines == [(a.task, 'maintenance')]
 
-    for control, user in ((a, 'user-a'), (b, 'user-b')):
+    for control, user in ((a, 'user-a'), (b, 'user-a')):
         with pytest.raises(TaskError) as told:
             ts.resolve_control(control.address, _account(user), 'task.data')
         assert told.value.code == TaskError.ENGINE_UNAVAILABLE
@@ -1568,6 +1786,33 @@ def test_build_task_round_trips_parameters_and_names_the_engine(monkeypatch, tmp
     assert task['config']['pipelineTraceLevel'] == 'full'
 
 
+@pytest.mark.asyncio
+async def test_the_open_config_follows_the_task_files_component_order(catalog, engines, monkeypatch, tmp_path):
+    """One stack order (engine_key.stack_order): a spec listing its components out of that order still gets
+    _caller.config[i] for the component the engine finds at pipeline.components[i] of the task file.
+    """
+    monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
+    ts = _server()
+    reversed_spec = _pipeline(instructions=['dry'])
+    reversed_spec['components'].reverse()
+    assert [c['id'] for c in reversed_spec['components']] == ['prompt_1', 'webhook_1']
+
+    control = await _start(ts, reversed_spec, user='user-a')
+    written = control.task._build_task(control.pipeline)['config']['pipeline']['components']
+
+    assert [c['id'] for c in written] == ['prompt_1', 'webhook_1']
+    assert all(c['config'] == {} for c in written)
+    config = control.caller_config()
+    assert config == control.config and len(config) == len(written)
+    # Index 0 is prompt_1 in both: its stored config carries the instructions, the webhook's is empty
+    assert config == [{'instructions': ['dry']}, {}]
+    # Another control of the same owner listing the components the other way round shares the engine and
+    # indexes its config the same way
+    other = await _start(ts, _pipeline(project_id='docBrainCopy', instructions=['wet']), user='user-a')
+    assert other.task is control.task
+    assert other.caller_config() == [{'instructions': ['wet']}, {}]
+
+
 def test_the_task_file_carries_no_trace_epoch(monkeypatch, tmp_path):
     """The engine's trace counter is a bare per-launch uint64; the launch is named by EaaS, never seeded into the engine (plan 7.4)."""
     monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
@@ -1612,8 +1857,8 @@ def test_a_cross_user_engine_names_no_user(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_start_task_builds_a_cross_user_engine_without_a_user_or_env(catalog, engines):
-    """The shared engine is nobody's: no client id, no caller env, default trace off."""
+async def test_start_task_builds_an_owner_qualified_engine_with_the_owners_env(catalog, engines):
+    """Every engine of this PR is its owner's: the owner's client id, env source and trace level."""
     ts = _server()
     env_source = AsyncMock(return_value={'ROCKETRIDE_TONE': 'secret-of-a'})
     request = {'command': 'execute', 'arguments': {'pipeline': _pipeline(), 'pipelineTraceLevel': 'full'}}
@@ -1630,11 +1875,9 @@ async def test_start_task_builds_a_cross_user_engine_without_a_user_or_env(catal
     (control,) = ts._task_control.values()
     engine = control.task
 
-    assert engine.shared and engine.client_id == ''
-    assert engine._pipelineTraceLevel == 'none'
-    assert control.trace_level == 'full'
-    assert await engine._env_source() == {}
-    env_source.assert_not_awaited()
+    assert not engine.shared and engine.client_id == 'user-a'
+    assert engine._pipelineTraceLevel == 'full' and control.trace_level == 'full'
+    assert engine._env_source is env_source
 
 
 def test_metrics_accumulate_per_trace_for_their_own_control():
@@ -1788,14 +2031,14 @@ def _caller(
 
 @pytest.mark.asyncio
 async def test_play_creates_the_dev_control_and_a_name_call_attaches_to_it(catalog, engines, deployments):
-    """@dev is attach-only: a name finds the caller's Play'd control and starts nothing."""
+    """@spec is attach-only: a name finds the caller's Play'd control and starts nothing."""
     ts = _server()
     deployments.deploy('user~user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
 
     resolved = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
 
-    assert resolved is played and resolved.rung == 'dev'
+    assert resolved is played and resolved.rung == 'spec'
     assert list(ts._task_control) == [played.key]
 
 
@@ -1809,7 +2052,7 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
 
     control = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
 
-    assert control.rung == 'me' and control.key == f'me.user-a.{ADDRESS}'
+    assert control.rung == 'me' and control.index_key == f'me.user-a.{ADDRESS}'
     assert (control.run_kind, control.owner_kind, control.owner_id) == ('deploy', 'user', 'user-a')
     assert control.trigger == 'submit'
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='acme.docBrain')
@@ -1827,7 +2070,7 @@ async def test_without_a_personal_deployment_the_team_answers(catalog, engines, 
 
     control = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
 
-    assert control.rung == 'team' and control.key == f'team.team-1.{ADDRESS}'
+    assert control.rung == 'team' and control.index_key == f'team.team-1.{ADDRESS}'
     assert (control.owner_kind, control.owner_id) == ('team', 'team-1')
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.docBrain')
 
@@ -1837,7 +2080,7 @@ async def test_without_a_personal_deployment_the_team_answers(catalog, engines, 
 
 @pytest.mark.asyncio
 async def test_a_non_owner_falls_past_the_owners_play_to_the_publication(catalog, engines, deployments):
-    """Nobody can name another user's control: user-b reaches the team publication, not user-a's @dev."""
+    """Nobody can name another user's control: user-b reaches the team publication, not user-a's @spec."""
     ts = _server()
     deployments.deploy('team-1')
     played = await _start(ts, _pipeline(), user='user-a')
@@ -1845,8 +2088,8 @@ async def test_a_non_owner_falls_past_the_owners_play_to_the_publication(catalog
     control = await ts.resolve_or_start(ADDRESS, _caller('user-b'), 'task.data')
 
     assert control is not played and control.rung == 'team'
-    # Identical content: the publication shares the Play'd engine
-    assert control.task is played.task
+    # Identical content, another owner (the team): another engine in this PR
+    assert control.task is not played.task
 
 
 @pytest.mark.asyncio
@@ -1858,7 +2101,7 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
 
     control = await ts.resolve_or_start(ADDRESS, stranger, 'task.data')
 
-    assert control.rung == 'public' and control.key == f'public.user-z.{ADDRESS}'
+    assert control.rung == 'public' and control.index_key == f'public.user-z.{ADDRESS}'
     assert control.address == ADDRESS
     assert (control.owner_kind, control.owner_id, control.userId) == ('user', 'user-z', 'user-z')
     assert (control.orgId, control.teamId) == ('org-2', 'team-z')
@@ -1885,7 +2128,7 @@ async def test_public_needs_ready_and_an_enabled_binding(catalog, engines, deplo
 
 @pytest.mark.asyncio
 async def test_a_scoped_key_skips_dev_and_starts_at_me(catalog, engines, deployments):
-    """A production webhook key never lands on the owner's Play'd run."""
+    """A production webhook key never lands on the owner's Play'd run (@spec is skipped)."""
     ts = _server()
     deployments.deploy('user~user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
@@ -1902,10 +2145,10 @@ async def test_a_scoped_key_skips_dev_and_starts_at_me(catalog, engines, deploym
 
 @pytest.mark.asyncio
 async def test_not_registered_lists_the_rungs_actually_tried(catalog, engines, deployments):
-    """not_found names the rungs walked; a scoped key never tried @dev."""
+    """not_found names the rungs walked; a scoped key never tried @spec."""
     ts = _server()
     for account, rungs in (
-        (_caller('user-a'), ['@dev', '@me', '@team', '@public']),
+        (_caller('user-a'), ['@spec', '@me', '@team', '@public']),
         (_caller('user-a', endpoints=[ADDRESS]), ['@me', '@team', '@public']),
     ):
         with pytest.raises(TaskError) as err:
@@ -2040,22 +2283,23 @@ def test_a_resolve_touches_constant_entries_however_large_the_registry():
             developer_id='acme', project_id=f'pipe{n}', source='webhook_1', userId=f'user-{n % 97}', teamId='team-1'
         )
         other.address = f'acme.pipe{n}.webhook_1'
-        other.key = f'dev.{other.userId}.{other.address}'
+        other.control_id = other.key = f'{n:032x}'
         registry[other.key] = other
     mine = TaskControl(developer_id='acme', project_id='docBrain', source='webhook_1', userId='user-a', teamId='team-1')
-    mine.address, mine.key = ADDRESS, f'dev.user-a.{ADDRESS}'
+    mine.address = ADDRESS
+    mine.control_id = mine.key = 'a' * 32
     mine.task = MagicMock()
     mine.task.is_task_complete.return_value = False
     mine.task.dormant_reason = None
     registry[mine.key] = mine
     teams = tuple(f'team-{n}' for n in range(5))
 
-    # A hit on @dev: one exact-key probe
+    # A hit on @spec: one name-index probe
     registry.probes = 0
     assert ts.resolve_control(ADDRESS, _caller('user-a', teams=teams), 'task.data') is mine
     assert registry.probes == 1
 
-    # A miss on every rung, twice (live, then registered): dev + me + teams + public per walk
+    # A miss on every rung, twice (live, then registered): spec + me + teams + public per walk
     registry.probes = 0
     with pytest.raises(TaskError):
         ts.resolve_control('acme.nowhere.webhook_1', _caller('user-a', teams=teams), 'task.data')
@@ -2148,3 +2392,40 @@ def test_engine_sharing_names_the_decision(catalog):
     unknown = _pipeline()
     unknown['components'][1]['provider'] = 'no_such_node'
     assert engine_sharing(unknown) is None
+
+
+@pytest.mark.asyncio
+async def test_a_restart_releases_the_engine_the_predecessor_holds_at_commit(catalog, engines, clock):
+    """A request on the dormant predecessor during the setup moves its hold; the commit releases THAT hold, not the stale one."""
+    ts = _server()
+    dev = await _start(ts, _pipeline(), user='user-a', ttl=3600)
+    stopped = dev.task
+    await _idle_out(ts, clock)
+    assert dev.dormant
+    resolve_env = ts._resolve_control_env
+    moved = {}
+
+    async def during_setup(control):
+        # An id-based request reaches the dormant predecessor while its
+        # successor is being set up: ensure_engine starts the key again and
+        # the predecessor's hold moves onto the replacement engine
+        if not moved:
+            moved['engine'] = await ts.ensure_engine(dev)
+            assert dev.task is moved['engine'] and moved['engine'] is not stopped
+        return await resolve_env(control)
+
+    ts._resolve_control_env = during_setup
+    conn = MagicMock()
+    conn._account_info = _account('user-a')
+    result = await ts.restart_task({'arguments': {'token': dev.control_id, 'pipeline': _pipeline()}}, conn=conn)
+
+    successor = ts._task_control[result['token']]
+    replacement = moved['engine']
+    assert dev.key not in ts._task_control
+    # The successor shares the replacement engine; the predecessor's hold on
+    # it is gone, so the successor's terminate is the last hold
+    assert successor.task is replacement
+    assert replacement.holds == {successor.key}
+    assert stopped.holds == frozenset()
+    await ts.stop_task(successor.key)
+    assert (replacement, 'user') in engines

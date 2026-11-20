@@ -24,16 +24,20 @@
 CallerStamp: the ONE mint point of the per-binding caller context (plan 5.3).
 
 Every data request (pipe open/write/close, tool) that EaaS forwards to an
-engine carries ``_caller``: who is calling, through which control, with which
-per-call parameters, environment, trace level and request id. Nodes read it
-through ``self.settings`` and nothing else, so it is the whole trust boundary
-between a client and the engine (plan 0 S2):
+engine carries ``_caller``: who is calling, through which control (its
+``controlId`` on every subcommand; on the frame that STARTS a binding, the
+OPEN and a standalone ``tool`` call naming no pipe, its resolved ``config``
+by stack index, from which the engine builds that control's IGlobal set), with
+which per-call parameters, environment, trace level and request id. Nodes
+read it through ``self.settings`` and nothing else, so it is the whole trust
+boundary between a client and the engine (plan 0 S2, 5.3):
 
-- STRIP first: every reserved key a client sent (``_caller``, ``_ctx``) is
-  deleted from the request's ``arguments``, at the top level AND inside the
-  object info, on EVERY subcommand. The engine cannot tell a server-set key
-  from a client-set one, so nothing identity-shaped is ever read from client
-  arguments; a merge (``setdefault``) would let the client win.
+- STRIP first: every reserved key a client sent (``_caller``, ``_ctx``,
+  ``config``, ``controlId``) is deleted from the request's ``arguments``, at
+  the top level AND inside the object info, on EVERY subcommand. The engine
+  cannot tell a server-set key from a client-set one, so nothing
+  identity-shaped is ever read from client arguments; a merge
+  (``setdefault``) would let the client win.
 - Then INJECT: ``_caller`` is set from the request's ``AccountInfo`` and the
   resolved ``TaskControl``, never from the request.
 
@@ -58,8 +62,34 @@ if TYPE_CHECKING:
 
 # ==== Constants ===============================================================
 
-#: The argument keys only the server may set.
-RESERVED_KEYS = ('_caller', '_ctx')
+#: The argument keys only the server may set (plan 5.3): the context, the
+#: forwarded context, the control's config and its id.
+RESERVED_KEYS = ('_caller', '_ctx', 'config', 'controlId')
+
+#: The subcommands that may start a binding: their ``_caller`` carries the
+#: control's config (the ``tool`` one only when it names no pipe).
+OPEN_SUBCOMMAND = 'open'
+TOOL_SUBCOMMAND = 'tool'
+
+
+def carries_config(subcommand: Optional[str], pipe_id: Any) -> bool:
+    """
+    Whether a frame starts a binding and so carries the control's config (plan 5.3, C.22).
+
+    The OPEN does; a standalone ``tool`` call (no ``pipeId``) is its own
+    binding and is the control's first frame on the engine as often as not,
+    so it does too; write/close/cancel and a ``tool`` call on an open pipe
+    carry the control id alone.
+
+    Args:
+        subcommand: The frame kind.
+        pipe_id: The slot the frame names, or None.
+
+    Returns:
+        True for an open or a standalone tool call.
+    """
+    return subcommand == OPEN_SUBCOMMAND or (subcommand == TOOL_SUBCOMMAND and pipe_id is None)
+
 
 #: The ``conn_id`` prefix of a connection the server itself made.
 INTERNAL_CONN_PREFIX = 'internal:'
@@ -122,6 +152,8 @@ def mint(
     *,
     correlation_id: str,
     params: Optional[Mapping[str, Mapping[str, Any]]] = None,
+    subcommand: Optional[str] = None,
+    pipe_id: Any = None,
 ) -> Dict[str, Any]:
     """
     The ``_caller`` context of one request through ``control`` (plan 5.3 item 1).
@@ -131,12 +163,22 @@ def mint(
         control: The control the request resolved to.
         correlation_id: The server-minted request id (the open's; its frames reuse it).
         params: The admitted per-call params, per node (``{nodeId: {configKey: value}}``).
+        subcommand: The frame kind.
+        pipe_id: The slot the frame names, or None for a frame that starts its own binding.
 
     Returns:
-        ``{userId, teamId, orgId, address, rung, params, env, traceLevel, correlationId}``.
+        ``{controlId, userId, teamId, orgId, address, rung, params, env,
+        traceLevel, correlationId}``, plus ``config`` (the control's
+        component config by stack index as the spec stores it, expanded for
+        this control; the engine resolves it) on the frames that start a
+        binding (``carries_config``): the open and a standalone tool call;
+        write/close/cancel and an attached tool call carry the control id
+        alone.
     """
     organization = getattr(account_info, 'organization', None) or {}
-    return {
+    stamp: Dict[str, Any] = {
+        # Through which control: the handle the engine keys its IGlobal set by
+        'controlId': control.control_id,
         # Who: the authenticated account, never a client field
         'userId': getattr(account_info, 'userId', '') or '',
         # The team whose environment applies (the answering team, a key's
@@ -155,6 +197,11 @@ def mint(
         'traceLevel': control.trace_level,
         'correlationId': correlation_id,
     }
+    # The frame that starts a binding builds the control's IGlobal set: its
+    # config rides it
+    if carries_config(subcommand, pipe_id):
+        stamp['config'] = control.caller_config()
+    return stamp
 
 
 def prepare(
@@ -187,5 +234,12 @@ def prepare(
     # Step 2: STRIP what the client sent, THEN set the server's context; the
     # order is the trust boundary (a merge would let the client win)
     prepared = strip_reserved(arguments)
-    prepared['_caller'] = mint(conn._account_info, control, correlation_id=correlation_id, params=params)
+    prepared['_caller'] = mint(
+        conn._account_info,
+        control,
+        correlation_id=correlation_id,
+        params=params,
+        subcommand=arguments.get('subcommand'),
+        pipe_id=arguments.get('pipeId'),
+    )
     return prepared

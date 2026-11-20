@@ -117,7 +117,7 @@ async def release_deployment_holds(server: Any, org_id: str, team_id: str, proje
     The publisher's kill switch (plan 7.2): each control that resolved
     through the deployment drops its hold, and an engine stops once nobody
     holds it. A hold of a control that did not resolve through it (the
-    owner's own @dev run of identical content) keeps its engine. Any other
+    owner's own @spec run of identical content) keeps its engine. Any other
     action releases nothing. A failure is logged and never fails the state
     change that triggered it, like every deploy event.
 
