@@ -192,6 +192,24 @@ def test_the_mock_enforces_the_result_window(size):
         assert client.search(index=_INDEX, body={'size': size})['hits']['hits'] == []
 
 
+@pytest.mark.parametrize(
+    'must',
+    [
+        [{'term': {'meta.objectId': 'o1'}}],
+        {'term': {'meta.objectId': 'o1'}},
+    ],
+    ids=['list', 'single-clause'],
+)
+def test_the_mock_takes_bool_must_as_a_list_or_a_single_clause(must):
+    """Elasticsearch accepts bool.must as a list of clauses or as one clause; both match the same documents."""
+    es_mock._store[_INDEX] = _docs('o1', 2) + _docs('o2', 3)
+    body = {'query': {'bool': {'must': must}}}
+
+    hits = es_mock.Elasticsearch().search(index=_INDEX, body=body)['hits']['hits']
+
+    assert sorted(hit['_id'] for hit in hits) == ['o1-0-0', 'o1-1-0']
+
+
 def test_the_mock_ignores_clauses_it_does_not_model():
     """A match or knn query still sees every document, as before the mock applied filters."""
     es_mock._store[_INDEX] = _docs('o1', 3)

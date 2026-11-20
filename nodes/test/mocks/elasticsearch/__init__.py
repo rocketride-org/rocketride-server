@@ -133,11 +133,16 @@ class Elasticsearch:
                 f'[index.max_result_window] index level setting.'
             )
 
+        # bool.must is a list of clauses or, as Elasticsearch also accepts, a single clause
+        must = body.get('query', {}).get('bool', {}).get('must', [])
+        if isinstance(must, dict):
+            must = [must]
+
         docs = _store.get(index, [])
         hits = []
         for i, d in enumerate(docs):
             src = d.get('_source', {})
-            if not all(_matches(src, clause) for clause in body.get('query', {}).get('bool', {}).get('must', [])):
+            if not all(_matches(src, clause) for clause in must):
                 continue
             hits.append(
                 {
