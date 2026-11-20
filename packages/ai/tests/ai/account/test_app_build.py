@@ -608,6 +608,63 @@ async def test_job_drift_fails_reasoned(monkeypatch, build_store, toolchain):
     assert 'react 18.2.0 -> 18.3.1' in (home / 'build.log').read_text(encoding='utf-8')
 
 
+_SCAFFOLD_SHELL_SPEC = 'file:../../.rocketride/shell/shell.tgz'
+_SCAFFOLD_RR_SPEC = 'file:../../.rocketride/client/rocketride.tgz'
+
+_SCAFFOLD_LOCK = f"""
+lockfileVersion: '9.0'
+importers:
+  apps/brandy-ui:
+    dependencies:
+      react:
+        specifier: ^18.2.0
+        version: 18.2.0
+      rocketride:
+        specifier: {_SCAFFOLD_RR_SPEC}
+        version: file:.rocketride/client/rocketride.tgz
+      shell:
+        specifier: {_SCAFFOLD_SHELL_SPEC}
+        version: file:.rocketride/shell/shell.tgz
+packages:
+  'shell@file:.rocketride/shell/shell.tgz':
+    resolution: {{tarball: file:.rocketride/shell/shell.tgz}}
+  'rocketride@file:.rocketride/client/rocketride.tgz':
+    resolution: {{tarball: file:.rocketride/client/rocketride.tgz}}
+"""
+
+
+@pytest.mark.parametrize('with_lock', [False, True], ids=['no-lockfile', 'packed-lockfile'])
+@pytest.mark.asyncio
+async def test_job_builds_scaffolded_app_with_in_workspace_file_specs(monkeypatch, build_store, toolchain, with_lock):
+    """The scaffold declares its platform packages as
+    ``file:../../.rocketride/...`` from ``apps/<name>``. That spec stays inside
+    the workspace, so a whole build (every materialize gate, including the
+    lockfile path check when a lock records it) must reach ``ok`` rather than
+    stop at materialize as an out-of-tree path.
+    """
+    zip_bytes = _app_source_zip(with_lock=with_lock, lock_text=_SCAFFOLD_LOCK if with_lock else '')
+    src = io.BytesIO(zip_bytes)
+    out = io.BytesIO()
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(out, 'w') as zout:
+        for item in zin.namelist():
+            data = zin.read(item)
+            if item == 'apps/brandy-ui/package.json':
+                pkg = json.loads(data)
+                pkg['dependencies'].update({'shell': _SCAFFOLD_SHELL_SPEC, 'rocketride': _SCAFFOLD_RR_SPEC})
+                data = json.dumps(pkg)
+            zout.writestr(item, data)
+
+    rail = _FakeRail(out.getvalue(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+
+    worker = AppBuildWorker(server=None)
+    assert await worker._run_job('org1', 'acme.brandy', 1) is False
+    assert rail.stamps[-1]['status'] == 'ok', rail.stamps[-1]
+
+
 @pytest.mark.asyncio
 async def test_job_infra_failure_requeues_then_exhausts(monkeypatch, build_store, toolchain):
     """A platform-flavored failure requeues (attempt 1 -> 2), then lands
