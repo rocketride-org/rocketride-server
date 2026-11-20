@@ -209,13 +209,15 @@ or a failover does not fail on a dead connection. What is bounded in time, and
 what is not:
 
 - **Opening a connection**, handshake and authentication included: each attempt
-  gives up after `connect_timeout` seconds (default 5, at most 60). An attempt that
+  gives up after `connect_timeout` seconds per host or IP address (default 5, at most 60;
+  a hostname that resolves to several addresses can take that long for each one). An attempt that
   fails because the server is unreachable or not ready (connection refused, timed
   out, the pooler at its client limit or unable to reach its backend, a user,
   role, database or server at its connection limit, the database starting up) is
   retried with exponential backoff and jitter, at most `connect_retries` attempts
   in total (default 3, at most 10) within `connect_retry_budget` seconds (default
-  10, at most 60), so one connect takes at most the budget plus one `connect_timeout`. A bad
+  10, at most 60). The budget is checked between attempts, not during one, so one connect
+  can run past it by a single attempt's duration. A bad
   role, password or database is reported at once, even when it comes back beside a
   refused address from a multi-host DSN. `connect_timeout` set here takes precedence
   over one written in the connection URL.

@@ -1104,7 +1104,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # holds the statement for the OS TCP timeout (minutes).
         from ai.common.database.connect_retry import (
             PING_WATCHDOG_SUPPORTED,
+            install_clickhouse_connect_retry,
             install_connect_retry,
+            install_mysql_handshake_timeout,
             install_ping_watchdog,
             network_settings_from_config,
             policy_from_config,
@@ -1122,7 +1124,16 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         )
         # Retry only the opening of a connection, never a statement: nothing has
         # been sent when an attempt is repeated, so no write can be duplicated.
-        install_connect_retry(self.engine, policy_from_config(raw))
+        if self.engine.dialect.name in ('mysql', 'mariadb'):
+            # The handshake is bounded by read/write timeouts that must not outlive it.
+            install_mysql_handshake_timeout(self.engine)
+        retry_policy = policy_from_config(raw)
+        if self.engine.dialect.name == 'clickhouse':
+            # clickhouse-driver opens its TCP connection on the first execute, not in
+            # dialect.connect: retry that transport step (before anything is sent).
+            install_clickhouse_connect_retry(self.engine, retry_policy)
+        else:
+            install_connect_retry(self.engine, retry_policy)
         if self.engine.dialect.name == 'postgresql' and PING_WATCHDOG_SUPPORTED:
             # Bound the pre-ping check itself: TCP settings cannot detect a pooler that
             # keeps acknowledging but stopped answering, and libpq has no read timeout.

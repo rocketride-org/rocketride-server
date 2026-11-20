@@ -51,7 +51,9 @@ import ai.common.database.db_global_base as db_global_base_module
 from ai.common.database.connect_retry import (
     ConnectRetryPolicy,
     connect_timeout_args,
+    install_clickhouse_connect_retry,
     install_connect_retry,
+    install_mysql_handshake_timeout,
     install_ping_watchdog,
     is_transient_connect_error,
     network_settings_from_config,
@@ -167,6 +169,25 @@ def test_the_time_budget_stops_the_retries_before_the_attempt_limit():
     assert engine.connects < 50
     # No wait was taken that would carry the total past the budget.
     assert clock.now < 1.0
+
+
+def test_no_connection_starts_after_a_sleep_that_overran_the_budget():
+    """A wait that returned late (a loaded host) must not be followed by one more attempt past the budget."""
+    clock = _Clock()
+    engine, _ = _engine(
+        clock,
+        attempts=5,
+        budget=1.0,
+        base_delay=0.25,
+        max_delay=0.25,
+        sleep=lambda seconds: clock.sleep(seconds + 5.0),  # the sleep itself overruns the budget
+    )
+    engine.script = [sqlite3.OperationalError(REFUSED)] * 10
+
+    with pytest.raises(OperationalError):
+        engine.connect()
+
+    assert engine.connects == 1  # no second attempt after the overrunning wait
 
 
 def test_one_attempt_means_no_retry():
@@ -319,8 +340,8 @@ def test_config_values_are_read_and_bad_ones_fall_back_to_the_defaults():
 
 def test_the_connect_timeout_applies_to_postgres_and_mysql_only():
     assert connect_timeout_args('postgresql', 5) == {'connect_timeout': 5}
-    assert connect_timeout_args('mysql', 7.4) == {'connect_timeout': 7}
-    assert connect_timeout_args('mariadb', 5) == {'connect_timeout': 5}
+    assert connect_timeout_args('mysql', 7.4) == {'connect_timeout': 7, 'read_timeout': 7, 'write_timeout': 7}
+    assert connect_timeout_args('mariadb', 5) == {'connect_timeout': 5, 'read_timeout': 5, 'write_timeout': 5}
     assert connect_timeout_args('sqlite', 5) == {}
     assert connect_timeout_args('clickhouse', 5) == {}
 
@@ -408,7 +429,7 @@ def test_begin_global_takes_the_connect_and_network_settings_from_the_node_confi
 def test_the_mysql_engine_gets_a_connect_timeout_and_no_postgres_options(monkeypatch):
     _, seen = _begin(monkeypatch, {'table': 'leases'}, url='mysql+pymysql://u:p@127.0.0.1:3306/db')
 
-    assert seen['kwargs']['connect_args'] == {'connect_timeout': 5}
+    assert seen['kwargs']['connect_args'] == {'connect_timeout': 5, 'read_timeout': 5, 'write_timeout': 5}
 
 
 @pytest.mark.parametrize('libpq, has_tcp_user_timeout', [(110000, False), (120000, True), (160000, True)])
@@ -475,10 +496,34 @@ def test_the_abort_ignores_a_connection_with_no_descriptor():
     _abort_connection(types.SimpleNamespace())  # no fileno: nothing to shut down, and no error
 
 
-def test_a_ping_that_overruns_is_aborted_and_fails():
+class _Handle:
+    """Stands in for the duplicated socket the ping takes before it arms the watchdog."""
+
+    def __init__(self, connection):
+        self.connection = connection
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def _fake_duplicates(monkeypatch):
+    """Patch the duplicate/abort seams; return (handles taken, handles shut down)."""
+    taken, aborted = [], []
+
+    def duplicate(connection):
+        handle = _Handle(connection)
+        taken.append(handle)
+        return handle
+
+    monkeypatch.setattr(connect_retry_module, '_duplicate_socket', duplicate)
+    monkeypatch.setattr(connect_retry_module, '_abort_socket', aborted.append)
+    return taken, aborted
+
+
+def test_a_ping_that_overruns_is_aborted_and_fails(monkeypatch):
     engine = create_engine('sqlite://')
     released = threading.Event()
-    aborted = []
 
     def stuck_ping(dbapi_connection):
         if not released.wait(5):
@@ -487,39 +532,58 @@ def test_a_ping_that_overruns_is_aborted_and_fails():
 
     engine.dialect.do_ping = stuck_ping
     install_ping_watchdog(engine, 0.2)
+    taken, aborted = _fake_duplicates(monkeypatch)
+    monkeypatch.setattr(connect_retry_module, '_abort_socket', lambda handle: (aborted.append(handle), released.set()))
 
-    def fake_abort(dbapi_connection):
-        aborted.append(dbapi_connection)
-        released.set()
+    started = time.monotonic()
+    with pytest.raises(sqlite3.OperationalError, match='closed the connection'):
+        engine.dialect.do_ping(object())
+    elapsed = time.monotonic() - started
 
-    original = connect_retry_module._abort_connection
-    connect_retry_module._abort_connection = fake_abort
-    try:
-        started = time.monotonic()
-        with pytest.raises(sqlite3.OperationalError, match='closed the connection'):
-            engine.dialect.do_ping(object())
-        elapsed = time.monotonic() - started
-    finally:
-        connect_retry_module._abort_connection = original
-
-    assert len(aborted) == 1
+    assert aborted == taken and len(aborted) == 1
     assert elapsed < 2
 
 
-def test_a_ping_that_answers_in_time_is_left_alone():
+def test_a_ping_that_answers_in_time_is_left_alone(monkeypatch):
     engine = create_engine('sqlite://')
     engine.dialect.do_ping = lambda dbapi_connection: True
     install_ping_watchdog(engine, 5)
-    aborted = []
-    original = connect_retry_module._abort_connection
-    connect_retry_module._abort_connection = aborted.append
-    try:
-        assert engine.dialect.do_ping(object()) is True
-        time.sleep(0.1)
-    finally:
-        connect_retry_module._abort_connection = original
+    taken, aborted = _fake_duplicates(monkeypatch)
+
+    assert engine.dialect.do_ping(object()) is True
+    time.sleep(0.1)
 
     assert aborted == []
+    assert [handle.closed for handle in taken] == [True]  # the duplicate is closed once the ping returned
+
+
+def test_the_duplicate_is_taken_before_the_ping_and_stays_open_until_it_returns(monkeypatch):
+    """The abort must act on a descriptor that cannot have been closed and reused while the ping ran."""
+    engine = create_engine('sqlite://')
+    seen = {}
+
+    def ping(dbapi_connection):
+        seen['open_during_ping'] = [handle.closed for handle in taken]
+        return True
+
+    engine.dialect.do_ping = ping
+    install_ping_watchdog(engine, 5)
+    taken, _aborted = _fake_duplicates(monkeypatch)
+
+    engine.dialect.do_ping(object())
+
+    assert seen['open_during_ping'] == [False]
+    assert taken[0].closed
+
+
+def test_a_connection_with_no_duplicable_socket_is_pinged_unbounded(monkeypatch):
+    engine = create_engine('sqlite://')
+    engine.dialect.do_ping = lambda dbapi_connection: True
+    watchdog = _ManualWatchdog()
+    install_ping_watchdog(engine, 5, watchdog)
+
+    assert engine.dialect.do_ping(types.SimpleNamespace()) is True  # no fileno: nothing to abort through
+    assert watchdog.armed == []
 
 
 class _ManualWatchdog:
@@ -542,8 +606,7 @@ def _watched_engine(monkeypatch, real_ping):
     engine.dialect.do_ping = real_ping
     watchdog = _ManualWatchdog()
     monkeypatch.setattr(connect_retry_module, '_PING_WATCHDOG', watchdog)
-    aborted = []
-    monkeypatch.setattr(connect_retry_module, '_abort_connection', aborted.append)
+    _taken, aborted = _fake_duplicates(monkeypatch)
     install_ping_watchdog(engine, 5)
     return engine, aborted, watchdog
 
@@ -571,7 +634,7 @@ def test_a_ping_that_returned_true_but_was_aborted_reports_failure(monkeypatch):
     holder['watchdog'] = watchdog
 
     assert engine.dialect.do_ping('connection') is False
-    assert aborted == ['connection']
+    assert [handle.connection for handle in aborted] == ['connection']
 
 
 def test_the_callback_runs_the_abort_at_most_once_per_ping(monkeypatch):
@@ -807,3 +870,92 @@ def test_a_begin_that_finishes_connecting_after_close_all_releases_its_connectio
     assert isinstance(outcome[0], RuntimeError) and 'closed' in str(outcome[0])
     assert len(registry._sessions) == 0
     assert engine.pool.checkedout() == 0
+
+
+# ---------------------------------------------------------------------------
+# MySQL handshake timeout and the ClickHouse transport retry
+# ---------------------------------------------------------------------------
+
+
+def test_the_mysql_handshake_timeouts_are_lifted_once_the_connection_is_open():
+    engine = create_engine('sqlite://')
+    install_mysql_handshake_timeout(engine)
+    connection = types.SimpleNamespace(_read_timeout=5, _write_timeout=5)
+
+    (listener,) = [f for f in engine.pool.dispatch.connect.listeners if f.__name__ == '_clear_handshake_deadline']
+    listener(connection, None)  # the pool's connect event, run after the driver's handshake
+
+    assert (connection._read_timeout, connection._write_timeout) == (None, None)
+
+
+class _FakeClickhouseConnection:
+    """The transport of one clickhouse-driver Client: ``connect`` opens the socket."""
+
+    def __init__(self, failures):
+        self.failures = failures
+        self.connects = 0
+
+    def connect(self):
+        self.connects += 1
+        if self.failures:
+            raise self.failures.pop(0)
+
+
+def _do_connect_hook(engine):
+    (hook,) = engine.dialect.dispatch.do_connect.listeners
+    return hook
+
+
+def _clickhouse_client_factory(clock, failures, **policy):
+    """Install the ClickHouse retry on an engine whose dialect hands out a fake native connection.
+
+    Returns the dbapi connection the ``do_connect`` hook produced, the transport (driver connection) its
+    client shares, and the list of statements that were actually sent.
+    """
+    clickhouse_errors = pytest.importorskip('clickhouse_driver.errors')
+    engine = create_engine('sqlite://')
+    install_clickhouse_connect_retry(engine, _policy(clock, **policy))
+    transport = _FakeClickhouseConnection([clickhouse_errors.NetworkError(message) for message in failures])
+    sent = []
+
+    def execute(statement):
+        transport.connect()  # like clickhouse-driver: the socket opens first, then the statement goes out
+        sent.append(statement)
+
+    client = types.SimpleNamespace(connection=transport, connections=[], execute=execute)
+    engine.dialect.connect = lambda *args, **kwargs: types.SimpleNamespace(transport=client)
+    dbapi = _do_connect_hook(engine)(engine.dialect, None, (), {})
+    return dbapi, transport, sent
+
+
+def test_clickhouse_retries_opening_the_transport_and_sends_the_statement_once():
+    clock = _Clock()
+    dbapi, transport, sent = _clickhouse_client_factory(clock, ['Code: 210. Connection refused (db:9000)'] * 2)
+
+    dbapi.transport.execute('SELECT 1')
+
+    assert transport.connects == 3  # two refused opens, then the open that worked
+    assert sent == ['SELECT 1']  # the statement went out once, after the transport was open
+    assert len(clock.sleeps) == 2
+
+
+def test_clickhouse_does_not_retry_a_configuration_error():
+    clock = _Clock()
+    dbapi, transport, sent = _clickhouse_client_factory(
+        clock, ['Code: 516. DB::Exception: tenant: Authentication failed']
+    )
+    clickhouse_errors = pytest.importorskip('clickhouse_driver.errors')
+
+    with pytest.raises(clickhouse_errors.NetworkError):
+        dbapi.transport.execute('SELECT 1')
+
+    assert transport.connects == 1 and sent == [] and clock.sleeps == []
+
+
+def test_a_driver_connection_without_a_transport_is_returned_unchanged():
+    engine = create_engine('sqlite://')
+    install_clickhouse_connect_retry(engine, _policy(_Clock()))
+    marker = object()
+    engine.dialect.connect = lambda *args, **kwargs: marker
+
+    assert _do_connect_hook(engine)(engine.dialect, None, (), {}) is marker

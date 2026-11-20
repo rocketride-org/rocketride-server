@@ -92,6 +92,7 @@ MAX_NETWORK_SECONDS = 600
 # PyMySQL). Others get none; a subclass can supply its own through
 # ``DatabaseGlobalBase._connect_args``.
 _CONNECT_TIMEOUT_BACKENDS = frozenset({'postgresql', 'mysql', 'mariadb'})
+_MYSQL_BACKENDS = frozenset({'mysql', 'mariadb'})
 
 # Fragments of a driver's message that mean "the server could not be reached or
 # was not ready to take a connection", matched case-insensitively. Deliberately a
@@ -141,8 +142,32 @@ _FATAL_FRAGMENTS = (
 def connect_timeout_args(backend: str, timeout: float) -> dict:
     """Return the ``connect_args`` that bound one connection attempt, or ``{}`` for a backend without one."""
     if backend in _CONNECT_TIMEOUT_BACKENDS:
-        return {'connect_timeout': max(1, int(timeout))}
+        args = {'connect_timeout': max(1, int(timeout))}
+        if backend in _MYSQL_BACKENDS:
+            # PyMySQL's connect_timeout covers only the TCP connect; the server greeting
+            # and authentication then read with ``read_timeout`` (default none), so a
+            # server that accepts and goes silent would stall the handshake forever.
+            # ``install_mysql_handshake_timeout`` clears these once the handshake is done.
+            args['read_timeout'] = args['write_timeout'] = args['connect_timeout']
+        return args
     return {}
+
+
+def install_mysql_handshake_timeout(engine: Any) -> None:
+    """Lift the handshake's read and write timeout from a new PyMySQL connection once it is open.
+
+    ``connect_timeout_args`` sets ``read_timeout`` and ``write_timeout`` so a
+    stalled greeting or authentication ends (and the retry proceeds); they must
+    not apply to application statements, which are bounded by the server's own
+    limits. The pool's ``connect`` event runs after the driver finished its
+    handshake, and PyMySQL re-reads these attributes before every socket call.
+    """
+
+    @event.listens_for(engine, 'connect')
+    def _clear_handshake_deadline(dbapi_connection, connection_record):
+        for name in ('_read_timeout', '_write_timeout'):
+            if hasattr(dbapi_connection, name):
+                setattr(dbapi_connection, name, None)
 
 
 def is_transient_connect_error(exc: BaseException) -> bool:
@@ -257,29 +282,51 @@ def postgres_network_args(settings: dict) -> dict:
     return args
 
 
-def _abort_connection(dbapi_connection: Any) -> None:
-    """Shut down the socket under ``dbapi_connection`` so a blocked read returns with an error.
+def _duplicate_socket(dbapi_connection: Any) -> Optional[socket.socket]:
+    """Return a socket object over a duplicate of the descriptor under ``dbapi_connection``, or ``None``.
 
-    Best effort: used from the ping watchdog thread, which must never raise.
-    Works on the file descriptor psycopg2 exposes. Where the connection has none
-    (already closed: psycopg2 raises ``InterfaceError``), the descriptor is not a
-    socket any more, or the platform cannot duplicate it (Windows), nothing happens
-    and the ping simply is not bounded. The duplicated descriptor is always closed.
+    Taken while the ping starts, so it stays valid for the whole ping and the
+    watchdog window even if the connection's own descriptor is closed and its
+    number reused meanwhile. ``None`` where the connection has none (already
+    closed: psycopg2 raises ``InterfaceError``), the descriptor is not a socket,
+    or the platform cannot duplicate it (Windows): the ping is then not bounded.
+    The caller closes the returned socket.
     """
     try:
         descriptor = os.dup(dbapi_connection.fileno())
     except Exception:
-        return
+        return None
     try:
-        sock = socket.socket(fileno=descriptor)
+        return socket.socket(fileno=descriptor)
     except Exception:
         os.close(descriptor)  # not a socket (the number was reused): the dup is still ours to close
-        return
+        return None
+
+
+def _abort_socket(sock: socket.socket) -> None:
+    """Shut ``sock`` down so a read blocked on the shared connection returns with an error. Never raises."""
     try:
-        with sock:
-            sock.shutdown(socket.SHUT_RDWR)
-    except OSError:
+        sock.shutdown(socket.SHUT_RDWR)
+    except Exception:
         pass
+
+
+def _close_socket(sock: socket.socket) -> None:
+    try:
+        sock.close()
+    except Exception:
+        pass
+
+
+def _abort_connection(dbapi_connection: Any) -> None:
+    """Shut down the socket under ``dbapi_connection`` so a blocked read returns with an error.
+
+    Best effort and never raises; the duplicate is always closed.
+    """
+    sock = _duplicate_socket(dbapi_connection)
+    if sock is not None:
+        _abort_socket(sock)
+        _close_socket(sock)
 
 
 # The ping watchdog shuts a socket down from another thread, through a duplicate of
@@ -389,6 +436,12 @@ def install_ping_watchdog(engine: Any, timeout: float, watchdog: Optional[_Deadl
     watchdog = watchdog or _PING_WATCHDOG
 
     def bounded_ping(dbapi_connection):
+        # Duplicated before the deadline is armed and closed only after the ping
+        # returns, so the abort always acts on a descriptor that is still this
+        # connection's socket, however long the watchdog takes to run.
+        handle = _duplicate_socket(dbapi_connection)
+        if handle is None:
+            return real_ping(dbapi_connection)  # nothing to abort through: not bounded
         lock = threading.Lock()
         state = {'done': False, 'aborted': False}
 
@@ -397,7 +450,7 @@ def install_ping_watchdog(engine: Any, timeout: float, watchdog: Optional[_Deadl
                 if state['done']:
                     return
                 state['aborted'] = True
-                _abort_connection(dbapi_connection)
+                _abort_socket(handle)
 
         entry = watchdog.arm(timeout, abort)
         try:
@@ -406,6 +459,7 @@ def install_ping_watchdog(engine: Any, timeout: float, watchdog: Optional[_Deadl
             with lock:
                 state['done'] = True
                 aborted = state['aborted']
+                _close_socket(handle)
             watchdog.disarm(entry)
         return False if aborted else result
 
@@ -423,21 +477,75 @@ def install_connect_retry(engine: Any, policy: Optional[ConnectRetryPolicy] = No
 
     @event.listens_for(engine, 'do_connect')
     def _connect_with_retry(dialect, conn_rec, cargs, cparams):
-        driver_errors = (dialect.loaded_dbapi.Error,)
-        started = policy.clock()
-        attempt = 1
-        while True:
-            try:
-                return dialect.connect(*cargs, **cparams)
-            except driver_errors as exc:
-                if attempt >= policy.attempts or not is_transient_connect_error(exc):
-                    raise
-                wait = policy.delay(attempt)
-                if policy.clock() - started + wait >= policy.budget:
-                    raise
-                # Positional only: rocketlib's logging calls reject keyword arguments.
-                warning(
-                    f'Database connection attempt {attempt} of {policy.attempts} failed, retrying in {wait:.2f}s: {exc}'
-                )
-                policy.sleep(wait)
-                attempt += 1
+        return _retry_open(policy, lambda: dialect.connect(*cargs, **cparams), (dialect.loaded_dbapi.Error,))
+
+
+def _retry_open(policy: ConnectRetryPolicy, open_connection: Callable[[], Any], driver_errors: tuple) -> Any:
+    """Call ``open_connection`` until it succeeds, a non-transient error, or the attempts or budget run out.
+
+    The budget is checked again after each wait and before the next attempt, so a
+    sleep that overran it (a slow clock, a loaded host) never starts another
+    connection past the budget.
+    """
+    started = policy.clock()
+    attempt = 1
+    while True:
+        try:
+            return open_connection()
+        except driver_errors as exc:
+            if attempt >= policy.attempts or not is_transient_connect_error(exc):
+                raise
+            wait = policy.delay(attempt)
+            if policy.clock() - started + wait >= policy.budget:
+                raise
+            # Positional only: rocketlib's logging calls reject keyword arguments.
+            warning(
+                f'Database connection attempt {attempt} of {policy.attempts} failed, retrying in {wait:.2f}s: {exc}'
+            )
+            policy.sleep(wait)
+            if policy.clock() - started >= policy.budget:
+                raise
+            attempt += 1
+
+
+def install_clickhouse_connect_retry(engine: Any, policy: Optional[ConnectRetryPolicy] = None) -> None:
+    """Make ``engine`` retry *opening the transport* of a clickhouse-driver connection under ``policy``.
+
+    clickhouse-driver connects lazily: ``dialect.connect`` (clickhouse-sqlalchemy's
+    native ``Connection``) builds a ``Client`` and returns at once, and the TCP
+    connection is made by the first ``execute`` through ``Connection.connect``. So
+    the ``do_connect`` retry never sees an outage, and retrying around ``execute``
+    would send the statement again. Here the transport step itself is retried: the
+    ``connect`` of each driver connection under the client (the current one and the
+    spare hosts it rotates to) is wrapped, and it runs before anything is sent. The
+    driver's own errors (``NetworkError``, ``SocketTimeoutError``) are classified
+    like any other connect failure.
+    """
+    policy = policy or ConnectRetryPolicy()
+
+    @event.listens_for(engine, 'do_connect')
+    def _wrap_transport(dialect, conn_rec, cargs, cparams):
+        dbapi_connection = dialect.connect(*cargs, **cparams)
+        client = getattr(dbapi_connection, 'transport', None)
+        first = getattr(client, 'connection', None)
+        if first is None:  # a driver version without this shape: leave it as it was
+            return dbapi_connection
+        try:
+            from clickhouse_driver import errors as driver_errors_module
+
+            driver_errors = (driver_errors_module.Error,)
+        except ImportError:  # pragma: no cover - the driver is installed whenever this is called
+            return dbapi_connection
+        for connection in [first, *getattr(client, 'connections', [])]:
+            _retry_connect_step(connection, policy, driver_errors)
+        return dbapi_connection
+
+
+def _retry_connect_step(connection: Any, policy: ConnectRetryPolicy, driver_errors: tuple) -> None:
+    """Replace ``connection.connect`` with a version that retries under ``policy``."""
+    connect = connection.connect
+
+    def connect_with_retry():
+        return _retry_open(policy, connect, driver_errors)
+
+    connection.connect = connect_with_retry
