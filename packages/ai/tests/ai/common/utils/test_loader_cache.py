@@ -103,13 +103,18 @@ def _run_all(targets):
     return threads, results, errors
 
 
-def _join(threads, errors):
-    """Join every worker, then re-raise the first failure on the test thread."""
+def _join(threads, *error_lists):
+    """Join every worker, then re-raise the first failure any of them recorded on the test thread.
+
+    The error lists are read only after every join, so a failure recorded while
+    the test waits is never missed.
+    """
     for thread in threads:
         thread.join(5)
         assert not thread.is_alive(), 'a worker did not finish'
-    if errors:
-        raise errors[0]
+    for errors in error_lists:
+        if errors:
+            raise errors[0]
 
 
 def _wait_for(predicate):
@@ -164,7 +169,7 @@ def test_a_waiting_acquire_survives_the_last_release_and_a_third_acquire_shares_
         _wait_for(lambda: slot.pending == 2)
     finally:
         slot.lock.release()
-    _join(threads + more, errors + more_errors)
+    _join(threads + more, errors, more_errors)
 
     # One reload, shared by both waiters, with both counted as holders.
     assert loads == [1, 1]

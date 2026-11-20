@@ -505,49 +505,68 @@ def method_closure(methods: Dict[str, ast.AST], start: str) -> List[ast.AST]:
     return order
 
 
-def alias_flow(body: List[ast.stmt], aliases: Set[str], is_source, scan) -> Set[str]:
+def alias_flow(
+    body: List[ast.stmt], aliases: Set[str], is_source, scan, trace: Optional[List[Set[str]]] = None
+) -> Set[str]:
     """
     Walk ``body`` in execution order, tracking the names that may alias a source; return the set after it.
 
     ``scan(expr, aliases)`` is called on every expression with the alias set
     that holds where it runs. Both arms of a branch are walked and their sets
     merged by union (a name aliases after the join if it may on any path); a
-    loop is walked as zero or more passes; a plain rebinding on the straight
-    line ends the alias. Nested function and class bodies do not run here.
+    loop is walked as zero or more passes, and a ``while`` condition is scanned
+    again with what the body carries back; an exception handler starts from
+    every state the ``try`` body passed through; a plain rebinding on the
+    straight line ends the alias. Nested function and class bodies do not run
+    here. ``trace``, when given, receives the set after every statement.
+
+    Limits (a static pass, not an interpreter): only plain names alias; an
+    alias stored in an attribute, a container or passed through a call is not
+    followed, and an exception is assumed possible after any statement.
     """
     aliases = set(aliases)
+
+    def walk(stmts: List[ast.stmt], state: Set[str]) -> Set[str]:
+        return alias_flow(stmts, state, is_source, scan, trace)
+
     for stmt in body:
         if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             continue
         if isinstance(stmt, ast.If):
             scan(stmt.test, aliases)
-            aliases = alias_flow(stmt.body, aliases, is_source, scan) | alias_flow(
-                stmt.orelse, aliases, is_source, scan
-            )
+            aliases = walk(stmt.body, aliases) | walk(stmt.orelse, aliases)
         elif isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
-            scan(stmt.iter if isinstance(stmt, (ast.For, ast.AsyncFor)) else stmt.test, aliases)
+            is_for = isinstance(stmt, (ast.For, ast.AsyncFor))
+            scan(stmt.iter if is_for else stmt.test, aliases)
             entry = set(aliases)
             for _ in range(2):  # a second pass carries what one iteration leaves into the next
-                start = set(entry)
-                if isinstance(stmt, (ast.For, ast.AsyncFor)):
-                    start -= set(assigned_names(stmt.target))
-                entry |= alias_flow(stmt.body, start, is_source, scan)
-            aliases = alias_flow(stmt.orelse, entry, is_source, scan)
+                begin = set(entry)
+                if is_for:
+                    begin -= set(assigned_names(stmt.target))
+                entry |= walk(stmt.body, begin)
+            if not is_for:
+                # The condition runs again after every iteration, with what the body left
+                scan(stmt.test, entry)
+            aliases = walk(stmt.orelse, entry)
         elif isinstance(stmt, (ast.With, ast.AsyncWith)):
             for item in stmt.items:
                 scan(item.context_expr, aliases)
                 if item.optional_vars is not None:
                     aliases -= set(assigned_names(item.optional_vars))
-            aliases = alias_flow(stmt.body, aliases, is_source, scan)
+            aliases = walk(stmt.body, aliases)
         elif isinstance(stmt, (ast.Try, getattr(ast, 'TryStar', ast.Try))):
-            after = alias_flow(stmt.body, aliases, is_source, scan)
-            anywhere = aliases | after
-            outs = [alias_flow(stmt.orelse, after, is_source, scan)]
-            outs += [alias_flow(h.body, anywhere, is_source, scan) for h in stmt.handlers]
-            aliases = alias_flow(stmt.finalbody, set().union(*outs), is_source, scan)
+            # A handler may start from any point the body reached, not only its entry or end
+            points: List[Set[str]] = [set(aliases)]
+            after = alias_flow(stmt.body, aliases, is_source, scan, points)
+            if trace is not None:
+                trace.extend(points)
+            anywhere = set().union(after, *points)
+            outs = [walk(stmt.orelse, after)]
+            outs += [walk(h.body, anywhere) for h in stmt.handlers]
+            aliases = walk(stmt.finalbody, set().union(*outs))
         elif isinstance(stmt, ast.Match):
             scan(stmt.subject, aliases)
-            outs = [aliases] + [alias_flow(case.body, aliases, is_source, scan) for case in stmt.cases]
+            outs = [aliases] + [walk(case.body, aliases) for case in stmt.cases]
             aliases = set().union(*outs)
         else:
             # A simple statement: its reads run before its bindings.
@@ -555,10 +574,13 @@ def alias_flow(body: List[ast.stmt], aliases: Set[str], is_source, scan) -> Set[
             value = assigned_value(stmt)
             for t in write_targets(stmt):
                 if isinstance(t, ast.Name):
-                    if isinstance(stmt, ast.Assign) and value is not None and is_source(value):
+                    # Assign and a value-bearing AnnAssign bind alike; write_targets skips a bare annotation
+                    if value is not None and is_source(value):
                         aliases.add(t.id)
                     else:
                         aliases.discard(t.id)
+        if trace is not None:
+            trace.append(set(aliases))
     return aliases
 
 

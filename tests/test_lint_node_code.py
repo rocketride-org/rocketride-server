@@ -644,6 +644,85 @@ def test_a_config_alias_on_either_branch_survives_the_join(tmp_path):
     assert 'self.edge' in (node / 'IGlobal.py').read_text(encoding='utf-8').splitlines()[findings[0].line - 1]
 
 
+_MAX_EDGE_PARAM = {
+    'title': 'Fixture',
+    'protocol': 'fixture://',
+    'properties': [{'name': 'maxEdge', 'type': 'integer', 'param': True}],
+}
+
+
+def _param_reads(tmp_path, body):
+    """Lint a beginGlobal body against a schema whose maxEdge is a param; return the flagged source lines."""
+    source = 'class IGlobal:\n    def beginGlobal(self):\n' + ''.join(f'        {line}\n' for line in body)
+    node = write_node(tmp_path, {'IGlobal.py': source}, _MAX_EDGE_PARAM)
+    lines = (node / 'IGlobal.py').read_text(encoding='utf-8').splitlines()
+    return [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+
+
+def test_a_while_condition_sees_the_alias_its_body_carries_back(tmp_path):
+    assert _param_reads(
+        tmp_path,
+        ['cfg = {}', "while cfg.get('maxEdge', 0) == 0:", '    cfg = self.config'],
+    ) == [('param-in-global', "while cfg.get('maxEdge', 0) == 0:")]
+
+
+def test_a_while_condition_on_a_local_dict_stays_clean(tmp_path):
+    assert (
+        _param_reads(
+            tmp_path,
+            ['cfg = {}', "while cfg.get('maxEdge', 0) == 0:", "    cfg = {'maxEdge': 1}"],
+        )
+        == []
+    )
+
+
+def test_an_exception_handler_sees_an_alias_from_inside_the_try(tmp_path):
+    assert _param_reads(
+        tmp_path,
+        [
+            'cfg = {}',
+            'try:',
+            '    cfg = self.config',
+            '    self.prepare()',
+            '    cfg = {}',
+            'except RuntimeError:',
+            "    self.edge = cfg.get('maxEdge')",
+            "self.after = cfg.get('maxEdge')",
+        ],
+    ) == [('param-in-global', "self.edge = cfg.get('maxEdge')"), ('param-in-global', "self.after = cfg.get('maxEdge')")]
+
+
+def test_the_successful_path_still_applies_the_final_rebinding(tmp_path):
+    assert (
+        _param_reads(
+            tmp_path,
+            [
+                'try:',
+                '    cfg = self.config',
+                '    cfg = {}',
+                'except RuntimeError:',
+                '    raise',
+                'else:',
+                "    self.edge = cfg.get('maxEdge')",
+            ],
+        )
+        == []
+    )
+
+
+def test_an_annotated_alias_is_an_alias_and_a_bare_annotation_is_not(tmp_path):
+    assert _param_reads(
+        tmp_path,
+        [
+            'cfg: object = self.config',
+            "self.edge = cfg.get('maxEdge')",
+            "other = {'maxEdge': 1}",
+            'other: object',
+            "self.other = other.get('maxEdge')",
+        ],
+    ) == [('param-in-global', "self.edge = cfg.get('maxEdge')")]
+
+
 @pytest.mark.parametrize('argv', [['--all'], ['no-such-node-dir'], ['--all', 'no-such-root']])
 def test_the_cli_refuses_what_it_cannot_lint(monkeypatch, argv):
     monkeypatch.setattr(LINT.sys, 'argv', ['lint-node-code.py', *argv])
