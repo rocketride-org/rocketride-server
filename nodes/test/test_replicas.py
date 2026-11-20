@@ -163,6 +163,16 @@ def test_each_server_has_its_own_file_root(tmp_path):
     assert alternating == reference
 
 
+def test_a_failed_setup_leaves_no_binding_behind(tmp_path):
+    broken = 'from rocketlib import IGlobalBase\n\n\nclass IGlobal(IGlobalBase):\n    def beginGlobal(self):\n        raise RuntimeError("no global")\n'
+    node = _node(tmp_path, 'counter_broken', _IN_STATE, broken)
+    with ReplicaServer() as server:
+        replica = Replica(server, node, 'counter', 'counter_1')
+        with pytest.raises(RuntimeError, match='no global'):
+            replica.call(_count(ALICE))
+        assert server._owners == {}
+
+
 def test_every_replica_ends_before_its_server_goes(tmp_path, monkeypatch):
     node = _node(tmp_path, 'counter_ends', _IN_STATE, _ENDS)
     ends = []

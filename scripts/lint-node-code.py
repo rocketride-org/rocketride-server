@@ -517,8 +517,9 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
 
     An assignment from an identity taints the names it binds and any other
     assignment to a name clears it, so a name reused for something else is
-    clean again. A branch keeps a name tainted when either way taints it, and
-    a loop body is followed twice so a value carried round the loop is seen.
+    clean again. A branch keeps a name tainted when either way taints it, a
+    loop body is followed until the taint at its head stops growing, and an
+    exception handler sees every state its try body passed through.
 
     Returns:
         The taint in effect BEFORE each node of the function's own statements
@@ -554,17 +555,22 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
         if isinstance(stmt, ast.If):
             mark([stmt.test], tainted)
             return block(stmt.body, set(tainted)) | block(stmt.orelse, set(tainted))
-        if isinstance(stmt, (ast.For, ast.AsyncFor)):
-            mark([stmt.iter, stmt.target], tainted)
-            names = _bound_names(stmt.target)
-            first = block(stmt.body, bind(names, stmt.iter, set(tainted)))
-            second = block(stmt.body, bind(names, stmt.iter, tainted | first))
-            return block(stmt.orelse, tainted | second)
-        if isinstance(stmt, ast.While):
-            mark([stmt.test], tainted)
-            first = block(stmt.body, set(tainted))
-            second = block(stmt.body, tainted | first)
-            return block(stmt.orelse, tainted | second)
+        if isinstance(stmt, (ast.For, ast.AsyncFor, ast.While)):
+            # The loop head joins the entry with every pass's end until that
+            # stops growing: a value carried round the loop any number of
+            # times is seen (the set of names is finite, so this ends)
+            names = _bound_names(stmt.target) if isinstance(stmt, (ast.For, ast.AsyncFor)) else set()
+            head = set(tainted)
+            while True:
+                if isinstance(stmt, ast.While):
+                    mark([stmt.test], head)
+                    end = block(stmt.body, set(head))
+                else:
+                    mark([stmt.iter, stmt.target], head)
+                    end = block(stmt.body, bind(names, stmt.iter, set(head)))
+                if end <= head:
+                    return block(stmt.orelse, head)
+                head |= end
         if isinstance(stmt, (ast.With, ast.AsyncWith)):
             for item in stmt.items:
                 mark([item.context_expr, item.optional_vars], tainted)
@@ -572,10 +578,19 @@ def identity_taint(func: ast.AST) -> Dict[int, FrozenSet[str]]:
             return block(stmt.body, tainted)
         if isinstance(stmt, ast.Try) or type(stmt).__name__ == 'TryStar':
             body = block(stmt.body, set(tainted))
-            merged = tainted | body | block(stmt.orelse, set(body))
+            # An exception can leave the body before any of its nodes: a
+            # handler (and a finally on that path) sees every state the body
+            # passed through, not just its entry and its end
+            raised = set(tainted) | body
+            for inner in stmt.body:
+                for sub in _own_walk(inner):
+                    raised |= taint_of.get(id(sub), frozenset())
+            merged = block(stmt.orelse, set(body))
             for handler in stmt.handlers:
-                mark([handler.type], tainted | body)
-                merged |= block(handler.body, (tainted | body) - ({handler.name} if handler.name else set()))
+                mark([handler.type], raised)
+                merged |= block(handler.body, raised - ({handler.name} if handler.name else set()))
+            if stmt.finalbody:
+                block(stmt.finalbody, raised | merged)
             return block(stmt.finalbody, merged)
         if isinstance(stmt, ast.Match):
             mark([stmt.subject], tainted)

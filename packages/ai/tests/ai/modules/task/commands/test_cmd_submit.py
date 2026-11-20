@@ -480,3 +480,40 @@ async def test_the_cleanup_close_after_a_failed_write_is_bounded(catalog, engine
         await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x')
     assert err.value.code == TaskError.CANCELLED
     assert time.monotonic() - started < 2.0
+
+
+@pytest.mark.asyncio
+async def test_a_cleanup_close_the_wait_gave_up_on_keeps_its_binding_until_it_finishes(
+    catalog, engines, deployments, monkeypatch
+):
+    """The bounded wait does not end the binding: the node's doors serve the close still running on the engine."""
+    ts = _server()
+    deployments.deploy('team-1')
+    monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_CLOSE_SECONDS', 0.05)
+    release = asyncio.Event()
+    seen = {}
+
+    async def send(self, request):
+        arguments = request['arguments']
+        sub = arguments['subcommand']
+        if sub == 'write':
+            raise TaskError(TaskError.CANCELLED, 'Pipe 1: the request was cancelled')
+        if sub == 'close':
+            seen['engine'], seen['cid'] = self, arguments['_caller']['correlationId']
+            await release.wait()
+            # The node's closing() runs here: its self.files still name the owner
+            seen['during'] = self.binding_control(seen['cid'])
+        return {'body': {'pipeId': 1}}
+
+    monkeypatch.setattr(TaskEngine, '_send_data', send)
+    with pytest.raises(TaskError):
+        await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'x')
+    # The request returned; the close still runs and its binding is still admitted
+    assert seen['engine'].binding_control(seen['cid']) is not None
+    release.set()
+    for _ in range(50):
+        if 'during' in seen and seen['engine'].binding_control(seen['cid']) is None:
+            break
+        await asyncio.sleep(0.01)
+    assert seen['during'] is not None
+    assert seen['engine'].binding_control(seen['cid']) is None

@@ -487,6 +487,30 @@ class TestSelectorParams:
                 ],
             }
         )
+        # A selector directly on the item, and one inside a group: each
+        # branch's block sits beside its selector
+        bounded = {'name': 'max', 'path': 'rules[].rule.window.bounded.max', 'type': 'integer', 'minimum': 0}
+        host = {'name': 'name', 'path': 'rules[].rule.host.name', 'type': 'string', 'required': True}
+        rules['item']['properties'] += [
+            {
+                'name': 'scope',
+                'path': 'rules[].rule.scope',
+                'type': 'string',
+                'default': 'all',
+                'enum': {'all': {'properties': []}, 'host': {'properties': [host]}},
+            },
+            {
+                'name': 'window',
+                'properties': [
+                    {
+                        'name': 'mode',
+                        'path': 'rules[].rule.window.mode',
+                        'type': 'string',
+                        'enum': {'open': {'properties': []}, 'bounded': {'properties': [bounded]}},
+                    }
+                ],
+            },
+        ]
         schema['params'].append({'field': 'grid', 'type': 'array', 'default': [], 'tool': True})
         return resolveConfig(schema, {})
 
@@ -510,6 +534,37 @@ class TestSelectorParams:
             view.overlay({'rules': [{'field': 'cpu', 'limits': {'max': -1}}]})
         with pytest.raises(ConfigError, match=r'"rules\[0\].limits" has no field "min"'):
             view.overlay({'rules': [{'field': 'cpu', 'limits': {'min': 1}}]})
+
+    def test_selector_branch_blocks_inside_object_items_are_validated(self):
+        view = self._with_nested_items()
+        rows = [
+            {'field': 'cpu', 'window': {'mode': 'bounded', 'bounded': {'max': 3}}},
+            {'field': 'mem', 'window': {'mode': 'open'}},
+            {'field': 'io', 'scope': 'host', 'host': {'name': 'web-1'}},
+        ]
+        assert view.overlay({'rules': rows}).rules == rows
+        refused = {
+            r'"rules\[0\].window.bounded" is the block of a branch "mode" does not select': {
+                'field': 'cpu',
+                'window': {'mode': 'open', 'bounded': {'max': 3}},
+            },
+            r'"rules\[0\].window.bounded.max" must be >= 0': {
+                'field': 'cpu',
+                'window': {'mode': 'bounded', 'bounded': {'max': -1}},
+            },
+            r'"rules\[0\].window.bounded" has no field "min"': {
+                'field': 'cpu',
+                'window': {'mode': 'bounded', 'bounded': {'min': 1}},
+            },
+            r'"rules\[0\].host.name" is required': {'field': 'cpu', 'scope': 'host', 'host': {}},
+            r'"rules\[0\].host" is the block of a branch "scope" does not select': {
+                'field': 'cpu',
+                'host': {'name': 'web-1'},
+            },
+        }
+        for message, row in refused.items():
+            with pytest.raises(ConfigError, match=message):
+                view.overlay({'rules': [row]})
 
     def test_leaf_path_resolves_any_branch(self, view):
         assert view.leaf_path('iqr.sensitivity') == 'iqr.sensitivity'

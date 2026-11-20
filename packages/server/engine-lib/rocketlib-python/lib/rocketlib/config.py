@@ -453,21 +453,44 @@ def _group_fields(descriptor: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
     return None
 
 
+def _selector_branches(descriptor: Dict[str, Any]) -> Optional[Dict[str, List[Dict[str, Any]]]]:
+    """A selector's branches (name -> its resolved fields), else None."""
+    enum = descriptor.get('enum')
+    if not isinstance(enum, dict) or not any(
+        isinstance(branch, dict) and isinstance(branch.get('properties'), list) for branch in enum.values()
+    ):
+        return None
+    return {
+        str(name): [child for child in (branch.get('properties') or []) if isinstance(child, dict)]
+        if isinstance(branch, dict)
+        else []
+        for name, branch in enum.items()
+    }
+
+
 def _validate_object(key: str, value: Any, fields: List[Dict[str, Any]], problems: List[str]) -> None:
     """
     Check one array element whose item is a group of fields, appending any problem to ``problems``.
 
     Step 1: the element is an object. Step 2: it names no field the item does
-    not declare. Step 3: every declared field validates (required included);
-    a field that is itself a group is an object of its own fields, checked the
-    same way (an absent one as an empty object, so its required fields count).
+    not declare (a selector's branch blocks sit beside it, named by branch).
+    Step 3: every declared field validates (required included); a field that
+    is itself a group is an object of its own fields, checked the same way
+    (an absent one as an empty object, so its required fields count). Step 4:
+    the block of the branch each selector selects is checked like a group; a
+    block of a branch it does not select is refused.
     """
     if not isinstance(value, dict):
         problems.append(f'"{key}" expects object, got {type(value).__name__} {value!r}')
         return
     declared = {str(child['name']): child for child in fields if child.get('name')}
+    blocks = {
+        branch: (name, branch_fields)
+        for name, child in declared.items()
+        for branch, branch_fields in (_selector_branches(child) or {}).items()
+    }
     for name in value:
-        if name not in declared:
+        if name not in declared and name not in blocks:
             problems.append(f'"{key}" has no field "{name}"; declared: {sorted(declared)}')
     for name, child in declared.items():
         grouped = _group_fields(child)
@@ -476,6 +499,13 @@ def _validate_object(key: str, value: Any, fields: List[Dict[str, Any]], problem
             _validate_object(f'{key}.{name}', {} if member is None else member, grouped, problems)
         else:
             _validate_value(f'{key}.{name}', value.get(name), child, problems)
+    for branch, (selector, branch_fields) in blocks.items():
+        member = value.get(branch)
+        if branch != value.get(selector, declared[selector].get('default')):
+            if member is not None:
+                problems.append(f'"{key}.{branch}" is the block of a branch "{selector}" does not select')
+            continue
+        _validate_object(f'{key}.{branch}', {} if member is None else member, branch_fields, problems)
 
 
 # ==== Overlay support ========================================================

@@ -383,6 +383,43 @@ def test_identity_taint_follows_statement_order(tmp_path):
     assert found == [('identity-persist', 'self.store.put(owner, 2)'), ('identity-persist', 'self.store.put(owner, 3)')]
 
 
+def test_identity_taint_through_a_loop_reaches_a_fixed_point_and_handlers_see_the_try_body(tmp_path):
+    node = write_node(
+        tmp_path,
+        {
+            'IInstance.py': """
+                class IInstance:
+                    def rotate(self):
+                        a = b = c = 'shared'
+                        for _ in range(4):
+                            self.store.put(a, 1)
+                            a = b
+                            b = c
+                            c = self.caller.userId
+
+                    def handled(self, risky):
+                        owner = 'shared'
+                        try:
+                            owner = self.caller.userId
+                            risky()
+                            owner = 'shared'
+                        except ValueError:
+                            self.store.put(owner, 2)
+                            owner = 'shared'
+                        self.store.put(owner, 3)
+            """
+        },
+    )
+    lines = (node / 'IInstance.py').read_text(encoding='utf-8').splitlines()
+    found = [(f.rule, lines[f.line - 1].strip()) for f in LINT.lint_node(node)]
+    # The fourth pass writes the identity, and the handler can see it; both
+    # paths out of the try are clean again, so the last write is not reported
+    assert found == [
+        ('identity-persist', 'self.store.put(a, 1)'),
+        ('identity-persist', 'self.store.put(owner, 2)'),
+    ]
+
+
 def test_logging_and_the_doors_are_not_identity_sinks(tmp_path):
     node = write_node(
         tmp_path,

@@ -55,6 +55,7 @@ task engine there is none and every request raises ``DoorError``.
 
 from __future__ import annotations
 
+import threading
 import time
 from contextlib import contextmanager
 from typing import Any, Callable, Dict, Iterator, Optional, Tuple
@@ -164,9 +165,18 @@ class NodeState:
                 an engine one control holds).
         """
         self._binding = str(binding or '')
-        # key -> the token of the lease ``lock`` holds on it: a write to a held
-        # key names it, and the server refuses the write once the lease lapsed
-        self._held: Dict[str, str] = {}
+        # Per THREAD, key -> the token of the lease a ``lock`` block of that
+        # thread holds: a write to a held key names it, and the server refuses
+        # the write once that lease lapsed. Worker threads sharing the door
+        # never see, use or clear each other's tokens
+        self._local = threading.local()
+
+    def _held(self) -> Dict[str, str]:
+        """This thread's lease tokens, by key."""
+        held = getattr(self._local, 'held', None)
+        if held is None:
+            held = self._local.held = {}
+        return held
 
     def _args(self, key: str, **extra: Any) -> Dict[str, Any]:
         """The arguments of one request: the binding, the node's key, the rest."""
@@ -175,9 +185,9 @@ class NodeState:
         return {'correlationId': self._binding, 'key': key, **extra}
 
     def _write_args(self, key: str, **extra: Any) -> Dict[str, Any]:
-        """The arguments of a write: a held key's write is fenced by its lock's token."""
+        """The arguments of a write: a key this thread holds is fenced by its own lock's token."""
         arguments = self._args(key, **extra)
-        token = self._held.get(key)
+        token = self._held().get(key)
         if token is not None:
             arguments['token'] = token
         return arguments
@@ -241,9 +251,10 @@ class NodeState:
         a channel slot the holder needs to release it); this side retries
         with backoff until ``timeout``. A holder that dies loses the lock
         after ``STATE_LOCK_LEASE`` seconds; ``put``/``delete``/``incr`` of the
-        key inside the block are fenced by the lease, so a holder that
-        outlived it gets a ``DoorError`` instead of overwriting the next
-        holder's work.
+        key made by this thread inside the block are fenced by this block's
+        own lease, so a holder that outlived it gets a ``DoorError`` instead
+        of overwriting the next holder's work, even when that holder is
+        another thread sharing the door.
 
         Args:
             key: The node's key.
@@ -264,11 +275,14 @@ class NodeState:
                 raise DoorError(f'state.lock: "{key}" is held by another binding; gave up after {timeout} seconds')
             time.sleep(pause)
             pause = min(pause * 2, longest)
-        self._held[key] = token
+        held = self._held()
+        held[key] = token
         try:
             yield
         finally:
-            self._held.pop(key, None)
+            # Only this block's own token leaves; the release names it too
+            if held.get(key) == token:
+                del held[key]
             _send('state.unlock', self._args(key, token=token))
 
 

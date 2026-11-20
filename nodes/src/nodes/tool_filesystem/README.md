@@ -156,16 +156,17 @@ in the task's failed-object count.
 ### Storage location
 
 Files land under the configured storage backend (defaults to `~/.rocketlib/store/`).
-For the default filesystem backend the absolute path is the task's storage anchor
-plus the relative path:
+For the default filesystem backend the absolute path is the storage anchor of the
+control the call runs under, plus the relative path:
 
 ```text
-<store>/users/<client_id>/files/<path>                    # development runs
-<store>/teams/<teamId>/files/tasks/<projectId>/<path>     # deployed runs
+<store>/users/<userId>/files/<path>                       # a user-owned run
+<store>/teams/<teamId>/files/tasks/<projectId>/<path>     # a team-owned deployment
 ```
 
-The anchor comes from the task file the engine wrote at spawn; the node picks up
-the current task automatically, no configuration needed.
+The server picks the anchor for every request from its own record of the call's
+control; nothing the engine or the node sends names it, and no configuration is
+needed.
 
 ### Running the tests
 

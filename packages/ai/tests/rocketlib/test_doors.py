@@ -26,6 +26,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -127,6 +128,50 @@ def test_writes_to_a_held_key_are_fenced_by_its_lease(channel):
     assert ('state.put', 'k', 't1') in sent and ('state.incr', 'k', 't1') in sent
     # Another key, and the key after the block, name no lease
     assert ('state.put', 'other', None) in sent and ('state.put', 'k', None) in sent
+
+
+def test_two_threads_sharing_a_door_never_mix_lease_tokens():
+    # A takes the key, stalls past its lease, B takes it; A then writes and
+    # leaves while B still holds it. A's write names A's token (the server
+    # refuses it), and A's exit leaves B's token alone
+    sent, tokens, guard = [], iter(['t-a', 't-b']), threading.Lock()
+
+    def request(command, arguments, data):
+        with guard:
+            sent.append((threading.current_thread().name, command, arguments.get('token')))
+            if command == 'state.lock':
+                return {'acquired': True, 'token': next(tokens)}, None
+        return {}, None
+
+    state = NodeState('cid')
+    a_locked, b_locked, a_done = threading.Event(), threading.Event(), threading.Event()
+
+    def holder_a():
+        with state.lock('k'):
+            a_locked.set()
+            b_locked.wait(5)
+            state.put('k', 'stale')
+        a_done.set()
+
+    def holder_b():
+        a_locked.wait(5)
+        with state.lock('k'):
+            b_locked.set()
+            a_done.wait(5)
+            state.put('k', 'fresh')
+
+    setNodeChannel(request)
+    try:
+        threads = [threading.Thread(target=holder_a, name='A'), threading.Thread(target=holder_b, name='B')]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(10)
+    finally:
+        setNodeChannel(None)
+
+    writes = [(name, token) for name, command, token in sent if command in ('state.put', 'state.unlock')]
+    assert writes == [('A', 't-a'), ('A', 't-a'), ('B', 't-b'), ('B', 't-b')]
 
 
 def test_lock_gives_up_after_its_timeout(channel, monkeypatch):

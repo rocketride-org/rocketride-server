@@ -388,25 +388,28 @@ class Replica:
         correlation_id = uuid.uuid4().hex
         owner = call.owner
         self.server.admit(self.engine, correlation_id, owner)
-        instance = self._instance_class()
-        instance.IGlobal = self._global_for(owner)
-        instance.IEndpoint = SimpleNamespace(endpoint=None)
-        instance.instance = _EngineInstance(trace_id, self.node_id)
-        # The engine's one write: the server-set caller context of this binding
-        instance._caller = {
-            'controlId': owner.control_id,
-            'userId': owner.userId,
-            'teamId': owner.teamId,
-            'orgId': owner.orgId,
-            'address': owner.address,
-            'rung': owner.rung,
-            'params': {self.node_id: dict(call.params)},
-            'env': {},
-            'traceLevel': 'none',
-            'correlationId': correlation_id,
-        }
-        token = self.server.serving(self.engine)
+        # From the admit on, every exit ends the binding; the serving mark is
+        # undone only when this call set it
+        token = None
         try:
+            instance = self._instance_class()
+            instance.IGlobal = self._global_for(owner)
+            instance.IEndpoint = SimpleNamespace(endpoint=None)
+            instance.instance = _EngineInstance(trace_id, self.node_id)
+            # The engine's one write: the server-set caller context of this binding
+            instance._caller = {
+                'controlId': owner.control_id,
+                'userId': owner.userId,
+                'teamId': owner.teamId,
+                'orgId': owner.orgId,
+                'address': owner.address,
+                'rung': owner.rung,
+                'params': {self.node_id: dict(call.params)},
+                'env': {},
+                'traceLevel': 'none',
+                'correlationId': correlation_id,
+            }
+            token = self.server.serving(self.engine)
             if hasattr(instance, 'beginInstance'):
                 instance.beginInstance()
             try:
@@ -417,7 +420,8 @@ class Replica:
             if hasattr(instance, 'endInstance'):
                 instance.endInstance()
         finally:
-            self.server.done(token)
+            if token is not None:
+                self.server.done(token)
             self.server.end(self.engine, correlation_id)
         return instance.instance.outputs
 
