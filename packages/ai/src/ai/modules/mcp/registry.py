@@ -23,6 +23,9 @@ its INSTANCE is the one tracked at that address -- a fresh launch at the
 same address (a new control id) drops the earlier run's nonces, ``remove``
 (the ``terminate`` tool) and FIFO eviction drop them with the task, and a
 replacement link is refused once the instance it was minted for is gone.
+A run restarted or terminated OUTSIDE MCP never reaches this registry; the
+route asks the engine whether the control id is still live at upload time
+and drops that run's nonces when it is not (``drop_run_upload_nonces``).
 """
 
 import secrets
@@ -153,12 +156,51 @@ class TaskRegistry:
         current = self._tasks[address]['instance']
         if instance is not None and instance != current:
             raise KeyError(handle)
-        live = [nonce for nonce, bound in self._upload_nonces.items() if bound['token'] == address]
-        while len(live) >= MAX_UPLOAD_NONCES_PER_TASK:
-            self._upload_nonces.pop(live.pop(0), None)
+        self._make_nonce_room(address)
         nonce = secrets.token_urlsafe(32)
         self._upload_nonces[nonce] = {'token': address, 'instance': current, 'caller_auth': caller_auth}
         return nonce
+
+    def restore_upload_nonce(self, nonce: str, bound: Dict[str, Any]) -> bool:
+        """Put a redeemed nonce back, unspent, while the run it names is still the one tracked.
+
+        For a request that redeemed ``nonce`` and then could not learn whether
+        its run is still live (the engine did not answer the status call): no
+        link is spent on a transport failure, so the same URL retries. Refused
+        when the entry has left the tracker or a fresh launch took the address
+        over meanwhile -- the nonce died with that run, as it would have unredeemed.
+
+        Args:
+            nonce: The nonce ``consume_upload_nonce`` just redeemed.
+            bound: What that redemption returned (``token``, ``instance``, ``caller_auth``).
+
+        Returns:
+            bool: True when the nonce is live again.
+        """
+        address = bound['token']
+        entry = self._tasks.get(address)
+        if entry is None or entry['instance'] != bound['instance']:
+            return False
+        self._make_nonce_room(address)
+        self._upload_nonces[nonce] = dict(bound)
+        return True
+
+    def drop_run_upload_nonces(self, address: str, instance: str) -> None:
+        """Forget every nonce of the run ``instance`` at ``address``: the engine no longer serves that control.
+
+        The upload route calls this when the status lookup of a redeemed
+        nonce's control id is refused (a run restarted or terminated outside
+        MCP). Only that run's nonces go: a no-op when a fresh launch took the
+        address over meanwhile (its nonces are the new run's) or the entry is
+        gone (its nonces went with it). The entry itself stays; it is advisory.
+
+        Args:
+            address: The task address the nonce was bound to.
+            instance: The control id the engine refused.
+        """
+        entry = self._tasks.get(address)
+        if entry is not None and entry['instance'] == instance:
+            self._drop_upload_nonces(address)
 
     def has_upload_nonce(self, nonce: str) -> bool:
         """Report whether ``nonce`` is live, WITHOUT redeeming it.
@@ -183,6 +225,12 @@ class TaskRegistry:
                 for all.
         """
         return self._upload_nonces.pop(nonce, None)
+
+    def _make_nonce_room(self, address: str) -> None:
+        """Drop the oldest nonces of ``address`` until one more fits under ``MAX_UPLOAD_NONCES_PER_TASK``."""
+        live = [nonce for nonce, bound in self._upload_nonces.items() if bound['token'] == address]
+        while len(live) >= MAX_UPLOAD_NONCES_PER_TASK:
+            self._upload_nonces.pop(live.pop(0), None)
 
     def _drop_upload_nonces(self, address: str) -> None:
         """Forget every nonce bound to ``address``."""

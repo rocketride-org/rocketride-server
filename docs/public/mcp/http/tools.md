@@ -217,11 +217,14 @@ separate HTTP channel (bytes cannot ride an MCP tool call).
   `upload_url`, and the link answers `404` once used, after `terminate`
   through MCP, once a fresh launch through MCP has replaced the run at that
   address (`run_pipeline`/`run_dropper_pipe` without `use_existing`; an
-  attach with `use_existing` keeps the link), or on another MCP server. One
-  gap remains: a run restarted outside MCP (DAP, another client) is not
-  seen by the MCP server, so an unused link stays usable until it is
-  consumed, the run is terminated through MCP, or the MCP server lets it go;
-  a liveness check of the control id at upload time will close it. The link
+  attach with `use_existing` keeps the link), or on another MCP server. A
+  run restarted or terminated outside MCP (DAP, another client) never
+  reaches the MCP server, so each upload first asks the engine, once, for
+  the status of the control id the link was minted for: when the engine no
+  longer serves it the upload answers `404`, nothing is forwarded, and every
+  other link for that run dies with it; when the status call itself gets no
+  answer (connection lost, timeout) the upload answers `503` and the link is
+  NOT spent, so the same `upload_url` retries. The link
   names the MCP server itself (the only holder of the nonce),
   not the engine the tools run on. One request may carry at most 100 MiB; a
   larger body answers `413` with a link to retry with once the drop is split.
