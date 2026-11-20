@@ -1334,6 +1334,9 @@ function makeTestAction() {
 					),
 					'server:compile-tests',
 					'server:copy-test-data',
+					// The engine's own tests build pipelines over Python nodes (parse to
+					// response): unpacked from the node archive, as EaaS does for a run
+					'nodes:place',
 					parallel(
 						[
 							'java:submodule-test',

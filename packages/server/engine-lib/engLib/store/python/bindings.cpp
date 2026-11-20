@@ -549,14 +549,16 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
     //-------------------------------------------------------------
     /// @details
-    ///		Declares a debug output function which can accept
-    ///		multiple arguments. All arguments MUST be convertable
-    ///		to python strings. This is for nodes to output
-    ///		under the DebugOut level
+    ///		Returns the listing of every service with its RESOLVED
+    ///		schema: the registered ones, and the caller's custom ones,
+    ///		which only this call sees. A service marked "internal" is
+    ///		left out unless internal is true: the listing is what a UI
+    ///		shows, and a caller that needs the schema of an internal
+    ///		custom service has no other lookup for it.
     ///------------------------------------------------------------
     engLib.PYBIND_FUNCTION(
         getServiceDefinitions,
-        [](py::list custom) -> py::object {
+        [](py::list custom, bool internal) -> py::object {
             // Get the service type, with the caller's custom services
             auto scope =
                 IServices::withCustomServices(pyjson::dictToJson(custom));
@@ -566,7 +568,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 return py::none();
             }
 
-            auto result = IServices::getServiceSchemas();
+            auto result = IServices::getServiceSchemas(internal);
             if (!result) {
                 if (custom.size()) throw result.ccode();
                 return py::none();
@@ -575,7 +577,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             // Return it
             return pyjson::jsonToDict(*result);
         },
-        py::arg("custom") = py::list());
+        py::arg("custom") = py::list(), py::arg("internal") = false);
 
     //-------------------------------------------------------------
     /// @details

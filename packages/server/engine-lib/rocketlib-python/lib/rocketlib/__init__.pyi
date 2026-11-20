@@ -999,8 +999,8 @@ def getServiceDefinition(logicalType: str) -> Dict[str, Any]:
     """Return the service definition for the given logical type name."""
     ...
 
-def getServiceDefinitions(custom: List[Dict[str, Any]] = ...) -> Dict[str, Any]:
-    """Return all registered service definitions, plus the custom ones passed in."""
+def getServiceDefinitions(custom: List[Dict[str, Any]] = ..., internal: bool = ...) -> Dict[str, Any]:
+    """Return all registered service definitions, plus the custom ones passed in; internal ones only when asked for."""
     ...
 
 def getVersion() -> Dict[str, Any]:

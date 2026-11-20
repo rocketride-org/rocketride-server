@@ -839,6 +839,32 @@ TEST_CASE("store::Services::custom") {
         CHECK_FALSE(IServices::isCustomService(registeredType()));
     }
 
+    // The listing is what a UI shows, so it leaves an internal service
+    // out; a caller that serves a custom one asks for it by name, since
+    // the listing is its only source of that service's resolved schema
+    SECTION("custom services: an internal one is listed only when asked for") {
+        auto hidden = customNode("custom_internal");
+        hidden["capabilities"].append("internal");
+        auto scope = IServices::withCustomServices(
+            customList({hidden, customNode("custom_shown")}));
+        REQUIRE_NO_ERROR(scope);
+
+        auto shown = IServices::getServiceSchemas();
+        REQUIRE_NO_ERROR(shown);
+        CHECK((*shown)["services"].isMember("custom_shown"));
+        CHECK_FALSE((*shown)["services"].isMember("custom_internal"));
+
+        auto all = IServices::getServiceSchemas(true);
+        REQUIRE_NO_ERROR(all);
+        CHECK((*all)["services"].isMember("custom_shown"));
+        REQUIRE((*all)["services"].isMember("custom_internal"));
+        const auto &service = (*all)["services"]["custom_internal"];
+        CHECK(service["properties"].isArray());
+        CHECK(service["params"].isArray());
+        CHECK((service["capabilities"].asUInt() &
+               url::UrlConfig::PROTOCOL_CAPS::INTERNAL) != 0);
+    }
+
     SECTION("custom services: nest") {
         auto outer = IServices::withCustomServices(
             customList({customNode("custom_outer")}));

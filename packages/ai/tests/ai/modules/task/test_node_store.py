@@ -45,7 +45,8 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(node_store, '_definitions', {})
     monkeypatch.setattr(node_store, '_schemas', {})
     monkeypatch.setattr(node_store, 'getServiceDefinition', lambda p: {'on': 'disk'} if p == 'webhook' else None)
-    monkeypatch.setattr(node_store, 'getServiceDefinitions', calls['parsed'].append)
+    # The second argument asks the engine for its internal services too (see the schema tests below)
+    monkeypatch.setattr(node_store, 'getServiceDefinitions', lambda custom, internal: calls['parsed'].append(custom))
     monkeypatch.setattr(node_store, 'warning', calls['warnings'].append)
     monkeypatch.setattr(node_store.account, 'node_index', lambda: _index())
     monkeypatch.setattr(node_store.account, 'node_package', lambda name, sha256: f'{name}:{sha256}'.encode())
@@ -106,7 +107,7 @@ def test_an_index_it_cannot_use_serves_nothing(server, monkeypatch, broken):
         _unpacked_before(server, 'webhook', 'older')
     else:
 
-        def refuse(definitions):
+        def refuse(definitions, internal):
             raise RuntimeError('The icon of provider_x must be inline (a data: URL)')
 
         monkeypatch.setattr(node_store, 'getServiceDefinitions', refuse)
@@ -161,6 +162,60 @@ def test_a_served_node_the_index_names_in_capitals_is_found_in_lower_case(server
 
     assert node_store.served('provider_x') is not None
     assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
+
+
+def test_a_served_node_comes_with_the_served_nodes_it_imports(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y']
+    for name, requires in (('embed_y', ['embed_z']), ('embed_z', ['webhook'])):
+        protocol = f'{name}_p://'
+        index['nodes'][name] = {
+            'sha256': name,
+            'services': {'services.json': json.dumps({'protocol': protocol})},
+            'icons': {},
+            'requires': requires,
+        }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    # Each after the nodes it imports
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['embed_z', 'embed_y', 'llm_x']
+    assert [args[0] for args in server['unpacked']] == ['embed_z', 'embed_y', 'llm_x']
+
+
+def test_a_node_whose_import_fails_to_unpack_is_not_unpacked(server, monkeypatch):
+    # Named to sort after llm_x, so path order alone would unpack llm_x first
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['zeta_y']
+    index['nodes']['zeta_y'] = {
+        'sha256': 'z',
+        'services': {'services.json': json.dumps({'protocol': 'zeta_y_p://'})},
+        'icons': {},
+    }
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    def unpack(*args):
+        server['unpacked'].append(args)
+        if args[0] == 'zeta_y':
+            raise OSError('disk full')
+
+    monkeypatch.setattr(node_store.node_packages, 'unpack', unpack)
+
+    with pytest.raises(OSError):
+        node_store.place({'components': [{'provider': 'provider_x'}]})
+    assert [args[0] for args in server['unpacked']] == ['zeta_y']
+
+
+def test_a_served_library_with_no_service_is_placed_with_the_node_that_imports_it(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['helper_x']
+    index['nodes']['helper_x'] = {'sha256': 'h', 'services': {}, 'icons': {}}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['helper_x', 'llm_x']
+    assert [args[0] for args in server['unpacked']] == ['helper_x', 'llm_x']
 
 
 def test_a_pipeline_that_names_no_served_node_unpacks_nothing(server):
@@ -223,6 +278,26 @@ def test_a_copy_an_earlier_release_unpacked_is_replaced_at_start(server):
 
     assert server['unpacked'] == [('webhook', b'webhook:w', 'w', server['nodes'])]
     assert len(server['warnings']) == 1 and 'webhook' in server['warnings'][0] and 'replaced' in server['warnings'][0]
+
+
+def test_a_copy_replaced_at_start_comes_with_the_nodes_it_now_imports(server, monkeypatch):
+    # Release N unpacked llm_x, so the scan registered it; this release's llm_x imports embed_y, not on disk
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['embed_y', 'webhook']
+    index['nodes']['embed_y'] = {'sha256': 'e', 'services': {}, 'icons': {}}
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    monkeypatch.setattr(
+        node_store, 'getServiceDefinition', lambda p: {'on': 'disk'} if p in ('webhook', 'provider_x') else None
+    )
+    _unpacked_before(server, 'llm_x', 'older')
+    # The server's own folder, which it imports too, stays as it is
+    os.makedirs(os.path.join(server['nodes'], 'webhook'))
+
+    node_store.start()
+
+    # What it imports first; a pipeline naming llm_x places nothing, as the engine has it
+    assert [args[0] for args in server['unpacked']] == ['embed_y', 'llm_x']
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == []
 
 
 def test_a_copy_with_this_releases_digest_is_left_alone(server):
@@ -291,13 +366,30 @@ X_SCHEMA = {'properties': [{'name': 'model', 'path': 'model'}], 'params': [], 'c
 def test_the_schema_the_engine_resolved_for_a_served_node_is_kept(server, monkeypatch):
     """A server-side lookup needs the resolved schema before the node is unpacked; the engine made it at start."""
     listed = {'version': 1, 'services': {'Provider_X': {**X_SCHEMA, 'title': 'X', 'protocol': 'provider_x://'}}}
-    monkeypatch.setattr(node_store, 'getServiceDefinitions', lambda custom: listed)
+    monkeypatch.setattr(node_store, 'getServiceDefinitions', lambda custom, internal: listed)
 
     node_store.start()
 
     assert node_store.schema('provider_x') == X_SCHEMA, 'only what resolveConfig consumes'
     assert node_store.schema('PROVIDER_X') == X_SCHEMA
     assert node_store.schema('webhook') is None, "a node the server carries is the engine's to answer"
+
+
+def test_the_engine_is_asked_for_the_internal_services_too(server, monkeypatch):
+    """A pipeline names an internal node like any other, and the listing a UI gets leaves it out."""
+    asked = []
+
+    def listing(custom, internal):
+        asked.append(internal)
+        # What the engine lists: the internal service only when asked for it
+        return {'version': 1, 'services': {'provider_x': X_SCHEMA} if internal else {}}
+
+    monkeypatch.setattr(node_store, 'getServiceDefinitions', listing)
+
+    node_store.start()
+
+    assert asked == [True]
+    assert node_store.schema('provider_x') == X_SCHEMA
 
 
 def test_node_config_falls_back_to_the_schema_of_a_served_node(server, monkeypatch):
@@ -316,7 +408,7 @@ def test_node_config_falls_back_to_the_schema_of_a_served_node(server, monkeypat
 
 
 def test_an_index_it_cannot_use_keeps_no_schema(server, monkeypatch):
-    def refuse(custom):
+    def refuse(custom, internal):
         raise RuntimeError('InvalidParam: the definition is in the old node format')
 
     monkeypatch.setattr(node_store, 'getServiceDefinitions', refuse)

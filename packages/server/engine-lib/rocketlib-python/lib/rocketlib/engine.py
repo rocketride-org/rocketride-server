@@ -321,7 +321,7 @@ def getServiceSchema(logicalType: str) -> Dict:
 getServiceSchema = engLib.getServiceSchema  # noqa
 
 
-def getServiceDefinitions(custom: list = []) -> Dict:
+def getServiceDefinitions(custom: list = [], internal: bool = False) -> Dict:
     """
     Return every service schema, plus the caller's custom service definitions if any.
 
@@ -330,6 +330,12 @@ def getServiceDefinitions(custom: list = []) -> Dict:
     services of any call this one runs inside; an empty list brings none,
     so a call made from a node's code during a call with custom services
     still sees those. A definition may nest at most 64 levels deep.
+
+    A service marked ``internal`` is left out, since the listing is what a
+    UI shows, unless ``internal`` is true. A caller that serves custom
+    definitions asks for them: ``getServiceSchema`` sees only registered
+    services, so the listing is the one source of a custom service's
+    resolved schema.
     """
     ...
 

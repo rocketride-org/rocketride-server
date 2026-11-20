@@ -147,10 +147,14 @@ module.exports = {
 			}),
 		},
 		{
+			// Some tests load real nodes in the engine they run in (a store driver's
+			// configuration, the binding seam's prompt-to-response pipeline). The
+			// nodes ship in an archive now, so the build makes it and nodes:place
+			// unpacks them, as EaaS does for a run.
 			name: 'ai:test',
 			action: () => ({
 				description: 'Testing ai',
-				steps: ['ai:build', 'ai:run-pytest'],
+				steps: ['ai:build', 'nodes:build', 'nodes:place', 'ai:run-pytest'],
 			}),
 		},
 		{

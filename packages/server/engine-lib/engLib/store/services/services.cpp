@@ -1927,10 +1927,15 @@ IServices::getServiceDefinitionFromService(
 /// @details
 ///		Returns all the service schemas. This is usually called to return
 ///		to the UI
-/// @param[in] logicalType
-///		The protocol type to find
+/// @param[in] includeInternal
+///		Also list the services marked "internal", which the UI never
+///		shows. A caller that serves definitions not on this engine's disk
+///		(EaaS, for the nodes of the node archive) asks for them: their
+///		resolved schema has no other source, since getServiceDefinition
+///		sees a custom service only inside the call it came with
 //-------------------------------------------------------------------------
-ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
+ErrorOr<json::Value> IServices::getServiceSchemas(
+    bool includeInternal) noexcept {
     json::Value schemas;
 
     // The registered services, then the custom ones of the call running
@@ -1950,8 +1955,9 @@ ErrorOr<json::Value> IServices::getServiceSchemas() noexcept {
             // If looking for a specific service, skip the rest
             if (ServiceName && ServiceName.val() != logicalType) continue;
 
-            // If this is marked as internal, skip it
-            if (def.capabilities & url::UrlConfig::PROTOCOL_CAPS::INTERNAL)
+            // If this is marked as internal, skip it unless asked for
+            if (!includeInternal &&
+                (def.capabilities & url::UrlConfig::PROTOCOL_CAPS::INTERNAL))
                 continue;
 
             // Does the caller wants the whole thing

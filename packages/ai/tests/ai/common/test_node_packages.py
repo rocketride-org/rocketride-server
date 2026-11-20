@@ -8,6 +8,7 @@
 import hashlib
 import io
 import os
+import pathlib
 import time
 import zipfile
 
@@ -102,6 +103,11 @@ def test_the_digest_is_each_path_with_the_sha256_of_its_file_in_order():
     lines = ''.join(f'{path}\0{hashlib.sha256(files[path]).hexdigest()}\n' for path in ('a/c.json', 'b.py'))
 
     assert node_packages.content_digest(files) == hashlib.sha256(lines.encode()).hexdigest()
+    # The vector nodes/scripts/tasks.test.js checks against the build's contentDigest
+    assert node_packages.content_digest(files) == 'cbd358a9e4e48458634a275f10ca7085f3576d2eba9f9a3d28f224f8d477c200'
+    # Paths sort by code point: JavaScript's default sort puts the emoji first
+    unicode = {'\U0001f600.txt': b'a', '\uff21.txt': b'b'}
+    assert node_packages.content_digest(unicode) == '306af2aa83b510e1390ea95c959bf150bd7a6ee619097c8e84ee5e17035ad997'
 
 
 def test_the_same_files_in_another_zip_match_the_digest(nodes):
@@ -231,3 +237,8 @@ def test_a_package_unpacks_when_only_nodes_is_writable(nodes, monkeypatch):
 
     assert node_packages.digest_of(node_dir) == sha256
     assert os.listdir(nodes) == ['railnode']
+
+
+def test_depends_leaves_out_the_nodes_this_marks_as_unpacked():
+    depends = pathlib.Path(__file__).parents[5] / 'packages/server/engine-lib/rocketlib-python/lib/depends.py'
+    assert f"_UNPACKED_MARKER = '{node_packages.DIGEST_FILE}'" in depends.read_text(encoding='utf-8')
