@@ -279,7 +279,7 @@ def test_render_registers_thread_with_pydevd_once(monkeypatch):
     inst, mod = _render_ready_instance()
     fake_pydevd = MagicMock()
     monkeypatch.setitem(sys.modules, 'pydevd', fake_pydevd)
-    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    monkeypatch.setattr(sys.modules[mod.register_debugger_thread.__module__], '_DEBUGGER_THREADS', set())
 
     inst.renderObject(types.SimpleNamespace(name='a.txt'))
     fake_pydevd.settrace.assert_called_once_with(suspend=False)
@@ -290,7 +290,7 @@ def test_render_registers_thread_with_pydevd_once(monkeypatch):
 def test_render_without_pydevd_is_a_noop(monkeypatch):
     inst, mod = _render_ready_instance()
     monkeypatch.delitem(sys.modules, 'pydevd', raising=False)
-    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    monkeypatch.setattr(sys.modules[mod.register_debugger_thread.__module__], '_DEBUGGER_THREADS', set())
     assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
 
 
@@ -301,7 +301,7 @@ def test_render_survives_pydevd_settrace_failure(monkeypatch):
     fake_pydevd = MagicMock()
     fake_pydevd.settrace.side_effect = RuntimeError('adapter gone')
     monkeypatch.setitem(sys.modules, 'pydevd', fake_pydevd)
-    monkeypatch.setattr(mod, '_DEBUGGER_THREADS', set())
+    monkeypatch.setattr(sys.modules[mod.register_debugger_thread.__module__], '_DEBUGGER_THREADS', set())
 
     assert inst.renderObject(types.SimpleNamespace(name='a.txt')) == 'PREVENT_DEFAULT'
     inst.renderObject(types.SimpleNamespace(name='b.txt'))
