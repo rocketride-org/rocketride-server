@@ -487,6 +487,12 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
         version = int(registry_version)
         if version not in await _version_dirs_for(token, app_id, want=version):
             return None
+        # An isolated app's main-origin entry URL is refused by _serve_versioned
+        # (E8): do not advertise it. Same None as an unbuilt version.
+        from .app_origin import isolated_for
+
+        if await isolated_for(token, app_id):
+            return None
         return {
             'appId': app_id,
             'name': _app_field(entry, 'name') or app_id,
@@ -549,6 +555,14 @@ _SANDBOXED_ASSET_HEADERS = {
 }
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
+# While isolation is on every reuse revalidates (with an ETag), so the E8
+# decision and its headers are applied on each use instead of being replayed
+# from a browser cache. Entries a browser stored BEFORE isolation was enabled
+# keep their one-hour lifetime and cannot be revoked from here: operators
+# enabling isolation should expect main-origin bundles cached earlier to age
+# out within an hour (a hard refresh or the shell's own version bump clears
+# them sooner).
+_BUNDLE_REVALIDATE = 'private, no-cache'
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
 # 'resolvedAt', 'floor', 'appId'} — HARD expiry (contrast _app_auth_cache's
 # sliding window); every deploy change also drops the app's entries
@@ -693,8 +707,9 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     # script here. Same 404 as an absent version. Skipped under off.
     token = request.cookies.get(_APP_COOKIE, '')
     media_type = _media_type(rest[-1]) or 'application/octet-stream'
-    headers = {'Cache-Control': _BUNDLE_CACHE}
     from .app_origin import current_config, is_canonical_app_id, isolated_for
+
+    headers = {'Cache-Control': _BUNDLE_CACHE if current_config().mode == 'off' else _BUNDLE_REVALIDATE}
 
     # A non-canonical spelling (acme.foo. names acme.foo's directory on a
     # Windows store) is refused while isolation is on, before the isolation
@@ -717,6 +732,11 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
+    if headers['Cache-Control'] == _BUNDLE_REVALIDATE:
+        etag = f'"{hashlib.sha256(data).hexdigest()[:32]}"'
+        headers['ETag'] = etag
+        if request.headers.get('if-none-match') == etag:
+            return Response(status_code=304, headers=headers)
     return Response(content=data, media_type=media_type, headers=headers)
 
 
@@ -819,7 +839,7 @@ async def apps_frame(request: Request):
             return _frame_error(413, 'too_large')
     try:
         body = json.loads(raw)
-    except ValueError:
+    except (ValueError, RecursionError):  # the byte cap bounds size, not nesting depth
         return _frame_error(400, 'bad_request')
     app_id = body.get('appId') if isinstance(body, dict) else None
     version = body.get('version') if isinstance(body, dict) else None

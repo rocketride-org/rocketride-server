@@ -522,16 +522,48 @@ def test_e8_refusal_is_not_an_existence_oracle(world):
 def test_e8_isolated_icon_is_not_a_script_vector(world):
     """T35: an isolated app's versioned icon may still feed an ``<img>`` but must not be a navigable script on the shell origin.
 
-    Either 404, or served with a policy that neutralises script inside an SVG
-    opened as a document (``sandbox`` or ``default-src 'none'``) plus nosniff.
+    Either 404, or served with exactly the sandboxed-asset policy (``default-src 'none'; sandbox``:
+    no ``allow-scripts`` token, no more specific script directive) plus nosniff.
     """
     resp = world.client.get(f'/apps/{THIRD}/v1/icon.svg', headers=COOKIE)
     if resp.status_code == 200:
-        csp = resp.headers.get('content-security-policy', '')
-        assert 'sandbox' in csp or "default-src 'none'" in csp
+        assert resp.headers.get('content-security-policy') == "default-src 'none'; sandbox"
         assert resp.headers.get('x-content-type-options') == 'nosniff'
     else:
         assert resp.status_code == 404
+
+
+def test_probe_does_not_advertise_an_entry_the_main_origin_refuses(world):
+    """The resolution probe answers like the bundle route: an isolated app has no main-origin entry URL."""
+    isolated = world.client.get(f'/apps/{THIRD}', headers=COOKIE)
+    assert 'remoteEntry.js' not in isolated.text and isolated.status_code != 200
+    assert world.client.get(f'/apps/{THIRD}/v1/remoteEntry.js', headers=COOKIE).status_code == 404
+    first_party = world.client.get(f'/apps/{FIRST}', headers=COOKIE)  # control: not isolated, still advertised
+    assert first_party.status_code == 200 and first_party.json()['entry'] == f'/apps/{FIRST}/v1/remoteEntry.js'
+
+
+def test_bundle_revalidates_while_isolation_is_on(world):
+    """Main-origin bundles are not replayed from a browser cache while isolation is on: ETag + no-cache + 304."""
+    first = world.client.get(f'/apps/{FIRST}/v1/remoteEntry.js', headers=COOKIE)
+    assert first.status_code == 200
+    assert first.headers['cache-control'] == 'private, no-cache'
+    etag = first.headers['etag']
+    again = world.client.get(f'/apps/{FIRST}/v1/remoteEntry.js', headers={**COOKIE, 'if-none-match': etag})
+    assert again.status_code == 304 and again.content == b''
+    world.registry.denied_use.add(('u1', FIRST, 1))  # the gates still run on a conditional request
+    gone = world.client.get(f'/apps/{FIRST}/v1/remoteEntry.js', headers={**COOKIE, 'if-none-match': etag})
+    assert gone.status_code == 404
+
+
+def test_apps_frame_decoder_recursion_limit_is_400(world, monkeypatch):
+    """The 4 KiB cap bounds bytes, not nesting: a decoder that hits its recursion limit answers 400, never a 500."""
+
+    def too_deep(raw):
+        raise RecursionError('maximum recursion depth exceeded while decoding a JSON array')
+
+    monkeypatch.setattr(shell_mod.json, 'loads', too_deep)
+    resp = world.post(raw=b'[' * 2000 + b']' * 2000, headers={'content-type': 'application/json'})
+    assert resp.status_code == 400 and 'bad_request' in resp.text
 
 
 def test_frame_grant_rechecks_eligibility_before_its_warm_verdict(world):
