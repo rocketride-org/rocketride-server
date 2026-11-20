@@ -152,5 +152,11 @@ def startup_failure(argv: List[str], code: int, output: str) -> Optional[str]:
     """
     if code == 0 or not argv or os.path.basename(argv[0]) not in ('bwrap', 'sandbox-exec'):
         return None
-    found = _STARTUP_ERROR.search(output)
-    return found.group('message').strip()[:500] if found else None
+    # The provider fails before the compiler runs, so its message is all there is. A line that
+    # only begins that way inside compiler output (a file of the app named "bwrap: ...") is a
+    # diagnostic, and any other line makes the whole output the compiler's.
+    lines = [line for line in output.splitlines() if line.strip()]
+    found = [_STARTUP_ERROR.match(line) for line in lines]
+    if not found or not all(found):
+        return None
+    return found[0].group('message').strip()[:500]

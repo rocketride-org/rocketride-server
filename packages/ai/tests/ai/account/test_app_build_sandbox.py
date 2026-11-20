@@ -174,6 +174,19 @@ socket.once('timeout', () => { console.log('denied'); socket.destroy(); });
         (['/usr/bin/bwrap'], 1, "src/a.ts(1,1): error TS2304: Cannot find name 'x'.\n", None),
         (['/usr/bin/bwrap'], 0, 'bwrap: noise on a successful run\n', None),
         (['/usr/bin/node', 'tsc'], 1, 'bwrap: written by the app itself\n', None),
+        # A compiler line that begins like the provider's, after other output, stays a compile error.
+        (
+            ['/usr/bin/bwrap'],
+            1,
+            "src/a.ts(1,1): error TS2304: Cannot find name 'x'.\nbwrap: x.ts(1,1): error TS1005: ';' expected.\n",
+            None,
+        ),
+        (
+            ['/usr/bin/sandbox-exec'],
+            1,
+            "bwrap: x.ts(1,1): error TS1005: ';' expected.\nsrc/a.ts(2,1): error TS2304: Cannot find name 'y'.\n",
+            None,
+        ),
     ],
 )
 def test_a_sandbox_that_cannot_start_is_not_a_compile_error(argv, code, output, expected):
