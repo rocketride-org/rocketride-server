@@ -700,11 +700,13 @@ def _patched_workspace_yaml(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-# Only a spec that starts with a URL scheme is a URL, never a local directory.
-# Every other spec is decided by its shape, not by a prefix: pnpm hands a spec
-# it cannot parse as a registry, git or tarball form to the local resolver, so
-# a prefix like 'git+' or 'github:' proves nothing.
-_URL_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*://')
+# Only the schemes pnpm resolves away from the local disk are exempt from the
+# path check: http(s) goes to the tarball resolver and the git protocols to the
+# git resolver. Any other scheme (including one pnpm does not know) that holds a
+# '/' falls through to the local resolver, which joins it onto the project
+# directory, so it is decided by its shape like any other spec. A prefix such as
+# 'git+' or 'github:' alone proves nothing either.
+_REMOTE_URL_SCHEME = re.compile(r'^(?:https?|git|git\+http|git\+https|git\+ssh|git\+rsync|git\+ftp|ssh)://')
 
 
 def _unsafe_spec(spec: Any, base: str = '.') -> bool:
@@ -714,7 +716,7 @@ def _unsafe_spec(spec: Any, base: str = '.') -> bool:
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
     that starts with ``.``, ``/``, ``~`` or a drive letter, ends in
     ``.tgz``/``.tar``/``.tar.gz``, or holds a path separator without starting
-    with a URL scheme, as a local path) — is refused when it is
+    with an http(s) or git URL scheme, as a local path) — is refused when it is
     absolute, home-relative, or, resolved against ``base`` (the declaring
     package's directory relative to the workspace root), lands above the
     workspace root. A ``..`` that stays inside the tree is allowed, so a
@@ -737,7 +739,7 @@ def _unsafe_spec(spec: Any, base: str = '.') -> bool:
                 bases = [base, '.']
             break
     else:
-        if _URL_SCHEME.match(text):
+        if _REMOTE_URL_SCHEME.match(text):
             return False
         # '~' alone or '~/...' is a home path; '~1.2.3' is a version range.
         bare = (

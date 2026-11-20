@@ -1465,6 +1465,13 @@ def test_unsafe_spec_covers_bare_and_prefixed_local_paths(spec, unsafe):
         ('github:x/../../../../y', 'apps/x', True),
         ('npm:x/../../../../y', 'apps/x', True),
         ('p/../../../../x/a://..', 'apps/x', True),
+        # only http(s) and the git protocols are remote; any other scheme is a path
+        ('foo://../../../x', '.', True),
+        ('svn://../../../../x', 'apps/x', True),
+        ('foo://a/b', '.', False),
+        ('ssh://git@example.com/a/b.git', '.', False),
+        ('git://example.com/a/b.git', '.', False),
+        ('git+ssh://git@example.com/a/b.git', '.', False),
     ],
 )
 def test_unsafe_spec_resolves_against_the_declaring_package(spec, base, unsafe):
