@@ -22,7 +22,6 @@ import asyncio
 import codecs
 import json
 import time
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, TYPE_CHECKING
 from starlette.websockets import WebSocketDisconnect
@@ -253,8 +252,19 @@ class DataConn(DAPConn):
         task_channel.attach(self)
 
     async def on_closing(self) -> None:
-        """Fail this task's pending requests and ask the engine to reconnect, before handlers are drained."""
+        """Fail pending requests, then free pipes within the shutdown limit.
+
+        The socket has stopped receiving. ``disconnect`` waits up to
+        ``CONST_DATA_SHUTDOWN_TIMEOUT`` for a call still running on a pipe,
+        then returns the pipe. Handlers still blocked after that are cancelled
+        so the transport's drain, which has no timeout of its own, can finish.
+        """
         await self._server._closing(self, self.channel_id)
+        await self.disconnect()
+        transport = getattr(self, '_transport', None)
+        for task in list(getattr(transport, '_message_tasks', ())):
+            if not task.done():
+                task.cancel()
 
     async def on_receive(self, message: Optional[Dict[str, Any]] = None) -> None:
         """Resolve a response to one of this task's requests; route anything else as before.
@@ -737,26 +747,80 @@ class DataConn(DAPConn):
         conn_pipe.last_activity_time = time.time()
         self.debug_message(f'Reset activity timer for pipe {conn_pipe.pipe_id}')
 
-    @asynccontextmanager
-    async def _in_use(self, conn_pipe: DataConnPipe):
-        """Count a write or tool call as running on the pipe until it returns.
+    async def _run_on_pipe(self, conn_pipe: DataConnPipe, func):
+        """Run ``func`` on a worker thread and count it until that thread returns.
 
-        Close, disconnect and the zombie sweep read this count, so the pipe is
-        not returned to the endpoint while a call still runs on it. The count
-        changes only on the event loop, never in the worker thread.
+        Cancelling the task that awaits this does not stop the thread. The
+        count therefore drops in a loop callback the thread schedules as it
+        returns, not in a ``finally`` of the awaiting task.
 
         Args:
             conn_pipe: The DataConnPipe the call runs on.
+            func: The synchronous call to run. It takes no arguments.
+
+        Returns:
+            Whatever ``func`` returns.
         """
         conn_pipe.in_flight += 1
         conn_pipe.idle.clear()
+        loop = asyncio.get_running_loop()
+
+        def worker():
+            try:
+                return func()
+            finally:
+                loop.call_soon_threadsafe(self._call_finished, conn_pipe)
+
+        return await asyncio.to_thread(worker)
+
+    def _call_finished(self, conn_pipe: DataConnPipe) -> None:
+        """Drop one in-flight call now that its worker thread has returned.
+
+        Args:
+            conn_pipe: The DataConnPipe the call ran on.
+        """
+        conn_pipe.in_flight -= 1
+        if conn_pipe.in_flight == 0:
+            conn_pipe.idle.set()
+        self._reset_pipe_activity(conn_pipe)
+
+    def _release_later(self, conn_pipe: DataConnPipe) -> None:
+        """Free a pipe from a task that outlives the handler waiting on it.
+
+        Close pops the pipe before it waits, so a cancelled close would
+        otherwise run its ``finally`` and return the pipe while the worker
+        is still using it. This task is not one of the socket's message
+        tasks, so the transport drain does not wait on it.
+
+        Args:
+            conn_pipe: The DataConnPipe already removed from the pipe map.
+        """
+        task = asyncio.create_task(self._release_when_idle(conn_pipe))
+        tasks = getattr(self, '_release_tasks', None)
+        if tasks is None:
+            tasks = set()
+            self._release_tasks = tasks
+        tasks.add(task)
+        task.add_done_callback(tasks.discard)
+
+    async def _release_when_idle(self, conn_pipe: DataConnPipe) -> None:
+        """Wait for the pipe's running calls, up to the shutdown limit, then free it.
+
+        Args:
+            conn_pipe: The DataConnPipe to return to the endpoint.
+        """
         try:
-            yield
-        finally:
-            conn_pipe.in_flight -= 1
-            if conn_pipe.in_flight == 0:
-                conn_pipe.idle.set()
-            self._reset_pipe_activity(conn_pipe)
+            await asyncio.wait_for(conn_pipe.idle.wait(), timeout=CONST_DATA_SHUTDOWN_TIMEOUT)
+        except asyncio.TimeoutError:
+            self.debug_message(
+                f'Freeing pipe {conn_pipe.pipe_id} after a cancelled close while a call still runs on it '
+                f'(waited {CONST_DATA_SHUTDOWN_TIMEOUT}s)'
+            )
+        conn_pipe.has_failed = True
+        await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
+        if conn_pipe.semaphore_acquired:
+            self._pipe_sem.release()
+            self.debug_message(f'Released semaphore for pipe {conn_pipe.pipe_id}')
 
     async def _monitor_pipes(self):
         """
@@ -781,8 +845,10 @@ class DataConn(DAPConn):
                 current_time = time.time()
                 zombie_pipes = []
 
-                # Find pipes that haven't been used in the timeout period
-                for pipe_id, conn_pipe in list(self._pipe_map.items()):
+                # Find pipes that haven't been used in the timeout period.
+                # Keep the pipe itself: cleanup awaits, and a write can start
+                # on a later pipe before this loop reaches it.
+                for conn_pipe in list(self._pipe_map.values()):
                     # Skip pipes that are actively processing (e.g. long LLM calls)
                     if conn_pipe.in_flight > 0:
                         continue
@@ -790,22 +856,36 @@ class DataConn(DAPConn):
                     time_since_last_activity = current_time - conn_pipe.last_activity_time
 
                     if time_since_last_activity > self._pipe_timeout:
-                        zombie_pipes.append((pipe_id, time_since_last_activity))
+                        zombie_pipes.append(conn_pipe)
 
                 # Clean up zombie pipes
-                for pipe_id, inactive_time in zombie_pipes:
+                for conn_pipe in zombie_pipes:
+                    pipe_id = conn_pipe.pipe_id
+                    # Recheck with no await between the check and the pop. A
+                    # write may have started while an earlier pipe was cleaned up.
+                    current = self._pipe_map.get(pipe_id)
+                    if (
+                        current is not conn_pipe
+                        or conn_pipe.in_flight > 0
+                        or time.time() - conn_pipe.last_activity_time <= self._pipe_timeout
+                    ):
+                        continue
+                    self._pipe_map.pop(pipe_id, None)
+                    inactive_time = time.time() - conn_pipe.last_activity_time
                     self.debug_message(
                         f'Cleaning up zombie pipe {pipe_id} after {inactive_time:.1f}s of inactivity (timeout: {self._pipe_timeout}s)'
                     )
-                    conn_pipe = self._pipe_map.pop(pipe_id, None)
-                    if conn_pipe:
-                        conn_pipe.has_failed = True  # Mark as failed for monitoring
-                        await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
+                    conn_pipe.has_failed = True  # Mark as failed for monitoring
+                    await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
 
-                        # Release semaphore for zombie pipe if it was acquired
-                        if conn_pipe.semaphore_acquired:
-                            self._pipe_sem.release()
-                            self.debug_message(f'Released semaphore for zombie pipe {pipe_id}')
+                    # Release semaphore for zombie pipe if it was acquired
+                    if conn_pipe.semaphore_acquired:
+                        self._pipe_sem.release()
+                        self.debug_message(f'Released semaphore for zombie pipe {pipe_id}')
+
+                scanned = getattr(self, '_sweep_scanned', None)
+                if scanned is not None:
+                    scanned.set()
 
                 # Log monitoring status if we have active pipes
                 if self._pipe_map:
@@ -1089,8 +1169,7 @@ class DataConn(DAPConn):
                 raise
 
         # Execute in thread, counted as in flight so close, disconnect and the zombie sweep wait for it
-        async with self._in_use(conn_pipe):
-            await asyncio.to_thread(write_sync)
+        await self._run_on_pipe(conn_pipe, write_sync)
         return self.build_response(request)
 
     async def _close(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
@@ -1188,13 +1267,18 @@ class DataConn(DAPConn):
             raise
 
         finally:
-            # Always clean up and release semaphore
-            await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
+            # A cancelled close must not return the pipe while its worker still
+            # runs. The replacement task waits for that worker, up to the
+            # shutdown limit. A close that finished its wait still cleans up here.
+            if conn_pipe.in_flight > 0:
+                self._release_later(conn_pipe)
+            else:
+                await asyncio.to_thread(self._cleanup_pipe, conn_pipe)
 
-            # Release semaphore if it was acquired in open()
-            if conn_pipe.semaphore_acquired:
-                self._pipe_sem.release()
-                self.debug_message(f'Released semaphore for pipe {pipe_id}')
+                # Release semaphore if it was acquired in open()
+                if conn_pipe.semaphore_acquired:
+                    self._pipe_sem.release()
+                    self.debug_message(f'Released semaphore for pipe {pipe_id}')
 
     def _emit_tool_trace(self, op: str, pipe_id: int, component: str, trace: Dict[str, Any]) -> None:
         """
@@ -1389,8 +1473,7 @@ class DataConn(DAPConn):
         # Execute in thread; a call on the caller's pipe is counted in flight so close, disconnect and the zombie sweep wait for it
         try:
             if conn_pipe is not None:
-                async with self._in_use(conn_pipe):
-                    result = await asyncio.to_thread(tool_sync)
+                result = await self._run_on_pipe(conn_pipe, tool_sync)
             else:
                 result = await asyncio.to_thread(tool_sync)
             return self.build_response(request, body={'result': result})

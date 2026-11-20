@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import threading
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -835,15 +835,17 @@ async def test_zombie_sweep_skips_a_pipe_while_an_overlapping_write_still_runs(m
     assert conn_pipe.in_flight == 1
     assert not conn_pipe.idle.is_set()
 
+    conn._sweep_scanned = asyncio.Event()
     sweep = asyncio.create_task(conn._monitor_pipes())
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(conn._sweep_scanned.wait(), 2)
     assert conn._pipe_map == {1: conn_pipe}
     conn._target.putPipe.assert_not_called()
 
     gate(b'second')[1].set()
     await second
-    await asyncio.sleep(0.1)
-    assert conn._pipe_map == {}
+    while 1 in conn._pipe_map:
+        conn._sweep_scanned.clear()
+        await asyncio.wait_for(conn._sweep_scanned.wait(), 2)
     conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
 
     conn._shutdown_event.set()
@@ -924,3 +926,124 @@ async def test_disconnect_frees_a_pipe_whose_write_outlasts_the_shutdown_limit(m
 
     gate(b'stuck')[1].set()
     await asyncio.gather(write, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_cancelling_a_write_keeps_the_pipe_in_flight_until_the_worker_returns(monkeypatch):
+    """Cancelling the awaiting task does not stop the thread, so the pipe stays in flight."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'slow'}))
+    await _wait_started(gate, b'slow')
+
+    write.cancel()
+    await asyncio.gather(write, return_exceptions=True)
+
+    assert conn_pipe.in_flight == 1
+    assert not conn_pipe.idle.is_set()
+
+    gate(b'slow')[1].set()
+    await asyncio.wait_for(conn_pipe.idle.wait(), 2)
+    assert conn_pipe.in_flight == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelling_close_does_not_free_the_pipe_until_the_write_returns(monkeypatch):
+    """A cancelled close leaves the pipe with the worker, and a later task returns it."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    conn_pipe.semaphore_acquired = True
+    conn._pipe_sem = MagicMock()
+    returned = asyncio.Event()
+    conn._target.putPipe.side_effect = lambda pipe: returned.set()
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'slow'}))
+    await _wait_started(gate, b'slow')
+
+    close = asyncio.create_task(conn._close({}, {'pipe_id': 1}))
+    await asyncio.sleep(0)
+    while not close.done() and conn_pipe.in_flight > 0 and 1 in conn._pipe_map:
+        await asyncio.sleep(0)
+    close.cancel()
+    await asyncio.gather(close, return_exceptions=True)
+
+    assert not returned.is_set()
+    conn._pipe_sem.release.assert_not_called()
+
+    gate(b'slow')[1].set()
+    await write
+    await asyncio.wait_for(returned.wait(), 2)
+    for _ in range(100):
+        if conn._pipe_sem.release.called:
+            break
+        await asyncio.sleep(0)
+    conn._pipe_sem.release.assert_called_once_with()
+
+
+@pytest.mark.asyncio
+async def test_sweep_rechecks_a_pipe_that_becomes_busy_while_an_earlier_one_is_cleaned(monkeypatch):
+    """Cleanup of one zombie awaits; a write that starts on the next pipe keeps that pipe."""
+    conn, first = _make_text_conn(monkeypatch)
+    second = data_conn.DataConnPipe(
+        pipe_id=2,
+        pipe=MagicMock(),
+        mime_type='application/octet-stream',
+        lane='raw',
+        is_open=True,
+        entry=MagicMock(),
+    )
+    first.last_activity_time = 0
+    second.last_activity_time = 0
+    conn._pipe_map = {1: first, 2: second}
+    conn._pipe_timeout = 0
+    conn._shutdown_event = asyncio.Event()
+    conn._sweep_scanned = asyncio.Event()
+    monkeypatch.setattr(data_conn, 'CONST_DATA_SHUTDOWN_TIMEOUT', 0.01)
+    started, release = threading.Event(), threading.Event()
+    cleanup = conn._cleanup_pipe
+
+    def blocking_cleanup(conn_pipe):
+        if conn_pipe.pipe_id == 1:
+            started.set()
+            assert release.wait(5), 'the test never released the cleanup'
+        cleanup(conn_pipe)
+
+    conn._cleanup_pipe = blocking_cleanup
+    sweep = asyncio.create_task(conn._monitor_pipes())
+    assert await asyncio.to_thread(started.wait, 5)
+
+    second.in_flight = 1
+    second.idle.clear()
+    release.set()
+    await asyncio.wait_for(conn._sweep_scanned.wait(), 2)
+
+    assert conn._pipe_map == {2: second}
+    conn._target.putPipe.assert_called_once_with(first.pipe)
+
+    conn._shutdown_event.set()
+    await sweep
+
+
+@pytest.mark.asyncio
+async def test_socket_close_frees_a_running_pipe_within_the_shutdown_limit(monkeypatch):
+    """A dropped socket runs disconnect, so a stuck write cannot keep its pipe past the limit."""
+    conn, conn_pipe, gate = _make_held_conn(monkeypatch)
+    _ready_to_disconnect(conn, monkeypatch)
+    monkeypatch.setattr(data_conn, 'CONST_DATA_SHUTDOWN_TIMEOUT', 0.05)
+    conn.channel_id = None
+    conn._server._closing = AsyncMock()
+    conn_pipe.semaphore_acquired = True
+    conn._pipe_sem = MagicMock()
+    write = asyncio.create_task(conn._write({}, {'pipe_id': 1, 'data': b'stuck'}))
+    await _wait_started(gate, b'stuck')
+    parked = asyncio.create_task(asyncio.sleep(30))
+    conn._transport = SimpleNamespace(_message_tasks={write, parked})
+
+    await asyncio.wait_for(conn.on_closing(), 2)
+
+    conn._server._closing.assert_awaited_once()
+    assert conn_pipe.has_failed
+    conn._target.putPipe.assert_called_once_with(conn_pipe.pipe)
+    conn._pipe_sem.release.assert_called_once_with()
+    assert write.cancelling()
+    assert parked.cancelling()
+
+    gate(b'stuck')[1].set()
+    await asyncio.gather(write, parked, return_exceptions=True)
