@@ -78,6 +78,29 @@ test('G4R2-M1 a refused response, unregister or publish is charged too', async (
 	assert.equal(codeOf({ __rrbus: 'response', ...reply }), 'rate', `after 120 refused messages the bucket is empty, got ${brief(reply)}`);
 });
 
+test('G4R2-M1b an unregister the rate bucket refused still releases the op at the root', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const R = t.open(ENTRY_A, { raw: true });
+	const C = t.open(ENTRY_A);
+	const op = `app.${key}.late`;
+	R.post({ __rrbus: 'register', ops: [op] });
+	await settle();
+	const hops = (): number => R.received.filter((m) => (m as { __rrbus?: string; op?: string }).__rrbus === 'request' && (m as { op?: string }).op === op).length;
+	void C.request(op, {}, 50).catch(() => undefined);
+	await settle();
+	assert.equal(hops(), 1, 'while registered, the owner is routed to');
+	for (let i = 0; i < 130; i++) R.post({ __rrbus: 'response', id: `nope-${i}`, ok: true, result: 1 });
+	await settle();
+	const refused = await R.rawRequest(`app.${keyB}.x`, {});
+	assert.equal(codeOf({ __rrbus: 'response', ...refused }), 'rate', 'the realm\'s bucket is empty');
+	R.post({ __rrbus: 'unregister', ops: [op] });
+	await settle();
+	void C.request(op, {}, 50).catch(() => undefined);
+	await settle();
+	assert.equal(hops(), 1, 'after the unregister, even a refused one, the owner is no longer routed to');
+});
+
 test('G4R2-M1 a denial never echoes more than 128 characters of an op or command', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());
