@@ -378,3 +378,54 @@ def test_the_end_marker_is_sent_when_the_final_flush_fails(monkeypatch):
 
     assert consumer.attempts == [(png, 4, 4.0)]
     assert consumer.ended, 'the end marker must still reach the callback'
+
+
+def _end_marker_failing_consumer(fail_frames):
+    """A frame callback whose end marker raises, and whose frames raise when asked to."""
+    seen = {'frames': [], 'ended': 0}
+
+    def consumer(image, number, ts):
+        if image is None:
+            seen['ended'] += 1
+            raise ValueError('cannot close the stream')
+        seen['frames'].append(number)
+        if fail_frames:
+            raise RuntimeError(f'downstream node failed frame {number}')
+
+    return consumer, seen
+
+
+def test_a_frame_error_is_kept_when_the_end_marker_also_fails(monkeypatch):
+    """The frame's error leaves the final flush even when the end marker raises as well.
+
+    The end marker is sent while the frame's error is on its way out of `onData`. The
+    frame's error is the cause of the failure, so it is the one the caller gets; the end
+    marker's error is logged.
+    """
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 1.0)
+    warnings = []
+    monkeypatch.setattr(F, 'warning', warnings.append)
+    consumer, seen = _end_marker_failing_consumer(fail_frames=True)
+    extractor = _failing_extractor(consumer)
+    extractor.onInfo(_info(4, 4.0))
+    extractor._buffer = bytearray(_png())
+
+    with pytest.raises(RuntimeError, match='frame 4'):
+        extractor.onData(None)
+
+    assert seen == {'frames': [4], 'ended': 1}, 'the end marker must still be sent, once'
+    assert len(warnings) == 1 and 'cannot close the stream' in warnings[0], 'the end marker error is logged'
+
+
+def test_an_end_marker_error_is_raised_when_the_final_flush_succeeds(monkeypatch):
+    """With no frame error to keep, the end marker's own error reaches the caller."""
+    monkeypatch.setattr(F, '_FRAME_INFO_TIMEOUT', 1.0)
+    consumer, seen = _end_marker_failing_consumer(fail_frames=False)
+    extractor = _failing_extractor(consumer)
+    extractor.onInfo(_info(4, 4.0))
+    extractor._buffer = bytearray(_png())
+
+    with pytest.raises(ValueError, match='cannot close the stream'):
+        extractor.onData(None)
+
+    assert seen == {'frames': [4], 'ended': 1}, 'the end marker is sent once, not retried'

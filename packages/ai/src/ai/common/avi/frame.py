@@ -226,11 +226,20 @@ class VideoFrameExtractor(AVIReader):
         try:
             # Process the buffer
             self._processBuffer()
-        finally:
-            # If we are done, signal end, also when a frame in the final flush failed:
-            # its error still propagates once the end marker is sent
+        except Exception:
+            # A frame callback raised. In the final flush, still signal end, and keep the
+            # frame's error as the one that propagates: an error from the end marker is
+            # only logged here, so it does not replace the cause of the failure.
             if chunk is None:
-                self._frame_callback(None, 0, 0)
+                try:
+                    self._frame_callback(None, 0, 0)
+                except Exception as end_error:
+                    warning(f'[{self._name}]: end marker failed after a frame error: {end_error}')
+            raise
+
+        # If we are done, signal end
+        if chunk is None:
+            self._frame_callback(None, 0, 0)
 
     def onInfo(self, info: str):
         # If this is the end, then done
