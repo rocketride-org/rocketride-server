@@ -664,6 +664,47 @@ describe('createFsPrefs — nothing the module does not understand is ever erase
 		assert.deepEqual(Object.getOwnPropertyDescriptor(after, '__proto__')?.value, { newer: true });
 	});
 
+	it('an owners entry keyed __proto__ is kept as an entry and survives the next write', async () => {
+		const original = JSON.parse(`{"version":${PREFS_FILE_VERSION},"owners":{"__proto__":{"at":5,"prefs":{"k":1}}}}`);
+		const { fs, stored } = storeOf(original);
+		const { clock, opts } = options(fs, { owner: 'team-A' });
+		const prefs = createFsPrefs(opts);
+		assert.equal(await prefs.load(), 'ready');
+		prefs.setPref('history', { q: 1 });
+		await clock.advance(PREFS_WRITE_DEBOUNCE_MS);
+		await prefs.flush();
+		await settle();
+		const owners = stored().owners;
+		assert.equal(Object.getPrototypeOf(owners), Object.prototype);
+		assert.deepEqual(Object.getOwnPropertyDescriptor(owners, '__proto__')?.value, { at: 5, prefs: { k: 1 } });
+		assert.ok(Object.prototype.hasOwnProperty.call(owners, 'team-A'));
+	});
+
+	it('close() waiting on the load still resolves, and writes nothing, when the owner becomes unknown during the read', async () => {
+		let signedIn = true;
+		let release: (value: unknown) => void = () => undefined;
+		const writes: unknown[] = [];
+		const fs: IPrefsFs = {
+			fsStat: async () => ({ exists: true, type: 'file' }),
+			fsReadJson: <T,>() => new Promise<T>((resolve) => { release = resolve as (value: unknown) => void; }),
+			fsMkdir: async () => undefined,
+			fsWriteJson: async (_path: string, obj: unknown) => { writes.push(obj); },
+		};
+		const { clock, opts } = options(fs, { owner: 'team-A', ownerNow: () => (signedIn ? 'team-A' : null) });
+		const prefs = createFsPrefs(opts);
+		prefs.setPref('history', { q: 1 });
+		const closed = prefs.close();
+		await settle();
+		signedIn = false;
+		release({ version: PREFS_FILE_VERSION, owners: {} });
+		await settle();
+		await clock.advance(5_000);
+		const outcome = await Promise.race([closed.then(() => 'closed'), new Promise((resolve) => setImmediate(() => resolve('hung')))]);
+		assert.equal(outcome, 'closed');
+		await clock.advance(60_000);
+		assert.deepEqual(writes, []);
+	});
+
 	it('close() before the load has settled waits for it and writes the changes queued meanwhile', async () => {
 		const { fs, stored } = storeOf({ version: PREFS_FILE_VERSION, owners: {} });
 		const { opts } = options(fs, { owner: 'team-A' });
