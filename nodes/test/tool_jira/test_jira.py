@@ -292,6 +292,12 @@ def test_search_passes_the_page_token_and_ends_on_the_last_page(api):
     assert out == {'success': True, 'issues': [], 'next_page_token': None}
 
 
+def test_search_keeps_the_page_token_when_islast_is_missing(api):
+    # isLast is optional in Jira's schema; nextPageToken is null on the last page
+    api.queue = [_resp(200, {'issues': [], 'nextPageToken': 'tok3'})]
+    assert _node().jira_search({'jql': 'project = RRT'})['next_page_token'] == 'tok3'
+
+
 def test_search_refuses_results_from_outside_the_allowlist(api):
     # a JQL quirk the wrapper missed must not leak another project's issues
     api.queue = [_resp(200, {'issues': [_issue('RRT-1'), _issue('SEC-9', project='SECRET')], 'isLast': True})]

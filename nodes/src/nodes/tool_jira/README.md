@@ -45,7 +45,7 @@ On by default. While on, `jira_issue_create` and `jira_comment_add` refuse with 
 
 ### Project allowlist
 
-Comma-separated project keys, such as `PROJ,OPS`. When set, searches are limited to those projects (`project in (...) AND (<your JQL>)`, with any `ORDER BY` kept last), issues and comments are read or written only when the issue's current project is listed, and the project list shows only those projects. The check reads the issue's project rather than trusting its key, because an issue moved between projects keeps resolving under its old key. A search that returns an issue from outside the list fails instead of returning it. Empty means every project the account can see.
+Comma-separated project keys, such as `PROJ,OPS`. When set, searches are limited to those projects (`project in (...) AND (<your JQL>)`, with any `ORDER BY` kept last), a call on an issue key is refused unless the issue's current project is listed, and the project list shows only those projects. The check reads the issue's project rather than trusting its key, because an issue moved between projects keeps resolving under its old key. The check is a separate request from the read or write that follows, since Jira has no conditional write, so to hold a hard line also limit the account's Jira permissions to those projects. A search that returns an issue from outside the list fails instead of returning it. Empty means every project the account can see.
 
 ### Results per page and label for created issues
 

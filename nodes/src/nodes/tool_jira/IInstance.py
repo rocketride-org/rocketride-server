@@ -244,7 +244,7 @@ class IInstance(IInstanceBase):
                 )
             return {
                 'issues': issues,
-                'next_page_token': None if resp.get('isLast', True) else resp.get('nextPageToken'),
+                'next_page_token': None if resp.get('isLast') else resp.get('nextPageToken'),
             }
 
         return _run(op)

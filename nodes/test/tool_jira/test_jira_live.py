@@ -132,13 +132,18 @@ def test_search_pages_past_100_issues():
     """Needs a project holding more than 100 issues; each page carries full issues, never bare ids."""
     node = _node()
     jql = f'project = {os.environ["ROCKETRIDE_JIRA_PROJECT"].upper()} ORDER BY created ASC'
-    first = node.jira_search({'jql': jql, 'max_results': 100})
-    assert first['success'], first
-    if not first['next_page_token']:
+    args, issues = {'jql': jql, 'max_results': 100}, []
+    # Jira may return fewer than max_results per page, so follow tokens until past 100;
+    # 101 pages reach that even at one issue per page, and the bound stops an endless token chain
+    for _ in range(101):
+        page = node.jira_search(args)
+        assert page['success'], page
+        issues += page['issues']
+        if len(issues) > 100 or not page['next_page_token']:
+            break
+        args['next_page_token'] = page['next_page_token']
+    if len(issues) <= 100 and not page['next_page_token']:
         pytest.skip('the project holds 100 issues or fewer')
-    assert len(first['issues']) == 100
-    second = node.jira_search({'jql': jql, 'max_results': 100, 'next_page_token': first['next_page_token']})
-    assert second['success'] and second['issues'], second
-    keys = [i['key'] for i in first['issues'] + second['issues']]
+    keys = [i['key'] for i in issues]
     assert len(keys) == len(set(keys)) > 100
-    assert all(i['summary'] and i['status'] and i['url'] for i in first['issues'] + second['issues'])
+    assert all(i['summary'] and i['status'] and i['url'] for i in issues)
