@@ -123,12 +123,24 @@ test('T31 prefs ops are confined to the app partition and bounded', async (tt) =
 	assert.equal(emitted().length, before, 'foreign partitions, long keys and oversize values are dropped');
 	assert.ok(t.logs.length > 0, 'drops are logged');
 
+	const beforeFill = emitted().length;
 	for (let i = 0; i < 256; i++) {
 		if (i % 50 === 0) t.clock.advance(60_000);
 		A.emit('shell.setPref', { partition: 'app:acme.alpha', key: `key${i}`, value: i });
 		if (i % 50 === 49) await settle();
 	}
 	await settle();
+	// The quota is only meaningful if the fill was FORWARDED: count the writes that reached the root bus.
+	const filled = emitted()
+		.slice(beforeFill)
+		.filter((o) => o.op === 'shell.setPref')
+		.map((o) => (o.params as { key: string }).key);
+	// 'k' (above) holds the first of the 256 key slots, so 255 of the 256 loop writes are forwarded, in order.
+	assert.deepEqual(
+		filled,
+		Array.from({ length: 255 }, (_, i) => `key${i}`),
+		'the fill writes up to the quota reach the root bus'
+	);
 	t.clock.advance(60_000);
 	const count = emitted().length;
 	A.emit('shell.setPref', { partition: 'app:acme.alpha', key: 'key-257', value: 1 });
@@ -304,7 +316,8 @@ test('T46 teardown ends runs, closes handles, removes monitors, clears ledgers',
 		const A = t.open(ENTRY_A);
 		const run = await startRun(A);
 		t.cm.engine.fail('terminate', 'x');
-		const done = await Promise.race([t.root.teardownAll(3000).then(() => true), new Promise<boolean>((r) => setTimeout(() => r(false), 3500))]);
+		let deadline: ReturnType<typeof setTimeout> | undefined;
+		const done = await Promise.race([t.root.teardownAll(3000).then(() => true), new Promise<boolean>((r) => (deadline = setTimeout(() => r(false), 3500)))]).finally(() => clearTimeout(deadline)); // never keeps the test worker alive
 		assert.equal(done, true, 'teardownAll must resolve within its timeout');
 		assert.equal(t.logs.filter((l) => /terminate/i.test(l)).length, 1, `one log line about the failed terminate, got ${brief(t.logs)}`);
 		assertDenied(await clientRequest(A, dap('rrext_get_task_status', { token: run.token })), 'ownership', 'the ledger is cleared after a failed terminate');
@@ -335,10 +348,14 @@ test('T47 monitor keys are handles only and refcounted per realm', async (tt) =>
 
 	const run2 = await startRun(A2);
 	const key = (token: string): string => JSON.stringify({ token });
+	// The SAME monitor added twice by one realm: one removal leaves it, the second takes it away.
+	await A.request('client.addMonitor', { key: { token: run.token }, types: ['summary'] });
 	await A.request('client.addMonitor', { key: { token: run.token }, types: ['summary'] });
 	await A2.request('client.addMonitor', { key: { token: run2.token }, types: ['summary'] });
 	await A.request('client.removeMonitor', { key: { token: run.token }, types: ['summary'] });
-	assert.ok(!engine.monitors.has(key(engine.runs[0].token)), "A's monitor is removed");
+	assert.ok(engine.monitors.has(key(engine.runs[0].token)), "one removal of a twice-added monitor leaves it (refcount 1)");
+	await A.request('client.removeMonitor', { key: { token: run.token }, types: ['summary'] });
+	assert.ok(!engine.monitors.has(key(engine.runs[0].token)), "A's monitor is removed once every add is undone");
 	assert.ok(engine.monitors.has(key(engine.runs[1].token)), "A's removal does not touch A2's monitor");
 });
 
