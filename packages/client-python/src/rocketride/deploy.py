@@ -149,11 +149,13 @@ class DeployApi:
             app deployment is born state 'private' (an @me/@team binding may
             serve it; the developer submits it for review to reach the public
             store).
+          - ``kind='node'``: pass ``data`` — the node's ``.rrnode``. It is
+            added as a new private version; ``rrext_deploy_node`` publishes it.
 
         Args:
             pipeline: Pipeline definition (kind 'pipe').
-            kind: 'pipe' (default) or 'app'.
-            data: Source zip bytes (kind 'app').
+            kind: 'pipe' (default), 'app' or 'node'.
+            data: Source zip bytes (kind 'app'), or the .rrnode (kind 'node').
             metadata: Optional metadata blob (e.g. projectId provenance,
                 appRoot for workspace-relative app zips).
             comment: Optional "what changed" note kept in the registry.

@@ -84,7 +84,7 @@ def _package(module='acme__echo', services=None, files=None, marker=None, symlin
 def rail(monkeypatch, tmp_path):
     """The account's real deployments backend and file store over a temp folder."""
     monkeypatch.setenv('RR_STORE_URL', f'filesystem://{tmp_path}')
-    monkeypatch.delenv('RR_NODE_RAIL_ENABLED', raising=False)
+    monkeypatch.setenv('RR_NODE_RAIL_ENABLED', '1')
     Store.reset()
     monkeypatch.setattr(account, '_deployments_backend', None)
     monkeypatch.setattr(node_deploy, '_catalogue', {})
@@ -427,6 +427,16 @@ async def test_switching_the_rail_off_leaves_only_the_release_nodes(rail, monkey
     with pytest.raises(NodeNotFound):
         await node_deploy.resolve_nodes('org1', 'u1', [], ['acme.echo'])
     assert await node_deploy.resolve_nodes('org1', 'u1', [], ['webhook']) == {}
+
+
+@pytest.mark.asyncio
+async def test_the_rail_is_off_unless_switched_on(rail, monkeypatch):
+    await _published('@me')
+    monkeypatch.delenv('RR_NODE_RAIL_ENABLED')
+
+    assert await node_deploy.visible_nodes(_Conn()) == {}
+    with pytest.raises(NodeNotFound):
+        await node_deploy.resolve_nodes('org1', 'u1', [], ['acme.echo'])
 
 
 @pytest.mark.asyncio

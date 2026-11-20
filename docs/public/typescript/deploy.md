@@ -126,6 +126,10 @@ is the provider a pipeline names, and the `protocol` in its `services.json`
 its `path` is `nodes.<developerId>__<name>`. The `.rrnode` is a zip of that one
 folder with a `.rrnode` marker holding `{"name", "contract"}`.
 
+A server serves published nodes only when it runs with `RR_NODE_RAIL_ENABLED=1`.
+Without it, only the release's nodes run, and a pipeline that names a published
+node gets `NODE_NOT_FOUND`.
+
 ```typescript
 const added = await client.deploy.add({ kind: 'node', data: await readFile('acme__echo.rrnode') });
 await client.call('rrext_deploy_node', {
