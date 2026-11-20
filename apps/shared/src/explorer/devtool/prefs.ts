@@ -92,14 +92,45 @@
 //     PREFS_FS_DEADLINE_MS): the SDK's file calls have no timeout of their own.
 //   NO LOST UPDATES ACROSS OWNERS. Each write re-reads the file first and
 //     merges (see `write`), so two windows of one user under different
-//     identities do not revert each other. Two windows under the SAME owner
-//     still keep only the later one's bag for that owner.
+//     identities do not revert each other. Within one process the whole
+//     read-merge-write is also serialised per file (see `serialiseByFile`), so
+//     two accessors on the same file cannot interleave their reads and writes.
+//     Two windows under the SAME owner still keep only the later one's bag for
+//     that owner (last writer wins; that scope is deliberate).
 // =============================================================================
 
 import { isPlainObject } from '../checks';
 import { MAX_HISTORY_BAG_CHARS } from '../history/types';
 import type { IPrefsAccessor } from '../history/types';
 import type { IPrefsFs } from './engineClient';
+
+/** The tail of the write queue of each file, per filesystem object. */
+const fileQueues = new WeakMap<object, Map<string, Promise<void>>>();
+
+/**
+ * Run a read-merge-write so that no other one on the same file (same
+ * filesystem object, same path) in this process overlaps it.
+ *
+ * @param fs - The filesystem the file lives on.
+ * @param file - The file's path.
+ * @param task - The read-merge-write.
+ * @returns What the task returns, once it has run.
+ */
+export function serialiseByFile(fs: object, file: string, task: () => Promise<void>): Promise<void> {
+	let queues = fileQueues.get(fs);
+	if (!queues) {
+		queues = new Map();
+		fileQueues.set(fs, queues);
+	}
+	const tail = queues.get(file) ?? Promise.resolve();
+	const run = tail.then(task, task);
+	const mark = run.then(() => undefined, () => undefined);
+	queues.set(file, mark);
+	void mark.then(() => {
+		if (queues.get(file) === mark) queues.delete(file);
+	});
+	return run;
+}
 
 /** The file format version this module reads and writes. */
 export const PREFS_FILE_VERSION = 1;
@@ -556,7 +587,8 @@ export function createFsPrefs(opts: IFsPrefsOptions): IFsPrefs {
 			clearTimer(timer);
 			timer = null;
 		}
-		chain = chain.then(write, write);
+		const locked = (): Promise<void> => serialiseByFile(fs, path, write);
+		chain = chain.then(locked, locked);
 		return chain;
 	};
 

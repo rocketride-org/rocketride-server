@@ -30,7 +30,7 @@ import { manualClock } from '../connect/testing';
 import { createHistoryStore } from '../history/store';
 import type { IHistoryEntry } from '../history/types';
 import type { IPrefsFs } from './engineClient';
-import { attachWhenLoaded, createFsPrefs, historyPrefsPath, PREFS_FILE_VERSION, PREFS_LOAD_ATTEMPTS, PREFS_WRITE_DEBOUNCE_MS, PREFS_WRITE_RETRIES } from './prefs';
+import { attachWhenLoaded, createFsPrefs, historyPrefsPath, PREFS_FILE_VERSION, PREFS_LOAD_ATTEMPTS, PREFS_WRITE_DEBOUNCE_MS, PREFS_WRITE_RETRIES, serialiseByFile } from './prefs';
 import type { IFsPrefsOptions } from './prefs';
 import { settle } from './testing';
 
@@ -836,5 +836,32 @@ describe('createFsPrefs — a "missing" stat is confirmed by a read (D6-SQL-3)',
 		await prefs.flush();
 		await settle();
 		assert.equal(world.writes.length, 1);
+	});
+});
+
+describe('serialiseByFile', () => {
+	it('never overlaps two tasks on the same file, and lets other files run alongside', async () => {
+		const fs = {};
+		const log: string[] = [];
+		const task = (name: string) => async (): Promise<void> => {
+			log.push(`${name}:start`);
+			await new Promise((resolve) => setImmediate(resolve));
+			log.push(`${name}:end`);
+		};
+		await Promise.all([
+			serialiseByFile(fs, 'a.json', task('a1')),
+			serialiseByFile(fs, 'a.json', task('a2')),
+			serialiseByFile(fs, 'b.json', task('b1')),
+		]);
+		assert.ok(log.indexOf('a1:end') < log.indexOf('a2:start'));
+		assert.ok(log.indexOf('b1:start') < log.indexOf('a1:end'));
+	});
+
+	it('runs the next task after one that failed', async () => {
+		const fs = {};
+		await assert.rejects(serialiseByFile(fs, 'a.json', async () => { throw new Error('boom'); }));
+		let ran = false;
+		await serialiseByFile(fs, 'a.json', async () => { ran = true; });
+		assert.equal(ran, true);
 	});
 });
