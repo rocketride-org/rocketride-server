@@ -149,7 +149,7 @@ def _server(logs):
 
 def _conn(auth=SECRET, user_id='user-1', team_id='team-1'):
     """A connection with a REAL AccountInfo that may control user-1's runs."""
-    conn = SimpleNamespace()
+    conn = SimpleNamespace(_authenticated=True)
     conn._account_info = AccountInfo(
         auth=auth,
         userId=user_id,
@@ -484,7 +484,9 @@ def test_accepts_credential_reads_the_signature(authorize, accepts):
 async def test_deploy_run_is_unaffected_by_the_credential_plumbing(logs, account, launch):
     """A deploy keeps its identity and its decisions: the same 8 keys, owner scope and run kind."""
     ts = _server(logs)
-    conn = SimpleNamespace(_account_info=AccountInfo(userId='', devTeam='team-1', organization=None))
+    conn = SimpleNamespace(
+        _authenticated=True, _account_info=AccountInfo(userId='', devTeam='team-1', organization=None)
+    )
 
     with pytest.raises(_Launched):
         await ts.start_task(
@@ -658,7 +660,7 @@ async def test_a_connection_without_account_info_reuses_with_none(logs, account)
     ts = _server(logs)
     control = _live_run(ts)
 
-    result = await _reuse(ts, control, SimpleNamespace())
+    result = await _reuse(ts, control, SimpleNamespace(_authenticated=True))
 
     assert result['reused'] is True
     assert [credential for _, _, credential in account['authorize']] == [None]
