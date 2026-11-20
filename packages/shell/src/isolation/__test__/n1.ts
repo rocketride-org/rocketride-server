@@ -115,12 +115,20 @@ export function eachString(value: unknown, cb: (s: string, isKey: boolean) => vo
 		} else if (typeof v === 'object' && v !== null && !seen.has(v)) {
 			seen.add(v);
 			const o = v as Record<string, unknown>;
-			if (!Array.isArray(v) && o.__rrbin === true && typeof o.b64 === 'string') {
+			// A binary member is decoded AND its other members are still walked: `extra` beside `__rrbin`/`b64` is data too.
+			if (!Array.isArray(v) && !(v instanceof Map) && !(v instanceof Set) && o.__rrbin === true && typeof o.b64 === 'string') {
 				const text = binaryText(Buffer.from(o.b64, 'base64'));
 				if (text !== undefined) cb(text, false);
-				continue;
 			}
 			if (Array.isArray(v)) stack.push(...v);
+			else if (v instanceof Map) {
+				// The test channel preserves Map and Set: Object.entries would not see their contents.
+				for (const [k, x] of v) {
+					if (typeof k === 'string') cb(k, true);
+					else stack.push(k);
+					stack.push(x);
+				}
+			} else if (v instanceof Set) stack.push(...v);
 			else
 				for (const [k, x] of Object.entries(o)) {
 					cb(k, true);
@@ -139,6 +147,12 @@ function eachKey(value: unknown, cb: (key: string) => void): void {
 		if (typeof v !== 'object' || v === null || seen.has(v) || v instanceof Uint8Array || v instanceof ArrayBuffer) continue;
 		seen.add(v);
 		if (Array.isArray(v)) stack.push(...v);
+		else if (v instanceof Map) {
+			for (const [k, x] of v) {
+				if (typeof k === 'string') cb(k);
+				stack.push(x);
+			}
+		} else if (v instanceof Set) stack.push(...v);
 		else
 			for (const [k, x] of Object.entries(v)) {
 				cb(k);
@@ -146,6 +160,9 @@ function eachKey(value: unknown, cb: (key: string) => void): void {
 			}
 	}
 }
+
+/** Every value that was real at any `assertNoReal` call, per fake manager (value -> what it is). */
+const history = new WeakMap<IFakeCm, Map<string, string>>();
 
 /** Every string and every object key in `realm.received` from message `from` on, decoding `__rrbin` members to text where they are UTF-8. */
 export function transcript(realm: IReceiver, from = 0): string[] {
@@ -174,8 +191,13 @@ export function assertNoReal(realm: IReceiver, cm: IFakeCm, extra: string[] = []
 	}
 	needles.push({ what: 'the session token', value: cm.sessionToken }, { what: 'the shell API key', value: cm.apiKey });
 	if (engine.userId.length >= 12) needles.push({ what: 'the real user id', value: engine.userId });
-	for (const value of extra) needles.push({ what: 'a value that must not appear', value });
-	const live = needles.filter((n) => n.value !== '');
+	// Values that were real EARLIER stay forbidden: after `engine.userId` or the session
+	// token changes, a message delivered before the change is still checked against the old one.
+	let known = history.get(cm);
+	if (known === undefined) history.set(cm, (known = new Map()));
+	for (const n of needles) if (n.value !== '' && !known.has(n.value)) known.set(n.value, n.what);
+	const live = [...known].map(([value, what]) => ({ what, value }));
+	for (const value of extra) if (value !== '') live.push({ what: 'a value that must not appear', value }); // per call: not remembered
 	realm.received.slice(from).forEach((message, offset) => {
 		const index = from + offset;
 		const strings: string[] = [];
