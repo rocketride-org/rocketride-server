@@ -449,10 +449,13 @@ test("T123 an event for a run whose execute answer is still in flight is buffere
 	tt.after(() => t.cleanup());
 	const A = t.open(ENTRY_A, { grant: GRANT_A });
 	const release = t.cm.engine.hold('execute');
+	tt.after(release); // released on every path: a failure below must not leave the held execute (and its bus timer) behind
 	const before = t.cm.engine.received.length;
 	const pending = execute(A);
 	await until(() => t.cm.engine.messagesFor('execute', before).length === 1);
-	const minted = (t.cm.engine.messagesFor('execute', before)[0].message.arguments as { pipeline: { project_id: string } }).pipeline.project_id;
+	const received = t.cm.engine.messagesFor('execute', before);
+	assert.equal(received.length, 1, 'the engine received the held execute');
+	const minted = (received[0].message.arguments as { pipeline: { project_id: string } }).pipeline.project_id;
 	const stats = t.root.__stats!();
 	t.cm.emitEngineEvent(t.cm.engine.event('flow', { project_id: minted, source: SRC }));
 	await settle();
