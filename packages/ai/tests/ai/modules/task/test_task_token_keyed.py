@@ -146,7 +146,7 @@ def _server(logs, monkeypatch, key=None):
 
 
 def _conn(user_id='user-1', team_id='team-1', auth='rr_session_key'):
-    conn = SimpleNamespace()
+    conn = SimpleNamespace(_authenticated=True)
     conn._account_info = AccountInfo(
         auth=auth,
         userId=user_id,
@@ -595,7 +595,7 @@ async def test_a_pk_is_refused_while_a_restart_onto_a_private_source_runs(logs, 
 
     control.task.restart_task = _restart
     control.task.has_attached_debugger = lambda: False
-    conn = SimpleNamespace(_account_info=None)
+    conn = SimpleNamespace(_authenticated=True, _account_info=None)
     restart = asyncio.ensure_future(
         ts.restart_task(
             {'arguments': {'token': started['token'], 'pipeline': json.loads(json.dumps(PRIVATE_PIPELINE))}}, conn
@@ -631,7 +631,7 @@ async def test_a_failed_restart_onto_a_public_source_does_not_open_a_private_run
     with pytest.raises(RuntimeError):
         await ts.restart_task(
             {'arguments': {'token': started['token'], 'pipeline': json.loads(json.dumps(CHAT_PIPELINE))}},
-            SimpleNamespace(_account_info=None),
+            SimpleNamespace(_authenticated=True, _account_info=None),
         )
     with pytest.raises(TaskError):
         await ts.authenticate(started['publicToken'])

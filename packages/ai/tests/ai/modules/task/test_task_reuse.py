@@ -237,3 +237,22 @@ async def test_a_restart_cannot_change_the_source():
         await ts.restart_task({'arguments': {'token': 'tk_test', 'pipeline': other_source}}, conn=conn)
 
     control.task.restart_task.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_reuse_is_refused_when_the_caller_deauthed_during_the_wait():
+    """A deauth landing during wait_for_running must not reach the database check as a trusted caller."""
+    ts = _make_server()
+    control = _running(_pipeline())
+    ts._task_control['tk_test'] = control
+    conn = MagicMock()
+    conn._authenticated = True
+
+    async def _deauth_during_wait():
+        conn._authenticated = False
+
+    control.task.wait_for_running = _deauth_during_wait
+
+    with pytest.raises(PermissionError, match='Not authenticated'):
+        await ts.start_task(_request(_pipeline()), conn=conn, wait_for_running=True)
+    control.task.authorize_reuse.assert_not_called()
