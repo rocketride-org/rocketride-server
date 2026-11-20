@@ -1,0 +1,17 @@
+{
+  "labels": [],
+  "nodes": {},
+  "relationships": [],
+  "schema": {
+    "version": 2,
+    "labels": [],
+    "relationship_types": [],
+    "sampled": false,
+    "truncated": false,
+    "refreshed_at": null,
+    "source": "startup",
+    "stale": false,
+    "error": "Schema reflection failed\nDatabase said: connection reset",
+    "capable": true
+  }
+}

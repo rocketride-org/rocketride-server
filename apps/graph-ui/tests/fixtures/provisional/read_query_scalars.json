@@ -1,0 +1,30 @@
+{
+  "columns": [
+    "label",
+    "n"
+  ],
+  "rows": [
+    [
+      "Person",
+      2
+    ],
+    [
+      "Company",
+      1
+    ],
+    [
+      null,
+      {
+        "@kind": "number",
+        "value": "9007199254740993"
+      }
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 0,
+  "value_limit": 500000,
+  "values": 6
+}

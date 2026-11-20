@@ -33,10 +33,17 @@ class AgeTranslationError(Exception):
 
 
 class AgeUnsupportedFeature(AgeTranslationError):
-    """The Cypher uses a feature this AGE version cannot run (capability REJECT)."""
+    """The Cypher uses a feature this AGE version cannot run (capability REJECT).
 
-    def __init__(self, feature: str, detail: str = ''):
+    ``construct`` names what the user wrote (e.g. ``date()``); ``detail`` says
+    what to do instead.
+    """
+
+    def __init__(self, feature: str, detail: str = '', construct: str = '', age_version: str = '1.5.0'):
         self.feature = feature
+        self.detail = detail
+        self.construct = construct or feature
+        self.age_version = age_version
         message = f'Unsupported on Apache AGE: {feature}'
         if detail:
             message += f' — {detail}'

@@ -2574,6 +2574,27 @@ async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code,
     assert run_log.end_run.await_args.args[0] == outcome
 
 
+@pytest.mark.asyncio
+async def test_data_request_while_terminating_carries_task_stopped():
+    """A request that arrives while the task terminates (or restarts) is refused
+    before it is sent, with TASK_STOPPED, so a client can tell it apart from a
+    failure inside the pipeline and retry an idempotent read once the task runs.
+    """
+    from ai.modules.task.types import TaskError
+
+    task = Task.__new__(Task)
+    task._is_terminating = True
+    task.reset_idle_timer = lambda: None
+    task._data_client = None
+
+    with pytest.raises(TaskError) as caught:
+        await Task._send_data(task, {'command': 'rrext_process'})
+
+    assert caught.value.code == TaskError.STOPPED
+    assert str(caught.value) == 'Task is terminating, cannot process data requests'
+    assert isinstance(caught.value, RuntimeError)
+
+
 # ---------------------------------------------------------------------------
 # TaskData — the engine's data channel to the task
 # ---------------------------------------------------------------------------

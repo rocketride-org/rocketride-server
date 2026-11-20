@@ -1,0 +1,92 @@
+{
+  "columns": [
+    "date",
+    "localtime",
+    "time",
+    "localdatetime",
+    "datetime",
+    "zoned",
+    "duration",
+    "cartesian",
+    "wgs84_3d",
+    "big",
+    "nan",
+    "neg_inf"
+  ],
+  "rows": [
+    [
+      {
+        "@kind": "temporal",
+        "type": "date",
+        "value": "2024-02-29"
+      },
+      {
+        "@kind": "temporal",
+        "type": "localtime",
+        "value": "12:30:15.123456789"
+      },
+      {
+        "@kind": "temporal",
+        "type": "time",
+        "value": "12:30:00.000000000+02:00"
+      },
+      {
+        "@kind": "temporal",
+        "type": "localdatetime",
+        "value": "2024-01-02T03:04:05.000000001"
+      },
+      {
+        "@kind": "temporal",
+        "type": "datetime",
+        "value": "2024-01-02T04:04:05.123456789+01:00"
+      },
+      {
+        "@kind": "temporal",
+        "type": "datetime",
+        "value": "2024-01-02T04:04:05.000000001+01:00",
+        "zone": "Europe/Berlin"
+      },
+      {
+        "@kind": "temporal",
+        "type": "duration",
+        "value": "P1Y2M3DT7.000000005S"
+      },
+      {
+        "@kind": "point",
+        "srid": 7203,
+        "coordinates": [
+          1.5,
+          2.0
+        ]
+      },
+      {
+        "@kind": "point",
+        "srid": 4979,
+        "coordinates": [
+          13.4,
+          52.5,
+          34.0
+        ]
+      },
+      {
+        "@kind": "number",
+        "value": "4611686018427387904"
+      },
+      {
+        "@kind": "number",
+        "value": "NaN"
+      },
+      {
+        "@kind": "number",
+        "value": "-Infinity"
+      }
+    ]
+  ],
+  "row_limit": 1000,
+  "truncated": false,
+  "truncated_by": null,
+  "element_limit": 10000,
+  "elements": 0,
+  "value_limit": 500000,
+  "values": 12
+}

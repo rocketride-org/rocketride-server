@@ -1,0 +1,24 @@
+{
+	// Type-checks apps/shared source AND its tests (shared:test runs this
+	// before node:test). tsconfig.json excludes **/*.test.ts(x) on purpose so
+	// the app programs that reach into shared via the `shared/*` path never
+	// pull test code into a bundle; this second program is the one that
+	// checks the tests, and the only place a test's types are ever verified —
+	// node:test runs through tsx, which erases types without checking them.
+	//
+	// `types: ["node"]` names the @types/node dependency the tests need for
+	// node:test / node:assert (tsconfig.json declares `types: []`).
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"types": [
+			"node"
+		]
+	},
+	"include": [
+		"src/**/*.ts",
+		"src/**/*.tsx"
+	],
+	"exclude": [
+		"node_modules"
+	]
+}

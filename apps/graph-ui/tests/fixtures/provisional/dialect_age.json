@@ -1,0 +1,28 @@
+{
+  "dialect": "age",
+  "engine": {
+    "name": "Apache AGE",
+    "version": "1.5.0",
+    "edition": null
+  },
+  "database": null,
+  "graph": "rocketride",
+  "allow_execute": false,
+  "capabilities": {
+    "read_query": true,
+    "refresh_schema": true,
+    "execute_shape_graph": true,
+    "params": true,
+    "shortest_path": false
+  },
+  "limits": {
+    "default_rows": 1000,
+    "max_rows": 1000,
+    "max_elements": 10000,
+    "max_values": 500000,
+    "statement_timeout_ms": 30000,
+    "server_result_cap": null
+  },
+  "read_boundary": "read_only_tx",
+  "read_boundary_verified": false
+}

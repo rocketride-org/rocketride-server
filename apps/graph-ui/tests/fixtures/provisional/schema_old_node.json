@@ -1,0 +1,36 @@
+{
+  "labels": [
+    "Company",
+    "Person"
+  ],
+  "nodes": {
+    "Company": [
+      {
+        "property": "name",
+        "type": "STRING"
+      }
+    ],
+    "Person": [
+      {
+        "property": "age",
+        "type": "INTEGER"
+      },
+      {
+        "property": "name",
+        "type": "STRING"
+      }
+    ]
+  },
+  "relationships": [
+    {
+      "type": "KNOWS",
+      "start": "Person",
+      "end": "Person"
+    },
+    {
+      "type": "WORKS_AT",
+      "start": "Person",
+      "end": "Company"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+	"name": "graph-explorer-acceptance-browser",
+	"version": "0.0.0",
+	"private": true,
+	"description": "Manual Playwright lanes for Graph Explorer and SQL Explorer (see ../README.md). Not part of the workspace or CI.",
+	"license": "MIT",
+	"type": "commonjs",
+	"dependencies": {
+		"playwright": "^1.55.0"
+	}
+}

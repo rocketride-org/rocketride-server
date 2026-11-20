@@ -1,0 +1,8 @@
+{
+  "refused_write": "Refused: read_query is read-only; this statement writes (CREATE)\nQuery rejected by firewall (write_clause): CREATE not allowed on the read-only path (use the execute path for writes)",
+  "refused_call": "Refused: CALL is not allowed on the read-only path\nQuery rejected by firewall (procedure_call): CALL is not allowed on the read-only path",
+  "hint_date": "Not supported on Apache AGE 1.5.0: date()\nAGE 1.5.0 has no date(), time(), localtime(), localdatetime() or duration() (function ag_catalog.age_<name> does not exist); store temporal values as ISO-8601 strings or epoch numbers and compare those (timestamp() returns epoch milliseconds)",
+  "hint_exists_subquery": "Not supported on Apache AGE 1.5.0: EXISTS { ... } subquery\nAGE 1.5.0 has no EXISTS subqueries; use OPTIONAL MATCH and test the result with IS NULL / IS NOT NULL",
+  "invalid_cypher": "Invalid Cypher for Apache AGE\nCypher syntax error: line 1:0 extraneous input 'MATCHX' expecting {OPTIONAL, MATCH, UNWIND, MERGE, CREATE, SET, DETACH, DELETE, REMOVE, CALL, WITH, RETURN, SP}; line 1:7 mismatched input '(' expecting {OPTIONAL, MATCH, UNWIND, MERGE, CREATE, SET, DETACH, DELETE, REMOVE, CALL, WITH, RETURN}",
+  "timeout": "Query timed out after 200 ms\ncanceling statement due to statement timeout"
+}

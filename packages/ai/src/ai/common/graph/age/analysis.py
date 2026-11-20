@@ -100,6 +100,10 @@ class CypherFacts:
     # (capability: empty_list_in — AGE 1.5.0 matches every row, or fails with
     # 'cache lookup failed for type 0' under NOT / AND / RETURN).
     empty_in_spans: List[Tuple[int, int]] = field(default_factory=list)
+    # [x IN list WHERE ... | ...] and [(a)-->(b) | ...] (capabilities:
+    # list_comprehension / pattern_comprehension — AGE 1.5.0 syntax errors).
+    has_list_comprehension: bool = False
+    has_pattern_comprehension: bool = False
 
     @property
     def is_write(self) -> bool:
@@ -587,7 +591,7 @@ def _projection_column(item_ctx) -> ReturnColumn:
     return ReturnColumn(display_name=_strip_backticks(expr_text), expression=expression)
 
 
-def analyze(query: str) -> CypherFacts:
+def analyze(query: str, age_version: Optional[str] = None) -> CypherFacts:
     """Parse ``query`` with the openCypher grammar and extract translation facts.
 
     Raises:
@@ -615,6 +619,13 @@ def analyze(query: str) -> CypherFacts:
             'Cypher expression is nested too deeply to parse (reduce parenthesis/expression nesting)'
         ) from None
     if listener.errors:
+        # Constructs a Neo4j user types early that this grammar cannot parse
+        # get a precise "not supported" hint instead of a bare syntax error.
+        from .capabilities import DEFAULT_AGE_VERSION, syntax_hint
+
+        hint = syntax_hint(query, age_version or DEFAULT_AGE_VERSION)
+        if hint is not None:
+            raise hint
         raise AgeTranslationError('Cypher syntax error: ' + '; '.join(listener.errors[:5]))
 
     facts = CypherFacts(query=query)
@@ -645,6 +656,10 @@ def analyze(query: str) -> CypherFacts:
                 facts.function_names.add(name_ctx.getText().lower())
         if isinstance(node, CypherParser.OC_MergeActionContext):
             facts.has_merge_action = True
+        if isinstance(node, CypherParser.OC_ListComprehensionContext):
+            facts.has_list_comprehension = True
+        if isinstance(node, CypherParser.OC_PatternComprehensionContext):
+            facts.has_pattern_comprehension = True
         if isinstance(node, CypherParser.OC_NodeLabelsContext):
             if len(node.oC_NodeLabel()) > 1:
                 facts.has_multi_label = True

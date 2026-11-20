@@ -1,0 +1,17 @@
+{
+  "columns": [
+    "p.name"
+  ],
+  "rows": [
+    [
+      "Alice"
+    ]
+  ],
+  "row_limit": 1,
+  "truncated": true,
+  "truncated_by": "rows",
+  "element_limit": 10000,
+  "elements": 0,
+  "value_limit": 500000,
+  "values": 1
+}

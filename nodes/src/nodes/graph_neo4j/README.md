@@ -41,17 +41,20 @@ only when **Allow direct query execution** is enabled.
 
 ## As a tool
 
-The functions are registered under the `neo4j` service prefix: for example,
-`neo4j.get_data`. There is no configurable tool-server-name field.
+The registered tool names are the bare method names below (an agent catalog
+namespaces them by the pipeline component id, not by the services.json
+`prefix`). There is no configurable tool-server-name field.
 
 | Function | Description |
 | --- | --- |
-| `neo4j.get_data` | Turn a natural-language request into a read-only Cypher query, run it, and return rows. |
-| `neo4j.get_schema` | Return the reflected labels, properties, and relationship types. |
-| `neo4j.get_query` | Return generated read-only Cypher without executing it. |
-| `neo4j.execute` | Run raw Cypher only when direct execution is enabled. |
-| `neo4j.dialect` | Return `{"dialect": "neo4j"}`. |
-| `neo4j.get_cypher` | Deprecated compatibility alias for `get_query`; it also includes the statement under `cypher`. |
+| `get_data` | Turn a natural-language request into a read-only Cypher query, run it, and return rows. |
+| `get_schema` | Return the reflected labels, properties, and relationship types. |
+| `refresh_schema` | Re-read the schema now and return it like `get_schema`. |
+| `get_query` | Return generated read-only Cypher without executing it. |
+| `read_query` | Run Cypher you wrote, read-only, and return positional rows in the shared graph result shape. |
+| `execute` | Run raw Cypher only when direct execution is enabled. |
+| `dialect` | Return `{"dialect": "neo4j"}` plus the engine version and edition, database, capabilities, limits and read boundary. |
+| `get_cypher` | Deprecated compatibility alias for `get_query`; it also includes the statement under `cypher`. |
 
 `get_data`, `get_query`, and `get_cypher` require a non-empty `question` and
 accept an optional integer `limit`; absent or invalid limits resolve to 250 and
@@ -64,7 +67,63 @@ instead of rows.
 otherwise the response includes `{database, labels, nodes, relationships}`.
 `execute` requires a non-empty raw `query`, accepts an optional object `params`
 whose values bind to `$name` placeholders, and returns `{rows, affected_rows}`;
-it raises an error while direct execution is disabled. `dialect` accepts no
+it raises an error while direct execution is disabled. With `shape: "graph"`
+it returns the `read_query` result shape plus `affected_rows` instead.
+
+`read_query` takes `{cypher, params?, limit?}`: one statement, values bound as
+`$name` parameters (ids as strings: `WHERE elementId(n) = $id`), and a row
+limit that defaults to 1,000 and is capped by the node (at most 25,000). It
+returns `{columns, rows, row_limit, truncated, truncated_by, element_limit,
+elements, value_limit, values}`. Rows are positional. Nodes, relationships and
+paths carry their `elementId` as `id` (a live handle, not a durable key), sorted
+labels, stored relationship direction and traversal-ordered paths. Temporal
+values keep nanoseconds and named zones, points keep their SRID, integers
+beyond 2^53 and NaN/Infinity are tagged as text, and byte arrays are reported
+as base64 (size only above 64 KiB). A response stops at 10,000 graph elements
+or 500,000 values (`truncated_by` says which limit applied). It is read-only
+whatever `allow_execute` says: write, administration and `USE` clauses and any
+`CALL` outside `db.labels`, `db.relationshipTypes`, `db.propertyKeys`,
+`db.schema.nodeTypeProperties`, `db.schema.relTypeProperties` and
+`db.schema.visualization` are refused before the query is sent, and so, as
+invalid input, is a number written straight against a letter, an underscore or
+a `.`, or a `/* … */` comment whose text holds a `/`; it then runs
+in a READ-mode transaction with a 30-second server-side deadline. Failures
+raise an error whose first line is a short headline (`Refused: …`,
+`Query timed out after 30000 ms`, `Invalid read_query input: …`,
+`Query result cannot be represented` (a value the database returned does not
+fit the result shape) or `Query failed`) and whose remaining lines are the
+detail, the database's own message where there is one.
+
+Neo4j refuses a result that names the same column twice, so `read_query`
+columns are always distinct here (rows stay positional all the same).
+
+`get_schema` and `refresh_schema` return the legacy `{labels, nodes,
+relationships}` keys plus a `schema` block (version 2): labels and
+relationship types with every observed property type (string, integer, float,
+boolean, list, map, temporal, point), relationship endpoint label pairs seen on
+sampled data, counts, and `sampled`, `truncated`, `refreshed_at`, `source`,
+`stale`, `error` and `capable`. The schema is read at start and again on
+`refresh_schema`, bounded to 200 labels, 100 relationship types and 100
+sampled rows each, within a 60-second budget. A refresh is all-or-nothing:
+if it fails or times out, the previous schema stays in place, marked `stale`
+with the `error`; a schema that never loaded has `refreshed_at: null` and an
+`error`, never an empty graph. Property types in the legacy keys now use the
+same vocabulary (`string`, `integer`, ...) instead of engine type names.
+
+`dialect` returns `dialect` plus `engine` (name, version, edition), `database`,
+`graph`, `allow_execute`, `capabilities`, `limits` (default and maximum rows,
+element and value budgets, statement timeout, server result cap) and
+`read_boundary`/`read_boundary_verified`. It never includes hosts, users or
+credentials.
+On Neo4j the schema comes from `db.labels()` and `db.relationshipTypes()` (raw
+names, so `get_schema` with `label` matches the label as stored), exact counts
+from the count store, and properties and endpoints sampled in one read
+transaction whose server-side timeout is the refresh budget. `read_boundary` is
+`database_role` with `read_boundary_verified: true` only when the server is
+Enterprise and the node's own privileges (`SHOW USER PRIVILEGES`) grant
+nothing beyond reading; otherwise it is `read_session`. The natural-language
+tools tell the model it is writing Neo4j Cypher for the server's version and
+which procedures it may call. `dialect` accepts no
 meaningful arguments. Generation failures return an error rather than an
 executable query, and `get_cypher` preserves those outcomes while adding
 `cypher` when a query is available.
@@ -98,8 +157,10 @@ actual schema.
 ### Max validation attempts
 
 **Max validation attempts** controls how many times a rejected generated query
-is repaired after Neo4j rejects it under `EXPLAIN`. The setting defaults to 5;
-the runtime clamps it to 1–10. Increase it only if valid requests routinely
+is repaired after Neo4j rejects it under `EXPLAIN`. The setting defaults to 5
+and accepts 1–10, the range the runtime applies: a value above 10 saved by an
+earlier version of this form, or set in a pipeline file, still runs as 10.
+Increase it only if valid requests routinely
 need additional repair attempts, since each retry calls the LLM and delays the
 answer. When all attempts fail, the node returns the database error rather than
 running the last rejected query.
@@ -111,12 +172,14 @@ agent and lane traffic: generated reads pass the Cypher safety gate and use a
 READ access-mode session. Turn it on only for a trusted caller that must issue
 raw Cypher through `execute` or `QuestionType.EXECUTE`, because that path skips
 both LLM translation and the read-only gate and can write to the database.
-Raw execution is still limited to 25,000 returned rows; exceeding that limit
-raises an error and rolls the statement back, so nothing is saved and a retry
-is safe. Batched statements are the exception: `CALL { ... } IN TRANSACTIONS`
-and, on Neo4j 4, `USING PERIODIC COMMIT`. Neo4j commits each batch as it runs,
-so a retry after the error can repeat writes; keep what these statements
-return under the limit.
+Raw execution is still limited to 25,000 returned rows. In the default shape,
+exceeding that limit raises an error and rolls the statement back, so nothing
+is saved and a retry is safe; with `shape: "graph"` the result is cut at 25,000
+rows and reported as truncated (`truncated_by: "rows"`), and what the statement
+wrote stands. Batched statements are the exception: `CALL { ... } IN
+TRANSACTIONS` and, on Neo4j 4, `USING PERIODIC COMMIT`. Neo4j commits each
+batch as it runs, so a retry after the error can repeat writes; keep what these
+statements return under the limit.
 
 ## Authentication
 
@@ -130,23 +193,45 @@ be verified.
 ## Limitations
 
 The `noremote` capability pins this node to the local worker because it holds a
-database client and credentials. The ordinary graph-query flow uses a
-client-side best-effort blacklist for selected write and administrative clauses
-and Neo4j READ access mode. Neither is a guaranteed read-only boundary: READ
-access controls routing, and the blacklist cannot cover every mutating procedure.
-Enabling direct execution grants trusted callers an explicit write-capable escape
-hatch.
+database client and credentials. `read_query` refuses write, administration
+and `USE` clauses and any `CALL` outside a short list of read-only schema
+procedures, then runs in a READ access-mode transaction; the ordinary
+graph-query flow uses a client-side best-effort blacklist for selected write
+and administrative clauses and Neo4j READ access mode. None of these is a
+guaranteed read-only boundary: READ
+access controls routing, not permissions, and a statement check cannot know
+every mutating function a server may have installed. **The boundary is the
+database user**: for browsing, connect with an identity whose Neo4j role can
+only read (for example the built-in `reader` role, Neo4j Enterprise or Aura;
+Community Edition has no roles). This was tested against Neo4j 5.26
+Enterprise with the built-in `reader` role: the database refused `CREATE`,
+`MERGE`, `SET`, `REMOVE`, `DELETE` and `CALL db.createLabel(...)` even with the
+node's own checks and READ mode removed, and `dialect` reported
+`read_boundary: "database_role"` with `read_boundary_verified: true` only for
+that user. Enabling direct execution grants trusted
+callers an explicit write-capable escape hatch, and it cannot write through a
+read-only identity: to offer both browsing and writing, configure two nodes,
+one with a read-only identity and one with a write identity and **Allow direct
+query execution** on.
+
+Neo4j's default `PUBLIC` role grants the `LOAD` privilege, so a read-only
+identity used with **Allow direct query execution** on can still run
+`LOAD CSV` through `execute`. That reads server-side or remote files; it never
+writes the graph. `read_query` refuses `LOAD CSV` regardless. Operators who
+want the identity to have no file or URL access should run
+`REVOKE LOAD ON ALL DATA FROM PUBLIC`. The privilege self-check behind
+`read_boundary_verified` treats `LOAD` as non-writing, so it does not stop a
+reader identity from counting as verified.
 
 ## Notes
 
 ### Schema reflection and query generation
 
-At startup, the node reflects node labels and property types through
-`db.schema.nodeTypeProperties()` and relationship information through
-`db.schema.visualization()`. On servers where those procedures fail, it falls
-back to `db.labels()` and `db.relationshipTypes()`. Reflection failure only
-warns and leaves an empty schema cache, so the connection can continue but the
-LLM has less structure to ground its Cypher generation.
+At startup, and on `refresh_schema`, the node reads labels and relationship
+types with `db.labels()` and `db.relationshipTypes()` and samples properties
+and endpoints (see **As a tool**). Reflection failure only warns and records the
+error in the schema block, so the connection can continue but the LLM has less
+structure to ground its Cypher generation.
 
 The LLM is instructed to generate queries only from the reflected schema;
 generated output is checked for unsafe clauses after comments are removed and
@@ -158,11 +243,53 @@ limit to report `truncated` correctly.
 
 ### Result serialization
 
-Returned graph values are made JSON-safe: nodes include `_labels`,
-relationships include `_type`, paths become `{nodes, relationships}`, and
-temporal values use their ISO representation. For raw execution, `affected_rows`
-counts created or deleted nodes and relationships, changed properties, and
-label changes reported by the Neo4j result summary.
+`get_data` and the default `execute` keep their established format: nodes
+include `_labels`, relationships include `_type`, paths become
+`{nodes, relationships}`, and temporal values use their ISO representation.
+`read_query` and `execute` with `shape: "graph"` use the shared graph result
+shape described under **As a tool**, which keeps ids, endpoints, direction,
+points, durations and large integers that the established format loses.
+Tested with the `neo4j` Python driver 6.3.1 against Neo4j 5.26 Community;
+Neo4j 5 is the minimum (`elementId`). For raw execution, `affected_rows`
+counts the changes in the Neo4j result summary (see **Write counts**).
+
+### Agents
+
+An LLM agent wired to this node gets every tool listed under **As a tool** in
+its tool catalog, `read_query` and `refresh_schema` included. With
+`read_query` the agent runs Cypher it writes itself (read-only, 1,000 rows by
+default, within the element and value budgets); `refresh_schema` re-reads the
+schema each time it is called (refreshes of one node run one at a time, with
+no cooldown). Say in the agent's instructions which tools it should prefer,
+for example `get_data` for questions in plain language.
+
+### Result size
+
+The `read_query` budgets count values, not bytes: a string counts as one value
+whatever its length (byte arrays above 64 KiB are reported by size only). A result of 1,000 rows whose nodes each carry
+100 KB of text is about 100 MB of JSON, which the engine builds in memory; the
+Python SDK closes its connection above 250 MB. When nodes hold large text,
+return the properties you need (`RETURN n.title` rather than `n`) or cut them
+with `substring()`.
+
+### Write counts
+
+`affected_rows` (from `execute`, both shapes) is the sum of the write counters
+in the Neo4j result summary: nodes and relationships created and deleted,
+properties set, labels added and removed. It counts changes, not rows:
+`CREATE (n:Note {a: 1, b: 2})` reports 4 (one node, two properties, one
+label), and a read reports 0.
+
+### How long a call can take
+
+`read_query` runs in a managed read transaction with a 30-second server-side
+deadline per attempt, and the driver retries transient failures (such as a
+cluster leader change) within its own retry window, 30 seconds by default. A
+call can therefore take longer than the `statement_timeout_ms` that `dialect`
+reports. `refresh_schema` waits up to 65 seconds for another refresh of the
+same node to finish, then runs within its 60-second budget. A client that
+stops waiting earlier only stops waiting: the database ends the transaction
+at its own deadline.
 
 ## Upstream docs
 
@@ -189,7 +316,7 @@ label changes reported by the Neo4j result summary.
 
 ## Dependencies
 
-- `neo4j`
+- `neo4j` `==6.3.1`
 
 ## Source
 

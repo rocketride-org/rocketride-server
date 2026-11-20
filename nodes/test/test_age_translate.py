@@ -435,6 +435,54 @@ class TestCapabilities:
         with pytest.raises(age.AgeUnsupportedFeature):
             age.translate('MATCH (n) RETURN datetime()', graph_name='g', age_version='9.9.9')
 
+    @pytest.mark.parametrize(
+        'query,feature,construct',
+        [
+            ("RETURN date('2024-01-01')", 'temporal_functions', 'date()'),
+            ('RETURN localdatetime(), localtime()', 'temporal_functions', 'localdatetime(), localtime()'),
+            ('RETURN time()', 'temporal_functions', 'time()'),
+            ("RETURN duration('P1D')", 'temporal_functions', 'duration()'),
+            ('MATCH (n) RETURN elementId(n)', 'element_id', 'elementId()'),
+            ('RETURN [x IN [1, 2] | x * 2]', 'list_comprehension', 'list comprehension'),
+            ('RETURN [x IN [1, 2] WHERE x > 1]', 'list_comprehension', 'list comprehension'),
+            ('MATCH (n) RETURN [(n)-->(m) | m.x]', 'pattern_comprehension', 'pattern comprehension'),
+            ('MATCH (a), (b) RETURN allShortestPaths((a)-[*..3]-(b))', 'all_shortest_paths', 'allShortestPaths()'),
+        ],
+    )
+    def test_accepted_but_failing_constructs_get_hints(self, query, feature, construct):
+        # Each of these parses, but AGE 1.5.0 fails at run time with a raw error
+        # (verified live: 'function ag_catalog.age_<name> does not exist' or a
+        # syntax error); the translator now refuses them with guidance first.
+        with pytest.raises(age.AgeUnsupportedFeature) as err:
+            age.translate(query, graph_name='g')
+        assert err.value.feature == feature
+        assert err.value.construct == construct
+        assert err.value.detail
+
+    @pytest.mark.parametrize(
+        'query,feature',
+        [
+            ('MATCH (n) WHERE EXISTS { MATCH (n)-->() } RETURN n', 'exists_subquery'),
+            ('MATCH p = shortestPath((a)-[*..3]-(b)) RETURN p', 'shortest_path'),
+            ("MATCH (n) WHERE n.name =~ 'A.*' RETURN n", 'regex_match'),
+            ('MATCH (n) WHERE exists(n.x) RETURN n', 'exists_function'),
+        ],
+    )
+    def test_unparseable_constructs_get_hints_instead_of_syntax_errors(self, query, feature):
+        with pytest.raises(age.AgeUnsupportedFeature) as err:
+            age.translate(query, graph_name='g')
+        assert err.value.feature == feature
+
+    def test_hints_ignore_words_inside_literals(self):
+        with pytest.raises(age.AgeTranslationError) as err:
+            age.translate("MATCH (n WHERE n.note = 'EXISTS { x }' RETURN n", graph_name='g')
+        assert not isinstance(err.value, age.AgeUnsupportedFeature)
+        assert 'syntax error' in str(err.value)
+
+    def test_supported_functions_still_translate(self):
+        for query in ('RETURN timestamp()', 'RETURN toString(1)', 'MATCH (n) RETURN coalesce(n.x, 1), keys(n)'):
+            age.translate(query, graph_name='g')
+
 
 # ---------------------------------------------------------------------------
 # capabilities: AGE 1.6.0
@@ -607,6 +655,26 @@ class TestEmit:
                 graph_name='g',
             )
 
+    def test_dollar_tag_never_closes_early_when_body_ends_like_the_tag(self):
+        # A query ending in `$rr_cypher` plus the closing `$rr_cypher$` would
+        # contain the tag one character early and end the string there.
+        plan = age.translate('MATCH (n) RETURN n.name = $rr_cypher', params={'rr_cypher': 'x'}, graph_name='g')
+        prepare = plan.statements[plan.result_index - 1]
+        body_start = prepare.index("'g', ") + len("'g', ")
+        tag = prepare[body_start : prepare.index('$', body_start + 1) + 1]
+        quoted = prepare[body_start:]
+        assert tag != '$rr_cypher$'
+        # The closing tag's first occurrence after the opening one ends exactly the body.
+        assert quoted.index(tag, len(tag)) == len(tag) + len('MATCH (n) RETURN n.name = $rr_cypher')
+
+    def test_prepared_name_recorded_for_param_plans(self):
+        plan = age.translate('MATCH (n) WHERE n.a = $x RETURN n', params={'x': 1}, graph_name='g')
+        assert plan.prepared_name and plan.statements[plan.result_index - 1].startswith(
+            f'PREPARE {plan.prepared_name}('
+        )
+        assert plan.statements[-1] == f'DEALLOCATE {plan.prepared_name}'
+        assert age.translate('MATCH (n) RETURN n', graph_name='g').prepared_name is None
+
     def test_dollar_tag_rotates_on_collision(self):
         plan = age.translate("MATCH (n) WHERE n.note = '$rr_cypher$x' RETURN n.note", graph_name='g')
         assert '$rr_cypher1$' in plan.statements[plan.result_index]
@@ -668,3 +736,40 @@ class TestDecode:
     def test_bad_agtype_raises(self):
         with pytest.raises(age.AgeTranslationError, match='agtype syntax error'):
             age.decode_agtype('{"unterminated')
+
+
+# ---------------------------------------------------------------------------
+# capabilities verified on AGE 1.5.0 only: any other version says so
+# ---------------------------------------------------------------------------
+
+_UNCONFIRMED_ON_OTHER_VERSIONS = [
+    ('RETURN date() AS d', 'temporal_functions', 'date()'),
+    ('MATCH (n:P) RETURN elementId(n) AS e', 'element_id', 'elementId()'),
+    ('MATCH (n:P) RETURN [x IN [1, 2] | x] AS l', 'list_comprehension', 'list comprehension'),
+    ('MATCH (n) WHERE EXISTS { MATCH (n)-->() } RETURN n', 'exists_subquery', 'EXISTS { ... } subquery'),
+]
+
+
+@pytest.mark.parametrize('query, feature, construct', _UNCONFIRMED_ON_OTHER_VERSIONS)
+def test_a_cell_verified_on_1_5_0_only_keeps_its_text_there(query, feature, construct):
+    with pytest.raises(age.AgeUnsupportedFeature) as err:
+        age.translate(query, mode=SAFE, graph_name='g', age_version='1.5.0')
+    assert err.value.feature == feature and err.value.construct == construct and err.value.age_version == '1.5.0'
+    assert 'Verified on AGE' not in str(err.value)
+
+
+@pytest.mark.parametrize('version', ['1.6.0', '1.7.0'])
+@pytest.mark.parametrize('query, feature, construct', _UNCONFIRMED_ON_OTHER_VERSIONS)
+def test_a_cell_verified_on_1_5_0_only_says_so_on_another_version(query, feature, construct, version):
+    with pytest.raises(age.AgeUnsupportedFeature) as err:
+        age.translate(query, mode=SAFE, graph_name='g', age_version=version)
+    assert err.value.age_version == version
+    assert f'Verified on AGE 1.5.0; not confirmed on {version}.' in str(err.value)
+
+
+def test_a_cell_verified_on_1_6_0_does_not_carry_the_note():
+    # merge_write was verified on 1.6.0 itself.
+    query = 'UNWIND [1, 2] AS i MERGE (n:P {k: 1}) SET n.v = i'
+    with pytest.raises(age.AgeUnsupportedFeature) as err:
+        age.translate(query, mode=RAW, graph_name='g', age_version='1.6.0')
+    assert 'Verified on AGE 1.5.0' not in str(err.value)

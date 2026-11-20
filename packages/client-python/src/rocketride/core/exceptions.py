@@ -100,6 +100,15 @@ class DAPException(Exception):
         # Store complete DAP result for detailed error analysis
         self.dap_result = dap_result or {}
 
+    def __reduce__(self):
+        """
+        Rebuild from the DAP result dictionary when unpickled.
+
+        The default rebuilds from ``args`` (the message string), which
+        ``__init__`` cannot take; every subclass shares this constructor.
+        """
+        return (self.__class__, (self.dap_result,), self.__dict__)
+
     @property
     def code(self) -> Optional[str]:
         """
@@ -212,6 +221,34 @@ class PipeException(RocketRideException, RuntimeError):
             # Handle data transfer failures
         except Exception as e:
             print(f"Unexpected pipe error: {e}")
+    """
+
+    pass
+
+
+class CommandException(RocketRideException, RuntimeError):
+    """
+    Exception raised when the server answers a command with a failure.
+
+    Raised by ``client.call()`` and therefore by every method built on it,
+    including ``client.tool()``, ``client.get_tasks()`` and
+    ``client.get_task_pipeline()``. ``str(e)`` is the server's message and
+    ``e.code`` its machine-readable code, when the failure has one (task
+    failures carry ``TASK_NOT_REGISTERED``, ``TASK_AMBIGUOUS``,
+    ``TASK_COMPLETED`` or ``TASK_STOPPED``).
+
+    Note:
+        Also inherits from :class:`RuntimeError`, which ``client.call()``
+        raised before, so existing ``except RuntimeError`` handlers still
+        catch it.
+
+    Example:
+        try:
+            rows = await client.tool(token=token, tool='read_query', input=args)
+        except CommandException as e:
+            if e.code == 'TASK_STOPPED':
+                ...  # the task stopped before the call reached the node
+            raise
     """
 
     pass

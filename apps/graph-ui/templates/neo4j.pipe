@@ -1,0 +1,91 @@
+{
+  "components": [
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "name": "Tools",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "tools",
+        "name": "Tools"
+      },
+      "ui": {
+        "position": {
+          "x": 100,
+          "y": 120
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "graph_neo4j_1",
+      "provider": "graph_neo4j",
+      "name": "Neo4j",
+      "config": {
+        "profile": "default",
+        "default": {
+          "uri": "neo4j://localhost:7687",
+          "auth_method": "userpass",
+          "user": "reader",
+          "database": "neo4j",
+          "allow_execute": false
+        },
+        "name": "Neo4j"
+      },
+      "ui": {
+        "position": {
+          "x": 260,
+          "y": 280
+        },
+        "measured": {
+          "width": 150,
+          "height": 123
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ]
+    },
+    {
+      "id": "annotation_1",
+      "provider": "annotation",
+      "name": "Read this first",
+      "config": {
+        "content": "**Neo4j**\n\nGraph Explorer opens this pipeline's graph node as a connection. Start the pipeline, then open Graph Explorer and choose the connection.\n\nGraph Explorer sends no writes from this node (`allow_execute` is off). With a writable database user that is a check in the node, not a database guarantee: **use a read-only role.**\n\nCreate a Neo4j user whose role can only read the database, and enter it in the node's form: the template's `user` is a placeholder (`reader`), and it holds no password (it is stored encrypted once you type one). Reads use a read-only session, which Neo4j treats as a routing hint, not access control: the role is the real protection.\n\nTo ask questions in words, add an LLM node and connect it to this graph node. Browsing with Cypher needs no model.",
+        "bgColor": "var(--rr-annotation-bg-default)",
+        "fgColor": "var(--rr-text-primary)"
+      },
+      "ui": {
+        "position": {
+          "x": 480,
+          "y": 100
+        },
+        "measured": {
+          "width": 340,
+          "height": 300
+        },
+        "nodeType": "annotation"
+      }
+    }
+  ],
+  "version": 1,
+  "docRevision": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ]
+}

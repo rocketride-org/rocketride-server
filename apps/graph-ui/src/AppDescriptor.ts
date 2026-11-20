@@ -1,0 +1,58 @@
+// =============================================================================
+// MIT License
+// Copyright (c) 2026 Aparavi Software AG
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+// =============================================================================
+// GRAPH-UI — APP DESCRIPTOR
+// =============================================================================
+
+// HMR anchor: keeps the shared jsx runtime referenced even when the app's
+// root component fails to compile (same reasoning as the other remotes).
+import 'react/jsx-dev-runtime';
+
+import React from 'react';
+import type { AppDescriptor } from 'shell';
+import { RocketRideMark } from 'shell';
+import GraphApp from './GraphApp';
+import { GraphDevTool } from './GraphDevToolFrame';
+import { GraphDevToolSidebar } from './GraphDevToolSidebar';
+
+const GRAPH_APP: AppDescriptor = {
+	id: 'rocketride.graph',
+	name: 'Graph Explorer',
+	branding: {
+		appName: 'Graph Explorer',
+		// style fills the shell's sized icon wrapper (the shared mark defaults to a
+		// fixed 24px; width/height:100% preserves the fill-to-slot behaviour).
+		iconDark: React.createElement(RocketRideMark, { bodyColor: '#E0DDF0', style: { width: '100%', height: '100%' } }),
+		iconLight: React.createElement(RocketRideMark, { bodyColor: '#1E1A34', style: { width: '100%', height: '100%' } }),
+	},
+	// Two-column app: GraphApp's root AppLayout declares the navigation/schema
+	// sidebar and the status bar.
+	app: GraphApp,
+	// Dev-tool mounts (VS Code, rocket-ui): the sidebar is the CONTROLLER (it
+	// owns the tool's one engine connection), every document is a frame with no
+	// client that calls it over ops (devtool/protocol.ts).
+	devToolFrame: GraphDevTool,
+	devToolSidebar: GraphDevToolSidebar,
+};
+
+export default GRAPH_APP;
