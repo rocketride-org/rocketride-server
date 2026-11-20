@@ -397,6 +397,7 @@ def _team_run(address, task_id):
         project_id=project_id,
         source=source,
         run_kind='deploy',
+        rung='team',
         owner_kind='team',
         owner_id='team-1',
         userId='',
