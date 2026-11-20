@@ -60,8 +60,11 @@ fsynced because the process may hang right after::
     === wmi query seconds=<s, 3 decimals> ok chars=<length of the returned text> query=<first 200 chars>
     === wmi query seconds=<s> error=<exception class> winerror=<code or -> query=<first 200 chars>
 
-followed by a blank line. With ``_WMI_SKIP`` false the wrapper returns the original result
-or re-raises the original exception unchanged. With ``_WMI_SKIP`` true (the default) it never
+followed by a blank line. With ``_WMI_SKIP`` false (the default) the wrapper returns the
+original result or re-raises the original exception unchanged. In the Windows CI job the
+original is already the stub of ``scripts/ci/rr_ci_skip_wmi.py`` (its ``.pth`` file sorts
+before this hook's ``zz_`` one), so every call logs ``error=OSError winerror=-`` at once; a
+real query logs ``ok`` or a ``winerror`` code. With ``_WMI_SKIP`` true the wrapper never
 calls ``_wmi``: it appends the block below and raises ``OSError``, which ``platform`` treats
 as "WMI unavailable" and answers from ``sys.getwindowsversion()``, the ``ver`` command
 (run once in a child process) and the environment::
@@ -128,7 +131,7 @@ _WMI_QUERY_MAX = 200
 
 # True: the wrapped ``_wmi.exec_query`` never calls the original and raises ``OSError``
 # after logging a ``skipped`` block. False: it calls the original and logs the outcome.
-_WMI_SKIP = True
+_WMI_SKIP = False
 
 # Interpreter options that take the next argument as their value.
 _VALUE_OPTIONS = ('-W', '-X')
