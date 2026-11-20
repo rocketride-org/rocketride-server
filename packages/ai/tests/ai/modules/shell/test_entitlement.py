@@ -172,3 +172,64 @@ def test_public_asset_rechecks_eligibility_before_its_warm_publish_map(served_ap
     served_app.registry.denied_use.add(('', served_app.APP, 1))
     assert served_app.get(path).status_code == 404
     assert served_app.registry.app_use_calls[-1] == ('', served_app.APP, 1)
+
+
+def _origin():
+    return sup.load_module('ai.modules.shell.app_origin')
+
+
+@pytest.mark.asyncio
+async def test_transient_denial_is_not_cached_as_an_unpublished_version(registry, clock):
+    """A live denial blocks the version, but the cached publication map still lists it afterwards."""
+    registry.add(APP, 1, org='pub-org', audience=('public', ''))
+    ao = _origin()
+    registry.denied_use.add(('', APP, 1))
+    assert await ao.public_version_dirs(APP, 1) == {}  # denied now
+    registry.denied_use.clear()  # eligibility restored: serving returns without waiting for the TTL
+    assert 1 in await ao.public_version_dirs(APP, 1)
+    registry.denied_use.add(('', APP, 1))
+    assert await ao.public_version_dirs(APP) == {}  # the unversioned view is filtered live as well
+
+
+@pytest.mark.asyncio
+async def test_a_raising_use_hook_denies_one_version_and_keeps_the_others(registry, clock, monkeypatch):
+    """A hook that raises while a directory map is built does not escape and does not drop other versions."""
+    from ai.account import account
+    from ai.account.app_deploy import entitled_version_dirs
+
+    registry.add(APP, 1, org='pub-org', audience=('public', ''))
+    registry.add(APP, 2, org='pub-org', audience=('public', ''))
+
+    async def flaky(info, app_id, version=None):
+        if version == 1:
+            raise RuntimeError('seat service down')
+        return True
+
+    monkeypatch.setattr(account, 'authorize_app_use', flaky)
+    dirs = await entitled_version_dirs(None, APP)
+    assert sorted(dirs) == [2]
+
+
+@pytest.mark.asyncio
+async def test_a_fill_that_began_before_invalidation_is_not_cached(registry, clock, monkeypatch):
+    """``drop_app`` during an in-flight fill: the old map is returned once but never stored."""
+    import ai.account.app_deploy as app_deploy_mod
+
+    registry.add(APP, 1, org='pub-org', audience=('public', ''))
+    ao = _origin()
+    real = app_deploy_mod.entitled_version_dirs
+    fills = []
+
+    async def racing(info, app_id, **kwargs):
+        fills.append(app_id)
+        dirs = await real(info, app_id, **kwargs)
+        if len(fills) == 1:
+            shell_mod.invalidate_app_serving(app_id)  # the invalidation lands while the fill is awaiting
+        return dirs
+
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', racing)
+    assert 1 in await ao.public_version_dirs(APP, 1)
+    assert 1 in await ao.public_version_dirs(APP, 1)
+    assert len(fills) == 2  # the first fill was not cached, so the second request walked again
+    assert 1 in await ao.public_version_dirs(APP, 1)
+    assert len(fills) == 2  # the second fill began after the invalidation and was cached

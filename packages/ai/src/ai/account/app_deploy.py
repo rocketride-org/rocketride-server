@@ -1367,7 +1367,7 @@ async def _caller_entitled_to_version(
     exactly here), or when the caller deployed that registry version (the
     developer flow — a fresh version is published nowhere yet).
     """
-    if not await account.authorize_app_use(conn._account_info, app_id, version):
+    if not await _use_allowed(account, conn._account_info, app_id, version):
         return False
     user_id = conn._account_info.userId
     rows = await _visible_rows_of(conn, account, org_id, app_id)
@@ -1554,7 +1554,16 @@ async def resolve_app_pins(org_id: str, user_id: Optional[str], team_ids: List[s
 # =============================================================================
 
 
-async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, str]:
+async def _use_allowed(account: Any, info: Optional[Any], app_id: str, version: int) -> bool:
+    """One version's live ``authorize_app_use`` verdict; a raising hook denies THAT version only."""
+    try:
+        return await account.authorize_app_use(info, app_id, version) is True
+    except Exception as exc:
+        debug(f'[app_deploy] authorize_app_use failed for {app_id} v{version}: {exc}')
+        return False
+
+
+async def entitled_version_dirs(info: Optional[Any], app_id: str, *, check_use: bool = True) -> Dict[int, str]:
     """Registry version -> store ``dist/`` dir the caller may FETCH (SaaS).
 
     The versioned serving route's request-time gate (cached by the shell
@@ -1578,6 +1587,12 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
       hid such an app while this route served its bytes to anyone.
 
     ``info`` None = anonymous: public rows only (the pre-auth landing).
+
+    Each version also passes the live ``authorize_app_use`` verdict (a hook
+    that raises denies that one version and keeps the others). A caller that
+    caches the PUBLICATION map and applies the live verdict itself on every
+    read passes ``check_use=False``, so a version dropped by a transient
+    denial is not cached as unpublished.
     """
     from ai.account import account
 
@@ -1623,7 +1638,11 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
             continue
         version = row.get('version')
         artifact_path = str(row.get('artifactPath') or '')
-        if isinstance(version, int) and artifact_path and await account.authorize_app_use(info, app_id, version):
+        if (
+            isinstance(version, int)
+            and artifact_path
+            and (not check_use or await _use_allowed(account, info, app_id, version))
+        ):
             dirs[version] = dist_dir_of(artifact_path)
 
     # Developer-org entitlement: the caller org's OWN rail (rail rows exist
@@ -1641,7 +1660,7 @@ async def entitled_version_dirs(info: Optional[Any], app_id: str) -> Dict[int, s
                 continue
             version = int(entry.get('version', 0))
             artifact_path = str(entry.get('artifactPath') or '')
-            if version and artifact_path and await account.authorize_app_use(info, app_id, version):
+            if version and artifact_path and (not check_use or await _use_allowed(account, info, app_id, version)):
                 dirs[version] = dist_dir_of(artifact_path)
     return dirs
 

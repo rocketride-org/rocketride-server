@@ -672,8 +672,28 @@ def _remember(cache: dict, key: Any, app_id: str, ttl: float = ENTITLEMENT_TTL, 
     return entry
 
 
+# Per-app invalidation counter. A cache fill awaits the account and the
+# registry, so one that began before ``drop_app`` could finish after it and
+# write the pre-invalidation map back with a fresh expiry. A fill takes the
+# generation before it awaits and stores only if it is unchanged.
+_generation: dict = {}
+
+
+def _fill_generation(app_id: str) -> int:
+    """The app's current invalidation generation (take it BEFORE a fill awaits)."""
+    return _generation.get(app_id, 0)
+
+
+def _remember_fill(cache: dict, key: Any, app_id: str, generation: int, **values: Any) -> dict:
+    """Cache a fill unless ``drop_app`` ran for the app since the fill began (then return it uncached)."""
+    if _generation.get(app_id, 0) != generation:
+        return {**values, 'expiry': 0.0, 'appId': app_id}
+    return _remember(cache, key, app_id, **values)
+
+
 def drop_app(app_id: str) -> None:
     """Drop every cached isolation verdict of one app (called by ``invalidate_app_serving``)."""
+    _generation[app_id] = _generation.get(app_id, 0) + 1  # one int per invalidated registry app id
     for name, cache in list(globals().items()):
         if name.endswith('_cache') and isinstance(cache, dict):
             for key in [k for k, entry in cache.items() if isinstance(entry, dict) and entry.get('appId') == app_id]:
@@ -724,15 +744,18 @@ async def token_version_dirs(user_id: str, org_id: str, app_id: str) -> dict:
     hit = _cached(_entitlement_cache, key)
     if hit is not None:
         return hit['dirs']
+    generation = _fill_generation(app_id)
     if saas:
         try:
             info = await account.account_info_for(user_id, org_id)
         except Exception:
             info = None
-        dirs = await entitled_version_dirs(info, app_id) if info is not None else {}
+        # The publication map only: every caller applies the live per-version
+        # verdict (``_app_use_allowed``) before it reads this map.
+        dirs = await entitled_version_dirs(info, app_id, check_use=False) if info is not None else {}
     else:
         dirs = await open_version_dirs(app_id)
-    return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
+    return _remember_fill(_entitlement_cache, key, app_id, generation, dirs=dirs)['dirs']
 
 
 async def public_version_dirs(app_id: str, version: Optional[int] = None) -> dict:
@@ -744,12 +767,16 @@ async def public_version_dirs(app_id: str, version: Optional[int] = None) -> dic
         return {}
     key = ('public', app_id)
     hit = _cached(_entitlement_cache, key)
-    if hit is not None:
-        if saas and version is None:
-            return {v: path for v, path in hit['dirs'].items() if await _app_use_allowed(None, app_id, v)}
-        return hit['dirs']
-    dirs = await entitled_version_dirs(None, app_id) if _is_saas() else await open_version_dirs(app_id)
-    return _remember(_entitlement_cache, key, app_id, dirs=dirs)['dirs']
+    if hit is None:
+        generation = _fill_generation(app_id)
+        # The publication map only (live eligibility is applied on every read
+        # below), so a version dropped by a transient denial is not cached as
+        # unpublished for the rest of the TTL.
+        dirs = await entitled_version_dirs(None, app_id, check_use=False) if saas else await open_version_dirs(app_id)
+        hit = _remember_fill(_entitlement_cache, key, app_id, generation, dirs=dirs)
+    if saas and version is None:
+        return {v: path for v, path in hit['dirs'].items() if await _app_use_allowed(None, app_id, v)}
+    return hit['dirs']
 
 
 PUBLIC_LOOKUP_LIMIT = 120  # registry walks per client address per minute
