@@ -4,7 +4,7 @@ A RocketRide tool node that gives an agent custom skills: written instructions f
 
 ## What it does
 
-The node has no data lanes and binds to an agent's `tools` connection. It loads skills on each call, from skills entered in the node and from a folder of skills in your RocketRide files. The agent sees each skill's name and description in the `load_skill` tool description, loads a skill's instructions only when the task matches it, and reads a skill's other files only when the instructions call for them. A skill therefore costs context only when the agent uses it, and one node can hold many skills. Use the Python, Daytona or Tenki tool nodes alongside it when a skill's scripts need to run: this node returns files as text and runs nothing.
+The node has no data lanes and binds to an agent's `tools` connection. It loads skills on each call, from skills entered in the node and from a folder of skills in your RocketRide files. The agent sees each skill's name and description in the `load_skill` tool description, loads a skill's instructions only when the task matches it, and reads a skill's other files only when the instructions call for them. A skill therefore costs context only when the agent uses it, and one node can hold many skills. Use the Python, Daytona or Luxor Sandbox tool nodes alongside it when a skill's scripts need to run: this node returns files as text and runs nothing.
 
 ## As a tool
 
