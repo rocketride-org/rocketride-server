@@ -58,34 +58,38 @@ import pipelinesIconUrl from './pipelines/icon.svg?url';
 // Setting declarations live in the PURE toolSettings leaf (the ext host and
 // settings surfaces import that, never this asset-bearing module).
 import { APPS_TOOL_SETTINGS, PIPELINES_TOOL_SETTINGS, TOOL_SETTINGS_OWNER } from './toolSettings';
+import { AGENT_ENABLED } from './agent/enabled';
 
 const PUBLISHER = 'Aparavi Software AG';
 
 /** Registers the builtin tools (idempotent — the registry dedupes by id). */
 export function registerBuiltinTools(): void {
-	registerBuiltinTool({
-		manifest: {
-			name: 'Agent',
-			publisher: PUBLISHER,
-			// All builtin tools are Rocket Builder's tools — their prefs and
-			// setting deltas store under the product's app partition so they
-			// follow the person across the tool and app surfaces.
-			storageAppId: TOOL_SETTINGS_OWNER,
-			description: 'Agent sessions against the connected engine.',
-			icon: agentIconUrl,
-			categories: ['devTool'],
-			// No VS Code surface BY POLICY: that host's agent story is Claude
-			// Code / Copilot — a second chat surface would be clutter.
-			shells: ['saas', 'oss'],
-		},
-		descriptor: {
-			id: 'agent',
-			name: 'Agent',
-			icon: <AgentIcon size={16} />,
-			devToolSidebar: AgentTool,
-			devToolFrame: AgentConversationTool,
-		},
-	});
+	// Gated: see AGENT_ENABLED.
+	if (AGENT_ENABLED) {
+		registerBuiltinTool({
+			manifest: {
+				name: 'Agent',
+				publisher: PUBLISHER,
+				// All builtin tools are Rocket Builder's tools — their prefs and
+				// setting deltas store under the product's app partition so they
+				// follow the person across the tool and app surfaces.
+				storageAppId: TOOL_SETTINGS_OWNER,
+				description: 'Agent sessions against the connected engine.',
+				icon: agentIconUrl,
+				categories: ['devTool'],
+				// No VS Code surface BY POLICY: that host's agent story is Claude
+				// Code / Copilot — a second chat surface would be clutter.
+				shells: ['saas', 'oss'],
+			},
+			descriptor: {
+				id: 'agent',
+				name: 'Agent',
+				icon: <AgentIcon size={16} />,
+				devToolSidebar: AgentTool,
+				devToolFrame: AgentConversationTool,
+			},
+		});
+	}
 	registerBuiltinTool({
 		manifest: {
 			name: 'Apps',
