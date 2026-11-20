@@ -132,7 +132,7 @@ separate caller choice rather than an accidental result of broad searching.
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `pinecone.collection` | `string` | **Collection**<br/>Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens | `"rocketride"` |
-| `pinecone.profile` | `string` | **Type of Pinecone Connection**<br/>Connect to... | `"pod-based"` |
+| `pinecone.profile` | `string` | **Type of Pinecone Connection**<br/>Connect to... | `"serverless-dense"` |
 | `pinecone.provider` | `string` |  | const: `"pinecone"` |
 | `pinecone.serverName` | `string` | **Tool Server Name**<br/>Label for this store in tool-response messages (for example, a refused write names pinecone.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings. | `"pinecone"` |
 
