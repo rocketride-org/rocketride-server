@@ -34,7 +34,6 @@ def _engine(client=None):
     t._engine_process = None
     t._run_kind = 'dev'
     t._task_metrics = None
-    t._service_up_notes = []
     t._status = SimpleNamespace(serviceUp=False, state=0, notes=None)
     t.state = EngineState.STARTING
     t.debug_message = MagicMock()

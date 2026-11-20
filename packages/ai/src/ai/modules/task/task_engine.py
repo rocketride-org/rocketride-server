@@ -894,10 +894,6 @@ class TaskEngine(DAPBase):
         # Save the source provider type
         self._provider = provider
 
-        # Status annotations for operational context
-        self._service_up_notes = []
-        self._service_down_notes = []
-
         # Execution configuration
         _args = launch_args or {}
         self._threads = threads
@@ -2829,11 +2825,13 @@ class TaskEngine(DAPBase):
             if self._task_metrics:
                 self._task_metrics.set_service_up(service_up)
 
+            # Readiness never touches the notes: they are what the nodes
+            # published (merge_status_notes), and a database node announces
+            # its button once, possibly before the source reports ready. A run
+            # reset (_reset_status) and a source's shutdown (an empty usr
+            # message) are the two things that clear them.
             if service_up:
                 self._confirm_running()
-                self._status.notes = self._service_up_notes
-            else:
-                self._status.notes = self._service_down_notes
 
             # Send a status now
             await self._send_status_update()
@@ -3316,8 +3314,6 @@ class TaskEngine(DAPBase):
             self._terminated_called = False
             self._teardown_done = asyncio.Event()
             self._exit_event_seen = False
-            self._service_up_notes = []
-            self._service_down_notes = []
             self._stop_reason = None
             self.dormant_reason = None
 

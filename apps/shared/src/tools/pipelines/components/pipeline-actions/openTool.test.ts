@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-import { openToolDocKey, openToolLabel, openToolNotes, openToolNotesFor, openToolTitle, parseToolDocKey } from './openTool';
+import { openToolDocKey, openToolLabel, openToolNotes, openToolNotesFor, openToolTitle, parseToolDocKey, sourceEndpointNote } from './openTool';
 
 // ==== The note walk ==========================================================
 
@@ -72,6 +72,36 @@ test('a non-source node finds its button in the status of the source whose engin
 test('the same button reported by two sources of one engine is shown once', () => {
 	const note = { 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.chat_1' };
 	assert.equal(openToolNotesFor({ a: { notes: [note] }, b: { notes: [note] } }, 'postgres_1').length, 1);
+});
+
+// ==== The source's endpoint note =============================================
+
+const WEBHOOK = { 'url-text': 'Webhook interface URL', 'url-link': 'http://h/webhook/acme.x.webhook_1', address: 'acme.x.webhook_1', lanes: ['json'] };
+const CHAT = { 'button-text': 'Open Chat', 'open-tool': 'rocketride.chat', nodeId: 'chat_1', address: 'acme.x.chat_1' };
+const SQL = { 'button-text': 'Explore', 'open-tool': 'rocketride.sql', nodeId: 'postgres_1', address: 'acme.x.webhook_1' };
+
+test('the webhook door is the endpoint even when a database note was merged in front of it', () => {
+	assert.equal(sourceEndpointNote([SQL, WEBHOOK], 'webhook_1'), WEBHOOK);
+	assert.equal(sourceEndpointNote([WEBHOOK, SQL], 'webhook_1'), WEBHOOK);
+	// With no source id the door still wins: a door is always the source's
+	assert.equal(sourceEndpointNote([SQL, WEBHOOK]), WEBHOOK);
+});
+
+test('a URL-less chat source is its own endpoint; the database note beside it never is', () => {
+	const sql = { ...SQL, address: 'acme.x.chat_1' };
+	assert.equal(sourceEndpointNote([sql, CHAT], 'chat_1'), CHAT);
+	assert.equal(sourceEndpointNote([CHAT, sql], 'chat_1'), CHAT);
+	// Only the database note in the list: no endpoint for this source
+	assert.equal(sourceEndpointNote([sql], 'chat_1'), null);
+	// No source id: the source is the node the address names last
+	assert.equal(sourceEndpointNote([sql, CHAT]), CHAT);
+	assert.equal(sourceEndpointNote([sql]), null);
+});
+
+test('no notes, no endpoint-shaped note, no endpoint', () => {
+	assert.equal(sourceEndpointNote(undefined, 'chat_1'), null);
+	assert.equal(sourceEndpointNote([], 'chat_1'), null);
+	assert.equal(sourceEndpointNote(['free text', 42, null, { nodeId: 'chat_1' }], 'chat_1'), null);
 });
 
 // ==== Labels =================================================================

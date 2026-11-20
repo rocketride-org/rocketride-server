@@ -23,7 +23,7 @@ import type { CSSProperties } from 'react';
 import { Button } from 'shell';
 import EndpointInfoModal from './EndpointInfoModal';
 import type { EndpointKeyMinter } from './endpointKey';
-import { openToolNotes } from './openTool';
+import { openToolNotes, sourceEndpointNote } from './openTool';
 import type { IOpenToolNote } from './openTool';
 
 // =============================================================================
@@ -87,6 +87,8 @@ export interface IPipelineActionsProps {
 	notes?: (string | Record<string, unknown>)[];
 	/** The node's buttons when the caller resolved them itself (a canvas node: its notes across every source's status). */
 	tools?: IOpenToolNote[];
+	/** The source component the notes belong to: tells its own endpoint note from a database node's. */
+	sourceId?: string;
 	/** Host address used to replace `{host}` placeholders in URLs. */
 	host?: string;
 	/** Called when a docs URL needs to be opened in the browser (the endpoint modal's links). */
@@ -103,28 +105,21 @@ export interface IPipelineActionsProps {
 // Helpers
 // =============================================================================
 
-/** Type guard: a source's endpoint note — a data door (`url-link`) or a front end (`open-tool`) with its address. */
-function isEndpointInfo(value: unknown): value is IEndpointInfo {
-	if (value == null || typeof value !== 'object') return false;
-	const record = value as Record<string, unknown>;
-	if (typeof record['url-link'] === 'string') return true;
-	return typeof record['open-tool'] === 'string' && typeof record['address'] === 'string';
-}
-
-/** The source's endpoint note: the first endpoint-shaped note (a database node's note may precede it after a merge). */
-function getEndpointInfo(notes?: (string | Record<string, unknown>)[]): IEndpointInfo | null {
-	for (const note of notes ?? []) {
-		if (isEndpointInfo(note)) return note;
-	}
-	return null;
+/**
+ * The source's endpoint note: its data door (`url-link`) or its own
+ * `open-tool` note; a database node's note merged into the list is never
+ * the endpoint (see {@link sourceEndpointNote}).
+ */
+function getEndpointInfo(notes?: (string | Record<string, unknown>)[], sourceId?: string): IEndpointInfo | null {
+	return (sourceEndpointNote(notes, sourceId) as IEndpointInfo | null) ?? null;
 }
 
 // =============================================================================
 // Component
 // =============================================================================
 
-export default function PipelineActions({ notes, tools: toolsProp, host, onOpenLink, onOpenTool, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
-	const endpointInfo = useMemo(() => getEndpointInfo(notes), [notes]);
+export default function PipelineActions({ notes, tools: toolsProp, sourceId, host, onOpenLink, onOpenTool, displayName, onCreateEndpointKey }: IPipelineActionsProps): ReactElement | null {
+	const endpointInfo = useMemo(() => getEndpointInfo(notes, sourceId), [notes, sourceId]);
 	// The node's own buttons: one per open-tool note the server filled. Shown
 	// only when the host can open a tool document.
 	const tools = useMemo(() => (onOpenTool ? (toolsProp ?? openToolNotes(notes)) : []), [notes, toolsProp, onOpenTool]);

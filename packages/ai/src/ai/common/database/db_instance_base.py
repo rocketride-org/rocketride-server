@@ -252,9 +252,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         """Announce this node's front end once per control (plan 3.6).
 
         An instance lives one binding, so the note is published on the
-        control's FIRST binding and guarded on the control's IGlobal: the
-        engine merges notes by node, and a second message from the same node
-        would only replace the first.
+        control's FIRST binding that can publish it and guarded on the
+        control's IGlobal: the engine merges notes by node, and a second
+        message from the same node would only replace the first.
         """
         self._announceOpenTool()
 
@@ -264,12 +264,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         The note names the app that talks to a database node (``rocketride.sql``)
         and this node's component id; ``{address}`` is filled per control by
         the server. No URL, no credential. Losing the note costs a button,
-        never a query, so any failure is logged and swallowed.
+        never a query, so any failure is logged and swallowed; the marker is
+        set only once the note went out, so a binding that could not publish
+        (no identity yet, the monitor refused) leaves the next one to try.
         """
         glb = self.IGlobal
         if glb is None or getattr(glb, 'open_tool_announced', False):
             return
-        glb.open_tool_announced = True
         try:
             node_id = glb.config.node.id
             if not node_id:
@@ -283,6 +284,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             monitorOther('usr', json.dumps([note]))
         except Exception as e:
             debug(f'Could not publish the open-tool note: {e}')
+            return
+        glb.open_tool_announced = True
 
     # ------------------------------------------------------------------
     # Reflection lock

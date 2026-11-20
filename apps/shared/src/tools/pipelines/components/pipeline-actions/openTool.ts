@@ -107,6 +107,37 @@ export function openToolNotesFor(statuses: Readonly<Record<string, { notes?: Rea
 }
 
 /**
+ * The SOURCE's endpoint note in a status's notes list: the note carrying a
+ * data door (`url-link`, a webhook), else the `open-tool` note of the source
+ * itself (a URL-less chat or dropper source). A database node's `open-tool`
+ * note merged into the same list is never the endpoint, wherever it stands:
+ * the source is told apart by its id (`sourceId`, the status entry's
+ * component) or, when the caller has none, by the address naming it as its
+ * last segment.
+ *
+ * @param notes - The status body's notes, as delivered.
+ * @param sourceId - The source component the status belongs to, when known.
+ * @returns The endpoint note, or null when the list has none.
+ */
+export function sourceEndpointNote<T>(notes: ReadonlyArray<T> | undefined, sourceId?: string): T | null {
+	if (!notes) return null;
+	let door: T | null = null;
+	let own: T | null = null;
+	for (const note of notes) {
+		if (note === null || typeof note !== 'object') continue;
+		const record = note as unknown as Record<string, unknown>;
+		if (door === null && typeof record['url-link'] === 'string') door = note;
+		if (own !== null || typeof record['open-tool'] !== 'string') continue;
+		const nodeId = record['nodeId'];
+		const address = record['address'];
+		if (typeof nodeId !== 'string' || typeof address !== 'string') continue;
+		const isSource = sourceId !== undefined ? nodeId === sourceId : address.endsWith(`.${nodeId}`);
+		if (isSource) own = note;
+	}
+	return door ?? own;
+}
+
+/**
  * The document key a tool document binds under: `<address>/<nodeId>`, so the
  * tool document URI is `tool:<appId>/<address>/<nodeId>` in every host.
  *

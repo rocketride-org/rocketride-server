@@ -112,7 +112,7 @@ export default function NodeStatus({ componentProvider, isSourceNode, taskStatus
 			</a>
 		) : null;
 
-		const pipelineActions = <PipelineActions notes={taskStatus.notes} tools={openTools} host={serverHost} onOpenLink={onOpenLink} onOpenTool={onOpenTool} onCreateEndpointKey={onCreateEndpointKey} displayName={displayName} />;
+		const pipelineActions = <PipelineActions notes={taskStatus.notes} tools={openTools} sourceId={componentProvider} host={serverHost} onOpenLink={onOpenLink} onOpenTool={onOpenTool} onCreateEndpointKey={onCreateEndpointKey} displayName={displayName} />;
 
 		// ── Starting / Initializing ──────────────────────────────────────
 		if (isRunning && (taskStatus.state === ITaskState.STARTING || taskStatus.state === ITaskState.INITIALIZING)) {

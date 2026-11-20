@@ -754,6 +754,35 @@ def test_begin_instance_without_an_identity_publishes_nothing(monkeypatch):
     assert sent == []
 
 
+def test_begin_instance_marks_the_control_announced_only_after_the_note_went_out(monkeypatch):
+    """A binding that cannot publish (identity not there yet, the monitor
+    refusing) leaves the control unannounced, so a later binding publishes;
+    once one succeeded, the following bindings stay quiet.
+    """
+    from ai.common.database import db_instance_base
+
+    sent = []
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda *a: sent.append(a))
+    # No identity: nothing sent, nothing marked
+    bare = _FakeGlobal()
+    _sql_instance(bare).beginInstance()
+    assert sent == [] and not getattr(bare, 'open_tool_announced', False)
+    # The monitor refuses: swallowed, not marked
+    glb = _open_tool_global('postgres_1')
+
+    def refuse(*a):
+        raise RuntimeError('no monitor')
+
+    monkeypatch.setattr(db_instance_base, 'monitorOther', refuse)
+    _sql_instance(glb).beginInstance()
+    assert not getattr(glb, 'open_tool_announced', False)
+    # The next binding publishes and marks; the one after is a duplicate and stays quiet
+    monkeypatch.setattr(db_instance_base, 'monitorOther', lambda *a: sent.append(a))
+    _sql_instance(glb).beginInstance()
+    _sql_instance(glb).beginInstance()
+    assert len(sent) == 1 and glb.open_tool_announced is True
+
+
 def test_build_sql_query_marks_invalid_after_explain_exhaustion():
     """Every EXPLAIN attempt failing must flip isValid to False, not leave the LLM's 'true'.
 

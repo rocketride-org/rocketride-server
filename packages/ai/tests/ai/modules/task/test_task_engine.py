@@ -1905,6 +1905,33 @@ async def test_on_event_engine_event_records_pipeline_activity_for_a_dev_task(ev
 
 
 @pytest.mark.asyncio
+async def test_readiness_keeps_the_notes_the_nodes_published():
+    """Readiness never touches the notes slot. A database node announces its
+    Explore button once, possibly before the source reports ready (plan 3.6),
+    so the keyed note merged before `service=True` must survive it; the
+    source's unkeyed door follows the same rule (readiness is not a writer of
+    notes at all). Only a run reset and a source's empty usr message clear.
+    """
+    t = _event_task()
+    t._task_metrics = None
+    t._channel_startup_open = True
+    t._confirm_running = MagicMock()
+    door = {'url-link': '{host}/webhook/{address}', 'address': '{address}'}
+    explore = {'open-tool': 'rocketride.sql', 'nodeId': 'postgres_1', 'address': '{address}'}
+    t._status.notes = [door, explore]
+
+    await TaskEngine.on_event(t, {'event': 'apaevt_status_state', 'body': {'service': True}})
+    assert t._status.notes == [door, explore]
+    assert t._status.serviceUp is True and t._confirm_running.called
+    await TaskEngine.on_event(t, {'event': 'apaevt_status_state', 'body': {'service': False}})
+    assert t._status.notes == [door, explore]
+    # The two clearing paths
+    assert merge_status_notes([door, explore], []) == []
+    TaskEngine._reset_status(t)
+    assert t._status.notes == []
+
+
+@pytest.mark.asyncio
 async def test_on_event_stdout_does_not_count_as_activity():
     """Raw node output must not count as idle-timer activity."""
     t = _event_task()
