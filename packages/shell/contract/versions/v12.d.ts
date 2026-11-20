@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-19T18:25:41.060Z
-// Source commit: b02b8bb9e7e23857e5698654a94ae90705c92d91
+// Generated:     2026-11-20T01:44:27.203Z
+// Source commit: bbf91bbfe4df9bfeab57258755e5e44728c93833
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -15913,6 +15913,37 @@ export interface DesktopViewProps {
  * @param props - {@link DesktopViewProps}.
  */
 export declare const DesktopView: React$1.FC<DesktopViewProps>;
+/** Props for the {@link CatalogPicker} component. */
+export interface ICatalogPickerProps {
+    /**
+     * Shell-compatibility filter sent to the catalog ('saas', 'oss',
+     * 'vscode'); omitted, every app the caller can reach is listed.
+     */
+    shell?: string;
+    /** App ids never shown (the host launcher itself, e.g. 'rocketride.hello'). */
+    excludeIds?: string[];
+    /**
+     * Launch handler for a tile that is already on the desktop. Default:
+     * emit `shell:switchApp` on the connection manager.
+     */
+    onLaunch?: (appId: string) => void;
+    /** Called once the server accepted an add (the identity push follows). */
+    onAdded?: (appId: string) => void;
+    /** Heading above the grid (default 'Catalog'); an empty string hides it. */
+    title?: string;
+    /** Line under the heading (default 'Add apps to your desktop.'). */
+    subtitle?: string;
+    /** Show the search field (default true). */
+    showSearch?: boolean;
+    /** Extra styles merged onto the root (padding/width belong to the host). */
+    style?: React$1.CSSProperties;
+}
+/**
+ * The catalog picker: every reachable app as a tile with Open / Add / Adding.
+ *
+ * @param props - {@link ICatalogPickerProps}.
+ */
+export declare const CatalogPicker: React$1.FC<ICatalogPickerProps>;
 /** Possible environment scope levels. */
 export type EnvironmentScope = "org" | "team" | "user";
 /** Connection state and permissions for a single connection slot. */
@@ -16334,6 +16365,7 @@ export declare const shellApi: {
     readonly BxFolderOpen: IconComponent;
     readonly AppLayout: import("react").FC<AppLayoutProps>;
     readonly DesktopView: import("react").FC<DesktopViewProps>;
+    readonly CatalogPicker: import("react").FC<ICatalogPickerProps>;
     readonly getAppVersionOverride: typeof getAppVersionOverride;
     readonly applyAppVersionOverride: typeof applyAppVersionOverride;
     readonly versionedEntryUrl: typeof versionedEntryUrl;
