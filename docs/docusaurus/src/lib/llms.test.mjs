@@ -47,9 +47,9 @@ describe('buildIndex', () => {
 		assert.match(index, /## Concepts/);
 		// Links are absolute (the llms.txt format specifies URLs) and carry the
 		// manifest description when the page has one.
-		assert.match(index, /\[Pipelines\]\(https:\/\/docs\.rocketride\.org\/concepts\/pipelines\.md\): A pipeline is a directed graph of nodes\./);
+		assert.match(index, /\[Pipelines\]\(https:\/\/docs\.rocketride\.ai\/concepts\/pipelines\.md\): A pipeline is a directed graph of nodes\./);
 		// An entry without a description degrades to a bare link, no trailing colon.
-		assert.match(index, /\[Quickstart\]\(https:\/\/docs\.rocketride\.org\/quickstart\.md\)\n/);
+		assert.match(index, /\[Quickstart\]\(https:\/\/docs\.rocketride\.ai\/quickstart\.md\)\n/);
 		// Get Started section precedes Concepts (spine order)
 		assert.ok(index.indexOf('## Get Started') < index.indexOf('## Concepts'));
 	});

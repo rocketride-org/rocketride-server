@@ -4,7 +4,7 @@
   "title": "RocketRide",
   "description": "RocketRide meta-harness: build, validate, run and observe agents from your AI assistant.",
   "version": "3.6.0",
-  "websiteUrl": "https://docs.rocketride.org/",
+  "websiteUrl": "https://docs.rocketride.ai/",
   "repository": {
     "url": "https://github.com/rocketride-org/rocketride-server",
     "source": "github"

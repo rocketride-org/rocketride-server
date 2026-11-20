@@ -58,7 +58,7 @@
 		"url": "https://github.com/rocketride-org/rocketride-server.git",
 		"directory": "packages/client-typescript"
 	},
-	"homepage": "https://docs.rocketride.org/",
+	"homepage": "https://docs.rocketride.ai/",
 	"bugs": {
 		"url": "https://github.com/rocketride-org/rocketride-server/issues/"
 	},
