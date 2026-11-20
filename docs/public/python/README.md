@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  Build, run, and manage AI pipelines from Python.
+  RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Python SDK and CLI.
 </p>
 
 <p align="center">
