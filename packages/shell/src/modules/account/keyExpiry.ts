@@ -17,16 +17,18 @@ export interface RevealedKeyExpiry {
 
 /**
  * Milliseconds of a server timestamp. The server sends naive UTC (no offset),
- * which `Date.parse` would read as local time; the same rule as
- * `parseWireDate` in ./components/shared. This file is deliberately import-free
- * so `node:test` can load it without the shell's React/TSX graph, which is why
- * the zone rule is repeated here instead of imported from shared.tsx; keep the
- * two in step.
+ * which `Date.parse` would read as local time, so a zone-less datetime is read
+ * as UTC. This is a deliberate copy of the rule in `parseWireDate`
+ * (./components/shared): this file stays import-free so `node:test` can load it
+ * without the shell's React/TSX graph. Keep the two in step.
  */
 function wireMillis(iso: string): number {
 	const trimmed = iso.trim();
+	// Already zoned (Z or an offset): parse verbatim.
 	if (/(?:Z|[+-]\d{2}:?\d{2})$/i.test(trimmed)) return Date.parse(trimmed);
-	return Date.parse(`${trimmed.replace(' ', 'T')}Z`);
+	// Zone-less datetime: normalize the separator and stamp UTC.
+	if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(trimmed)) return Date.parse(`${trimmed.replace(' ', 'T')}Z`);
+	return Date.parse(trimmed);
 }
 
 /**

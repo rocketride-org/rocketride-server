@@ -430,6 +430,51 @@ async def test_r972_1a_overlapping_rebuilds_keep_the_later_membership_update(mon
 
 
 @pytest.mark.asyncio
+async def test_r972_1a_rebuild_lock_stops_an_older_read_installing_over_a_newer_one(monkeypatch):
+    """The per-connection lock serializes rebuilds: a rebuild that read the old
+    membership and is held while a second one reads the new membership must not
+    install its stale read over the second's result.
+
+    The first rebuild waits (bounded) for the second to read. With the lock the
+    second cannot start until the first finishes, so the wait times out and the
+    rebuilds run one after the other. Without the lock the second reads and
+    installs the new membership, then the first resumes and overwrites it with
+    the old one; the generation is unchanged, so nothing else would stop that.
+    """
+    account = FakeAccount({'u': (True, frozenset())})
+    server = make_server(account, monkeypatch)
+    conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+    second_read = asyncio.Event()
+    reads = []
+
+    async def slow_rebuild(user_id, auth, capabilities=None):
+        reads.append(user_id)
+        perms = account.rows[user_id][1]
+        if len(reads) == 1:
+            # The first read saw the old membership; hold it until the second has read.
+            try:
+                await asyncio.wait_for(second_read.wait(), timeout=0.2)
+            except asyncio.TimeoutError:
+                pass
+            # Let a concurrent second rebuild finish installing before this one returns.
+            await asyncio.sleep(0.05)
+        else:
+            second_read.set()
+        return identity(user_id, perms, auth=auth)
+
+    account._service.get_authentication_result = slow_rebuild
+
+    first = asyncio.ensure_future(server.push_account_update('u'))
+    await asyncio.sleep(0.01)  # the first rebuild has read and is held
+    account.rows['u'] = (True, frozenset({'sys.view'}))  # the membership update lands
+    second = asyncio.ensure_future(server.push_account_update('u'))
+    await asyncio.gather(first, second)
+
+    assert len(reads) == 2
+    assert conn._account_info.sysPermissions == ['sys.view']
+
+
+@pytest.mark.asyncio
 async def test_r972_1a_direct_reauth_detaches_the_debugger(monkeypatch):
     """Auth on an already-authenticated socket (no deauth between) installs a new
     identity that must attach as debugger again.
