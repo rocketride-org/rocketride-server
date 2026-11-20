@@ -179,6 +179,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	let eventsDropped = 0;
 	/** Root-made envelopes and event params already scrubbed: the choke point passes or refuses them without a second scan. */
 	const verdicts = new WeakMap<object, 'ok' | 'deny'>();
+	/** Bumped by logout only (teardown keeps the session): see `refreshApiKeys`. */
+	let sessionEpoch = 0;
 	/** Settles when the latest host.apiKey answer arrived (or after API_KEY_WAIT_MS); null when none is pending. */
 	let apiKeyReady: Promise<void> | null = null;
 
@@ -200,11 +202,15 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** Fetches the API key from both sources: `getClient().getApiKey()` and `host.apiKey` (`hostOps.ts:122`). */
 	const refreshApiKeys = (): void => {
 		addApiKey(clientApiKey());
+		// An answer that arrives after a logout belongs to the session that ended: logout cleared the keys, so it must not put one back.
+		const startedIn = sessionEpoch;
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		const answered = Promise.resolve()
 			.then(() => cm.ops().request('host.apiKey', {}))
 			.then(
-				(answer) => addApiKey(isPlainObject(answer) ? answer.apiKey : undefined),
+				(answer) => {
+					if (sessionEpoch === startedIn) addApiKey(isPlainObject(answer) ? answer.apiKey : undefined);
+				},
 				() => undefined
 			);
 		const waited = new Promise<void>((resolve) => {
@@ -779,6 +785,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// A logout that bypassed teardownAll: the token is already gone, so only the ledgers are cleared.
 	cm.on('shell:logout', () => {
 		epoch++;
+		sessionEpoch++;
 		for (const st of realms.values()) {
 			st.ledger.clear();
 			st.scrub.aliases.clear();
@@ -913,6 +920,6 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			}
 		},
 
-		__stats: () => ({ eventsDropped, knownProjects: known.size() }),
+		__stats: () => ({ eventsDropped, knownProjects: known.size(), apiKeys: apiKeys.size }),
 	};
 }

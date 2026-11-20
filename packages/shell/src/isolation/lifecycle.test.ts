@@ -111,6 +111,23 @@ test('G4-F4 a request waiting for the API key is refused when teardown completes
 	assert.equal(engine.runs.length, 0, 'no run was started after teardown');
 });
 
+test('an API key answer that arrives after a logout is discarded', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	Object.assign(t.cm.apiKeySources, { client: false, host: true }); // only the async host.apiKey path
+	t.open(ENTRY_A);
+	await settle();
+	assert.equal(t.root.__stats!().apiKeys, 1, 'control: the attach-time key is held');
+	const release = t.cm.holdApiKey();
+	tt.after(release);
+	t.cm.emit('shell:login', {}); // a refresh is now pending
+	t.cm.emit('shell:logout', {}); // the session ends before the answer
+	assert.equal(t.root.__stats!().apiKeys, 0, 'logout cleared the keys');
+	release();
+	await settle();
+	assert.equal(t.root.__stats!().apiKeys, 0, 'the answer of the ended session did not put a key back');
+});
+
 test('G4-F4 detach ends the realm runs', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());

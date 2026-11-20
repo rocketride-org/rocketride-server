@@ -176,5 +176,5 @@ export interface IAppRoot {
 	/** Terminates live runs, closes fs handles, removes monitors, clears ledgers. */
 	teardownAll(timeoutMs: number): Promise<void>;
 	/** Test-only counters (PR2a-2): engine events dropped because no realm owns them, and project ids held. */
-	__stats?(): { eventsDropped: number; knownProjects: number };
+	__stats?(): { eventsDropped: number; knownProjects: number; apiKeys: number };
 }
