@@ -44,6 +44,7 @@ from .types.billing import (
     CreditPack,
     PromoRedemption,
     PromoValidation,
+    PublicationUsage,
     TransactionsResult,
     UsageRollup,
 )
@@ -432,6 +433,31 @@ class BillingApi:
             List of usage rollup rows ordered by total consumption descending.
         """
         body = await self._client.call('rrext_account_billing', subcommand='usage_by_team', orgId=org_id)
+        return body.get('usage', [])
+
+    async def get_usage_by_publication(
+        self, org_id: str, since: str | None = None, until: str | None = None
+    ) -> list[PublicationUsage]:
+        """
+        Fetch the org's own named-pipe usage grouped by the publication that served it.
+
+        Groups by pipe, rung, answering team and version. Only the org's rows
+        are read, so a publisher never sees other orgs' calls.
+
+        Args:
+            org_id: Organisation UUID.
+            since: ISO datetime — the first UTC day counted.
+            until: ISO datetime — the first UTC day not counted.
+
+        Returns:
+            One row per publication, ordered by total consumption descending.
+        """
+        kwargs: dict = {'subcommand': 'usage_by_publication', 'orgId': org_id}
+        if since:
+            kwargs['since'] = since
+        if until:
+            kwargs['until'] = until
+        body = await self._client.call('rrext_account_billing', **kwargs)
         return body.get('usage', [])
 
     # =========================================================================

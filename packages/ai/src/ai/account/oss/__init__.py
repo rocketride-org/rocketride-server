@@ -572,13 +572,15 @@ class Account(AccountBase):
 
     async def handle_account(self, conn, request):
         """
-        Handle ``rrext_account_me`` for env subcommands only.
+        Handle ``rrext_account_me`` env subcommands and the empty publication breakdown.
 
         OSS supports ``get_env`` (the ROCKETRIDE_* names in os.environ, values
         masked) and ``update_env`` (merges into os.environ and the .env file: a
         value is set, None deletes, the mask keeps what is stored). ``set_env``
         is the same merge, for clients that predate ``update_env``.
-        All other account commands raise NotImplementedError.
+        ``rrext_account_billing`` ``usage_by_publication`` answers the base's
+        empty breakdown (no ledger standalone). All other account commands
+        raise NotImplementedError.
 
         Args:
             conn:    TaskConn instance.
@@ -624,6 +626,12 @@ class Account(AccountBase):
             if sub == 'env_keys':
                 keys = sorted(k for k in os.environ if k.startswith('ROCKETRIDE_'))
                 return conn.build_response(request, body={'keys': keys})
+
+        # Served by publication answers its local shape: OSS keeps no ledger,
+        # so the breakdown is the base's empty list, never an edition error
+        if command == 'rrext_account_billing' and sub == 'usage_by_publication':
+            rows = await self.get_usage_by_publication(args.get('orgId', ''))
+            return conn.build_response(request, body={'usage': rows})
 
         raise NotImplementedError('Account management requires SaaS mode')
 

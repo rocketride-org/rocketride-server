@@ -34,6 +34,7 @@ import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
+from datetime import datetime
 from typing import Callable, NamedTuple, Optional
 
 # What clients see in place of a stored environment value. A secret is
@@ -444,6 +445,33 @@ class AccountBase(ABC):
             ``{'transactions': [...], 'total': int, 'page': int, 'pageSize': int}``
         """
         return {'transactions': [], 'total': 0, 'page': page, 'pageSize': page_size}
+
+    async def get_usage_by_publication(
+        self,
+        org_id: str,
+        since: datetime | None = None,
+        until: datetime | None = None,
+    ) -> list:
+        """
+        The org's own named-pipe usage grouped by the publication that served it (plan 8.3, B39).
+
+        OSS keeps no ledger (``apply_usage`` is a no-op), so there is no row
+        to group and the answer is an empty list. The SaaS implementation
+        reads only ``org_id``'s usage day rows, keyed
+        ``usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}``,
+        and groups them by pipe, rung, answering team and version, so a
+        publisher never sees other orgs' calls.
+
+        Args:
+            org_id: Organisation to query (the viewer's org).
+            since:  First UTC day to count, or None.
+            until:  First UTC day not counted, or None.
+
+        Returns:
+            ``[{pipe, rung, team, teamName, version, requestCount,
+            credits: {resource: amount}}, ...]`` ordered by total desc.
+        """
+        return []
 
     # NOTE: fire-time billing resolution (resolve_billing_team) is GONE by
     # doctrine — billing is ABSOLUTE, stamped onto every publish at pointer

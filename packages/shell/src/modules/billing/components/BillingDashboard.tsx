@@ -12,8 +12,10 @@
  * Card shell — never a Card header stacked on a grid bar.
  *   1. Balance breakdown -- purchased vs consumed per resource with bars
  *   2. Spending velocity -- burn rate + days remaining as MiniCard tiles
- *   3. Usage leaderboard -- top consumers (CardDataGrid, LOCAL mode; the
- *      By User / By Team ToggleGroup rides the header as `actions`)
+ *   3. Usage leaderboard -- top consumers, and the org's own usage by the
+ *      publication served (CardDataGrid, LOCAL mode; the
+ *      By User / By Team / By Publication ToggleGroup rides the header as
+ *      `actions`)
  *   4. Transaction log   -- paginated ledger detail (CardDataGrid in REMOTE
  *      mode over a prop-fed page bridge; see TransactionLog). Row click opens
  *      the transaction record panel (a contained DetailPanel) with the FULL
@@ -39,7 +41,9 @@ import type { IDataGridHandle, IDataGridPage, IDataGridPageRequest } from '../..
 import type { GridColumnDefinition } from '../../../components/data-grid/defaults';
 import { ToggleGroup } from '../../../components/toggle-group/ToggleGroup';
 import { formatDateValue } from '../../../components/data-grid/defaults';
-import type { CreditBalance, LedgerTransaction, TransactionsResult, UsageRollup } from '../types';
+import type { CreditBalance, LedgerTransaction, PublicationUsage, TransactionsResult, UsageRollup } from '../types';
+import { publicationRows } from './publicationUsage';
+import type { PublicationRow } from './publicationUsage';
 
 // =============================================================================
 // STYLES
@@ -207,6 +211,9 @@ const styles = {
 // HELPERS
 // =============================================================================
 
+/** One stable empty breakdown, so an absent prop keeps the leaderboard's memo inputs equal. */
+const NO_PUBLICATION_USAGE: PublicationUsage[] = [];
+
 /** Formats a number to a compact display string (e.g. 1234 -> "1,234.0"). */
 function fmt(n: number): string {
 	return Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 });
@@ -286,6 +293,10 @@ export interface BillingDashboardProps {
 	usageByUser: UsageRollup[];
 	/** Per-team usage rollup. */
 	usageByTeam: UsageRollup[];
+	/** The org's own usage by the publication that served it (plan 8.3); absent = none. */
+	usageByPublication?: PublicationUsage[];
+	/** Label of the period the publication breakdown covers (e.g. "November 2026"). */
+	publicationPeriod?: string;
 	/** Currently running tasks with live token data. */
 	activeTasks: ActiveTask[];
 	/** Available top-up packs for purchase. */
@@ -446,13 +457,21 @@ interface LeaderRow extends Record<string, unknown> {
 	resources: number;
 }
 
-/** Usage leaderboard -- top consumers by user or team. */
-const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[] }> = ({
+/** The leaderboard's group-by: the payer views (user, team) and the publication served. */
+type LeaderMode = 'user' | 'team' | 'publication';
+
+/**
+ * Usage leaderboard -- top consumers by user or team, and the org's own
+ * usage by the publication that served it (plan 8.3, mockup 4.3).
+ */
+const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: UsageRollup[]; usageByPublication: PublicationUsage[]; publicationPeriod?: string }> = ({
 	usageByUser,
 	usageByTeam,
+	usageByPublication,
+	publicationPeriod,
 }) => {
-	const [mode, setMode] = useState<'user' | 'team'>('user');
-	const data = mode === 'user' ? usageByUser : usageByTeam;
+	const [mode, setMode] = useState<LeaderMode>('user');
+	const data = mode === 'team' ? usageByTeam : usageByUser;
 
 	// Flatten rollups into table rows with computed totals; the display name
 	// arrives resolved on the rollup row itself.
@@ -493,32 +512,78 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 		[mode]
 	);
 
-	if (!usageByUser.length && !usageByTeam.length) return null;
+	// The publication view: one row per publication served, from the
+	// server's org-scoped breakdown (grouping and labels in publicationUsage).
+	const publicationData = useMemo<PublicationRow[]>(() => publicationRows(usageByPublication), [usageByPublication]);
+
+	// Columns of the publication view, as mockup 4.3 draws them.
+	const publicationColumns = useMemo<GridColumnDefinition[]>(
+		() => [
+			{ title: 'Publication', field: 'publication', rrType: 'string', rrDefault: true, rrDescription: 'Published pipe that served the requests, as developerId.pipeId.', headerSort: true },
+			{ title: 'Version', field: 'version', rrType: 'enum', rrDefault: true, rrDescription: 'Artifact version that answered; "--" for a development run, which serves through no publication.', headerSort: true },
+			{ title: 'Publishing team', field: 'team', rrType: 'enum', rrDefault: true, rrDescription: 'Team whose publication answered (its audience slot): the org\'s team name, "Only me" on @me, "Development run" for a dev run, "Public" for another org\'s public pipe.', headerSort: true },
+			{ title: 'Requests', field: 'requests', rrType: 'number', rrDefault: true, rrDescription: "This org's requests served by the publication in the period; other orgs' calls are never counted.", hozAlign: 'right', headerHozAlign: 'right', headerSort: true, sorter: 'number', formatter: (cell: CellComponent) => fmtInt(cell.getValue() as number) },
+			{
+				title: 'Tokens',
+				field: 'tokens',
+				rrType: 'number',
+				rrDefault: true,
+				rrDefaultSort: 'desc',
+				rrDescription: 'Credits this org consumed through the publication in the period: the sum of absolute usage-ledger debits across every metered resource.',
+				hozAlign: 'right',
+				headerHozAlign: 'right',
+				headerSort: true,
+				sorter: 'number',
+				formatter: (cell: CellComponent) => fmt(cell.getValue() as number),
+			},
+		],
+		[]
+	);
+
+	if (!usageByUser.length && !usageByTeam.length && !usageByPublication.length) return null;
+
+	// The group-by toggle rides the grid header as `actions` in every mode.
+	const toggle = (
+		<ToggleGroup<LeaderMode>
+			options={[
+				{ id: 'user', label: 'By User' },
+				{ id: 'team', label: 'By Team' },
+				{ id: 'publication', label: 'By Publication' },
+			]}
+			value={mode}
+			onChange={setMode}
+			small
+		/>
+	);
 
 	// The grid IS the card: its two-row header carries the title and the
-	// By User / By Team toggle (`actions`); the headerless Card is only the
-	// bordered shell. noSearch: a short leaderboard needs no search box (the
-	// tool row collapses to a plain card header); Export still covers the set.
+	// group-by toggle (`actions`); the headerless Card is only the bordered
+	// shell. noSearch: a short leaderboard needs no search box (the tool row
+	// collapses to a plain card header); Export still covers the set. The
+	// publication view is its own grid (its own row shape), keyed apart.
 	return (
 		<Card noBodyPadding>
-			<CardDataGrid<LeaderRow>
-				title="Usage Leaderboard"
-				actions={
-					<ToggleGroup<'user' | 'team'>
-						options={[
-							{ id: 'user', label: 'By User' },
-							{ id: 'team', label: 'By Team' },
-						]}
-						value={mode}
-						onChange={setMode}
-						small
-					/>
-				}
-				columns={columns}
-				data={rows}
-				noSearch
-				emptyTitle="No usage data"
-			/>
+			{mode === 'publication' ? (
+				<CardDataGrid<PublicationRow>
+					key="publication"
+					title={publicationPeriod ? `Served by Publication, ${publicationPeriod}` : 'Served by Publication'}
+					actions={toggle}
+					columns={publicationColumns}
+					data={publicationData}
+					noSearch
+					emptyTitle="No publication usage in this period"
+				/>
+			) : (
+				<CardDataGrid<LeaderRow>
+					key="payer"
+					title="Usage Leaderboard"
+					actions={toggle}
+					columns={columns}
+					data={rows}
+					noSearch
+					emptyTitle="No usage data"
+				/>
+			)}
 		</Card>
 	);
 };
@@ -978,6 +1043,8 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 	transactions,
 	usageByUser,
 	usageByTeam,
+	usageByPublication,
+	publicationPeriod,
 	activeTasks,
 	loading,
 	onTransactionPage,
@@ -993,7 +1060,7 @@ export const BillingDashboard: React.FC<BillingDashboardProps> = ({
 		<div style={styles.stack}>
 			<BalanceBreakdown balance={balance} transactions={transactions} />
 			<SpendingVelocity balance={balance} transactions={transactions} onAddCapacity={onAddCapacity} />
-			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} />
+			<UsageLeaderboard usageByUser={usageByUser} usageByTeam={usageByTeam} usageByPublication={usageByPublication ?? NO_PUBLICATION_USAGE} publicationPeriod={publicationPeriod} />
 			<ActiveTasksView activeTasks={activeTasks} />
 			<TransactionLog transactions={transactions} onPageChange={onTransactionPage} fetchTransactions={fetchTransactions} fetchTransactionDistinct={fetchTransactionDistinct} />
 		</div>

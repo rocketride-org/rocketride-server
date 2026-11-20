@@ -243,6 +243,34 @@ export interface UsageRollup {
 }
 
 /**
+ * One publication's share of the org's own named-pipe usage, returned by
+ * usage_by_publication. Computed from the VIEWER's org rows only: the org's
+ * calls through each publication, never other orgs' calls to it.
+ */
+export interface PublicationUsage {
+	/** Published pipe name, `developerId.pipeId`. */
+	pipe: string;
+
+	/** Rung that answered: `dev`, `me`, `team` or `public`. */
+	rung: string;
+
+	/** Answering team (the publication's audience slot), or null for a development run. */
+	team: string | null;
+
+	/** Display name of the answering team when it is one of the org's own teams, else null. */
+	teamName: string | null;
+
+	/** Artifact version that answered, or null for a development run. */
+	version: number | null;
+
+	/** Requests served in the period. */
+	requestCount: number;
+
+	/** Consumption per resource type (absolute values — always positive). */
+	credits: Record<string, number>;
+}
+
+/**
  * Result of resolving a promo code via `promo_validate`.
  *
  * `valid: false` carries a human-readable `reason`. A grant/hackathon code

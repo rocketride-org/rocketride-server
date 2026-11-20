@@ -38,8 +38,9 @@
 
 import React, { useState, useEffect, useCallback, useRef, CSSProperties } from 'react';
 import AccountView from '../modules/account/AccountView';
+import { monthPeriod } from '../modules/billing/components/publicationUsage';
 import type { IDataGridPageRequest } from '../components/data-grid/DataGrid';
-import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, TransactionsResult, UsageRollup } from 'rocketride';
+import type { ConnectResult, AccountSection, ApiKeyRecord, OrgDetail, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, BillingDetail, CreditBalance, PublicationUsage, TransactionsResult, UsageRollup } from 'rocketride';
 import { useShellConnection } from '../connection/ConnectionContext';
 import { useAuthUser, useLogout } from '../hooks/useAuthUser';
 import { ConnectionManager } from '../connection/connection';
@@ -121,6 +122,8 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 	const [transactions, setTransactions] = useState<TransactionsResult | null>(null);
 	const [usageByUser, setUsageByUser] = useState<UsageRollup[]>([]);
 	const [usageByTeam, setUsageByTeam] = useState<UsageRollup[]>([]);
+	const [usageByPublication, setUsageByPublication] = useState<PublicationUsage[]>([]);
+	const [publicationPeriod, setPublicationPeriod] = useState<string | undefined>(undefined);
 	const [dashboardLoading, setDashboardLoading] = useState(false);
 
 	// ── Section load error ──────────────────────────────────────────────────
@@ -251,8 +254,10 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			return;
 		}
 		setBillingError(null);
+		// Served by publication reports the current UTC month (mockup 4.3).
+		const period = monthPeriod(new Date());
 		try {
-			const [subs, balance, plans, tx, byUser, byTeam] = await Promise.all([
+			const [subs, balance, plans, tx, byUser, byTeam, byPublication] = await Promise.all([
 				client.billing.getDetails(orgId).catch((err: any) => {
 					setBillingError(err.message ?? 'Failed to load subscriptions');
 					return [] as BillingDetail[];
@@ -262,6 +267,7 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				client.billing.getTransactions(orgId, { page: 1, pageSize: 20 }).catch(() => null),
 				client.billing.getUsageByUser(orgId).catch(() => [] as UsageRollup[]),
 				client.billing.getUsageByTeam(orgId).catch(() => [] as UsageRollup[]),
+				client.billing.getUsageByPublication(orgId, { since: period.since, until: period.until }).catch(() => [] as PublicationUsage[]),
 			]);
 			setSubscriptions(subs);
 			setCreditBalance(balance);
@@ -269,6 +275,8 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 			setTransactions(tx);
 			setUsageByUser(byUser);
 			setUsageByTeam(byTeam);
+			setUsageByPublication(byPublication);
+			setPublicationPeriod(period.label);
 		} finally {
 			setBillingLoading(false);
 			setDashboardLoading(false);
@@ -768,6 +776,8 @@ const AccountProvider: React.FC<IAccountProviderProps> = ({ onSubscribe, embedde
 				transactions={transactions}
 				usageByUser={usageByUser}
 				usageByTeam={usageByTeam}
+				usageByPublication={usageByPublication}
+				publicationPeriod={publicationPeriod}
 				activeTasks={[]}
 				topupPlans={allPlans.filter((p: any) => p.metadata?.kind === 'topup').map((p: any) => ({ id: p.id, stripePriceId: p.stripePriceId, nickname: p.nickname, amountCents: p.amountCents, metadata: p.metadata }))}
 				allPlans={allPlans}

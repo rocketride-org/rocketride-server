@@ -208,6 +208,7 @@ from .billing import (
     LedgerTransaction,
     PromoRedemption,
     PromoValidation,
+    PublicationUsage,
     TransactionsResult,
     UsageRollup,
 )
@@ -361,6 +362,7 @@ __all__ = [
     'LedgerTransaction',
     'PromoRedemption',
     'PromoValidation',
+    'PublicationUsage',
     'TransactionsResult',
     'UsageRollup',
 ]
