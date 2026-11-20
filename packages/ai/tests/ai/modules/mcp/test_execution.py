@@ -373,7 +373,7 @@ async def test_run_dropper_pipe_returns_the_address_and_a_credential_free_upload
     assert result['upload_url'].startswith(prefix)
     nonce = result['upload_url'][len(prefix) :]
     assert nonce and '/' not in nonce and '?' not in result['upload_url']
-    assert tasks.consume_upload_nonce(nonce) == {'token': fake_engine._token, 'caller_auth': None}
+    assert tasks.consume_upload_nonce(nonce) == {'token': fake_engine._token, 'caller_auth': None, 'generation': 1}
     # The dropper UI is the shell app's deep link (plan 3.6): the address, no credential
     assert result['dropper_url'] == f'{fake_engine.base_url}/?appid=rocketride.dropper&pipe={fake_engine._token}'
     assert 'auth=' not in result['dropper_url']
@@ -401,7 +401,11 @@ async def test_run_dropper_pipe_binds_the_nonce_to_the_calling_identity(fake_eng
         identity.CALLER_AUTH.reset(token)
 
     nonce = result['upload_url'].rsplit('/', 1)[1]
-    assert tasks.consume_upload_nonce(nonce) == {'token': fake_engine._token, 'caller_auth': 'rr_caller_key'}
+    assert tasks.consume_upload_nonce(nonce) == {
+        'token': fake_engine._token,
+        'caller_auth': 'rr_caller_key',
+        'generation': 1,
+    }
     # one-time: a second redemption answers nothing
     assert tasks.consume_upload_nonce(nonce) is None
 

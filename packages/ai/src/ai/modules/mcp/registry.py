@@ -41,8 +41,13 @@ class TaskRegistry:
 
     def __init__(self) -> None:
         self._tasks: Dict[str, Dict[str, Any]] = {}
-        # nonce -> {'token': task address, 'caller_auth': credential or None}
+        # nonce -> {'token': task address, 'caller_auth': credential or None,
+        #           'generation': the instance generation it was minted for}
         self._upload_nonces: Dict[str, Dict[str, Any]] = {}
+        # token -> instance generation: bumped on every fresh add, kept on a
+        # same_instance re-add, so a nonce redeemed for one run can never buy
+        # a replacement link for the run that took the address over meanwhile
+        self._generations: Dict[str, int] = {}
 
     def add(self, token: str, *, same_instance: bool = False, **metadata: Any) -> None:
         """Register ``token`` with the given metadata, replacing any prior entry.
@@ -69,6 +74,8 @@ class TaskRegistry:
         """
         if self._tasks.pop(token, None) is not None and not same_instance:
             self._drop_upload_nonces(token)
+        if not same_instance or token not in self._generations:
+            self._generations[token] = self._generations.get(token, 0) + 1
         while len(self._tasks) >= MAX_TASKS:
             evicted = next(iter(self._tasks))
             self._tasks.pop(evicted)
@@ -95,7 +102,11 @@ class TaskRegistry:
     # Upload nonces (plan 3.7)
     # ------------------------------------------------------------------
 
-    def issue_upload_nonce(self, token: str, caller_auth: Optional[str]) -> str:
+    def generation_of(self, token: str) -> Optional[int]:
+        """The instance generation ``token`` is at, or ``None`` when untracked."""
+        return self._generations.get(token) if token in self._tasks else None
+
+    def issue_upload_nonce(self, token: str, caller_auth: Optional[str], *, generation: Optional[int] = None) -> str:
         """Mint a one-time upload nonce for the tracked task ``token``.
 
         The nonce is bound to the task AND to ``caller_auth`` -- the credential
@@ -107,20 +118,31 @@ class TaskRegistry:
         Args:
             token: The task address, already registered via ``add``.
             caller_auth: The caller credential to forward the upload with.
+            generation: When given (a replacement link for a redeemed nonce),
+                the instance generation that nonce was minted for; the link is
+                refused when the address has since been taken over by a fresh
+                launch, since it would carry the earlier caller into the new run.
 
         Returns:
             str: The URL-safe nonce.
 
         Raises:
-            KeyError: ``token`` is not tracked.
+            KeyError: ``token`` is not tracked, or ``generation`` is not the
+                instance it is at.
         """
         if token not in self._tasks:
+            raise KeyError(token)
+        if generation is not None and generation != self._generations.get(token):
             raise KeyError(token)
         live = [nonce for nonce, bound in self._upload_nonces.items() if bound['token'] == token]
         while len(live) >= MAX_UPLOAD_NONCES_PER_TASK:
             self._upload_nonces.pop(live.pop(0), None)
         nonce = secrets.token_urlsafe(32)
-        self._upload_nonces[nonce] = {'token': token, 'caller_auth': caller_auth}
+        self._upload_nonces[nonce] = {
+            'token': token,
+            'caller_auth': caller_auth,
+            'generation': self._generations[token],
+        }
         return nonce
 
     def consume_upload_nonce(self, nonce: str) -> Optional[Dict[str, Any]]:
@@ -130,7 +152,7 @@ class TaskRegistry:
             nonce: The path segment the upload route received.
 
         Returns:
-            Optional[Dict[str, Any]]: ``{'token', 'caller_auth'}`` on the first
+            Optional[Dict[str, Any]]: ``{'token', 'caller_auth', 'generation'}`` on the first
                 use of a live nonce; ``None`` for an unknown, already used, or
                 dead (task removed/evicted) nonce. The three are
                 indistinguishable on purpose: the route answers 404 for all.

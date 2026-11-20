@@ -213,11 +213,16 @@ separate HTTP channel (bytes cannot ride an MCP tool call).
   caller who started it, so the upload is billed to that caller exactly as a
   `send_data` call would be. The nonce is single-use and bound to the task:
   the response is the engine envelope `{status, data}` plus the **next**
-  `upload_url`, and the link answers `404` once used, after `terminate`, when
-  a new run has started at the same address, or on another MCP server. The
-  link names the MCP server itself (the only holder of the nonce), not the
-  engine the tools run on. One request may carry at most 100 MiB; a larger
-  body answers `413` with a link to retry with once the drop is split.
+  `upload_url`, and the link answers `404` once used, after `terminate`
+  through MCP, after a fresh launch **through MCP** at the same address
+  (`run_pipeline`/`run_dropper_pipe` without `use_existing`), or on another
+  MCP server. A restart of the same address outside MCP (DAP, another
+  client) is not seen by the MCP server, so an unused link stays usable
+  until it is consumed, the task is terminated through MCP, or the MCP
+  server lets the task go; keying the link on the per-run control id closes
+  this. The link names the MCP server itself (the only holder of the nonce),
+  not the engine the tools run on. One request may carry at most 100 MiB; a
+  larger body answers `413` with a link to retry with once the drop is split.
   `dropper_url` opens the dropper app on that pipe
   (`?appid=rocketride.dropper&pipe=<address>`), where a person signs in and
   drags files into the running pipeline.

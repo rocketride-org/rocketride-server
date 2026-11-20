@@ -363,7 +363,9 @@ async def handle_upload(
     5. Answer the standard engine envelope ``{status: 'OK', data}`` plus the
        NEXT ``upload_url`` on this server's origin: the redeemed nonce is
        spent, and the widget's "drop more files" needs a fresh one. No next
-       URL is issued once the task has left the tracker.
+       URL is issued once the task has left the tracker or a fresh launch has
+       taken its address over (the registry generation the nonce was minted
+       for must still be current; a ``use_existing`` re-add keeps it).
 
     Args:
         request: The incoming request; ``nonce`` is its path parameter.
@@ -393,7 +395,7 @@ async def handle_upload(
             'unknown or already used upload nonce; call run_dropper_pipe again for a fresh upload_url',
             httpStatus=404,
         )
-    address, caller_auth = bound['token'], bound['caller_auth']
+    address, caller_auth, generation = bound['token'], bound['caller_auth'], bound['generation']
 
     # 3. the caller's own engine client, 4. forward
     auth_token = identity.CALLER_AUTH.set(caller_auth)
@@ -404,10 +406,12 @@ async def handle_upload(
         try:
             data = await _forward_upload(client, address, request)
         except UploadTooLarge:
-            # this request spent its nonce; the task is still tracked, so hand
-            # out the next link with the refusal
+            # this request spent its nonce; while the SAME instance is still
+            # tracked, hand out the next link with the refusal. A fresh launch
+            # that took the address over meanwhile gets no link: it would carry
+            # this request's caller into a run that is not theirs
             try:
-                return _too_large(mcp_origin, tasks.issue_upload_nonce(address, caller_auth))
+                return _too_large(mcp_origin, tasks.issue_upload_nonce(address, caller_auth, generation=generation))
             except KeyError:
                 return _too_large(mcp_origin, None)
         except Exception as exc:  # noqa: BLE001 - the body could not be read or split; same envelope as the door
@@ -423,11 +427,15 @@ async def handle_upload(
             identity.REQUEST_CLIENTS.reset(clients_token)
             identity.CALLER_AUTH.reset(auth_token)
 
-    # 5. the envelope and the next nonce
+    # 5. the envelope and the next nonce -- bound to the instance the redeemed
+    # nonce named: none when that instance left the tracker or a fresh launch
+    # replaced it while the upload ran
     content = ResultSuccess(data=data).model_dump(exclude_none=True)
     try:
-        content['upload_url'] = upload_url(mcp_origin, tasks.issue_upload_nonce(address, caller_auth))
-    except KeyError:  # the task left the tracker while the upload ran: nothing further to authorize
+        content['upload_url'] = upload_url(
+            mcp_origin, tasks.issue_upload_nonce(address, caller_auth, generation=generation)
+        )
+    except KeyError:
         pass
     return JSONResponse(content=content)
 
