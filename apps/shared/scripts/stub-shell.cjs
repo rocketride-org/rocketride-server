@@ -22,6 +22,9 @@ const Module = require('module');
 const stub = {
 	// Any style-fragment lookup yields an empty, spreadable object.
 	commonStyles: new Proxy({}, { get: () => ({}) }),
+	// registerBuiltinTool contributes settings for builtins that declare a
+	// configuration; the test runner has no settings registry to receive them.
+	registerSettings: () => () => {},
 };
 
 // The shell's own sources, which tests load by relative path (the dev-tool
@@ -37,5 +40,9 @@ Module._load = function (request, parent, isMain) {
 		return origLoad.call(this, request, parent, isMain);
 	}
 	if (request === 'shell' || request === 'rocketride') return stub;
+	// Bundler `?url` asset imports (tool icons) stand in as their own request
+	// string — the URL the bundler would emit. A require.extensions hook can't
+	// do this: tsx claims unknown extensions as JS after the preload runs.
+	if (request.endsWith('?url')) return request;
 	return origLoad.call(this, request, parent, isMain);
 };
