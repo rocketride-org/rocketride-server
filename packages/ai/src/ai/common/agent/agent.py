@@ -280,7 +280,7 @@ class AgentBase(ABC):
                 # Only a top-level run ends the stream: a sub-agent shares its parent's, and
                 # its refusal is the parent's tool result, not the end of the parent's run.
                 if emit_answers_lane:
-                    self._send_stop_status(iInstance, 'Answer refused: no tool was called.')
+                    self._send_stop_status(iInstance, run_id, 'Answer refused: no tool was called.')
 
             except Exception as e:
                 error_type = type(e).__name__
@@ -290,7 +290,7 @@ class AgentBase(ABC):
                 # verify_tool first), so this exit must report its stop reason itself. A
                 # sub-agent does not: its failure is its parent's tool result.
                 if emit_answers_lane:
-                    self._send_stop_status(iInstance, 'The run failed.')
+                    self._send_stop_status(iInstance, run_id, 'The run failed.')
                 ended_at = now_iso()
                 answer_payload = {
                     'content': error_message or f'{error_type} (no message)',
@@ -490,7 +490,9 @@ class AgentBase(ABC):
         Send a real-time SSE status update to the UI for the given run's pipe.
 
         The invoker is read from the explicit `context` (per-call), not from
-        `self`, so concurrent pipes never cross-route SSE events.
+        `self`, so concurrent pipes never cross-route SSE events. Every event
+        carries the run's `run_id`: a parent agent and a worker it calls as a
+        tool share one pipe, and this is what tells their events apart.
 
         Args:
             context: The current run context (carries the per-pipe invoker).
@@ -498,17 +500,22 @@ class AgentBase(ABC):
             **data:  Keyword arguments included as the event data payload.
         """
         if context and context.invoker and context.invoker.instance:
-            context.invoker.instance.sendSSE(type, **data)
+            context.invoker.instance.sendSSE(type, **{**data, 'run_id': context.run_id})
 
-    def _send_stop_status(self, iInstance: Any, message: str) -> None:
+    def _send_stop_status(self, iInstance: Any, run_id: str, message: str) -> None:
         """Send the last status of a run that ended on an error, with ``stop_reason='error'``.
 
         Sent through ``iInstance``, which every run context uses as its invoker, so a run
         that fails before its context is built still reports why it stopped. Best effort:
         a failed send is logged and must not cost the run its answer.
+
+        Args:
+            iInstance: The node instance the run belongs to.
+            run_id: The run's id, passed in because the run context may not exist yet.
+            message: The status text.
         """
         try:
-            iInstance.instance.sendSSE('thinking', message=message, stop_reason='error')
+            iInstance.instance.sendSSE('thinking', message=message, stop_reason='error', run_id=run_id)
         except Exception as exc:
             warning(f'agent base stop status not sent: {type(exc).__name__}: {exc}')
 
