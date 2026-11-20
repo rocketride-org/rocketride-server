@@ -30,10 +30,11 @@
 # import-time error rather than a silent runtime AttributeError.
 # =============================================================================
 
+import asyncio
 import os
 import re
 from abc import ABC, abstractmethod
-from typing import NamedTuple, Optional
+from typing import Callable, NamedTuple, Optional
 
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
@@ -706,6 +707,38 @@ class AccountBase(ABC):
             self._desktop_backend_instance = FileDesktopBackend(Store.instance().raw_store())
         return self._desktop_backend_instance
 
+    def _desktop_lock(self, org_id: str, user_id: str) -> asyncio.Lock:
+        """
+        The per-(org, user) lock every desktop read-modify-write holds.
+
+        The list is one document rewritten whole, with awaits between its
+        read and its write (the seed, the reachability walk, the change), so
+        two concurrent requests for one user would lose an update without it.
+        Same shape as the deployment backend's per-project ``_meta_locks``.
+
+        Args:
+            org_id:  The organization.
+            user_id: The user.
+
+        Returns:
+            The lock for that desktop (created on first use).
+        """
+        locks = self.__dict__.setdefault('_desktop_locks', {})
+        key = f'{org_id}/{user_id}'
+        lock = locks.get(key)
+        if lock is None:
+            lock = locks[key] = asyncio.Lock()
+        return lock
+
+    async def _desktop_ids_unlocked(self, user_id: str, org_id: str, inventory: list) -> list:
+        """``desktop_app_ids`` for a caller already holding ``_desktop_lock``."""
+        backend = self._desktop_backend()
+        ids = await backend.read(org_id, user_id)
+        if ids is None:
+            ids = [app_id for app_id in inventory if app_id]
+            await backend.write(org_id, user_id, ids)
+        return ids
+
     async def desktop_app_ids(self, user_id: str, org_id: str, inventory: list) -> list:
         """
         The user's desktop app ids, seeding the list on the first read.
@@ -714,7 +747,8 @@ class AccountBase(ABC):
         caller can reach today — written as their first desktop, so an
         existing user's first sign-in after the upgrade shows the same tiles
         as before (plan 9.1, B41). Later reads return the stored list as is,
-        whether or not an id is still reachable.
+        whether or not an id is still reachable; an existing list, an empty
+        one included, is never re-seeded.
 
         Args:
             user_id:   The user.
@@ -724,14 +758,36 @@ class AccountBase(ABC):
         Returns:
             The desktop app ids in stored order.
         """
-        backend = self._desktop_backend()
-        ids = await backend.read(org_id, user_id)
-        if ids is None:
-            ids = [app_id for app_id in inventory if app_id]
-            await backend.write(org_id, user_id, ids)
-        return ids
+        async with self._desktop_lock(org_id, user_id):
+            return await self._desktop_ids_unlocked(user_id, org_id, inventory)
 
-    async def decorate_desktop(self, user_id: str, org_id: str, apps: list) -> list:
+    async def desktop_mutate(self, user_id: str, org_id: str, inventory: list, mutate: Callable[[list], list]) -> list:
+        """
+        Change the user's desktop list atomically.
+
+        Under the desktop lock: read (seeding from ``inventory`` when the
+        user has no list yet), apply ``mutate`` to a copy, and write the
+        result back when it differs. Callers push the refreshed identity
+        AFTER this returns — the push reads the stored list, so it must see
+        the write.
+
+        Args:
+            user_id:   The user.
+            org_id:    The organization.
+            inventory: The reachable app ids (the seed for a first write).
+            mutate:    The change: takes the current list, returns the new one.
+
+        Returns:
+            The desktop after the change.
+        """
+        async with self._desktop_lock(org_id, user_id):
+            current = await self._desktop_ids_unlocked(user_id, org_id, inventory)
+            changed = list(dict.fromkeys(mutate(list(current))))
+            if changed != current:
+                await self._desktop_backend().write(org_id, user_id, changed)
+            return changed
+
+    async def decorate_desktop(self, user_id: str, org_id: str, apps: list, inventory: Optional[list] = None) -> list:
         """
         Stamp ``appStatus`` and the real ``onDesktop`` on manifest entries.
 
@@ -741,14 +797,20 @@ class AccountBase(ABC):
         billing on a standalone server, so everything reachable is ``free``.
 
         Args:
-            user_id: The user.
-            org_id:  The organization.
-            apps:    Manifest entries (mutated in place and returned).
+            user_id:   The user.
+            org_id:    The organization.
+            apps:      Manifest entries (mutated in place and returned).
+            inventory: The ids the FIRST desktop is seeded from when the user
+                       has none yet — the caller's whole reachable set. Omitted,
+                       ``apps`` is that set; a caller decorating a SUBSET (the
+                       public catalog) must pass the full inventory, or the
+                       apps outside the subset never reach the seeded desktop.
 
         Returns:
             ``apps``, decorated.
         """
-        desktop = set(await self.desktop_app_ids(user_id, org_id, [a.get('id') for a in apps]))
+        seed = inventory if inventory is not None else [a.get('id') for a in apps]
+        desktop = set(await self.desktop_app_ids(user_id, org_id, seed))
         for entry in apps:
             entry['appStatus'] = 'free'
             entry['onDesktop'] = entry.get('id') in desktop
@@ -1094,21 +1156,24 @@ class AccountBase(ABC):
             if not user_id:
                 return conn.build_error(request, 'Authentication required')
             # The gate: anything the caller's reachable catalog returns is
-            # installable (publish visibility IS the access rule).
+            # installable (publish visibility IS the access rule). The walk,
+            # the seed, the change and the write all sit under the user's
+            # desktop lock, so two requests for one user cannot lose an
+            # update; the identity push follows the write.
             org = getattr(info, 'organization', None)
             orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
-            reachable = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
-            desktop = await self.desktop_app_ids(user_id, org_id, reachable)
-            if sub == 'desktop_add':
-                if app_id not in reachable:
+            async with self._desktop_lock(org_id, user_id):
+                reachable = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
+                if sub == 'desktop_add' and app_id not in reachable:
                     return conn.build_error(request, 'App not found')
-                if app_id not in desktop:
-                    await self._desktop_backend().write(org_id, user_id, [*desktop, app_id])
-                await push_account(conn._server, user_id)
-                return conn.build_response(request, body={'added': True, 'appId': app_id})
-            if app_id in desktop:
-                await self._desktop_backend().write(org_id, user_id, [a for a in desktop if a != app_id])
+                desktop = await self._desktop_ids_unlocked(user_id, org_id, reachable)
+                changed = [*desktop, app_id] if sub == 'desktop_add' else [a for a in desktop if a != app_id]
+                changed = list(dict.fromkeys(changed))
+                if changed != desktop:
+                    await self._desktop_backend().write(org_id, user_id, changed)
             await push_account(conn._server, user_id)
+            if sub == 'desktop_add':
+                return conn.build_response(request, body={'added': True, 'appId': app_id})
             return conn.build_response(request, body={'removed': True, 'appId': app_id})
 
         raise NotImplementedError('App catalog administration requires SaaS mode')
@@ -1155,7 +1220,13 @@ class AccountBase(ABC):
         info = getattr(conn, '_account_info', None)
         user_id = getattr(info, 'userId', None) if info else None
         if user_id:
-            await self.decorate_desktop(user_id, self._org_id_of(info), apps)
+            # The public rung is a SUBSET of what the caller can reach: a
+            # first desktop seeded from it would leave the team-only apps
+            # off, so the seed is the caller's whole reachable inventory.
+            org = getattr(info, 'organization', None)
+            orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
+            inventory = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
+            await self.decorate_desktop(user_id, self._org_id_of(info), apps, inventory)
         else:
             for entry in apps:
                 entry['appStatus'] = 'auth'

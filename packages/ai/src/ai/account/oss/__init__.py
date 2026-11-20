@@ -278,9 +278,13 @@ class Account(AccountBase):
             entries = await resolve_app_pins('local', 'local', ['local'])
         except Exception as exc:
             # A broken publish store must never block sign-in — but say so.
+            # The empty list is TEMPORARY: it never initializes the desktop
+            # (an empty seed written here would stick once the registry
+            # recovers); the first successful assembly seeds.
             debug(f'[oss] app pin resolution failed: {exc}')
-            entries = []
-        # Skip ONE malformed pin, not the whole set.
+            return []
+        # Skip ONE malformed pin, not the whole set. A genuinely empty
+        # inventory still seeds (an empty desktop is a real answer).
         apps: List[Dict] = [entry for entry in entries if entry.get('id')]
         try:
             return await self.decorate_desktop('local', 'local', apps)

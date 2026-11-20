@@ -30,6 +30,7 @@ import { Button } from '../button/Button';
 import { EmptyState } from '../empty-state/EmptyState';
 import { InputField } from '../input-field/InputField';
 import type { AppManifestEntry } from '../workspace/types';
+import { CATALOG_PAGE_LIMIT, fetchCatalogPages, reconcileAdded } from './catalogLogic';
 
 // =============================================================================
 // CONSTANTS
@@ -45,9 +46,6 @@ const CATALOG_TIMEOUT_MS = 5000;
 
 /** Poll cadence while the connection is not yet attached. */
 const CATALOG_RETRY_MS = 150;
-
-/** The largest page the catalog verb serves. */
-const CATALOG_PAGE_LIMIT = 100;
 
 /** Category ids whose display label is not a simple capitalisation. */
 const CATEGORY_LABELS: Record<string, string> = {
@@ -102,6 +100,11 @@ interface CatalogState {
 	loading: boolean;
 	/** True when nothing arrived within CATALOG_TIMEOUT_MS. */
 	timedOut: boolean;
+	/**
+	 * The catalog request's failure, when it failed — distinct from a
+	 * successful empty response. Cleared by a reload.
+	 */
+	error: string | null;
 }
 
 // =============================================================================
@@ -349,8 +352,10 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 }) => {
 	const identity = useAuthUser();
 	const { isOnDesktop } = useSubscriptions();
-	const [catalog, setCatalog] = useState<CatalogState>({ apps: [], total: 0, loading: true, timedOut: false });
+	const [catalog, setCatalog] = useState<CatalogState>({ apps: [], total: 0, loading: true, timedOut: false, error: null });
 	const [search, setSearch] = useState('');
+	// Bumped by Retry: a failed load re-runs with the same arguments.
+	const [reloadSeq, setReloadSeq] = useState(0);
 	// Adds in flight, adds the server accepted but the identity push has not
 	// yet confirmed, and the last failure per app.
 	const [adding, setAdding] = useState<ReadonlySet<string>>(() => new Set());
@@ -359,7 +364,10 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 
 	// -- The catalog load ------------------------------------------------------
 	// Fire at once; if the connection is not attached yet, poll briefly until
-	// it is. Re-run when the signed-in user changes: the reachable set does.
+	// it is. Re-run when the signed-in user changes (the reachable set does)
+	// and on Retry. The verb pages (offset/limit, max 100 per page): every
+	// page is fetched until the accumulated count reaches the server's total,
+	// so a catalog past one page is never silently truncated.
 	const userId = identity?.userId ?? '';
 	useEffect(() => {
 		let cancelled = false;
@@ -368,28 +376,30 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 		let timer: ReturnType<typeof setInterval> | undefined;
 		const stopPolling = () => { stopped = true; if (timer) clearInterval(timer); timer = undefined; };
 
-		setCatalog((c) => ({ ...c, loading: true, timedOut: false }));
+		setCatalog((c) => ({ ...c, loading: true, timedOut: false, error: null }));
 		const timeoutId = setTimeout(() => {
 			if (cancelled) return;
 			stopPolling();
 			setCatalog((c) => (c.loading ? { ...c, loading: false, timedOut: true } : c));
 		}, CATALOG_TIMEOUT_MS);
 
-		/** One fetch; false when the connection is not attached yet. */
+		/** One fetch (all pages); false when the connection is not attached yet. */
 		const attempt = async (): Promise<boolean> => {
 			const client = ConnectionManager.getInstance().getClient();
 			if (!client || !client.isAttached()) return false;
 			try {
-				const body = await client.call('rrext_public_catalog', {
-					action: 'list',
-					limit: CATALOG_PAGE_LIMIT,
-					...(shell ? { shell } : {}),
-				}) as { apps?: AppManifestEntry[]; total?: number } | null;
+				const { apps, total } = await fetchCatalogPages<AppManifestEntry>(
+					(args) => client.call('rrext_public_catalog', args),
+					{ action: 'list', ...(shell ? { shell } : {}) },
+					CATALOG_PAGE_LIMIT,
+				);
 				if (cancelled) return true;
-				const apps = Array.isArray(body?.apps) ? body!.apps! : [];
-				setCatalog({ apps, total: body?.total ?? apps.length, loading: false, timedOut: false });
-			} catch {
-				if (!cancelled) setCatalog((c) => ({ ...c, loading: false, timedOut: false }));
+				setCatalog({ apps, total, loading: false, timedOut: false, error: null });
+			} catch (err) {
+				if (!cancelled) {
+					const error = err instanceof Error && err.message ? err.message : 'The catalog request failed.';
+					setCatalog((c) => ({ ...c, loading: false, timedOut: false, error }));
+				}
 			}
 			return true;
 		};
@@ -411,16 +421,16 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 		});
 
 		return () => { cancelled = true; stopPolling(); clearTimeout(timeoutId); };
-	}, [shell, userId]);
+	}, [shell, userId, reloadSeq]);
 
 	// Once the identity confirms an add, the local marker is redundant — drop
 	// it so a later desktop remove (from the desktop grid) shows Add again.
+	// `added` is a dependency on purpose: when the identity push lands BEFORE
+	// desktop_add resolves, the marker is recorded after the identity
+	// changed, and only a run on the marker itself clears it.
 	useEffect(() => {
-		setAdded((prev) => {
-			const next = new Set([...prev].filter((id) => !isOnDesktop(id)));
-			return next.size === prev.size ? prev : next;
-		});
-	}, [isOnDesktop]);
+		setAdded((prev) => reconcileAdded(prev, isOnDesktop));
+	}, [isOnDesktop, added]);
 
 	// -- Actions ---------------------------------------------------------------
 	const open = useCallback((appId: string) => {
@@ -487,11 +497,17 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 				</div>
 			)}
 
-			{/* Body — loading, failed, empty, or the grid */}
+			{/* Body — loading, failed (with Retry), empty, or the grid */}
 			{catalog.loading && !catalog.timedOut ? (
 				<div style={S.status}><EmptyState title="Loading the catalog…" /></div>
-			) : catalog.timedOut && catalog.apps.length === 0 ? (
-				<div style={S.status}><EmptyState title="Couldn't load the catalog." description="Check the connection and try again." /></div>
+			) : catalog.error !== null || (catalog.timedOut && catalog.apps.length === 0) ? (
+				<div style={S.status}>
+					<EmptyState
+						title="Couldn't load the catalog."
+						description={catalog.error ?? 'The connection did not answer in time.'}
+						action={<Button onClick={() => setReloadSeq((n) => n + 1)}>Retry</Button>}
+					/>
+				</div>
 			) : visible.length === 0 ? (
 				<div style={S.status}>
 					<EmptyState

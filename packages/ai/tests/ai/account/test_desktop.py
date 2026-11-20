@@ -10,10 +10,14 @@ and the account-layer behaviour built on it.
 - ``handle_public`` — the public catalog carries the same decoration.
 - The OSS login assembly and the OSS account push decorate with the real
   membership (no forced ``onDesktop: True`` anywhere).
+- Concurrency: the per-user lock keeps two adds from losing one another.
+- Seeding: the public catalog seeds from the whole reachable inventory; a
+  failed registry resolution never writes a desktop.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List
 from unittest.mock import MagicMock
 
@@ -348,3 +352,130 @@ async def test_oss_account_push_carries_the_decorated_list(monkeypatch):
         {'id': 'rocketride.chat', 'appStatus': 'free', 'onDesktop': False},
         {'id': 'rocketride.sql', 'appStatus': 'free', 'onDesktop': True},
     ]
+
+
+# ---------------------------------------------------------------------------
+# PR #3385 review threads: the lock, the seed source, the failed resolution
+# ---------------------------------------------------------------------------
+
+
+class _YieldingStore(MemoryStore):
+    """A MemoryStore that yields to the loop around every read and write, so
+    an unlocked read-modify-write interleaves the way a real backend does.
+    """
+
+    async def read_file(self, filename):
+        await asyncio.sleep(0)
+        return await super().read_file(filename)
+
+    async def write_file(self, filename, data):
+        await asyncio.sleep(0)
+        await super().write_file(filename, data)
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_adds_of_different_apps_both_land(pushes):
+    acct = _Account(inventory=[{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}, {'id': 'rocketride.dropper'}])
+    acct._desktop_backend_instance = FileDesktopBackend(_YieldingStore())
+    await acct._desktop_backend().write('local', 'local', ['rocketride.chat'])
+    results = await asyncio.gather(
+        acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.sql')),
+        acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.dropper')),
+    )
+    assert all(r['success'] for r in results)
+    assert set(await acct._desktop_backend().read('local', 'local')) == {
+        'rocketride.chat',
+        'rocketride.sql',
+        'rocketride.dropper',
+    }
+    assert pushes == ['local', 'local']
+
+
+@pytest.mark.asyncio
+async def test_concurrent_first_reads_seed_once():
+    acct = _Account()
+    acct._desktop_backend_instance = FileDesktopBackend(_YieldingStore())
+    seeded = await asyncio.gather(
+        acct.desktop_app_ids('local', 'local', ['a', 'b']),
+        acct.desktop_app_ids('local', 'local', ['c']),
+    )
+    # Whichever ran first seeded; the other read that seed, never its own.
+    assert seeded[0] == seeded[1]
+    assert await acct._desktop_backend().read('local', 'local') == seeded[0]
+
+
+@pytest.mark.asyncio
+async def test_desktop_mutate_is_atomic_and_writes_only_on_change():
+    acct = _Account()
+    acct._desktop_backend_instance = FileDesktopBackend(_YieldingStore())
+    await asyncio.gather(
+        acct.desktop_mutate('local', 'local', ['a'], lambda ids: [*ids, 'b']),
+        acct.desktop_mutate('local', 'local', ['a'], lambda ids: [*ids, 'c']),
+    )
+    assert set(await acct._desktop_backend().read('local', 'local')) == {'a', 'b', 'c'}
+    assert await acct.desktop_mutate('local', 'local', [], lambda ids: ids) == await acct._desktop_backend().read(
+        'local', 'local'
+    )
+
+
+@pytest.mark.asyncio
+async def test_handle_public_first_read_seeds_from_the_whole_reachable_inventory():
+    """The public catalog is a subset of what the caller reaches: a first
+    desktop seeded from it would leave the team-only app off.
+    """
+
+    class _TeamAccount(_Account):
+        async def get_public_apps(self):
+            return [{'id': 'rocketride.chat'}]
+
+    acct = _TeamAccount(inventory=[{'id': 'rocketride.chat'}, {'id': 'team.only'}])
+    result = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog'})
+    assert [(a['id'], a['onDesktop']) for a in result['body']['apps']] == [('rocketride.chat', True)]
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat', 'team.only']
+
+
+@pytest.mark.asyncio
+async def test_handle_public_never_changes_an_existing_list_even_an_empty_one():
+    acct = _Account()
+    await acct._desktop_backend().write('local', 'local', [])
+    result = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog'})
+    assert all(a['onDesktop'] is False for a in result['body']['apps'])
+    assert await acct._desktop_backend().read('local', 'local') == []
+
+
+@pytest.mark.asyncio
+async def test_oss_login_assembly_failed_resolution_writes_no_desktop_then_seeds(monkeypatch):
+    from ai.account import app_deploy
+    from ai.account.oss import Account
+
+    state = {'fail': True}
+
+    async def pins(org_id, team_id, teams):
+        if state['fail']:
+            raise RuntimeError('registry down')
+        return [{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}]
+
+    monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
+    acct = Account.__new__(Account)
+    acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
+    assert await acct._assemble_apps() == []
+    assert await acct._desktop_backend().read('local', 'local') is None
+    state['fail'] = False
+    apps = await acct._assemble_apps()
+    assert [(a['id'], a['onDesktop']) for a in apps] == [('rocketride.chat', True), ('rocketride.sql', True)]
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat', 'rocketride.sql']
+
+
+@pytest.mark.asyncio
+async def test_oss_login_assembly_empty_inventory_still_seeds(monkeypatch):
+    from ai.account import app_deploy
+    from ai.account.oss import Account
+
+    async def pins(org_id, team_id, teams):
+        return []
+
+    monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
+    acct = Account.__new__(Account)
+    acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
+    assert await acct._assemble_apps() == []
+    assert await acct._desktop_backend().read('local', 'local') == []
