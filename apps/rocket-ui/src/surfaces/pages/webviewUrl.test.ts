@@ -117,7 +117,7 @@ test('refuses URLs that only resolve onto the shell once the iframe applies its 
 	// `https:host/..` has no `//`, so alone it names another host but against
 	// the shell document it is a path on the shell's own origin.
 	const href = `${SHELL}/index.html`;
-	for (const url of ['https:evil.example/../apps/x/index.html', 'https:/apps/x/index.html', 'https:evil.example/chat/p/s']) {
+	for (const url of ['https:evil.example/../apps/x/v1/index.html', 'https:evil.example/../apps/x/index.html', 'https:evil.com/../', 'https:evil.example/../', 'https:/apps/x/index.html', 'https:evil.example/chat/p/s']) {
 		assert.equal(isAllowedWebviewUrl(url, SHELL, href), false, url);
 		assert.equal(resolveWebviewUrl(url, SHELL, href), null, url);
 	}
