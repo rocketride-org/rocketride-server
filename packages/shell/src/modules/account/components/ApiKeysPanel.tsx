@@ -45,6 +45,7 @@ import type { GridColumnDefinition } from '../../../components/data-grid/default
 import { commonStyles } from '../../../themes/styles';
 import type { ApiKeyRecord, TeamRecord } from '../types';
 import { S, PermGrid, PermPill, ExpiryOpts, parseWireDate, relativeTime } from './shared';
+import { revealedKeyExpiry, utcDay } from '../keyExpiry';
 
 // =============================================================================
 // STYLES
@@ -181,7 +182,7 @@ export interface ApiKeysPanelProps {
 	/** Teams available for the create form's scope select. */
 	teams: TeamRecord[];
 	/** Creates a key; resolves with the one-time raw key value. */
-	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string }>;
+	onCreateKey: (params: { name: string; permissions: string[]; expiresAt?: string; teamId?: string }) => Promise<{ key: string; expiresAt?: string | null }>;
 	/** Revokes a key by id. */
 	onRevokeKey: (keyId: string) => Promise<void>;
 }
@@ -275,7 +276,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
 	// One-time secret returned by a successful create (reveal presentation).
-	const [revealed, setRevealed] = useState<{ key: string; expiresAt: string | null } | null>(null);
+	const [revealed, setRevealed] = useState<{ key: string; expiresAt: string | null; bounded: boolean } | null>(null);
 	const [copied, setCopied] = useState(false);
 	// Revoke confirmation gate (stacks over the panel via the overlay stack).
 	const [confirmRevoke, setConfirmRevoke] = useState(false);
@@ -359,12 +360,13 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 				rrDefault: true,
 				rrDescription: 'UTC instant after which the key stops authenticating; empty means the key never expires.',
 				headerSort: true,
-				// parseWireDate applies the platform contract (zone-less wire
-				// datetimes ARE UTC) — a bare new Date(iso) would misparse them
-				// as local and could show the wrong calendar day.
+				// utcDay applies the platform contract (zone-less wire datetimes
+				// ARE UTC) and shows the UTC day, as both CLIs do — a bare
+				// new Date(iso) would misparse them as local and could show the
+				// wrong calendar day.
 				formatter: (cell: CellComponent) => {
 					const iso = cell.getValue() as string | null;
-					return iso ? `Exp. ${parseWireDate(iso).toLocaleDateString()}` : 'No expiry';
+					return iso ? `Exp. ${utcDay(iso)}` : 'No expiry';
 				},
 			},
 			{ title: 'Created', field: 'createdAt', rrType: 'date', rrDefaultSort: 'desc', rrDescription: 'UTC creation time of the key; the grid sorts newest-first on it by default.', headerSort: true, formatter: autoFormatter },
@@ -417,8 +419,9 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 			};
 			if (formTeamId) params.teamId = formTeamId;
 			const body = await onCreateKey(params);
-			// Step 3: show the one-time secret in place — the panel stays open.
-			setRevealed({ key: body.key, expiresAt: expiresAt ?? null });
+			// Step 3: show the one-time secret in place — the panel stays open —
+			// with the expiry the server GRANTED (it may cap the requested one).
+			setRevealed({ key: body.key, ...revealedKeyExpiry(expiresAt, body.expiresAt) });
 		} catch (e) {
 			setError(e instanceof Error ? e.message : 'Failed to create key');
 		} finally {
@@ -505,7 +508,7 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 						<LabelValue label="Team Scope">{teamScope(viewedKey) || 'Session'}</LabelValue>
 						<LabelValue label="Created">{viewedKey.createdAt ? parseWireDate(viewedKey.createdAt).toLocaleString() : '--'}</LabelValue>
 						<LabelValue label="Last Used">{viewedKey.lastUsedAt ? `Used ${relativeTime(viewedKey.lastUsedAt)}` : 'Never used'}</LabelValue>
-						<LabelValue label="Expires">{viewedKey.expiresAt ? parseWireDate(viewedKey.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
+						<LabelValue label="Expires">{viewedKey.expiresAt ? utcDay(viewedKey.expiresAt) : 'No expiry'}</LabelValue>
 					</Section>
 					{(viewedKey.permissions?.length ?? 0) > 0 && (
 						<Section label="Permissions">
@@ -578,7 +581,9 @@ export const ApiKeysPanel: React.FC<ApiKeysPanelProps> = ({ keys, teams, onCreat
 								<div style={styles.revealWarn}>Warning: store safely. It cannot be retrieved after closing.</div>
 							</div>
 							<Section label="Details">
-								<LabelValue label="Expires">{revealed.expiresAt ? new Date(revealed.expiresAt).toLocaleDateString() : 'No expiry'}</LabelValue>
+								<LabelValue label="Expires">
+									{revealed.expiresAt ? `${utcDay(revealed.expiresAt)}${revealed.bounded ? ' (bounded by your sign-in session)' : ''}` : 'No expiry'}
+								</LabelValue>
 							</Section>
 						</>
 					) : (

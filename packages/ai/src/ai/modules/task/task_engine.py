@@ -508,6 +508,19 @@ async def _check_spend(task: 'Task', arguments: Dict[str, Any], data: Optional[b
 register_channel_command('spend.check', _check_spend)
 
 
+def _authority_gate_ok(conn: Any) -> bool:
+    """False when this debugger connection may not receive events (#972).
+
+    A connection that is no longer authenticated (deauthed or revoked)
+    receives nothing; an authenticated subject the live re-check refuses
+    receives nothing either.
+    """
+    if not getattr(conn, '_authenticated', False):
+        return False
+    authz = getattr(getattr(conn, '_server', None), '_authz', None)
+    return authz is None or authz.gate_ok(conn)
+
+
 class Task(DAPBase):
     """
     Pipeline task execution and lifecycle management system.
@@ -1957,7 +1970,8 @@ class Task(DAPBase):
         try:
             # Clean up attached debugger
             if self._debugger:
-                await self._debugger.send_event('terminated', id=self.id)
+                if _authority_gate_ok(self._debugger):
+                    await self._debugger.send_event('terminated', id=self.id)
                 await self._debugger._transport.disconnect()
 
                 self._debugger = None
@@ -2324,7 +2338,7 @@ class Task(DAPBase):
         # Route debug events to debugger
         if type & EVENT_TYPE.DEBUGGER:
             # If we have an attach debugger
-            if self._debugger is not None:
+            if self._debugger is not None and _authority_gate_ok(self._debugger):
                 try:
                     event = message.get('event', '')
                     body = message.get('body', {})
@@ -2758,13 +2772,25 @@ class Task(DAPBase):
         Args:
             conn: Connection to detach
         """
-        if self._debugger != conn:
-            return
+        if self.release_debugger(conn):
+            self.debug_message('Debugger detached from task')
+
+    def release_debugger(self, conn: TaskConn) -> bool:
+        """
+        Synchronously clear ``conn`` as the attached debugger, if it is one.
+
+        Used by ``detach_task`` and by a connection dropping its authority
+        (deauth, revoke), so no attachment outlives the identity that made it.
+
+        Returns:
+            True when ``conn`` was the attached debugger and is now detached.
+        """
+        if self._debugger is None or self._debugger != conn:
+            return False
 
         self._debugger = None
         self._status.debuggerAttached = False
-
-        self.debug_message('Debugger detached from task')
+        return True
 
     def _accumulate_analytics(
         self, operation: str, pipe_index: Any, component_name: str, pipes: List[str], flow_body: Dict[str, Any]

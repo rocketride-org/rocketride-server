@@ -47,6 +47,7 @@ import { Command } from 'commander';
 import { RocketRideClient } from '../../client/client';
 import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_LOCAL } from '../../client/constants';
 import { Output } from '../output';
+import { describeLoginKeyExpiry } from '../keyExpiry';
 import { addConnectionOptions, connectClient, disconnectAll, promptHidden, promptLine, runCliCommand, ConnectionOptions } from '../common';
 import { ENV_DEV_URI, ENV_DEV_APIKEY, ENV_DEPLOY_URI, ENV_DEPLOY_APIKEY, writeDotEnv } from '../env';
 import { toHttpBase, writeIfChanged, fetchArtifact, installDocsBundle, syncServiceCatalog, installStub, ensureGitignore } from '../../../../client-common/typescript/src/provision';
@@ -327,7 +328,9 @@ export function authorizeViaLoopback(zitadelUrl: string, clientId: string, chall
  * Code extension's id) — the client package a server serves was built
  * from the same tree as that server. The PKCE exchange returns a 90-day
  * session key; the durable credential is a freshly minted personal API
- * key (never expires), created over the same authenticated connection.
+ * key, created over the same authenticated connection. It expires no later
+ * than that sign-in session (the server caps it), and the real expiry is
+ * printed.
  *
  * @param uri - The server URI.
  * @param out - Output channel.
@@ -360,12 +363,13 @@ async function signInSaas(uri: string, out: Output): Promise<string> {
 			throw new Error('Sign-in succeeded but the server returned no token');
 		}
 
-		// step: mint the durable credential — a personal API key that,
-		// unlike the session key, never expires and survives sign-outs.
+		// step: mint the credential for .env — a personal API key that
+		// survives sign-outs. It is minted over this session, so the server
+		// caps its expiry at the session's bound; print what was granted.
 		// Empty permissions = full personal access token.
 		const keyName = `CLI on ${os.hostname()}`;
 		const minted = await tempClient.account.createKey({ name: keyName, permissions: [] });
-		out.line(`Signed in${result.displayName ? ` as ${result.displayName}` : ''}; minted API key '${keyName}'.`);
+		out.line(`Signed in${result.displayName ? ` as ${result.displayName}` : ''}; minted API key '${keyName}'.${describeLoginKeyExpiry(minted.expiresAt)}`);
 		outcome = { ok: true, webUrl };
 		return minted.key;
 	} catch (err) {
