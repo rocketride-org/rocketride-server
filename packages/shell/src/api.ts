@@ -94,6 +94,8 @@ import { useFixedPopupPosition } from './hooks/useFixedPopupPosition';
 
 // Non-React client access + connection manager singleton
 import { getClient } from './util/getClient';
+import { getIsolation, SHELL_CAPS } from './isolation/config';
+import { CapabilityDeniedError } from './isolation/capabilityDenied';
 import { ConnectionManager } from './connection/connection';
 
 // Connection state enum (re-exported from shared)
@@ -741,6 +743,12 @@ export const shellApi = {
 	// Stable versioned entry URL (constructed, never minted — the server
 	// enforces entitlement per request on the /apps/<id>/v<N>/ route)
 	get versionedEntryUrl() { return versionedEntryUrl; },
+	// Separate-origin app isolation (#1022, v14): the isolation state
+	// (null under `off`), the shell's capabilities, and the one error an
+	// isolated app sees for a refused operation.
+	get getIsolation() { return getIsolation; },
+	get SHELL_CAPS() { return SHELL_CAPS; },
+	get CapabilityDeniedError() { return CapabilityDeniedError; },
 } as const;
 
 // =============================================================================
@@ -787,6 +795,8 @@ export {
 	TelemetryProvider, useReport, useConsent, openConsentBanner,
 	// Module-level consent/experiment seams (roulette, signup attribution, replay resume)
 	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, resumeSignedOutCapture,
+	// Separate-origin app isolation (v14)
+	getIsolation, SHELL_CAPS, CapabilityDeniedError,
 };
 
 /**

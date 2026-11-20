@@ -27,6 +27,9 @@
 //     half-boot into a generic shell and time out confused.
 // =============================================================================
 
+import { getIsolation } from 'shell';
+import { previewAllowed } from '../isolationGate';
+
 /** One authored page per (appId, index snapshot); revoked by the caller. */
 export interface DevPreviewPage {
 	/** The blob URL to load (iframe src / window.open target). */
@@ -44,6 +47,8 @@ export interface DevPreviewPage {
  *         the caller falls back to the legacy `?appid&rrdev=1` URL.
  */
 export async function createDevPreviewPage(appId: string): Promise<DevPreviewPage> {
+	// E14 (#1022): no blob page runs an app that app isolation keeps out of this origin.
+	if (!previewAllowed(appId, getIsolation())) throw new Error(`"${appId}" runs in its own isolated origin and cannot be previewed here`);
 	const res = await fetch('/shell/index.html', { cache: 'no-store' });
 	if (!res.ok) throw new Error(`shell index fetch failed: HTTP ${res.status}`);
 	const html = await res.text();

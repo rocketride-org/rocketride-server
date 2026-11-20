@@ -96,7 +96,7 @@ export interface FrameOk {
 }
 
 /** What the guest receives in `rr:bridge:init` (PR2a-2 builds it). */
-export interface BridgeInit {
+export type BridgeInit = {
 	type: 'rr:bridge:init';
 	proto: number;
 	entryPrefix: string;
@@ -110,7 +110,7 @@ export interface BridgeInit {
 	moduleId: string;
 	viewId: string;
 	engineHttpUrl: string;
-}
+};
 
 /** One chip in the frame strip. */
 export interface StripItem {
@@ -142,6 +142,14 @@ export interface IRealmGrant {
 	capabilities?: readonly string[];
 	/** The `/apps/frame` answer for this realm: its identity aliases (PR2a-2). */
 	frame?: FrameOk;
+	/** `IAppRoot.sessionStamp()` taken when the grant was fetched: attach refuses it after a logout or a user change. */
+	session?: ISessionStamp;
+}
+
+/** The session a grant was fetched in. */
+export interface ISessionStamp {
+	logouts: number;
+	userId: string | undefined;
 }
 
 /** Root options. */
@@ -164,6 +172,8 @@ export interface IAppRootOptions {
 	 * pass one driven by their fake clock.
 	 */
 	schedule?(cb: () => void, ms: number): () => void;
+	/** Called once when a realm is detached (logout, another user's sign-in, `detach`): the frame shows its tile. */
+	onDetached?(realmId: RealmId): void;
 	/** Test-only: makes the named hook throw (the gate must then fail closed). */
 	__throwIn?: 'gate' | 'ledger' | 'outbound';
 }
@@ -173,8 +183,20 @@ export interface IAppRoot {
 	/** Throws for a first-party or non-isolated entry. Returns the new realm's id. */
 	attach(entry: IsolatedEntry, endpoint: IBusEndpoint, grant?: IRealmGrant): RealmId;
 	detach(realmId: RealmId): void;
-	/** Terminates live runs, closes fs handles, removes monitors, clears ledgers. */
-	teardownAll(timeoutMs: number): Promise<void>;
+	/**
+	 * Terminates live runs, closes fs handles, removes monitors, clears ledgers.
+	 * `final` (the logout path) keeps the root closed afterwards, every op
+	 * refused and every event withheld, until the next shell:login or shell:logout.
+	 */
+	teardownAll(timeoutMs: number, options?: { final?: boolean }): Promise<void>;
+	/** The current session, stamped on a grant when it is fetched. */
+	sessionStamp(): ISessionStamp;
+	/**
+	 * The realm's `rr:bridge:init`, built by `buildBridgeInit` from its grant and
+	 * passed through its outbound choke point. Throws for an unknown or detached
+	 * realm, and a `CapabilityDeniedError` (`credential`) when the choke point refuses it.
+	 */
+	bridgeInit(realmId: RealmId, input: { displayName: string; theme: Record<string, string>; props: BridgeInit['props']; engineHttpUrl: string; proto: number }): BridgeInit;
 	/** Test-only counters (PR2a-2): engine events dropped because no realm owns them, and project ids held. */
 	__stats?(): { eventsDropped: number; knownProjects: number };
 }

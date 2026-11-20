@@ -77,6 +77,10 @@ _MIN_SECRET_BYTES = 32
 
 # runtime.json's guest bundle name: served at /_rr/<guest>.
 _GUEST_NAME = re.compile(r'guest-[A-Za-z0-9_.-]+\.js')
+# Every other file the flat guest build emits (Appendix L), listed in runtime.json's ``chunks``.
+_GUEST_ASSET = re.compile(r'guest-[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.(?:js|css|woff2|woff|svg|png)')
+_MAX_CHUNKS = 512
+_GUEST_PUBLIC_PATH = '/_rr/'
 _SHA256_HEX = re.compile(r'[0-9a-f]{64}')
 
 _HEADER_NAME = re.compile(r'[A-Za-z0-9-]{1,64}')
@@ -105,6 +109,8 @@ class IsolationConfig:
             client-IP header counts only from a peer inside one of them.
         same_site_asserted: Shell hosts sharing the app suffix's last two
             labels that ``RR_APP_DOMAIN_SAME_SITE_OK=1`` let through.
+        alias_key: ``RR_APP_ALIAS_KEY`` (per-app user and org aliases); not
+            for rotation: a new key changes every alias.
     """
 
     mode: str = 'off'
@@ -119,6 +125,7 @@ class IsolationConfig:
     client_ip_header: str = ''
     trusted_proxies: Tuple[Any, ...] = ()
     same_site_asserted: Tuple[str, ...] = ()
+    alias_key: bytes = field(default=b'', repr=False)
 
     def origin_of(self, app_id: str) -> str:
         """The app origin of one app id under the template."""
@@ -153,6 +160,22 @@ def _parse_keys(value: str) -> Tuple[Tuple[str, bytes], ...]:
         seen.add(kid)
         keys.append((kid, key))
     return tuple(keys)
+
+
+def _parse_alias_key(value: str) -> bytes:
+    """Parse ``RR_APP_ALIAS_KEY`` (one base64url key, at least 32 bytes); raises a one-line RuntimeError."""
+    encoded = value.strip()
+    if not encoded:
+        raise _refuse(f'RR_APP_ALIAS_KEY is required (base64url, at least {_MIN_SECRET_BYTES} bytes; not for rotation)')
+    try:
+        if not _B64URL.fullmatch(encoded):
+            raise ValueError
+        key = base64.urlsafe_b64decode(encoded + '=' * (-len(encoded) % 4))
+    except (binascii.Error, ValueError):
+        raise _refuse('RR_APP_ALIAS_KEY is not base64url') from None
+    if len(key) < _MIN_SECRET_BYTES:
+        raise _refuse(f'RR_APP_ALIAS_KEY is shorter than {_MIN_SECRET_BYTES} bytes')
+    return key
 
 
 def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
@@ -201,6 +224,10 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
     if not keys_value.strip():
         raise _refuse('RR_APP_FRAME_TOKEN_KEYS is required (kid:base64url, at least 32 bytes)')
     token_keys = _parse_keys(keys_value)
+    alias_key = _parse_alias_key(env.get('RR_APP_ALIAS_KEY') or '')
+    # One secret, one purpose: the alias key is never also a frame-token key.
+    if any(hmac.compare_digest(alias_key, key) for _, key in token_keys):
+        raise _refuse('RR_APP_ALIAS_KEY must differ from every RR_APP_FRAME_TOKEN_KEYS key')
 
     origins_value = env.get('RR_SHELL_ORIGINS') or env.get('RR_FRONTEND_ORIGIN') or ''
     shell_origins = []
@@ -284,6 +311,7 @@ def load_isolation_config(env: Mapping[str, str]) -> IsolationConfig:
         client_ip_header=client_ip_header,
         trusted_proxies=tuple(trusted_proxies),
         same_site_asserted=tuple(asserted),
+        alias_key=alias_key,
     )
 
 
@@ -390,10 +418,47 @@ def read_runtime_marker() -> dict:
         and marker['protoMin'] <= marker['protoMax']
         and isinstance(marker.get('capabilitiesSha256'), str)
         and _SHA256_HEX.fullmatch(marker['capabilitiesSha256'])
+        and marker.get('publicPath') == _GUEST_PUBLIC_PATH
+        and _valid_chunks(marker.get('chunks'), marker['guest'])
     )
     if not valid:
         raise _refuse(f'isolation runtime marker {path} is not a runtime 1 marker: {_REMEDY}')
     return marker
+
+
+def _valid_chunks(chunks: Any, guest: str) -> bool:
+    """``chunks``: a list of at most 512 unique ``_GUEST_ASSET`` names, none equal to the guest bundle."""
+    return (
+        isinstance(chunks, list)
+        and len(chunks) <= _MAX_CHUNKS
+        and all(isinstance(name, str) and _GUEST_ASSET.fullmatch(name) and name != guest for name in chunks)
+        and len(set(chunks)) == len(chunks)
+    )
+
+
+_guest_assets_cache: dict = {}
+
+
+def guest_assets() -> frozenset:
+    """
+    The exact file names ``/_rr/<name>`` serves besides ``frame.html``: the guest bundle and its chunks.
+
+    Cached per marker mtime. Raises the marker's RuntimeError when it is
+    missing or invalid.
+    """
+    path = guest_dir() / 'runtime.json'
+    try:
+        stamp = (str(path), path.stat().st_mtime_ns)
+    except OSError:
+        stamp = None
+    hit = _guest_assets_cache.get('assets')
+    if stamp is not None and hit is not None and hit[0] == stamp:
+        return hit[1]
+    marker = read_runtime_marker()
+    assets = frozenset((marker['guest'], *marker['chunks']))
+    if stamp is not None:
+        _guest_assets_cache['assets'] = (stamp, assets)
+    return assets
 
 
 def read_capabilities() -> Optional[dict]:
@@ -462,6 +527,9 @@ def validate_isolation_config(account: Any = None) -> None:
         raise _refuse(f'isolation runtime incomplete: {guest / "frame.html"} is missing: {_REMEDY}')
     if not (guest / marker['guest']).is_file():
         raise _refuse(f'isolation runtime incomplete: guest bundle {guest / marker["guest"]} is missing: {_REMEDY}')
+    for chunk in marker['chunks']:
+        if not (guest / chunk).is_file():
+            raise _refuse(f'isolation runtime incomplete: guest chunk {guest / chunk} is missing: {_REMEDY}')
 
     caps_path = _static_paths()[1]  # (c)
     try:
@@ -550,16 +618,61 @@ def _aead(key: bytes):
     return AESGCM(HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=_TOKEN_KEY_INFO).derive(key))
 
 
-def _mint(app_id: str, version: int, user_id: str, org_id: str, config: IsolationConfig) -> Tuple[str, dict]:
-    """``(token, claims)`` sealed under the first configured key."""
+# The additional-data suffix per purpose: a frame token is sealed under
+# ``v1.<kid>`` (byte-identical to PR1), a frame ticket under ``v1.<kid>.csp``,
+# so neither ever opens as the other.
+_PURPOSE_AAD = {'token': '', 'ticket': '.csp'}
+
+
+def _seal(claims: dict, purpose: str, config: IsolationConfig) -> str:
+    """``v1.<kid>.<nonce>.<ct>`` of ``claims`` under the first configured key and the purpose's additional data."""
     if not config.token_keys:
         raise RuntimeError('no frame token key is configured (RR_APP_FRAME_TOKEN_KEYS)')
     kid, key = config.token_keys[0]
+    nonce = os.urandom(_NONCE_BYTES)
+    aad = f'v1.{kid}{_PURPOSE_AAD[purpose]}'.encode()
+    sealed = _aead(key).encrypt(nonce, json.dumps(claims, separators=(',', ':')).encode('utf-8'), aad)
+    return f'v1.{kid}.{_b64u(nonce)}.{_b64u(sealed)}'
+
+
+def _open(token: Any, purpose: str, claim_keys: frozenset, config: IsolationConfig) -> dict:
+    """The claims of a sealed token of ``purpose`` with exactly ``claim_keys``; FrameTokenError otherwise."""
+    parts = token.split('.') if isinstance(token, str) else []
+    if len(parts) != 4 or parts[0] != 'v1':
+        raise FrameTokenError('malformed token')
+    _, kid, nonce_text, sealed_text = parts
+    key = dict(config.token_keys).get(kid)
+    if key is None:
+        raise FrameTokenError('unknown key')
+    nonce, sealed = _unb64u(nonce_text), _unb64u(sealed_text)
+    if len(nonce) != _NONCE_BYTES or len(sealed) <= _TAG_BYTES:
+        raise FrameTokenError('malformed token')
+    from cryptography.exceptions import InvalidTag
+
+    try:
+        claims = json.loads(_aead(key).decrypt(nonce, sealed, f'v1.{kid}{_PURPOSE_AAD[purpose]}'.encode()))
+    except (InvalidTag, ValueError):
+        raise FrameTokenError('bad seal') from None
+    if not isinstance(claims, dict) or set(claims) != claim_keys:
+        raise FrameTokenError('malformed claims')
+    return claims
+
+
+def _check_lifetime_and_label(claims: dict, host_label: Any) -> None:
+    """Shared checks: ``v >= 1``, ``0 < exp - iat <= 900``, not expired, ``label_of(a) == host_label``."""
+    if claims['v'] < 1 or not 0 < claims['exp'] - claims['iat'] <= FRAME_TOKEN_TTL:
+        raise FrameTokenError('malformed claims')
+    if time.time() >= claims['exp']:
+        raise FrameTokenError('expired')
+    if not hmac.compare_digest(label_of(claims['a']).encode('utf-8'), str(host_label).encode('utf-8')):
+        raise FrameTokenError('wrong host')
+
+
+def _mint(app_id: str, version: int, user_id: str, org_id: str, config: IsolationConfig) -> Tuple[str, dict]:
+    """``(token, claims)`` sealed under the first configured key."""
     iat = int(time.time())
     claims = {'a': app_id, 'v': version, 'u': user_id, 'o': org_id, 'iat': iat, 'exp': iat + FRAME_TOKEN_TTL}
-    nonce = os.urandom(_NONCE_BYTES)
-    sealed = _aead(key).encrypt(nonce, json.dumps(claims, separators=(',', ':')).encode('utf-8'), f'v1.{kid}'.encode())
-    return f'v1.{kid}.{_b64u(nonce)}.{_b64u(sealed)}', claims
+    return _seal(claims, 'token', config), claims
 
 
 def mint_frame_token(
@@ -601,34 +714,86 @@ def verify_frame_token(token: str, host_label: str, *, config: Optional[Isolatio
         FrameTokenError: The token does not open anything on this host.
     """
     config = config or current_config()
-    parts = token.split('.') if isinstance(token, str) else []
-    if len(parts) != 4 or parts[0] != 'v1':
-        raise FrameTokenError('malformed token')
-    _, kid, nonce_text, sealed_text = parts
-    key = dict(config.token_keys).get(kid)
-    if key is None:
-        raise FrameTokenError('unknown key')
-    nonce, sealed = _unb64u(nonce_text), _unb64u(sealed_text)
-    if len(nonce) != _NONCE_BYTES or len(sealed) <= _TAG_BYTES:
-        raise FrameTokenError('malformed token')
-    from cryptography.exceptions import InvalidTag
-
-    try:
-        claims = json.loads(_aead(key).decrypt(nonce, sealed, f'v1.{kid}'.encode()))
-    except (InvalidTag, ValueError):
-        raise FrameTokenError('bad seal') from None
-    if not isinstance(claims, dict) or set(claims) != _CLAIM_KEYS:
-        raise FrameTokenError('malformed claims')
+    claims = _open(token, 'token', _CLAIM_KEYS, config)
     ints = [claims['v'], claims['iat'], claims['exp']]
     if not all(type(value) is int for value in ints) or not all(isinstance(claims[k], str) for k in 'auo'):
         raise FrameTokenError('malformed claims')
-    if claims['v'] < 1 or not 0 < claims['exp'] - claims['iat'] <= FRAME_TOKEN_TTL:
-        raise FrameTokenError('malformed claims')
-    if time.time() >= claims['exp']:
-        raise FrameTokenError('expired')
-    if not hmac.compare_digest(label_of(claims['a']).encode('utf-8'), str(host_label).encode('utf-8')):
-        raise FrameTokenError('wrong host')
+    _check_lifetime_and_label(claims, host_label)
     return claims
+
+
+# =============================================================================
+# FRAME TICKETS — which network origins one app version's frame may reach (PR2b, plan 4.5)
+# =============================================================================
+# ``/_rr/frame.html?c=<ticket>``: claims {a: appId, v: version, n: network,
+# iat, exp}, sealed like a frame token under the additional data
+# ``v1.<kid>.csp``. It is not a credential: it only widens that label's
+# img-src/connect-src to the version's approved origins, and the list is
+# revalidated when served. Minted for anonymous public callers too (no user).
+
+_TICKET_CLAIM_KEYS = frozenset({'a', 'v', 'n', 'iat', 'exp'})
+
+
+def mint_frame_ticket(
+    app_id: str, version: int, network: List[str], *, config: Optional[IsolationConfig] = None
+) -> str:
+    """Seal a frame ticket for one app version's network, valid for 15 minutes."""
+    iat = int(time.time())
+    claims = {'a': app_id, 'v': version, 'n': list(network), 'iat': iat, 'exp': iat + FRAME_TOKEN_TTL}
+    return _seal(claims, 'ticket', config or current_config())
+
+
+def verify_frame_ticket(ticket: Any, host_label: str, *, config: Optional[IsolationConfig] = None) -> dict:
+    """
+    Verify a frame ticket for the app host it arrived on.
+
+    Returns:
+        The claims ``{a, v, n, iat, exp}``.
+
+    Raises:
+        FrameTokenError: Every cause (layout, key, seal, claims, expiry, host).
+    """
+    claims = _open(ticket, 'ticket', _TICKET_CLAIM_KEYS, config or current_config())
+    ints = [claims['v'], claims['iat'], claims['exp']]
+    if not all(type(value) is int for value in ints) or not isinstance(claims['a'], str):
+        raise FrameTokenError('malformed claims')
+    if not isinstance(claims['n'], list) or not all(isinstance(item, str) for item in claims['n']):
+        raise FrameTokenError('malformed claims')
+    _check_lifetime_and_label(claims, host_label)
+    return claims
+
+
+# =============================================================================
+# PER-APP ALIASES — what an app is told about its user and org (PR2b, plan 4.9)
+# =============================================================================
+# ``ru_``/``ro_`` + the first 22 base64url characters of HMAC-SHA256 keyed by
+# HKDF-SHA256(RR_APP_ALIAS_KEY, info) over ``appId || 0x00 || id``. Stable per
+# (subject, app), different across apps, independent of the frame-token keys.
+
+_USER_ALIAS_INFO = b'rocketride/app-user-alias/v1'
+_ORG_ALIAS_INFO = b'rocketride/app-org-alias/v1'
+
+
+def _alias(prefix: str, info: bytes, app_id: str, subject: str, config: IsolationConfig) -> str:
+    """One alias under ``config.alias_key``."""
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+    if not config.alias_key:
+        raise RuntimeError('no alias key is configured (RR_APP_ALIAS_KEY)')
+    key = HKDF(algorithm=hashes.SHA256(), length=32, salt=None, info=info).derive(config.alias_key)
+    mac = hmac.new(key, app_id.encode('utf-8') + b'\x00' + subject.encode('utf-8'), hashlib.sha256).digest()
+    return prefix + _b64u(mac)[:22]
+
+
+def user_alias(app_id: str, user_id: str, *, config: Optional[IsolationConfig] = None) -> str:
+    """The app's stable alias of one user (``ru_`` + 22 base64url characters)."""
+    return _alias('ru_', _USER_ALIAS_INFO, app_id, user_id, config or current_config())
+
+
+def org_alias(app_id: str, org_id: str, *, config: Optional[IsolationConfig] = None) -> str:
+    """The app's stable alias of one organization (``ro_`` + 22 base64url characters)."""
+    return _alias('ro_', _ORG_ALIAS_INFO, app_id, org_id, config or current_config())
 
 
 # =============================================================================
@@ -1162,6 +1327,39 @@ def _network_of(metadata: dict) -> List[str]:
         return []
 
 
+_network_cache: dict = {}
+
+
+async def network_for(app_id: str, version: int, dist_dir: Optional[str]) -> List[str]:
+    """
+    The validated ``appManifest.network`` of the version behind one entitled dist dir ([] when unknown).
+
+    Cached 60 s per (app, version, dist dir); ``drop_app`` clears it.
+    """
+    if not dist_dir:
+        return []
+    key = (app_id, version, dist_dir)
+    hit = _cached(_network_cache, key)
+    if hit is not None:
+        return hit['network']
+    facts = await _version_facts(app_id, version, dist_dir)
+    network = _network_of(facts[2]) if facts is not None else []
+    return _remember(_network_cache, key, app_id, network=network)['network']
+
+
+def _frame_identity(app_id: str, info: Any, config: IsolationConfig) -> Optional[dict]:
+    """``{userId: ru_, organizations: [{id: ro_, name}]}`` of a signed-in caller, or None when anonymous."""
+    if info is None:
+        return None
+    user_id, org_id, _ = _identity_of(info)
+    organizations = []
+    org = getattr(info, 'organization', None)
+    if org_id:
+        name = (org.get('name') if isinstance(org, dict) else getattr(org, 'name', '')) or ''
+        organizations.append({'id': org_alias(app_id, org_id, config=config), 'name': str(name)})
+    return {'userId': user_alias(app_id, user_id, config=config), 'organizations': organizations}
+
+
 async def frame_grant(app_id: str, version: int, token: str, info: Any, config: IsolationConfig) -> Optional[dict]:
     """
     The ``POST /apps/frame`` 200 body for one caller, or None (the one 404).
@@ -1192,12 +1390,15 @@ async def frame_grant(app_id: str, version: int, token: str, info: Any, config: 
     else:
         entry_prefix = f'/_p/{app_id}/v{version}/'
         expires_at = (int(time.time()) + FRAME_TOKEN_TTL) * 1000
+    network = _network_of(metadata)
     return {
         'v': 1,
         'origin': config.origin_of(app_id),
         'entryPrefix': entry_prefix,
         'expiresAt': expires_at,
         'capabilities': await _granted(org_id_of_version, app_id, version, state),
-        'network': _network_of(metadata),
+        'network': network,
         'state': state,
+        'frame': f'/_rr/frame.html?c={mint_frame_ticket(app_id, version, network, config=config)}',
+        'identity': _frame_identity(app_id, info, config),
     }

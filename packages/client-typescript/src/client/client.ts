@@ -558,7 +558,8 @@ export class RocketRideClient extends DAPClient {
 	 * capabilities, platform, and public apps without requiring credentials.
 	 *
 	 * @param uri - Server URI (e.g. ``"localhost:5565"``, ``"https://api.rocketride.ai"``)
-	 * @param timeout - Optional timeout in ms for the entire operation
+	 * @param timeoutOrOptions - Optional timeout in ms for the entire operation, or
+	 *   `{ timeout?, shellCaps? }` (the shell's capabilities go with the probe)
 	 * @returns Server info including version and capability tags
 	 * @throws Error if the server is unreachable or does not support probes
 	 *
@@ -570,14 +571,17 @@ export class RocketRideClient extends DAPClient {
 	 * }
 	 * ```
 	 */
-	public static async getServerInfo(uri: string, timeout?: number): Promise<ServerInfoResult> {
+	public static async getServerInfo(uri: string, timeoutOrOptions?: number | { timeout?: number; shellCaps?: string[] }): Promise<ServerInfoResult> {
+		const options = typeof timeoutOrOptions === 'object' && timeoutOrOptions !== null ? timeoutOrOptions : { timeout: timeoutOrOptions };
+		const timeout = options.timeout;
 		const client = new RocketRideClient({ uri, persist: false });
 		try {
 			// Open a public connection (no auth handshake)
 			await client.attach(uri, { timeout });
 
 			// Send rrext_public_probe — allowed on unauthenticated connections
-			const message = client.buildRequest('rrext_public_probe', {});
+			// (shellCaps only when given: the pre-PR2 probe shape is unchanged)
+			const message = client.buildRequest('rrext_public_probe', Array.isArray(options.shellCaps) ? { arguments: { shellCaps: [...options.shellCaps] } } : {});
 			const response = await client.request(message, timeout);
 
 			if (response.success === false) {
@@ -852,6 +856,7 @@ export class RocketRideClient extends DAPClient {
 			const authArguments: Record<string, unknown> = { auth: operation.pkce ? this._resolveCredential(operation.pkce) : operation.credentialKey };
 			if (this._clientDisplayName) authArguments.clientName = this._clientDisplayName;
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
+			if (this._shellCaps) authArguments.shellCaps = [...this._shellCaps];
 
 			operation.authRequestSent = true;
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);

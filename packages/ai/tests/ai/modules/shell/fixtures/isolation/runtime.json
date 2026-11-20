@@ -3,5 +3,14 @@
   "guest": "guest-test.js",
   "protoMin": 1,
   "protoMax": 1,
-  "capabilitiesSha256": "0000000000000000000000000000000000000000000000000000000000000000"
+  "capabilitiesSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "chunks": [
+    "guest-chunk.1a2b3c.js",
+    "guest-font.7a8b9c.woff",
+    "guest-font.7a8b9c.woff2",
+    "guest-image.3d4e5f.png",
+    "guest-logo.0a1b2c.svg",
+    "guest-style.4d5e6f.css"
+  ],
+  "publicPath": "/_rr/"
 }

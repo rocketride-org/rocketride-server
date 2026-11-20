@@ -124,7 +124,9 @@ test('T116 real user, team and org ids never reach a realm in free text, store e
 		tt.after(() => t.cleanup());
 		t.cm.engine.userId = USER;
 		t.cm.engine.teamId = TEAM;
-		delete t.cm.engine.client.getAccountInfo;
+		// Account info that names none of the ids the engine stamps (PR2b fails closed with no
+		// account info at all, so the realm needs some): nothing may be learnt from the bodies.
+		t.cm.engine.client.getAccountInfo = () => ({ userId: 'local', devTeam: 'local', organization: null });
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
 		const run = await startRun(A);
 		t.cm.engine.setStatus({ notes: [`by ${USER} for ${TEAM}`] });
@@ -234,7 +236,7 @@ async function best(n: number, run: () => Promise<void>): Promise<number> {
 }
 
 test('T118 scrub cost is linear in the message, not in the needle sets (sets full)', async (tt) => {
-	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 50 ms', async () => {
+	await tt.test('inbound: a 256 KiB execute of 60,000 strings is gated in under 250 ms', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A, caps: ['core', 'pipelines.run', 'fs.app'] });
@@ -246,10 +248,11 @@ test('T118 scrub cost is linear in the message, not in the needle sets (sets ful
 			await call(A, 'terminate', { token: String((result as { body: Record<string, unknown> }).body.token) });
 		});
 		tt.diagnostic(`inbound 60,000 strings: ${ms.toFixed(1)} ms (round trip incl. terminate)`);
-		assert.ok(ms < 50, `inbound gate took ${ms.toFixed(1)} ms`);
+		// Widened 5x for loaded CI hosts (margin was under 3x: up to 27.5 ms seen).
+		assert.ok(ms < 250, `inbound gate took ${ms.toFixed(1)} ms`);
 	});
 
-	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 200 ms', async () => {
+	await tt.test('outbound: an 8 MiB status response is scrubbed and delivered in under 1000 ms', async () => {
 		const t = makeRoot();
 		tt.after(() => t.cleanup());
 		const A = t.open(ENTRY_A, { grant: GRANT_A });
@@ -262,7 +265,8 @@ test('T118 scrub cost is linear in the message, not in the needle sets (sets ful
 			expectOk(await status(A, run.token), '8 MiB status');
 		});
 		tt.diagnostic(`outbound 8 MiB: ${ms.toFixed(1)} ms`);
-		assert.ok(ms < 200, `outbound scrub took ${ms.toFixed(1)} ms`);
+		// Widened 5x for loaded CI hosts (margin was under 3x: up to 128 ms seen).
+		assert.ok(ms < 1000, `outbound scrub took ${ms.toFixed(1)} ms`);
 	});
 
 	await tt.test('events: 1000 owned events of 50 strings each are delivered in under 500 ms', async () => {

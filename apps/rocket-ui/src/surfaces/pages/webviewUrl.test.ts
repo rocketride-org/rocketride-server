@@ -113,6 +113,58 @@ test('refuses non-http(s) schemes, credentials, non-loopback http and unparsable
 	}
 });
 
+// ── PR2b T76 (E7): the app-origin suffix is never framed from a `webview:` document ──────────
+//
+// `isAllowedWebviewUrl(raw, shellOrigin, shellHref?, appOriginTemplate?)` also refuses every host under the
+// app-origin template's suffix: those are the isolated apps' origins, and a `webview:` frame is
+// not the app frame (no handshake, no scrub, and a `sandbox` with allow-same-origin of its own).
+// Without a template (isolation off) nothing changes.
+
+const TEMPLATE = 'https://{label}.apps.example';
+const LOCAL_TEMPLATE = 'http://{label}.apps.localhost:5565';
+const allowed = (raw: string, shellOrigin: string, template?: string | null): boolean => isAllowedWebviewUrl(raw, shellOrigin, shellOrigin, template);
+
+test('T76 a host under the app-origin suffix is refused, whatever its spelling', () => {
+	for (const url of [
+		'https://a1234567890123456789012345.apps.example/',
+		'https://a1234567890123456789012345.apps.example/_rr/frame.html',
+		'https://a1234567890123456789012345.apps.example:8443/x',
+		'https://A1234567890123456789012345.APPS.EXAMPLE/x',
+		'https://a1234567890123456789012345.apps.example./x',
+		'https://x.y.apps.example/x',
+		'https://apps.example/x',
+		'https://apps.example./x',
+	]) {
+		assert.equal(allowed(url, SHELL, TEMPLATE), false, url);
+	}
+});
+
+test('T76 hosts that merely look like the suffix are still framed', () => {
+	for (const url of ['https://notapps.example/', 'https://apps.example.com/', 'https://docs.example/', 'https://apps-example.net/']) {
+		assert.equal(allowed(url, SHELL, TEMPLATE), true, url);
+	}
+});
+
+test('T76 the local development template (apps.localhost, a port) refuses the suffix on any port (guard: the base already refuses these as non-loopback http)', () => {
+	for (const url of ['http://a1234567890123456789012345.apps.localhost:5565/', 'http://a1234567890123456789012345.apps.localhost:9999/', 'http://apps.localhost:5565/', 'http://a1.apps.localhost/']) {
+		assert.equal(allowed(url, 'http://localhost:5565', LOCAL_TEMPLATE), false, url);
+	}
+	assert.equal(allowed('http://localhost:5565/chat/p/s', 'http://localhost:5565', LOCAL_TEMPLATE), true, 'the engine chat page is unaffected');
+});
+
+test('T76 without a template (isolation off) nothing changes, and a missing or null template is the same', () => {
+	for (const template of [undefined, null]) {
+		assert.equal(allowed('https://a1234567890123456789012345.apps.example/', SHELL, template), true);
+	}
+	assert.equal(isAllowedWebviewUrl('https://docs.example', SHELL), true);
+	assert.equal(isAllowedWebviewUrl('http://localhost:5565/apps/x', 'http://localhost:5565'), false, 'the old refusals stay');
+});
+
+test('T76 a template without a {label} placeholder names no suffix, so nothing is refused on its account', () => {
+	assert.equal(allowed('https://docs.example/', SHELL, 'https://apps.example'), true);
+	assert.equal(allowed('https://docs.example/', SHELL, ''), true);
+});
+
 test('refuses URLs that only resolve onto the shell once the iframe applies its base', () => {
 	// `https:host/..` has no `//`, so alone it names another host but against
 	// the shell document it is a path on the shell's own origin.

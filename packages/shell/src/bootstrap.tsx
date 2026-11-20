@@ -27,6 +27,7 @@ import type { AppManifestEntry } from './components/workspace/types';
 import { buildShellConfig } from './createShellConfig';
 import { registerAndMapApps } from './util/appLoader';
 import { installDevHooks } from './util/devMode';
+import { installIsolation, SHELL_CAPS } from './isolation/config';
 
 // =============================================================================
 // BOOTSTRAP
@@ -54,8 +55,11 @@ async function main() {
 	let telemetry: { key?: string; host?: string } = {};
 	let apiEndpoint = '';
 	try {
-		const info = await RocketRideClient.getServerInfo(serverUri);
+		const info = await RocketRideClient.getServerInfo(serverUri, { shellCaps: [...SHELL_CAPS] });
 		capabilities = info.capabilities ?? [];
+		// Separate-origin app isolation (#1022): installed before the first
+		// mapping, so the stamp rule applies to the probe's own apps.
+		installIsolation(info.appIsolation);
 		apps = registerAndMapApps(info.apps ?? []);
 		// Stripe publishable key comes from the server (not baked at build
 		// time) so one bundle works against test- and live-keyed servers.
@@ -70,6 +74,8 @@ async function main() {
 		apiEndpoint = info.endpoints.api;
 	} catch (err) {
 		console.error('[bootstrap] Server probe failed:', err);
+		// The isolation state is unknown: isolated entries tile, dev registration is denied (#1022).
+		installIsolation(undefined, { probeFailed: true });
 		// Shell will render with no apps — user can retry after server is up
 	}
 

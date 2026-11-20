@@ -3631,3 +3631,95 @@ describe('RocketRideClient lifecycle operations', () => {
 		expect(onDisconnected).toHaveBeenCalledTimes(1);
 	});
 });
+
+// =============================================================================
+// PR2b T69: shellCaps in the probe and in every `auth` (#1022, M3)
+// =============================================================================
+//
+// `RocketRideClientConfig.shellCaps?: string[]` goes into `authArguments`
+// (`client.ts` `_runLoginOperation`) so the server stores it on the connection
+// (`task_conn.py:417`); `getServerInfo(uri, timeoutOrOptions)` accepts a number
+// (as before) or `{timeout?, shellCaps?}` and the probe request carries
+// `shellCaps`. Without the field nothing changes on the wire.
+
+describe('RocketRideClient shellCaps (T69)', () => {
+	let originalWindow: PropertyDescriptor | undefined;
+	let originalWebSocket: PropertyDescriptor | undefined;
+	let clients: RocketRideClient[];
+
+	beforeEach(() => {
+		originalWindow = Object.getOwnPropertyDescriptor(globalThis, 'window');
+		originalWebSocket = Object.getOwnPropertyDescriptor(globalThis, 'WebSocket');
+		Object.defineProperty(globalThis, 'window', { configurable: true, value: { WebSocket: LifecycleBrowserWebSocket } });
+		Object.defineProperty(globalThis, 'WebSocket', { configurable: true, value: LifecycleBrowserWebSocket });
+		LifecycleBrowserWebSocket.instances = [];
+		LifecycleBrowserWebSocket.requests = [];
+		clients = [];
+	});
+
+	afterEach(async () => {
+		for (const client of clients) await client.detach().catch(() => undefined);
+		jest.clearAllTimers();
+		jest.useRealTimers();
+		for (const socket of LifecycleBrowserWebSocket.instances) {
+			socket.onopen = null;
+			socket.onmessage = null;
+			socket.onclose = null;
+			socket.onerror = null;
+		}
+		if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
+		else Reflect.deleteProperty(globalThis, 'window');
+		if (originalWebSocket) Object.defineProperty(globalThis, 'WebSocket', originalWebSocket);
+		else Reflect.deleteProperty(globalThis, 'WebSocket');
+	});
+
+	async function authArguments(config: Record<string, unknown>): Promise<Record<string, unknown>> {
+		const client = new RocketRideClient({ uri: 'https://one.example.test', requestTimeout: 5_000, ...config } as ConstructorParameters<typeof RocketRideClient>[0]);
+		clients.push(client);
+		const login = loginOutcome(client.login('shellcaps-key'));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('auth', socket).length === 1, 'auth');
+		const auth = lifecycleRequests('auth', socket)[0];
+		socket.respond(auth.message, connectResult('caps'));
+		await login;
+		return (auth.message.arguments ?? {}) as Record<string, unknown>;
+	}
+
+	it('sends shellCaps in the auth arguments when the config carries them', async () => {
+		const args = await authArguments({ shellCaps: ['appIsolation:1'] });
+		expect(args.shellCaps).toEqual(['appIsolation:1']);
+		expect(args.auth).toBe('shellcaps-key');
+	});
+
+	it('sends no shellCaps key at all when the config has none (the wire is unchanged for every other client)', async () => {
+		const args = await authArguments({});
+		expect('shellCaps' in args).toBe(false);
+	});
+
+	it('getServerInfo with options sends the probe with shellCaps and honours the timeout', async () => {
+		const info = RocketRideClient.getServerInfo('https://probe.example.test', { timeout: 2_000, shellCaps: ['appIsolation:1'] });
+		const settled = loginOutcome(info);
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'probe socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('rrext_public_probe', socket).length === 1, 'probe request');
+		const probe = lifecycleRequests('rrext_public_probe', socket)[0];
+		expect(((probe.message.arguments ?? {}) as Record<string, unknown>).shellCaps).toEqual(['appIsolation:1']);
+		socket.respond(probe.message, { version: '1.0.0', capabilities: [] });
+		await expect(settled).resolves.toMatchObject({ status: 'resolved' });
+	});
+
+	it('getServerInfo with a plain number still works and sends no shellCaps (the pre-PR2 call shape)', async () => {
+		const settled = loginOutcome(RocketRideClient.getServerInfo('https://probe2.example.test', 2_000));
+		await waitForLifecycle(() => LifecycleBrowserWebSocket.instances.length === 1, 'probe socket');
+		const socket = LifecycleBrowserWebSocket.instances[0];
+		socket.open();
+		await waitForLifecycle(() => lifecycleRequests('rrext_public_probe', socket).length === 1, 'probe request');
+		const probe = lifecycleRequests('rrext_public_probe', socket)[0];
+		expect('shellCaps' in ((probe.message.arguments ?? {}) as Record<string, unknown>)).toBe(false);
+		socket.respond(probe.message, { version: '1.0.0', capabilities: [] });
+		await expect(settled).resolves.toMatchObject({ status: 'resolved' });
+	});
+});
