@@ -25,7 +25,7 @@
 /**
  * SDK version — automatically synced from package.json during build.
  */
-export const SDK_VERSION = '1.3.0';
+export const SDK_VERSION = '1.5.0';
 
 /**
  * Default protocol for connections when none is specified.
@@ -77,6 +77,12 @@ export const CONST_WS_PING_INTERVAL = 15;
  * the connection is considered dead and will be closed.
  */
 export const CONST_WS_PING_TIMEOUT = 60;
+
+/**
+ * What `getEnv` answers in place of each stored value; sending it back to
+ * `setEnv` keeps that value.
+ */
+export const CONST_ENV_MASK = '••••••••';
 
 /**
  * Default store directory for project pipeline files.

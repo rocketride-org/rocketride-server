@@ -54,33 +54,87 @@ the `rocketride` twin) — logged loudly, since the yaml is user-owned. A
 workspace that already overrides `shell`/`rocketride` (the platform
 monorepos pin `workspace:*`) is left untouched.
 
-## Live preview overlay & dev servers
+## Local-first preview & dev servers
 
-A local dev build is previewed by registering a per-user `moduleId → entry URL`
-overlay (via `rrext_deploy_app.register_dev`) so the developer's shell points at
-their locally built bundle. The extension manages the underlying rsbuild dev
-servers through a serialized per-app operation chain (start/stop/restart run one
-at a time). Closing a preview **lingers** the server for 60 s so a quick reopen
-revives it instantly; a Reload or extension deactivation stops immediately.
-Every dev server is **owned** by the current extension host and runs under a
-guard wrapper whose stdin tether kills it the moment the host dies (window
-reload, crash, EDH stop — any death mode), so orphaned dev servers cannot
-exist. A server that crashes while its panel is open respawns itself
-automatically (bounded, so a crash loop gives up and points at the Console).
-The dev overlay holds one registration **per editor session** — several
-editors (or windows) can dev-serve the same app concurrently; previews
-launched from an editor carry its `rrsession` nonce and resolve that
-editor's server, and shells without a nonce take the newest registration.
+The preview is **local-first**: the app's rsbuild dev server runs as a
+**passthrough proxy** to the connected engine origin. It serves the dev app's
+workspace files (bundle, chunks, icon, `package.json`) from disk under the
+conventional `/apps/<appId>/dev/**` prefix and proxies EVERYTHING else —
+`/task` websocket, auth, published app bundles — to the engine untouched, so
+the preview shell is same-origin with its dev assets and the server holds
+zero dev state. Registration is a **push**: the preview panel posts
+`rrdev:registerRemote { appId, moduleId, entry, manifest }` into the shell
+(re-posted on rebuild and on manifest change — the workspace `package.json`
+is the metadata truth in dev); a top-level tab (F5 external-browser debug)
+instead **self-registers by URL convention**, fetching
+`/apps/<appId>/dev/package.json` from its own origin. A locally registered
+app id REPLACES the server's manifest row wholesale.
+
+**Trust boundary.** The dev hooks (`window.__rrShellDev`, the `rrdev:*` message
+listener) exist only in the DEV flavor of the shell; a production build can
+never enable them from the URL, `sessionStorage` or an injected boot config.
+`?rrdev=1` merely selects the dev flavor's assets, and that flavor is reachable
+from the production origin, so what it does for a caller is restricted in code.
+A `rrdev:*` message is honoured only from a window with the right relation AND
+an origin from a closed set of exactly two:
+
+- as the shell's **parent** (a framed shell): a `vscode-webview://<id>` page
+  (the VS Code App Builder) or a page of the shell's **own origin** (the web
+  App Builder's blob preview iframe);
+- as the shell's **opener** (a top-level tab): a page of the shell's **own
+  origin** only (the web App Builder's debug tab). No other origin, and
+  `vscode-webview://`, is ever an opener.
+
+A loopback origin is **never** a sender, not even for a loopback-served shell,
+and a page that merely `window.open()`s or frames the shell is not trusted by
+that fact. `rrdev:registerRemote` entries must be absolute `http(s)` loopback
+URLs; console rows are posted only to the verified embedder origin. `#rrtoken=`
+seeding is honoured only in a dev build, on a top-level shell served from
+loopback (`localhost`, `*.localhost`, `127.0.0.0/8`, `[::1]`). In a dev build on
+a top-level shell that is NOT loopback-served, and in a production build on a
+top-level shell (loopback or not), the fragment is ignored (nothing is saved or
+cleared) and stripped from the URL; a framed shell never acts on it or strips it
+here. The `rrauthorigin` sign-in relay is armed only on `http://localhost` and
+`http://127.0.0.1`, the shells its OAuth bounce can return to (any port; the
+`pnpm start` server is `http://localhost:3000`, so it is armed there); on any
+other shell (an `https://` origin, `[::1]`, `*.localhost`, other `127.x.x.x`
+addresses) it is not armed.
+
+Deliberate compatibility costs of a closed set, so nobody is surprised:
+browser-hosted VS Code and Codespaces (webview origins on `*.vscode-cdn.net`)
+are refused; code-server is refused whether it is served from a loopback or a
+non-loopback host; and a dev server reached by LAN IP or a forwarded hostname
+(not loopback) loses URL-convention self-registration, remote entries,
+`#rrtoken` seeding and the sign-in relay. Those dev servers are intentionally
+unsupported: dev remotes, token seeding and the relay are bound to loopback so
+that a dev flavor served from a real origin (the production origin included)
+cannot be steered by a link, and the loopback predicate (`isLoopbackHostname`,
+devGate.ts) cannot tell a LAN dev server from an attacker's host. Only the
+embedder cases (`*.vscode-cdn.net`, code-server) are governed by the allow-list
+`isAllowedEmbedderOrigin`; supporting one of them is a deliberate change there,
+with its own review.
+
+The extension manages the dev servers through a serialized per-app operation
+chain (start/stop/restart run one at a time). Closing a preview **lingers**
+the server for 60 s so a quick reopen revives it instantly; a Reload or
+extension deactivation stops immediately. Every dev server is **owned** by
+the current extension host and runs under a guard wrapper whose stdin tether
+kills it the moment the host dies (window reload, crash, EDH stop — any
+death mode), so orphaned dev servers cannot exist. A server that crashes
+while its panel is open respawns itself automatically (bounded, so a crash
+loop gives up and points at the Console). Several editors can dev-serve the
+same app concurrently — each preview loads through its OWN editor's proxy
+origin, so no cross-editor routing exists to disambiguate.
 
 The dev-loop primitives live in the SDK, `rocketride/app-dev`
 (`packages/client-typescript/src/app-dev/`), shared with `rocketride app
-dev`: the session nonce and `devPreviewUrl`, `resolveRsbuildInvocation`, the
+dev`: `devPreviewUrl`, `resolveRsbuildInvocation`, the
 rsbuild output classifier (`splitCompleteLines`, `classifyDevOutput`), the
-guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the overlay calls
-(`registerDevOverlay`, `unregisterDevOverlay`), and the guard program itself
+guarded spawn and stop (`spawnDevServer`, `stopDevServer`), the proxy config
+writer (`writeProxyConfig`, `webOriginFor`), and the guard program itself
 (`DEV_SERVER_GUARD_SOURCE`, written to a private temp file by
 `materializeDevServerGuard` — no host ships it as a separate file). The
-extension's `WatchManager` keeps only the panel orchestration (op chains,
+extension's `DevSessionManager` keeps only the panel orchestration (op chains,
 linger, panel-gated respawn, the install badge); `DevSession` composes the
 same primitives into the single-app foreground loop the CLI runs. Any page
 that loaded a dev bundle — the panel or a plain browser tab — updates on save
@@ -121,7 +175,7 @@ missing/non-numeric version is rejected, not sent as `null`).
 | `preflight`       | —                             | tiered readiness rows `{ id, state, label, note?, tier }` from the SDK's `preflightApp`: the `package` tier is the personal-publish bar, the `store` tier adds the public-submission bar |
 | `history`         | —                             | the app's full `deployment_history` stream, **oldest-first** — audit rows plus the review thread (`reply` rows); the host walks the server's 100-row pages. Rows are self-describing: audience rows carry the dereferenced `name`/`handle` (plus `previousVersion` on a repoint), deploy rows the deploy `comment`, review rows their `from`/`to` states — the view never needs a second lookup |
 | `reply`           | `[message, registryVersion?]` | appends a developer message to the review thread (side `'developer'`) |
-| `buildLog`        | `[registryVersion]`           | one version's durable server build log (phase-by-phase output; `''` = no log) — the Deploy card's `failed` badge opens it |
+| `buildLog`        | `[registryVersion]`           | one version's durable server build log (phase-by-phase output; `''` = no log) — the Deploy card's `failed` badge and the Dashboard's failed-build line open it |
 | `pickFile`        | `['icon' \| 'readme']`        | native file picker for a manifest asset; returns the APP-FOLDER-relative `./`-prefixed path (picks outside the app folder are refused — the server only serves app-relative assets) or `null` on cancel |
 | `readFile`        | `[appRelativePath]`           | one app-folder-relative text file (icon SVG / README markdown) for preview; traversal-guarded, 512KB cap |
 | `readImage`       | `[appRelativePath]`           | one app-folder-relative image as a data: URI (README images are binary; mime by extension, 256KB cap, `null` when unservable) — the README viewer resolves relative image refs against the README's own directory through this |

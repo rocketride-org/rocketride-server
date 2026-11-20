@@ -9,9 +9,14 @@ declare module '*.svg' {
 	export default Component;
 }
 
-declare module '*.svg?url' {
-	const url: string;
-	export default url;
+// Append `?inline` to import an SVG as a data URI string — always inlined,
+// never an emitted file (required where the consumer cannot resolve emitted
+// asset paths, e.g. URLs rendered inside VS Code webviews). Mirrors the
+// declaration in apps/shared/src/types/global.d.ts, which the webview
+// tsconfig does not include.
+declare module '*.svg?inline' {
+	const dataUri: string;
+	export default dataUri;
 }
 
 declare module '*.png' {

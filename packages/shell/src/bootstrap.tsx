@@ -51,6 +51,7 @@ async function main() {
 	let capabilities: string[] = [];
 	let apps: AppManifestEntry[] = [];
 	let stripePublishableKey = '';
+	let telemetry: { key?: string; host?: string } = {};
 	let apiEndpoint = '';
 	try {
 		const info = await RocketRideClient.getServerInfo(serverUri);
@@ -59,6 +60,9 @@ async function main() {
 		// Stripe publishable key comes from the server (not baked at build
 		// time) so one bundle works against test- and live-keyed servers.
 		stripePublishableKey = info.stripePublishableKey ?? '';
+		// Product-telemetry config, same contract: served at runtime, absent =
+		// telemetry structurally off (no posthog chunk is ever fetched).
+		telemetry = { key: info.posthogPublishableKey ?? '', host: info.posthogHost ?? '' };
 		// The server says where live traffic goes (already resolved by the
 		// SDK — 'origin' became the probed address). Same as the page origin
 		// on single-host deployments; a direct API host on split ones, so
@@ -70,13 +74,16 @@ async function main() {
 	}
 
 	// Install the app-dev hooks (registerLocalApp / __rrShellDev / dev share
-	// scope). No-ops entirely unless this is a dev build or the URL carries
-	// rrdev=1 — production sessions expose nothing. Fire-and-forget: the
-	// hooks signal readiness to embedders themselves via shell:devReady.
+	// scope). No-ops entirely unless this is a DEV BUILD (NODE_ENV !==
+	// 'production': `rsbuild dev` or the stitched dev flavor). `rrdev=1` and the
+	// per-tab session only SELECT that flavor in the index.html picker; they
+	// never enable hooks in a production build — production sessions expose
+	// nothing. Fire-and-forget: the hooks signal readiness to embedders
+	// themselves via shell:devReady.
 	void installDevHooks();
 
 	// Assemble the shell configuration with server capabilities
-	const config = buildShellConfig(apps, capabilities, stripePublishableKey, apiEndpoint);
+	const config = buildShellConfig(apps, capabilities, stripePublishableKey, apiEndpoint, telemetry);
 
 	// Create portal container for popup menus (must exist before React renders)
 	if (!document.getElementById('rr-popup-portal')) {

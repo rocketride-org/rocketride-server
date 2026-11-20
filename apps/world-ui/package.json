@@ -7,10 +7,11 @@
   "appManifest": {
     "id": "rocketride.world",
     "projectId": "c13662ab-13a9-4375-a43d-2529e189c0e6",
-    "publisher": "Aparavi Software AG",
+    "publisher": "RocketRide",
     "name": "Hello World",
     "description": "A simple Hello World demo application",
     "icon": "./src/icon.svg",
+    "readme": "./README.md",
     "categories": [
       "demo"
     ],
@@ -30,14 +31,14 @@
     "safari >= 13"
   ],
   "dependencies": {
-    "@module-federation/rsbuild-plugin": "^2.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "rocketride": "file:../../.rocketride/client/rocketride.tgz",
     "shell": "file:../../.rocketride/shell/shell.tgz"
   },
   "devDependencies": {
-    "@rsbuild/core": "~2.0.11",
+    "@module-federation/rsbuild-plugin": "^2.5.1",
+    "@rsbuild/core": "~2.2.12",
     "@rsbuild/plugin-react": "~2.0.1",
     "typescript": "^5.3.0",
     "@types/react": "~18.3.31",

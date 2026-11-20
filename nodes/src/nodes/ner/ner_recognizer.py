@@ -92,7 +92,16 @@ class NERRecognizer:
             # - Tokenization
             # - Model inference
             # - Post-processing
-            raw_entities = self.ner_pipeline(text)
+            # Submit a single-item list: PipelineProxy forwards the inputs to the
+            # model server unchanged, so a bare string would let the server
+            # derive a batch size from the text length instead of 1.
+            results = self.ner_pipeline([text])
+            # RocketRide's local and remote wrappers return one result envelope
+            # per input. This call submits a single text, whose complete HF
+            # entity dictionaries are carried in the 'entities' field.
+            raw_entities = []
+            if results:
+                raw_entities = results[0]['entities']
 
             # Filter by confidence threshold
             filtered_entities = [entity for entity in raw_entities if entity.get('score', 0) >= self.min_confidence]

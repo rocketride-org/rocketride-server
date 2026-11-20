@@ -27,7 +27,16 @@
 # =============================================================================
 
 from dataclasses import dataclass
-from typing import Any, NotRequired, Optional, TypedDict
+import sys
+from typing import Any, Optional
+
+if sys.version_info >= (3, 12):
+    from typing import NotRequired, TypedDict
+else:
+    # The repo floor is 3.10 (AGENTS.md): NotRequired lands in typing on
+    # 3.11, and pydantic refuses typing.TypedDict before 3.12 — both names
+    # come from typing_extensions on older interpreters.
+    from typing_extensions import NotRequired, TypedDict
 
 from pydantic import BaseModel
 
@@ -331,6 +340,25 @@ def resolve_task_permissions(account_info: AccountInfo, task_team_id: str) -> li
     return []
 
 
+def public_key_reaches(control: Any) -> bool:
+    """Whether a run's ``pk_`` may authenticate: its source is a public endpoint.
+
+    Both pipelines must say so: the control's, and the one its task holds.
+    ``restart_task`` hands the task the new pipeline before the restart runs
+    and updates the control only once it has succeeded, so while a restart
+    runs, or after one failed, the two can differ. Requiring both keeps a
+    restart onto a private source from being reachable by the old ``pk_``
+    for even that window.
+    """
+    from ai.common.rocketride_db import source_is_public
+
+    source = getattr(control, 'source', None)
+    if not source_is_public(getattr(control, 'pipeline', None), source):
+        return False
+    task = getattr(control, 'task', None)
+    return task is None or source_is_public(getattr(task, '_pipeline', None), source)
+
+
 def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str]:
     """
     Return the caller's effective permissions for one RUN (a TASK_CONTROL).
@@ -367,10 +395,11 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
     # nothing, including other runs billed to the same team.
     auth = getattr(account_info, 'auth', '') or ''
     if auth.startswith(('pk_', 'tk_')):
-        if auth in (
-            getattr(control, 'public_auth', '') or None,
-            getattr(control, 'token', '') or None,
-        ):
+        if auth == (getattr(control, 'token', '') or None):
+            return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
+        # A pk_ is derivable from the run's identity, so it reaches only a run
+        # whose source is a public endpoint, the one thing it is minted for.
+        if auth == (getattr(control, 'public_auth', '') or None) and public_key_reaches(control):
             return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
         return []
 

@@ -38,6 +38,13 @@ import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
 import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
+// Exact text the server sends when it receives an empty credential.
+const NO_AUTH_MESSAGE = 'No authorization provided';
+const NO_AUTH_HINT =
+	'No API key was sent. Set ROCKETRIDE_APIKEY or pass auth when you create the client. ' +
+	'A local engine accepts any non-empty value unless ROCKETRIDE_APIKEY is set on the engine. ' +
+	'RocketRide Cloud needs a key: run `rocketride login`.';
+
 // Global counter for generating unique client IDs
 let clientId = 0;
 
@@ -665,6 +672,12 @@ export class RocketRideClient extends DAPClient {
 						code: credential.code,
 						verifier: credential.verifier,
 						redirectUri: credential.redirectUri,
+						// The Zitadel client that MINTED the code — Zitadel
+						// binds codes to their client, so non-web clients
+						// (VS Code native app, CLI) must name themselves or
+						// the server-side exchange fails with invalid_client.
+						// Omitted = the server's default (web) client.
+						...(credential.clientId ? { clientId: credential.clientId } : {}),
 						...(signup ? { signup_properties: signup } : {}),
 					})
 				)
@@ -844,6 +857,9 @@ export class RocketRideClient extends DAPClient {
 			const response = await this.request({ type: 'request', command: 'auth', seq: 0, arguments: authArguments }, timeout);
 			this._assertCurrentOperation(operation);
 			if (response.success !== true) {
+				if (response.message === NO_AUTH_MESSAGE && !String(authArguments.auth ?? '').trim()) {
+					throw new AuthenticationException({ ...(response as unknown as Record<string, unknown>), hint: NO_AUTH_HINT });
+				}
 				throw new AuthenticationException(response as unknown as Record<string, unknown>);
 			}
 
@@ -925,6 +941,10 @@ export class RocketRideClient extends DAPClient {
 				code: credential.code,
 				verifier: credential.verifier,
 				redirectUri: credential.redirectUri,
+				// Credential IDENTITY: the minting Zitadel client. Stays in the
+				// reconnect key (unlike signupProperties) — a key that dropped it
+				// would alias a VS Code login onto a web login.
+				clientId: credential.clientId,
 				// Defer even property access to the guarded send boundary.
 				signupProperties: () => {
 					const value = credential.signupProperties;
@@ -1321,8 +1341,13 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Validate a pipeline configuration.
 	 *
-	 * Sends the pipeline to the server for structural validation, checking
-	 * required fields and component references.
+	 * Sends the pipeline to the server, which checks required fields and
+	 * component references, then checks the pipeline against the services
+	 * it names: each provider is a service on the engine, each control
+	 * entry sits on the node being called, and each input's lane is one
+	 * its upstream node produces and its node takes. A node with no lanes,
+	 * such as a tool, is not checked for the lanes it takes, and a `"*"`
+	 * in a node's lanes matches any lane.
 	 *
 	 * Source resolution follows the same logic as {@link use}:
 	 * 1. Explicit `source` option (if provided)
@@ -1882,6 +1907,9 @@ export class RocketRideClient extends DAPClient {
 			if (!question) {
 				throw new Error('Question cannot be empty');
 			}
+
+			// A broken turn rule fails here, before a pipe opens, not when the engine reads it
+			question.checkTurn();
 
 			// Create unique identifier for this chat operation
 			const objinfo = { name: `Question ${this._nextChatId}` };
@@ -2919,11 +2947,14 @@ export class RocketRideClient extends DAPClient {
 	 * every app id it owns. Readable on both editions (OSS answers the
 	 * fixed namespace its sessions carry; there is no Stripe Connect there).
 	 *
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table, so a late reply is ignored.
 	 * @returns `{developerId, stripeAccountId, stripeAccountStatus}`;
 	 *   `developerId` is null until an org admin registers one
 	 */
-	async developerStatus(): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' })) as any;
+	async developerStatus(options?: { timeout?: number }): Promise<{ developerId: string | null; stripeAccountId: string | null; stripeAccountStatus: string }> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_status' }, options)) as any;
 	}
 
 	/**
@@ -2932,10 +2963,14 @@ export class RocketRideClient extends DAPClient {
 	 * publish beyond the workspace.
 	 *
 	 * @param developerId - The slug to claim (lowercase letters/underscores)
+	 * @param options - Optional request settings.
+	 * @param options.timeout - Per-request timeout in ms; on expiry the request
+	 *   rejects and is dropped from the pending table (the claim may still land
+	 *   on the server, so callers should re-check developerStatus()).
 	 * @returns The server's registration record
 	 */
-	async registerDeveloper(developerId: string): Promise<Record<string, unknown>> {
-		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId })) as any;
+	async registerDeveloper(developerId: string, options?: { timeout?: number }): Promise<Record<string, unknown>> {
+		return (await this.call('rrext_deploy_app', { subcommand: 'developer_register', developerId }, options)) as any;
 	}
 
 	// (appEntry is RETIRED: versions serve from stable constructed URLs —
@@ -2986,15 +3021,42 @@ export class RocketRideClient extends DAPClient {
 		}
 	}
 
-	/** Read a JSON file. */
+	/**
+	 * Read a JSON file.
+	 *
+	 * ONE round trip (`fs_get_json`), not open/read/close — see
+	 * {@link fsWriteJson} for why that matters.
+	 *
+	 * @param path - Relative path within the account store
+	 * @returns The parsed value
+	 */
 	async fsReadJson<T = any>(path: string): Promise<T> {
-		const text = await this.fsReadString(path);
-		return JSON.parse(text);
+		this.validateStorePath(path);
+		const body = await this.call('rrext_store', { subcommand: 'fs_get_json', path });
+		return body.value as T;
 	}
 
-	/** Write an object as JSON. */
+	/**
+	 * Write an object as JSON.
+	 *
+	 * ONE round trip (`fs_put_json`). The handle sequence this used to run —
+	 * fs_open, fs_write, fs_close — leaves a write handle open between
+	 * messages, and the server commits that handle when the connection
+	 * drops: a client that dies after fs_open replaces the file with an
+	 * empty buffer. A browser reload mid-save was enough to zero a
+	 * workspace file. A single request has no such window; one that never
+	 * arrives leaves the file exactly as it was.
+	 *
+	 * The whole value travels in that one message, so this is for complete
+	 * documents (it always was — the object is serialised in full either
+	 * way). Large payloads still belong on the streaming handle API.
+	 *
+	 * @param path - Relative path within the account store
+	 * @param obj - Any JSON-serialisable value
+	 */
 	async fsWriteJson(path: string, obj: any): Promise<void> {
-		await this.fsWriteString(path, JSON.stringify(obj, null, 2));
+		this.validateStorePath(path);
+		await this.call('rrext_store', { subcommand: 'fs_put_json', path, value: obj });
 	}
 
 	// ============================================================================

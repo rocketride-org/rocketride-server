@@ -60,20 +60,20 @@ if("${CMAKE_SYSTEM_NAME}" STREQUAL "Linux")
     set(ROCKETRIDE_PLAT_UNX 1 CACHE INTERNAL "Platform definition" CACHE STRING "" FORCE)
     set(ROCKETRIDE_PLAT_TYPE "lin" CACHE STRING "" FORCE)
     set(ROCKETRIDE_PLAT_TYPE_LONG "linux" CACHE STRING "" FORCE)
-    set(ROCKETRIDE_DEFS "-DROCKETRIDE_PLAT_LIN=1 -DROCKETRIDE_PLAT_UNX=1" CACHE STRING "" FORCE)
+    set(ROCKETRIDE_DEFS "ROCKETRIDE_PLAT_LIN=1;ROCKETRIDE_PLAT_UNX=1" CACHE STRING "" FORCE)
 elseif("${CMAKE_SYSTEM_NAME}" STREQUAL "Darwin")
     rocketride_msg("System is Mac")
     set(ROCKETRIDE_PLAT_MAC 1 CACHE INTERNAL "Platform definition" CACHE STRING "" FORCE)
     set(ROCKETRIDE_PLAT_UNX 1 CACHE INTERNAL "Platform definition" CACHE STRING "" FORCE)
     set(ROCKETRIDE_PLAT_TYPE "mac" CACHE STRING "" FORCE)
     set(ROCKETRIDE_PLAT_TYPE_LONG "osx" CACHE STRING "" FORCE)
-    set(ROCKETRIDE_DEFS "-DROCKETRIDE_PLAT_MAC=1 -DROCKETRIDE_PLAT_UNX=1" CACHE STRING "" FORCE)
+    set(ROCKETRIDE_DEFS "ROCKETRIDE_PLAT_MAC=1;ROCKETRIDE_PLAT_UNX=1" CACHE STRING "" FORCE)
 elseif(WIN32)
     rocketride_msg("System is Windows")
     set(ROCKETRIDE_PLAT_WIN 1 CACHE INTERNAL "Platform definition" FORCE)
     set(ROCKETRIDE_PLAT_TYPE "win" CACHE STRING "" FORCE)
     set(ROCKETRIDE_PLAT_TYPE_LONG "windows" CACHE STRING "" FORCE)
-    set(ROCKETRIDE_DEFS "-DROCKETRIDE_PLAT_WIN=1" CACHE STRING "" FORCE)
+    set(ROCKETRIDE_DEFS "ROCKETRIDE_PLAT_WIN=1" CACHE STRING "" FORCE)
     # Something is setting /W3, and adding /W4 causes compilation warnings, so just replace the /W3 setting
     string(REPLACE " /W3" " /W4" CMAKE_C_FLAGS "${CMAKE_C_FLAGS}")
     string(REPLACE " /W3" " /W4" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
@@ -86,12 +86,11 @@ if(ROCKETRIDE_PLAT_TYPE AND NOT ROCKETRIDE_PLAT_TYPE_LONG)
     set(ROCKETRIDE_PLAT_TYPE_LONG "${ROCKETRIDE_PLAT_TYPE}" CACHE STRING "" FORCE)
 endif()
 
-# Set our definition for debug mode in rocketride land
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ROCKETRIDE_DEFS}" CACHE STRING "" FORCE)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ROCKETRIDE_DEFS}" CACHE STRING "" FORCE)
-
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} ${ROCKETRIDE_DEFS}" CACHE STRING "" FORCE)
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} ${ROCKETRIDE_DEFS}" CACHE STRING "" FORCE)
+# Platform macros (ROCKETRIDE_PLAT_*) for every C and C++ target configured after
+# this point. Compile definitions rather than text appended to CMAKE_<LANG>_FLAGS,
+# so they do not depend on how set(CACHE) treats a same-named normal variable
+# (CMP0126) - the flags files and the /W3 replacement above both create one
+add_compile_definitions(${ROCKETRIDE_DEFS})
 
 rocketride_msg("Detected platform - ${ROCKETRIDE_PLAT_TYPE}")
 

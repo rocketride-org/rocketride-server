@@ -13,7 +13,8 @@
 			"shell": ["./src/trace-viewer/shell-shim.ts"],
 			"shell/src/*": ["../../../../../../../apps/shared/node_modules/shell/src/*"],
 			"rocketride": ["../../../../../../../apps/shared/node_modules/rocketride/dist/types/index.d.ts"],
-			"@app-shared/*": ["../../../../../../../apps/shared/src/*"]
+			"@app-shared/*": ["../../../../../../../apps/shared/src/*"],
+			"shared/*": ["../../../../../../../apps/shared/src/*"]
 		}
 	},
 	"include": ["src", "vite.config.ts", "vitest.config.ts"]

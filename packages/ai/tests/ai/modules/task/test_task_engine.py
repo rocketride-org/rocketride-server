@@ -33,14 +33,17 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from rocketride import TASK_STATE
 
 from ai.constants import CONST_STATUS_HISTORY_LIMIT
 from ai.modules.task.task_engine import (
+    CONST_PARAM_TOKEN_SECRET_ENV,
     CONST_TRACE_PAYLOAD_CAP,
     CONST_TRACE_PREVIEW_BYTES,
     Task,
     cap_trace_payload,
     filter_subprocess_env,
+    resolve_parameter_tokens,
     saas_pipeline_violation,
 )
 
@@ -71,6 +74,7 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     t = Task.__new__(Task)
     t.id = 'task-test'
     t.token = 'tk_test'
+    t._data_token = 'dt_test'
     t.client_id = 'user-1'
     t.team_id = 'team-1'
     t.org_id = 'org-1'
@@ -97,6 +101,8 @@ def _task(*, source='src-id', task_name=None, pipeline=None, status=None):
     # debug_message is normally inherited from DAPBase and requires
     # _call_debug_message to be wired by __init__. Bypass with a MagicMock.
     t.debug_message = MagicMock()
+    # Channel state __init__ would have set
+    Task._reset_channel_state(t)
     return t
 
 
@@ -207,6 +213,8 @@ def test_build_task_returns_subprocess_config_shape(tmp_path, monkeypatch):
     assert config['identity'] == {'userId': 'user-1', 'teamId': 'team-1', 'orgId': 'org-1'}
     # Dev runs anchor node storage at the owner's whole tree.
     assert config['storage'] == {'root': 'users/user-1/files'}
+    # The channel token stays with the engine; nothing of it is in the task file.
+    assert 'dt_test' not in json.dumps(config)
 
 
 def test_build_task_deploy_storage_anchor(monkeypatch, tmp_path):
@@ -775,6 +783,25 @@ def test_db_access_empty_without_db_nodes():
     assert Task._db_access(_task(), pipeline) == ([], True)
 
 
+def test_db_access_resolves_a_db_node_only_eaas_serves(monkeypatch):
+    """A DB node the server does not carry is resolved with the definition EaaS serves."""
+    import ai.modules.task.task_engine as engine
+    from ai.common.config import Config
+
+    served = {'protocol': 'rocketride_sql://'}
+    monkeypatch.setattr(engine.node_store, 'served', lambda provider: served if provider == 'rocketride_sql' else None)
+    seen = []
+    monkeypatch.setattr(
+        Config, 'getNodeConfig', staticmethod(lambda provider, config, service=None: seen.append(service) or {})
+    )
+
+    assert Task._db_access(_task(), {'components': [{'id': 'db', 'provider': 'rocketride_sql'}]}) == (
+        [('org', '')],
+        False,
+    )
+    assert seen == [served]
+
+
 def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
     assert Task._db_access(_task(), {}) == ([], False)
@@ -984,10 +1011,11 @@ def _fake_db_account(monkeypatch, deny=None, owner=None):
     import ai.account
     from ai.account.base import DbDecision
 
-    calls = {'authorize': [], 'resolve': []}
+    calls = {'authorize': [], 'credentials': [], 'resolve': []}
 
-    async def authorize(identity, target=None):
+    async def authorize(identity, target=None, *, credential=None):
         calls['authorize'].append((identity, target))
+        calls['credentials'].append(credential)
         reason = deny(target) if deny else None
         if reason:
             return DbDecision(False, reason, True)
@@ -1145,7 +1173,7 @@ async def test_authorize_raising_fails_task_start_and_issues_no_dsn(monkeypatch)
 
     calls = _fake_db_account(monkeypatch)
 
-    async def authorize(identity, target=None):
+    async def authorize(identity, target=None, *, credential=None):
         raise RuntimeError('membership lookup failed')
 
     monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize)
@@ -1302,6 +1330,53 @@ async def test_start_passes_only_the_operators_options(monkeypatch, saas, startu
     assert checked == ([True] if saas else [])
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize('available', [True, False])
+async def test_start_puts_the_pipelines_nodes_on_disk_before_the_spawn(monkeypatch, available):
+    """The nodes a pipeline names that the server lacks are unpacked before the
+    engine starts, so its start-up scan loads them; one that cannot be had
+    refuses the launch and nothing is spawned. The pipeline placed is the
+    resolved one: ${...} can name the provider.
+    """
+    import ai.modules.task.task_engine as engine
+
+    _fake_db_account(monkeypatch)
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: False)
+    order = []
+
+    def place(pipeline):
+        order.append(('place', [c['provider'] for c in pipeline['components']]))
+        if not available:
+            raise FileNotFoundError('llm_x.rrnode is not in releases server-v1')
+
+    monkeypatch.setattr(engine.node_store, 'place', place)
+    t = _env_task(pipeline={'components': [{'id': 'src', 'provider': '${ROCKETRIDE_NODE}'}]})
+    t.source = 'src'
+    t._env_source = AsyncMock(return_value={'ROCKETRIDE_NODE': 'llm_x'})
+    t._restart_env = None
+    t._status = SimpleNamespace(name='', state=engine.TASK_STATE.NONE.value, exitMessage='', completed=False)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._server = MagicMock(_config={})
+    t._is_debugging = lambda: False
+    t._write_task_file = AsyncMock(return_value='/tmp/task.json')
+    t._send_status_update = AsyncMock()
+    t._terminated = AsyncMock()
+
+    class Launched(Exception):
+        pass
+
+    async def spawn(*args, **kwargs):
+        order.append(('spawn',))
+        raise Launched()
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', spawn)
+    with pytest.raises(Launched if available else RuntimeError, match=None if available else "pipeline's nodes"):
+        await Task.start_task(t)
+
+    assert order == ([('place', ['llm_x']), ('spawn',)] if available else [('place', ['llm_x'])])
+
+
 # ---------------------------------------------------------------------------
 # filter_subprocess_env — the child inherits an allowlist, never the whole env
 # ---------------------------------------------------------------------------
@@ -1333,6 +1408,7 @@ def test_filter_subprocess_env_is_an_allowlist():
             # engine-only: deployment credentials and server-side settings
             'RR_DB_URL': 'postgresql://platform',
             'RR_MASTER_KEY': 'fernet',
+            'RR_PARAM_TOKEN_SECRET': 'param-token-secret',
             'RR_IDP_SERVICE_TOKEN': 'jwt',
             'RR_APP_URL': 'https://app.example',
             'ENGINE_API_KEY': 'engine',
@@ -1392,6 +1468,65 @@ def test_filter_subprocess_env_star_passes_everything():
     """A bare '*' is the explicit opt-out back to full inheritance."""
     src = {'RR_SUBPROCESS_ENV': '*', 'RR_MASTER_KEY': 'fernet', 'PATH': '/usr/bin'}
     assert filter_subprocess_env(src) == src
+
+
+# ---------------------------------------------------------------------------
+# resolve_parameter_tokens — the child gets values, not tokens it cannot read
+# ---------------------------------------------------------------------------
+
+_TOKEN_PIPELINE = {
+    'source': 'source_1',
+    'components': [
+        {
+            'id': 'source_1',
+            'provider': 'filesys',
+            'config': {'parameters': {'secureParameters': {'secure': ['password'], 'token': 'UlJQVAI='}}},
+        }
+    ],
+}
+
+
+@pytest.fixture
+def engine_resolve(monkeypatch):
+    """Record calls to rocketlib.resolveSecureParameters and return a decoded pipeline."""
+    calls = []
+    decoded = {'source': 'source_1', 'components': [{'id': 'source_1', 'config': {'parameters': {'password': 'pw'}}}]}
+
+    def resolve(pipeline):
+        calls.append(pipeline)
+        return decoded
+
+    monkeypatch.setattr(sys.modules['rocketlib'], 'resolveSecureParameters', resolve, raising=False)
+    return SimpleNamespace(calls=calls, decoded=decoded)
+
+
+def test_resolve_parameter_tokens_without_secret_passes_through(engine_resolve):
+    """Without the deployment secret the child decodes its own tokens, as before."""
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={}) is _TOKEN_PIPELINE
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: ''}) is _TOKEN_PIPELINE
+    assert engine_resolve.calls == []
+
+
+def test_resolve_parameter_tokens_with_secret_decodes_in_engine(engine_resolve):
+    """With the deployment secret set, the engine decodes the tokens before the task file is written."""
+    result = resolve_parameter_tokens(_TOKEN_PIPELINE, environ={CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert result is engine_resolve.decoded
+    assert engine_resolve.calls == [_TOKEN_PIPELINE]
+
+
+def test_resolve_parameter_tokens_reads_process_environment(engine_resolve, monkeypatch):
+    """The default environment is the engine process's own."""
+    monkeypatch.delenv(CONST_PARAM_TOKEN_SECRET_ENV, raising=False)
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is _TOKEN_PIPELINE
+
+    monkeypatch.setenv(CONST_PARAM_TOKEN_SECRET_ENV, 'param-token-secret')
+    assert resolve_parameter_tokens(_TOKEN_PIPELINE) is engine_resolve.decoded
+
+
+def test_param_token_secret_stays_out_of_subprocess():
+    """The child never gets the secret, which is why the engine decodes for it."""
+    env = filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
+    assert env == {'PATH': '/usr/bin'}
 
 
 def test_filter_subprocess_env_matches_names_case_insensitively():
@@ -1700,7 +1835,7 @@ async def test_restart_loads_values_before_stopping_and_keeps_the_task_if_that_f
     task._reset_status = lambda: None
     seen = []
 
-    async def start():
+    async def start(*, credential=None):
         seen.append(await task._resolve_pipeline(task._pipeline))
 
     task.start_task = start
@@ -1878,7 +2013,7 @@ async def test_a_second_restart_while_one_runs_is_refused():
 
     seen = []
 
-    async def start():
+    async def start(*, credential=None):
         seen.append(await task._resolve_pipeline(task._pipeline))
 
     task.stop_task = stop
@@ -2055,6 +2190,7 @@ async def test_on_event_exit_reads_the_key_the_emitters_write():
     t._status.exitMessage = ''
     t._status.state = 0
     t._is_restarting = False
+    t._stop_requested = False
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2072,6 +2208,7 @@ async def test_on_event_exit_still_defaults_when_no_code_is_sent():
     t._status.exitMessage = ''
     t._status.state = 0
     t._is_restarting = False
+    t._stop_requested = False
     t._update_completion_status = MagicMock()
     t._close_run_log = MagicMock()
 
@@ -2246,6 +2383,24 @@ def test_saas_gate_matches_the_node_not_the_provider_name(component):
     assert problem and 'stdio MCP transport' in problem
 
 
+def test_saas_gate_sees_a_nosaas_node_that_only_eaas_serves(monkeypatch):
+    """A node EaaS serves is not in the engine's registry; the hosted gate
+    still reads its capabilities and refuses it.
+    """
+    import rocketlib
+
+    import ai.modules.task.task_engine as engine
+
+    monkeypatch.setattr(engine, '_is_saas_engine', lambda: True)
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: None)
+    monkeypatch.setattr(engine.node_store, '_definitions', {'text_output': {'capabilities': ['nosaas']}})
+    t = _task(source='src')
+    t._shares_host = lambda: True
+
+    with pytest.raises(ValueError, match='not available on RocketRide Cloud'):
+        Task._check_pipeline(t, {'components': [{'id': 'src', 'provider': 'text_output'}]})
+
+
 def test_saas_gate_off_the_engine_host_allows_stdio_mcp_but_not_nosaas():
     def violation(component):
         return saas_pipeline_violation({'components': [component]}, _get_service, _mcp_node_config, shared_host=False)
@@ -2265,6 +2420,8 @@ def _exit_task(exit_event_seen=False):
     t = _task(status=TASK_STATUS())  # a first run: exitCode starts at 0
     t._exit_event_seen = exit_event_seen
     t._stop_requested = False
+    t._crash = None
+    t._process_killed = False
     return t
 
 
@@ -2304,6 +2461,17 @@ async def test_exit_event_marks_the_run_as_reported():
     await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': {'exitCode': 3, 'message': 'boom'}})
     assert t._exit_event_seen is True
     assert (t._status.exitCode, t._status.exitMessage) == (3, 'boom')
+
+
+def test_a_new_run_starts_from_exit_code_zero():
+    """A run started again after an error: a stop by the server, which keeps the code, must not read the old one."""
+    t = _analytics_task()
+    t._status_trace = []
+    t.info = {}
+    t._status.exitCode = 3
+    t._status.exitMessage = 'boom'
+    Task._reset_status(t)
+    assert (t._status.exitCode, t._status.exitMessage) == (0, '')
 
 
 class _ExitingProcess:
@@ -2359,6 +2527,52 @@ async def test_a_process_that_does_not_exit_is_killed_and_reaped(monkeypatch):
     assert await Task._process_exit_code(t) == -9
     assert t._engine_process.killed
 
+    # The server's own kill is not a crash
+    Task._apply_process_exit_code(t, -9)
+    assert t._crash is None
+
+
+# ---------------------------------------------------------------------------
+# A crash the engine reported with >EXIT*Crash
+# ---------------------------------------------------------------------------
+
+_SEGV = {'exitCode': 1, 'message': 'Application received system signal: SIGSEGV', 'crash': True}
+
+
+def _ending_task(process_exit_code):
+    """A task whose output has closed, for running the real _terminated()."""
+    t = _exit_task()
+    t._terminated_called = False
+    t._is_restarting = False
+    t._debug_stdio = t._data_client = t._task_metrics = t._tmpfile = t._data_port = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._stop_reason = None
+    t._run_trigger = None
+    t._send_status_update = AsyncMock()
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=process_exit_code)
+    return t
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'stop_requested, status, exit_code, exit_message, outcome',
+    [
+        (False, 'Stopped unexpectedly', 1, 'Stopped unexpectedly', 'error'),
+        # A crash during a requested stop is part of the stop
+        (True, 'Stopped', 0, '', 'cancelled'),
+    ],
+)
+async def test_a_reported_crash_ends_the_task(stop_requested, status, exit_code, exit_message, outcome):
+    t = _ending_task(-6)
+    t._stop_requested = stop_requested
+    run_log = t._run_log = AsyncMock()
+    await Task.on_event(t, {'type': 'event', 'event': 'apaevt_exit', 'body': dict(_SEGV)})
+    await Task._terminated(t)
+    assert (t._status.status, t._status.exitCode, t._status.exitMessage) == (status, exit_code, exit_message)
+    assert run_log.end_run.await_args.args[0] == outcome
+
 
 # ---------------------------------------------------------------------------
 # TaskData — the engine's data channel to the task
@@ -2404,8 +2618,8 @@ class _SilentTransport:
 )
 async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
     """A request waiting on the data channel fails when the channel closes, instead of waiting forever."""
-    parent = SimpleNamespace(_data_client=None)
-    client = Task.TaskData(parent_task=parent, module='DATA-test', transport=_SilentTransport())
+    parent = _task()
+    client = Task.TaskData(parent_task=parent, channel_id='c1', module='DATA-test', transport=_SilentTransport())
     parent._data_client = client
 
     pending = asyncio.ensure_future(client.dap_request(command='rrext_process', arguments={'subcommand': 'open'}))
@@ -2417,3 +2631,138 @@ async def test_data_channel_disconnect_fails_pending_requests(reason, expected):
     with pytest.raises(ConnectionError, match=expected):
         await asyncio.wait_for(pending, timeout=1)
     assert parent._data_client is None
+
+
+# ---------------------------------------------------------------------------
+# The data-channel token
+# ---------------------------------------------------------------------------
+
+
+class _LaunchStop(Exception):
+    """Raised by a stubbed launch step to end start_task early."""
+
+
+def _startable_task(monkeypatch):
+    """Build a Task that start_task can drive up to the subprocess launch.
+
+    The launch itself is stubbed: ``create_subprocess_exec`` records its
+    arguments and raises ``_LaunchStop``, so no process starts.
+
+    Args:
+        monkeypatch: pytest fixture.
+
+    Returns:
+        tuple: ``(task, launches)`` — ``launches`` collects ``(argv, env)``.
+    """
+    from ai.modules.task import task_engine
+
+    t = _task()
+    t._status = SimpleNamespace(state=TASK_STATE.NONE.value, completed=False, startTime=None)
+    t._is_restarting = False
+    t._launch_args = {}
+    t._resolve_pipeline = AsyncMock(return_value={'components': []})
+    t._check_pipeline = MagicMock()
+    t._write_task_file = AsyncMock(return_value='/tmp/task-1.json')
+    t._is_debugging = MagicMock(return_value=False)
+    t._send_status_update = AsyncMock()
+    t._build_subprocess_env = AsyncMock(return_value={'PATH': '/usr/bin'})
+    t._terminated = AsyncMock()
+    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), _config={})
+
+    launches = []
+
+    async def fake_exec(*argv, env=None, **kwargs):
+        """Record the launch and stop it before any process starts."""
+        launches.append((argv, env))
+        raise _LaunchStop()
+
+    monkeypatch.setattr(task_engine.asyncio, 'create_subprocess_exec', fake_exec)
+    return t, launches
+
+
+async def test_start_task_mints_a_fresh_token_for_every_start(monkeypatch):
+    """Every start gets its own token, separate from the control token."""
+    t, _ = _startable_task(monkeypatch)
+    tokens = []
+
+    for _ in range(2):
+        t._status.state = TASK_STATE.NONE.value
+        with pytest.raises(_LaunchStop):
+            await Task.start_task(t)
+        tokens.append(t._data_token)
+
+    assert all(len(token) >= 32 for token in tokens)
+    assert tokens[0] != tokens[1]
+    assert t.token not in tokens
+
+
+async def test_start_task_passes_only_the_token_hash_ahead_of_pipeline_args(monkeypatch):
+    """The token's SHA-256 goes on argv before any pipeline arg; the token is in neither argv nor env."""
+    t, launches = _startable_task(monkeypatch)
+    t._launch_args = {'args': [f'--data_token_sha256={"b" * 64}']}
+
+    with pytest.raises(_LaunchStop):
+        await Task.start_task(t)
+
+    ((argv, env),) = launches
+    expected = f'--data_token_sha256={hashlib.sha256(t._data_token.encode("utf-8")).hexdigest()}'
+    assert [arg for arg in argv if arg.startswith('--data_token_sha256')][0] == expected
+    assert not any(t._data_token in arg for arg in argv)
+    assert not any(t._data_token in value for value in env.values())
+
+
+async def test_data_connection_presents_the_token(monkeypatch):
+    """The parent dials /task/data with its run's token on the handshake."""
+    from ai.modules.task import task_engine
+
+    transports = []
+
+    def fake_transport(uri, **kwargs):
+        """Record the URI and the handshake options; hand back a stand-in transport."""
+        transports.append((uri, kwargs))
+        return MagicMock(name='transport')
+
+    client = MagicMock(name='data-client')
+    client.connect = AsyncMock()
+    client.dap_request = AsyncMock(return_value={'success': True})
+    client.did_fail = MagicMock(return_value=False)
+
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', fake_transport)
+    monkeypatch.setattr(Task, 'TaskData', MagicMock(return_value=client))
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_port = 20001
+    t._data_token = 'run-token'
+    t._engine_process = None
+    t._provider = None
+
+    await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    ((uri, kwargs),) = transports
+    assert uri == 'ws://127.0.0.1:20001/task/data'
+    assert kwargs['headers']['Authorization'] == 'Bearer run-token'
+    assert kwargs['headers']['X-Channel-Id']
+
+
+async def test_data_request_without_a_token_fails_at_once(monkeypatch):
+    """A request that outlived the run fails clearly, with no retries and no ``Bearer None``."""
+    from ai.modules.task import task_engine
+
+    transport = MagicMock(name='TransportWebSocket')
+    monkeypatch.setattr(task_engine, 'TransportWebSocket', transport)
+
+    t = _task()
+    t._is_terminating = False
+    t._data_lock = asyncio.Lock()
+    t._data_client = None
+    t._data_port = None
+    t._data_token = None
+    t._engine_process = None
+
+    with pytest.raises(RuntimeError, match='not running'):
+        await Task._send_data(t, {'command': 'apaext_process', 'arguments': {}})
+
+    transport.assert_not_called()

@@ -59,7 +59,7 @@ import { codeOnly, keywordSites, stripSqlComments } from './split';
 export type RunOutcome = 'pending' | 'running' | 'rows' | 'affected' | 'error' | 'abandoned' | 'skipped';
 
 /** One statement of a batch, with whatever is known about it so far. */
-export interface IStatementRun {
+export interface StatementRun {
 	/** Zero-based position in the batch. */
 	index: number;
 	/** The statement as sent (before the row limit is appended). */
@@ -115,7 +115,7 @@ export interface IStatementRun {
  * @param runs - The batch's statements, in order.
  * @returns True when one of them has been sent and has not answered yet.
  */
-export function hasStatementInFlight(runs: IStatementRun[]): boolean {
+export function hasStatementInFlight(runs: StatementRun[]): boolean {
 	return runs.some((run) => run.outcome === 'running');
 }
 
@@ -160,7 +160,7 @@ type OutcomeGroup = 'ran' | 'committed' | 'failed' | 'not run' | 'abandoned';
  * @param run - The statement.
  * @returns The group, or null for a statement that has not resolved.
  */
-function groupOf(run: IStatementRun): OutcomeGroup | null {
+function groupOf(run: StatementRun): OutcomeGroup | null {
 	if (run.outcome === 'rows' || run.outcome === 'affected') return run.kind === 'read' ? 'ran' : 'committed';
 	if (run.outcome === 'error') return 'failed';
 	if (run.outcome === 'abandoned') return 'abandoned';
@@ -179,7 +179,7 @@ function groupOf(run: IStatementRun): OutcomeGroup | null {
  * @param runs - The batch's statements, in order.
  * @returns The summary line ('' when there is nothing to say).
  */
-export function formatBatchOutcome(runs: IStatementRun[]): string {
+export function formatBatchOutcome(runs: StatementRun[]): string {
 	const parts: string[] = [];
 	let groupStart = -1;
 	let groupName: OutcomeGroup | null = null;
@@ -215,7 +215,7 @@ export function formatBatchOutcome(runs: IStatementRun[]): string {
  * @param failedIndex - Zero-based index of the statement that failed.
  * @returns The sentence, or '' when nothing ran before the failure.
  */
-export function formatPriorStatements(runs: IStatementRun[], failedIndex: number): string {
+export function formatPriorStatements(runs: StatementRun[], failedIndex: number): string {
 	const prior = runs.slice(0, Math.max(0, failedIndex));
 	if (prior.length === 0) return '';
 	const span = prior.length === 1 ? 'Statement 1' : `Statements 1\u2013${prior.length}`;
@@ -236,7 +236,7 @@ export function formatPriorStatements(runs: IStatementRun[], failedIndex: number
  * @param run - The statement.
  * @returns The label.
  */
-export function formatRunLabel(run: IStatementRun): string {
+export function formatRunLabel(run: StatementRun): string {
 	const head = `${run.index + 1} ${run.verb}`;
 	const elapsed = run.ms === undefined ? '' : ` · ${formatElapsed(run.ms)}`;
 	switch (run.outcome) {

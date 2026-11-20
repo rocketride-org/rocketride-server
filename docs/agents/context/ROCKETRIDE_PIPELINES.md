@@ -18,7 +18,7 @@ pipeline components this document does not mention. Always confirm a provider na
 and its `invoke` requirements in `.rocketride/services-catalog.json` before wiring it. For
 client SDK usage (`client.use()`, `client.chat()`, `client.send()`), read
 ROCKETRIDE_python_API.md or ROCKETRIDE_typescript_API.md.
-On RocketRide Cloud there are no custom nodes (its engine starts without `--node_path`),
+On RocketRide Cloud there are no custom nodes (it runs only the catalog's),
 and a pipeline bundled in a store app may use catalog nodes only: see 'Catalog nodes only'
 in `ROCKETRIDE_APPS.md`.
 
@@ -301,6 +301,7 @@ data. The complete set in the current catalog:
 | `filestore_source` | `tags` | Reads from a RocketRide file store |
 | `filesys` | `tags` | Reads from the local file system |
 | `telegram` | `text`, `image`, `audio`, `video`, `tags` | Telegram Bot messages, routed per message type |
+| `scraper_beautifulsoup_source` | `answers`, `text` | Run-once web scraping of configured JSON APIs, RSS/Atom feeds and HTML pages (no input; schedulable). `answers` carries one JSON row list per source — wire it to a SQL node's `answers` lane to load a table |
 | `tools` | — (nothing) | Transfers no data; exists to **host tool nodes** via invoke |
 
 (`remote` is NOT a source — it is an infrastructure transport for distributed pipelines.)
@@ -478,7 +479,7 @@ message points straight at the wiring to fix:
 | --- | --- |
 | Sub-pipeline shared with the main flow or a second start | `Control node "Pipeline Tool" (pipe_tool_1) reaches node "Prompt" (sub_a) that the main flow owns; a control node's sub-pipeline must not be shared with the main pipeline or another start` |
 | One sub-pipeline node reached by two control nodes | `is reachable from two control roots ( ... and ... ) - a node has exactly one lifecycle owner` |
-| An invoke node that drives a sub-pipeline and is itself data-fed | `drives a sub-pipeline and is also data-fed` (for `tool_pipe` specifically, lane validation rejects earlier: `input lane ... not found in service definition` — `tool_pipe` accepts no data input at all) |
+| An invoke node that drives a sub-pipeline and is itself data-fed | `drives a sub-pipeline and is also data-fed` (for `tool_pipe` specifically, `validate()` reports it first as `which tool_pipe does not take; it takes no lanes`, since `tool_pipe` accepts no data input at all) |
 
 **Valid:** invoking the *same* tool from two agents — one sub-pipeline, one owner. Only
 *sharing nodes between* sub-pipelines (or with the main flow) is rejected.
@@ -586,7 +587,8 @@ chat →  → agent_b →  → response_answers   (ONE node, one `input` entry p
 ```text
                 → [preprocessor_langchain → embedding_transformer → qdrant (content)]
 webhook → parse →
-                → [summarization [controlled: llm] → embedding_transformer → qdrant (summaries)]
+                → [summarization → embedding_transformer → qdrant (summaries)]
+    [controlled by summarization: llm]
 ```
 
 Two-tier retrieval indexing. `summarization` requires an `llm` control connection.
@@ -661,6 +663,21 @@ Connects to an external MCP server and exposes its tools to the controlling agen
 (`endpoint` field), `sse` (legacy, `sse_endpoint` field). A plain `tool` node: control wiring
 only, no lanes.
 
+A published stdio server usually reads its API key from an environment variable: set it in
+`env`, which is added to the engine's environment for that process. `allowedTools` exposes
+only the listed tools; the agent never sees the others and a call to one is refused before it
+reaches the server. Leave it empty to expose every tool. Stdio servers do not run on
+RocketRide Cloud.
+
+```json
+{ "id": "mcp_client_1", "provider": "mcp_client",
+  "config": { "serverName": "github", "transport": "stdio",
+    "stdio": { "commandLine": "npx -y @modelcontextprotocol/server-github",
+               "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "${ROCKETRIDE_GITHUB_TOKEN}" } },
+    "allowedTools": [{ "toolName": "search_issues" }, { "toolName": "get_issue" }], "parameters": {} },
+  "control": [{ "classType": "tool", "from": "agent_rocketride_1" }] }
+```
+
 ### Pattern 14: Graph store Q&A (`graph_neo4j`, `graph_falkordb`, `rocketride_graph`)
 
 ```text
@@ -679,7 +696,12 @@ no database connection settings in the pipeline. Their classType also includes `
 an agent can control a graph store as a tool instead.
 
 **Writing to a graph store** goes through its `execute` tool (node config
-`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. On `rocketride_graph`
+`allow_execute: true`) or `client.database.query` — raw Cypher, no LLM. A write whose result
+passes `max_execute_rows` (25,000 rows by default) fails with nothing saved on `rocketride_graph` and `graph_neo4j`
+(except Neo4j's batched `CALL { ... } IN TRANSACTIONS`, whose earlier batches stay saved);
+`graph_falkordb` cannot roll back, so it saves the write and returns the first rows with
+`truncated: true`; it does the same when the reply reaches the server's `RESULTSET_SIZE`
+(10,000 in the official image), because the server cuts replies there. On `rocketride_graph`
 the rules follow the Apache AGE version the database reports (`pg_extension.extversion`):
 1.5.0 and 1.6.0 have their own rules, and any other version gets the strict 1.5.0 rules. A
 database whose AGE library is already 1.6.0 reports 1.5.0 until `ALTER EXTENSION age UPDATE`
@@ -687,7 +709,7 @@ runs, so it keeps the 1.5.0 rules until then.
 
 - Bind values as named `params` (`{ "rows": [...] }` for `$rows`) — never paste them into the
   Cypher text: no escaping, and bound values do not count toward the 10,000-character query
-  limit. `graph_neo4j` accepts `params` too; `graph_falkordb` rejects them.
+  limit. `graph_neo4j` and `graph_falkordb` accept `params` too.
 - On AGE 1.5.0 a bulk upsert is TWO calls. AGE 1.5.0 applies SET / REMOVE / DELETE only to the
   first node or edge a MERGE creates in a statement, so `UNWIND ... MERGE ... SET` in one call is
   rejected:
@@ -870,7 +892,8 @@ Research needs two capabilities: finding sources and reading them; the agent's L
 synthesis. Search tools (pick one): `tool_tavily` (`apikey`, `maxResults`, `searchDepth`
 `basic`/`advanced`, `topic` `general`/`news`/`finance`) or `tool_exa_search` (`apikey`,
 `numResults`, `searchType` `auto`/`neural`/`keyword`, `useAutoprompt`, `includeText`). Page
-reader: `tool_firecrawl` (`apikey`; exposes `firecrawl.scrape_url` and `firecrawl.map_url`).
+reader: `tool_firecrawl` (`apikey`; exposes `firecrawl.scrape_url` and `firecrawl.map_url`), or the
+key-free `scraper_beautifulsoup` (`fetch_page`, `extract`, `fetch_feed`, `fetch_json`; no JavaScript rendering).
 Tool configs are flat — `{ "type": "tool_tavily", "apikey": "${ROCKETRIDE_TAVILY_KEY}" }` —
 and each tool declares `"control": [{ "classType": "tool", "from": "agent_rocketride_1" }]`
 exactly as in Pattern 13.
@@ -991,7 +1014,8 @@ response/store node for the machine-readable result. For video, put `frame_grabb
 ### Pattern 27: Structured extraction with validation
 
 ```text
-webhook → parse → extract_data [controlled: llm] → schema_validate → response_answers
+webhook → parse → extract_data → schema_validate → response_answers
+    [controlled by extract_data: llm]
 ```
 
 `extract_data` (requires an `llm` control connection) pulls a configured column set out of
@@ -1065,6 +1089,25 @@ that broker. They take no database connection settings in the pipeline; being bu
 does not make a database available on an unconfigured local engine. For your own database,
 use `db_postgres` for SQL, PostgreSQL (pgvector), provider `postgres`, for vectors, or
 `graph_neo4j` / `graph_falkordb` for graphs.
+
+### Pattern 30: Custom skills for an agent (`tool_skills`)
+
+```json
+{ "id": "tool_skills_1", "provider": "tool_skills",
+  "config": { "folder": "skills", "skills": [
+    { "skillName": "release-notes",
+      "skillDescription": "Write release notes from merged changes. Use when asked for release notes or a changelog.",
+      "skillInstructions": "Group the changes into Added, Fixed and Changed. One short sentence per change." } ],
+    "parameters": {} },
+  "control": [{ "classType": "tool", "from": "agent_rocketride_1" }] }
+```
+
+Gives the agent skills in the `SKILL.md` format: rows in `skills` (paste a whole `SKILL.md`,
+frontmatter included, into `skillInstructions` and leave the name and description empty), or
+a `folder` in the RocketRide file store with one subfolder per skill, each holding a
+`SKILL.md` and any reference files. The agent gets `load_skill`, whose description lists every
+skill, and `read_skill_file` for a folder skill's bundled files. Skills load when the pipeline
+starts. Works with every agent node; a plain `tool` node with control wiring only.
 
 ---
 
@@ -1145,7 +1188,7 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
 ### Driving pipelines from code (pointers)
 
 - Start once with `client.use(filepath='...')` and reuse the returned token; pass
-  `use_existing=True` in long-running services to avoid `Pipeline already running`. A task
+  `use_existing=True` in long-running services to avoid `Pipeline is already running`. A task
   is keyed by owner + `project_id` + source, so to run the same pipe more than once at a
   time give each `use()` its own unguessable `tk_` token.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
@@ -1197,10 +1240,19 @@ Validation errors (pipeline rejected before running):
 | `input references unknown component id:` / `control references unknown component id:` | `from` must name an existing component |
 | `'pipeline.source' references unknown component id:` | Point `source` at a real component id |
 | `Pipeline has multiple source components, please specify one explicitly` | Two+ `mode: "Source"` components — add top-level `source` (or pass `source` to `client.use()`) |
-| `input lane <lane> not found in service definition` | Data input wired into invoke-only `tool_pipe` — remove it; `tool_pipe` is invoked, never fed |
 | `...must not be shared with the main pipeline or another start` | Sub-pipeline node also reachable from a start — make the sub-pipeline self-contained (ownership rule 3) |
 | `...is reachable from two control roots...a node has exactly one lifecycle owner` | Node shared between two invoke nodes' sub-pipelines — one sub-pipeline per invoke node (rule 2) |
 | `...drives a sub-pipeline and is also data-fed...` | Remove the data input from the invoke node (rule 1) |
+
+Wiring errors. `validate()` checks the pipeline against the services it names. A run does
+not, so a pipeline with these errors can still start and then fail or lose data:
+
+| Error contains | Cause / fix |
+| --- | --- |
+| `which is not a service on this engine` | Unknown or misspelled provider; use one from the service catalog |
+| `which is not a class of <provider>` | A `control` entry on the wrong node; put it on the node being called, with `from` naming the node that calls it |
+| `which <provider> does not produce` | The upstream node never writes that lane; wire it from a node that does |
+| `which <provider> does not take` | The node never reads that lane, such as a data input into invoke-only `tool_pipe`; remove the input or use a lane the node takes |
 
 Runtime errors:
 
@@ -1208,7 +1260,7 @@ Runtime errors:
 | --- | --- |
 | `Connection closed` / `Connection timeout` | **Blocked async event loop** — async I/O only; see the SDK docs |
 | `KeyError: 'answers'` | Custom `laneName` changed the response key — read keys via `result_types` |
-| `Pipeline already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
+| `Pipeline is already running` | `use()` while running — `use_existing=True`, `terminate()` first, or a distinct `token` per instance |
 | `Component not found` / `Lane not supported` | Provider or lane not in the catalog — check spelling and `lanes` |
 | `Connection refused` / `Invalid API key` | External service down, or wrong `.env` values — check hosts, ports, `${ROCKETRIDE_*}` names |
 

@@ -28,7 +28,8 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isDevRemote, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { resetDevGateForTests } from './devGate';
 import type { AppDescriptor } from '../components/workspace/types';
 
 // In the browser the rsbuild MF plugin creates the host instance; stand one
@@ -51,6 +52,9 @@ function stubLoader(load: (id: string) => unknown): void {
  * framed (an embedded App Builder preview) or the top-level window.
  */
 function stubPage(search: string, framed: boolean): void {
+	// The preview behaviour under test is a DEV-build capability: stage it
+	// explicitly instead of inheriting whatever NODE_ENV the runner has.
+	process.env.NODE_ENV = 'development';
 	const self = {};
 	const store = new Map<string, string>();
 	Reflect.set(globalThis, 'window', { self, top: framed ? {} : self, location: { search } });
@@ -59,6 +63,9 @@ function stubPage(search: string, framed: boolean): void {
 		setItem: (key: string, value: string) => void store.set(key, value),
 		removeItem: (key: string) => void store.delete(key),
 	});
+	// The tab session freezes on first read (a real page's identity never
+	// changes mid-session); each stubbed page is a NEW page.
+	resetDevGateForTests();
 }
 
 /** Pins the page clock (ms since navigation start) the hold is measured on. */
@@ -66,9 +73,14 @@ function stubClock(ms: number): void {
 	mock.method(performance, 'now', () => ms);
 }
 
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
 afterEach(() => {
 	mock.restoreAll();
 	setDescriptorInvalidator(null);
+	if (ORIGINAL_NODE_ENV === undefined) delete process.env.NODE_ENV;
+	else process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+	resetDevGateForTests();
 });
 
 /** A module loader whose loads stay open until the test settles them, one handle per module id. */
@@ -81,7 +93,7 @@ function heldLoader(): Map<string, { resolve: (v: unknown) => void; reject: (e: 
 test('a module load that ends first (the waitlist screen\'s telemetry entry) never clears the pending mark of the app load still in flight', async () => {
 	stubPage('', false);
 	const held = heldLoader();
-	const [entry] = registerAndMapApps([{ id: 'org.race', moduleId: 'race_mod', name: 'Race', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	const [entry] = registerAndMapApps([{ id: 'org.race', moduleId: 'race_mod', name: 'Race', registryVersion: 1 }]);
 	const appLoad = entry.load();
 	assert.equal(isRemotePending('race_mod'), true, 'the app load marks the container');
 	const telemetry = loadAppModule('org.race', 'telemetry');
@@ -100,7 +112,7 @@ test('a module load that ends first (the waitlist screen\'s telemetry entry) nev
 test('the other order: the app load ends first and the module load keeps the mark until it ends', async () => {
 	stubPage('', false);
 	const held = heldLoader();
-	const [entry] = registerAndMapApps([{ id: 'org.race2', moduleId: 'race_mod2', name: 'Race 2', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	const [entry] = registerAndMapApps([{ id: 'org.race2', moduleId: 'race_mod2', name: 'Race 2', registryVersion: 1 }]);
 	const telemetry = loadAppModule('org.race2', 'telemetry');
 	const appLoad = entry.load();
 	held.get('race_mod2/AppDescriptor')!.resolve({ default: { id: 'org.race2' } });
@@ -114,7 +126,7 @@ test('the other order: the app load ends first and the module load keeps the mar
 test('a loader that throws before returning a promise leaves no pending mark (app load and module load)', async () => {
 	stubPage('', false);
 	stubLoader(() => { throw new Error('no federation instance'); });
-	const [entry] = registerAndMapApps([{ id: 'org.sync', moduleId: 'sync_mod', name: 'Sync', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	const [entry] = registerAndMapApps([{ id: 'org.sync', moduleId: 'sync_mod', name: 'Sync', registryVersion: 1 }]);
 	assert.throws(() => entry.load(), /no federation instance/);
 	assert.equal(isRemotePending('sync_mod'), false, 'the app load released its mark');
 	assert.equal(await loadAppModule('org.sync', 'telemetry'), null);
@@ -124,8 +136,8 @@ test('a loader that throws before returning a promise leaves no pending mark (ap
 test('a later registration batch (the apps a sign-in adds) keeps the earlier batch loadable', async () => {
 	stubPage('', false);
 	stubLoader(async (id: string) => ({ default: id }));
-	registerAndMapApps([{ id: 'org.probe', moduleId: 'probe_mod', name: 'Probe', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
-	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', dev: true, entry: 'http://localhost:9/remoteEntry.js' }]);
+	registerAndMapApps([{ id: 'org.probe', moduleId: 'probe_mod', name: 'Probe', registryVersion: 1 }]);
+	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', registryVersion: 1 }]);
 	assert.deepEqual(await loadAppModule('org.probe', 'telemetry'), { default: 'probe_mod/telemetry' }, 'the probe catalog app still resolves');
 	assert.deepEqual(await loadAppModule('org.gated', 'telemetry'), { default: 'gated_mod/telemetry' });
 });
@@ -155,8 +167,17 @@ test('the hold applies only to the app the preview is locked to', () => {
 	assert.equal(isDevPreviewPending('org.other'), false);
 });
 
-test('a top-level page never holds', () => {
+test('a top-level rrdev tab holds too (URL-convention self-registration)', () => {
+	// Local-first dev: a top-level F5 tab (?appid&rrdev=1) self-registers
+	// its dev build from its own proxy origin, so its first load holds for
+	// that registration exactly like a framed preview.
 	stubPage('?appid=org.held&rrdev=1', false);
+	stubClock(1_000);
+	assert.equal(isDevPreviewPending('org.held'), true);
+});
+
+test('a page without the rrdev marker never holds', () => {
+	stubPage('?appid=org.held', false);
 	stubClock(1_000);
 	assert.equal(isDevPreviewPending('org.held'), false);
 });
@@ -175,7 +196,9 @@ test('the remaining hold time counts down to zero and is zero outside a dev prev
 	mock.restoreAll();
 	stubClock(31_000);
 	assert.equal(devPreviewHoldRemainingMs(), 0);
-	stubPage('?appid=org.held&rrdev=1', false);
+	// Outside a dev preview = no rrdev marker (a top-level rrdev tab is a
+	// dev preview now — it self-registers and holds like a framed one).
+	stubPage('?appid=org.held', false);
 	mock.restoreAll();
 	stubClock(1_000);
 	assert.equal(devPreviewHoldRemainingMs(), 0);
@@ -199,4 +222,48 @@ test('a dev registration for the locked app is not reported as a mismatch', () =
 	const warn = mock.method(console, 'warn', () => {});
 	registerDevRemote('org.match', 'org_match', 'Match', 'http://localhost:1/remoteEntry.js');
 	assert.equal(warn.mock.callCount(), 0);
+});
+
+test('a dev registration whose entry is not a loopback dev server is refused (no remote, no local app)', () => {
+	stubPage('?appid=org.evil&rrdev=1', true);
+	// isDevPreviewPending() below is measured against the page clock: pin it,
+	// or the assertion holds only while the process is under 30 s old.
+	stubClock(1_000);
+	setDescriptorInvalidator(() => {});
+	mock.method(console, 'error', () => {});
+	const registerRemotes = mock.method(federation, 'registerRemotes', () => {});
+	for (const [i, entry] of ['https://attacker.example/remoteEntry.js', '//attacker.example/remoteEntry.js', 'javascript:alert(1)', 'http://localhost.attacker.example/remoteEntry.js', 'http://user:pw@localhost:1/remoteEntry.js', '/remoteEntry.js'].entries()) {
+		registerDevRemote('org.evil', `org_evil${i}`, 'Evil', entry);
+		assert.equal(isDevRemote(`org_evil${i}`), false, entry);
+	}
+	assert.equal(registerRemotes.mock.callCount(), 0, 'nothing was handed to Module Federation');
+	assert.equal(isDevPreviewPending('org.evil'), true, 'the locked app is still waiting for a real registration');
+});
+
+test('a dev registration with a loopback dev-server entry is registered', () => {
+	stubPage('?appid=org.good&rrdev=1', true);
+	setDescriptorInvalidator(() => {});
+	registerDevRemote('org.good', 'org_good', 'Good', 'http://127.0.0.1:3001/remoteEntry.js?t=1');
+	assert.equal(isDevRemote('org_good'), true);
+});
+
+test('the registered entry is the canonical URL that was vetted, not the raw input', () => {
+	stubPage('?appid=org.canon&rrdev=1', true);
+	setDescriptorInvalidator(() => {});
+	const registerRemotes = mock.method(federation, 'registerRemotes', () => {});
+	// Tabs and newlines are stripped by the URL parser; the loader must fetch
+	// exactly what was vetted.
+	registerDevRemote('org.canon', 'org_canon', 'Canon', 'http://loc\talhost:3001/remote\nEntry.js?t=1');
+	assert.equal(isDevRemote('org_canon'), true);
+	assert.equal(registerRemotes.mock.callCount(), 1, 'the module federation runtime was handed the remote');
+	assert.deepEqual(registerRemotes.mock.calls[0].arguments[0], [{ name: 'org_canon', entry: 'http://localhost:3001/remoteEntry.js?t=1' }]);
+});
+
+test('a production build never holds for a dev preview, whatever the URL and tab session say', () => {
+	stubPage('?appid=org.held&rrdev=1', true);
+	process.env.NODE_ENV = 'production';
+	resetDevGateForTests();
+	stubClock(1_000);
+	assert.equal(isDevPreviewPending('org.held'), false);
+	assert.equal(devPreviewHoldRemainingMs(), 0);
 });

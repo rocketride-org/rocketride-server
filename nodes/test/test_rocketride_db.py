@@ -58,12 +58,13 @@ _VEC_NODE_DIR = _REPO / 'nodes' / 'src' / 'nodes' / 'rocketride_vector'
 TEST_DSN = 'postgresql://rruser:rrpass@localhost:55432/rrtenant'
 
 
-def _load_from_path(name: str, path: Path, *, is_package: bool = False):
+def _load_from_path(name: str, path: Path, *, is_package: bool = False, register: bool = True):
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
-    sys.modules[name] = module
+    if register:
+        sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -568,6 +569,11 @@ def _vector_store_cls(monkeypatch):
     # Deliver the org DSN the way the task engine does.
     monkeypatch.setenv('ROCKETRIDE_DB_DSNS', json.dumps({'org': TEST_DSN}))
 
+    search_module = _load_from_path(
+        'ai.common.store.pgvector_store', _AI_SRC / 'ai/common/store/pgvector_store.py', register=False
+    )
+    monkeypatch.setitem(sys.modules, 'ai.common.store.pgvector_store', search_module)
+
     iglobal = _load_from_path('nodes.rocketride_vector.IGlobal', _VEC_NODE_DIR / 'IGlobal.py')
     pkg = types.ModuleType('nodes.rocketride_vector')
     pkg.__path__ = [str(_VEC_NODE_DIR)]
@@ -583,6 +589,51 @@ def _make_store(cls, config):
 
 
 class TestRocketrideVectorStore:
+    @pytest.mark.parametrize('version, iterative', [('0.7.4', False), ('0.8.0', True), ('0.8.1', True)])
+    def test_search_detects_extension_capability_once_per_connection(self, monkeypatch, version, iterative):
+        cls, _ = _vector_store_cls(monkeypatch)
+        monkeypatch.setattr(sys.modules[cls.__module__], 'Doc', types.SimpleNamespace)
+        monkeypatch.setattr(_FakeCursor, 'description', [('content',), ('objectid',), ('distance',)], raising=False)
+        monkeypatch.setattr(
+            _FakeCursor,
+            'fetchone',
+            lambda cur: (version,) if cur._executed[-1].startswith('SELECT extversion') else (True,),
+        )
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
+        for _ in range(2):
+            store.client.fetch_batches = [[('eligible', 'present', 0.05)]] * 2
+            docs = store.searchSemantic(types.SimpleNamespace(embedding=[1.0, 0.0]), types.SimpleNamespace(limit=5))
+            assert [doc.metadata['objectId'] for doc in docs] == ['present']
+        assert store._iterative_scan is iterative
+        statements = store.client.executed
+        assert sum(sql.startswith('SELECT extversion') for sql in statements) == 1
+        assert statements.count('SET LOCAL hnsw.iterative_scan = strict_order') == (2 if iterative else 0)
+        assert sum('distance + 0' in sql for sql in statements) == (0 if iterative else 2)
+
+    @pytest.mark.parametrize('iterative', [False, True])
+    @pytest.mark.parametrize('candidate_score', [0.1, 0.3])
+    def test_full_batch_of_weak_ann_candidates_does_not_hide_a_strong_match(
+        self, monkeypatch, candidate_score, iterative
+    ):
+        """Retry after the 0.20 floor or configured threshold removes ANN hits."""
+        cls, _ = _vector_store_cls(monkeypatch)
+        module = sys.modules[cls.__module__]
+        monkeypatch.setattr(module, 'Doc', types.SimpleNamespace)
+        monkeypatch.setattr(_FakeCursor, 'description', [('content',), ('objectid',), ('distance',)], raising=False)
+        store = _make_store(cls, {'collection': 'rr_vec', 'similarity': 'cosine', 'score': 0.5})
+        store._iterative_scan = iterative
+        monkeypatch.setattr(store, '_convertFilter', lambda doc_filter: ('WHERE isDeleted = %s', [False]))
+        store.client.fetch_batches = [
+            [('weak candidate', f'weak-{i}', 1 - candidate_score) for i in range(5)],
+            [('strong match', 'recovered', 0.05)],
+        ]
+
+        docs = store.searchSemantic(types.SimpleNamespace(embedding=[1.0, 0.0]), types.SimpleNamespace(limit=5))
+
+        assert [doc.metadata['objectId'] for doc in docs] == ['recovered']
+        assert abs(docs[0].score - 0.95) < 1e-9
+
     def test_store_connects_to_its_scopes_database(self, monkeypatch):
         cls, _ = _vector_store_cls(monkeypatch)
         user_dsn = 'postgresql://u_rw:pw@pooler:5432/t_user_u1'

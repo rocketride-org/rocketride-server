@@ -26,15 +26,17 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { useShellConnection } from 'shell';
+import { useShellConnection, useShellEvent } from 'shell';
 import { Explorer } from 'shell';
+import type { RocketRideClient } from 'rocketride';
 import { BxDownload, BxDockLeft, SidebarCollapsedGate } from 'shell';
 import type { ExplorerEntry, ExplorerConfig, ExplorerFileAction } from 'shell';
-import type { IVirtualFileSystem, RocketRideClient } from 'shell';
-import { getDocs } from './docs';
+import type { IVirtualFileSystem, DevToolProps } from 'shell';
 import { getMediaInfo } from './mediaTypes';
 import { getCompatibleViewers, VIEWER_LABELS } from './viewerRegistry';
 import type { ViewerId } from './viewerRegistry';
+import { localDocsBridge, createPeerDocsBridge } from './explorerBridge';
+import type { ExplorerDocsBridge } from './explorerBridge';
 
 // =============================================================================
 // CONFIG
@@ -88,37 +90,29 @@ const styles = {
  * form). ExplorerApp passes this component as its root layout's `sidebar`
  * prop. Files open in the Documents tab system on click.
  */
-const ExplorerSidebar: React.FC = () => {
-	const { client, isConnected } = useShellConnection();
+const ExplorerSidebar: React.FC<{ bridge?: ExplorerDocsBridge; gated?: boolean }> = ({ bridge = localDocsBridge, gated = true }) => {
+	// The realm's own client — the root's real one, or the realm client whose
+	// requests ride the shell bus. Same type, same behaviour either way.
+	const { client: shellClient, isConnected } = useShellConnection();
+	const client = isConnected ? shellClient : null;
 	const [entries, setEntries] = useState<ExplorerEntry[]>([]);
 
-	// Active file path from Documents (for highlighting)
+	// Active file path (for highlighting) — from the bridge: the Documents
+	// store in-app, the frame's `active` peer feed as a devToolSidebar.
 	const [activeFile, setActiveFile] = useState('');
-	useEffect(() => {
-		const docs = getDocs();
-		if (!docs) return;
-		const readActive = (): string => {
-			const s = docs.getState();
-			const group = s.groups[s.activeGroupId];
-			if (!group) return '';
-			const editorId = group.editorIds[group.activeEditorIndex];
-			return editorId ? (s.editors[editorId]?.documentUri ?? '') : '';
-		};
-		setActiveFile(readActive());
-		return docs.subscribe(() => setActiveFile(readActive()));
-	}, []);
+	useEffect(() => bridge.subscribeActive(setActiveFile), [bridge]);
 
 	// --- Refresh file list (recursive) ----------------------------------------
 
 	const refresh = useCallback(async () => {
-		if (!client || !isConnected) { setEntries([]); return; }
+		if (!client) { setEntries([]); return; }
 		try {
 			const allEntries = await listRecursive(client, '@');
 			setEntries(allEntries);
 		} catch {
 			setEntries([]);
 		}
-	}, [client, isConnected]);
+	}, [client]);
 
 	// Refresh on mount and when connection changes
 	useEffect(() => { refresh(); }, [refresh]);
@@ -129,8 +123,8 @@ const ExplorerSidebar: React.FC = () => {
 		const entry = entries.find((e) => e.path === path);
 		// Don't try to open directories as documents
 		if (entry?.type === 'dir') return;
-		getDocs()?.openDocument(path);
-	}, [entries]);
+		bridge.open(path);
+	}, [entries, bridge]);
 
 	// --- File management (rename, delete, createFile, createFolder) -----------
 
@@ -148,16 +142,8 @@ const ExplorerSidebar: React.FC = () => {
 					const newPath = dir ? `${dir}/${newName}` : newName;
 					if (newPath === path) break;
 					await client.fsRename(path, newPath);
-					// Update open editor tabs
-					const docs = getDocs();
-					if (docs) {
-						const s = docs.getState();
-						const editorIds = Object.entries(s.editors)
-							.filter(([, ed]) => ed.documentUri === path)
-							.map(([id]) => id);
-						for (const eid of editorIds) docs.closeEditor(eid);
-						if (editorIds.length > 0) await docs.openDocument(newPath);
-					}
+					// Re-point open editor tabs (local or over the peer channel)
+					bridge.renamed(path, newPath);
 					break;
 				}
 				case 'delete': {
@@ -167,12 +153,12 @@ const ExplorerSidebar: React.FC = () => {
 					} else {
 						await client.fsDelete(path);
 					}
-					getDocs()?.discardDocument(path);
+					bridge.deleted(path);
 					break;
 				}
 				case 'createFile': {
 					await client.fsWriteString(path, '');
-					getDocs()?.openDocument(path);
+					bridge.open(path);
 					break;
 				}
 				case 'createFolder': {
@@ -184,7 +170,7 @@ const ExplorerSidebar: React.FC = () => {
 		} catch (err) {
 			console.error(`[ExplorerSidebar] ${action} failed:`, err);
 		}
-	}, [client, refresh]);
+	}, [client, refresh, bridge]);
 
 	// --- Move (drag within tree) ----------------------------------------------
 
@@ -198,31 +184,13 @@ const ExplorerSidebar: React.FC = () => {
 			const newPath = `${targetDir || '@'}/${name}`;
 			if (newPath === sourcePath) return;
 			await client.fsRename(sourcePath, newPath);
-			// Keep open editor tabs in sync with the move.  A moved file must
-			// re-point its tab at the new path; a moved directory must re-point
-			// every open tab whose path lives under the old directory prefix.
-			const docs = getDocs();
-			if (docs) {
-				const s = docs.getState();
-				const dirPrefix = `${sourcePath}/`;
-				const affected = Object.entries(s.editors)
-					.map(([id, ed]) => ({ id, uri: ed.documentUri }))
-					.filter(({ uri }) => uri === sourcePath || uri.startsWith(dirPrefix));
-				// Compute each affected tab's new path, close the stale editors,
-				// then reopen at the relocated paths.
-				const reopenPaths: string[] = [];
-				for (const { id, uri } of affected) {
-					const movedUri = uri === sourcePath ? newPath : `${newPath}/${uri.slice(dirPrefix.length)}`;
-					reopenPaths.push(movedUri);
-					docs.closeEditor(id);
-				}
-				for (const movedUri of reopenPaths) await docs.openDocument(movedUri);
-			}
+			// Keep open editor tabs in sync with the move (local or peer).
+			bridge.moved(sourcePath, newPath);
 			await refresh();
 		} catch (err) {
 			console.error('[ExplorerSidebar] move failed:', err);
 		}
-	}, [client, refresh]);
+	}, [client, refresh, bridge]);
 
 	// --- Upload (drop from OS) ------------------------------------------------
 
@@ -233,7 +201,9 @@ const ExplorerSidebar: React.FC = () => {
 				// Same root rule as handleMove: '' targetDir is the '@' mount.
 				const path = `${targetDir || '@'}/${file.name}`;
 				const { handle } = await client.fsOpen(path, 'w');
-				const chunkSize = 4 * 1024 * 1024; // 4 MB
+				// 1 MB chunks (in an off-root realm the bytes ride the bus
+				// base64-framed — binaryWire — so keep frames postMessage-friendly).
+				const chunkSize = 1024 * 1024;
 				try {
 					// Stream the file in chunks via File.slice so we never
 					// buffer the entire file in memory at once.
@@ -281,20 +251,8 @@ const ExplorerSidebar: React.FC = () => {
 	// --- Open with... handler ----------------------------------------------------
 
 	const handleOpenWith = useCallback((path: string, viewerId: ViewerId) => {
-		const docs = getDocs();
-		if (!docs) return;
-
-		// Open the file (may already be open)
-		docs.openDocument(path).then(() => {
-			const s = docs.getState();
-			const group = s.groups[s.activeGroupId];
-			if (!group) return;
-			// Find the editor for this URI in the active group
-			const editorId = group.editorIds.find(eid => s.editors[eid]?.documentUri === path);
-			if (!editorId) return;
-			docs.updateEditorViewState(editorId, { ...s.editors[editorId]?.viewState, viewerId });
-		});
-	}, []);
+		bridge.openWith(path, viewerId);
+	}, [bridge]);
 
 	// --- File actions (kebab menu) -------------------------------------------
 
@@ -340,9 +298,36 @@ const ExplorerSidebar: React.FC = () => {
 		</div>
 	);
 
-	// Render behind the collapse gate — this free-form content has no
-	// icon-rail form, so it hides while the sidebar is collapsed.
-	return <SidebarCollapsedGate>{content}</SidebarCollapsedGate>;
+	// In-app: render behind the collapse gate — this free-form content has no
+	// icon-rail form, so it hides while the shell sidebar is collapsed. As a
+	// devToolSidebar there is no shell frame; the host panel owns visibility.
+	return gated ? <SidebarCollapsedGate>{content}</SidebarCollapsedGate> : content;
+};
+
+/**
+ * The tree as a host-mounted devToolSidebar: document actions ride the tool
+ * channel to the frame (which owns Documents), and the active-path highlight
+ * arrives back the same way.
+ */
+export const ExplorerDevToolSidebar: React.FC<DevToolProps> = ({ channel, documents }) => {
+	const bridge = useMemo(() => createPeerDocsBridge(channel), [channel]);
+
+	// SINGLE-PANE UX: the explorer's editor surface is one pane, so
+	// activating its sidebar tab opens (or reveals) it — the tool's choice.
+	//
+	// Mounting is NOT an activation. The host keeps every pinned tool's
+	// sidebar mounted (SidebarChrome's TabPanel hides inactive panels with
+	// display:none rather than unmounting them), so opening on mount
+	// reopened this pane on every page load — including panes the user had
+	// deliberately closed. This listener is registered long before any
+	// selection can happen, so it covers the first selection too.
+	useShellEvent('shell:toolSidebarActivated', ({ appId }) => {
+		if (appId === 'rocketride.explorer') documents?.open('', 'File Explorer');
+	});
+
+	// No controller duties remain: the frame holds its own realm client (the
+	// shell bus carries its requests), so no `explorer.*` ops are served here.
+	return <ExplorerSidebar bridge={bridge} gated={false} />;
 };
 
 // =============================================================================

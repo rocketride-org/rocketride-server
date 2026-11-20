@@ -113,7 +113,7 @@ node).
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows }>` | Execute raw SQL or Cypher through the pipeline's `execute` tool function. `params` is a positional array for SQL nodes, or an object keyed by placeholder name for the `rocketride_graph` and `graph_neo4j` nodes (`graph_falkordb` rejects params). `rowMode: 'array'` returns positional rows (TypeScript only; the Python SDK has no `row_mode`). |
+| `database.query` | `database.query({ token, sql, nodeId?, sessionId?, params?, rowMode? }): Promise<{ rows, affected_rows, truncated? }>` | Execute raw SQL or Cypher through the pipeline's `execute` tool function. `params` is a positional array for SQL nodes, or an object keyed by placeholder name for the graph nodes (`rocketride_graph`, `graph_neo4j`, `graph_falkordb`). When `graph_falkordb` saves a write but cuts its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`, the result also carries `truncated: true`. `rowMode: 'array'` returns positional rows (TypeScript only; the Python SDK has no `row_mode`). |
 | `database.beginTransaction` | `database.beginTransaction({ token, nodeId? }): Promise<{ session_id }>` | Open a transaction (`begin` tool function). |
 | `database.commit` | `database.commit({ token, sessionId, nodeId? }): Promise<{ ok }>` | Commit the open transaction. |
 | `database.rollback` | `database.rollback({ token, sessionId, nodeId? }): Promise<{ ok }>` | Roll back the open transaction. |
@@ -177,8 +177,8 @@ live on `client.deploy`; the unprefixed verbs are methods on the client itself
 | `disableAppPublish` | `disableAppPublish(appId, target): Promise<{publish}>` | Disable an audience binding — serving stops, but the row STAYS in the where-live listing marked `disabled` (a visible off switch), unlike `removeAppPublish`. Publishing any version to that audience re-enables it. Returns the binding row (state `disabled`). |
 | `whereApp` | `whereApp(appId): Promise<Array<{rung, handle, version, appVersion, state, deployedAt?}>>` | The reverse index: one row per audience serving the app — `state` is the bound DEPLOYMENT's review state. |
 | `waitForAppBuild` | `waitForAppBuild(appId, registryVersion, { timeoutMs?, intervalMs?, onStatus? }): Promise<RailEntry>` | Wait for one version's server build — deploying returns at once with `buildStatus: 'queued'`, and publish/submit/serve gate on a finished (`ok`) build. Polls the rail; throws on a failed build (read it with `buildLog`), an unknown version, or the timeout (default 10 minutes). |
-| `developerStatus` | `developerStatus(): Promise<{developerId, stripeAccountId, stripeAccountStatus}>` | The caller org's developer namespace — the `<developerId>` half of every app id it owns. `developerId` is `null` until an org admin registers one. Readable on both editions (OSS answers the fixed namespace its sessions carry). |
-| `registerDeveloper` | `registerDeveloper(developerId): Promise<Record<string, unknown>>` | Claim the caller org's developer id slug (org.admin, self-service, SaaS only). |
+| `developerStatus` | `developerStatus(options?: { timeout?: number }): Promise<{developerId, stripeAccountId, stripeAccountStatus}>` | The caller org's developer namespace — the `<developerId>` half of every app id it owns. `developerId` is `null` until an org admin registers one. Readable on both editions (OSS answers the fixed namespace its sessions carry). `options.timeout` bounds the request in ms; on expiry it rejects and a late reply is ignored. |
+| `registerDeveloper` | `registerDeveloper(developerId, options?: { timeout?: number }): Promise<Record<string, unknown>>` | Claim the caller org's developer id slug (org.admin, self-service, SaaS only). `options.timeout` bounds the request in ms; a timed-out claim may still land, so re-check `developerStatus()`. |
 
 Serving needs no verb: a version's bundle loads from the stable
 `/apps/<appId>/v<N>/remoteEntry.js` URL constructed from its registry
@@ -192,19 +192,18 @@ Two raw DAP commands carry this surface (call via
 
 - **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
   developerId is a deploy PREREQUISITE, not a marketplace action): the
-  `developer_*` family, `submit`, and `register_dev`.
+  `developer_*` family and `submit`.
 - **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
   install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
   pricing (`pricing_*`).
 
-Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+Grouped families (the `developer_*`/`submit` rows are on
 `rrext_deploy_app`; the rest on `rrext_app`):
 
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
 | submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread (sugar over `submitApp`/`withdrawApp`/`replyApp`). |
-| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` flips it `ready`, `admin_reject(appId, version)` flips it `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org (owns the app_products row) | Manage Stripe price tiers for a monetized app. |
@@ -282,6 +281,11 @@ constructor(options?: {
 | `addDocuments` | `addDocuments(documents: Doc \| Doc[]): void` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(goal: string): void` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(hasPreviousJsonFailed?: boolean): string` | Returns the full prompt (internal use). |
+| `messages` | field, default `[]` | The conversation, as `UserMessage` / `AssistantMessage` items. Non-empty switches the question to turn mode (native tool calling). See [Chat](/clients/typescript/chat#native-tool-calling). |
+| `tools` | field, default `[]` | `{ name, description?, inputSchema? }` items the model may call. Turn mode only. |
+| `addMessage` | `addMessage(message: Message): void` | Appends a message, such as `answer.message`. Throws if the question uses a field turn mode rejects. |
+| `addToolResult` | `addToolResult(callId: string, content: string, isError?: boolean): void` | Adds a tool result to the user message after the assistant turn that made the call. Throws for an unknown `callId`. |
+| `checkTurn` | `checkTurn(): void` | Checks the turn-mode rules (`fromDict` runs it); throws an `Error` naming the broken rule. |
 | `cachePrefix` | field, default `false` | Set to `true` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
@@ -300,6 +304,12 @@ constructor(expectJson?: boolean)  // default false
 | `getJson` | `getJson(): unknown` | The stored answer as parsed JSON; **throws** if it is not JSON-compatible. |
 | `isJson` | `isJson(): boolean` | Returns the `expectJson` flag this `Answer` was constructed with (does not inspect content). |
 | `Answer.parsePython` | `parsePython(value: string): string` | Static. Extracts Python code from a code block in the response. |
+| `Answer.fromResult` | `fromResult(result: PIPELINE_RESULT, key?: string): Answer` | Static. Reads the answer a turn-mode `client.chat()` returned. A text entry gives a text `Answer`. Throws if `result` has no entry under `key`. |
+| `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
+| `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
+| `error` | field | `{ code, message }` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
+| `toolCalls` | getter | The calls in `message`, in order. Empty for a text answer. |
+| `tokens` | field | Turn token usage, set by `fromResult`. |
 
 ## Types
 

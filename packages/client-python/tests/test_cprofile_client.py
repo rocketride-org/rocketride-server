@@ -32,7 +32,7 @@ from echo_pipeline import get_echo_pipeline
 from rocketride import RocketRideClient
 
 TEST_CONFIG = {
-    'uri': os.getenv('ROCKETRIDE_URI', 'http://localhost:5565'),
+    'uri': os.getenv('ROCKETRIDE_URI', 'http://127.0.0.1:5565'),
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
 }
 

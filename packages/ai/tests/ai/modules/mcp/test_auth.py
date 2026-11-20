@@ -243,6 +243,27 @@ def test_unconfigured_audience_is_refused_on_a_public_bind(keypair):
     assert 'MCP_EXPECTED_AUDIENCE' in error
 
 
+@pytest.mark.parametrize('bind_host', ['0.0.0.0', 'engine.internal', ''])
+def test_non_rr_key_on_a_public_bind_is_told_to_use_an_rr_prefix(bind_host):
+    """A self-hoster's natural OSS key must not get an OAuth-audience riddle.
+
+    The refusal and the rule are unchanged; only the message says what to fix.
+    """
+    error = auth.authorize(scope_with('mysecret'), bind_host=bind_host)
+    assert error is not None
+    assert 'must start with rr_' in error
+    assert 'reachable from other machines' in error
+
+
+def test_jwt_on_a_public_bind_gets_a_message_that_names_the_audience_setting(keypair):
+    """The same refusal text reads correctly for an OAuth token, not only for a mistyped key."""
+    token = make_token(keypair)
+    error = auth.authorize(scope_with(token), bind_host='0.0.0.0')
+    assert error is not None
+    assert error.startswith('MCP_EXPECTED_AUDIENCE is not configured')
+    assert 'OAuth tokens are refused' in error
+
+
 def test_unconfigured_audience_on_public_bind_still_allows_api_keys():
     """The unconfigured refusal is about JWTs; static keys are unaffected."""
     assert auth.authorize(scope_with('rr_abc123'), bind_host='0.0.0.0') is None

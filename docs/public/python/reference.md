@@ -102,7 +102,7 @@ surface (`rocketride/drizzle`), plus a deprecated Sequelize binding.
 
 | Method | Signature | Description |
 | --- | --- | --- |
-| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for the `rocketride_graph` and `graph_neo4j` nodes (`graph_falkordb` rejects params); returns `{rows, affected_rows}`. |
+| `database.query` | `async def query(*, token, sql, node_id='', session_id='', params=None) -> dict` | Execute raw SQL or Cypher through the pipeline's `execute` tool function; `params` is a positional list for SQL nodes, or a dict keyed by placeholder name for the graph nodes (`rocketride_graph`, `graph_neo4j`, `graph_falkordb`); returns `{rows, affected_rows}`, plus `truncated: True` from `graph_falkordb` when it saved a write but cut its rows, at `max_execute_rows` or at the server's `RESULTSET_SIZE`. |
 | `database.begin_transaction` | `async def begin_transaction(*, token, node_id='') -> dict` | Open a transaction (`begin` tool function); returns `{session_id}`. |
 | `database.commit` | `async def commit(*, token, session_id, node_id='') -> dict` | Commit the open transaction. |
 | `database.rollback` | `async def rollback(*, token, session_id, node_id='') -> dict` | Roll back the open transaction. |
@@ -172,19 +172,18 @@ Two raw DAP commands carry this surface (call via
 
 - **`rrext_deploy_app`** — the developer-account + review verbs (claiming a
   developerId is a deploy PREREQUISITE, not a marketplace action): the
-  `developer_*` family, `submit`, and `register_dev`.
+  `developer_*` family and `submit`.
 - **`rrext_app`** — the pure marketplace: browse (`list`/`get`/`list_mine`),
   install (`desktop_add`/`desktop_remove`), admin review (`admin_*`), and
   pricing (`pricing_*`).
 
-Grouped families (the `developer_*`/`submit`/`register_dev` rows are on
+Grouped families (the `developer_*`/`submit` rows are on
 `rrext_deploy_app`; the rest on `rrext_app`):
 
 | Subcommand family | Subcommands | Guard | Purpose |
 | ----------------- | ----------- | ----- | ------- |
 | developer_* | `developer_register` · `developer_stripe` · `developer_dashboard` · `developer_status` | org.admin (register) | Claim the org's developer id slug + Stripe Connect onboarding. |
-| submit | `submit` | developer org + namespace | Submit a deployed version for review — flips the DEPLOYMENT `private` → `submit`. |
-| register_dev | `register_dev` | self | Per-user live dev overlay (App Builder hot-reload); OSS-capable. |
+| submit | `submit` · `withdraw` · `reply` | developer org + namespace | Submit a deployed version for review (flips the DEPLOYMENT `private` → `submit`), cancel a pending review, or append a developer message to the review thread. |
 | catalog | `list` · `get` · `list_mine` · `desktop_add` · `desktop_remove` | authenticated | Browse reachable apps, the developer's own rail view, and desktop membership. |
 | admin_* | `admin_queue` · `admin_approve` · `admin_reject` · `admin_reply` · `admin_reseed` | sys.admin | Store review over the DEPLOYMENTS: the queue is deployments in `submit`; `admin_approve(appId, version)` → `ready`, `admin_reject(appId, version)` → `rejected`. |
 | pricing_* | `pricing_list` · `pricing_create` · `pricing_delete` | developer org | Manage Stripe price tiers for a monetized app. |
@@ -249,6 +248,11 @@ Question(
 | `addDocuments` | `addDocuments(self, documents: Doc \| List[Doc])` | Adds documents for the AI to reference. |
 | `addGoal` | `addGoal(self, goal: str)` | Adds a goal statement for the AI. |
 | `getPrompt` | `getPrompt(self, has_previous_json_failed: bool = False) -> str` | Returns the full prompt (internal). |
+| `messages` | field, default `[]` | The conversation, as `UserMessage` / `AssistantMessage` items. Non-empty switches the question to turn mode (native tool calling). See [Chat](/clients/python/chat#native-tool-calling). |
+| `tools` | field, default `[]` | `Tool(name, description, inputSchema)` items the model may call. Turn mode only. |
+| `addMessage` | `addMessage(self, message: UserMessage \| AssistantMessage \| dict)` | Appends a message, such as `answer.message`. Raises `ValueError` if the question uses a field turn mode rejects. |
+| `addToolResult` | `addToolResult(self, callId: str, content: str, isError: bool = False)` | Adds a tool result to the user message after the assistant turn that made the call. Raises `ValueError` for an unknown `callId`. |
+| `checkTurn` | `checkTurn(self)` | Checks the turn-mode rules (parsing runs it); raises `ValueError` naming the broken rule. |
 | `cachePrefix` | field, default `False` | Set to `True` when the question will be sent again with only its context, documents, goals or questions changed (an agent loop). A provider with prompt caching (the Anthropic node, and Claude models on the Bedrock node) may then cache the unchanging start of the prompt: role, instructions, examples and history. Other providers ignore it. |
 
 ## Answer
@@ -263,7 +267,12 @@ From `rocketride.schema`. Parses chat response content — see
 | `getJson` | `getJson(self) -> Optional[dict]` | The parsed JSON. Returns `None` only when no answer has been set; **raises `ValueError`** on invalid JSON. |
 | `isJson` | `isJson(self) -> bool` | Returns the `expectJson` flag (does not inspect content). |
 | `parsePython` | `parsePython(self, value: str) -> Any` | Extracts Python code from a code block in the response. |
-| `tokens` | field | Turn-total LLM token usage reported by the server. The TypeScript `Answer` carries no usage field. <!-- language-specific --> |
+| `tokens` | field | Turn-total LLM token usage reported by the server. |
+| `fromResult` | `Answer.fromResult(result: dict, key: str = 'answers') -> Answer` | Classmethod. Reads the answer a turn-mode `client.chat()` returned. A text entry gives a text `Answer`. Raises `ValueError` if `result` has no entry under `key`. |
+| `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
+| `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
+| `error` | field | `AnswerError(code, message)` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
+| `toolCalls` | `toolCalls(self) -> List[ToolCallBlock]` | The calls in `message`, in order. Empty for a text answer. |
 
 ## Types
 

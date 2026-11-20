@@ -13,11 +13,12 @@
  * Used by ConnectionSettings (dev) and DeployTargetSettings (deploy).
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
+import { AnchoredPopup } from 'shell';
 import ServiceIcon from '../../../../assets/service.svg';
 import { ServiceStatus, VersionOption, displayVersion, stateLabels, panelStyles as S, statusIndicatorStyle, primaryBtnStyle, secondaryBtnStyle, optionStyle } from './shared';
-import { MessageData } from '../../Settings/SettingsWebview';
-import { MessageDisplay } from '../../Settings/MessageDisplay';
+import { MessageData } from '../../settings/SettingsWebview';
+import { MessageDisplay } from '../../settings/MessageDisplay';
 
 // =============================================================================
 // TYPES
@@ -45,7 +46,8 @@ export interface ServicePanelProps {
 	onRemove: () => void;
 	onStart: () => void;
 	onStop: () => void;
-	/** Whether the sudo password overlay is visible (Linux/macOS only). */
+	/** Whether the sudo password entry is visible (Linux/macOS only — shown
+	 *  when host.engine.control answered needsSudo). */
 	sudoPromptVisible: boolean;
 	sudoPasswordInput: string;
 	onSudoPasswordChange: (password: string) => void;
@@ -66,18 +68,9 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 	const [hoveredBtn, setHoveredBtn] = useState<string | null>(null);
 	const [hoveredOption, setHoveredOption] = useState<string | null>(null);
 	const [dropdownOpen, setDropdownOpen] = useState(false);
-
-	// Close dropdown on outside click
-	useEffect(() => {
-		const handler = (e: MouseEvent) => {
-			const target = e.target as HTMLElement;
-			if (!target.closest(`[data-split-button="${idPrefix}-service"]`)) {
-				setDropdownOpen(false);
-			}
-		};
-		document.addEventListener('click', handler);
-		return () => document.removeEventListener('click', handler);
-	}, [idPrefix]);
+	const closeDropdown = useCallback(() => setDropdownOpen(false), []);
+	// Anchor for the version dropdown (only one split button renders at a time).
+	const splitRef = useRef<HTMLDivElement | null>(null);
 
 	const transitional = status.state === 'starting' || status.state === 'stopping';
 	const allDisabled = busy || transitional || sudoPromptVisible;
@@ -95,7 +88,7 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 		const arrowId = `${idPrefix}-service-arrow`;
 
 		return (
-			<div style={S.splitButton} data-split-button={`${idPrefix}-service`}>
+			<div ref={splitRef} style={S.splitButton}>
 				<button type="button" style={{ ...btnStyle(hoveredBtn === mainId, allDisabled), borderRadius: '4px 0 0 4px', whiteSpace: 'nowrap' }} disabled={allDisabled} onClick={onClick} onMouseEnter={() => setHoveredBtn(mainId)} onMouseLeave={() => setHoveredBtn(null)}>
 					{busy ? busyLabel : `${label}: ${currentLabel}`}
 				</button>
@@ -121,8 +114,8 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 				>
 					&#9662;
 				</button>
-				{dropdownOpen && (
-					<div role="menu" style={S.splitDropdown}>
+				<AnchoredPopup anchorRef={splitRef} open={dropdownOpen} onClose={closeDropdown} gap={2} matchAnchorWidth style={S.splitDropdown}>
+					<div role="menu">
 						<div style={S.splitDropdownGroupLabel}>Recommended</div>
 						{versions.filter((v) => v.value === 'latest' || v.value === 'prerelease').map((opt) => {
 							const optKey = `${idPrefix}-service-${opt.value}`;
@@ -146,7 +139,7 @@ export const ServicePanel: React.FC<ServicePanelProps> = ({ idPrefix, status, pr
 							</>
 						)}
 					</div>
-				)}
+				</AnchoredPopup>
 			</div>
 		);
 	};

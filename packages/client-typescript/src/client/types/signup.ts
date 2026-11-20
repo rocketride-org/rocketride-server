@@ -34,6 +34,11 @@ export type SignupProperties = {
 	exposed_at: number;
 	expires_at: number;
 	consent_version: 1;
+	/**
+	 * Present only when the visitor had not yet chosen whether to allow analytics. The context then rides the OAuth
+	 * state instead of site storage, so it stays in browser history and reaches the identity provider's request logs.
+	 */
+	consent_state?: 'undecided';
 };
 
 /** PKCE exchange credentials with optional, consent-aware signup analytics context. */
@@ -41,6 +46,14 @@ export type PkceCredential = {
 	code: string;
 	verifier: string;
 	redirectUri: string;
+	/**
+	 * The Zitadel client that MINTED the code (VS Code native app, CLI, ...).
+	 * Zitadel binds codes to their client — exchanging with any other id fails
+	 * with invalid_client. Omitted = the server's default (web) client. Unlike
+	 * {@link PkceCredential.signupProperties}, this IS credential identity and
+	 * stays in the reconnect key.
+	 */
+	clientId?: string;
 	/** Evaluated immediately before auth is sent; null or a thrown error omits attribution. */
 	signupProperties?: SignupProperties | (() => SignupProperties | null);
 };

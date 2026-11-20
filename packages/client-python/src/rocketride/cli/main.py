@@ -141,6 +141,14 @@ def setup_parser() -> argparse.ArgumentParser:
         description='RocketRide Unified Pipeline and File Management CLI',
         epilog='Use "rocketride <command> --help" for command-specific help',
     )
+    # __version__ is read from the installed package metadata ('' when not installed).
+    # Resolved here, not at import, so tooling that loads this module through a
+    # bare stub package (scripts/validate-cli-docs.py) can still build the parser.
+    try:
+        from .. import __version__
+    except ImportError:
+        __version__ = ''
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__ or "unknown"}')
     subparsers = parser.add_subparsers(dest='command', help='Available commands', metavar='COMMAND')
 
     # ── init ─────────────────────────────────────────────────────────────

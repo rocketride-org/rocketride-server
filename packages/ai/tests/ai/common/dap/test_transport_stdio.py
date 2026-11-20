@@ -396,12 +396,11 @@ async def test_exit_message_non_zero_code_marks_disconnect_as_error():
 
 
 @pytest.mark.asyncio
-async def test_exit_message_cancelled_code_maps_to_zero():
-    """The literal token CANCELLED is mapped to exit code 0 in 4-field form."""
-    # 4-field form: >EXIT*code*message*trailing
+async def test_exit_message_cancelled_code_maps_to_one():
+    """In 4-field form, CANCELLED, a code name no engine error has, is no stop: exit code 1."""
     events, disconnects = await _drive('>EXIT*CANCELLED*user stop*x')
-    assert events[0]['body']['exitCode'] == 0
-    assert disconnects[0]['has_error'] is False
+    assert events[0]['body']['exitCode'] == 1
+    assert disconnects[0]['has_error'] is True
 
 
 @pytest.mark.asyncio
@@ -609,3 +608,24 @@ async def test_read_stream_skips_oversized_line_and_keeps_going():
     assert any(e.get('event') == 'apaevt_status_state' for e in stub.events), (
         f'message after the oversized line was not processed: {stub.events!r}'
     )
+
+
+# ---------------------------------------------------------------------------
+# >CHN — channel signals
+# ---------------------------------------------------------------------------
+
+
+async def test_chn_ready_signal_without_an_id():
+    """``>CHN*1`` reports the listener up; no connection id yet."""
+    events, _ = await _drive('>CHN*1')
+    event = _single_event(events)
+    assert event['event'] == 'apaevt_channel'
+    assert event['body'] == {'state': '1', 'id': None}
+
+
+async def test_chn_signal_names_the_closed_connection():
+    """``>CHN*1*<id>`` names the engine's connection that ended; ``>CHN*2`` closes startup."""
+    events, _ = await _drive('>CHN*1*0123abcd')
+    assert _single_event(events)['body'] == {'state': '1', 'id': '0123abcd'}
+    events, _ = await _drive('>CHN*2')
+    assert _single_event(events)['body'] == {'state': '2', 'id': None}
