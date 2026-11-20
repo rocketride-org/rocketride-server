@@ -24,7 +24,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from ai.account import manifest_push
-from ai.account.base import AccountBase
+from ai.account.base import AccountBase, InventoryUnavailableError
 from ai.account.desktop import DESKTOP_FORMAT_VERSION, FileDesktopBackend
 from ai.account.store_providers.memory import MemoryStore
 
@@ -458,7 +458,8 @@ async def test_oss_login_assembly_failed_resolution_writes_no_desktop_then_seeds
     monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
     acct = Account.__new__(Account)
     acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
-    assert await acct._assemble_apps() == []
+    with pytest.raises(InventoryUnavailableError):
+        await acct._assemble_apps()
     assert await acct._desktop_backend().read('local', 'local') is None
     state['fail'] = False
     apps = await acct._assemble_apps()
@@ -479,3 +480,97 @@ async def test_oss_login_assembly_empty_inventory_still_seeds(monkeypatch):
     acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
     assert await acct._assemble_apps() == []
     assert await acct._desktop_backend().read('local', 'local') == []
+
+
+# ---------------------------------------------------------------------------
+# PR #3385 round 2: the REAL OSS account path (the _Account double bypasses
+# decoration): no deadlock on the writes, no seed from a failed inventory
+# ---------------------------------------------------------------------------
+
+
+def _oss_account(monkeypatch, state: Dict[str, Any]):
+    """The real OSS ``Account`` over a MemoryStore desktop, with the registry
+    walk replaced by ``state``: ``fail`` raises, else ``pins`` resolve.
+    """
+    from ai.account import app_deploy
+    from ai.account.oss import Account
+
+    async def pins(org_id, team_id, teams):
+        if state.get('fail'):
+            raise RuntimeError('registry down')
+        return [dict(p) for p in state['pins']]
+
+    monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
+    acct = Account.__new__(Account)
+    acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
+    return acct
+
+
+@pytest.mark.asyncio
+async def test_oss_desktop_writes_do_not_deadlock_on_the_inventory_walk(monkeypatch, pushes):
+    """desktop_add/remove gate on get_apps_for_user, which on OSS decorates
+    through desktop_app_ids and takes the per-user lock itself: the walk
+    must run outside the write's lock or both verbs hang.
+    """
+    acct = _oss_account(monkeypatch, {'pins': [{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}]})
+    added = await asyncio.wait_for(acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.sql')), timeout=2)
+    assert added['body'] == {'added': True, 'appId': 'rocketride.sql'}
+    removed = await asyncio.wait_for(
+        acct.handle_app(_conn(), _req('desktop_remove', appId='rocketride.chat')), timeout=2
+    )
+    assert removed['body'] == {'removed': True, 'appId': 'rocketride.chat'}
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.sql']
+    assert pushes == ['local', 'local']
+
+
+@pytest.mark.asyncio
+async def test_oss_list_get_public_on_a_failed_inventory_write_nothing_then_seed(monkeypatch, pushes):
+    state: Dict[str, Any] = {'fail': True, 'pins': [{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}]}
+    acct = _oss_account(monkeypatch, state)
+
+    async def public_apps():
+        return [{'id': 'rocketride.chat'}]
+
+    acct.get_public_apps = public_apps  # type: ignore[method-assign]
+
+    listed = await acct.handle_app(_conn(), _req('list'))
+    assert listed == {'success': True, 'body': {'apps': []}}
+    got = await acct.handle_app(_conn(), _req('get', appId='rocketride.chat'))
+    assert got == {'success': False, 'message': 'App not found'}
+    public = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog'})
+    assert [(a['id'], a['appStatus'], a['onDesktop']) for a in public['body']['apps']] == [
+        ('rocketride.chat', 'free', False)
+    ]
+    write = await acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.sql'))
+    assert write == {'success': False, 'message': 'The app catalog is unavailable; try again.'}
+    signed_in = await acct.authenticate('')
+    assert signed_in.apps == []
+    # Nothing was written by any door while the registry was down.
+    assert await acct._desktop_backend().read('local', 'local') is None
+    assert pushes == []
+
+    # The registry recovers: the next read seeds the whole inventory.
+    state['fail'] = False
+    listed = await acct.handle_app(_conn(), _req('list'))
+    assert [(a['id'], a['onDesktop']) for a in listed['body']['apps']] == [
+        ('rocketride.chat', True),
+        ('rocketride.sql', True),
+    ]
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat', 'rocketride.sql']
+
+
+@pytest.mark.asyncio
+async def test_oss_public_catalog_on_a_failed_inventory_still_reads_the_stored_desktop(monkeypatch):
+    acct = _oss_account(monkeypatch, {'fail': True, 'pins': []})
+    await acct._desktop_backend().write('local', 'local', ['rocketride.chat'])
+
+    async def public_apps():
+        return [{'id': 'rocketride.chat'}, {'id': 'rocketride.sql'}]
+
+    acct.get_public_apps = public_apps  # type: ignore[method-assign]
+    public = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog'})
+    assert {a['id']: a['onDesktop'] for a in public['body']['apps']} == {
+        'rocketride.chat': True,
+        'rocketride.sql': False,
+    }
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat']

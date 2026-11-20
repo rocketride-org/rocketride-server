@@ -463,6 +463,7 @@ async def _apps_for_token(token: str) -> list:
     pre-auth landing/home) resolve without a session, private ones do not.
     """
     from ai.account import account
+    from ai.account.base import InventoryUnavailableError
 
     info = await _authenticated(token)
     if info is not None:
@@ -476,7 +477,13 @@ async def _apps_for_token(token: str) -> list:
             return await account.get_apps_for_user(info.userId, organizations, sys_perms)
         except TypeError:
             # Older signature without sys_permissions.
-            return await account.get_apps_for_user(info.userId, organizations)
+            try:
+                return await account.get_apps_for_user(info.userId, organizations)
+            except InventoryUnavailableError:
+                # The registry did not answer: nothing resolves for this caller.
+                return []
+        except InventoryUnavailableError:
+            return []
     return await account.get_public_apps()
 
 

@@ -76,6 +76,17 @@ class OutOfCreditsError(RuntimeError):
     code = 'OUT_OF_CREDITS'
 
 
+class InventoryUnavailableError(RuntimeError):
+    """
+    The caller's app inventory could not be assembled (the publish registry
+    did not answer). Distinct from a genuinely EMPTY inventory on purpose:
+    a desktop is seeded from the inventory on a user's first read, and an
+    outage must never be written down as "this user chose no apps". Callers
+    that decorate catch it and decorate WITHOUT seeding; sign-in catches it
+    and proceeds with no apps.
+    """
+
+
 class AccountBase(ABC):
     """
     Abstract interface for the RocketRide Account facade.
@@ -787,7 +798,27 @@ class AccountBase(ABC):
                 await self._desktop_backend().write(org_id, user_id, changed)
             return changed
 
-    async def decorate_desktop(self, user_id: str, org_id: str, apps: list, inventory: Optional[list] = None) -> list:
+    async def desktop_app_ids_stored(self, user_id: str, org_id: str) -> list:
+        """
+        The user's stored desktop app ids WITHOUT seeding: ``[]`` when none.
+
+        For callers whose inventory assembly failed (``InventoryUnavailableError``):
+        they still answer from whatever is stored, but must not write a first
+        desktop from an outage.
+
+        Args:
+            user_id: The user.
+            org_id:  The organization.
+
+        Returns:
+            The stored list, or an empty list when the user has none yet.
+        """
+        async with self._desktop_lock(org_id, user_id):
+            return await self._desktop_backend().read(org_id, user_id) or []
+
+    async def decorate_desktop(
+        self, user_id: str, org_id: str, apps: list, inventory: Optional[list] = None, seed: bool = True
+    ) -> list:
         """
         Stamp ``appStatus`` and the real ``onDesktop`` on manifest entries.
 
@@ -805,12 +836,20 @@ class AccountBase(ABC):
                        ``apps`` is that set; a caller decorating a SUBSET (the
                        public catalog) must pass the full inventory, or the
                        apps outside the subset never reach the seeded desktop.
+            seed:      False when the caller's inventory could not be assembled:
+                       the stored desktop (or nothing) decides membership and
+                       nothing is written.
 
         Returns:
             ``apps``, decorated.
         """
-        seed = inventory if inventory is not None else [a.get('id') for a in apps]
-        desktop = set(await self.desktop_app_ids(user_id, org_id, seed))
+        if seed:
+            ids = await self.desktop_app_ids(
+                user_id, org_id, inventory if inventory is not None else [a.get('id') for a in apps]
+            )
+        else:
+            ids = await self.desktop_app_ids_stored(user_id, org_id)
+        desktop = set(ids)
         for entry in apps:
             entry['appStatus'] = 'free'
             entry['onDesktop'] = entry.get('id') in desktop
@@ -1118,10 +1157,15 @@ class AccountBase(ABC):
                 # exists for signature fidelity, not behaviour.
                 org = getattr(info, 'organization', None)
                 orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
-                apps = await self.get_apps_for_user(user_id, orgs)
+                try:
+                    apps = await self.get_apps_for_user(user_id, orgs)
+                except InventoryUnavailableError:
+                    # The registry did not answer: an empty answer for now,
+                    # and NO first desktop written from the outage.
+                    apps = []
                 # OSS decoration — the login assembly's, so the catalog and
                 # the handshake agree by construction.
-                await self.decorate_desktop(user_id, org_id, apps)
+                await self.decorate_desktop(user_id, org_id, apps, seed=bool(apps))
             else:
                 # Anonymous: nothing is on a desktop and every action needs a
                 # sign-in first (the SaaS catalog's anonymous shape).
@@ -1156,16 +1200,23 @@ class AccountBase(ABC):
             if not user_id:
                 return conn.build_error(request, 'Authentication required')
             # The gate: anything the caller's reachable catalog returns is
-            # installable (publish visibility IS the access rule). The walk,
-            # the seed, the change and the write all sit under the user's
-            # desktop lock, so two requests for one user cannot lose an
-            # update; the identity push follows the write.
+            # installable (publish visibility IS the access rule). The walk
+            # runs OUTSIDE the desktop lock — on OSS it decorates through
+            # ``desktop_app_ids``, which takes this same non-reentrant lock.
+            # The read, the seed, the change and the write sit under the
+            # lock, so two requests for one user cannot lose an update; the
+            # identity push follows the write.
             org = getattr(info, 'organization', None)
             orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
-            async with self._desktop_lock(org_id, user_id):
+            try:
                 reachable = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
-                if sub == 'desktop_add' and app_id not in reachable:
-                    return conn.build_error(request, 'App not found')
+            except InventoryUnavailableError:
+                # No gate without the registry — and no first desktop written
+                # from an outage either.
+                return conn.build_error(request, 'The app catalog is unavailable; try again.')
+            if sub == 'desktop_add' and app_id not in reachable:
+                return conn.build_error(request, 'App not found')
+            async with self._desktop_lock(org_id, user_id):
                 desktop = await self._desktop_ids_unlocked(user_id, org_id, reachable)
                 changed = [*desktop, app_id] if sub == 'desktop_add' else [a for a in desktop if a != app_id]
                 changed = list(dict.fromkeys(changed))
@@ -1225,8 +1276,13 @@ class AccountBase(ABC):
             # off, so the seed is the caller's whole reachable inventory.
             org = getattr(info, 'organization', None)
             orgs = [org if isinstance(org, dict) else {'id': getattr(org, 'id', 'local')}] if org else []
-            inventory = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
-            await self.decorate_desktop(user_id, self._org_id_of(info), apps, inventory)
+            try:
+                inventory = [a.get('id') for a in await self.get_apps_for_user(user_id, orgs)]
+                await self.decorate_desktop(user_id, self._org_id_of(info), apps, inventory)
+            except InventoryUnavailableError:
+                # The registry did not answer: membership from the stored
+                # desktop (or none), and no first desktop written.
+                await self.decorate_desktop(user_id, self._org_id_of(info), apps, seed=False)
         else:
             for entry in apps:
                 entry['appStatus'] = 'auth'
