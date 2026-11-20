@@ -1,0 +1,44 @@
+{
+	"success": true,
+	"results": [
+		{
+			"content": "ops ops 021 part 40: audit sample protocol station filter filter contract protocol nesting pressure filter trial…",
+			"score": 0.0,
+			"metadata": {
+				"objectId": "2ed1cfeb-37ac-4394-30f7-699303f093bd",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/ops/ops_021.pdf",
+				"chunkId": 39
+			},
+			"rank": 1
+		},
+		{
+			"content": "ops ops 005 part 68: protocol water sample schedule nesting harvest invoice station orchid clause nesting spring…",
+			"score": 0.0,
+			"metadata": {
+				"objectId": "ef35cb9c-f98f-e472-d795-298a40a5cb2b",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/ops/ops_005.pdf",
+				"chunkId": 67
+			},
+			"rank": 2
+		},
+		{
+			"content": "finance ocr scan junk part 28: kestrel survey valve trial trial survey water pressure schedule season kestrel…",
+			"score": 0.0,
+			"metadata": {
+				"objectId": "0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/finance/ocr_scan_junk.txt",
+				"chunkId": 27
+			},
+			"rank": 3
+		}
+	],
+	"total": 3,
+	"warnings": [
+		"keyword_fallback",
+		"semantic search failed: the embedding model is not loaded"
+	],
+	"mode_used": "keyword"
+}

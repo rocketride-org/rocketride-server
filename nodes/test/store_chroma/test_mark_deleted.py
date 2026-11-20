@@ -23,6 +23,9 @@ import types
 
 import pytest
 
+from ai.common.store import vx_write_gate
+
+from ..test_vector_write_gate import agent
 from .test_convert_filter_explicit_none import _load_store_class
 
 
@@ -94,7 +97,15 @@ def store():
     driver.client = None
     driver.collectionObj = _FakeCollection({**_rows('a', 2), **_rows('b', 1)})
     driver.doesCollectionExist = lambda modelName=None: True
+    driver._doesCollectionExist = lambda: True  # what the explorer's stats reads
+    driver._exists = lambda: True  # and the counts the trash tools take
     return driver
+
+
+@pytest.fixture()
+def as_agent(monkeypatch):
+    """The write gate fails closed without a call context: run the tools as an agent's."""
+    monkeypatch.setattr(vx_write_gate, '_current_tool_call', lambda: agent())
 
 
 def _deleted_flags(collection):
@@ -175,7 +186,7 @@ def test_a_missing_collection_matches_nothing(store):
     assert store.collectionObj.get_calls == []
 
 
-def test_the_trash_tools_work_on_this_driver(store):
+def test_the_trash_tools_work_on_this_driver(store, as_agent):
     """What an agent reaches: soft_delete and restore through the shared mixin."""
     from ai.common.store.document_store import VectorStoreToolMixin
 
@@ -184,9 +195,11 @@ def test_the_trash_tools_work_on_this_driver(store):
         serverName='chroma', store=store, embed_query=None, embed_model_name=None, expose_tools=True, allow_write=True
     )
 
-    assert tool.soft_delete({'object_ids': ['b']}) == {'success': True, 'object_ids': ['b'], 'matched_chunks': 1}
+    soft = tool.soft_delete({'object_ids': ['b']})
+    assert (soft['success'], soft['object_ids'], soft['matched_chunks'], soft['moved_chunks']) == (True, ['b'], 1, 1)
     assert _deleted_flags(store.collectionObj)['b-0'] is True
-    assert tool.restore({'object_ids': ['b']}) == {'success': True, 'object_ids': ['b'], 'matched_chunks': 1}
+    restored = tool.restore({'object_ids': ['b']})
+    assert (restored['success'], restored['matched_chunks'], restored['moved_chunks']) == (True, 1, 1)
     assert _deleted_flags(store.collectionObj)['b-0'] is False
 
 
@@ -202,8 +215,9 @@ def test_stats_count_asks_the_server_instead_of_reading_every_id(store):
     tool.IGlobal = types.SimpleNamespace(serverName='chroma', store=store, expose_tools=True)
 
     assert store.count_documents() == 3
+    assert collection.get_calls == []  # the count is the server's Collection.count, not one id per row
+    # The explorer's stats adds filtered figures, which Chroma can only read; its count stays the server's.
     assert tool.stats({})['count'] == 3
-    assert collection.get_calls == []
 
 
 def test_paths_list_records_without_a_deleted_flag_and_hide_trashed_ones(store):
@@ -212,7 +226,10 @@ def test_paths_list_records_without_a_deleted_flag_and_hide_trashed_ones(store):
     collection.rows['c-0'] = {'objectId': 'c', 'chunkId': 0, 'parent': '/c'}  # no isDeleted key
 
     assert store.getPaths() == {'/a': 'a', '/b': 'b', '/c': 'c'}
-    assert collection.get_calls[-1] == {'$and': [{'chunkId': {'$eq': 0}}, {'isDeleted': {'$ne': True}}]}
+    # Chunk 0 of the records that are not in the trash (a missing flag counts as live), never the control record.
+    assert collection.get_calls[-1] == {
+        '$and': [{'chunkId': {'$eq': 0}}, {'objectId': {'$ne': 'schema'}}, {'isDeleted': {'$ne': True}}]
+    }
 
     store.markDeleted(['c'])
     assert store.getPaths() == {'/a': 'a', '/b': 'b'}

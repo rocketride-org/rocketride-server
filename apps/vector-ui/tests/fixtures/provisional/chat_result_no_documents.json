@@ -1,0 +1,11 @@
+{
+	"name": "Question 1",
+	"path": "",
+	"objectId": "5d9a8fde-b3b1-5b87-ac90-db66dfbbf2f4",
+	"result_types": {
+		"answers": "answers"
+	},
+	"answers": [
+		"[STUB-LLM] deterministic answer. prompt_chars=212 context_quote=\"### Documents: | ### Current Task: | What is quantum chromodynamics?\""
+	]
+}

@@ -1,0 +1,6 @@
+{
+	"success": false,
+	"code": "RATE_LIMITED",
+	"error": "Too many embed calls on this task; try again in 12 s.",
+	"retry_after_s": 12
+}

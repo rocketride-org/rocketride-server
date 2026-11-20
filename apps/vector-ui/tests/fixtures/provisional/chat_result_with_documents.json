@@ -1,0 +1,59 @@
+{
+	"name": "Question 1",
+	"path": "",
+	"objectId": "a911e86a-9051-5c7e-9528-c2e4c20f73cb",
+	"result_types": {
+		"answers": "answers",
+		"documents": "documents"
+	},
+	"answers": [
+		"[STUB-LLM] deterministic answer. prompt_chars=1572 context_quote=\"### Documents: | Document 1) Content: # Falcon Station Operations Handbook | ## Water supply | Drinking water comes from the Glassbrook spring, filtered at the pump house.\""
+	],
+	"documents": [
+		{
+			"type": "Document",
+			"page_content": "# Falcon Station Operations Handbook\n\n## Water supply\n\nDrinking water comes from the Glassbrook spring, filtered at the pump house.",
+			"score": 0.5757919640293089,
+			"metadata": {
+				"objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+				"chunkId": 0,
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/handbooks/falcon_handbook.md",
+				"permissionId": 0,
+				"isDeleted": false,
+				"isTable": false,
+				"tableId": 0
+			}
+		},
+		{
+			"type": "Document",
+			"page_content": "## Pump house\n\nThe pump house filters run on a weekly schedule. Log pressure readings every morning.",
+			"score": 0.4107,
+			"metadata": {
+				"objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+				"chunkId": 4,
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/handbooks/falcon_handbook.md",
+				"permissionId": 0,
+				"isDeleted": false,
+				"isTable": false,
+				"tableId": 0
+			}
+		},
+		{
+			"type": "Document",
+			"page_content": "## Nesting\n\nPairs return to the same ledge each spring.",
+			"score": 0.3121,
+			"metadata": {
+				"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+				"chunkId": 1,
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/field/kestrel_field_guide.md",
+				"permissionId": 0,
+				"isDeleted": false,
+				"isTable": false,
+				"tableId": 0
+			}
+		}
+	]
+}

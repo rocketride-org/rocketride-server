@@ -116,14 +116,11 @@
 						"notEmpty": true,
 						"contains": "Paris",
 						//
-						// The [0].score bound below is a compatibility pin, NOT a correctness
-						// expectation: identical embeddings give a cosine distance of 0, which the
-						// current (inverted) conversion turns into 0.5. A perfect match should
-						// score 1.0 - fixing that is tracked in issue #2236, which must also
-						// update this assertion.
+						// Identical embeddings give a cosine distance of 0, which scores
+						// (2 - 0) / 2 = 1.0: a perfect match scores 1.0.
 						//
 						"property": [
-							{ "path": "[0].score", "greaterThan": 0.499, "lessThan": 0.501 },
+							{ "path": "[0].score", "greaterThan": 0.999, "lessThan": 1.001 },
 							{ "path": "[0].metadata.objectId", "equals": "test-doc-1" }
 						]
 					}
@@ -218,11 +215,11 @@
 		},
 		"chroma.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "chroma.tenant", "chroma.database", "vector.collection", "vector.top_k", "chroma.serverName", "chroma.ssl"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "chroma.tenant", "chroma.database", "vector.collection", "vector.top_k", "chroma.serverName", "chroma.ssl", "vector.allow_writes"]
 		},
 		"chroma.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.collection", "vector.top_k", "chroma.serverName"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.collection", "vector.top_k", "chroma.serverName", "vector.allow_writes"]
 		},
 		//
 		// Profile selection for ChromaDB service

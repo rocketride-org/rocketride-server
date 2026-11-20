@@ -230,7 +230,10 @@ def test_trash_round_trip_filters_paths_before_paging(store):
             for field, value in query.items():
                 actual = row['meta'][field.removeprefix('meta.')]
                 if isinstance(value, dict):
-                    if not re.search(value['$regex'], actual, re.IGNORECASE):
+                    if '$ne' in value:  # the control record is left out of the listing
+                        if actual == value['$ne']:
+                            return False
+                    elif not re.search(value['$regex'], actual, re.IGNORECASE):
                         return False
                 elif actual != value:
                     return False

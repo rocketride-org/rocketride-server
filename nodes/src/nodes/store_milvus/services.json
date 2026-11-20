@@ -121,6 +121,53 @@
 						]
 					}
 				}
+			},
+			{
+				"name": "Add a second batch of the same document",
+				"documents": [
+					{
+						"page_content": "Its river is the Seine.",
+						"metadata": {
+							"objectId": "test-doc-1",
+							"nodeId": "test-node",
+							"parent": "/test",
+							"chunkId": 1,
+							"isDeleted": false
+						},
+						"embedding": [0.1, 0.2, 0.3, 0.5, 0.4],
+						"embedding_model": "test-model"
+					}
+				],
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Seine"
+					}
+				}
+			},
+			{
+				"name": "Search finds both batches of the document",
+				"questions": {
+					"type": "semantic",
+					"questions": [
+						{
+							"text": "What is the capital of France?",
+							"embedding": [0.1, 0.2, 0.3, 0.4, 0.5],
+							"embedding_model": "test-model"
+						}
+					]
+				},
+				"expect": {
+					"documents": {
+						"notEmpty": true,
+						"contains": "Paris",
+						"property": [
+							{ "path": "[0].metadata.chunkId", "equals": 0 },
+							{ "path": "[1].metadata.chunkId", "equals": 1 },
+							{ "path": "[1].metadata.objectId", "equals": "test-doc-1" }
+						]
+					}
+				}
 			}
 		]
 	},
@@ -182,11 +229,11 @@
 		},
 		"milvus.cloud": {
 			"object": "cloud",
-			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "milvus.serverName"]
+			"properties": ["vector.cloud.host", "vector.cloud.port", "vector.apikey", "vector.score", "vector.collection", "milvus.serverName", "vector.allow_writes"]
 		},
 		"milvus.local": {
 			"object": "local",
-			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "milvus.serverName"]
+			"properties": ["vector.local.host", "vector.local.port", "vector.score", "vector.collection", "milvus.serverName", "vector.allow_writes"]
 		},
 		"milvus.profile": {
 			"title": "Type of Milvus host",

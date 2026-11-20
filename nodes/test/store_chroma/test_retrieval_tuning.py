@@ -46,7 +46,18 @@ class _FakeDoc:
 
 
 class _FakeDocumentStoreBase:
-    """Non-abstract stand-in for ai.common.store.DocumentStoreBase."""
+    """Non-abstract stand-in for ai.common.store.DocumentStoreBase (the two helpers the driver calls)."""
+
+    @staticmethod
+    def resolveDeleted(docFilter):
+        deleted = getattr(docFilter, 'deleted', None)
+        if deleted in ('active', 'deleted', 'all'):
+            return deleted
+        return 'all' if getattr(docFilter, 'isDeleted', None) is True else 'active'
+
+    def effectiveFloor(self, docFilter):
+        min_score = getattr(docFilter, 'minScore', None)
+        return 0.2 if min_score is None else float(min_score)
 
 
 _STUBBED_MODULE_NAMES = (
@@ -200,12 +211,10 @@ def _empty_query_result():
 # --- _convertToDocs: preserve the hardcoded 0.20 floor -----------------------
 
 
-def test_convert_to_docs_applies_hardcoded_score_floor(monkeypatch):
+def test_convert_to_docs_applies_hardcoded_score_floor():
     store = _make_store(similarity='l2')
-    scores = iter([0.19, 0.20])
-    monkeypatch.setattr(_CHROMA.np, 'exp', lambda _value: (1.0 / next(scores)) - 1.0)
-
-    docs = store._convertToDocs(_query_result([0.0, 1.0]))
+    # l2 scores 1 / (1 + sqrt(d)): d = 18.2 -> 0.19, d = 16.0 -> exactly 0.20.
+    docs = store._convertToDocs(_query_result([18.2, 16.0]))
 
     assert len(docs) == 1
     assert docs[0].page_content == 'chunk 1'

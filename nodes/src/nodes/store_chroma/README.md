@@ -33,8 +33,9 @@ Pipeline agents address the functions below as `<node id>.<function>`. The confi
 | `stats` | Returns the collection's count as this store reports it, `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Add or update documents in the collection. |
 | `delete` | Remove documents by object ID. |
-| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs, and `matched_chunks` is the number of chunks the store matched (0 when none exists). |
-| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash; the reply echoes the distinct IDs and the numeric `matched_chunks` count, as for `soft_delete`. A document removed with `delete` cannot be restored. |
+| `list_documents` | List the documents one by one with their path and chunk count, in pages ordered by path (follow `next_cursor`); `deleted: 'deleted'` lists the trash. |
+| `soft_delete` | Move documents to the trash by object ID: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. |
+| `restore` | Take documents out of the trash by object ID. |
 
 `search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are separate from the data lanes, so a pipeline embedding upstream does not by itself provide vectors to a tool call. Agents distinguish multiple Chroma nodes by their pipeline node IDs.
 
@@ -93,6 +94,20 @@ Use the bound provider for an agent that must add or search information without 
 
 The name defaults to `chroma` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
 
+### Write switches
+
+Allow document management from tool calls (`allow_writes`) is off by default.
+Turn it on in the pipeline whose Tools source should be able to remove
+documents from the collection, or add them with the `upsert` tool, through
+tool calls, for example the pipeline the Vector Explorer manages. Even when it
+is on, such a write is accepted only from a Tools source of the pipeline,
+addressed to this node; calls from the pipeline's chat or ingest sources are
+refused. Documents the pipeline's own lanes write are not affected by this
+switch.
+
+The switch does not apply to an agent in this pipeline: its `upsert` and
+`delete` calls work as they always have.
+
 ## Authentication
 
 The cloud profile passes **API Key** to Chroma's token-authentication client. The local profile constructs the HTTP client without those authentication settings. A failed connection reports the host and port and points to connectivity, credentials, or an incompatible server as possible causes.
@@ -105,17 +120,21 @@ When the server reports a version, this node requires Chroma 0.6 or later. An un
 
 ### Ingestion, replacement, and rendering
 
-Every ingested chunk needs an embedding. Inserts are batched and flush at 500 chunks or when the accumulated payload exceeds the configured limit. A chunk with `chunkId` 0 causes older chunks with the same `objectId` to be deleted before the new chunks are upserted, so a re-ingest replaces an object rather than adding a second copy. Chroma record IDs are generated UUIDs; use `objectId` and `chunkId` as the stable application identifiers.
+Every ingested chunk needs an embedding. Inserts are batched and flush at 500 chunks or when the accumulated payload exceeds the configured limit. A chunk with `chunkId` 0 causes older chunks with the same `objectId` to be deleted before the new chunks are upserted, so a re-ingest replaces an object rather than adding a second copy. That delete, like every deletion and soft deletion, names the documents in ID lists of at most a thousand, so a large batch or folder deletion stays within the server's limit on filter size (about 32,000 values per list).
 
-Soft deletion marks the metadata and hides a document from default search; hard deletion removes it. Rendering reconstructs an object in chunk-ID order and reads it in configured windows, tolerating gaps in the sequence. That makes the render path appropriate for a large stored document, not a guarantee that all chunks are contiguous.
+Each chunk is stored under a record ID derived from its document and position, `uuid5(NAMESPACE_URL, '<objectId>#<chunkId>')`, so a chunk always maps to one record; if one batch carries the same chunk twice, the later one is kept. Collections written by earlier versions of this node hold random record IDs; every read by document and chunk falls back to a metadata filter for those. Keep `objectId` and `chunkId` consistent across imports to make replacement, filters, and rendering predictable.
 
-The node gives each Chroma record a fresh UUID, even when an object is being re-ingested. The stable identifiers for lifecycle operations are therefore the metadata `objectId` and `chunkId`, not an internal Chroma record ID. Keep those metadata values consistent across imports to make replacement, filters, and rendering predictable.
+Soft deletion sets `isDeleted` in the metadata of every record of the document and hides it from default search; hard deletion removes it. Rendering reconstructs an object in chunk-ID order and reads it in configured windows, tolerating gaps in the sequence. That makes the render path appropriate for a large stored document, not a guarantee that all chunks are contiguous. The path listing returns one entry per document that has a first chunk, matching a `parent` filter exactly, and leaves out deleted documents. A filter with an empty ID list (documents, chunks, tables or permissions) matches nothing; the node answers it without querying the server, which would refuse it.
 
 ### Search result interpretation
 
-Chroma reports distances, which the node converts to the score carried by a returned document. The conversion differs for cosine versus `l2` or `ip`, so a numeric threshold has meaning only alongside the selected similarity. Compare retrieval-score behavior within one collection and metric; do not treat the same threshold as equivalent after changing metrics.
+Chroma reports distances, which the node converts to a score where higher means closer, using the space the collection was created with. For `cosine` and `ip` the score is `(2 - distance) / 2`, which is `(1 + similarity) / 2`: an identical vector scores 1.0 and an opposite one 0. For `l2` the score is `1 / (1 + euclidean distance)`. Earlier versions of this node turned distances into scores that grew with distance (a cosine distance `d` became `(d + 1) / 2`, so an identical vector scored 0.5), and results ranked the farthest chunks first; a retrieval score tuned on that scale needs re-tuning. A numeric threshold has meaning only alongside the selected similarity: compare retrieval-score behavior within one collection and metric.
 
-When semantic results are unexpectedly empty, verify the query embedding, the collection metric, the `isDeleted` filter, and the `0.20` hard floor in that order. When keyword results are unexpectedly empty, verify the search text and document containment rather than the vector score.
+When semantic results are unexpectedly empty, verify the query embedding, the collection metric, the `isDeleted` filter, and the `0.20` floor in that order (a caller can set its own minimum score; the Vector Explorer does, to show what the floor hides). When keyword results are unexpectedly empty, verify the search text and document containment rather than the vector score.
+
+### Vector Explorer
+
+The node answers the Vector Explorer's store calls. Documents are listed from their first chunks in storage order (the app sorts what it has loaded); after those, one pass over every record's metadata finds documents whose first chunk is missing and gives the document total (up to 200,000 records per pass). Chroma has no filtered count, so chunk counts read the matching record IDs; the explorer caches them and its quick statistics use the collection's own record count. Chroma has no neighbour-graph API, so the map's graph is computed on the node, and samples are one contiguous window of the collection (from a seeded offset), not a random draw.
 
 ### Agent tool dependency
 
@@ -149,5 +168,5 @@ Agent semantic search and automatic tool upserts require the node's bound embedd
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_chroma)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_chroma)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

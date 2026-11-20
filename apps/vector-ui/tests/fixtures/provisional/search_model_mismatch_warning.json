@@ -1,0 +1,85 @@
+{
+	"success": true,
+	"results": [
+		{
+			"content": "ops ops 021 part 40: audit sample protocol station filter filter contract protocol nesting pressure filter trial…",
+			"score": 0.5433,
+			"metadata": {
+				"objectId": "2ed1cfeb-37ac-4394-30f7-699303f093bd",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/ops/ops_021.pdf",
+				"chunkId": 39
+			},
+			"rank": 1,
+			"raw_score": 0.5433,
+			"sim": 0.5433,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "ops ops 005 part 68: protocol water sample schedule nesting harvest invoice station orchid clause nesting spring…",
+			"score": 0.5247,
+			"metadata": {
+				"objectId": "ef35cb9c-f98f-e472-d795-298a40a5cb2b",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/ops/ops_005.pdf",
+				"chunkId": 67
+			},
+			"rank": 2,
+			"raw_score": 0.5247,
+			"sim": 0.5247,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "finance ocr scan junk part 28: kestrel survey valve trial trial survey water pressure schedule season kestrel…",
+			"score": 0.5178,
+			"metadata": {
+				"objectId": "0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/finance/ocr_scan_junk.txt",
+				"chunkId": 27
+			},
+			"rank": 3,
+			"raw_score": 0.5178,
+			"sim": 0.5178,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "field field 008 part 3: protocol audit kestrel station pressure station audit orchid rotation trial maintenance…",
+			"score": 0.504,
+			"metadata": {
+				"objectId": "c8e55bfa-5fc2-c7d6-191d-a019fde5c682",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/field/field_008.md",
+				"chunkId": 2
+			},
+			"rank": 4,
+			"raw_score": 0.504,
+			"sim": 0.504,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "handbooks handbooks 035 part 9: kestrel audit humidity clause ledger greenhouse trial report sample greenhouse ledger…",
+			"score": 0.4861,
+			"metadata": {
+				"objectId": "2cb507f4-94e2-6068-fe33-054190fcec00",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/handbooks/handbooks_035.txt",
+				"chunkId": 8
+			},
+			"rank": 5,
+			"raw_score": 0.4861,
+			"sim": 0.4861,
+			"below_threshold": false,
+			"below_floor": false
+		}
+	],
+	"total": 5,
+	"warnings": [
+		"model_mismatch"
+	],
+	"mode_used": "semantic"
+}

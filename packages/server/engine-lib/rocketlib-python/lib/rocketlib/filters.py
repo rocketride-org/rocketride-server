@@ -23,9 +23,11 @@
 # =============================================================================
 
 from __future__ import annotations  # Enables forward references
+import contextlib
 import functools
 import json
-from typing import TYPE_CHECKING, Dict, Any, List, Optional, TypedDict, Callable, Protocol
+import logging
+from typing import TYPE_CHECKING, Dict, Any, List, Optional, Tuple, TypedDict, Callable, Protocol
 from .types import AVI_ACTION, OPEN_MODE, ENDPOINT_MODE, SERVICE_MODE, Entry, IControl, IInvoke, IJson
 from .error import APERR, Ec
 
@@ -64,33 +66,111 @@ def invoke_function(fn: Callable) -> Callable:
     return fn
 
 
+#: The audiences a tool can be listed for: ``'agent'`` (the agent catalog that
+#: ``tool.query`` builds) and ``'dap'`` (external tool calls through the DAP).
+TOOL_AUDIENCES: Tuple[str, ...] = ('agent', 'dap')
+
+
+def _normalize_audience(audience: Any) -> Tuple[str, ...]:
+    """Return ``audience`` as a tuple of known audience names.
+
+    A single name may be given as a string (``audience='dap'``); a bare string is
+    never split into characters.
+
+    Raises:
+        ValueError: When the audience is empty or names an unknown audience.
+    """
+    names = (audience,) if isinstance(audience, str) else tuple(audience or ())
+    if not names:
+        raise ValueError('tool_function: audience must name at least one of ' + ', '.join(TOOL_AUDIENCES))
+    unknown = [name for name in names if name not in TOOL_AUDIENCES]
+    if unknown:
+        raise ValueError(f'tool_function: unknown audience {unknown!r}; expected any of {list(TOOL_AUDIENCES)}')
+    return tuple(dict.fromkeys(names))
+
+
 def tool_function(
     *,
     input_schema: Any = None,
     description: Any = None,
     output_schema: Any = None,
+    audience: Any = TOOL_AUDIENCES,
 ) -> Callable:
     """Mark a method as a tool entry point.
 
     The method name becomes the bare tool ID.  Each parameter accepts either
     a static value or a ``callable(self)`` evaluated at ``tool.query`` time.
 
+    ``audience`` names who the tool is listed for: ``'agent'`` (the agent
+    catalog built by ``tool.query``) and/or ``'dap'`` (external tool calls).
+    It is recorded in ``__tool_meta__['audience']`` as a tuple; the default
+    lists the tool for both, which is every tool's behaviour today. A tool
+    whose audience leaves out ``'agent'`` is not listed in ``tool.query``,
+    but ``tool.invoke`` still dispatches it: the audience decides what a
+    catalog shows, not who may call.
+
     ``@tool_function`` implicitly registers the method as an invoke handler
     for the ``tool.*`` ops — no separate ``@invoke_function`` needed::
 
         @tool_function(input_schema={...}, description='...')
         def get_data(self, args): ...
+
+    A tool for external callers only::
+
+        @tool_function(input_schema={...}, description='...', audience=('dap',))
+        def list_documents(self, args): ...
     """
+    names = _normalize_audience(audience)
 
     def decorator(fn: Callable) -> Callable:
         fn.__tool_meta__ = {
             'input_schema': input_schema,
             'description': description,
             'output_schema': output_schema,
+            'audience': names,
         }
         return fn
 
     return decorator
+
+
+#: Module names whose absence means the ``ai`` package is simply not installed.
+_TOOL_CONTEXT_MODULES = ('ai', 'ai.common', 'ai.common.tool_context')
+
+#: True once a broken ``ai.common.tool_context`` import has been logged.
+_tool_context_failure_reported = False
+
+
+def _tool_context_module() -> Any:
+    """Return ``ai.common.tool_context``, or None when it cannot be imported.
+
+    rocketlib is usable without the ``ai`` package (tests, tooling); then no call
+    context is ever set, which every tool that needs one treats as an unknown
+    caller. Any other import failure (a broken module, a missing dependency of
+    it) has the same effect, so it is logged once as a warning: write tools
+    would otherwise refuse every call with no visible cause. A successful
+    import is cached by ``sys.modules``; a failed one is retried on the next
+    call rather than remembered.
+    """
+    global _tool_context_failure_reported
+    try:
+        from ai.common import tool_context
+    except ModuleNotFoundError as e:
+        if e.name in _TOOL_CONTEXT_MODULES:
+            return None
+        failure: Exception = e
+    except Exception as e:
+        failure = e
+    else:
+        return tool_context
+    if not _tool_context_failure_reported:
+        _tool_context_failure_reported = True
+        logging.getLogger(__name__).warning(
+            'ai.common.tool_context failed to import (%s: %s); tool calls run with no call context',
+            type(failure).__name__,
+            failure,
+        )
+    return None
 
 
 class IKeyValueStore:
@@ -1138,13 +1218,19 @@ class IInstanceBase:
     # like self.IGlobal.db_description or self._db_display_name().
     # ------------------------------------------------------------------
 
-    def _build_tool_descriptors(self, methods: Dict[str, Callable]) -> List[ToolDescriptor]:
+    def _build_tool_descriptors(
+        self, methods: Dict[str, Callable], audience: Optional[str] = 'agent'
+    ) -> List[ToolDescriptor]:
         """Build ToolDescriptor dicts from @tool_function metadata.
 
         The user-entered tool description (from the node's "tool" config
         field) is auto-prepended to every tool's description so the LLM
         sees context like "Database of world cities" before the fixed
         tool description.
+
+        Only tools whose ``audience`` includes ``audience`` are listed; the
+        default is the agent catalog. ``audience=None`` lists every tool.
+        A method stamped without an audience is listed for every audience.
         """
         # The user-entered description from the node config panel.
         # e.g. "This is a database of world cities and populations"
@@ -1153,6 +1239,12 @@ class IInstanceBase:
 
         for tool_name, method in methods.items():
             meta = method.__tool_meta__
+
+            # --- Audience ---
+            # DAP-only tools (e.g. the vector store explorer tools) stay out of
+            # the agent catalog so an agent sees exactly the tools it saw before.
+            if audience is not None and audience not in meta.get('audience', TOOL_AUDIENCES):
+                continue
 
             # --- Description ---
             # Resolve: static string, callable(self), or fall back to docstring.
@@ -1212,9 +1304,11 @@ class IInstanceBase:
             raise APERR(Ec.PreventDefault, 'no tool methods')
 
         if op == 'tool.query':
-            # Build descriptors from all @tool_function methods on this node,
-            # plus any dynamically discovered tools (e.g. MCP).
-            descriptors = self._build_tool_descriptors(methods)
+            # Build descriptors from the agent-audience @tool_function methods
+            # on this node, plus any dynamically discovered tools (e.g. MCP).
+            # tool.query builds the agent catalog, so DAP-only tools are left
+            # out here; tool.invoke below still dispatches them.
+            descriptors = self._build_tool_descriptors(methods, audience='agent')
             descriptors.extend(self._tool_query_dynamic())
 
             # Add our descriptors to the shared param.tools list.
@@ -1237,17 +1331,25 @@ class IInstanceBase:
                 raise ValueError('tool_name must be a non-empty string')
             tool_name = tool_name.strip()
 
-            # Try static @tool_function methods first
-            if tool_name in methods:
-                output = methods[tool_name](input_obj)
-
-            # Then try dynamic tools (MCP etc.)
-            elif has_dynamic:
-                output = self._tool_invoke_dynamic(tool_name=tool_name, input_obj=input_obj)
-
             # This node doesn't own this tool — let the next node try.
-            else:
+            if tool_name not in methods and not has_dynamic:
                 raise APERR(Ec.PreventDefault, f'tool.invoke: {tool_name} not owned')
+
+            # Run the tool inside the call context the caller stamped on the
+            # param (the DAP path and the agent host do; see
+            # ai.common.tool_context). No stamp means no context, even when
+            # this call is nested in another tool call. The tool input is
+            # never read as context.
+            tool_context = _tool_context_module()
+            scope = tool_context.dispatch_scope(param) if tool_context is not None else contextlib.nullcontext()
+            with scope:
+                # Try static @tool_function methods first
+                if tool_name in methods:
+                    output = methods[tool_name](input_obj)
+
+                # Then try dynamic tools (MCP etc.)
+                else:
+                    output = self._tool_invoke_dynamic(tool_name=tool_name, input_obj=input_obj)
 
             # Write the output back into the param object so the caller
             # can read it from param.output after the invoke returns.

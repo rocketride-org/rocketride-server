@@ -1,0 +1,369 @@
+{
+  "components": [
+    {
+      "id": "ingest_1",
+      "provider": "dropper",
+      "name": "Ingest",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "dropper",
+        "name": "Ingest"
+      },
+      "ui": {
+        "position": {
+          "x": 40,
+          "y": 40
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "chat_1",
+      "provider": "chat",
+      "name": "Chat",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "chat",
+        "name": "Chat"
+      },
+      "ui": {
+        "position": {
+          "x": 40,
+          "y": 320
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "tools_1",
+      "provider": "tools",
+      "name": "Tools",
+      "config": {
+        "hideForm": true,
+        "mode": "Source",
+        "parameters": {},
+        "type": "tools",
+        "name": "Tools"
+      },
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": -140
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      }
+    },
+    {
+      "id": "parse_1",
+      "provider": "parse",
+      "name": "Parse",
+      "config": {
+        "index": {
+          "maxFileSize": 52428800
+        }
+      },
+      "ui": {
+        "position": {
+          "x": 240,
+          "y": 40
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "tags",
+          "from": "ingest_1"
+        }
+      ]
+    },
+    {
+      "id": "chunk_1",
+      "provider": "preprocessor_langchain",
+      "name": "Chunker",
+      "config": {
+        "profile": "default",
+        "default": {
+          "mode": "strlen",
+          "splitter": "RecursiveCharacterTextSplitter",
+          "strlen": 1000
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 440,
+          "y": 40
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "text",
+          "from": "parse_1"
+        },
+        {
+          "lane": "table",
+          "from": "parse_1"
+        }
+      ]
+    },
+    {
+      "id": "embed_1",
+      "provider": "embedding_transformer",
+      "name": "Embedding",
+      "config": {
+        "profile": "miniAll",
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 640,
+          "y": 180
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "chunk_1"
+        },
+        {
+          "lane": "questions",
+          "from": "chat_1"
+        }
+      ],
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ]
+    },
+    {
+      "id": "store_1",
+      "provider": "mongodb+srv",
+      "name": "MongoDB Atlas",
+      "config": {
+        "profile": "default",
+        "default": {
+          "host": "",
+          "apikey": "",
+          "database": "rocketride",
+          "collection": "vector_explorer_docs",
+          "score": 0.65,
+          "serverName": "atlas",
+          "allow_writes": true
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 860,
+          "y": 40
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "embed_1"
+        }
+      ],
+      "control": [
+        {
+          "classType": "tool",
+          "from": "tools_1"
+        }
+      ]
+    },
+    {
+      "id": "store_2",
+      "provider": "mongodb+srv",
+      "name": "MongoDB Atlas (chat)",
+      "config": {
+        "profile": "default",
+        "default": {
+          "host": "",
+          "apikey": "",
+          "database": "rocketride",
+          "collection": "vector_explorer_docs",
+          "score": 0.65,
+          "serverName": "atlas",
+          "allow_writes": false
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 860,
+          "y": 320
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "embed_1"
+        }
+      ]
+    },
+    {
+      "id": "llm_1",
+      "provider": "llm_openai_api",
+      "name": "LLM",
+      "config": {
+        "profile": "custom",
+        "custom": {
+          "model": "gpt-4o-mini",
+          "base_url": "",
+          "apikey": "replace-with-your-key",
+          "modelTotalTokens": 16384
+        },
+        "parameters": {}
+      },
+      "ui": {
+        "position": {
+          "x": 1080,
+          "y": 320
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "questions",
+          "from": "store_2"
+        }
+      ]
+    },
+    {
+      "id": "response_1",
+      "provider": "response_answers",
+      "name": "Return Answers",
+      "config": {
+        "laneName": "answers"
+      },
+      "ui": {
+        "position": {
+          "x": 1300,
+          "y": 320
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "answers",
+          "from": "llm_1"
+        }
+      ]
+    },
+    {
+      "id": "response_2",
+      "provider": "response_documents",
+      "name": "Return Documents",
+      "config": {
+        "laneName": "documents"
+      },
+      "ui": {
+        "position": {
+          "x": 1080,
+          "y": 480
+        },
+        "measured": {
+          "width": 150,
+          "height": 87
+        },
+        "nodeType": "default",
+        "formDataValid": true
+      },
+      "input": [
+        {
+          "lane": "documents",
+          "from": "store_2"
+        }
+      ]
+    },
+    {
+      "id": "annotation_1",
+      "provider": "annotation",
+      "name": "Read this first",
+      "config": {
+        "content": "**Vector Explorer: MongoDB Atlas**\n\nThis pipeline is laid out for Vector Explorer. It has three sources: **Ingest** (drop files here to add documents), **Chat** (ask questions over them) and **Tools** (Vector Explorer's own calls). Start all three, save the pipeline as a project, then open Vector Explorer and choose the connection.\n\n`store_1` is the store Vector Explorer manages; `store_2` reads the same collection for the chat. Keep both on the same collection and connection settings.\n\nMongoDB Atlas is experimental in Vector Explorer: it was not run against a live server in this build.\n\n**Removing documents is on for `store_1`** (`allow_writes`). Turn it off to make Vector Explorer read-only for this store. Adding documents goes through the Ingest source: anyone who can send data to it can add documents.\n\nThe LLM node needs your key: replace `replace-with-your-key`, and set `base_url` only for an OpenAI-compatible server other than OpenAI.\n\n`chunk_1` cuts text into chunks of at most 1,000 characters (`strlen`); on mixed documents that gives a median chunk of about 800 characters, small enough for precise answers and a readable map.",
+        "bgColor": "var(--rr-annotation-bg-default)",
+        "fgColor": "var(--rr-text-primary)"
+      },
+      "ui": {
+        "position": {
+          "x": 40,
+          "y": 520
+        },
+        "measured": {
+          "width": 520,
+          "height": 360
+        },
+        "nodeType": "annotation"
+      }
+    }
+  ],
+  "version": 1,
+  "docRevision": 1,
+  "isLocked": false,
+  "snapToGrid": true,
+  "snapGridSize": [
+    10,
+    10
+  ]
+}

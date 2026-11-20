@@ -311,6 +311,24 @@ export class DataPipe {
 }
 
 /**
+ * The error a method that re-words a failed call throws: a DAPException (of
+ * the same class) keeps its server response and `code` under the new
+ * message, so a caller can still classify it (e.g. `TASK_STOPPED`); anything
+ * else becomes a plain Error with the message.
+ *
+ * @param err - What the call threw.
+ * @param message - The message to throw with.
+ * @returns The error to throw.
+ */
+function rewrapFailure(err: unknown, message: string): Error {
+	if (err instanceof DAPException) {
+		const Same = err.constructor as new (dapResult: Record<string, unknown>) => DAPException;
+		return new Same({ ...err.dapResult, message });
+	}
+	return new Error(message);
+}
+
+/**
  * Main RocketRide client for connecting to RocketRide servers and services.
  *
  * This client provides a comprehensive API for interacting with RocketRide services,
@@ -1290,7 +1308,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			await this.call('rrext_ping', undefined, { token });
 		} catch (err) {
-			throw new Error(`Ping failed: ${err instanceof Error ? err.message : err}`);
+			throw rewrapFailure(err, `Ping failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -1387,7 +1405,7 @@ export class RocketRideClient extends DAPClient {
 			// never need null guards on a passing validation.
 			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
-			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
+			throw rewrapFailure(err, `Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -1560,7 +1578,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline termination failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw rewrapFailure(err, errorMsg);
 		}
 	}
 
@@ -1603,7 +1621,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw rewrapFailure(err, errorMsg);
 		}
 	}
 
@@ -1626,7 +1644,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
-			throw new Error(errorMsg);
+			throw rewrapFailure(err, errorMsg);
 		}
 	}
 
@@ -2116,7 +2134,7 @@ export class RocketRideClient extends DAPClient {
 		try {
 			await this.call('rrext_monitor', args, { token });
 		} catch (err) {
-			throw new Error(`Event subscription failed: ${err instanceof Error ? err.message : err}`);
+			throw rewrapFailure(err, `Event subscription failed: ${err instanceof Error ? err.message : err}`);
 		}
 	}
 
@@ -3536,7 +3554,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param args    - Key/value arguments forwarded in the request.
 	 * @param options - Optional token (for task-scoped calls) and timeout in ms.
 	 * @returns The `body` field of a successful DAP response.
-	 * @throws Error if the server signals failure.
+	 * @throws DAPException if the server signals failure: an `Error` whose
+	 *         `message` is the server's message and whose `code` is the
+	 *         server's machine-readable code, when the failure has one.
 	 */
 	async call<T = any>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T> {
 		// Build the raw DAP request
@@ -3550,10 +3570,12 @@ export class RocketRideClient extends DAPClient {
 
 		const response = await this.request(message, options?.timeout);
 
-		// Throw on server-reported failure
+		// Throw on server-reported failure. DAPException keeps the server's
+		// machine-readable code (TASK_STOPPED, ...) next to the unchanged
+		// message, so callers classify on the code instead of the prose.
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
-			throw new Error(response.message ?? `${command} failed`);
+			throw new DAPException({ ...response, message: response.message ?? `${command} failed` });
 		}
 
 		// Trace: success response
@@ -3578,7 +3600,9 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.input - Arguments forwarded to the tool function
 	 * @param options.timeout - Optional per-request timeout in ms
 	 * @returns The tool's return value (typically a record/object)
-	 * @throws Error if the server signals failure or no node handles the requested tool
+	 * @throws DAPException if the server signals failure or no node handles the
+	 *         requested tool; `code` carries the server's code when there is one
+	 *         (e.g. `TASK_STOPPED` when the task stopped before the call reached it)
 	 */
 	async tool<T = any>(options: { token: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
 		const result = await this.call<{ result: T }>(

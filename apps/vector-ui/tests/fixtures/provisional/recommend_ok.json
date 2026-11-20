@@ -1,0 +1,86 @@
+{
+	"success": true,
+	"items": [
+		{
+			"key": [
+				"75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+				7
+			],
+			"sim": 0.71,
+			"score": 0.71,
+			"below_floor": false,
+			"path": "C:/demo/handbooks/falcon_handbook.md",
+			"chunkId": 7,
+			"preview": "Falcon Station draws its drinking water from the spring above the intake; the filter is changed…"
+		},
+		{
+			"key": [
+				"91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+				2
+			],
+			"sim": 0.66,
+			"score": 0.66,
+			"below_floor": false,
+			"path": "C:/demo/field/kestrel_field_guide.md",
+			"chunkId": 2,
+			"preview": "Kestrels hunt the ridge above the station in spring; nesting boxes are checked weekly…"
+		},
+		{
+			"key": [
+				"75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+				12
+			],
+			"sim": 0.63,
+			"score": 0.63,
+			"below_floor": false,
+			"path": "C:/demo/handbooks/falcon_handbook.md",
+			"chunkId": 12,
+			"preview": "The intake valve is opened by the morning shift and logged in the station book…"
+		},
+		{
+			"key": [
+				"91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+				5
+			],
+			"sim": 0.58,
+			"score": 0.58,
+			"below_floor": false,
+			"path": "C:/demo/field/kestrel_field_guide.md",
+			"chunkId": 5,
+			"preview": "Survey the nesting season from the north hide; record every sighting with its time…"
+		},
+		{
+			"key": [
+				"7598ec68-b5a3-51a8-bdd3-7200638f85db",
+				1
+			],
+			"sim": 0.41,
+			"score": 0.41,
+			"below_floor": false,
+			"path": "C:/demo/ops/shift_rota.docx",
+			"chunkId": 1,
+			"preview": "Shift rota: the morning shift opens the intake and reads the pressure gauge…"
+		},
+		{
+			"key": [
+				"75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+				21
+			],
+			"sim": 0.37,
+			"score": 0.37,
+			"below_floor": false,
+			"path": "C:/demo/handbooks/falcon_handbook.md",
+			"chunkId": 21,
+			"preview": "Maintenance schedule for the water station: filters, valves and the pressure sensor…"
+		}
+	],
+	"strategy_used": "average_vector",
+	"native": false,
+	"metric": "cosine",
+	"k_requested": 6,
+	"examples_resolved": {
+		"positive": 2,
+		"negative": 1
+	},
+	"not_found": []
+}

@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "SAMPLE_EXPIRED",
+	"error": "The sample is no longer held by the node (it expires after 600 s or when a newer sample replaces it). Draw the sample again."
+}

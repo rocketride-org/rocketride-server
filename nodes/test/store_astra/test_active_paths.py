@@ -18,6 +18,7 @@ import pytest
 from astrapy import DataAPIClient
 from astrapy.exceptions import TooManyDocumentsToCountException
 
+from ai.common.store.errors import StoreError
 from nodes.store_astra.astra_db import Store, _count_floor
 
 
@@ -134,12 +135,13 @@ def test_count_floor_takes_the_data_api_default_when_the_refusal_names_no_limit(
 def test_service_errors_are_not_reported_as_empty_results(astra, operation):
     store, request = astra
     request.side_effect = RuntimeError('service unavailable')
-    with pytest.raises(RuntimeError, match='service unavailable'):
+    # The driver re-raises a client failure as a StoreError with a fixed, host-free text (it never hides it).
+    with pytest.raises(StoreError, match=f'^Astra DB {operation} failed: RuntimeError$'):
         getattr(store, operation)()
 
 
 def test_count_estimate_errors_are_not_reported_as_counts(astra):
     store, request = astra
     request.side_effect = [{'status': {'count': 1000, 'moreData': True}}, RuntimeError('estimate unavailable')]
-    with pytest.raises(RuntimeError, match='estimate unavailable'):
+    with pytest.raises(StoreError, match='^Astra DB count_documents failed: RuntimeError$'):
         store.count_documents()

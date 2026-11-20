@@ -1,0 +1,20 @@
+{
+	"success": true,
+	"deleted_count": 1,
+	"removed_chunks": 12,
+	"not_found": [],
+	"kept_live": ["2c4e8a10-7b1d-5f3a-9e6c-0d8b4a2f1e57"],
+	"audit": {
+		"action": "vector.delete",
+		"node": "store_1",
+		"provider": "postgres",
+		"collection": "vx_demo_docs",
+		"object_ids": ["91ae15d4-3f6e-589f-bb81-72301f2ca1b6", "2c4e8a10-7b1d-5f3a-9e6c-0d8b4a2f1e57"],
+		"rows": 12,
+		"caller": {
+			"auth": "account",
+			"userId": "u-0001",
+			"teamId": "t-0001"
+		}
+	}
+}

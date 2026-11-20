@@ -1,0 +1,43 @@
+{
+	"success": true,
+	"items": [
+		{
+			"objectId": "e75b1be4-9c82-5266-96b3-b894c6fe4113",
+			"path": "C:/demo/greenhouse/orchid_notes.pdf",
+			"chunks": 6,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 181220,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "459ea560-0859-5475-93cf-cf0effbc5bfe",
+			"max_chunk_id": 5,
+			"deleted_chunks": 0
+		},
+		{
+			"objectId": "dcfda41e-afa5-5f8d-b1c7-860cc0e03189",
+			"path": "C:/demo/greenhouse/orchid_notes.txt",
+			"chunks": 4,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 6120,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "66b162c7-a5da-51a7-948e-1a1e7e1e7647",
+			"max_chunk_id": 3,
+			"deleted_chunks": 0
+		}
+	],
+	"next_cursor": null,
+	"total": 2,
+	"counts_exact": true,
+	"distinct": true,
+	"sorted": true,
+	"filter_applied": "server",
+	"filter_ignored": [],
+	"caveats": []
+}

@@ -17,6 +17,8 @@ from ai.common.schema import Doc, DocMetadata, Question, QuestionType
 from ai.common.store import DocumentStoreBase
 from ai.common.store.document_store import VectorStoreToolMixin
 
+from ._vectordb_tool_harness import as_agent
+
 
 class _FakeStore(DocumentStoreBase):
     """Minimal concrete DocumentStoreBase for exercising createCollection() in isolation."""
@@ -221,10 +223,13 @@ def test_tool_upsert_missing_model_name_does_not_prescribe_lane_wiring():
     tools.IGlobal = SimpleNamespace(
         store=store, serverName='test', embed_query=lambda text: [0.1, 0.2, 0.3], embed_model_name=None
     )
-    result = tools.upsert({'documents': [{'content': 'hello', 'object_id': 'obj'}]})
+    # The write gate refuses a write without a call context: run it as an agent's call
+    with as_agent():
+        result = tools.upsert({'documents': [{'content': 'hello', 'object_id': 'obj'}]})
     assert result['success'] is False
+    # The tool envelope names the exception type before its message (vx_tools.safe_error)
     assert result['error'] == (
-        'Documents are missing an embedding model name. Check the embedding configuration '
+        'Exception: Documents are missing an embedding model name. Check the embedding configuration '
         'or supply vectors with their model name.'
     )
 

@@ -35,8 +35,9 @@ Pipeline agents address the functions below as `<node id>.<function>`. The confi
 | `stats` | Returns the collection's row count (including trashed chunks and the control row; exact up to the count ceiling and approximate above it), `document_count` (null on this store, which does not list documents), the embedding model name, and the vector size. |
 | `upsert` | Add or update documents in the collection. |
 | `delete` | Remove documents by object ID. |
-| `soft_delete` | Moves the documents of a non-empty `object_ids` array to the trash, keeping their chunks; the reply echoes the distinct IDs, and `matched_chunks` is null on this store. |
-| `restore` | Takes the documents of a non-empty `object_ids` array out of the trash. A document removed with `delete` cannot be restored. |
+| `list_documents` | List the documents one by one with their path and chunk count, in pages ordered by path (follow `next_cursor`); `deleted: 'deleted'` lists the trash. |
+| `soft_delete` | Move documents to the trash by object ID: their chunks stay stored but leave search, `objdir`, `get` and the listing until `restore`. |
+| `restore` | Take documents out of the trash by object ID. |
 
 `search` and an `upsert` without a supplied embedding use the node's bound embedding provider. These calls are on the agent tool channel, not the document lanes. Agents distinguish multiple Astra nodes by their pipeline node IDs.
 
@@ -67,7 +68,7 @@ The first successful ingest fixes the collection's vector dimension from the inc
 
 ### Retrieval score
 
-The generated configuration supplies the requested retrieval score, while the store also has a hard floor: semantic hits below `0.20` are discarded before they reach any output lane. Raise the configured score when loosely related context is polluting answers; lower it when relevant content is absent, while remembering that values below the hard floor cannot restore those results. Keyword search does not carry this vector-similarity filter.
+The generated configuration supplies the requested retrieval score, while the store also has a floor: semantic hits below `0.20` are discarded before they reach any output lane. Scores are the Data API's normalised `$similarity`, between `0` and `1` for every metric. Raise the configured score when loosely related context is polluting answers; lower it when relevant content is absent, while remembering that values below the floor cannot restore those results. Keyword search does not carry this vector-similarity filter.
 
 ### Profile choice and first write
 
@@ -84,6 +85,20 @@ Soft deletion is a separate lifecycle action. It leaves the chunks in Astra and 
 ### Tool Server Name
 
 The name defaults to `astra` and labels this store in tool-response messages. Pipeline agents address all eight functions listed above by node ID, for example `<node id>.search` or `<node id>.restore`; changing this label does not change those addresses.
+
+### Write switches
+
+Allow document management from tool calls (`allow_writes`) is off by default.
+Turn it on in the pipeline whose Tools source should be able to remove
+documents from the collection, or add them with the `upsert` tool, through
+tool calls, for example the pipeline the Vector Explorer manages. Even when it
+is on, such a write is accepted only from a Tools source of the pipeline,
+addressed to this node; calls from the pipeline's chat or ingest sources are
+refused. Documents the pipeline's own lanes write are not affected by this
+switch.
+
+The switch does not apply to an agent in this pipeline: its `upsert` and
+`delete` calls work as they always have.
 
 ## Authentication
 
@@ -107,11 +122,24 @@ Astra has no collection aggregation method in the supported SDK, and a server-si
 
 ### Ingestion, replacement, and deletion
 
-The node stores each chunk with a generated `_id`, the content, metadata, and its vector. It collects up to 500 chunks before inserting. If a chunk with `chunkId` 0 arrives, all existing chunks with the same `objectId` are deleted first, so a complete re-ingest replaces that object instead of duplicating it. Near-zero vectors are omitted from the insert batch; the special zero-vector schema control document is adjusted to a tiny non-zero vector.
+The node stores each chunk with a generated `_id`, the content, metadata, and its vector. It collects up to 500 chunks before inserting. If a chunk with `chunkId` 0 arrives, all existing chunks with the same `objectId` are deleted first, so a complete re-ingest replaces that object instead of duplicating it. A later batch of the same object (one without chunk 0) is added to it, and sent again (a retried batch) it replaces the chunks it holds instead of storing them twice. That delete runs before the insert and is not atomic with it, so a failed insert loses the old copy of those chunks; send the batch again. Rows an older version stored are not matched by a repeated chunk number until the object is written again from chunk 0. Near-zero vectors are omitted from the insert batch; the collection's zero-vector control record is stored with a unit vector instead, so it is kept (earlier releases dropped it, and the second write to a collection then failed).
+
+The stored metadata is the declared document fields plus the control record's embedding model and vector size, without empty values; other metadata, such as file size and ingest time, is not stored on Astra. Rows written by earlier releases carry empty values and are still read. Earlier releases also left the embedding model and vector size out of the control record, so a collection they created cannot be searched or written by this node (its collection check needs both): re-create it. Counts use the Data API's `count_documents` with a ceiling of 1,000: the node's document count falls back to Astra's estimate above it, and a filtered count above it is reported as unknown. Reads by filter honour their offset (paging with a sort, as the Data API requires), and path listing returns live documents only, never the control record.
 
 `markDeleted` and `markActive` update the `meta.isDeleted` flag for all chunks of the supplied object IDs, while `remove` permanently deletes those chunks. Rendering an object fetches its non-deleted chunks, sorts them by `chunkId` in the node, and joins their content because Astra does not guarantee the returned order.
 
 That ordering detail matters when rendering a document whose chunks were written in parallel: do not rely on Astra's natural return order to reproduce the source text. The node makes the ordering decision itself, then calls the render callback with the combined text.
+
+### Vector Explorer
+
+The Vector Explorer app supports Astra DB as **experimental**: its explorer functions are tested against an in-memory stand-in for the Data API client, not against Astra. What the app sees on Astra:
+
+- The document list pages through each document's chunk 0 in Astra's own storage order, following the Data API's page state (the app sorts what it has loaded by path). It shows no chunk count per document: the Data API cannot count per document without one request per row. A document whose chunk 0 is missing is not listed. A document whose chunk 0 is in the trash but a later chunk is live (moved to the trash while it was still being uploaded) is listed after the others, from a read of up to 1,000 documents of the trash (the list says so when the trash holds more).
+- The explorer never asks Astra to sort on a metadata field: the Data API answers such a request with at most 20 documents and sorts at most 10,000 rows in memory. Lists, chunk pages and the `objdir` paths are read unsorted, and a document's chunks are read by ranges of chunk ids and put in order on the node. File size and ingest time are not shown because Astra does not keep them.
+- Chunk counts honour the active, deleted and all views (any other view is refused as invalid input); the collection's control record is never counted or listed. Collections written by earlier releases have no embedding model in their control record, so the model is shown as unknown there; the explorer still reads them, but searches and writes through this node need the collection re-created (see Ingestion above).
+- Samples for the embedding map are taken in storage order, and the neighbour graph is computed on the node.
+- Removing a document reports the number of chunks it removed.
+- When Astra DB fails (unreachable, or a request it rejects), the explorer, the store's tools and the pipeline's writes report `Astra DB <operation> failed: <error class> (code N)`, for reads, writes, marks, renders and the collection checks alike. The client's own message, which can name the server, is not passed on. An error raised by the node's own code is reported as it is.
 
 ### Tool embedding dependency
 
@@ -139,5 +167,5 @@ Agent `search` needs an embedding for semantic retrieval, and agent `upsert` nee
 
 ## Source
 
-[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/rocketride-org/rocketride-server/tree/develop/nodes/src/nodes/store_astra)
+[<svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true" style="vertical-align:-0.15em;margin-right:0.35em"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg> View source](https://github.com/nihalnihalani/rocketride-server/tree/develop/nodes/src/nodes/store_astra)
 <!-- ROCKETRIDE:GENERATED:PARAMS END -->

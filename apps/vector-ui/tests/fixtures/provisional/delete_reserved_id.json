@@ -1,0 +1,5 @@
+{
+	"success": false,
+	"code": "RESERVED_ID",
+	"error": "'schema' is the collection's control record and cannot be removed."
+}

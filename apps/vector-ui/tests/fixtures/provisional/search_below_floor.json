@@ -1,0 +1,158 @@
+{
+	"success": true,
+	"results": [
+		{
+			"content": "ops ops 021 part 40: audit sample protocol station filter filter contract protocol nesting pressure filter trial…",
+			"score": 0.5433,
+			"metadata": {
+				"objectId": "2ed1cfeb-37ac-4394-30f7-699303f093bd",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/ops/ops_021.pdf",
+				"chunkId": 39
+			},
+			"rank": 1,
+			"raw_score": 0.5433,
+			"sim": 0.5433,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "ops ops 005 part 68: protocol water sample schedule nesting harvest invoice station orchid clause nesting spring…",
+			"score": 0.5247,
+			"metadata": {
+				"objectId": "ef35cb9c-f98f-e472-d795-298a40a5cb2b",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/ops/ops_005.pdf",
+				"chunkId": 67
+			},
+			"rank": 2,
+			"raw_score": 0.5247,
+			"sim": 0.5247,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "finance ocr scan junk part 28: kestrel survey valve trial trial survey water pressure schedule season kestrel…",
+			"score": 0.5178,
+			"metadata": {
+				"objectId": "0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/finance/ocr_scan_junk.txt",
+				"chunkId": 27
+			},
+			"rank": 3,
+			"raw_score": 0.5178,
+			"sim": 0.5178,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "field field 008 part 3: protocol audit kestrel station pressure station audit orchid rotation trial maintenance…",
+			"score": 0.504,
+			"metadata": {
+				"objectId": "c8e55bfa-5fc2-c7d6-191d-a019fde5c682",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/field/field_008.md",
+				"chunkId": 2
+			},
+			"rank": 4,
+			"raw_score": 0.504,
+			"sim": 0.504,
+			"below_threshold": false,
+			"below_floor": false
+		},
+		{
+			"content": "finance ocr scan junk part 37: protocol spring maintenance humidity pressure valve nesting valve valve rotation…",
+			"score": 0.19,
+			"metadata": {
+				"objectId": "0ab4bcf8-cc0a-71ee-7141-6e7abba8b1ad",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/finance/ocr_scan_junk.txt",
+				"chunkId": 36
+			},
+			"rank": 5,
+			"raw_score": 0.19,
+			"sim": 0.19,
+			"below_threshold": true,
+			"below_floor": true
+		},
+		{
+			"content": "finance finance 001 part 57: nesting budget falcon station season valve rotation audit invoice audit valve water…",
+			"score": 0.17,
+			"metadata": {
+				"objectId": "e4feb073-97bb-5fe9-e197-598c3038fa99",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/finance/finance_001.pdf",
+				"chunkId": 56
+			},
+			"rank": 6,
+			"raw_score": 0.17,
+			"sim": 0.17,
+			"below_threshold": true,
+			"below_floor": true
+		},
+		{
+			"content": "support support 007 part 13: ticket report budget budget spring sample rotation orchid season pressure spring…",
+			"score": 0.15,
+			"metadata": {
+				"objectId": "cf4d318a-103a-3e37-21b4-94feaa693a35",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/support/support_007.txt",
+				"chunkId": 12
+			},
+			"rank": 7,
+			"raw_score": 0.15,
+			"sim": 0.15,
+			"below_threshold": true,
+			"below_floor": true
+		},
+		{
+			"content": "finance finance 001 part 72: ledger survey ticket maintenance pressure pressure humidity greenhouse pressure humidity…",
+			"score": 0.13,
+			"metadata": {
+				"objectId": "e4feb073-97bb-5fe9-e197-598c3038fa99",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/finance/finance_001.pdf",
+				"chunkId": 71
+			},
+			"rank": 8,
+			"raw_score": 0.13,
+			"sim": 0.13,
+			"below_threshold": true,
+			"below_floor": true
+		},
+		{
+			"content": "support support 039 part 48: protocol invoice station harvest ticket schedule humidity harvest sample kestrel report…",
+			"score": 0.11,
+			"metadata": {
+				"objectId": "4bbe410d-202b-a5fa-9780-3bb9cf28a9b1",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/support/support_039.txt",
+				"chunkId": 47
+			},
+			"rank": 9,
+			"raw_score": 0.11,
+			"sim": 0.11,
+			"below_threshold": true,
+			"below_floor": true
+		},
+		{
+			"content": "support support 015 part 21: ledger maintenance filter pressure nesting sample clause falcon sample report…",
+			"score": 0.09,
+			"metadata": {
+				"objectId": "91e0b4a0-3e6d-47db-3f8e-eb6fa030dae3",
+				"nodeId": "chunk_1",
+				"parent": "C:/demo/support/support_015.txt",
+				"chunkId": 20
+			},
+			"rank": 10,
+			"raw_score": 0.09,
+			"sim": 0.09,
+			"below_threshold": true,
+			"below_floor": true
+		}
+	],
+	"total": 10,
+	"warnings": [],
+	"mode_used": "semantic"
+}

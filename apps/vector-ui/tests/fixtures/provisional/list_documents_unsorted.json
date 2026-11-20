@@ -1,0 +1,66 @@
+{
+	"success": true,
+	"items": [
+		{
+			"objectId": "75b89d86-a64e-5143-bf50-55d4a7fd8cd2",
+			"path": "C:/demo/handbooks/falcon_handbook.md",
+			"chunks": 31,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": null,
+			"modifyTime": null,
+			"ingestedAt": null,
+			"pointId": "76d57a1c-26e2-5ad0-b88c-b9405dce880c"
+		},
+		{
+			"objectId": "b7d9f0ed-3e89-583f-9dbe-195a39648e40",
+			"path": "report.pdf",
+			"chunks": 19,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 1048211,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "d9a3b0c6-544b-56a9-96a7-f9a991a42054"
+		},
+		{
+			"objectId": "91ae15d4-3f6e-589f-bb81-72301f2ca1b6",
+			"path": "C:/demo/field/kestrel_field_guide.md",
+			"chunks": 12,
+			"has_first_chunk": true,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": 7419,
+			"modifyTime": null,
+			"ingestedAt": "2026-10-08T18:20:11Z",
+			"pointId": "6df68429-1d3e-5eed-bbfc-6c41d8ea51dd"
+		},
+		{
+			"objectId": "505cac3b-3469-59e1-a8e4-0b5580c7ba99",
+			"path": "ops/old_memo.txt",
+			"chunks": 3,
+			"has_first_chunk": false,
+			"tables": 0,
+			"deleted": false,
+			"nodeId": "chunk_1",
+			"size": null,
+			"modifyTime": null,
+			"ingestedAt": null,
+			"pointId": "3e475818-8000-53fd-8127-96ee5ace3ac6"
+		}
+	],
+	"next_cursor": null,
+	"total": null,
+	"counts_exact": true,
+	"distinct": true,
+	"sorted": false,
+	"caveats": [
+		"documents_unsorted",
+		"documents_by_first_chunk"
+	]
+}

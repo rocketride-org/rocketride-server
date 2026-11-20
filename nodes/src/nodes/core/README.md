@@ -319,6 +319,7 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 
 | Field | Type | Description | Default |
 |---|---|---|---|
+| `vector.allow_writes` | `boolean` | **Allow document management from tool calls**<br/>Let tool calls from a Tools source (for example the Vector Explorer) remove and add documents in this collection. Calls from other sources, from callers that are not signed in, and calls that do not name this node are refused either way. An agent in this pipeline is not affected: it writes through this node's tools as before. | `false` |
 | `vector.apikey` | `string` | **API key**<br/>Enter your API key |  |
 | `vector.cloud.host` | `string` | **Host**<br/>Enter the server IP address e.g. Localhost |  |
 | `vector.cloud.port` | `number` | **Port**<br/>Enter the port number |  |
@@ -347,23 +348,11 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 | `filesys.source.parameters` |  | **Parameters** |  |
 | `include` |  | This path defines the paths included for Scan, Index, Classify and OCR. By default, its empty.<br/><br/>Format for Windows : C:\foldername (for local filesystem) or \\file.core.net\foldername (for shared folders)<br/><br/>Format for Linux : /file.core.net/foldername |  |
 
-### Fingerprinter (`services.hash.json`)
-
-_No configuration fields._
-
-### Word indexer (`services.indexer.json`)
-
-_No configuration fields._
-
 ### Local File System (`services.null.json`)
 
 | Field | Type | Description | Default |
 |---|---|---|---|
 | `null.source.parameters` |  | **Parameters** |  |
-
-### Parser (`services.parse.json`)
-
-_No configuration fields._
 
 ### ZIP Creation (`services.zip.json`)
 

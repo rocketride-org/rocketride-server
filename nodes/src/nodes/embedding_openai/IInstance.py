@@ -23,15 +23,19 @@
 
 from typing import List
 from rocketlib import IInstanceBase, Entry
+from ai.common.embed_tool import EmbedToolMixin
 from ai.common.schema import Doc, Question
 from .IGlobal import IGlobal
 
 
-class IInstance(IInstanceBase):
+class IInstance(EmbedToolMixin, IInstanceBase):
     """
     Represent an instance that processes documents and questions using embeddings.
 
-        It interacts with the global embedding system to encode data.
+    It interacts with the global embedding system to encode data. It also answers
+    the ``embed`` tool (EmbedToolMixin), which uses the same model: every model
+    call here runs inside ``_embed_batch()`` so a tool call never runs on the
+    model in the middle of a batch.
     """
 
     IGlobal: IGlobal  # Reference to a global context providing embedding functionality
@@ -56,7 +60,8 @@ class IInstance(IInstanceBase):
         Args:
             documents (List[Doc]): A list of documents to encode.
         """
-        self.IGlobal.embedding.encodeChunks(documents)  # Encode document chunks
+        with self._embed_batch():
+            self.IGlobal.embedding.encodeChunks(documents)  # Encode document chunks
 
     def writeQuestions(self, question: Question):
         """
@@ -65,4 +70,5 @@ class IInstance(IInstanceBase):
         Args:
             question (Question): The question to encode.
         """
-        self.IGlobal.embedding.encodeQuestion(question)  # Encode the question
+        with self._embed_batch():
+            self.IGlobal.embedding.encodeQuestion(question)  # Encode the question
