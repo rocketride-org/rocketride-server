@@ -310,7 +310,7 @@ constructor(expectJson?: boolean)  // default false
 | `error` | field | `{ code, message }` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
 | `toolCalls` | getter | The calls in `message`, in order. Empty for a text answer. |
 | `tokens` | field | Turn token usage, set by `fromResult`. |
-| `agentStopReason` | field | Why the agent run that answered stopped: `done`, `max_steps`, `empty_plan` or `error`. `fromResult` sets it from the result's `stop_reason`. |
+| `agentStopReason` | field | Why the agent run that answered stopped: `done`, `max_steps`, `empty_plan`, `error` or `unknown`. `fromResult` sets it from the result's `stop_reason`. |
 
 ## Types
 

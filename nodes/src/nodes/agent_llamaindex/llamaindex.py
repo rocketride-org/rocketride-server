@@ -113,10 +113,10 @@ class LlamaIndexDriver(AgentBase):
                 step = parser.parse(raw)
             except Exception:
                 # Unparseable output means the model answered directly; strip scaffolding.
-                return _clean_answer(raw), {'steps': stack}
+                return _clean_answer(raw), {'steps': stack, 'stop_reason': 'done'}
 
             if step.is_done:
-                return safe_str(getattr(step, 'response', raw)), {'steps': stack}
+                return safe_str(getattr(step, 'response', raw)), {'steps': stack, 'stop_reason': 'done'}
 
             self.sendSSE(context, 'thinking', message=f'Calling {step.action}...', tool=step.action)
             try:

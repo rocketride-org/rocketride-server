@@ -142,9 +142,10 @@ StopReason = Literal['end_turn', 'tool_use', 'max_tokens', 'stop_sequence', 'ref
 
 # Why an agent run stopped. Only `done` means the answer is the agent's finished one:
 # `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
-# planning) answer with a best effort from the work so far, and `error` (the run failed,
-# or its answer was refused) answers with the error message.
-AgentStopReason = Literal['done', 'max_steps', 'empty_plan', 'error']
+# planning) answer with a best effort from the work so far, `error` (the run failed,
+# or its answer was refused) answers with the error message or a best effort, and
+# `unknown` means the agent did not say how its run ended.
+AgentStopReason = Literal['done', 'max_steps', 'empty_plan', 'error', 'unknown']
 
 
 class AnswerError(BaseModel):

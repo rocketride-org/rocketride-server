@@ -272,7 +272,7 @@ From `rocketride.schema`. Parses chat response content — see
 | `message` | field | The model's turn (`AssistantMessage`). Set only in turn mode. |
 | `stopReason` | field | `end_turn`, `tool_use`, `max_tokens`, `stop_sequence` or `refusal`. Set only in turn mode. |
 | `error` | field | `AnswerError(code, message)` when a turn failed; `code` is `tools_unsupported`, `invalid_request` or `provider_error`. |
-| `agentStopReason` | field | Why the agent run that answered stopped: `done`, `max_steps`, `empty_plan` or `error`. `fromResult` sets it from the result's `stop_reason`. |
+| `agentStopReason` | field | Why the agent run that answered stopped: `done`, `max_steps`, `empty_plan`, `error` or `unknown`. `fromResult` sets it from the result's `stop_reason`. |
 | `toolCalls` | `toolCalls(self) -> List[ToolCallBlock]` | The calls in `message`, in order. Empty for a text answer. |
 
 ## Types

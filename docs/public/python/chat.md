@@ -87,7 +87,10 @@ is a finished answer:
   with a best effort from the work so far.
 - `empty_plan`: the Wave agent's model stopped planning without finishing, and the answer
   is a best effort too.
-- `error`: the run failed or its answer was refused, and the answer is the error message.
+- `error`: the run failed or its answer was refused. The answer is the error message,
+  or a best effort from the work so far when the Wave agent's planning failed after it
+  had done some work.
+- `unknown`: the agent did not say how its run ended.
 
 ```python
 reason = response.get('stop_reason')
@@ -95,7 +98,8 @@ if reason and reason != 'done':
     print(f'Not a finished answer ({reason})')
 ```
 
-The field is absent when no agent answered.
+The field is absent when no agent answered. When several agents answered, it is the first
+reason other than `done`, and it does not say which answer that reason belongs to.
 
 ## Native tool calling
 

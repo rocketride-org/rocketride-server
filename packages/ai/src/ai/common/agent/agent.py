@@ -36,9 +36,9 @@ from ._internal.utils import (
 
 
 def _stop_reason(raw: Any) -> AgentStopReason:
-    """Why a run that returned stopped: its trace's `stop_reason`, else `done`."""
+    """Why a run that returned stopped: its trace's `stop_reason`, else `unknown`."""
     reason = raw.get('stop_reason') if isinstance(raw, dict) else None
-    return reason if reason in get_args(AgentStopReason) else 'done'
+    return reason if reason in get_args(AgentStopReason) else 'unknown'
 
 
 class ToolCallRequiredError(RuntimeError):
@@ -358,9 +358,10 @@ class AgentBase(ABC):
         - content: final user-facing text
         - raw: framework-native output object/state for trace/debugging
 
-        A run that returns has finished (`done`) unless `raw` is a dict whose
-        `stop_reason` says otherwise: a driver that answers with a best effort
-        after running out of steps reports `max_steps` there.
+        `raw` is a dict whose `stop_reason` says why the run stopped: `done` once
+        the framework reports the run finished, `max_steps` for a best effort
+        after running out of steps. A run whose `raw` gives no recognized reason
+        reports `unknown`.
         """
         raise NotImplementedError
 

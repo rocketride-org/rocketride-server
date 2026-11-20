@@ -246,15 +246,17 @@ class CrewBase(AgentBase):
         channels carried by `context`.
         """
         from crewai import BaseLLM
-        from crewai.utilities.i18n import I18N_DEFAULT
+        from crewai.utilities.i18n import get_i18n
 
         outer_self = self
         outer_context = context
         outer_role = role
 
-        # The turn CrewAI appends when an agent reaches max_iter, to force a final answer
-        # (handle_max_iterations_exceeded in crewai/utilities/agent_utils.py).
-        forced_turn = {'role': 'user', 'content': I18N_DEFAULT.errors('force_final_answer').rstrip()}
+        # The prompt CrewAI appends when an agent reaches max_iter, to force a final answer
+        # (handle_max_iterations_exceeded in crewai/utilities/agent_utils.py). Before 1.15.42
+        # it is an assistant turn that can start with the agent's last reply; from 1.15.42 it
+        # is a user turn of its own.
+        force_text = get_i18n().errors('force_final_answer').rstrip()
 
         class HostInvokeLLM(BaseLLM):
             # Set when CrewAI forces this model's final answer: its agent ran out of steps.
@@ -271,7 +273,12 @@ class CrewBase(AgentBase):
                 available_functions: Optional[Dict[str, Any]] = None,
                 **kwargs: Any,
             ) -> Union[str, Any]:
-                if isinstance(messages, list) and messages and messages[-1] == forced_turn:
+                last = messages[-1] if isinstance(messages, list) and messages else None
+                if (
+                    isinstance(last, dict)
+                    and isinstance(last.get('content'), str)
+                    and last['content'].endswith(force_text)
+                ):
                     self.forced_final_answer = True
                 # CrewAI injects the ReAct stop list ("\nObservation:") per-call via a
                 # contextvar override that is ONLY visible through the `stop_sequences`

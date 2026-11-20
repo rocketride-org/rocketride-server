@@ -8,7 +8,7 @@ Acts as the terminal node in pipelines triggered via HTTP: it collects everythin
 
 When an object finishes processing, the node also copies the object's name, path (the containing directory, with the file name stripped), and metadata (all keys except Tika-derived ones, which are filtered out) into the response. It also records a `result_types` map that ties each result key back to its original lane type.
 
-When an agent's answer arrives, the node also records why the agent's run stopped as `stop_reason`, next to the answers, which keep their shape. Only `done` is a finished answer: `max_steps` and `empty_plan` are a best effort from the work so far, and `error` means the answer is the error message. If several agents answer, `stop_reason` is the first reason other than `done`. It is absent when no agent answered.
+When an agent's answer arrives, the node also records why the agent's run stopped as `stop_reason`, next to the answers, which keep their shape. Only `done` is a finished answer: `max_steps` and `empty_plan` are a best effort from the work so far, `error` means the answer is the error message (or, from the Wave agent, a best effort when planning failed after some work), and `unknown` means the agent did not say how its run ended. If several agents answer, `stop_reason` is the first reason other than `done`, and it does not say which answer that reason belongs to. It is absent when no agent answered.
 
 Data handling per lane:
 

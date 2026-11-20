@@ -540,10 +540,32 @@ def test_a_best_effort_answer_says_why_the_run_stopped():
     assert ii.instance.written[0].agentStopReason == 'max_steps'
 
 
-@pytest.mark.parametrize('raw', [None, 'text trace', {'messages': []}, {'stop_reason': 3}])
-def test_a_run_that_returns_without_a_reason_finished(raw):
+# Only a driver that saw its run finish may say `done` (#3361 review).
+@pytest.mark.parametrize(
+    'raw',
+    [
+        None,
+        'text trace',
+        {},
+        {'messages': []},
+        {'stop_reason': 3},
+        {'stop_reason': 'max_tokens'},
+        {'stop_reason': 'max_waves'},
+    ],
+)
+def test_a_run_that_returns_without_a_known_reason_is_not_called_finished(raw):
     ii = _FakeIInstance()
     driver = _make_driver(lambda self, ctx, q: ('ok', raw), require_tool_call=False)
+
+    payload = driver.run_agent(ii, _FakeQuestion())
+
+    assert payload['meta']['stop_reason'] == 'unknown'
+    assert ii.instance.written[0].agentStopReason == 'unknown'
+
+
+def test_a_run_whose_driver_saw_it_finish_reports_done():
+    ii = _FakeIInstance()
+    driver = _make_driver(lambda self, ctx, q: ('ok', {'stop_reason': 'done'}), require_tool_call=False)
 
     payload = driver.run_agent(ii, _FakeQuestion())
 

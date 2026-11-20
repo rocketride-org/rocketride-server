@@ -75,22 +75,26 @@ A complete chat program is [example 6](/clients/typescript/examples#6-chat-quest
 
 ## Agent answers
 
-When an agent answered, `result.stop_reason` says why its run stopped. Only `done` is a
+When an agent answered, `response.stop_reason` says why its run stopped. Only `done` is a
 finished answer:
 
 - `max_steps`: the agent ran out of steps (`max_waves` on the Wave agent) and answered
   with a best effort from the work so far.
 - `empty_plan`: the Wave agent's model stopped planning without finishing, and the answer
   is a best effort too.
-- `error`: the run failed or its answer was refused, and the answer is the error message.
+- `error`: the run failed or its answer was refused. The answer is the error message,
+  or a best effort from the work so far when the Wave agent's planning failed after it
+  had done some work.
+- `unknown`: the agent did not say how its run ended.
 
 ```typescript
-if (result.stop_reason && result.stop_reason !== 'done') {
-	console.warn(`Not a finished answer (${result.stop_reason})`);
+if (response.stop_reason && response.stop_reason !== 'done') {
+	console.warn(`Not a finished answer (${response.stop_reason})`);
 }
 ```
 
-The field is absent when no agent answered.
+The field is absent when no agent answered. When several agents answered, it is the first
+reason other than `done`, and it does not say which answer that reason belongs to.
 
 ## Native tool calling
 
