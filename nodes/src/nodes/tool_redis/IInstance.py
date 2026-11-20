@@ -46,6 +46,7 @@ def _as_object(raw) -> dict:
                 raise TypeError('Unsupported tool input')
             raw = convert()
     except Exception:
+        # Model converters may raise arbitrary exceptions containing credentials.
         raise RedisNodeError('invalid_input', 'Tool arguments must be an object.') from None
     if not isinstance(raw, dict):
         raise RedisNodeError('invalid_input', 'Tool arguments must be an object.')
