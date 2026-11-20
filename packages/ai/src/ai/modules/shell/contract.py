@@ -77,6 +77,8 @@ PLATFORM_DEVELOPER_ID = 'rocketride'
 # /remote and /pipe belong to other server configurations; /db, /internal,
 # /marketplace/apps and /oauth to the SaaS extension, which that test does not
 # boot. Only /marketplace/apps: /marketplace itself is the home app's page.
+# A SaaS route missing here is still never a page (the live route check refuses
+# it); listing it reserves the whole prefix around it.
 RESERVED_PREFIXES = (
     '/.well-known',
     '/api',
