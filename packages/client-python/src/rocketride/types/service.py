@@ -192,4 +192,4 @@ class PROTOCOL_CAPS(Flag):
     FOCUS = 1 << 14  # Focus on this driver
     DEPRECATED = 1 << 15  # Driver is deprecated
     EXPERIMENTAL = 1 << 16  # Driver is experimental
-    MULTITENANT = 1 << 17  # Node is certified reentrant-safe for cross-user sharing
+    MULTITENANT = 1 << 17  # Retired: the server sets it on no node and reads it nowhere (engines share by shape)

@@ -81,18 +81,6 @@ UNCHECKED_TYPES = frozenset({'constant', 'oauth2', 'upload', 'secret', 'env', 'n
 #: control). A call whose map is not cached resolves it again; nothing is lost.
 OVERLAY_CACHE_SIZE = 64
 
-#: The PROTOCOL_CAPS bit a node carries once it is certified reentrant-safe
-#: (MULTITENANT = BIT(17) in engine-core/apLib/url/Url.hpp). The resolved
-#: schema's "capabilities" is the PROTOCOL_CAPS int bitmask. Taken from the
-#: engine's PROTOCOL_CAPS when this module runs inside it; the literal keeps
-#: the module pure for the validators that run without an engine.
-try:
-    from .types import PROTOCOL_CAPS as _PROTOCOL_CAPS
-
-    MULTITENANT_BIT = int(getattr(_PROTOCOL_CAPS, 'MULTITENANT', 1 << 17))
-except ImportError:
-    MULTITENANT_BIT = 1 << 17
-
 
 # ==== Errors =================================================================
 

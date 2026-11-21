@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -829,6 +829,22 @@ def test_the_engine_debit_of_a_run_with_no_user_names_its_team(fake_psutil, no_g
     asyncio.run(tm._report_to_billing_system())
 
     assert [(row['org_id'], row['user_id'], row['team_id']) for row in rows] == [('org-1', None, 'team-1')]
+
+
+def test_a_shared_engine_writes_no_remainder_debit(fake_psutil, no_gpu, monkeypatch):
+    """A shared engine has no owner: its callers' cost rides their usage rows; the remainder is plan 15 item 21."""
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', 'user-1', 'team-1', 'run-1'
+    tm.debit_remainder = False
+    status.tokens.cpu_utilization = 2.0
+    apply_debit = AsyncMock(return_value=True)
+
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+    asyncio.run(tm._report_to_billing_system())
+
+    apply_debit.assert_not_awaited()
 
 
 def test_a_failed_engine_debit_is_logged_as_an_error(fake_psutil, no_gpu, monkeypatch):

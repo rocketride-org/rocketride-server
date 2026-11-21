@@ -36,7 +36,7 @@ import sys
 from pathlib import Path
 
 from ai.modules.task import engine_key as engine_key_module
-from ai.modules.task.engine_key import connections_of, engine_key
+from ai.modules.task.engine_key import connections_of, engine_key, properties_digest
 
 MODULE_PATH = Path(engine_key_module.__file__).resolve()
 
@@ -66,16 +66,27 @@ spec.loader.exec_module(module)
 fixture = json.loads(sys.argv[2])
 wiring = {c['id']: module.connections_of(c) for c in fixture['components']}
 args = (fixture['types'], wiring, fixture['source'])
+digest = module.properties_digest(4, ['--x'])
 print(json.dumps([module.engine_key(*args, rung='spec', owner_id=''),
-                  module.engine_key(*args, rung='spec', owner_id='user-a')]))
+                  module.engine_key(*args, rung='spec', owner_id='user-a'),
+                  module.engine_key(*args, rung='public', owner_id='user-a'),
+                  module.engine_key(*args, rung='me', owner_id='user-a', private=True),
+                  module.engine_key(*args, rung='spec', owner_id='user-a', properties=digest)]))
 """
 
 
 def _server_keys():
-    """Both key kinds (bare, owner-qualified) computed in this process."""
+    """Every key kind (bare, owner-qualified, published, private, off-policy) computed in this process."""
     wiring = {c['id']: connections_of(c) for c in FIXTURE['components']}
     args = (FIXTURE['types'], wiring, FIXTURE['source'])
-    return [engine_key(*args, rung='spec', owner_id=''), engine_key(*args, rung='spec', owner_id='user-a')]
+    digest = properties_digest(4, ['--x'])
+    return [
+        engine_key(*args, rung='spec', owner_id=''),
+        engine_key(*args, rung='spec', owner_id='user-a'),
+        engine_key(*args, rung='public', owner_id='user-a'),
+        engine_key(*args, rung='me', owner_id='user-a', private=True),
+        engine_key(*args, rung='spec', owner_id='user-a', properties=digest),
+    ]
 
 
 def test_engine_key_parity_between_the_server_and_a_bare_interpreter():
@@ -93,6 +104,8 @@ def test_engine_key_parity_between_the_server_and_a_bare_interpreter():
     server = _server_keys()
     assert bare == server
     assert server[1] == f'{server[0]}:user-a'
+    assert server[2] == server[0] and server[3] == server[1]
+    assert server[4] == f'{server[0]}+{properties_digest(4, ["--x"])}:user-a'
 
 
 def test_engine_key_imports_the_standard_library_only():
@@ -121,8 +134,8 @@ def test_avoid_mocks_is_part_of_the_content_identity():
     assert content_hash(**parts) != content_hash(**parts, avoid_mocks=True)
 
     def facts(provider, stored):
-        """A one-line catalog stand-in: every component resolves to its stored config, shareable."""
-        return stored, True
+        """A one-line catalog stand-in: every component resolves to its stored config, a door source."""
+        return stored, ('source', 'webhook')
 
     spec = {'components': [{'id': 'a', 'provider': 'webhook', 'config': {}}], 'source': 'a'}
     plain = engine_content(spec, 'a', facts)
@@ -136,7 +149,7 @@ def test_configuration_is_out_of_the_engine_key_and_kept_for_the_control():
     from ai.modules.task.engine_key import engine_content
 
     def facts(provider, stored):
-        return {'provider': provider, **stored}, True
+        return {'provider': provider, **stored}, ('source', 'webhook')
 
     spec = {
         'source': 'a',

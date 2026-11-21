@@ -177,6 +177,20 @@ or requesting signed entry URLs, it predates the current platform.
 - **Pipelines run on the server** — always. Your script or app is a remote
   control holding a task token, not the executor. Closing your laptop does
   not stop a server task (unless its ttl ends it).
+- **Engines are shared by shape.** An engine process is keyed by the
+  pipeline's SHAPE (its nodes, wiring and source), never by configuration.
+  Your own runs (`@spec`: Play, `use(spec)`) get an engine per shape that is
+  yours alone. A published pipe (`@me`, `@team/<name>`, `@public`) runs on
+  ONE engine per shape for every caller: each caller has their own control,
+  configuration, environment and billing, and each control its own set of
+  node globals inside that process. Two exceptions keep an engine per owner
+  on every rung: a source that drives itself (a listener or poller such as
+  Discord, Telegram, a mailbox or a scan; any source that is not a webhook,
+  chat, dropper or tools door) and a pipe using a RocketRide cloud database
+  node. Nothing else decides sharing: there is no certification. On a shared
+  engine, engine-level output (bare `print`, counts, exit codes) goes to the
+  operators' ops stream, never to a caller: debug your node in your own
+  `@spec` run and report to callers through `self.debug/warning/error`.
 - **Apps run in the browser** (or a VS Code webview) against the shell.
   During development the App Builder serves your app live with hot reload;
   deployed versions are served from the store's immutable version

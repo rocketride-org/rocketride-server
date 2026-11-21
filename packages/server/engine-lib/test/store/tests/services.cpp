@@ -274,12 +274,12 @@ TEST_CASE("store::Services::paths") {
         REQUIRE((*schema)["capabilities"].isUInt());
         REQUIRE((*schema)["capabilities"].asUInt() == 0u);
 
-        auto certified = resolveFixture(
+        auto flagged = resolveFixture(
             fixture(definitions, properties),
-            url::UrlConfig::PROTOCOL_CAPS::MULTITENANT);
-        REQUIRE_NO_ERROR(certified);
-        REQUIRE(((*certified)["capabilities"].asUInt() &
-                 url::UrlConfig::PROTOCOL_CAPS::MULTITENANT) != 0);
+            url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL);
+        REQUIRE_NO_ERROR(flagged);
+        REQUIRE(((*flagged)["capabilities"].asUInt() &
+                 url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL) != 0);
     }
 }
 
@@ -919,7 +919,7 @@ TEST_CASE("store::Services::custom") {
     // capabilities bitmask and the secret registrations
     SECTION("custom services: the property model") {
         auto node = customNode("custom_pm");
-        node["capabilities"].append("multitenant");
+        node["capabilities"].append("experimental");
         node["propertyDefinitions"] = R"({
             "custom_pm.size": {
                 "type": "integer", "title": "Size", "default": 1,
@@ -950,7 +950,7 @@ TEST_CASE("store::Services::custom") {
         CHECK(schema["properties"][0]["path"] == "size");
         CHECK_FALSE(schema["properties"][0].isMember("param"));
         CHECK((schema["capabilities"].asUInt() &
-               url::UrlConfig::PROTOCOL_CAPS::MULTITENANT) != 0);
+               url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL) != 0);
 
         // The leaf listed in both branches is hoisted to the root
         const auto &cloud = schema["properties"][2]["enum"]["cloud"];
