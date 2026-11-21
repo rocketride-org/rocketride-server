@@ -282,8 +282,8 @@ class Store(DocumentStoreBase):
             # Create metadata object
             metadata = DocMetadata(**metadata_dict)
 
-            # Determine the score of this document
-            score = hit.get('_score', 0.0)
+            # Determine the score of this document. A sorted search (get) returns `_score: null`.
+            score = hit.get('_score') or 0.0
             if score > 0:
                 # Normalize score based on similarity metric
                 if self.similarity == 'cosine':
@@ -544,7 +544,9 @@ class Store(DocumentStoreBase):
 
         def _run_bulk(actions_batch: List[Dict[str, Any]]) -> None:
             try:
-                bulk(self.client, actions_batch)
+                # The control row must be searchable before the next batch checks for it, or
+                # createCollection finds an empty index and recreates it.
+                bulk(self.client, actions_batch, refresh=None if checkCollection else 'wait_for')
             except BulkIndexError as e:
                 errors = getattr(e, 'errors', []) or []
                 for item in errors:
