@@ -331,7 +331,7 @@ class TestRocketrideSqlConnection:
         assert params['user'] == 'rruser'
         assert params['password'] == 'rrpass'
         assert params['database'] == 'rrtenant'
-        assert 'table' not in params  # a per-call param, read from the instance's settings
+        assert params['table'] == 'widgets'
 
     def test_build_connection_url_uses_cached_dsn(self, monkeypatch):
         _deliver(monkeypatch)
@@ -404,6 +404,9 @@ class TestSqlEnginePoolSize:
         db_global = sys.modules['ai.common.database.db_global_base']
         calls = []
         monkeypatch.setattr(db_global, 'create_engine', lambda url, **kw: calls.append(kw) or types.SimpleNamespace())
+        tx_registry = types.ModuleType('ai.common.database.tx_registry')
+        tx_registry.TransactionRegistry = lambda *a, **kw: None
+        monkeypatch.setitem(sys.modules, 'ai.common.database.tx_registry', tx_registry)
         monkeypatch.setattr(type(glb), '_getDatabaseSchema', lambda self: {})
         monkeypatch.setattr(type(glb), '_getTableSchema', lambda self, table: {})
         glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'table': 'widgets'})
