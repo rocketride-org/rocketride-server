@@ -34,6 +34,8 @@
 	//
 	"propertyDefinitions": {
 		"agent_description": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Agent description",
@@ -41,18 +43,24 @@
 			"description": "What this manager + its sub-agent crew does. Used by parent agents that call this manager as a tool via `<nodeId>.run_agent` to decide when to invoke it."
 		},
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the manager's delegation strategy.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,
 			"description": "Require at least one tool call (including calls delegated to sub-agents) before answering. When on, a run that answers without any tool invocation fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
 		"goal": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Manager Goal",
@@ -60,6 +68,8 @@
 			"default": ""
 		},
 		"backstory": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Manager Backstory",
@@ -67,6 +77,8 @@
 			"default": ""
 		},
 		"planning": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Crew Planning",
 			"description": "Run CrewAI's planner before the crew executes, adding a step-by-step plan to each task. Off by default: the planner requires the LLM to return JSON matching CrewAI's plan schema, and a model that answers in prose instead fails the whole run with <b>Failed to get the Planning output</b>. It also costs one extra LLM call per kickoff. Enable only with a model that reliably emits well-formed JSON.",

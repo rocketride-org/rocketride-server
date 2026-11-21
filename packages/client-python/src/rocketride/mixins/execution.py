@@ -60,6 +60,7 @@ import os
 from typing import Dict, Any, List, Optional, Union
 from ..core import DAPClient
 from ..core.constants import SUBMIT_INLINE_MAX
+from ..core.exceptions import PipeException
 from ..types.pipeline import SUBMIT_RESULT, PipelineConfig
 from ..types.task import TASK_STATUS
 
@@ -257,7 +258,9 @@ class ExecutionMixin(DAPClient):
             reason = response.get('message', 'process failed')
             if reason.startswith('Unsupported command: rrext_submit'):
                 raise RuntimeError('This server does not support submit(); upgrade the server')
-            raise RuntimeError(reason)
+            # A PipeException (a RuntimeError) carries the server's code:
+            # SUBSCRIPTION_REQUIRED, OUT_OF_CREDITS, TASK_*
+            raise PipeException({**response, 'message': reason})
         if self._on_trace:
             self._on_trace(self.TRACE_SUCCESS, response)
         stamps = response.get('body') or {}

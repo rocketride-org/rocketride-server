@@ -49,29 +49,14 @@ class CrewAgent(CrewBase):
 
     FRAMEWORK = 'crewai'
 
-    def __init__(
-        self,
-        iGlobal: Any,
-        *,
-        process: Any = None,
-        role: str = 'Assistant',
-        task_description: str = '',
-        goal: str = '',
-        backstory: str = '',
-        expected_output: str = '',
-    ):
-        """Initialise the driver with per-node config loaded from connConfig.
+    def __init__(self, iGlobal: Any, *, process: Any = None):
+        """Initialise the driver; the persona and task are each call's (``settings``).
 
-        All string fields default to empty; empty values fall back to the
-        module-level ``_DEFAULT_*`` constants at run time.
+        Empty persona strings fall back to the module-level ``_DEFAULT_*``
+        constants at run time.
         """
         super().__init__(iGlobal)
         self._process = process
-        self._role = role
-        self._task_description = task_description
-        self._goal = goal
-        self._backstory = backstory
-        self._expected_output = expected_output
 
     def _run(
         self,
@@ -82,26 +67,36 @@ class CrewAgent(CrewBase):
         """Execute a single-agent CrewAI Crew and return the result text.
 
         Builds a one-agent, one-task Crew using the host's LLM and tool
-        channels. If ``task_description`` is blank the incoming prompt is used
-        as the task. All config fields fall back to ``_DEFAULT_*`` constants
-        when empty.
+        channels, from the invoking instance's settings (this call's persona).
+        If ``task_description`` is blank the incoming prompt is used as the
+        task. All persona fields fall back to ``_DEFAULT_*`` constants when empty.
         """
         debug('agent_crewai driver _run start run_id={}'.format(context.run_id))
 
         from crewai import Agent, Crew, Task
 
+        # This call's persona and task
+        settings = context.invoker.settings
+        role = settings.role.strip() or 'Assistant'
+        task_description = settings.task_description.strip()
+        goal = settings.goal.strip()
+        backstory = settings.backstory.strip()
+        expected_output = settings.expected_output.strip()
+
         tool_descriptors = context.tools.list
-        llm = self._build_crew_llm(context, self._role)
+        llm = self._build_crew_llm(context, role)
         tools_for_agent = self._build_crew_tools(context, tool_descriptors)
 
-        # Weave the agent's `instructions` config into the backstory.  Without
-        # this, instructions loaded by AgentBase never reach CrewAI — Crew
-        # only sees Agent(backstory=...) and Task(description=...).
-        agent_backstory = self._merge_instructions(self._backstory or self._DEFAULT_BACKSTORY, self._instructions)
+        # Weave the agent's `instructions` into the backstory.  Without this,
+        # the instructions never reach CrewAI — Crew only sees
+        # Agent(backstory=...) and Task(description=...).
+        agent_backstory = self._merge_instructions(
+            backstory or self._DEFAULT_BACKSTORY, self.instructions_of(context.invoker)
+        )
 
         agent_obj = Agent(
-            role=self._role,
-            goal=self._goal or self._DEFAULT_GOAL,
+            role=role,
+            goal=goal or self._DEFAULT_GOAL,
             backstory=agent_backstory,
             tools=tools_for_agent,
             llm=llm,
@@ -110,12 +105,12 @@ class CrewAgent(CrewBase):
 
         # Inject the user's chat prompt into the task description.  Mirrors the
         # pattern CrewManager already uses: if the node has no static
-        # _task_description configured, the prompt becomes the task; if it does,
+        # task_description set, the prompt becomes the task; if it does,
         # the prompt is appended as additional user context.  Without this, the
         # LLM never sees what the user typed and the agent responds with
         # "I haven't been told what the task is."
         prompt = safe_str(question.getPrompt())
-        task_text = self._task_description or ''
+        task_text = task_description or ''
         if not task_text:
             task_text = prompt or 'Complete the user request.'
         elif prompt:
@@ -125,7 +120,7 @@ class CrewAgent(CrewBase):
 
         task_obj = Task(
             description=desc,
-            expected_output=self._expected_output or self._DEFAULT_EXPECTED_OUTPUT,
+            expected_output=expected_output or self._DEFAULT_EXPECTED_OUTPUT,
             agent=agent_obj,
             markdown=False,
         )

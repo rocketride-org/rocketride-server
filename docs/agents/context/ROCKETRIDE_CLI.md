@@ -326,9 +326,9 @@ by name, in any case), or `=team/<tid>` (a team by id, as a row's `teamId`
 carries it). A bare team id is refused, and so are the retired
 `@team/<name>` and `@user`. `deploy interfaces` takes no `--team`: root the
 address instead (`@Production/acme.docBrain`), or leave it bare to let your
-team order decide. Output names teams instead of printing raw ids (`--json`
-keeps `teamId` and adds `teamName`). An unnamed pipeline deploys under its
-file name.
+team order decide. Output shows each row's handle (`@me`, `@<team>`,
+`@public`; `--json` keeps `teamId` and adds `teamName`). An unnamed
+pipeline deploys under its file name.
 
 ```bash
 rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse" [--deploy-to <team>]   # next registry version from ONE .pipe: the pipe plus the readme, icon and README-referenced files its store block names; a folder argument is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)

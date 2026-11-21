@@ -54,7 +54,7 @@ from croniter import croniter
 from rocketlib import debug, error, warning
 
 from ai.account import account
-from ai.account.pipe_deploy import pointer_run_owner
+from ai.account.pipe_deploy import listing_of, pointer_run_owner
 from .deploy_events import broadcast_deploy_changed
 from .task_control import DeploymentRef
 from .task_server_facade import start_server_task_as_team
@@ -432,6 +432,9 @@ class TaskScheduler:
 
             try:
                 ttl = sched.get('ttl')
+                # The store listing of the version this run starts (plan 8.4):
+                # the control's store gate holds for anyone who reaches it
+                listing = await listing_of(account, org_id, project_id, dep['version'])
                 control_id = await start_server_task_as_team(
                     self._server,
                     pipeline,
@@ -451,6 +454,7 @@ class TaskScheduler:
                     # A store pointer's run sits on the public rung (team-owned
                     # by its billing team); every other slot derives its rung
                     rung=forced_rung,
+                    listing=listing,
                 )
             except PermissionError as e:
                 # Permission-shaped failures are permanent until a human acts —

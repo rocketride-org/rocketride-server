@@ -33,6 +33,8 @@ then set its context limit, output limit, API key and base URL. Choose the Nebiu
 when using Token Factory; it offers a **Model** selector whose listed models pin the model
 id and context limit.
 
+The model and its token limits are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and base URL and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Generic OpenAI-compatible endpoints
 
 Set `base_url` to the provider's OpenAI-compatible API root and `model` to its exact

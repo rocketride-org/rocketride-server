@@ -26,7 +26,7 @@ Qwen (DashScope) binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -68,13 +68,13 @@ class Chat(ChatBase):
             region = config.get('region', 'us')
             base_url = DASHSCOPE_REGIONS.get(region, DASHSCOPE_REGIONS['us'])
 
-        # Get the llm using OpenAI-compatible endpoint
+        # Get the llm using OpenAI-compatible endpoint: one for every call,
+        # each request binds its model and max_tokens
         self._llm = ChatOpenAI(
-            model=self._model,
+            model=UNBOUND_MODEL,
             api_key=apikey,
             base_url=base_url,
             temperature=0,
-            max_tokens=self._modelOutputTokens,
         )
 
     def is_retryable_error(self, error):

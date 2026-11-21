@@ -36,14 +36,12 @@ the flag from the leaf itself, so the descriptors are the one record of it);
 
 from __future__ import annotations
 
-import copy
 from typing import Any, Dict
 
 #: PROTOCOL_CAPS bits as the engine emits them in the resolved schema (apLib/url/Url.hpp).
 CAP_NETWORK = 1 << 3
 CAP_INVOKE = 1 << 10
 CAP_GPU = 1 << 12
-CAP_MULTITENANT = 1 << 17
 
 
 def _leaf(name: str, path: str, **members: Any) -> Dict[str, Any]:
@@ -259,10 +257,3 @@ DETECTOR: Dict[str, Any] = {
         {'field': 'rules', 'type': 'array', 'default': [], 'tool': True},
     ],
 }
-
-
-def multitenant(schema: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a copy of ``schema`` certified ``multitenant``."""
-    certified = copy.deepcopy(schema)
-    certified['capabilities'] = int(certified.get('capabilities', 0)) | CAP_MULTITENANT
-    return certified

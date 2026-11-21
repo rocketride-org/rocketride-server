@@ -60,6 +60,7 @@ from ai.account.roots import KIND_ME, KIND_TEAM, format_root
 from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
+from ..engine_key import key_owner
 from ..task_control import RESOLVE_ATTACH, TeamContext
 
 # Only import for type checking to avoid circular import errors
@@ -207,6 +208,9 @@ class TaskCommands(DAPConn):
             # ... and when the dispatch read the deployment's state (plan 7.2:
             # a disable/remove since then refuses the control)
             deployment_epoch = getattr(self, '_trusted_deployment_epoch', None)
+            # ... and the store listing of that version (plan 8.4); a
+            # client's own run has none and is free
+            listing = getattr(self, '_trusted_listing', None)
             team_context = getattr(self, '_trusted_team_context', None) or TeamContext(
                 home_team(self._account_info) or team_id,
                 'key' if getattr(self._account_info, 'endpoints', None) is not None else 'home',
@@ -250,6 +254,7 @@ class TaskCommands(DAPConn):
                 rung=rung,
                 version=version,
                 team_context=team_context,
+                listing=listing,
             )
 
             # Confirm successful task execution startup
@@ -483,9 +488,11 @@ class TaskCommands(DAPConn):
 
         The operator's stop (plan 7.2), and the OWNER's (plan 7.1: the verb
         that frees a GPU). ``sys.admin`` and ``internal`` may stop any engine;
-        anyone else may stop an engine whose key carries their owner id (every
-        rung in this PR): their own user id, or a team they hold
-        ``task.control`` on. The engine stops regardless of holds, and every
+        anyone else may stop an engine whose key carries their owner id (a
+        ``@spec`` engine, or a published shape that serves one owner): their
+        own user id, or a team they hold ``task.control`` on. A shared engine
+        (a bare key) is nobody's: only an operator stops it, since it serves
+        other callers. The engine stops regardless of holds, and every
         holder's control is told ``TASK_ENGINE_UNAVAILABLE`` on its next
         request.
 
@@ -512,11 +519,11 @@ class TaskCommands(DAPConn):
                 raise ValueError('engineKey is required')
 
             # Step 2: an operator, or the owner the key names. A key without
-            # an owner (none exist before C.25) is an operator's only
+            # an owner (a shared engine) is an operator's only
             sys_perms = self._account_info.sysPermissions or []
             if 'sys.admin' not in sys_perms and 'internal' not in sys_perms:
-                _, qualified, owner = engine_key.rpartition(':')
-                if not qualified or not owner:
+                owner = key_owner(engine_key)
+                if not owner:
                     raise PermissionError('Stopping a shared engine requires sys.admin')
                 if owner != self._account_info.userId:
                     self.verify_team_permission(owner, 'task.control')
@@ -683,7 +690,7 @@ class TaskCommands(DAPConn):
                     continue
 
                 # Get current status for name and status string
-                status = control.task.get_status()
+                status = control.status_view()
 
                 # Read name and description from the flat project
                 project = control.pipeline or {}
@@ -711,7 +718,7 @@ class TaskCommands(DAPConn):
                             'token': control.control_id,
                             'controlId': control.control_id,
                             'address': control.address,
-                            'status': status.status,
+                            'status': status.get('status'),
                             # The engine's availability (plan 7.5)
                             'engineState': engine_state,
                             # Owning team — lets clients attribute a task to a

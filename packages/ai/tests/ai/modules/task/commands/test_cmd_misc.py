@@ -231,7 +231,6 @@ async def test_on_rrext_validate_uses_explicit_source(monkeypatch):
     assert captured['payload']['pipeline']['source'] == 'explicit-source'
     assert captured['payload']['pipeline']['version'] == 1  # default
     body = dict(result['body'])
-    assert body.pop('engineSharing') in ('owner', 'users')
     assert result['type'] == 'response' and body == {'ok': True}
 
 
@@ -741,7 +740,6 @@ async def test_on_rrext_validate_without_substitution_validates_once(monkeypatch
 
     assert len(calls) == 1
     body = dict(result['body'])
-    body.pop('engineSharing', None)  # an unkeyable spec carries no decision (plan 4.4)
     assert result['type'] == 'response' and body == {'ok': True}
 
 
@@ -1072,6 +1070,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         ttl=600,
         idle_seconds=lambda: 0.0,
         engine_state='running',
+        status_view=lambda: dict(vars(own_status)),
         task=own_task,
         launch_type=SimpleNamespace(value='LAUNCH'),
     )
@@ -1185,6 +1184,7 @@ def _list_control(
         ttl=600,
         idle_seconds=lambda: 0.0,
         engine_state='running',
+        status_view=lambda: dict(vars(status)),
         task=SimpleNamespace(
             get_status=lambda: status,
         ),
@@ -1756,9 +1756,7 @@ async def test_on_rrext_validate_adds_no_errors_key_when_every_config_fits(monke
     pipeline = {'source': 'q1', 'components': [{'id': 'q1', 'provider': 'store_qdrant', 'config': {'mode': 'local'}}]}
     result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
 
-    # The engine-key decision rides every whole-pipeline validation (plan 4.4)
     body = dict(result['body'])
-    assert body.pop('engineSharing') in ('owner', 'users')
     assert body == {'ok': True}
 
 
@@ -1772,9 +1770,7 @@ async def test_on_rrext_validate_leaves_an_unknown_provider_to_the_engine(monkey
     pipeline = {'source': 'n1', 'components': [{'id': 'n1', 'provider': 'nope', 'config': {'bogus': 1}}]}
     result = await MiscCommands.on_rrext_validate(conn, {'arguments': {'pipeline': pipeline}})
 
-    # The engine-key decision rides every whole-pipeline validation (plan 4.4)
     body = dict(result['body'])
-    body.pop('engineSharing', None)  # an unkeyable spec carries no decision (plan 4.4)
     assert body == {'ok': True}
 
 

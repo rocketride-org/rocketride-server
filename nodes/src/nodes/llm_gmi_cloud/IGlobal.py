@@ -27,8 +27,6 @@ from typing import Optional
 from rocketlib import IGlobalBase
 from ai.common.chat import ChatBase
 
-from .IValidator import validate_serverbase
-
 
 class IGlobal(IGlobalBase):
     """Global handler for the GMI Cloud LLM node."""
@@ -45,13 +43,9 @@ class IGlobal(IGlobalBase):
         from .gmi_cloud import Chat
 
         bag = self.IEndpoint.endpoint.bag
-        config = self.config
-        # The schema pins the shared endpoint per model and requires one for the
-        # deploy-on-demand models; only the host rule is checked here.
-        err = validate_serverbase(config.serverbase)
-        if err:
-            raise ValueError(err)
-        self._chat = Chat(self.config.node.provider, config, bag)
+        # The endpoint is the call's model branch's: the chat checks its host
+        # when it builds that endpoint's client
+        self._chat = Chat(self.config.node.provider, self.config, bag)
 
     def endGlobal(self):
         """Release the chat client."""

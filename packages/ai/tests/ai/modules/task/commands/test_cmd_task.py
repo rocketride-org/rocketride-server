@@ -753,6 +753,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
             engine_state='running' if status is running_status else 'stopped',
+            status_view=lambda: vars(status),
             dormant=False,
         )
 
@@ -810,6 +811,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         pipeline=None,
         task=task,
         engine_state='running',
+        status_view=lambda: vars(status),
         dormant=False,
     )
 

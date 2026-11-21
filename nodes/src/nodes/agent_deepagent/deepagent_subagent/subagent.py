@@ -65,9 +65,9 @@ class DeepAgentSubagentDriver(DeepAgentDriver):
 
         return IInvokeDeepagent.DescribeResponse(
             name=node_id or node.provider,
-            description=self._description,
-            system_prompt=self._system_prompt,
-            instructions=list(self._instructions or []),
+            description=(pSelf.settings.get('description') or '').strip(),
+            system_prompt=self.system_prompt_of(pSelf),
+            instructions=self.instructions_of(pSelf),
             node_id=node_id,
             invoke=pSelf,
         )

@@ -78,11 +78,16 @@ class _FakeInner:
 
 
 class _FakeIInstance:
-    """Minimal IInstance: pre-set ``_agent_host`` so run_agent skips host build."""
+    """Minimal IInstance: pre-set ``_agent_host`` so run_agent skips host build.
 
-    def __init__(self) -> None:
+    ``settings`` is this call's: the guard and the instructions are per-call
+    parameters the driver reads from the invoking instance.
+    """
+
+    def __init__(self, *, require_tool_call: bool = False, instructions: Tuple[str, ...] = ()) -> None:
         self._agent_host = _FakeHost()
         self.instance = _FakeInner()
+        self.settings = {'require_tool_call': require_tool_call, 'instructions': list(instructions)}
 
 
 class _FakeQuestion:
@@ -93,9 +98,10 @@ class _FakeQuestion:
 RunImpl = Callable[[AgentBase, AgentContext, Any], Tuple[str, Any]]
 
 
-def _make_driver(run_impl: RunImpl, *, require_tool_call: bool) -> AgentBase:
+def _make_driver(run_impl: RunImpl) -> AgentBase:
     """Build an AgentBase subclass instance without running __init__ (which needs
-    an engine iGlobal + Config).
+    an engine iGlobal). The driver keeps no config: the call's settings are the
+    invoking instance's.
     """
 
     class _StubDriver(AgentBase):
@@ -104,11 +110,7 @@ def _make_driver(run_impl: RunImpl, *, require_tool_call: bool) -> AgentBase:
         def _run(self, *, context: AgentContext, question: Any) -> Tuple[str, Any]:
             return run_impl(self, context, question)
 
-    driver = _StubDriver.__new__(_StubDriver)
-    driver._instructions = []
-    driver._agent_description = ''
-    driver._require_tool_call = require_tool_call
-    return driver
+    return _StubDriver.__new__(_StubDriver)
 
 
 def _context(host: _FakeHost) -> AgentContext:
@@ -132,7 +134,7 @@ def _context(host: _FakeHost) -> AgentContext:
 def test_call_tool_records_invocation_and_forwards():
     host = _FakeHost()
     ctx = _context(host)
-    driver = _make_driver(lambda d, c, q: ('', None), require_tool_call=False)
+    driver = _make_driver(lambda d, c, q: ('', None))
 
     out = driver.call_tool(ctx, 'weather.get', {'city': 'NYC'})
 
@@ -151,7 +153,7 @@ def test_call_tool_counts_even_when_tool_raises():
     host = _FakeHost()
     host.tools = _Boom()
     ctx = _context(host)
-    driver = _make_driver(lambda d, c, q: ('', None), require_tool_call=False)
+    driver = _make_driver(lambda d, c, q: ('', None))
 
     with pytest.raises(RuntimeError):
         driver.call_tool(ctx, 'weather.get', {})
@@ -174,8 +176,8 @@ def _call_one_tool(driver, context, _question):
 
 
 def test_guard_trips_when_no_tool_invoked():
-    driver = _make_driver(_narrate, require_tool_call=True)
-    payload = driver.run_agent(_FakeIInstance(), _FakeQuestion(), emit_answers_lane=False)
+    driver = _make_driver(_narrate)
+    payload = driver.run_agent(_FakeIInstance(require_tool_call=True), _FakeQuestion(), emit_answers_lane=False)
 
     assert 'without invoking any tool' in payload['content']
     assert payload['meta']['tool_calls'] == 0
@@ -189,16 +191,46 @@ def test_guard_trips_when_no_tool_invoked():
 
 
 def test_guard_passes_when_a_tool_is_invoked():
-    driver = _make_driver(_call_one_tool, require_tool_call=True)
-    payload = driver.run_agent(_FakeIInstance(), _FakeQuestion(), emit_answers_lane=False)
+    driver = _make_driver(_call_one_tool)
+    payload = driver.run_agent(_FakeIInstance(require_tool_call=True), _FakeQuestion(), emit_answers_lane=False)
 
     assert payload['content'] == 'It is sunny in NYC.'
     assert payload['meta']['tool_calls'] == 1
     assert payload['stack'][0]['kind'] == 'RocketRide.agent.raw.v1'
 
 
+def test_one_driver_guards_one_call_and_not_the_next():
+    """The guard is a per-call parameter: the control's one driver applies each call's own."""
+    driver = _make_driver(_narrate)
+
+    guarded = driver.run_agent(_FakeIInstance(require_tool_call=True), _FakeQuestion(), emit_answers_lane=False)
+    free = driver.run_agent(_FakeIInstance(), _FakeQuestion(), emit_answers_lane=False)
+
+    assert guarded['stack'][0]['kind'] == 'RocketRide.agent.guard.v1'
+    assert free['content'] == 'I called the weather tool and it is sunny.'
+
+
+def test_each_call_adds_its_own_instructions():
+    """The instructions are the invoking instance's settings, read per run."""
+
+    class _Recording(_FakeQuestion):
+        def __init__(self) -> None:
+            self.instructions: List[str] = []
+
+        def addInstruction(self, title: str, text: str) -> None:
+            self.instructions.append(text)
+
+    driver = _make_driver(_narrate)
+    first, second = _Recording(), _Recording()
+    driver.run_agent(_FakeIInstance(instructions=('be brief',)), first, emit_answers_lane=False)
+    driver.run_agent(_FakeIInstance(instructions=('cite sources', 'be formal')), second, emit_answers_lane=False)
+
+    assert first.instructions == ['be brief']
+    assert second.instructions == ['cite sources', 'be formal']
+
+
 def test_guard_off_allows_a_tool_free_answer():
-    driver = _make_driver(_narrate, require_tool_call=False)
+    driver = _make_driver(_narrate)
     payload = driver.run_agent(_FakeIInstance(), _FakeQuestion(), emit_answers_lane=False)
 
     assert payload['content'] == 'I called the weather tool and it is sunny.'
@@ -207,8 +239,8 @@ def test_guard_off_allows_a_tool_free_answer():
 
 
 def test_guard_answer_is_emitted_on_the_answers_lane():
-    ii = _FakeIInstance()
-    driver = _make_driver(_narrate, require_tool_call=True)
+    ii = _FakeIInstance(require_tool_call=True)
+    driver = _make_driver(_narrate)
     driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     # Even a tripped guard still emits exactly one answer downstream.
@@ -232,9 +264,7 @@ def _say_done_then_narrate(driver, context, _question):
 
 def test_a_run_that_raises_before_any_status_still_reports_why_it_stopped():
     ii = _FakeIInstance()
-    payload = _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(
-        ii, _FakeQuestion(), emit_answers_lane=True
-    )
+    payload = _make_driver(_fail_before_any_status).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     assert payload['meta']['stop_reason'] == 'error'
     assert 'is not a connected tool' in payload['content']
@@ -249,9 +279,8 @@ def test_a_run_that_fails_before_its_context_is_built_still_reports_why_it_stopp
         def addInstruction(self, *args: Any, **kwargs: Any) -> None:
             raise ValueError('instruction rejected')
 
-    ii = _FakeIInstance()
-    driver = _make_driver(_call_one_tool, require_tool_call=False)
-    driver._instructions = ['be brief']
+    ii = _FakeIInstance(instructions=('be brief',))
+    driver = _make_driver(_call_one_tool)
 
     payload = driver.run_agent(ii, _BrokenQuestion(), emit_answers_lane=True)
 
@@ -260,15 +289,15 @@ def test_a_run_that_fails_before_its_context_is_built_still_reports_why_it_stopp
 
 
 def test_a_refused_answer_overrides_the_done_status():
-    ii = _FakeIInstance()
-    _make_driver(_say_done_then_narrate, require_tool_call=True).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+    ii = _FakeIInstance(require_tool_call=True)
+    _make_driver(_say_done_then_narrate).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     assert [kw['stop_reason'] for _, kw in ii.instance.sse] == ['done', 'error']
 
 
 def test_a_run_that_answers_sends_no_extra_status():
-    ii = _FakeIInstance()
-    _make_driver(_call_one_tool, require_tool_call=True).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
+    ii = _FakeIInstance(require_tool_call=True)
+    _make_driver(_call_one_tool).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     assert ii.instance.sse == []
 
@@ -277,18 +306,16 @@ def test_a_sub_agent_that_fails_leaves_the_stream_to_its_parent():
     """A sub-agent shares its parent's status stream; its failure is a tool result, not the end."""
     ii = _FakeIInstance()
 
-    payload = _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(
-        ii, _FakeQuestion(), emit_answers_lane=False
-    )
+    payload = _make_driver(_fail_before_any_status).run_agent(ii, _FakeQuestion(), emit_answers_lane=False)
 
     assert payload['meta']['stop_reason'] == 'error'
     assert ii.instance.sse == []
 
 
 def test_a_sub_agent_whose_answer_is_refused_leaves_the_stream_to_its_parent():
-    ii = _FakeIInstance()
+    ii = _FakeIInstance(require_tool_call=True)
 
-    _make_driver(_say_done_then_narrate, require_tool_call=True).run_agent(ii, _FakeQuestion(), emit_answers_lane=False)
+    _make_driver(_say_done_then_narrate).run_agent(ii, _FakeQuestion(), emit_answers_lane=False)
 
     assert [kw['stop_reason'] for _, kw in ii.instance.sse] == ['done']
 
@@ -303,9 +330,7 @@ def test_a_failed_status_send_keeps_the_answer(monkeypatch):
         raise RuntimeError('pipe closed')
 
     ii.instance.sendSSE = broken_send
-    payload = _make_driver(_fail_before_any_status, require_tool_call=False).run_agent(
-        ii, _FakeQuestion(), emit_answers_lane=True
-    )
+    payload = _make_driver(_fail_before_any_status).run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     assert 'is not a connected tool' in payload['content']
     assert len(ii.instance.written) == 1
@@ -336,7 +361,7 @@ def test_answer_carries_the_turn_token_usage():
 
     metrics.reset()
     ii = _FakeIInstance()
-    driver = _make_driver(_report_two_calls, require_tool_call=False)
+    driver = _make_driver(_report_two_calls)
     driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     tokens = ii.instance.written[0].tokens
@@ -350,7 +375,7 @@ def test_answer_has_no_tokens_when_none_were_reported():
 
     metrics.reset()
     ii = _FakeIInstance()
-    driver = _make_driver(_call_one_tool, require_tool_call=False)
+    driver = _make_driver(_call_one_tool)
     driver.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     assert ii.instance.written[0].tokens is None
@@ -365,7 +390,7 @@ def test_a_prior_turn_does_not_bleed_into_the_next():
     from ai.web.metrics.metrics import metrics
 
     metrics.reset()
-    driver = _make_driver(_report_two_calls, require_tool_call=False)
+    driver = _make_driver(_report_two_calls)
 
     ii1 = _FakeIInstance()
     driver.run_agent(ii1, _FakeQuestion(), emit_answers_lane=True)
@@ -387,7 +412,7 @@ def test_outer_agent_total_includes_sub_agent_calls():
     from ai.web.metrics.metrics import metrics
 
     metrics.reset()
-    sub_driver = _make_driver(_report_two_calls, require_tool_call=False)  # 2 calls: 30 in / 12 out
+    sub_driver = _make_driver(_report_two_calls)  # 2 calls: 30 in / 12 out
 
     def _outer_run(_driver, _context, _question):
         report_llm_tokens(5, 2, model='outer')  # the outer agent's own call
@@ -395,7 +420,7 @@ def test_outer_agent_total_includes_sub_agent_calls():
         return ('done', {'raw': 'x'})
 
     ii = _FakeIInstance()
-    outer = _make_driver(_outer_run, require_tool_call=False)
+    outer = _make_driver(_outer_run)
     outer.run_agent(ii, _FakeQuestion(), emit_answers_lane=True)
 
     tokens = ii.instance.written[0].tokens
@@ -424,7 +449,7 @@ def test_subcontext_sharing_counts_delegated_tool_calls():
         started_at=parent.started_at,
         invoked_tools=parent.invoked_tools,
     )
-    driver = _make_driver(lambda d, c, q: ('', None), require_tool_call=False)
+    driver = _make_driver(lambda d, c, q: ('', None))
 
     driver.call_tool(child, 'db.query', {'sql': 'select 1'})
 
@@ -456,7 +481,7 @@ def test_context_stays_hashable_with_the_tool_tally():
 
 
 def test_require_tool_call_coercion_is_string_safe():
-    # AgentBase.__init__ reads the flag with parse_bool, not bool(), so a
+    # AgentBase.run_agent reads the flag with parse_bool, not bool(), so a
     # stringified "false"/"0"/"no" leaves the guard OFF instead of enabling it
     # (plain bool("false") is True and would wrongly turn the guard on).
     assert parse_bool('false', False) is False
@@ -476,7 +501,7 @@ def _boom_after_tool(driver, context, _question):
 def test_error_path_still_reports_tool_calls():
     # A run that errors after calling a tool reports tool_calls in meta too, so
     # the key is present on success, guard, AND error answers.
-    driver = _make_driver(_boom_after_tool, require_tool_call=False)
+    driver = _make_driver(_boom_after_tool)
     payload = driver.run_agent(_FakeIInstance(), _FakeQuestion(), emit_answers_lane=False)
 
     assert payload['stack'][0]['kind'] == 'RocketRide.agent.error.v1'
@@ -491,14 +516,14 @@ def test_error_path_still_reports_tool_calls():
 class _FakeEndpointIInstance(_FakeIInstance):
     """An IInstance whose job config carries the task's control token, as the engine's does."""
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, **settings: Any) -> None:
+        super().__init__(**settings)
         self.IEndpoint = type('E', (), {'endpoint': type('J', (), {'jobConfig': {'taskId': 'tk_secret_token'}})()})()
 
 
 def test_task_token_never_reaches_the_answer():
     """The job config's taskId is the task's control token; a parent agent shows this payload to its model."""
-    driver = _make_driver(lambda self, ctx, q: ('ok', {}), require_tool_call=False)
+    driver = _make_driver(lambda self, ctx, q: ('ok', {}))
 
     payload = driver.run_agent(_FakeEndpointIInstance(), _FakeQuestion())
 
@@ -510,7 +535,7 @@ def test_task_token_is_absent_from_the_error_answer_too():
     def boom(self, ctx, q):
         raise RuntimeError('planner failed')
 
-    payload = _make_driver(boom, require_tool_call=False).run_agent(_FakeEndpointIInstance(), _FakeQuestion())
+    payload = _make_driver(boom).run_agent(_FakeEndpointIInstance(), _FakeQuestion())
 
     assert 'tk_secret_token' not in repr(payload)
     assert payload['meta']['stop_reason'] == 'error'
@@ -518,9 +543,9 @@ def test_task_token_is_absent_from_the_error_answer_too():
 
 def test_guard_answer_has_no_token_and_stops_with_error():
     """An answer refused by require_tool_call reports stop_reason "error", whatever the run said."""
-    driver = _make_driver(lambda self, ctx, q: ('OK', {'stop_reason': 'done'}), require_tool_call=True)
+    driver = _make_driver(lambda self, ctx, q: ('OK', {'stop_reason': 'done'}))
 
-    payload = driver.run_agent(_FakeEndpointIInstance(), _FakeQuestion())
+    payload = driver.run_agent(_FakeEndpointIInstance(require_tool_call=True), _FakeQuestion())
 
     assert payload['stack'][0]['kind'] == 'RocketRide.agent.guard.v1'
     assert payload['meta']['stop_reason'] == 'error'
@@ -529,7 +554,7 @@ def test_guard_answer_has_no_token_and_stops_with_error():
 
 def test_stop_reason_from_the_trace_reaches_the_meta():
     """A parent agent can tell a forced answer (max_waves) from a finished one."""
-    driver = _make_driver(lambda self, ctx, q: ('best effort', {'stop_reason': 'max_waves'}), require_tool_call=False)
+    driver = _make_driver(lambda self, ctx, q: ('best effort', {'stop_reason': 'max_waves'}))
 
     payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
 
@@ -538,7 +563,7 @@ def test_stop_reason_from_the_trace_reaches_the_meta():
 
 @pytest.mark.parametrize('raw', [None, 'text trace', {'waves': []}, {'stop_reason': 3}])
 def test_no_stop_reason_when_the_trace_has_none(raw):
-    driver = _make_driver(lambda self, ctx, q: ('ok', raw), require_tool_call=False)
+    driver = _make_driver(lambda self, ctx, q: ('ok', raw))
 
     payload = driver.run_agent(_FakeIInstance(), _FakeQuestion())
 

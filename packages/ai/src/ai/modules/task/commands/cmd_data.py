@@ -40,7 +40,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from ai.account.base import OutOfCreditsError
 from ai.common.dap import DAPConn, TransportBase
 
-from .. import caller_stamp
+from .. import caller_stamp, store_gate
 from ..address import refuse_team_option
 from ..task_control import OpenPipe, is_control_id
 from .engine_access import engine_for, wait_running
@@ -159,10 +159,13 @@ class DataCommands(DAPConn):
             The engine's response body in an envelope keyed off this request.
 
         Raises:
-            PermissionError: The caller has no access, or names a pipe that is
-                not open on their control.
+            PermissionError: The caller has no access, names a pipe that is
+                not open on their control, or uses a scoped key on a
+                publication that is not free.
             TaskError: The engine could not start, or the params were rejected.
             OutOfCreditsError: The control's paying unit is out of credit.
+            SubscriptionRequiredError: The caller has no subscription to a
+                subscription-priced publication.
         """
         try:
             arguments = request.get('arguments')
@@ -285,24 +288,32 @@ class DataCommands(DAPConn):
         Raises:
             TaskError: TASK_PARAM_REJECTED, or the engine could not start.
             OutOfCreditsError: The paying unit is out of credit.
+            PermissionError: A scoped key on a publication that is not free.
+            SubscriptionRequiredError: No subscription to a paid publication.
         """
-        # Step 1: the engine under the control's hold, started again when it
+        # Step 1: the store gate (plan 0 S9/S10, 8.4), before a stopped engine
+        # is started for a caller who may not use the listing: a binding that
+        # names a control id reaches no resolver, so the control's own cached
+        # verdict answers here
+        await store_gate.require_access(control, self._account_info)
+
+        # Step 2: the engine under the control's hold, started again when it
         # stopped on its inactivity timer (plan 7.2) after the caller's team
         # access is re-checked
         engine = await engine_for(self, control, 'task.data')
 
-        # Step 2: per-call params enter by the open: admitted by public name
+        # Step 3: per-call params enter by the open: admitted by public name
         # against the control's parameters map, then by value against the
         # node's descriptors (plan 5.4 item 5); a rejected key never reaches
         # the engine
         params = control.resolve_params(control.check_params(arguments.pop('params', None)))
 
-        # Step 3: credit, on the control's paying unit, before any bytes reach
+        # Step 4: credit, on the control's paying unit, before any bytes reach
         # the subprocess (plan 0 S9); the engine-side gate stays for the
         # bindings EaaS never sees
         await self._require_credit(control)
 
-        # Step 4: a server-minted request id; a client never names another
+        # Step 5: a server-minted request id; a client never names another
         # request's binding (ALB seam 7)
         return _Frame(engine=engine, correlation_id=uuid.uuid4().hex, params=params)
 

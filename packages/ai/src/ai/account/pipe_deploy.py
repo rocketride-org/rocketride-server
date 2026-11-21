@@ -72,7 +72,7 @@ from ai.account.models import team_order
 if TYPE_CHECKING:
     from ai.account.models import AccountInfo
     from ai.modules.task.address import Address
-    from ai.modules.task.task_control import DeploymentRef
+    from ai.modules.task.task_control import DeploymentRef, Listing
 
 
 # ==== Shapes ===================================================================
@@ -481,6 +481,45 @@ async def resolve_pipe_version(account_info: Optional['AccountInfo'], pipe_name:
     pipe_name = build_address(parsed.developer_id, parsed.pipe_id)
     rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE])
     return _serving_pin(rows, 'pipe', 'public', PUBLIC_AUDIENCE)
+
+
+# ==== The listing of a version =================================================
+
+
+async def listing_of(account: Any, org_id: str, pipe_name: str, version: int) -> 'Listing':
+    """
+    The store listing of one published version: its mode and the plan a caller subscribes to.
+
+    The mode is the version's ``metadata.manifest.mode``, written by the pipe
+    door from the ``.pipe`` ``store`` block (plan 9). A version with no
+    manifest shaped from a store block, or one the registry does not hold, is
+    ``free``. A failing store raises: a paid pipe is never served as free
+    because the registry was down.
+
+    Args:
+        account: The account singleton.
+        org_id: The publisher's org.
+        pipe_name: The registry name ``developerId.pipeId``.
+        version: The registry version the publication points at.
+
+    Returns:
+        The listing.
+    """
+    from ai.account.pipe_bundle import is_listed
+    from ai.modules.task.task_control import Listing
+
+    for entry in await account.deployments_versions(org_id, pipe_name):
+        if not isinstance(entry, dict) or entry.get('version') != version:
+            continue
+        metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+        manifest = metadata.get('manifest')
+        if not is_listed(manifest):
+            break
+        billing = manifest.get('billing') if isinstance(manifest.get('billing'), dict) else {}
+        plans = [plan for plan in billing.get('plans') or [] if isinstance(plan, dict)]
+        plan = str(plans[0].get('nickname') or '') if plans else ''
+        return Listing(mode=str(manifest.get('mode') or 'free'), plan=plan)
+    return Listing()
 
 
 # ==== The catalog row ==========================================================

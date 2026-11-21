@@ -46,6 +46,8 @@ const STAGING = row({ teamId: '=team/team-staging', teamName: 'Staging', handle:
 const PROD = row({ teamId: '=team/team-prod', teamName: 'Production', handle: '@Production', rung: 'team', version: 4 });
 const STORE = row({ teamId: '@public', teamName: '@public', handle: '@public', rung: 'public', version: 4 });
 const OTHER = row({ teamId: '=user/u2', teamName: 'Personal', handle: 'Personal', rung: 'personal', version: 3 });
+/** A team the caller cannot name: the server shows it by its audience, and so does its label. */
+const UNNAMED = row({ teamId: '=team/team-9', teamName: '=team/team-9', handle: '=team/team-9', rung: 'team', version: 1 });
 
 describe('whereLiveRungsOf', () => {
 	it('draws one row per rung in rung order: Me, other spaces, teams in roster order, the store', () => {
@@ -56,14 +58,15 @@ describe('whereLiveRungsOf', () => {
 		);
 	});
 
-	it('names each rung by label and handle', () => {
-		const rungs = whereLiveRungsOf([ME, STAGING, STORE, OTHER], TEAMS);
+	it("names each rung by label and the server's handle, never one composed here", () => {
+		const rungs = whereLiveRungsOf([ME, STAGING, STORE, OTHER, UNNAMED], TEAMS);
 		assert.deepEqual(
 			rungs.map((r) => [r.label, r.handle]),
 			[
 				['Me', '@me'],
 				['Personal', ''],
 				['Staging', '@Staging'],
+				['=team/team-9', '=team/team-9'],
 				['Store', '@public'],
 			]
 		);
@@ -78,8 +81,8 @@ describe('whereLiveRungsOf', () => {
 	});
 
 	it('puts a team outside the roster after the roster, by name', () => {
-		const zeta = row({ teamId: '=team/team-zeta', teamName: 'Zeta', rung: 'team' });
-		const alpha = row({ teamId: '=team/team-alpha', teamName: 'Alpha', rung: 'team' });
+		const zeta = row({ teamId: '=team/team-zeta', teamName: 'Zeta', handle: '@Zeta', rung: 'team' });
+		const alpha = row({ teamId: '=team/team-alpha', teamName: 'Alpha', handle: '@Alpha', rung: 'team' });
 		assert.deepEqual(
 			whereLiveRungsOf([zeta, PROD, alpha], TEAMS).map((r) => r.label),
 			['Production', 'Alpha', 'Zeta']

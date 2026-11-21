@@ -20,7 +20,9 @@ fine died during planning, on every kickoff.
 
 Planning is therefore opt-in and off by default. These tests pin the contract at
 the two seams that are checkable without the engine: the manifest the config
-panel renders from, and ``IGlobal``'s parsing of the field.
+panel renders from, and the resolver's typing of the field. Planning is a
+per-call parameter: the manager reads it from the invoking instance's
+settings, and the control's IGlobal neither keeps nor may read it.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ class TestManifest:
 
 
 # ---------------------------------------------------------------------------
-# IGlobal wiring — stub the CrewAI seams so the real module can be imported;
+# Settings — stub the CrewAI seams so the real IGlobal can be imported;
 # rocketlib is the real one, so the config goes through the real resolver
 # ---------------------------------------------------------------------------
 
@@ -138,7 +140,7 @@ def _load_iglobal():
 
 
 def _begin(config: dict):
-    """Run beginGlobal on the real resolver (stored config ``config``) and return the populated IGlobal."""
+    """Run beginGlobal on the real resolver (stored config ``config``) and return the IGlobal."""
     with _scoped_stubs():
         iglobal_mod = _load_iglobal()
 
@@ -149,26 +151,38 @@ def _begin(config: dict):
         return instance
 
 
-class TestIGlobalWiring:
+def _planning(config: dict, **params) -> bool:
+    """The ``planning`` a call with ``params`` runs with, on a control whose stored config is ``config``."""
+    return _begin(config).config.overlay(params)['planning']
+
+
+class TestSettings:
     def test_planning_defaults_to_false_when_absent(self):
-        assert _begin({'goal': '', 'backstory': ''}).planning is False
+        assert _planning({'goal': '', 'backstory': ''}) is False
 
     def test_true_enables_planning(self):
-        assert _begin({'planning': True}).planning is True
+        assert _planning({'planning': True}) is True
 
     @pytest.mark.parametrize('value', [False, None])
     def test_false_or_unset_keeps_planning_off(self, value):
         """None is "unset" to the resolver, so the schema default (off) applies."""
-        assert _begin({'planning': value}).planning is False
+        assert _planning({'planning': value}) is False
 
     @pytest.mark.parametrize('value', [1, 'yes', 0])
     def test_a_non_boolean_is_refused_by_the_schema(self, value):
         """The field is a boolean: a stringified or numeric flag is a config error, never a guess."""
         with pytest.raises(ConfigError, match='"planning" expects boolean'):
-            _begin({'planning': value})
+            _planning({'planning': value})
 
-    def test_endglobal_resets_planning(self):
+    def test_a_call_turns_planning_on_for_itself(self):
+        """One control: a call that asks for planning gets it, the next call does not."""
+        instance = _begin({'planning': False})
+        assert instance.config.overlay({'planning': True})['planning'] is True
+        assert instance.config.overlay(None)['planning'] is False
+
+    def test_the_global_keeps_no_planning_and_cannot_read_it(self):
+        """A per-call value read through the control's IGlobal.config raises, by design."""
         instance = _begin({'planning': True})
-        assert instance.planning is True
-        instance.endGlobal()
-        assert instance.planning is False
+        assert not hasattr(instance, 'planning')
+        with pytest.raises(ConfigError, match='"planning" is a parameter'):
+            instance.config.planning

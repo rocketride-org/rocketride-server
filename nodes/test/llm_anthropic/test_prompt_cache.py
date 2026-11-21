@@ -89,6 +89,12 @@ def _chat(monkeypatch):
     return module.Chat('llm_anthropic', resolveConfig(schema, config), {})
 
 
+def _ask(chat, question, **callbacks):
+    """Ask one question as LLMBase does: inside the call the node's settings resolve to."""
+    with chat.calling(chat.resolve_call(chat._config)):
+        return chat.chat(question, **callbacks)
+
+
 def _agent_question(scratch: str, cache: bool = True) -> Question:
     q = Question(role='You are a planning agent.', expectJson=True)
     q.cachePrefix = cache
@@ -104,7 +110,7 @@ def test_the_unchanging_start_is_marked_and_the_rest_is_not(monkeypatch, server)
     chat = _chat(monkeypatch)
     question = _agent_question('round 1')
 
-    chat.chat(question)
+    _ask(chat, question)
 
     content = server[0]['messages'][0]['content']
     assert isinstance(content, list) and len(content) == 2
@@ -118,8 +124,8 @@ def test_the_marked_start_is_identical_across_rounds(monkeypatch, server):
     """Only an identical prefix can be read back from the cache."""
     chat = _chat(monkeypatch)
 
-    chat.chat(_agent_question('round 1'))
-    chat.chat(_agent_question('round 2: read App.css, it is revision 1'))
+    _ask(chat, _agent_question('round 1'))
+    _ask(chat, _agent_question('round 2: read App.css, it is revision 1'))
 
     first, second = (b['messages'][0]['content'] for b in server)
     assert first[0]['text'] == second[0]['text']
@@ -131,7 +137,7 @@ def test_without_the_flag_the_request_is_unchanged(monkeypatch, server):
     chat = _chat(monkeypatch)
     question = _agent_question('round 1', cache=False)
 
-    chat.chat(question)
+    _ask(chat, question)
 
     assert server[0]['messages'][0]['content'] == question.getPrompt()
     assert 'cache_control' not in json.dumps(server[0])

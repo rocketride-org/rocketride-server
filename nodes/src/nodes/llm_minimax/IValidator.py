@@ -47,7 +47,9 @@ class IValidator(IValidatorBase):
         # Load dependencies first
         # The schema check: a config that does not fit raises ConfigError here,
         # before any probe. syntaxOnly asks for that check alone.
-        config = self.config
+        # The model leaves are per-call parameters, which self.config refuses: the
+        # probe checks the values a call that sets none of them runs with
+        config = self.config.overlay(None)
         if syntaxOnly:
             return
 

@@ -196,7 +196,7 @@ async def test_every_proxy_handler_authorizes_the_target(handler):
     ids=['team', 'public', 'shared-engine'],
 )
 async def test_operators_may_profile_any_engine(sys_permissions, shape):
-    """sys.admin / internal profile @team, @public and cross-user engines."""
+    """sys.admin / internal profile @team, @public and shared engines."""
     control = _running_control(**shape)
     account = _account_info()
     account.sysPermissions = sys_permissions

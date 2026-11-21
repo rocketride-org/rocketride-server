@@ -29,7 +29,7 @@ from hosting import is_hosted
 from starlette.websockets import WebSocketState
 from rocketlib import IEndpointBase, setNodeChannel
 from ai.common.dap import DAPBase, TransportWebSocket
-from ai.account.base import OutOfCreditsError
+from ai.account.base import OutOfCreditsError, SubscriptionRequiredError
 from ai.constants import CONST_CHANNEL_CHUNK, CONST_SPEND_ALLOW_SECONDS, CONST_SPEND_CHECK_TIMEOUT
 from .channel import ChannelError, ChannelUnavailable, task_channel
 from .caller_context import pending_caller
@@ -296,7 +296,15 @@ _asking = threading.Lock()
 
 
 def require_credit() -> None:
-    """Engine pipe gate: raise OutOfCreditsError if the paying unit of the binding being opened may not."""
+    """
+    Engine pipe gate: refuse the binding being opened when its paying unit may not open a pipe.
+
+    Raises:
+        OutOfCreditsError: The paying unit is out of credit.
+        SubscriptionRequiredError: The caller has no subscription to the
+            subscription-priced publication the binding serves (plan 8.4).
+        RuntimeError: Nobody answered the check.
+    """
     global _allowed_until
     caller = pending_caller()
     unit = (str(caller.get('orgId') or ''), str(caller.get('address') or '')) if caller else None
@@ -307,14 +315,19 @@ def require_credit() -> None:
         if now < allowed_until:
             return
         # Step 2: ask EaaS, naming the caller so the answer is about THEIR
-        # paying unit (plan 8.3), not the engine starter's
-        arguments = {'caller': {k: caller.get(k) for k in ('userId', 'orgId', 'address', 'rung')}} if caller else None
+        # paying unit (plan 8.3), not the engine starter's; the binding's
+        # request id lets EaaS find the control it recorded for the binding
+        named = ('userId', 'orgId', 'address', 'rung', 'correlationId')
+        arguments = {'caller': {k: caller.get(k) for k in named}} if caller else None
         try:
             reply = task_channel.request_sync('spend.check', arguments, timeout=CONST_SPEND_CHECK_TIMEOUT)
         except (ChannelUnavailable, ChannelError) as e:
             # No answer, no pipe
             raise RuntimeError(f'No credit check answered: {getattr(e, "message", e)}') from None
         if reply.body.get('refusal'):
+            # The answer names which refusal it is; credit is the unnamed one
+            if reply.body.get('code') == SubscriptionRequiredError.code:
+                raise SubscriptionRequiredError(reply.body['refusal'], address=unit[1] if unit else '')
             raise OutOfCreditsError(reply.body['refusal'])
         # Step 3: remember the allow for this unit only
         if unit is not None:

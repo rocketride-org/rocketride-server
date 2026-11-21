@@ -55,7 +55,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 
-from rocketride.types.task import TASK_METRICS, TASK_TOKENS
+from rocketride.types.task import TASK_METRICS, TASK_STATUS_FLOW, TASK_TOKENS
 from rocketlib.config import ConfigError, _coerce, _type_error
 
 from ai.account.audience import compose_owner, parse_audience
@@ -391,6 +391,37 @@ class DeploymentRef:
         return decoded.id if decoded.kind == 'team' else ''
 
 
+# ==== Store listing ============================================================
+
+#: The listing mode of a publication that charges no subscription, and of a
+#: publication with no store block at all (plan 8.4, 9).
+LISTING_FREE = 'free'
+
+
+@dataclass(frozen=True)
+class Listing:
+    """
+    The store listing facts of the publication a control serves through (plan 8.4).
+
+    Read once from the version's ``metadata.manifest`` when the control is
+    created: a version is immutable, so its listing never changes under a
+    control. A dev run, and a publication with no store block, is ``free``.
+
+    Attributes:
+        mode: ``'free'``, ``'subscription'`` or ``'paywall'``.
+        plan: The nickname of the listing's first plan ('' when it names
+            none): what a refused caller is told to subscribe to.
+    """
+
+    mode: str = LISTING_FREE
+    plan: str = ''
+
+    @property
+    def paid(self) -> bool:
+        """True when calling the publication needs a subscription (any mode but ``free``)."""
+        return self.mode != LISTING_FREE
+
+
 # ==== Team context =============================================================
 
 #: Why a team is a control's team context (plan 6.2).
@@ -531,6 +562,10 @@ class TaskControl:
             the control unavailable (plan 7.2, the kill switch).
         deployment: The deployment this control resolved through, if any.
         version: The artifact version a published rung started from (None on @spec).
+        listing: The store listing of that version (``free`` on @spec and
+            for a publication with no store block).
+        subscription_allowed_at: Monotonic time the caller's subscription to
+            a paid listing was last confirmed (0.0 = never).
         team_context: The team whose environment this control runs with.
         task: The ONE engine this control holds. It may be an engine that
             stopped on its inactivity timer or crashed after it confirmed
@@ -596,6 +631,12 @@ class TaskControl:
     # from the team context (plan 6.2; filled by C.10); rides _caller.env
     env: Dict[str, str] = field(default_factory=dict)
 
+    # The RocketRide cloud databases this control's DB nodes may open, as
+    # dsn_key -> the owner the account approved FOR THIS CONTROL'S RUN
+    # (SDD 4.4); empty without DB nodes. Authorized when the control is
+    # created; the engine it holds must have been handed exactly these
+    db_approved: Dict[str, str] = field(default_factory=dict, repr=False, compare=False)
+
     # The pipes this control has open, by slot (plan 3.1 P1/P2), and what its
     # bindings did so far (plan 7.5)
     open_pipes: Dict[int, OpenPipe] = field(default_factory=dict)
@@ -615,6 +656,10 @@ class TaskControl:
     # trusts an allow for the same window). A refusal is never cached.
     credit_allowed_at: float = 0.0
 
+    # The same window for the subscription to a paid listing (plan 8.4): one
+    # question per control per window, and a refusal is never cached
+    subscription_allowed_at: float = 0.0
+
     # The control's own idle clock and its idle-expiry heap entry: activity
     # through one control never keeps another alive (plan 7.1)
     last_activity: float = field(default_factory=time.monotonic)
@@ -625,6 +670,9 @@ class TaskControl:
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
     version: Optional[int] = None
+
+    # The store listing of that version (plan 8.4); free for a dev run
+    listing: Listing = field(default_factory=Listing)
 
     # The team whose environment applies (plan 6.2); never billing
     team_context: TeamContext = field(default_factory=TeamContext)
@@ -658,6 +706,11 @@ class TaskControl:
     def index_key(self) -> str:
         """The owner-filtered index key ``<rung>.<ownerId>.<address>`` a name resolves through (plan 7.5)."""
         return control_key(self.rung, self.owner_id, self.address)
+
+    @property
+    def display_name(self) -> str:
+        """What this control is called where a shared engine has no name of its own: its pipeline's name, else its address."""
+        return str((self.pipeline or {}).get('name') or self.address or self.id)
 
     @property
     def index_map(self) -> IndexMap:
@@ -924,12 +977,13 @@ class TaskControl:
         engine's counters are the owner's own work and pass through. On a
         shared engine they are every holder's work: the counts become this
         control's own, rates and engine-level diagnostics (warnings, errors,
-        component stats, slowest documents, metrics) are scrubbed, and no
-        holder count rides anywhere (``pipeflow.totalPipes`` stays 0).
+        component stats, slowest documents, metrics, the status message, the
+        exit text) are scrubbed, the body names this control, and no holder
+        count rides anywhere (``pipeflow`` is empty).
 
         Args:
             status: The engine's ``TASK_STATUS`` as a dict (not modified).
-            shared: Whether the engine is shared across users.
+            shared: Whether the engine is shared (its key names no owner).
 
         Returns:
             The projected status body.
@@ -963,8 +1017,17 @@ class TaskControl:
             currentObject='',
             currentSize=0,
         )
-        # Step 3: engine-level diagnostics and the engine's resource and token
-        # totals belong to the ops stream (a holder's own usage is C.13)
+        # Step 2a: a shared engine names nobody; the body names this control
+        if 'name' in body:
+            body['name'] = self.display_name
+        if 'project_id' in body:
+            body['project_id'] = self.project_id or ''
+        if 'source' in body:
+            body['source'] = self.source or ''
+        # Step 3: engine-level diagnostics, the engine's resource and token
+        # totals, the pipes every holder has open (their object names with
+        # them) and the engine's exit text belong to the ops stream (a
+        # holder's own usage is C.13; its own pipes reach it as flow events)
         for key, empty in (
             ('warnings', []),
             ('errors', []),
@@ -973,10 +1036,30 @@ class TaskControl:
             ('slowestDocs', []),
             ('metrics', TASK_METRICS().model_dump()),
             ('tokens', TASK_TOKENS().model_dump()),
+            ('pipeflow', TASK_STATUS_FLOW().model_dump()),
+            ('exitMessage', ''),
+            # The engine's last status message (a node's monitor text, a
+            # model download) names whatever work the engine did last, any
+            # holder's; the availability says what the holder needs
+            ('status', ''),
         ):
             if key in body:
                 body[key] = empty
         return body
+
+    def status_view(self) -> Dict[str, Any]:
+        """
+        This control's view of its engine's current status: ``project_status`` of ``get_status()``.
+
+        What every surface that shows a control's status to its caller reads
+        (the status body, the task lists, the dashboard rows), so a holder of
+        a shared engine never reads another holder's counts or the engine's
+        totals through any of them.
+
+        Returns:
+            The projected status body.
+        """
+        return self.project_status(self.task.get_status().model_dump(), bool(self.task.shared))
 
     def _author_status(self, body: Dict[str, Any]) -> None:
         """
@@ -1031,6 +1114,18 @@ class TaskControl:
             True within ``CONST_SPEND_ALLOW_SECONDS`` of the last allow.
         """
         return now - self.credit_allowed_at < CONST_SPEND_ALLOW_SECONDS
+
+    def subscription_allowed(self, now: float) -> bool:
+        """
+        Whether the caller's subscription to this control's paid listing was confirmed recently.
+
+        Args:
+            now: ``time.monotonic()``.
+
+        Returns:
+            True within ``CONST_SPEND_ALLOW_SECONDS`` of the last confirmation.
+        """
+        return now - self.subscription_allowed_at < CONST_SPEND_ALLOW_SECONDS
 
     def begin_request(self) -> None:
         """

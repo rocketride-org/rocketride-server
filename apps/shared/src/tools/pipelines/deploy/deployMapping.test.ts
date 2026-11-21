@@ -30,7 +30,7 @@ import { mapHistoryRows, mapTeamDeploymentRows, withReviewStates } from './deplo
 import type { DeployTeamRefDTO, DeployVersionCardDTO } from './deployTypes';
 
 describe('mapTeamDeploymentRows', () => {
-	it("draws each row on the server's rung, names a team by the caller's roster, and keeps its audience", () => {
+	it("draws each row on the server's rung, names a team by the caller's roster, and keeps its audience and handle", () => {
 		const teams: DeployTeamRefDTO[] = [{ id: '=team/team-prod', name: 'Production', canControl: true }];
 		const rows = mapTeamDeploymentRows(
 			[
