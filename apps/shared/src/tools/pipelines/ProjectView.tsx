@@ -31,9 +31,10 @@ import type { OpenToolHandler } from 'shared/tools/pipelines/components/pipeline
 import { DeveloperIdBanner } from './components/DeveloperIdBanner';
 import { ConversionBanner } from './components/ConversionBanner';
 import type { IConversionBanner } from './convertOnOpen';
+import type { ICatalogGate } from './catalogGate';
 
 import { TabPanel } from 'shell';
-import { ContentHeader } from 'shell';
+import { Button, ContentHeader, EmptyState } from 'shell';
 import { TabControl } from 'shell';
 import type { ViewMenu } from 'shell';
 import CanvasPanel from 'shared/tools/pipelines/panels/design/canvas';
@@ -83,6 +84,9 @@ export interface IProjectViewProps {
 	documentTitle?: string;
 	/** Available node service definitions (keyed by provider). */
 	servicesJson: Record<string, any>;
+	/** What DESIGN shows instead of the canvas while no catalog is held
+	 *  (catalogGate); null or absent draws the canvas. */
+	canvasGate?: ICatalogGate | null;
 	/** Whether the host is connected to the RocketRide server. */
 	isConnected: boolean;
 	/** Whether a connection is configured to use RocketRide Cloud. */
@@ -226,6 +230,14 @@ const styles = {
 		flexDirection: 'column',
 		position: 'relative',
 	} as CSSProperties,
+	// The canvas gate's EmptyState, centred in the canvas's place.
+	canvasGate: {
+		flex: 1,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		padding: 24,
+	} as CSSProperties,
 	// Fills the space below the top TabControl strip; TabPanel's
 	// 100%-height wrapper resolves against this definite flex box.
 	pageBody: {
@@ -283,7 +295,7 @@ function migrateViewMode(mode: string | undefined): ProjectViewMode {
 /** The prefs key behind the Cloud prompt's "Don't show again". */
 const CLOUD_CANVAS_PROMPT_DISMISSED_KEY = 'cloudCanvasPromptDismissed';
 
-const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, onOpenTool, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, onUnknownConfigKeys, configMessages, conversion = null, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
+const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, servicesJson, canvasGate = null, isConnected, cloudConnectionConfigured, isSubscribed = true, statusMap, serverHost = '', onCreateEndpointKey, onOpenTool, knownDeveloperId, onRegisterDeveloper, canRegisterDeveloper, onUnknownConfigKeys, configMessages, conversion = null, assetsHost, isDirty = false, isNew = false, initialViewState, prefs, onContentChanged, onValidate, getNodeSchema, developerId, onPipelineAction, onViewStateChange, onOpenLink, onOpenCloudSetup, oauth2RootUrl = OAUTH_ROOT_URL, oauthReturnUrl, onOpenExternal, pendingOAuthTokens, clearPendingOAuthTokens, onSave, onExport, isReadonly = false, envKeys, onMissingEnvVars, liveLogEvents = [], openEventStream, fetchTimeline, deploy, review }) => {
 	// --- Local view state (initialized from props, managed locally) -----------
 
 	const [viewState, setViewState] = useState<ViewState>(() => ({
@@ -590,7 +602,14 @@ const ProjectView: React.FC<IProjectViewProps> = ({ project, documentTitle, serv
 				<div style={styles.canvasPadding}>
 					<PrefsProvider value={prefsApi}>
 						<AppStateProvider value={appStateApi}>
-						{project && (
+						{/* The canvas gate: no catalog held yet, so the reason and the way
+						    out stand in for a canvas that could draw no lanes or forms. */}
+						{project && canvasGate && (
+							<div style={styles.canvasGate}>
+								<EmptyState title={canvasGate.title} description={canvasGate.description} {...(canvasGate.offerSettings && onOpenCloudSetup ? { action: <Button onClick={onOpenCloudSetup}>Open Settings</Button> } : {})} />
+							</div>
+						)}
+						{project && !canvasGate && (
 							<CanvasPanel
 								oauth2RootUrl={oauth2RootUrl}
 								oauthReturnUrl={oauthReturnUrl}

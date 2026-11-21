@@ -551,13 +551,17 @@ class MiscCommands(DAPConn):
         with ``pipeline`` from the reply, and shows ``warnings``; a component
         the converter cannot map is listed in ``errors`` and keeps its original
         config. Nothing is written server-side. A pipeline already in the
-        current format comes back unchanged with ``touched`` false.
+        current format comes back unchanged with ``touched`` false. A nameless
+        pipeline the conversion rewrites is named after ``nameHint`` (the IDE's
+        file name), else its ``project_id``, never a GUID.
 
         Args:
             request (Dict[str, Any]): DAP request containing:
                 - arguments (Dict[str, Any]):
                     - pipeline (Dict[str, Any]): The pipeline, flat or in the
                       ``{'pipeline': {...}}`` file envelope.
+                    - nameHint (str, optional): The name a nameless pipeline
+                      takes when the conversion fills it in.
 
         Returns:
             Dict[str, Any]: DAP response whose body is
@@ -565,7 +569,7 @@ class MiscCommands(DAPConn):
             entries are ``{message, id?}``).
 
         Usage Example:
-        { "command": "rrext_convert", "arguments": { "pipeline": { "components": [...] } } }
+        { "command": "rrext_convert", "arguments": { "pipeline": { "components": [...] }, "nameHint": "docBrain" } }
         """
         args = request.get('arguments', {}) or {}
         pipeline = args.get('pipeline')
@@ -573,7 +577,10 @@ class MiscCommands(DAPConn):
             pipeline = pipeline['pipeline']
         if not isinstance(pipeline, dict) or not isinstance(pipeline.get('components'), list):
             raise ValueError("'pipeline' must be a pipeline object with a 'components' list")
-        return self.build_response(request, body=convert_pipeline(pipeline).as_body())
+        name_hint = args.get('nameHint')
+        if name_hint is not None and not isinstance(name_hint, str):
+            raise ValueError("'nameHint' must be a string")
+        return self.build_response(request, body=convert_pipeline(pipeline, name_hint=name_hint).as_body())
 
     async def on_rrext_resolve_config(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

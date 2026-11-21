@@ -1,6 +1,39 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+"""
+Video frame extraction over an ffmpeg subprocess.
+
+``VideoFrameExtractor`` turns one video stream into a sequence of PNG frames,
+selected by interval, scene transition, keyframe or an explicit list of frame
+numbers, and pairs each PNG with the frame number and timestamp ffmpeg's
+``showinfo`` filter reports for it.
+"""
+
 import re
 import queue
-from typing import Dict, Any
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
+from typing import Dict, Any, List, Optional
 from typing import Callable
 
 from rocketlib import warning
@@ -11,6 +44,62 @@ from .reader import AVIReader
 # The entry is written by ffmpeg alongside the frame, so this is generous; its job is to
 # bound the wait rather than to time real work.
 _FRAME_INFO_TIMEOUT = 5.0
+
+# The fallback when showinfo printed no time base (see onInfo): pts_time is compared
+# with the start time, allowing for its printed rounding. ffmpeg 7 prints microseconds.
+_PTS_TOLERANCE = 1e-6
+
+# showinfo's frame line, and the time base it prints once when the filter is configured.
+_FRAME_INFO_RE = re.compile(r'.*n:\s*(\d+)\s+pts:\s*(\d+)\s+pts_time:\s*([0-9.]+)')
+_TIME_BASE_RE = re.compile(r'config in time_base:\s*(\d+)/(\d+)')
+
+# AV_TIME_BASE: ffmpeg reads -ss in microseconds.
+_MICROSECONDS = 1_000_000
+
+
+def start_pts(start_time: str, time_base: Fraction) -> Optional[int]:
+    """
+    The first pts the output seek keeps, as ffmpeg computes it.
+
+    ffmpeg reads ``-ss`` in microseconds, dropping any further digits, and rescales it
+    to the stream's time base rounding to nearest (halves up, ``AV_ROUND_NEAR_INF``);
+    the seek then keeps every frame whose pts is at least that. A frame up to half a
+    time-base tick before the start time therefore survives, which a comparison of
+    seconds would miss.
+
+    Args:
+        start_time: The ``-ss`` value exactly as passed to ffmpeg.
+        time_base: The stream's time base, from showinfo.
+
+    Returns:
+        int: The first kept pts, or None when the value is not a plain number.
+    """
+    try:
+        microseconds = int(Decimal(start_time) * _MICROSECONDS)
+    except (InvalidOperation, ValueError):
+        return None
+    divisor = _MICROSECONDS * time_base.numerator
+    return (microseconds * time_base.denominator + divisor // 2) // divisor
+
+
+def frames_select(frames: List[int]) -> str:
+    """
+    Build the ffmpeg ``select`` filter that passes exactly the listed frames.
+
+    ``n`` in a ``select`` expression counts every decoded frame from 0 at the start of
+    the video, so the numbers are absolute whatever start time the extractor seeks to.
+
+    Args:
+        frames: The frame numbers, sorted and without duplicates.
+
+    Returns:
+        str: The filter, quoted for the filtergraph so its commas stay inside the
+        expression; ``select=0`` (pass nothing) for an empty list.
+    """
+    # An empty list selects nothing rather than handing ffmpeg an empty expression
+    if not frames:
+        return 'select=0'
+    return "select='" + '+'.join(f'eq(n,{number})' for number in frames) + "'"
 
 
 class VideoFrameExtractor(AVIReader):
@@ -29,7 +118,7 @@ class VideoFrameExtractor(AVIReader):
 
         Takes a structure as:
             {
-            type: 'interval' | 'key' | 'transition',
+            type: 'interval' | 'key' | 'transition' | 'frames',
             start_time: float,
             duration: float,
             scale_width: int,
@@ -37,7 +126,14 @@ class VideoFrameExtractor(AVIReader):
             fps: float,
             max_frames: int,
             percent: float (0.0 to 1.0 for transition),
+            frames: list[int] (frame numbers from 0 at the start of the video, for frames),
             }
+
+        Args:
+            frame_callback: Receives ``(png, frame_number, seconds)`` per frame, and
+                ``(None, 0, 0)`` once the stream ends.
+            name: The reader's name in log lines.
+            config: The structure above.
         """
         # Save the frame callback function
         self._frame_callback = frame_callback
@@ -48,9 +144,20 @@ class VideoFrameExtractor(AVIReader):
         # Get the type
         self._type = config.get('type', 'interval')
 
-        # Save the start time so we can adjust to pts_timestamp
+        # The start time is where showinfo entries start counting (see onInfo); the
+        # string is the -ss value ffmpeg is given, so onInfo cuts where ffmpeg cuts
         self._start_time = config.get('start_time', 0.0)
+        self._start_arg = f'{self._start_time}'
         self._duration = config.get('duration', 0.0)
+
+        # The stream's time base and the first pts the seek keeps, from showinfo's
+        # configuration line; None until it arrives, and again for every new stream
+        self._time_base: Optional[Fraction] = None
+        self._start_pts: Optional[int] = None
+
+        # The frames mode's list, sorted so the n-th frame select passes is the n-th
+        # number in it (onInfo reports the number, not the ordinal)
+        self._frames = sorted({int(number) for number in config.get('frames') or []})
 
         # Determine fps setting
         self._fps = config.get('fps', 1.0)
@@ -60,10 +167,12 @@ class VideoFrameExtractor(AVIReader):
         else:
             fps_string = f'fps=1/{round(1 / self._fps)}'
 
-        # Common ffmpeg args
+        # Common ffmpeg args. -ss after the input is an OUTPUT seek: the filters below
+        # still see every frame from the start of the video, and the frames before the
+        # start time are dropped after them (onInfo skips their showinfo entries)
         args = [
             '-ss',
-            f'{self._start_time}',
+            self._start_arg,
         ]
 
         # Initialize filters list
@@ -84,6 +193,8 @@ class VideoFrameExtractor(AVIReader):
             filters.append("select='eq(pict_type,I)'")
         elif self._type == 'interval':
             filters.append(f'{fps_string}')
+        elif self._type == 'frames':
+            filters.append(frames_select(self._frames))
         else:
             raise ValueError(f'Unknown frame grab type: {self._type}')
 
@@ -171,6 +282,12 @@ class VideoFrameExtractor(AVIReader):
         return None
 
     def _processBuffer(self):
+        """
+        Emit every complete PNG in the buffer, each with its own showinfo entry.
+
+        Runs on the data thread. A PNG whose entry has not arrived within
+        ``_FRAME_INFO_TIMEOUT`` stays buffered for the next chunk to retry.
+        """
         while True:
             result = self.extract_complete_png(self._buffer)
             if not result:
@@ -190,13 +307,21 @@ class VideoFrameExtractor(AVIReader):
                 warning(f'[{self._name}]: no showinfo entry for a complete frame after {_FRAME_INFO_TIMEOUT}s')
                 return
 
-            # Callback with complete PNG frame
-            self._frame_callback(png_data, frame_number, start_time + self._start_time)
+            # Callback with complete PNG frame. showinfo's pts_time already counts from
+            # the start of the video (the seek is on the output), so it is the timestamp
+            self._frame_callback(png_data, frame_number, start_time)
 
             # Remove processed bytes from buffer
             self._buffer = self._buffer[end_offset:]
 
     def onData(self, chunk: bytes = None):
+        """
+        Take a chunk of ffmpeg's stdout, or the end of it.
+
+        Args:
+            chunk: PNG bytes, or None once ffmpeg's output has ended, which is passed
+                on to the callback as ``(None, 0, 0)``.
+        """
         # Add the bytes to the existing buffer
         if chunk is not None:
             self._buffer.extend(chunk)
@@ -211,6 +336,19 @@ class VideoFrameExtractor(AVIReader):
             self._frame_callback(None, 0, 0)
 
     def onInfo(self, info: str):
+        """
+        Queue the frame number and timestamp of each frame ffmpeg will emit.
+
+        showinfo sits before the output seek, so it also reports the frames before the
+        start time that ffmpeg then drops; their entries are skipped here, or every
+        frame after them would carry an earlier frame's number and time. The cut is
+        ffmpeg's own (``start_pts``): integer pts against the start rescaled to the
+        stream's time base, which showinfo prints once before the first frame. Without
+        that line the printed pts_time is compared with the start time instead.
+
+        Args:
+            info: One line of ffmpeg's stderr, or None at its end.
+        """
         # If this is the end, then done
         if info is None:
             return
@@ -219,14 +357,38 @@ class VideoFrameExtractor(AVIReader):
         if not info.startswith('[Parsed_showinfo_'):
             return
 
+        # Example: [Parsed_showinfo_0 @ 0x55cd1be2b400] config in time_base: 1/25000, frame_rate: 25/1
+        base = _TIME_BASE_RE.search(info)
+        if base:
+            numerator, denominator = int(base.group(1)), int(base.group(2))
+            if numerator > 0 and denominator > 0:
+                self._time_base = Fraction(numerator, denominator)
+                self._start_pts = start_pts(self._start_arg, self._time_base)
+            return
+
         # Example: [Parsed_showinfo_0 @ 0x55cd1be2b400] n:   1 pts: 90000 pts_time: 1.000000
-        match = re.match(r'.*n:\s*(\d+)\s+pts:\s*(\d+)\s+pts_time:\s*([0-9.]+)', info)
+        match = _FRAME_INFO_RE.match(info)
         if not match:
             return
 
-        # Get the frame number and presentation time relative to our start time
+        # n counts the frames the select passed (seek-dropped ones included); pts and
+        # pts_time count from the start of the video
         frame_number = int(match.group(1))
+        pts = int(match.group(2))
         pts_time = float(match.group(3))
+
+        # A frame before the cut never reaches the output: no PNG will claim it. With
+        # the time base the time is exact, not the printed rounding
+        if self._time_base is not None and self._start_pts is not None:
+            if pts < self._start_pts:
+                return
+            pts_time = float(pts * self._time_base)
+        elif pts_time < self._start_time - _PTS_TOLERANCE:
+            return
+
+        # In frames mode the n-th selected frame is the n-th listed number
+        if self._type == 'frames' and frame_number < len(self._frames):
+            frame_number = self._frames[frame_number]
         self._frame_info_queue.put((frame_number, pts_time))
 
     def start(self):
@@ -251,6 +413,11 @@ class VideoFrameExtractor(AVIReader):
                 self._frame_info_queue.get_nowait()
             except queue.Empty:
                 break
+
+        # The next stream's showinfo prints its own time base; until it does, nothing
+        # carries over from this one
+        self._time_base = None
+        self._start_pts = None
 
         # Start extractor process and feed video data to it via stdin
         super().start()

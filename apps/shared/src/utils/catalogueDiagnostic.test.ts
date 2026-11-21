@@ -40,6 +40,15 @@ test('an empty catalogue is a warning that points at the node definitions', () =
 	assert.match(diagnostic?.message ?? '', /--trace=Services/);
 });
 
+test('the cause holds in every host: it names the reason and no extension file', () => {
+	const failed = catalogueDiagnostic({ services: {}, servicesError: 'HTTP 401' });
+	const empty = catalogueDiagnostic({ services: {} });
+
+	assert.match(failed?.cause ?? '', /HTTP 401/);
+	assert.match(empty?.cause ?? '', /--trace=Services/);
+	for (const diagnostic of [failed, empty]) assert.doesNotMatch(diagnostic?.cause ?? '', /services-catalog\.json/);
+});
+
 test('a healthy catalogue says nothing', () => {
 	assert.equal(catalogueDiagnostic({ services: { llm_openai: {} } }), null);
 });

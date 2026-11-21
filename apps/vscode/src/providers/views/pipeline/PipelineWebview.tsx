@@ -28,6 +28,7 @@ import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewP
 
 import { PipelineEditor } from 'shared/tools/pipelines/PipelineEditor';
 import type { IPipelineEditorHost } from 'shared/tools/pipelines/PipelineEditor';
+import { pipeStemOf } from 'shared/tools/pipelines/sidebar/bundles';
 import type { ViewState } from 'shared/tools/pipelines';
 import { CheckoutModal } from 'shell';
 import type { CheckoutPlan, PlanAction } from 'shell';
@@ -69,6 +70,16 @@ const PipelineWebview: React.FC = () => {
 	// the readonly live-task viewer) — stamped into the served HTML, present
 	// before any script ran.
 	const docRef = useRef<string>(document.body.dataset.rrDoc ?? '');
+	// The document's file name without `.pipe`, from its URI (convert-on-open
+	// names a nameless pipeline after it); none for the live-task viewer's
+	// task:<pid>.<sid> identity or a URI that does not decode.
+	const fileStem = useMemo(() => {
+		try {
+			return pipeStemOf(decodeURIComponent(docRef.current)) ?? undefined;
+		} catch {
+			return undefined;
+		}
+	}, []);
 	// OAuth tokens were just applied: the next contentSet must reach disk
 	// without a manual save (the one-shot coupling, stamped realm-side).
 	const saveAfterOAuthRef = useRef(false);
@@ -223,6 +234,7 @@ const PipelineWebview: React.FC = () => {
 
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
+			...(fileStem ? { fileStem } : {}),
 			isDirty,
 			isNew,
 			isReadonly,
@@ -285,7 +297,7 @@ const PipelineWebview: React.FC = () => {
 				};
 			},
 		}),
-		[isDirty, isNew, isReadonly, viewState, subscribed, cloudConnectionConfigured, oauthReturnUrl, pendingOAuthTokens, handleContentChanged, handleViewStateChange, assetOps]
+		[fileStem, isDirty, isNew, isReadonly, viewState, subscribed, cloudConnectionConfigured, oauthReturnUrl, pendingOAuthTokens, handleContentChanged, handleViewStateChange, assetOps]
 	);
 
 	// --- Checkout callbacks — the realm client's billing surface --------------

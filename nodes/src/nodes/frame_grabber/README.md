@@ -14,7 +14,7 @@ result as PNG.
 ## What it does
 
 The node receives video on the `video` lane and selects frames in interval,
-scene-transition, or keyframe mode. It can produce each selected frame as a
+scene-transition, keyframe, or specific-frames mode. It can produce each selected frame as a
 PNG image stream or as an image document; it can also collect frame numbers and
 timestamps into a table when the video closes. Each output is generated only
 when its corresponding downstream listener is present. Pick this node over a
@@ -38,6 +38,7 @@ Default: **Extract video frames at intervals** (`interval`).
 | `interval` **(default)** | Extract video frames at intervals | Shows the interval, start-time, duration, and watermark settings. |
 | `transition` | Extract video frames at scene transitions | Shows the change percentage, minimum scene gap, time bounds, frame cap, and watermark settings. |
 | `key` | Extract video frames at keyframes | Shows the time bounds, frame cap, and watermark settings. |
+| `frames` | Extract specific video frames | Shows the frame list, time bounds, and watermark settings. |
 
 ## Configuration
 
@@ -46,22 +47,39 @@ right starting point for regular sampling; use the other profiles only when
 their selection criteria match the video. The generated schema below lists the
 available fields and defaults.
 
+Every setting, the mode included, is a per-call parameter: a pipeline can
+expose any of them in its `parameters` map, and each call then sends its own
+value without starting a new pipeline. A call that sends the mode moves to that
+mode's settings; a call that sends a setting of a mode it did not select (a
+frame list on an interval pipeline) is refused. The frame cap can be set by a
+caller but never by an LLM through a tool call.
+
 ### Frame grabber mode
 
-**Frame grabber mode** selects `interval`, `transition`, or `key` and changes
-which settings the configuration panel exposes. Keep the default `interval`
-when frames should be sampled at a regular cadence. Choose `transition` when
-scene changes should control selection, or `key` when keyframes are the desired
-selection points. The transition profile supplies `0.4` as its configured
-percentage default.
+**Frame grabber mode** selects `interval`, `transition`, `key`, or `frames` and
+changes which settings the configuration panel exposes. Keep the default
+`interval` when frames should be sampled at a regular cadence. Choose
+`transition` when scene changes should control selection, `key` when keyframes
+are the desired selection points, or `frames` when the frames are known by
+number. The transition profile supplies `0.4` as its configured percentage
+default.
 
 ### Interval between frames
 
 **Interval (in seconds) between frames** is available in interval mode and
-defaults to `5`. At global initialization, the node converts this interval to
-frames per second as `1 / interval`; it must therefore be greater than zero,
-or startup raises a `ValueError`. Lower it for more frequent sampling and raise
-it when fewer frames are sufficient.
+defaults to `5`. When a call begins, the node converts this interval to frames
+per second as `1 / interval`; the schema's minimum of `0.01` keeps it above
+zero. Lower it for more frequent sampling and raise it when fewer frames are
+sufficient.
+
+### Specific frames
+
+**Frame numbers** is available in specific-frames mode: a list of up to 1000
+frame numbers, counted from `0` at the start of the video whatever the start
+time. The list may be in any order and may repeat a number; each frame is
+extracted once, in video order, and reports its own number as `frame_number`.
+A frame before the start time, after the duration, or past the end of the video
+is not extracted. An empty list extracts nothing and logs a warning.
 
 ### Percentage change for frame and minimum gap
 
@@ -70,16 +88,23 @@ be set from `0.1` to `1.0` in the configuration panel. Use a lower percentage
 when smaller changes should select frames; use a higher percentage to require
 a larger change. **Minimum gap between scenes** defaults to `0` (disabled) and
 can be set from `0.5` to `5` seconds to reduce burst detections in
-high-motion segments. Pair a nonzero gap with a low percentage when a busy
-video would otherwise produce closely spaced selections.
+high-motion segments: the node drops a frame that falls closer than the gap to
+the last frame it emitted from the same video. Pair a nonzero gap with a low
+percentage when a busy video would otherwise produce closely spaced selections.
 
 ### Extraction window and frame cap
 
 **Start time** and **Duration** are available in every profile. Their default
 of `0` starts at the beginning and continues to the end of the video,
-respectively; set them to limit work to a relevant segment. **Maximum number of
-frames** is available in transition and keyframe modes and defaults to `0` for
-no limit. Set a cap when downstream storage or review must be bounded.
+respectively; set them to limit work to a relevant segment. Frame timestamps
+always count from the start of the video, not from the start time. In interval
+mode the window is cut on the interval's own ticks, rounded to the nearest: with
+a 5 second interval and a start time of 12, the first frame is the one at 10
+seconds (12 is nearer 10 than 15). **Maximum
+number of frames** is available in transition and keyframe modes and defaults
+to `0` for no limit. It counts per video stream; with a scene gap set, it
+counts the frames the gap kept. Set a cap when downstream storage or review
+must be bounded.
 
 ### Watermark
 

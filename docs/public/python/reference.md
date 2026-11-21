@@ -63,7 +63,7 @@ Context manager: `async with RocketRideClient(...) as client:` — entering call
 | `get_services` | `async def get_services(self, *, definitions: bool = False) -> SERVICES_RESPONSE` | `SERVICES_RESPONSE` | Lightweight **summaries** of every service, plus a deduplicated `icons` table and the server `version`. With `definitions=True`, every entry is the service's **full** definition (resolved `properties` and `params` included) and there is no `icons` table; each definition carries its own `icon`. One service's full definition comes from `get_service`. |
 | `get_service` | `async def get_service(self, service: str) -> dict` | `dict` | One service's full definition (config schema included). **Raises** `ValueError` (empty name) or `RuntimeError` (unknown service); never returns `None`. |
 | `validate` | `async def validate(self, pipeline: PipelineConfig, *, source: str = None) -> dict` | `dict` | Validates a pipeline configuration without starting it; returns errors and warnings. |
-| `convert` | `async def convert(self, pipeline: PipelineConfig) -> dict` | `dict` | Rewrites a pipeline from the old node-config format; returns the converted pipeline, warnings, errors and whether anything changed. |
+| `convert` | `async def convert(self, pipeline: PipelineConfig, name_hint: Optional[str] = None) -> dict` | `dict` | Rewrites a pipeline from the old node-config format; returns the converted pipeline, warnings, errors and whether anything changed. `name_hint` names a nameless pipeline the conversion fills in (pass the file name; never a GUID). |
 | `ping` | `async def ping(self) -> None` | - | Liveness check; raises on failure. (A legacy `token` argument is accepted but not sent.) |
 
 ### Chat

@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 34146e5f4c033b92e4ecb3abf81684c288ccf869
+// Source commit: 23856ebecb39045986cf65e59c5271da1a8ed74f
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5772,6 +5772,9 @@ export declare class RocketRideClient extends DAPClient {
      * writing the converted text back to a file. Nothing is stored server-side.
      *
      * @param options.pipeline - Pipeline configuration, flat or in the `.pipe` file envelope
+     * @param options.nameHint - The name a nameless pipeline takes when the
+     *        conversion fills it in: pass the file's name without its extension.
+     *        Without one the server uses the `project_id`, never a GUID.
      * @returns The pipeline to use (the input when `touched` is false), what
      *          changed per component, and the components that could not be
      *          converted (they keep their original config)
@@ -5779,7 +5782,7 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @example
      * ```typescript
-     * const result = await client.convert({ pipeline });
+     * const result = await client.convert({ pipeline, nameHint: 'docBrain' });
      * if (result.touched && result.errors.length === 0) {
      *   await save(result.pipeline);
      * }
@@ -5789,6 +5792,7 @@ export declare class RocketRideClient extends DAPClient {
      */
     convert(options: {
         pipeline: PipelineConfig | Record<string, unknown>;
+        nameHint?: string;
     }): Promise<ConvertResult>;
     /**
      * Start an RocketRide pipeline for processing data.

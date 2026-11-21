@@ -21,7 +21,16 @@
 # SOFTWARE.
 # =============================================================================
 
-import threading
+"""
+Control-wide half of the Frame Grabber node: it keeps nothing.
+
+Every key of the node is a per-call parameter, read by the instance from
+``self.settings``, and the extractor is built per binding (one ffmpeg process
+per video stream, started by the reader as the stream arrives), so there is
+no client, model or pool for the IGlobal to cache. The module stays for
+``load_depends``, which installs the node's requirements (Pillow, for the
+watermark) before the instance imports them.
+"""
 
 from depends import load_depends
 
@@ -31,32 +40,4 @@ from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    #: The extractor's config: the resolved node config as a plain dict plus
-    #: the two keys VideoFrameExtractor reads under other names.
-    grab_config: dict
-
-    def beginGlobal(self):
-        """Build the extractor config from the resolved node config.
-
-        The selected mode flattens to its own leaves (interval, percent,
-        min_scene_gap, max_frames) beside the shared ones (start_time,
-        duration, watermark); the resolver applied every default and bounded
-        the interval above zero.
-        """
-        # Mutex if this driver requires physical devices
-        self.device_lock = threading.Lock()
-
-        config = self.config
-        self.grab_config = dict(config)
-
-        # VideoFrameExtractor reads the mode as 'type'
-        self.grab_config['type'] = config.profile
-
-        # Translate interval (seconds between frames) to fps for VideoFrameExtractor,
-        # which only reads 'fps' and never reads 'interval'
-        if 'interval' in config:
-            self.grab_config['fps'] = 1.0 / config.interval
-
-    def endGlobal(self):
-        # Release the lock
-        self.device_lock = None
+    """The frame grabber's IGlobal: nothing is built from config, so nothing is held."""

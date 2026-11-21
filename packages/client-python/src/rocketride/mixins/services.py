@@ -193,7 +193,7 @@ class ServicesMixin(DAPClient):
         except Exception as err:
             raise RuntimeError(f'Pipeline validation failed: {err}') from err
 
-    async def convert(self, pipeline: PipelineConfig) -> CONVERT_RESULT:
+    async def convert(self, pipeline: PipelineConfig, name_hint: Optional[str] = None) -> CONVERT_RESULT:
         """
         Rewrite a pipeline from the old node-config format to the current one.
 
@@ -205,6 +205,9 @@ class ServicesMixin(DAPClient):
 
         Args:
             pipeline: Pipeline configuration, flat or in the ``.pipe`` file envelope.
+            name_hint: The name a nameless pipeline takes when the conversion
+                fills it in: pass the file's name without its extension. Without
+                one the server uses the ``project_id``, never a GUID.
 
         Returns:
             ``{'pipeline', 'warnings', 'errors', 'touched'}``: the pipeline to
@@ -217,12 +220,13 @@ class ServicesMixin(DAPClient):
             RuntimeError: If the server refuses the request.
 
         Example:
-            result = await client.convert(pipeline)
+            result = await client.convert(pipeline, name_hint='docBrain')
             if result['touched'] and not result['errors']:
                 save(result['pipeline'])
         """
         try:
-            result = await self.call('rrext_convert', pipeline=pipeline)
+            hint = {'nameHint': name_hint} if name_hint is not None else {}
+            result = await self.call('rrext_convert', pipeline=pipeline, **hint)
             result.setdefault('warnings', [])
             result.setdefault('errors', [])
             result.setdefault('touched', False)

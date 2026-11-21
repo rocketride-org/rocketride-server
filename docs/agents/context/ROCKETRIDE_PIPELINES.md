@@ -297,7 +297,10 @@ converted text is returned (`validate()` → `converted` + `conversion`; `conver
 plain rewrite) and nothing is written back server-side: save the returned pipeline to make
 the file current. A component the converter cannot map (a key that was never declared, a
 profile that never existed, a credential the node now requires) is an error naming the
-component and the key; that component keeps its original config until you fix it.
+component and the key; that component keeps its original config until you fix it. A
+converted pipeline with no `name` is named after the name hint `convert()` was given (the
+IDE passes the file name), else its `project_id`, never a GUID: an old GUID-id pipeline
+converted with no hint is named `Pipeline`.
 
 ### LLM model selection (`llm_openai`)
 
