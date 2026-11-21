@@ -1,6 +1,6 @@
 {
 	"name": "@rocketride/test-ui",
-	"version": "1.2.0",
+	"version": "2.0.0",
 	"private": true,
 	"description": "Stress & chaos testing dashboard for the RocketRide TypeScript client SDK",
 	"license": "MIT",
