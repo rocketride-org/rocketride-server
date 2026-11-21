@@ -26,10 +26,15 @@ queue it is skipped (`changes` runs on PRs only), so there it does not hold
   frees its message with its own `free`, while ASan's `operator new` allocated
   it. Any other error fails, also one that stops inside a toolchain library. The
   job summary lists the known groups in a "Known third-party" section.
+- Processes write their reports without symbolization (`symbolize=0`): a test
+  server kills a task 5 s after it asks it to stop, and a report written while
+  the task stops would be cut short by the seconds that in-process symbolizing
+  takes. After the tests, `scripts/ci/sanitizer-symbolize.mjs` adds function,
+  file and line to every report.
 - Before the build, a canary program with two planted errors
-  (`scripts/ci/sanitizer-canary.cpp`) must be reported, so a run whose sanitizer
-  runtime, options or report script cannot report an error fails. The canary
-  does not cover engine task processes.
+  (`scripts/ci/sanitizer-canary.cpp`) must be reported and symbolized, so a run
+  whose sanitizer runtime, options, symbolize script or report script cannot
+  report an error fails. The canary does not cover engine task processes.
 - Its vcpkg binary cache is read-only: a PR that changes ports builds those
   dependencies from source in this job. `sanitize` starts in parallel with
   `build`, so on such a PR it may reach its 120-minute limit; re-run it after

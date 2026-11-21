@@ -40,8 +40,14 @@ jobs:
       # halt_on_error=0 keeps a program running after a report, so one run shows
       # every error. Leaks are not checked yet (detect_leaks=0): the embedded
       # CPython and the JVM leave memory allocated at exit by design.
-      # ASan and UBSan share one runtime and one log_path, taken from the
-      # options read last (UBSAN_OPTIONS), so both options name the same path.
+      # symbolize=0 writes each frame as its module and offset, in well under a
+      # second: reports come while the test server stops a task, which it kills
+      # 5 s after SIGTERM, and symbolizing in the process takes 3-5 s, so the
+      # report would stop after its header. sanitizer-symbolize.mjs adds the
+      # function, file and line after the tests.
+      # ASan and UBSan share one runtime and its common options (log_path,
+      # symbolize), taken from the options read last (UBSAN_OPTIONS), so both
+      # options name the same values.
       # Each process that reports writes all its reports to <log_path>.<pid>.
       - name: Set sanitizer options
         run: |
@@ -49,8 +55,8 @@ jobs:
           mkdir -p "$report_dir"
           {
             echo "SANITIZER_REPORT_DIR=$report_dir"
-            echo "ASAN_OPTIONS=halt_on_error=0:detect_leaks=0:log_path=$report_dir/report"
-            echo "UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$report_dir/report"
+            echo "ASAN_OPTIONS=halt_on_error=0:detect_leaks=0:symbolize=0:log_path=$report_dir/report"
+            echo "UBSAN_OPTIONS=halt_on_error=0:print_stacktrace=1:report_error_type=1:symbolize=0:log_path=$report_dir/report"
           } >> "$GITHUB_ENV"
 
       # No git credentials are kept: every later git call reads a public repository.
@@ -59,8 +65,8 @@ jobs:
         with:
           submodules: recursive
           persist-credentials: false
-      - name: Test the sanitizer report script
-        run: node --test scripts/ci/sanitizer-report.test.mjs
+      - name: Test the sanitizer report scripts
+        run: node --test scripts/ci/sanitizer-report.test.mjs scripts/ci/sanitizer-symbolize.test.mjs
       - name: Set up pnpm
         uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
         with:
@@ -105,9 +111,12 @@ jobs:
       # not its whole flag set, and run with the job's options plus its own
       # log_path (a later option value wins). Its reports go to their own folder,
       # which the report script reads in full, so the program and the summary
-      # file sit beside it. The summary goes to a throwaway file so the canary
-      # stays out of the job summary; in that mode the script prints one
-      # tab-separated line per group (count, sanitizer, kind, location) on stdout.
+      # file sit beside it. Like the job's, they are written with symbolize=0 and
+      # symbolized by sanitizer-symbolize.mjs; the heap-buffer-overflow is located
+      # from its stack, so its file and line in main prove that step. The summary
+      # goes to a throwaway file so the canary stays out of the job summary; in
+      # that mode the script prints one tab-separated line per group (count,
+      # sanitizer, kind, location) on stdout.
       - name: Canary, a planted error must be reported
         run: |
           set -euo pipefail
@@ -129,6 +138,7 @@ jobs:
           export ASAN_OPTIONS="$ASAN_OPTIONS:log_path=$canary_dir/report"
           export UBSAN_OPTIONS="$UBSAN_OPTIONS:log_path=$canary_dir/report"
           "$canary_exe" > /dev/null 2>&1 || true
+          node scripts/ci/sanitizer-symbolize.mjs "$canary_dir"
           code=0
           # The script's own ::error:: line (stderr) would show as an error on the
           # expected exit code 1, so it is kept for the failure message only.
@@ -136,8 +146,10 @@ jobs:
           out=$(GITHUB_STEP_SUMMARY="$RUNNER_TEMP/sanitizer-canary-summary.md" \
             node scripts/ci/sanitizer-report.mjs "$canary_dir" 2> "$err") || code=$?
           kinds=$(awk -F'\t' 'NF >= 3 { print $3 }' <<< "$out" | sort | paste -sd' ')
-          if [ "$code" -ne 1 ] || [ "$kinds" != "heap-buffer-overflow signed-integer-overflow" ]; then
-            echo "::error::the sanitizer job cannot see errors: the canary's planted errors were not reported as expected (report script exit code $code, groups: ${kinds:-none}; wanted exit code 1 with exactly heap-buffer-overflow and signed-integer-overflow)"
+          overflow_at=$(awk -F'\t' '$3 == "heap-buffer-overflow" { print $4 }' <<< "$out")
+          if [ "$code" -ne 1 ] || [ "$kinds" != "heap-buffer-overflow signed-integer-overflow" ] \
+            || [[ "$overflow_at" != *sanitizer-canary.cpp:*" in main" ]]; then
+            echo "::error::the sanitizer job cannot see errors: the canary's planted errors were not reported as expected (report script exit code $code, groups: ${kinds:-none}, heap-buffer-overflow at: ${overflow_at:-no location}; wanted exit code 1 with exactly heap-buffer-overflow and signed-integer-overflow, the first at a line of sanitizer-canary.cpp in main)"
             echo "$out"
             cat "$err"
             exit 1
@@ -210,9 +222,13 @@ jobs:
 
       # Under halt_on_error=0 the programs exit 0 after a report, so this step is
       # what fails the job: it exits 1 when any report is not on the script's known list.
+      # The reports are symbolized in place first, so the known list matches
+      # function names and the uploaded artifact holds the symbolized files.
       - name: Fail on sanitizer reports
         if: always() && env.SANITIZER_REPORT_DIR != ''
-        run: node scripts/ci/sanitizer-report.mjs "$SANITIZER_REPORT_DIR"
+        run: |
+          node scripts/ci/sanitizer-symbolize.mjs "$SANITIZER_REPORT_DIR"
+          node scripts/ci/sanitizer-report.mjs "$SANITIZER_REPORT_DIR"
 
       # storage-cleanup.yml deletes artifacts older than 3 days; the job summary
       # keeps the grouped reports for as long as the run.

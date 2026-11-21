@@ -201,8 +201,8 @@ directory must exist and its path must be absolute:
 
 ```bash
 mkdir -p "$PWD/sanitizer-reports"
-export ASAN_OPTIONS="halt_on_error=0:detect_leaks=0:log_path=$PWD/sanitizer-reports/report"
-export UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1:report_error_type=1:log_path=$PWD/sanitizer-reports/report"
+export ASAN_OPTIONS="halt_on_error=0:detect_leaks=0:symbolize=0:log_path=$PWD/sanitizer-reports/report"
+export UBSAN_OPTIONS="halt_on_error=0:print_stacktrace=1:report_error_type=1:symbolize=0:log_path=$PWD/sanitizer-reports/report"
 export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-18/bin/llvm-symbolizer
 export RR_SUBPROCESS_ENV="ASAN_* UBSAN_*"
 
@@ -210,6 +210,7 @@ export RR_SUBPROCESS_ENV="ASAN_* UBSAN_*"
 ./builder server:test --cmake-config=Sanitize --nodownload
 ./builder nodes:test --cmake-config=Sanitize --nodownload
 
+node scripts/ci/sanitizer-symbolize.mjs "$PWD/sanitizer-reports"
 node scripts/ci/sanitizer-report.mjs "$PWD/sanitizer-reports"
 ```
 
@@ -218,8 +219,14 @@ node scripts/ci/sanitizer-report.mjs "$PWD/sanitizer-reports"
 - `log_path`: ASan and UBSan share one runtime, so both options name the same
   prefix, and each process that reports writes all its reports to
   `<log_path>.<pid>`.
-- `ASAN_SYMBOLIZER_PATH`: the path to `llvm-symbolizer`, which adds file and
-  line to the reports. The apt `llvm-18` package puts no unversioned
+- `symbolize=0`: a process writes each frame as its module and offset, in well
+  under a second. A test server kills a task 5 s after it asks it to stop, and
+  symbolizing in the process takes seconds, so a report written while a task
+  stops would end after its header.
+  `node scripts/ci/sanitizer-symbolize.mjs <dir>` adds function, file and line
+  to every report in the directory afterwards.
+- `ASAN_SYMBOLIZER_PATH`: the path to `llvm-symbolizer`, which
+  `sanitizer-symbolize.mjs` runs. The apt `llvm-18` package puts no unversioned
   `llvm-symbolizer` on `PATH`.
 - `RR_SUBPROCESS_ENV`: the engine runs each task in its own engine process and
   passes it only an allowlist of variables. A trailing `*` passes every variable
