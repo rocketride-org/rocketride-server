@@ -23,7 +23,7 @@
 """
 The server side of ``self.state`` / ``self.files`` (plan 5.7): identity is decided here.
 
-Every request carries only the binding (``correlationId``) and the node's own key or
+Every request carries only the binding (``correlationId``), the node's id and its own key or
 path. These tests drive the registered channel commands through the real
 channel dispatch with an engine double whose ``binding_control`` names the
 owning control, and ``TaskEngine.binding_control`` itself on its records.
@@ -31,13 +31,15 @@ owning control, and ``TaskEngine.binding_control`` itself on its records.
 
 import shutil
 import tempfile
+import time
 from types import SimpleNamespace
 
 import pytest
 
-from ai.account.state_store import MemoryStateStore, install_state_store, state_key
+from ai.account.state_store import MemoryStateStore, install_state_store, state_key, state_scope
 from ai.account.store import Store
 from ai.account.store_providers.filesystem import FilesystemStore
+from ai.constants import CONST_STATE_MAX_KEYS_PER_NODE, CONST_STATE_MAX_TTL_SECONDS
 from ai.modules.task import node_doors
 from ai.modules.task.task_channel import ChannelStreams, handle
 from ai.modules.task.task_engine import TaskEngine
@@ -118,99 +120,249 @@ def files(monkeypatch):
 ALICE = _control()
 BOB = _control(orgId='org-2', userId='user-2', teamId='team-2')
 
+#: The component id the state requests below name unless a test is about it.
+NODE = 'node_1'
+
 # ==== state.* ====================================================================
 
 
 async def test_the_key_is_built_from_the_control_never_from_the_request(state):
     engine = _Engine({'c1': ALICE})
     # Identity fields smuggled into the request change nothing
-    await _ask(engine, 'state.put', correlationId='c1', key='series:cpu', value=[1, 2], userId='user-2', orgId='org-2')
-    assert await state.get(state_key('org-1', 'user-1', 'acme.monitor.webhook', 'series:cpu')) == '[1,2]'
-    assert await state.get(state_key('org-2', 'user-2', 'acme.monitor.webhook', 'series:cpu')) is None
+    await _ask(
+        engine,
+        'state.put',
+        correlationId='c1',
+        nodeId=NODE,
+        key='series:cpu',
+        value=[1, 2],
+        userId='user-2',
+        orgId='org-2',
+    )
+    assert await state.get(state_key('org-1', 'user-1', 'acme.monitor.webhook', NODE, 'series:cpu')) == '[1,2]'
+    assert await state.get(state_key('org-2', 'user-2', 'acme.monitor.webhook', NODE, 'series:cpu')) is None
 
 
 async def test_two_owners_naming_one_key_never_meet(state):
     engine = _Engine({'c1': ALICE, 'c2': BOB})
-    await _ask(engine, 'state.put', correlationId='c1', key='k', value='alice')
-    await _ask(engine, 'state.put', correlationId='c2', key='k', value='bob')
-    assert (await _ask(engine, 'state.get', correlationId='c1', key='k'))[0] == {'found': True, 'value': 'alice'}
-    assert (await _ask(engine, 'state.get', correlationId='c2', key='k'))[0] == {'found': True, 'value': 'bob'}
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value='alice')
+    await _ask(engine, 'state.put', correlationId='c2', nodeId=NODE, key='k', value='bob')
+    assert (await _ask(engine, 'state.get', correlationId='c1', nodeId=NODE, key='k'))[0] == {
+        'found': True,
+        'value': 'alice',
+    }
+    assert (await _ask(engine, 'state.get', correlationId='c2', nodeId=NODE, key='k'))[0] == {
+        'found': True,
+        'value': 'bob',
+    }
 
 
 async def test_a_team_owned_control_keys_by_its_team(state):
     engine = _Engine({'c1': _control(owner_type='team')})
-    await _ask(engine, 'state.put', correlationId='c1', key='k', value=1)
-    assert await state.get(state_key('org-1', 'team-1', 'acme.monitor.webhook', 'k')) == '1'
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1)
+    assert await state.get(state_key('org-1', 'team-1', 'acme.monitor.webhook', NODE, 'k')) == '1'
 
 
 async def test_an_unowned_binding_is_refused(state):
     engine = _Engine({'c1': ALICE})
     with pytest.raises(RuntimeError, match='belongs to no control'):
-        await _ask(engine, 'state.get', correlationId='c2', key='k')
+        await _ask(engine, 'state.get', correlationId='c2', nodeId=NODE, key='k')
     with pytest.raises(RuntimeError, match='belongs to no control'):
-        await _ask(engine, 'state.get', key='k')
+        await _ask(engine, 'state.get', nodeId=NODE, key='k')
 
 
 async def test_get_delete_incr_and_absent_values(state):
     engine = _Engine({'c1': ALICE})
-    assert (await _ask(engine, 'state.get', correlationId='c1', key='k'))[0] == {'found': False}
-    await _ask(engine, 'state.put', correlationId='c1', key='k', value=None)
-    assert (await _ask(engine, 'state.get', correlationId='c1', key='k'))[0] == {'found': True, 'value': None}
-    assert (await _ask(engine, 'state.delete', correlationId='c1', key='k'))[0] == {'deleted': True}
-    assert (await _ask(engine, 'state.incr', correlationId='c1', key='n', amount=3))[0] == {'value': 3}
+    assert (await _ask(engine, 'state.get', correlationId='c1', nodeId=NODE, key='k'))[0] == {'found': False}
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=None)
+    assert (await _ask(engine, 'state.get', correlationId='c1', nodeId=NODE, key='k'))[0] == {
+        'found': True,
+        'value': None,
+    }
+    assert (await _ask(engine, 'state.delete', correlationId='c1', nodeId=NODE, key='k'))[0] == {'deleted': True}
+    assert (await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n', amount=3))[0] == {'value': 3}
     with pytest.raises(RuntimeError, match='amount is an integer'):
-        await _ask(engine, 'state.incr', correlationId='c1', key='n', amount=1.5)
+        await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n', amount=1.5)
 
 
-async def test_the_ttl_defaults_to_the_controls_idle_policy(state, monkeypatch):
+@pytest.fixture
+def writes(state, monkeypatch):
+    """The (ttl, max_keys) of every put and incr that reaches the store."""
     seen = []
-    real = state.put
+    real_put, real_incr = state.put, state.incr
 
-    async def put(key, text, ttl, token=None):
-        seen.append(ttl)
-        await real(key, text, ttl, token)
+    async def put(scope, key, text, ttl, max_keys, token=None):
+        seen.append((ttl, max_keys))
+        await real_put(scope, key, text, ttl, max_keys, token)
+
+    async def incr(scope, key, amount, ttl, max_keys, token=None):
+        seen.append((ttl, max_keys))
+        return await real_incr(scope, key, amount, ttl, max_keys, token)
 
     monkeypatch.setattr(state, 'put', put)
-    await _ask(_Engine({'c1': _control(ttl=900)}), 'state.put', correlationId='c1', key='k', value=1)
-    await _ask(_Engine({'c1': _control(ttl=0)}), 'state.put', correlationId='c1', key='k', value=1)
-    await _ask(_Engine({'c1': _control(ttl=900)}), 'state.put', correlationId='c1', key='k', value=1, ttl=5)
-    assert seen == [900.0, None, 5.0]
+    monkeypatch.setattr(state, 'incr', incr)
+    return seen
+
+
+async def test_the_ttl_defaults_to_the_controls_idle_policy(writes):
+    await _ask(_Engine({'c1': _control(ttl=900)}), 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1)
+    await _ask(
+        _Engine({'c1': _control(ttl=900)}), 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1, ttl=5
+    )
+    await _ask(_Engine({'c1': _control(ttl=900)}), 'state.incr', correlationId='c1', nodeId=NODE, key='n')
+    assert [ttl for ttl, _ in writes] == [900.0, 5.0, 900.0]
     with pytest.raises(RuntimeError, match='ttl'):
-        await _ask(_Engine({'c1': ALICE}), 'state.put', correlationId='c1', key='k', value=1, ttl=-1)
+        await _ask(_Engine({'c1': ALICE}), 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1, ttl=-1)
+
+
+@pytest.mark.parametrize('policy', [0, None])
+async def test_a_control_with_no_idle_policy_gives_the_longest_ttl(writes, policy):
+    engine = _Engine({'c1': _control(ttl=policy)})
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1)
+    await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n')
+    assert [ttl for ttl, _ in writes] == [float(CONST_STATE_MAX_TTL_SECONDS)] * 2
+
+
+async def test_an_idle_policy_above_the_longest_ttl_is_capped(writes):
+    engine = _Engine({'c1': _control(ttl=CONST_STATE_MAX_TTL_SECONDS * 4)})
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1)
+    await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n')
+    assert [ttl for ttl, _ in writes] == [float(CONST_STATE_MAX_TTL_SECONDS)] * 2
+
+
+async def test_a_node_ttl_above_the_longest_is_refused(writes):
+    assert CONST_STATE_MAX_TTL_SECONDS == 7 * 24 * 3600
+    engine = _Engine({'c1': _control(ttl=900)})
+    longest = CONST_STATE_MAX_TTL_SECONDS
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1, ttl=longest)
+    for command, extra in (('state.put', {'value': 1}), ('state.incr', {})):
+        for ttl in (longest + 1, 0, True, 'soon'):
+            with pytest.raises(RuntimeError, match=f'{command}: ttl is a number of seconds'):
+                await _ask(engine, command, correlationId='c1', nodeId=NODE, key='k', ttl=ttl, **extra)
+    assert writes == [(float(longest), CONST_STATE_MAX_KEYS_PER_NODE)]
+
+
+async def test_every_stored_value_has_an_expiry(state):
+    # Whatever the control's policy and whether or not the node names a ttl
+    for index, policy in enumerate((0, 900, CONST_STATE_MAX_TTL_SECONDS * 4)):
+        engine = _Engine({'c1': _control(ttl=policy, address=f'acme.monitor.source{index}')})
+        await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1)
+        await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n')
+    now = time.monotonic()
+    assert len(state._values) == 6
+    assert all(now < deadline <= now + CONST_STATE_MAX_TTL_SECONDS for _, deadline, _ in state._values.values())
+
+
+# ==== state.*: one node's keys ====================================================
+
+
+async def test_two_nodes_of_one_control_naming_one_key_never_meet(state):
+    engine = _Engine({'c1': ALICE})
+    await _ask(engine, 'state.put', correlationId='c1', nodeId='anomaly_1', key='series:cpu', value=[1])
+    await _ask(engine, 'state.put', correlationId='c1', nodeId='anomaly_2', key='series:cpu', value=[2])
+    first = (await _ask(engine, 'state.get', correlationId='c1', nodeId='anomaly_1', key='series:cpu'))[0]
+    second = (await _ask(engine, 'state.get', correlationId='c1', nodeId='anomaly_2', key='series:cpu'))[0]
+    assert (first, second) == ({'found': True, 'value': [1]}, {'found': True, 'value': [2]})
+    # Counters, deletes and locks are per node too
+    assert (await _ask(engine, 'state.incr', correlationId='c1', nodeId='anomaly_1', key='n'))[0] == {'value': 1}
+    assert (await _ask(engine, 'state.incr', correlationId='c1', nodeId='anomaly_2', key='n'))[0] == {'value': 1}
+    assert (await _ask(engine, 'state.delete', correlationId='c1', nodeId='anomaly_1', key='series:cpu'))[0] == {
+        'deleted': True
+    }
+    assert (await _ask(engine, 'state.get', correlationId='c1', nodeId='anomaly_2', key='series:cpu'))[0] == second
+    assert (await _ask(engine, 'state.lock', correlationId='c1', nodeId='anomaly_1', key='k'))[0]['acquired'] is True
+    assert (await _ask(engine, 'state.lock', correlationId='c1', nodeId='anomaly_2', key='k'))[0]['acquired'] is True
+
+
+async def test_the_node_id_joins_the_key_after_the_address(state):
+    engine = _Engine({'c1': ALICE})
+    await _ask(engine, 'state.put', correlationId='c1', nodeId='anomaly/1', key='k', value=1)
+    assert await state.get(state_key('org-1', 'user-1', 'acme.monitor.webhook', 'anomaly/1', 'k')) == '1'
+    assert list(state._scopes) == [state_scope('org-1', 'user-1', 'acme.monitor.webhook', 'anomaly/1')]
+
+
+async def test_a_node_id_never_reaches_another_owner(state):
+    engine = _Engine({'c1': ALICE, 'c2': BOB})
+    await _ask(engine, 'state.put', correlationId='c2', nodeId=NODE, key='k', value='bob')
+    # The node id is one escaped segment under the caller's own owner and address
+    forged = '../../../org-2/user-2/acme.monitor.webhook/' + NODE
+    assert (await _ask(engine, 'state.get', correlationId='c1', nodeId=forged, key='k'))[0] == {'found': False}
+    assert (await _ask(engine, 'state.get', correlationId='c1', nodeId=NODE, key='k'))[0] == {'found': False}
+
+
+@pytest.mark.parametrize(
+    'command', ['state.get', 'state.put', 'state.delete', 'state.incr', 'state.lock', 'state.unlock']
+)
+@pytest.mark.parametrize('node_id', [None, '', 7, ['n']])
+async def test_a_request_without_a_node_id_is_refused(state, command, node_id):
+    engine = _Engine({'c1': ALICE})
+    arguments = {'correlationId': 'c1', 'key': 'k', 'value': 1, 'token': 't'}
+    if node_id is not None:
+        arguments['nodeId'] = node_id
+    with pytest.raises(RuntimeError, match=f'{command}: "nodeId" is a non-empty string'):
+        await _ask(engine, command, **arguments)
+    assert not state._values and not state._locks
+
+
+async def test_a_node_holds_sixteen_keys_and_the_next_is_refused(state, writes):
+    assert CONST_STATE_MAX_KEYS_PER_NODE == 16
+    engine = _Engine({'c1': ALICE})
+    for index in range(16):
+        await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key=f'k{index}', value=index)
+    assert {max_keys for _, max_keys in writes} == {16}
+    with pytest.raises(RuntimeError, match='state.put: a node keeps at most 16 state keys'):
+        await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k16', value=16)
+    with pytest.raises(RuntimeError, match='state.incr: a node keeps at most 16 state keys'):
+        await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n')
+    # A key the node holds is still written; nothing was evicted
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k0', value='again')
+    values = [(await _ask(engine, 'state.get', correlationId='c1', nodeId=NODE, key=f'k{i}'))[0] for i in range(16)]
+    assert [v['value'] for v in values] == ['again', *range(1, 16)]
+    # Another node of the pipeline, and the same node for another owner, have their own sixteen
+    await _ask(engine, 'state.put', correlationId='c1', nodeId='node_2', key='k16', value=1)
+    await _ask(_Engine({'c2': BOB}), 'state.put', correlationId='c2', nodeId=NODE, key='k16', value=1)
+    # A deleted key frees its slot
+    await _ask(engine, 'state.delete', correlationId='c1', nodeId=NODE, key='k5')
+    assert (await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='n'))[0] == {'value': 1}
 
 
 async def test_values_are_capped_and_keys_validated(state):
     engine = _Engine({'c1': ALICE})
     with pytest.raises(RuntimeError, match='at most'):
-        await _ask(engine, 'state.put', correlationId='c1', key='k', value='x' * (1024 * 1024))
+        await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value='x' * (1024 * 1024))
     with pytest.raises(RuntimeError, match='non-empty string'):
-        await _ask(engine, 'state.get', correlationId='c1', key='')
+        await _ask(engine, 'state.get', correlationId='c1', nodeId=NODE, key='')
 
 
 async def test_a_lock_never_waits_here_and_only_its_token_releases_it(state):
     engine = _Engine({'c1': ALICE, 'c2': ALICE})
-    first = (await _ask(engine, 'state.lock', correlationId='c1', key='k'))[0]
+    first = (await _ask(engine, 'state.lock', correlationId='c1', nodeId=NODE, key='k'))[0]
     assert first['acquired'] and first['token']
-    assert (await _ask(engine, 'state.lock', correlationId='c2', key='k'))[0] == {'acquired': False, 'token': None}
-    assert (await _ask(engine, 'state.unlock', correlationId='c2', key='k', token='guess'))[0] == {'released': False}
-    assert (await _ask(engine, 'state.unlock', correlationId='c1', key='k', token=first['token']))[0] == {
+    assert (await _ask(engine, 'state.lock', correlationId='c2', nodeId=NODE, key='k'))[0] == {
+        'acquired': False,
+        'token': None,
+    }
+    assert (await _ask(engine, 'state.unlock', correlationId='c2', nodeId=NODE, key='k', token='guess'))[0] == {
+        'released': False
+    }
+    assert (await _ask(engine, 'state.unlock', correlationId='c1', nodeId=NODE, key='k', token=first['token']))[0] == {
         'released': True
     }
-    assert (await _ask(engine, 'state.lock', correlationId='c2', key='k'))[0]['acquired'] is True
+    assert (await _ask(engine, 'state.lock', correlationId='c2', nodeId=NODE, key='k'))[0]['acquired'] is True
 
 
 async def test_a_write_naming_a_lost_lease_is_refused(state):
     engine = _Engine({'c1': ALICE, 'c2': ALICE})
-    first = (await _ask(engine, 'state.lock', correlationId='c1', key='k'))[0]
-    await _ask(engine, 'state.put', correlationId='c1', key='k', value=1, token=first['token'])
-    await _ask(engine, 'state.unlock', correlationId='c1', key='k', token=first['token'])
-    second = (await _ask(engine, 'state.lock', correlationId='c2', key='k'))[0]
-    await _ask(engine, 'state.put', correlationId='c2', key='k', value=2, token=second['token'])
+    first = (await _ask(engine, 'state.lock', correlationId='c1', nodeId=NODE, key='k'))[0]
+    await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1, token=first['token'])
+    await _ask(engine, 'state.unlock', correlationId='c1', nodeId=NODE, key='k', token=first['token'])
+    second = (await _ask(engine, 'state.lock', correlationId='c2', nodeId=NODE, key='k'))[0]
+    await _ask(engine, 'state.put', correlationId='c2', nodeId=NODE, key='k', value=2, token=second['token'])
     with pytest.raises(RuntimeError, match='lock on this key was lost'):
-        await _ask(engine, 'state.put', correlationId='c1', key='k', value=9, token=first['token'])
+        await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=9, token=first['token'])
     with pytest.raises(RuntimeError, match='token is the string'):
-        await _ask(engine, 'state.incr', correlationId='c1', key='k', token=7)
-    assert (await _ask(engine, 'state.get', correlationId='c2', key='k'))[0] == {'found': True, 'value': 2}
+        await _ask(engine, 'state.incr', correlationId='c1', nodeId=NODE, key='k', token=7)
+    assert (await _ask(engine, 'state.get', correlationId='c2', nodeId=NODE, key='k'))[0] == {'found': True, 'value': 2}
 
 
 # ==== fs_* =======================================================================

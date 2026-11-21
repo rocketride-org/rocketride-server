@@ -28,14 +28,14 @@ The calls of one control alternate between two replicas, each with its own
 import of the node and its own IGlobal, sharing only the server's state store:
 every answer must equal a single replica's, a series is scored from one
 history whichever replica serves it, and one owner's values never enter
-another owner's series. The node's settings come from the engine-resolved
-schema, so the per-call params (a selector among them) are resolved exactly
-as on a running engine.
+another owner's series, nor one detector node's values another detector's.
+The node's settings come from the engine-resolved schema, so the per-call
+params (a selector among them) are resolved exactly as on a running engine.
 """
 
 from ai.common.schema import Doc, DocMetadata
 
-from ..framework.replicas import NODES_DIR, Call, Owner, run_alternating_and_alone
+from ..framework.replicas import NODES_DIR, Call, Owner, Replica, ReplicaServer, run, run_alternating_and_alone
 
 # ==== The node and its calls =====================================================
 
@@ -152,3 +152,25 @@ def test_two_owners_of_one_organization_keep_their_own_series():
     alone, _ = _run(alice)
     assert _texts(together)[0::2] == _texts(alone)
     assert all('[ANOMALY' not in text for text in _texts(together)[1::2][2:])
+
+
+# ==== Two detectors in one pipeline ===============================================
+
+
+def test_two_detectors_of_one_pipeline_keep_their_own_windows():
+    # One owner, one address, one series name, two detector nodes: the second
+    # is fed what would make the first one's spikes look normal
+    calls = [call for value in VALUES for call in (_text(ALICE, value), _text(ALICE, 160))]
+    with ReplicaServer() as server:
+        detectors = [Replica(server, NODE_DIR, 'anomaly_detector', node_id) for node_id in (NODE_ID, 'anomaly_2')]
+        try:
+            together = run(calls, detectors)
+        finally:
+            for detector in detectors:
+                detector.end()
+        scopes = sorted(scope.rsplit('/', 1)[1] for scope in server.state._scopes)
+    alone, _ = _run([_text(ALICE, value) for value in VALUES])
+    assert _texts(together)[0::2] == _texts(alone)
+    assert all('[ANOMALY' not in text for text in _texts(together)[1::2][2:])
+    # Each detector's window is a value in its own node's scope of the store
+    assert scopes == [NODE_ID, 'anomaly_2']

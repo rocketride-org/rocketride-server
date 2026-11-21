@@ -97,7 +97,7 @@ class Owner:
         rung: The rung that answered.
         owner_kind: ``'user'`` or ``'team'``.
         project_id: The pipeline's short id.
-        ttl: The control's idle ttl (0 = values never expire).
+        ttl: The control's idle ttl (0 = no idle limit; its state values then live the longest ttl).
         config: The node's stored config for this control.
         control_id: The control's transient id.
     """

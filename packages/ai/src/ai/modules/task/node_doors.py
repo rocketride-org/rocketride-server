@@ -32,9 +32,19 @@ control's org, owner and address prefix every state key; its owner tree roots
 every file path. A node that lies about its caller can mislabel its own logs
 and nothing else.
 
+A state request also names its node (``nodeId``, the component id), which
+joins the key after the address so two nodes of one pipeline that choose the
+same key name keep separate values. It is the one part of the key's prefix
+the engine side names. That is acceptable because org, owner and address are
+already fixed by the control: a false ``nodeId`` reaches only the state of
+another node of the same owner's same pipeline, never another owner's.
+
 - ``state.get`` / ``state.put`` / ``state.delete`` / ``state.incr``: JSON values
-  in the server's ``StateStore``; a ``ttl`` the node does not name follows the
-  control's idle policy.
+  in the server's ``StateStore``. Every value expires: a ``ttl`` the node
+  does not name follows the control's idle policy, and no value outlives
+  ``CONST_STATE_MAX_TTL_SECONDS`` without being written again. One node
+  holds at most ``CONST_STATE_MAX_KEYS_PER_NODE`` live keys; a write that
+  would add one more is refused.
 - ``state.lock`` / ``state.unlock``: a lease per key that never blocks here
   (the node's client retries), so a waiting node never holds a channel slot
   the holder needs.
@@ -45,12 +55,17 @@ and nothing else.
 
 import json
 import secrets
-from typing import TYPE_CHECKING, Any, Dict, Optional, Set
+from typing import TYPE_CHECKING, Any, Dict, Optional, Set, Tuple
 
 from ai.account.file_store import SYSTEM_TREES, normalize_path, storage_root_for
-from ai.account.state_store import StateError, encode_value, state_key, state_store
+from ai.account.state_store import StateError, encode_value, state_key, state_scope, state_store
 from ai.account.store import StorageError, Store
-from ai.constants import CONST_CHANNEL_CHUNK, CONST_STATE_MAX_LEASE_SECONDS, CONST_STATE_MAX_TTL_SECONDS
+from ai.constants import (
+    CONST_CHANNEL_CHUNK,
+    CONST_STATE_MAX_KEYS_PER_NODE,
+    CONST_STATE_MAX_LEASE_SECONDS,
+    CONST_STATE_MAX_TTL_SECONDS,
+)
 
 from .task_channel import ChannelRefused, ChannelReply, register_channel_command
 
@@ -100,20 +115,59 @@ def _control(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'Ta
     return control
 
 
-def _ttl(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> Optional[float]:
-    """The expiry of a write: the node's ``ttl``, else the control's idle policy (None = never)."""
+def _ttl(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> float:
+    """
+    The expiry of a write; every value has one.
+
+    Args:
+        control: The control that owns the binding.
+        arguments: The request; ``ttl`` is read.
+        command: The command, named in a refusal.
+
+    Returns:
+        The node's ``ttl`` when it names one. Otherwise the control's idle
+        policy, capped at ``CONST_STATE_MAX_TTL_SECONDS``, and that maximum
+        for a control with no idle limit.
+
+    Raises:
+        ChannelRefused: The node's ``ttl`` is not a number of seconds in
+            ``(0, CONST_STATE_MAX_TTL_SECONDS]``.
+    """
     ttl = arguments.get('ttl')
     if ttl is None:
-        return float(control.ttl) if control.ttl else None
+        policy = control.ttl
+        if not policy or policy <= 0:
+            return float(CONST_STATE_MAX_TTL_SECONDS)
+        return min(float(policy), float(CONST_STATE_MAX_TTL_SECONDS))
     if isinstance(ttl, bool) or not isinstance(ttl, (int, float)) or not 0 < ttl <= CONST_STATE_MAX_TTL_SECONDS:
         raise ChannelRefused(f'{command}: ttl is a number of seconds in (0, {CONST_STATE_MAX_TTL_SECONDS}]')
     return float(ttl)
 
 
-def _key(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> str:
-    """The physical key of the node's key, owned by the control's (org, owner, address)."""
+def _key(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> Tuple[str, str]:
+    """
+    The scope and physical key of the node's key.
+
+    Org, owner and address come from the control; the request names only the
+    node (``nodeId``) and its key.
+
+    Args:
+        control: The control that owns the binding.
+        arguments: The request; ``nodeId`` and ``key`` are read.
+        command: The command, named in a refusal.
+
+    Returns:
+        ``(scope, key)``: the node's scope and the physical key inside it.
+
+    Raises:
+        ChannelRefused: ``nodeId`` or ``key`` is missing, not a string, empty or too long.
+    """
+    node_id = arguments.get('nodeId')
+    if not isinstance(node_id, str) or not node_id:
+        raise ChannelRefused(f'{command}: "nodeId" is a non-empty string')
     try:
-        return state_key(control.orgId, control.owner_id, control.address, arguments.get('key'))
+        scope = state_scope(control.orgId, control.owner_id, control.address, node_id)
+        return scope, state_key(control.orgId, control.owner_id, control.address, node_id, arguments.get('key'))
     except StateError as e:
         raise ChannelRefused(f'{command}: {e}') from None
 
@@ -124,7 +178,8 @@ def _key(control: 'TaskControl', arguments: Dict[str, Any], command: str) -> str
 async def _state_get(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Return the value under the node's key: ``{found, value}``."""
     control = _control(task, arguments, 'state.get')
-    text = await state_store().get(_key(control, arguments, 'state.get'))
+    _, key = _key(control, arguments, 'state.get')
+    text = await state_store().get(key)
     if text is None:
         return ChannelReply(body={'found': False})
     return ChannelReply(body={'found': True, 'value': json.loads(text)})
@@ -141,10 +196,17 @@ def _token(arguments: Dict[str, Any], command: str) -> Optional[str]:
 async def _state_put(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Store a JSON value under the node's key."""
     control = _control(task, arguments, 'state.put')
-    key = _key(control, arguments, 'state.put')
+    scope, key = _key(control, arguments, 'state.put')
     ttl = _ttl(control, arguments, 'state.put')
     try:
-        await state_store().put(key, encode_value(arguments.get('value')), ttl, _token(arguments, 'state.put'))
+        await state_store().put(
+            scope,
+            key,
+            encode_value(arguments.get('value')),
+            ttl,
+            CONST_STATE_MAX_KEYS_PER_NODE,
+            _token(arguments, 'state.put'),
+        )
     except StateError as e:
         raise ChannelRefused(f'state.put: {e}') from None
     return ChannelReply(body={})
@@ -153,10 +215,9 @@ async def _state_put(task: 'TaskEngine', arguments: Dict[str, Any], data: Option
 async def _state_delete(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Remove the node's key: ``{deleted}``."""
     control = _control(task, arguments, 'state.delete')
+    scope, key = _key(control, arguments, 'state.delete')
     try:
-        deleted = await state_store().delete(
-            _key(control, arguments, 'state.delete'), _token(arguments, 'state.delete')
-        )
+        deleted = await state_store().delete(scope, key, _token(arguments, 'state.delete'))
     except StateError as e:
         raise ChannelRefused(f'state.delete: {e}') from None
     return ChannelReply(body={'deleted': deleted})
@@ -165,22 +226,26 @@ async def _state_delete(task: 'TaskEngine', arguments: Dict[str, Any], data: Opt
 async def _state_incr(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Add to the integer under the node's key: ``{value}``."""
     control = _control(task, arguments, 'state.incr')
-    key = _key(control, arguments, 'state.incr')
+    scope, key = _key(control, arguments, 'state.incr')
     ttl = _ttl(control, arguments, 'state.incr')
     amount = arguments.get('amount', 1)
     if isinstance(amount, bool) or not isinstance(amount, int):
         raise ChannelRefused('state.incr: amount is an integer')
     try:
-        value = await state_store().incr(key, amount, ttl, _token(arguments, 'state.incr'))
+        value = await state_store().incr(
+            scope, key, amount, ttl, CONST_STATE_MAX_KEYS_PER_NODE, _token(arguments, 'state.incr')
+        )
     except StateError as e:
-        raise ChannelRefused(str(e)) from None
+        # The store's own message names state.incr only for a non-integer value
+        text = str(e)
+        raise ChannelRefused(text if text.startswith('state.incr') else f'state.incr: {text}') from None
     return ChannelReply(body={'value': value})
 
 
 async def _state_lock(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Try to take the lease on the node's key, never waiting: ``{acquired, token}``."""
     control = _control(task, arguments, 'state.lock')
-    key = _key(control, arguments, 'state.lock')
+    _, key = _key(control, arguments, 'state.lock')
     lease = arguments.get('lease', CONST_DEFAULT_LEASE_SECONDS)
     if isinstance(lease, bool) or not isinstance(lease, (int, float)) or lease <= 0:
         raise ChannelRefused('state.lock: lease is a positive number of seconds')
@@ -195,7 +260,8 @@ async def _state_lock(task: 'TaskEngine', arguments: Dict[str, Any], data: Optio
 async def _state_unlock(task: 'TaskEngine', arguments: Dict[str, Any], data: Optional[bytes]) -> ChannelReply:
     """Release the lease the token holds: ``{released}``."""
     control = _control(task, arguments, 'state.unlock')
-    released = await state_store().unlock(_key(control, arguments, 'state.unlock'), str(arguments.get('token') or ''))
+    _, key = _key(control, arguments, 'state.unlock')
+    released = await state_store().unlock(key, str(arguments.get('token') or ''))
     return ChannelReply(body={'released': released})
 
 

@@ -1202,14 +1202,19 @@ class IInstanceBase:
     # the engine froze into it at bind, never anything read off the shared
     # pipe (which serves the next binding after putPipe()). The server ends
     # that id with the binding, so an instance kept past it reaches nothing.
+    # The state door also names this node's component id, which the server
+    # puts in every state key so each node of a pipeline has its own keys.
     # ------------------------------------------------------------------
 
     @property
     def state(self) -> NodeState:
-        """Small JSON values that survive a call, owned by this binding's control (plan 5.7)."""
+        """Small JSON values that survive a call, owned by this binding's control and this node (plan 5.7)."""
         door = self.__dict__.get(_STATE_KEY)
         if door is None:
-            door = NodeState(self.caller.correlationId)
+            # The record config.node is filled from; reading it here does not
+            # resolve the node's schema
+            glb = self.IGlobal
+            door = NodeState(self.caller.correlationId, glb._node_info().id if glb is not None else '')
             self.__dict__[_STATE_KEY] = door
         return door
 

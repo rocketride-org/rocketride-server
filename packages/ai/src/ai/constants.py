@@ -189,7 +189,8 @@ CONST_CHANNEL_REDIAL_DELAY = 5.0  # seconds before dialling again after a dial t
 # =============================================================================
 CONST_STATE_MAX_KEY_LENGTH = 512  # characters in a node's own state key
 CONST_STATE_MAX_VALUE_BYTES = 512 * 1024  # bytes of one state value, as JSON
-CONST_STATE_MAX_TTL_SECONDS = 30 * 24 * 3600  # the longest expiry a node may ask for
+CONST_STATE_MAX_TTL_SECONDS = 7 * 24 * 3600  # the longest any state value lives without being written again
+CONST_STATE_MAX_KEYS_PER_NODE = 16  # live state keys of one node, per org, owner and address
 CONST_STATE_MAX_LEASE_SECONDS = 300.0  # the longest a node may hold a state lock unreleased
 CONST_STATE_MAX_ENTRIES = 100_000  # values the in-process (OSS) state store keeps
 

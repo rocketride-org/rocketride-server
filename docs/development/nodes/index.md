@@ -293,7 +293,23 @@ standalone catalog nodes.
      `with self.state.lock(key):` around a read-modify-write (a write to the
      locked key after the lock's lease lapsed is refused, never laid over the
      next holder's). The node names only its own key; the server prefixes it
-     with the calling owner, so one owner never reads another's values.
+     with the calling owner, so one owner never reads another's values. Three
+     rules bound it:
+     - **Keys are per node.** The server also puts the node's id in the key,
+       so two nodes of one pipeline that both use `series:cpu` each have their
+       own value. A node cannot read another node's state.
+     - **Every value expires, within 7 days.** A `put` or `incr` without a
+       `ttl` takes the pipeline's idle timeout, 7 days at most, and 7 days when
+       the pipeline has none; a `ttl` above 7 days is refused. Each write
+       restarts the expiry, so a value still in use is kept alive by writing
+       it. Never treat state as permanent storage: what must outlive a week of
+       silence belongs in `self.files`.
+     - **16 keys per node.** A node holds at most 16 live keys per calling
+       owner and pipeline. A write that would create a 17th is refused with an
+       error naming the limit; nothing is evicted. Writing a key the node
+       already holds always succeeds, and a deleted or expired key frees its
+       slot. A node with many small items (one per series, per session) keeps
+       them inside a few values or deletes what it no longer needs.
    - `self.files` (IInstance; `IEndpoint.files` for a source's own scan): the
      file store rooted at the calling owner's tree — `read` (100 MB at most
      unless the node names `max_size`), `write`,
