@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 7590cc4a8f9ca5674821cacb718cb5c41d67d6c0
+// Source commit: da90d7b8901fb37e3b707ef1ecfc75c5041f8589
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1497,12 +1497,12 @@ export interface DeployHistoryEntry {
     /** Unix timestamp (seconds). */
     at?: number;
     /** `pause`/`resume` appear only on rows written before the
-        enable/disable vocabulary (the trail is immutable). NOTE: app rails
-        additionally carry the review vocabulary (`request`/`approved`/
-        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
-        the union names the pipe-rail actions only and stays as the frozen
-        v1.3 floor wrote it (widening a returned union would break floor
-        assignability); compare raw strings for the app-rail extras. */
+        enable/disable vocabulary (the trail is immutable). App rails also
+        carry `delete`, a binding's lifecycle as its state (`enabled`/
+        `disabled`/`removed`), the review transitions (`request`/`approved`/
+        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime:
+        the union names the pipe-rail actions only, because the shell contract
+        (append-only) re-exports this type; compare raw strings for the rest. */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the audience on pointer changes. */
     teamId?: string;
@@ -2792,7 +2792,7 @@ export interface UPLOAD_RESULT {
  * Event Categories:
  * ----------------
  * NONE: Unsubscribe from all events (cleanup and disconnection)
- * ALL: Subscribe to all events regardless of category (comprehensive monitoring)
+ * ALL: Every category except OPS (comprehensive monitoring; OPS is added explicitly)
  * DEBUGGER: Debug-specific events for debugging protocol communication
  * DETAIL: Real-time processing events requiring immediate client attention
  * SUMMARY: Periodic status summaries suitable for dashboard monitoring
@@ -2807,6 +2807,8 @@ export interface UPLOAD_RESULT {
  *
  * ALL: Comprehensive monitoring for administrative clients that need
  *      complete visibility into task execution and debugging activities.
+ *      It does not include OPS (1 << 10), the operator-only stream of a shared
+ *      engine's engine-level output: an operator subscribes ALL | OPS.
  *
  * DEBUGGER: Debug protocol events including breakpoint hits, variable
  *           changes, stack traces, and debugging session management.
@@ -2839,7 +2841,9 @@ export interface UPLOAD_RESULT {
  * Different clients can subscribe to different event types simultaneously:
  * - Debugging clients: DEBUGGER + DETAIL for comprehensive debugging
  * - Monitoring dashboards: SUMMARY for efficient status tracking
- * - Administrative tools: ALL for complete system visibility
+ * - Administrative tools: ALL | OPS for complete system visibility (ALL
+ *   excludes the operator-only OPS stream, which carries a shared engine's
+ *   errors, crashes and other engine-level output)
  * - Log viewers: OUTPUT for message monitoring
  * - Pipeline managers: FLOW + TASK for execution tracking
  *
@@ -5555,14 +5559,22 @@ export type MonitorKey = {
     runKind?: "dev" | "deploy";
 };
 export declare class RocketRideClient extends DAPClient {
-    /** SSE callbacks by the request tree's wire traceId (a pipe slot is reused; a traceId never is). */
     /**
-     * SSE callbacks by pipe SLOT. A slot is reused by the next binding once a
-     * pipe closes, so dispatch by the never-reused `traceId` (which every SSE
-     * body now carries) is the right key; it lands with the 2.0 surface, since
-     * this member's type is part of the frozen 1.x class contract.
+     * SSE callbacks by pipe slot. A slot is reused by the next binding once a
+     * pipe closes, so delivery also checks the event's `traceId` against
+     * `_ssePipeTraces` (the member types are part of the append-only shell
+     * contract, so the map keeps its key).
      */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
+    /**
+     * The request tree (wire `traceId`) each SSE slot was registered for.
+     *
+     * The callbacks stay keyed by slot (that member's type is part of the
+     * shell contract, which is append-only); an event is delivered only when
+     * its `traceId` is the one its slot was registered under, so a late event
+     * of a closed pipe never reaches the next pipe opened on the same slot.
+     */
+    readonly _ssePipeTraces: Map<number, string>;
     /**
      * Creates a new RocketRideClient instance.
      *
@@ -6090,10 +6102,17 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @example
      * ```typescript
-     * // Subscribe to upload events
-     * client.on('apaevt_status_upload', (event) => {
-     *   console.log(`${event.body.filepath}: ${event.body.bytes_sent}/${event.body.file_size}`);
+     * // Progress arrives on the client's onEvent callback
+     * const client = new RocketRideClient({
+     *   auth: 'your-api-key',
+     *   uri: 'wss://your-server.com',
+     *   onEvent: async (event) => {
+     *     if (event.event !== 'apaevt_status_upload') return;
+     *     const upload = event.body as unknown as UPLOAD_RESULT;
+     *     console.log(`${upload.filepath}: ${upload.bytes_sent}/${upload.file_size}`);
+     *   },
      * });
+     * await client.connect();
      *
      * // Upload files
      * const results = await client.sendFiles(
