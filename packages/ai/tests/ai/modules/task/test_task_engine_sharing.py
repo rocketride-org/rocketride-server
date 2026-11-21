@@ -675,6 +675,46 @@ async def test_a_control_attaching_needs_the_databases_its_engine_was_handed(cat
 
 
 @pytest.mark.asyncio
+async def test_a_control_wanting_fewer_databases_or_another_org_is_refused(catalog, engines, db_account):
+    """The engine's process holds exactly its handed databases, in its org: both maps must match, and the org."""
+    ts = _server()
+    first = await _start(ts, _db_pipeline(), user='user-a', org='org-a')
+    first.task.db_approved = {**first.db_approved, 'team': 'team-1'}
+    first.task.org_id = 'org-a'
+
+    # A control that wants only some of what the process holds is refused
+    with pytest.raises(TaskError) as fewer:
+        await _start(ts, _db_pipeline(project_id='docDbFewer'), user='user-a', org='org-a')
+    assert fewer.value.code == TaskError.ENGINE_UNAVAILABLE and 'team' in str(fewer.value)
+
+    # The same user in another org resolves the same scope to another database
+    first.task.db_approved = dict(first.db_approved)
+    with pytest.raises(TaskError) as other_org:
+        await _start(ts, _db_pipeline(project_id='docDbOrgB'), user='user-a', org='org-b')
+    assert other_org.value.code == TaskError.ENGINE_UNAVAILABLE
+
+
+@pytest.mark.asyncio
+async def test_a_dormant_control_is_reauthorized_before_it_rejoins(catalog, engines, db_account, clock, monkeypatch):
+    """Membership revoked after a control started refuses its rejoin; it stays on its stopped engine."""
+    import ai.account
+
+    ts = _server()
+    control = await _start(ts, _db_pipeline(), user='user-a', ttl=3600)
+    stopped = control.task
+    await _idle_out(ts, clock)
+    assert control.dormant
+
+    async def deny(identity, request):
+        return SimpleNamespace(allowed=False, reason='no longer a member', owner_id='')
+
+    monkeypatch.setattr(ai.account.account, 'authorize_db_target', deny, raising=False)
+    with pytest.raises(PermissionError, match='no longer a member'):
+        await ts.ensure_engine(control)
+    assert control.task is stopped and control.dormant
+
+
+@pytest.mark.asyncio
 async def test_a_shared_engine_carries_no_user_identity_and_no_user_env(catalog, engines, monkeypatch, tmp_path):
     """Plan 7.2: a shared engine starts as nobody, from the shape alone; env rides each control's open."""
     monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))

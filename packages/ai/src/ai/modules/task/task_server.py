@@ -3100,10 +3100,19 @@ class TaskServer(DAPBase):
         Raises:
             TaskError: TASK_ENGINE_UNAVAILABLE naming the databases.
         """
-        if engine.state is EngineState.NEW or not control.db_approved:
+        if engine.state is EngineState.NEW:
             return
         handed = engine.db_approved
-        missing = sorted(key for key, owner in control.db_approved.items() if handed.get(key) != owner)
+        wanted = control.db_approved
+        if not handed and not wanted:
+            return
+        # The process holds exactly the databases it was handed, resolved in
+        # the org it started for: a control must want exactly those, in that
+        # org (a user scope resolves per org, so the owner alone is not enough)
+        keys = set(handed) | set(wanted)
+        missing = sorted(key for key in keys if handed.get(key) != wanted.get(key))
+        if not missing and str(engine.org_id or '') != str(control.orgId or ''):
+            missing = sorted(keys)
         if missing:
             raise TaskError(
                 TaskError.ENGINE_UNAVAILABLE,
@@ -3245,6 +3254,11 @@ class TaskServer(DAPBase):
         stopped = control.task
         if stopped is None or not control.dormant:
             return stopped
+
+        # The account answers again before a dormant control takes a hold:
+        # membership revoked since the control started refuses the rejoin and
+        # leaves it on its stopped engine
+        control.db_approved = await self._authorize_control_db(control)
 
         def _hold(engine: TaskEngine) -> None:
             # A concurrent request through this control may have moved it
