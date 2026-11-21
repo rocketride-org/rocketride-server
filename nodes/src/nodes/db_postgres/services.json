@@ -85,22 +85,19 @@
 			"format": "textarea",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
-			"param": true
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries."
 		},
 		"postgresdb.host": {
 			"type": "string",
 			"title": "PostgreSQL host",
 			"default": "localhost",
-			"description": "Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433)",
-			"env": "ROCKETRIDE_DB_POSTGRES_HOST"
+			"description": "Host name or IP address of the PostgreSQL server, optionally including a port (e.g. localhost:5433)"
 		},
 		"postgresdb.user": {
 			"type": "string",
 			"title": "User",
 			"default": "postgres",
-			"description": "User to connect to the PostgreSQL server",
-			"env": "ROCKETRIDE_DB_POSTGRES_USER"
+			"description": "User to connect to the PostgreSQL server"
 		},
 		"postgresdb.password": {
 			"type": "string",
@@ -115,16 +112,13 @@
 			"default": "postgres",
 			"minLength": 2,
 			"maxLength": 63,
-			"description": "Name of database",
-			"env": "ROCKETRIDE_DB_POSTGRES_DATABASE"
+			"description": "Name of database"
 		},
 		"postgresdb.table": {
 			"type": "string",
 			"title": "Table name",
 			"default": "table",
-			"description": "Name of table",
-			"param": true,
-			"tool": false
+			"description": "Name of table"
 		},
 		"postgresdb.max_attempts": {
 			"type": "integer",
@@ -132,17 +126,13 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 20,
-			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL",
-			"param": true,
-			"tool": false
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
 		},
 		"postgresdb.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
-			"description": "Permit the execute tool function to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.",
-			"param": true,
-			"tool": false
+			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
 		}
 	},
 	//

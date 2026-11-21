@@ -154,7 +154,7 @@ export interface PageStatements {
  * own page numbers reach the statement directly.
  *
  * Placeholder caveat: the node rewrites `$n` TEXTUALLY before binding
- * (packages/ai/src/ai/common/database/sql_binds.py:42-43), so a literal
+ * (packages/ai/src/ai/common/database/tx_registry.py:43-45), so a literal
  * `$1` inside a string body would be rewritten too. Every statement this
  * module emits is generated here and never places a placeholder inside a
  * literal — which is precisely why LIKE patterns are assembled as bind

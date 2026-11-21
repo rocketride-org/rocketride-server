@@ -47,6 +47,9 @@ configurable server-name prefix.
 | `refresh_schema` | Re-read the schema, replace the cache, and return it. |
 | `get_sql` | Generate a safe `SELECT` without executing it. |
 | `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
+| `begin` | Reserve a connection and return its session ID; no transaction is opened. |
+| `commit` | Close a session; its statements were already executed. |
+| `rollback` | Close a session; this undoes nothing. |
 | `dialect` | Return `{ "dialect": "clickhouse" }`. |
 
 `get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
@@ -66,11 +69,11 @@ leaves the cached schema exactly as it was. `get_data` returns
 `{valid: false, answer}`, and a query execution failure returns
 `{valid: false, error, sql, rows: []}`.
 
-`execute` requires non-empty `sql` (or a `statements` array of `{sql,
-params}` objects) and optionally accepts positional values for `$1`, `$2`, and
-so on. It returns `{rows, affected_rows}`, or `{results}` with one per
-statement. A failed statement raises `SQL execution failed:`
-followed by `Error <code>:` and ClickHouse's own primary message. The `clickhouse+native://`
+`execute` requires non-empty `sql` and optionally accepts a `session_id`
+from `begin` plus positional values for `$1`, `$2`, and so on. It returns
+`{rows, affected_rows}`. A failed statement raises `SQL execution failed:`
+followed by `Error <code>:` and ClickHouse's own primary message,
+identically with and without a `session_id`. The `clickhouse+native://`
 driver does not raise a DBAPI error, so the node unwraps it to the driver
 error it carries; the code and message come from the server's
 own `ServerException`. The driver interpolates bound values into the
@@ -92,16 +95,21 @@ message. If the cut leaves only the exception class, the result says the
 server's message only repeated the statement. That is deliberate:
 reaching this tool at all requires **Allow direct query execution**, and a
 caller who has it can read the same data with a `SELECT`. The full text is
-written to the server log. `execute` fails when **Allow direct query
-execution** is off. Invalid tool input raises an error.
+written to the server log. `begin` takes no arguments and returns `{session_id}`;
+`commit` and `rollback` require that ID and return `{ok: true}`. These four
+write-capable operations fail when **Allow direct query execution** is off;
+unknown or expired session IDs also fail. Invalid tool input raises an error.
 
-ClickHouse has no transactions. Every statement of an `execute` call is
-applied when it is sent and other connections see its effect at once, so a
-failed statement in `statements` undoes nothing that ran before it. Savepoints
-do not exist either: `SAVEPOINT` is a syntax error. To undo a write, run a
-statement that reverses it. Nothing is held between calls: there is no
-`begin`, `commit` or `rollback` tool and no `session_id` (one is refused). The
-`execute` tool description states this policy.
+A session opens no ClickHouse transaction. `begin` reserves a connection for
+the `session_id`, but every statement sent on it is executed when it is sent,
+and other connections see its effect without waiting for a `commit`;
+`commit` and `rollback` only close the session, so `rollback` discards
+nothing. Savepoints do not exist either: `SAVEPOINT` is a syntax error, and
+`rollback to savepoint <name>` fails with `unknown savepoint`. To undo a
+write, run a statement that reverses it. A failed statement leaves the
+session open. Its error text is byte-identical with and without a
+`session_id` and carries no advice, so this policy is stated in the `execute`
+tool description instead. The idle reaper closes a session that is abandoned.
 
 ## Configuration
 
@@ -128,10 +136,10 @@ connection string is built, so reserved characters in those values are safe.
 
 ### Target database and table
 
-The database selects the connection's database; the table is a per-call
-parameter naming the target table, whose column map is reflected on first use
-and cached by name. Set both to the exact objects the LLM should use. The node
-reflects the full database for LLM context. Since the declared
+The database selects the connection's database; the table identifies the
+target table whose schema is also cached at startup. Set both to the exact
+objects the LLM should use. The node reflects the full database for LLM context,
+but it warns if this particular target table does not exist. Since the declared
 lanes do not accept data for insertion, create and populate ClickHouse tables
 outside this node.
 
@@ -146,8 +154,9 @@ subsequent execution will succeed.
 
 ### Allow direct query execution
 
-Leave this off by default. When on, the `execute` tool can bypass LLM
-translation and the generated-query safety check, and each raw statement is applied when it runs: ClickHouse holds no
+Leave this off by default. When on, the `execute`, `begin`, `commit`, and
+`rollback` tools can bypass LLM translation and the generated-query safety
+check, and each raw statement is applied when it runs: ClickHouse holds no
 transaction for it to commit or roll back. Enable it only for trusted callers
 that need writes or dialect-specific SQL; use `get_data` for ordinary
 read-only retrieval.

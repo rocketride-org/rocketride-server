@@ -32,24 +32,13 @@ Derived classes must implement one method:
 All pipeline lane handlers (``writeQuestions``, ``writeTable``,
 ``writeAnswers``), query execution, and data insertion are implemented here
 using SQLAlchemy abstractions that work across dialects.
-
-What a call decides is read from ``self.settings`` when the call needs it: the
-target ``table``, ``db_description``, ``max_attempts`` and the ``allow_execute``
-gate are parameters, so one control serves calls that name different tables
-on the one engine pool its IGlobal holds (plan 4.1 rule 4).
-
-Transactions are one per call (plan 4.1 rule 3): a call that writes opens its
-transaction, commits it when every statement succeeded and rolls it back when
-one failed, and returns its connection to the pool before it answers. Nothing
-is held between calls, because the next call of the same control may land on
-another replica.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List
 
 import json
 import threading
@@ -64,12 +53,7 @@ from ai.common.utils import parse_bool
 from rocketlib.types import IInvokeLLM
 
 from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
-from .sql_binds import shape_execute_result, to_sqlalchemy_text
 from .sql_safety import is_sql_safe
-
-# The most statements one ``execute`` call may carry in ``statements``: the call
-# holds one pooled connection and one transaction for as long as they run.
-MAX_EXECUTE_STATEMENTS = 100
 
 
 def _isDbFailure(exc: BaseException) -> bool:
@@ -93,8 +77,9 @@ def _isDbFailure(exc: BaseException) -> bool:
     ``max_execute_rows`` overflow above all: it is a bare ``RuntimeError``
     whose wording and whose rollback callers and tests depend on.
 
-    One predicate for the two sites that would otherwise copy the same test
-    into their ``except`` arms: ``_executeStatements`` and ``_insertData``.
+    One predicate for the three sites that used to copy the same test into two
+    ``except`` arms apiece -- ``execute``'s session block, ``_executeRawQuery``
+    and ``_insertData`` (dylan-savage, review 5215826786 nit 2).
     """
     return isinstance(exc, SQLAlchemyError) or getattr(exc, 'orig', None) is not None
 
@@ -232,55 +217,32 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         can branch on the underlying engine (dialect-specific SQL, type coercion, etc.).
         """
 
-    def _callsAreTransactions(self) -> bool:
-        """Return whether one ``execute`` call is a database transaction on this node.
+    def _sessionsAreTransactions(self) -> bool:
+        """Return whether a ``begin`` session is a database transaction on this node.
 
         db_clickhouse overrides this to False: its ``commit`` and ``rollback`` are
-        no-ops, so the ``execute`` tool must not promise that a failed statement
-        undoes the ones before it.
+        no-ops and it has no savepoints, so the session tools must not promise rollback.
         """
         return True
 
-    def _transactionPolicy(self) -> str:
-        """Return the ``execute`` description's statement of what one call commits or undoes."""
-        if not self._callsAreTransactions():
+    def _unknownSession(self, session_id: Any) -> ValueError:
+        """Return the error for a ``session_id`` the registry does not hold."""
+        kind = 'transaction session' if self._sessionsAreTransactions() else 'session'
+        return ValueError(f'unknown or expired {kind}: {session_id}')
+
+    def _sessionRecoveryPolicy(self) -> str:
+        """Return the ``execute`` description's advice for a session after a failed statement."""
+        if not self._sessionsAreTransactions():
             return (
-                f'{self._db_display_name()} has no transactions: every statement is applied when it is '
-                f'sent, so a failed statement undoes nothing that ran before it.'
+                f'A failed statement inside a session_id leaves the session open. A session on '
+                f'{self._db_display_name()} opens no transaction, so it undoes nothing: every statement is '
+                f'executed when it is sent, rollback discards nothing, and savepoints do not exist.'
             )
         return (
-            'One call is one transaction: it commits when every statement succeeded and rolls back '
-            'entirely when one fails. No transaction outlives the call, so there is nothing to begin, '
-            'commit or roll back in a later call: send every statement of one unit of work in "statements".'
+            'A failed statement inside a session_id rolls nothing back and leaves the session open: '
+            'recover with rollback, or rollback to savepoint <name>, before sending more work on that '
+            'session. On PostgreSQL the transaction stays aborted until you do, and commit is refused.'
         )
-
-    # ------------------------------------------------------------------
-    # Per-call settings (parameters: read from ``self.settings``, never the IGlobal)
-    # ------------------------------------------------------------------
-
-    def _table(self) -> str:
-        """Return the table this call writes to: the ``table`` parameter, trimmed."""
-        table = (self.settings['table'] or '').strip()
-        if not table:
-            raise ValueError('"table" is empty: name the table this node writes to')
-        return table
-
-    def _allowExecute(self) -> bool:
-        """Return whether this call may run raw SQL: the ``allow_execute`` gate.
-
-        The execute tool is opt-in: it bypasses the LLM translation and the
-        ``is_sql_safe`` gate, so the node owner enables it explicitly. Strings
-        like 'false' / '0' are not truthy here.
-        """
-        return parse_bool(self.settings['allow_execute'], default=False)
-
-    def _maxAttempts(self) -> int:
-        """Return this call's EXPLAIN-validation retry bound (``max_attempts``, at least 1)."""
-        return max(1, int(self.settings['max_attempts']))
-
-    def _dbDescription(self) -> str:
-        """Return this call's ``db_description``: what the owner says the database holds."""
-        return (self.settings['db_description'] or '').strip()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -523,27 +485,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
     @tool_function(
         input_schema={
             'type': 'object',
+            'required': ['sql'],
             'properties': {
-                'sql': {'type': 'string', 'description': 'Raw SQL statement to execute. Give this or "statements".'},
-                'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n of "sql".'},
-                'statements': {
-                    'type': 'array',
-                    'description': (
-                        'Several statements to run in order in this one call, in place of "sql". '
-                        f'At most {MAX_EXECUTE_STATEMENTS}.'
-                    ),
-                    'items': {
-                        'type': 'object',
-                        'required': ['sql'],
-                        'properties': {
-                            'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
-                            'params': {
-                                'type': 'array',
-                                'description': 'Optional positional bind values for $1..$n.',
-                            },
-                        },
-                    },
-                },
+                'sql': {'type': 'string', 'description': 'Raw SQL statement to execute.'},
+                'session_id': {'type': 'string', 'description': 'Optional session id from begin.'},
+                'params': {'type': 'array', 'description': 'Optional positional bind values for $1..$n.'},
                 'row_mode': {
                     'type': 'string',
                     'enum': ['object', 'array'],
@@ -556,88 +502,74 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             'properties': {
                 'rows': {'type': 'array', 'items': {'type': ['object', 'array']}},
                 'affected_rows': {'type': 'integer'},
-                'results': {
-                    'type': 'array',
-                    'description': 'With "statements": one {rows, affected_rows} per statement, in order.',
-                    'items': {'type': 'object'},
-                },
             },
         },
         description=lambda self: (
-            f'Execute raw SQL against this {self._db_display_name()} database: one statement in "sql", '
-            f'or several in "statements". Bypasses LLM translation and SQL safety checks. '
-            f'{self._transactionPolicy()}'
+            f'Execute a raw SQL statement against this {self._db_display_name()} database. '
+            f'Bypasses LLM translation and SQL safety checks. {self._sessionRecoveryPolicy()}'
         ),
     )
     def execute(self, args):
-        """Execute raw SQL against this database, in one transaction that ends with the call."""
+        """Execute a raw SQL statement against this database."""
         if not isinstance(args, dict):
             raise ValueError('Tool input must be a JSON object')
+        sql = args.get('sql')
+        if not sql or not isinstance(sql, str) or not sql.strip():
+            raise ValueError('"sql" is required and must be a non-empty string')
 
-        # Step 1: one statement in "sql", or several in "statements"; never both
-        batch = args.get('statements')
-        if batch is not None and args.get('sql') is not None:
-            raise ValueError('give "sql" or "statements", not both')
-        if batch is None:
-            sql = args.get('sql')
-            if not sql or not isinstance(sql, str) or not sql.strip():
-                raise ValueError('"sql" is required and must be a non-empty string')
-
-        # Step 2: the gate is this call's own: allow_execute is a parameter
-        if not self._allowExecute():
+        if not self.IGlobal.allow_execute:
             raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
 
-        # Step 3: validate everything before anything is sent. A session_id is
-        # refused, never ignored: running its statement on its own would commit
-        # work the caller still believes it can roll back
-        if args.get('session_id'):
-            raise ValueError(
-                'execute: a transaction is one call, so "session_id" is not supported; '
-                'send every statement of one unit of work in "statements"'
-            )
+        session_id = args.get('session_id')
+        params = args.get('params')
+        self._validateExecuteParams(params)
         row_mode = args.get('row_mode', 'object')
-        if batch is None:
-            params = args.get('params')
-            self._validateExecuteParams(params)
-            statements = [(sql.strip(), params)]
-        else:
-            statements = self._validateExecuteStatements(batch)
         if row_mode not in ('object', 'array'):
             raise ValueError("\"row_mode\" must be 'object' or 'array'")
+        if session_id:
+            try:
+                result = self.IGlobal.tx_registry.execute(session_id, sql.strip(), params, row_mode)
+            except KeyError:
+                raise self._unknownSession(session_id)
+            except Exception as e:
+                # The statement itself failed. `tx_registry` has no IGlobal and
+                # is shared with other callers, so the formatting the sessionless
+                # branch gets from `_executeRawQuery` has to be applied here:
+                # otherwise the same tool, behind the same allow_execute gate,
+                # returns the raw exception -- `[SQL: ...]` / `[parameters: ...]`
+                # tail included -- purely because a session_id was passed.
+                # `_isDbFailure` covers both shapes, the dialect-wrapped one and
+                # the ClickHouse connector's unwrapped `DatabaseException`, so
+                # the session half cannot report a failure differently from the
+                # sessionless half. Anything else -- the max_rows RuntimeError
+                # above all, whose wording and rollback callers depend on -- is
+                # re-raised exactly as the registry threw it.
+                #
+                # A failed statement leaves the session OPEN: Postgres marks the
+                # transaction aborted, MySQL leaves it usable. The client owns
+                # recovery — `rollback`, or `rollback to savepoint` for nested
+                # transactions — and the idle reaper is the backstop for abandoned
+                # sessions. Committing an aborted transaction would degrade to a
+                # silent ROLLBACK, so the registry refuses it and raises instead.
+                #
+                # That policy is NOT appended to this message. The two execute
+                # paths report a driver failure with the same bytes -- the
+                # contract `test_both_execute_paths_report_a_driver_failure_identically`
+                # pins -- and a session-only suffix would break it. It is stated
+                # in the `execute` tool description above instead, which every
+                # agent reads before calling, and in the node READMEs;
+                # `test_the_execute_tool_description_states_the_session_recovery_policy`
+                # is what stops that sentence drifting from this code.
+                if not _isDbFailure(e):
+                    raise
+                error(f'Error executing raw SQL in session {session_id}: {e}')
+                # `from None` keeps the driver traceback out of the tool response.
+                raise RuntimeError(f'SQL execution failed: {self.IGlobal._format_db_error(e)}') from None
+        else:
+            result = self._executeRawQuery(sql.strip(), params, row_mode)
 
-        # Step 4: one transaction for the call; it is closed before this returns
-        shaped = self._executeStatements(statements, row_mode)
-        results = [
-            {'rows': [self._sanitize_row(row) for row in result['rows']], 'affected_rows': result['affected_rows']}
-            for result in shaped
-        ]
-        if batch is None:
-            return results[0]
-        return {'results': results}
-
-    @classmethod
-    def _validateExecuteStatements(cls, batch: Any) -> List[Tuple[str, Optional[list]]]:
-        """Return the ``statements`` argument as ``(sql, params)`` pairs, or refuse it whole.
-
-        Refused before anything is dispatched: a batch that is not a non-empty
-        array of objects, one over ``MAX_EXECUTE_STATEMENTS``, a statement
-        without a non-empty ``sql``, or ``params`` that is not an array.
-        """
-        if not isinstance(batch, list) or not batch:
-            raise ValueError('"statements" must be a non-empty array of {sql, params} objects')
-        if len(batch) > MAX_EXECUTE_STATEMENTS:
-            raise ValueError(f'"statements" holds {len(batch)} statements; at most {MAX_EXECUTE_STATEMENTS} per call')
-        statements: List[Tuple[str, Optional[list]]] = []
-        for index, entry in enumerate(batch):
-            if not isinstance(entry, dict):
-                raise ValueError(f'"statements[{index}]" must be an object with "sql"')
-            sql = entry.get('sql')
-            if not sql or not isinstance(sql, str) or not sql.strip():
-                raise ValueError(f'"statements[{index}].sql" is required and must be a non-empty string')
-            params = entry.get('params')
-            cls._validateExecuteParams(params)
-            statements.append((sql.strip(), params))
-        return statements
+        rows = [self._sanitize_row(row) for row in result['rows']]
+        return {'rows': rows, 'affected_rows': result['affected_rows']}
 
     @staticmethod
     def _validateExecuteParams(params: Any) -> None:
@@ -645,7 +577,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         ``to_sqlalchemy_text`` rewrites ``$n`` into a bind by indexing
         ``params[n - 1]``, so a JSON object raised ``KeyError: 0`` from inside
-        the rewriter -- which told the caller nothing.
+        the rewriter -- which told the caller nothing, and on the session path
+        was indistinguishable from an unknown session id: ``execute`` reported
+        "unknown or expired transaction session" for a session that was still
+        open and still usable.
 
         The placeholder range check is ``to_sqlalchemy_text``'s own and applies
         when ``params`` is non-empty. It is quote-aware -- a ``$n`` inside a
@@ -660,6 +595,68 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return
         if not isinstance(params, list):
             raise ValueError('"params" must be an array of positional bind values')
+
+    @tool_function(
+        input_schema={'type': 'object', 'properties': {}},
+        output_schema={'type': 'object', 'properties': {'session_id': {'type': 'string'}}},
+        description=lambda self: (
+            f'Begin a transaction on this {self._db_display_name()} database; returns a session_id.'
+            if self._sessionsAreTransactions()
+            else f'Reserve a connection on this {self._db_display_name()} database; returns a session_id. '
+            f'It opens no transaction: statements sent with the session_id are executed when they are sent.'
+        ),
+    )
+    def begin(self, args):
+        """Open a session and return its session_id; a transaction unless ``_sessionsAreTransactions`` is False."""
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+        return {'session_id': self.IGlobal.tx_registry.begin()}
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['session_id'],
+            'properties': {'session_id': {'type': 'string'}},
+        },
+        output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
+        description=lambda self: (
+            'Commit an open transaction session.'
+            if self._sessionsAreTransactions()
+            else 'Close a session. Its statements were already executed when they were sent.'
+        ),
+    )
+    def commit(self, args):
+        """Commit and close a session; where sessions are not transactions it only closes it."""
+        return self._finishTx(args, commit=True)
+
+    @tool_function(
+        input_schema={
+            'type': 'object',
+            'required': ['session_id'],
+            'properties': {'session_id': {'type': 'string'}},
+        },
+        output_schema={'type': 'object', 'properties': {'ok': {'type': 'boolean'}}},
+        description=lambda self: (
+            'Roll back an open transaction session.'
+            if self._sessionsAreTransactions()
+            else 'Close a session. This undoes nothing: its statements were already executed when they were sent.'
+        ),
+    )
+    def rollback(self, args):
+        """Roll back and close a session; where sessions are not transactions it only closes it."""
+        return self._finishTx(args, commit=False)
+
+    def _finishTx(self, args, *, commit: bool):
+        """Shared commit/rollback implementation enforcing the allow_execute gate."""
+        if not isinstance(args, dict) or not args.get('session_id'):
+            raise ValueError('"session_id" is required')
+        if not self.IGlobal.allow_execute:
+            raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
+        try:
+            (self.IGlobal.tx_registry.commit if commit else self.IGlobal.tx_registry.rollback)(args['session_id'])
+        except KeyError:
+            raise self._unknownSession(args['session_id'])
+        return {'ok': True}
 
     @tool_function(
         input_schema={
@@ -702,11 +699,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         ``IGlobal.db_schema`` is the same dict the natural-language path
         describes to the LLM (``_buildSQLQueryOnce`` -> ``describe_schema``),
         so refreshing it also stops ``get_data`` / ``get_sql`` writing queries
-        against a table shape that no longer exists. ``IGlobal.table_schemas``
-        -- the per-table column maps the answers lane inserts against, one per
-        table a call has named -- is rebuilt from the same walk at the same
-        time, so the node is current on both paths, not just the one this tool
-        returns, and the next insert does not reflect its table a second time.
+        against a table shape that no longer exists. ``IGlobal.schema`` -- the
+        configured table's column map that the answers lane inserts against --
+        is rebuilt from the same walk at the same time, so the node is current
+        on both paths, not just the one this tool returns, and the next insert
+        does not reflect the configured table a second time.
 
         Reflection and publication run under this node's ``reflect_lock`` so
         concurrent callers neither repeat the full table walk nor race on the
@@ -725,7 +722,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         ``Schema refresh failed: <name>``. Neither cache is touched in either
         case: the node keeps serving the schema it had and says the refresh
         failed, rather than publishing a half-walked database or, worse,
-        rewriting ``IGlobal.table_schemas`` from a half-walked result (or emptying it,
+        rewriting ``IGlobal.schema`` from a half-walked result (or emptying it,
         which re-arms the insert lane's lazy rebuild against a database that
         just refused to be reflected) while ``db_schema`` still held the old
         value. Skipping the offending table and
@@ -763,30 +760,32 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 raise RuntimeError(f'Schema refresh failed: {self.IGlobal._format_db_error(e)}') from None
 
             self.IGlobal.db_schema = refreshed
-            # `db_schema` is not the only cache: `IGlobal.table_schemas` holds
-            # the column map of every table a call has inserted into, and
-            # `_insertData` iterates the map of its call's table to build every
-            # answers-lane INSERT. Leaving it alone would make "refreshed" true
-            # for the LLM path and false for the insert path -- a column added
-            # by the DDL that prompted this call would still be skipped.
+            # `db_schema` is not the only start-up snapshot: `IGlobal.schema`
+            # holds the configured table's column map, and `_insertData`
+            # iterates it to build every answers-lane INSERT. Leaving it alone
+            # would make "refreshed" true for the LLM path and false for the
+            # insert path -- a column added by the DDL that prompted this call
+            # would still be skipped.
             #
-            # Every cached map is REBUILT here rather than emptied. The walk
-            # above has already read those tables' columns, and emptying re-armed
-            # the lazy rebuild at the top of `_insertData`, which reflected the
-            # same table a second time on the next batch. The value shape is
-            # exactly what `_getTableSchema` publishes and `_insertData`
-            # consumes -- `{name: (type, comment)}` -- with the comment slot
-            # empty, because `_getDatabaseSchema` does not collect comments and
-            # `_insertData` only ever reads the map by key. A cached table the
-            # refresh did not find (dropped or renamed) is forgotten, which
+            # It is REBUILT here rather than emptied. The walk above has already
+            # read the configured table's columns, and emptying re-armed the
+            # lazy rebuild at the top of `_insertData`, which reflected the same
+            # table a second time on the next batch (dylan-savage, review
+            # 5215826786 nit 4). The value shape is exactly what
+            # `_getTableSchema` publishes and `_insertData` consumes --
+            # `{name: (type, comment)}` -- with the comment slot empty, because
+            # `_getDatabaseSchema` does not collect comments and `_insertData`
+            # only ever reads this map by key. A configured table the refresh
+            # did not find (dropped, renamed, or never set) still publishes an
+            # empty map, which is both what task start leaves behind and what
             # re-arms the lazy rebuild for a table that comes back.
             #
-            # Each map is rebound whole, under the same `reflect_lock`
+            # The rebind is atomic and happens under the same `reflect_lock`
             # `_insertData` takes across its check, its rebuild and the snapshot
             # it builds the batch from, so a concurrent insert reads either the
-            # old map or the new one, never a half-built one.
+            # old map or this one, never a half-built one.
             #
-            # A rebuilt map is a plain reflection, so it carries columns the
+            # The rebuilt map is a plain reflection, so it carries columns the
             # map `_createTableFromData` curates for an auto-created table
             # deliberately does not: the primary key, and anything DDL has
             # added since. Changing what the INSERT carries is the POINT of the
@@ -810,9 +809,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # change, and honouring a supplied key on an auto-created table
             # before any refresh would mean curating the PK into that map --
             # a separate decision, not this one.
-            # The call's own table is published too: its next insert reads it
-            # from this walk instead of reflecting it again
-            self.IGlobal._republishTableSchemas(refreshed, (self.settings['table'] or '').strip())
+            table_info = refreshed.get(self.IGlobal.table)
+            self.IGlobal.schema = (
+                {name: (col_type, '') for name, col_type in table_info['columns']} if table_info else {}
+            )
             refreshed_at = datetime.now(timezone.utc).isoformat()
 
         # Rendering is pure formatting over `refreshed`, so it runs after the
@@ -864,7 +864,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         Calls ``_buildSQLQueryOnce`` to ask the LLM, then runs ``EXPLAIN`` on
         the result.  If EXPLAIN rejects the query the error is fed back to the
-        LLM and another attempt is made, up to this call's ``max_attempts``
+        LLM and another attempt is made, up to ``IGlobal.max_validation_attempts``
         times.  Returns the last LLM response if EXPLAIN eventually accepts it;
         if every attempt is rejected, the result is forced to ``isValid: False``
         with the last EXPLAIN error carried in ``error``. An ``error`` the LLM
@@ -882,8 +882,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         last_error: str | None = None
         result: dict = {}
 
-        max_attempts = self._maxAttempts()
-        for attempt in range(max_attempts):
+        for attempt in range(self.IGlobal.max_validation_attempts):
             result = self._buildSQLQueryOnce(question_text, limit=limit, previous_sql=previous_sql, error=last_error)
             # The prompt asks for no error key: whatever the LLM wrote there is its text, not ours
             if result.get('error'):
@@ -905,11 +904,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             # EXPLAIN rejected the query — log and feed the error back so the
             # LLM can produce a corrected statement on the next attempt.
-            warning(f'SQL validation attempt {attempt + 1}/{max_attempts} failed: {explain_error}')
+            warning(
+                f'SQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
+            )
             previous_sql = sql_query
             last_error = explain_error
 
-        warning(f'SQL validation failed after {max_attempts} attempt(s); rejecting the query.')
+        warning(f'SQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); rejecting the query.')
         # Every EXPLAIN attempt failed. Force isValid False so callers (get_sql,
         # get_data, writeQuestions) don't execute a query the database already
         # refused; keep the last query for context and carry the EXPLAIN error
@@ -973,9 +974,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         question: Question = Question(type=QuestionType.QUESTION, role='You are a technical assistant.')
         question.addQuestion(question_text)
 
-        db_description = self._dbDescription()
-        if db_description:
-            question.addContext(f'Database description: {db_description}')
+        if self.IGlobal.db_description:
+            question.addContext(f'Database description: {self.IGlobal.db_description}')
 
         question.addContext(db_schema_description)
         question.expectJson = True
@@ -1063,44 +1063,36 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return None
 
     def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict:
-        """Execute one raw SQL statement (read or write) in its own transaction; see ``_executeStatements``."""
-        return self._executeStatements([(query, params)], row_mode)[0]
+        """Execute a raw SQL statement (read or write) without LLM or safety gating.
 
-    def _executeStatements(self, statements: List[Tuple[str, Optional[list]]], row_mode: str = 'object') -> List[dict]:
-        """Execute raw SQL statements in ONE transaction that ends with this call (plan 4.1 rule 3).
-
-        ``engine.begin()`` opens the transaction on a pooled connection, commits
-        it when every statement succeeded, rolls it back when any raised, and
-        returns the connection to the pool either way: nothing is left open
-        after the call, and nothing can be continued by a later one. Returns
-        one ``{'rows': [...], 'affected_rows': N}`` per statement, in order;
-        there is no failure return value, every failure raises. A SQLAlchemy
-        error is logged via ``error()`` and re-raised as ``RuntimeError``
-        carrying the DRIVER's own message: the caller wrote the statement, so
-        the caller is who needs to read "no such column: foo" — collapsing every
-        failure into one opaque string made a typo, a missing table, and a
-        permission error indistinguishable. A ``max_execute_rows`` overflow
-        raises ``RuntimeError`` from *inside* the transaction so
+        Uses ``engine.begin()`` so writes auto-commit. Returns
+        ``{'rows': [...], 'affected_rows': N}``; there is no failure return
+        value, every failure raises. A SQLAlchemy error
+        is logged via ``error()`` and re-raised as ``RuntimeError`` carrying
+        the DRIVER's own message: the caller wrote the statement, so the caller
+        is who needs to read "no such column: foo" — collapsing every failure
+        into one opaque string made a typo, a missing table, and a permission
+        error indistinguishable. A ``max_execute_rows``
+        overflow raises ``RuntimeError`` from *inside* the transaction so
         ``engine.begin()`` rolls back — otherwise a write (e.g. ``INSERT ...
         RETURNING``) would commit even though ``execute()`` reports failure.
 
         SELECT results are bounded by ``IGlobal.max_execute_rows`` to keep a
         large query from exhausting worker memory.
         """
+        from ai.common.database.tx_registry import shape_execute_result, to_sqlalchemy_text
+
         try:
             with self.IGlobal.engine.begin() as conn:
-                shaped_results: List[dict] = []
-                for query, params in statements:
-                    clause, binds = to_sqlalchemy_text(query, params)
-                    result = conn.execute(clause, binds)
-                    shaped = shape_execute_result(result, self.IGlobal.max_execute_rows, row_mode)
-                    if shaped is None:
-                        # Raise inside the transaction so it rolls back; returning
-                        # None here would let an overflowing write commit anyway.
-                        error(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
-                        raise RuntimeError(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
-                    shaped_results.append(shaped)
-                return shaped_results
+                clause, binds = to_sqlalchemy_text(query, params)
+                result = conn.execute(clause, binds)
+                shaped = shape_execute_result(result, self.IGlobal.max_execute_rows, row_mode)
+                if shaped is None:
+                    # Raise inside the transaction so it rolls back; returning
+                    # None here would let an overflowing write commit anyway.
+                    error(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
+                    raise RuntimeError(f'EXECUTE query exceeded max_execute_rows={self.IGlobal.max_execute_rows}')
+                return shaped
 
         except Exception as e:
             # Both driver shapes, and nothing else. `_isDbFailure` carries the
@@ -1279,35 +1271,35 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             debug('No items to insert.')
             return
 
-        # The target is this call's own: `table` is a parameter, so two calls
-        # of one control may write to two tables on the one engine pool.
-        target = self._table()
-
         # Auto-create the table from the incoming data shape if it doesn't exist.
-        if not self.IGlobal._tableExists(target):
-            debug(f'Table "{target}" does not exist. Creating it from data structure...')
-            if not self.IGlobal._createTableFromData(target, items):
-                error(f'Failed to create table "{target}". Please create it manually before running the pipeline.')
-                raise RuntimeError(f'Table "{target}" does not exist and could not be created automatically.')
-            debug(f'Successfully created table "{target}" from data structure.')
+        if not self.IGlobal._tableExists(self.IGlobal.table):
+            debug(f'Table "{self.IGlobal.table}" does not exist. Creating it from data structure...')
+            if not self.IGlobal._createTableFromData(self.IGlobal.table, items):
+                error(
+                    f'Failed to create table "{self.IGlobal.table}". Please create it manually before running the pipeline.'
+                )
+                raise RuntimeError(
+                    f'Table "{self.IGlobal.table}" does not exist and could not be created automatically.'
+                )
+            debug(f'Successfully created table "{self.IGlobal.table}" from data structure.')
 
-        # Fetch the table's column map if no call has cached it yet (the
-        # control's first insert into this table, or an entry the bounded cache
-        # dropped), then take a private snapshot to build this batch from.
+        # Fetch the schema if it wasn't populated at startup (e.g. the table
+        # was just created above, or beginGlobal found no table), then take a
+        # private snapshot to build this batch from.
         #
         # The check, the rebuild and the snapshot are one critical section.
-        # The map is absent until the first insert into the table, and after
-        # a `refresh_schema` whose walk did not find the table, so at runtime
-        # a second insert can arrive while the first is
+        # The map is empty at task start, after `beginGlobal` found no table,
+        # and after a `refresh_schema` whose walk did not find the configured
+        # table, so at runtime a second insert can arrive while the first is
         # reflecting, and the state it would observe is wrong: a map still
         # being built silently drops the columns not yet added.
         #
         # What the snapshot buys is one map for the whole batch. Both parts of
         # that matter and they are different: binding it to a local is what
         # stops a `refresh_schema` arriving mid-batch from swapping the map the
-        # per-row loop below is walking (every publisher REBINDS the table's
-        # entry -- `_getTableSchema` and `_createTableFromData` both
-        # publish a map they finished building, so nothing mutates the live one
+        # per-row loop below is walking (every publisher REBINDS
+        # `IGlobal.schema` -- `_getTableSchema` and `_createTableFromData` both
+        # assign a map they finished building, so nothing mutates the live one
         # in place today), and copying it is what keeps that true if a future
         # publisher ever fills a map in place again, which is exactly the bug
         # both publishers were fixed for. The copy is a handful of tuples.
@@ -1317,7 +1309,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         # deliberate: an uncontended acquire is a few hundred nanoseconds
         # against an insert that is about to do network I/O, and the two
         # cheaper shapes both cost correctness. A check-then-lock fast path has
-        # to read the cached map once into a local and snapshot THAT -- read
+        # to read `IGlobal.schema` once into a local and snapshot THAT -- read
         # it twice and a `refresh_schema` landing between the two hands this
         # batch an empty map -- which is a second code path pinned by no test.
         # What made the unconditional acquire expensive was that the lock was
@@ -1326,24 +1318,22 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         # node's own refresh or rebuild, which it genuinely must not read past.
         #
         # The lock is released before the Table reflection and before the
-        # INSERT. Neither reads the cached map and both are slow.
+        # INSERT. Neither reads `IGlobal.schema` and both are slow.
         with self._reflectLock():
-            schema = self.IGlobal._tableSchema(target)
-            if not schema:
+            if not self.IGlobal.schema:
                 # `_getTableSchema` publishes the map it builds, in one
                 # assignment once the walk is complete, and returns the same
-                # columns as pairs. Rebuilding the cached map from those
+                # columns as pairs. Rebuilding `IGlobal.schema` from those
                 # pairs here produced the identical key set with the reflected
                 # column comment blanked to '' -- a second publisher for no
                 # gain, since this map is only ever read by key. `refresh_schema`
                 # does publish exactly that comment-less shape, out of its own
                 # walk, which is fine for a map read by key; what this block
                 # avoids is a THIRD publisher, running on every batch.
-                if not self.IGlobal._getTableSchema(target):
-                    error(f'Unable to retrieve schema for table "{target}"')
-                    raise RuntimeError(f'Table "{target}" schema could not be retrieved.')
-                schema = self.IGlobal._tableSchema(target)
-            schema = dict(schema)
+                if not self.IGlobal._getTableSchema(self.IGlobal.table):
+                    error(f'Unable to retrieve schema for table "{self.IGlobal.table}"')
+                    raise RuntimeError(f'Table "{self.IGlobal.table}" schema could not be retrieved.')
+            schema = dict(self.IGlobal.schema)
 
         metadata = MetaData()
         engine = self.IGlobal.engine
@@ -1351,10 +1341,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         # Reflect the live table definition so SQLAlchemy knows the exact
         # column set and types when building the INSERT statement.
         try:
-            table = SQLTable(target, metadata, autoload_with=engine)
+            table = SQLTable(self.IGlobal.table, metadata, autoload_with=engine)
         except NoSuchTableError:
             error(
-                f'Table "{target}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.'
+                f'Table "{self.IGlobal.table}" does not exist in database "{self.IGlobal.database}". Please create it manually before running the pipeline.'
             )
             raise
 
@@ -1367,10 +1357,10 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         # `id SERIAL NOT NULL`; a `created_at timestamptz NOT NULL DEFAULT now()`
         # behaves the same way.
         #
-        # `_createTableFromData` curates the cached map down to the data
+        # `_createTableFromData` curates `IGlobal.schema` down to the data
         # columns for exactly this reason, but any map built by reflection --
-        # `refresh_schema`'s own rebuild, or the lazy rebuild above for a table
-        # that already existed -- carries every column the
+        # `beginGlobal` for a table that already existed, `refresh_schema`'s
+        # own rebuild, or the lazy rebuild above -- carries every column the
         # table has. That difference is meant to reach the INSERT: a
         # column added by DDL is one the next insert should populate. What must
         # NOT reach it is a NULL bound into a column the database owns, so both
@@ -1415,7 +1405,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 continue
 
             # `schema` is never empty here: the locked block above either left
-            # the table's cached map populated or raised.
+            # `IGlobal.schema` populated or raised.
             values: Dict[str, Any] = {}
             # Case-insensitive key lookup so 'UserName' maps to 'username'.
             item_lower_keys = {k.lower(): k for k in item.keys()}
@@ -1515,7 +1505,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                         # NULL into a column the database was about to fill.
                         for _ in run:
                             conn.execute(insert(table))
-                debug(f"Inserted {len(insert_values)} records into '{target}' in {len(runs)} run(s).")
+                debug(f"Inserted {len(insert_values)} records into '{self.IGlobal.table}' in {len(runs)} run(s).")
             except Exception as e:
                 # The context manager has already rolled back every run of the
                 # batch; nothing of it is written. The full exception --
@@ -1526,11 +1516,13 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 # fills in fails HERE, and "NOT NULL constraint failed:
                 # codes.code" is what says so. A failure that is not a database
                 # failure is re-raised untouched -- the same `_isDbFailure`
-                # predicate the execute path asks.
-                error(f'Error inserting data into "{target}": {e}')
+                # predicate the two execute sites ask.
+                error(f'Error inserting data into "{self.IGlobal.table}": {e}')
                 if not _isDbFailure(e):
                     raise
                 # `from None` keeps the driver traceback out of the message.
-                raise RuntimeError(f'Insert into "{target}" failed: {self.IGlobal._format_db_error(e)}') from None
+                raise RuntimeError(
+                    f'Insert into "{self.IGlobal.table}" failed: {self.IGlobal._format_db_error(e)}'
+                ) from None
         else:
             debug('No records to insert.')

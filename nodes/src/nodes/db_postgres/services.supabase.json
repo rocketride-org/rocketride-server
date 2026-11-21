@@ -86,22 +86,19 @@
 			"format": "textarea",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
-			"param": true
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries."
 		},
 		"postgresdb.host": {
 			"type": "string",
 			"title": "Supabase host",
 			"required": true,
-			"description": "From the Supabase dashboard (Connect button), including the port. Recommended: the Supavisor pooler (works over IPv4) -> aws-0-<region>.pooler.supabase.com:6543 (transaction) or :5432 (session). The Direct connection (db.<project-ref>.supabase.co:5432) is IPv6-only and will fail to resolve on networks without IPv6.",
-			"env": "ROCKETRIDE_DB_SUPABASE_HOST"
+			"description": "From the Supabase dashboard (Connect button), including the port. Recommended: the Supavisor pooler (works over IPv4) -> aws-0-<region>.pooler.supabase.com:6543 (transaction) or :5432 (session). The Direct connection (db.<project-ref>.supabase.co:5432) is IPv6-only and will fail to resolve on networks without IPv6."
 		},
 		"postgresdb.user": {
 			"type": "string",
 			"title": "User",
 			"default": "postgres",
-			"description": "Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref>, without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres",
-			"env": "ROCKETRIDE_DB_SUPABASE_USER"
+			"description": "Database user. For the pooler (recommended) it MUST include your project ref: postgres.<project-ref>, without the .<project-ref> suffix the pooler returns 'no tenant identifier'. For the direct connection it is just: postgres"
 		},
 		"postgresdb.password": {
 			"type": "string",
@@ -117,16 +114,13 @@
 			"default": "postgres",
 			"minLength": 2,
 			"maxLength": 63,
-			"description": "Name of database (Supabase default is 'postgres')",
-			"env": "ROCKETRIDE_DB_SUPABASE_DATABASE"
+			"description": "Name of database (Supabase default is 'postgres')"
 		},
 		"postgresdb.table": {
 			"type": "string",
 			"title": "Table name",
 			"default": "table",
-			"description": "Name of table",
-			"param": true,
-			"tool": false
+			"description": "Name of table"
 		},
 		"postgresdb.max_attempts": {
 			"type": "integer",
@@ -134,17 +128,13 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 20,
-			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL",
-			"param": true,
-			"tool": false
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
 		},
 		"postgresdb.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
-			"description": "Permit the execute tool function to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.",
-			"param": true,
-			"tool": false
+			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
 		}
 	},
 	//

@@ -64,8 +64,8 @@ class IGlobal(DatabaseGlobalBase):
         engine delivered for this node's ``scope`` / ``target``. Read it once
         here, cache it for ``_build_connection_url``, and parse out
         ``database`` so the base's schema-reflection messaging names the real
-        tenant database. The table is a parameter: the instance reads it per
-        call from settings.
+        tenant database. ``table`` remains the one structured, user-facing
+        target field.
         """
         self._dsn = resolve_rocketride_dsn(*db_target(config))
         fields = parse_dsn_fields(self._dsn)
@@ -74,6 +74,7 @@ class IGlobal(DatabaseGlobalBase):
             'user': fields['user'],
             'password': fields['password'],
             'database': fields['database'] or 'rocketride',
+            'table': config['table'].strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -85,3 +86,11 @@ class IGlobal(DatabaseGlobalBase):
         if not self._dsn:
             raise RuntimeError('_connection_params must run before _build_connection_url')
         return to_sqlalchemy_url(self._dsn)
+
+    def _max_validation_attempts(self, config: Mapping) -> int:
+        """Return the EXPLAIN-validation retry count; the schema bounds it to [1, 20]."""
+        return int(config['max_attempts'])
+
+    def _db_description(self, config: Mapping) -> str:
+        """Return the user-provided database description (empty string if unset)."""
+        return config['db_description']

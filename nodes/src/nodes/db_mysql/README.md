@@ -47,6 +47,9 @@ configurable server-name prefix.
 | `refresh_schema` | Re-read the schema, replace the cache, and return it. |
 | `get_sql` | Generate a safe `SELECT` without executing it. |
 | `execute` | Run raw SQL, bypassing LLM translation and the safety check. |
+| `begin` | Open a transaction and return its session ID. |
+| `commit` | Commit and close a transaction session. |
+| `rollback` | Roll back and close a transaction session. |
 | `dialect` | Return `{ "dialect": "mysql" }`. |
 
 `get_data` and `get_sql` require a non-empty `question`; `get_data` accepts an
@@ -57,12 +60,11 @@ node currently holds — the reflection taken at start-up, replaced by each
 `refresh_schema` call — so DDL run since the last reflection is invisible to
 it until the next one. `refresh_schema` takes no arguments, re-reflects the
 database, replaces that database-wide cache, and returns the `get_schema`
-shape plus a `refreshed_at` UTC timestamp. It also rebuilds the cached
-column map of every table a call has inserted into, and of the calling call's
-table, from the same walk, which is how the next
+shape plus a `refreshed_at` UTC timestamp. It also rebuilds the configured
+table's cached column map from the same walk, which is how the next
 `answers`-lane insert picks up added or dropped columns instead of continuing
-against the start-up shape; no second reflection is needed. A cached table
-the walk did not find is forgotten, and the next insert reflects the
+against the start-up shape; no second reflection is needed. A configured table
+the walk did not find leaves that map empty, and the next insert reflects the
 table itself if it has come back. If the database refuses the reflection — a revoked grant, a lock
 timeout, a table dropped mid-walk — the call fails with `Schema refresh
 failed:` followed by the database's own message (for a table that disappeared
@@ -72,14 +74,13 @@ they were. `get_data` returns
 `{valid: false, answer}`, and a query execution failure returns
 `{valid: false, error, sql, rows: []}`.
 
-`execute` requires non-empty `sql` (or a `statements` array of `{sql,
-params}` objects) and optionally accepts positional values for `$1`, `$2`, and
-so on, and a `row_mode`:
+`execute` requires non-empty `sql` and optionally accepts a transaction
+`session_id`, positional values for `$1`, `$2`, and so on, and a `row_mode`:
 `object` (default) keys rows by column name, while `array` returns positional
 arrays that preserve column order and keep duplicate column names — the shape
 ORM drivers such as Drizzle require. It returns `{rows, affected_rows}`. A
 failed statement raises `SQL execution failed:` followed by the database's own
-primary message. What is removed
+primary message, identically with and without a `session_id`. What is removed
 is the tail: SQLAlchemy's `[SQL: ...]` / `[parameters: ...]` echo. The primary
 sentence itself is passed through as MySQL wrote it: a `SIGNAL`'s text comes
 back whole, a constraint error names the value that collided, and a syntax
@@ -91,10 +92,20 @@ query execution**, and a caller who has it can read the same data with a
 `SELECT`. The full text is written to the server log. For ClickHouse, use the
 `db_clickhouse` node: pointed at ClickHouse's MySQL interface, this node
 returns ClickHouse's error text as is, which can repeat the statement and its
-bound values. `execute` fails when **Allow direct query execution** is off.
-Invalid tool input raises an error.
+bound values. `begin` takes no arguments and returns `{session_id}`; `commit`
+and `rollback` require that ID and return
+`{ok: true}`. These four write-capable operations fail when **Allow direct
+query execution** is off; unknown or expired session IDs also fail. Invalid
+tool input raises an error.
 
-One `execute` call is one transaction: it commits when every statement succeeded and rolls back entirely when one fails, and its connection is back in the pool before the call answers. No transaction outlives the call, so there is no `begin`, `commit` or `rollback` tool and no `session_id`: send the statements of one unit of work together in `statements` (at most 100), and the result carries one `{rows, affected_rows}` per statement in `results`. A `session_id` is refused rather than ignored.
+A failed statement does **not** roll the session back. The session stays open
+and MySQL leaves its transaction usable, so a later `commit` persists the work
+that preceded the error — recovery is the client's responsibility. Issue
+`rollback` to discard the session, or `rollback to savepoint <name>` to undo
+only the failed portion and continue; the idle reaper is the backstop for
+sessions that are abandoned instead. (Postgres differs: it aborts the whole
+transaction on any failure, so the node refuses the later commit rather than
+letting it degrade to a silent rollback.)
 
 ## Configuration
 
@@ -116,7 +127,9 @@ replace the actual table and column information collected at startup.
 Set the host, user, password, database, and table to the MySQL server and
 target table. User, password, and database are URL-encoded before the PyMySQL
 DSN is built, so reserved characters in those values are safe. The node
-reflects the complete database for query context at startup. The target table is a per-call parameter: a call may name another table on the same connection pool. Each table's column map is reflected on the first insert into it and cached by name (a bounded cache); a missing table is created from the first incoming `answers` data.
+reflects the complete database for query context at startup, then separately
+checks the target table: if it is absent, it warns and waits to create it from
+the first incoming `answers` data.
 
 ### Max validation attempts
 
@@ -130,9 +143,10 @@ guarantee that a subsequent execution will succeed.
 
 ### Allow direct query execution
 
-Leave this off by default. When on, the `execute` tool can bypass LLM
-translation and the generated-query safety check. Each call is one transaction
-that commits on success; send several statements in `statements` when they
+Leave this off by default. When on, the `execute`, `begin`, `commit`, and
+`rollback` tools can bypass LLM translation and the generated-query safety
+check. A raw call without a session uses a transaction that commits on success;
+use `begin` followed by `execute` with its session ID when several statements
 must share a transaction. Enable it only for trusted callers that need writes
 or dialect-specific SQL; use `get_data` for ordinary read-only retrieval.
 

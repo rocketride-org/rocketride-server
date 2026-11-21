@@ -85,15 +85,17 @@ def test_connection_params_defaults(g):
         'user': 'default',
         'password': '',
         'database': 'default',
+        'table': 'table',
         'tls': '',
     }
 
 
 def test_connection_params_strips_but_keeps_password_whitespace(g):
-    """Host/user/db are stripped; password is preserved verbatim; the table is not a connection param."""
-    p = g._connection_params(_resolve({'host': '  h  ', 'user': ' u ', 'database': ' db ', 'password': '  pw  '}))
-    assert (p['host'], p['user'], p['database']) == ('h', 'u', 'db')
-    assert 'table' not in p
+    """Host/user/db/table are stripped; password is preserved verbatim."""
+    p = g._connection_params(
+        _resolve({'host': '  h  ', 'user': ' u ', 'database': ' db ', 'table': ' t ', 'password': '  pw  '})
+    )
+    assert (p['host'], p['user'], p['database'], p['table']) == ('h', 'u', 'db', 't')
     assert p['password'] == '  pw  '
 
 
@@ -105,6 +107,7 @@ def test_connection_params_null_values_mean_use_the_default(g):
         'user': 'default',
         'password': '',
         'database': 'default',
+        'table': 'table',
         'tls': '',
     }
 
@@ -177,35 +180,22 @@ def test_build_url_tls_ipv6_keeps_explicit_port(g):
 
 
 # ---------------------------------------------------------------------------
-# table / max_attempts / db_description / allow_execute are per-call params
+# _max_validation_attempts / _db_description
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize('key', ['table', 'max_attempts', 'db_description', 'allow_execute'])
-def test_a_param_read_through_the_global_config_raises(key):
-    """The IGlobal's view refuses a param: it is per call and lives in the instance's settings."""
-    with pytest.raises(ConfigError):
-        _resolve({}).restricted(refuse_params=True)[key]
-
-
-def test_the_connection_params_read_no_param(g):
-    """The connection params come from the restricted view, where a param read would raise."""
-    p = g._connection_params(_resolve({'table': 'events'}).restricted(refuse_params=True))
-    assert set(p) == {'host', 'user', 'password', 'database', 'tls'}
 
 
 @pytest.mark.parametrize(
     'stored, expected', [({}, 5), ({'max_attempts': 9}, 9), ({'max_attempts': 1}, 1), ({'max_attempts': 20}, 20)]
 )
-def test_max_attempts(stored, expected):
+def test_max_validation_attempts(g, stored, expected):
     """max_attempts arrives as the resolved integer, defaulted to 5."""
-    assert _resolve(stored)['max_attempts'] == expected
+    assert g._max_validation_attempts(_resolve(stored)) == expected
 
 
 @pytest.mark.parametrize(
     'stored', [{'max_attempts': 0}, {'max_attempts': -3}, {'max_attempts': 100}, {'max_attempts': '7'}]
 )
-def test_max_attempts_out_of_range_is_refused(stored):
+def test_max_validation_attempts_out_of_range_is_refused(stored):
     """The documented 1..20 bounds are enforced by the resolver, not clamped by the node."""
     with pytest.raises(ConfigError):
         _resolve(stored)
@@ -214,6 +204,8 @@ def test_max_attempts_out_of_range_is_refused(stored):
 @pytest.mark.parametrize(
     'stored, expected', [({}, ''), ({'db_description': 'sales events'}, 'sales events'), ({'db_description': None}, '')]
 )
-def test_db_description_resolves_to_a_str(stored, expected):
-    """A stored null means the default, an empty string."""
-    assert (_resolve(stored)['db_description'] or '') == expected
+def test_db_description_always_returns_str(g, stored, expected):
+    """_db_description honors its -> str contract; a stored null means the default."""
+    result = g._db_description(_resolve(stored))
+    assert isinstance(result, str)
+    assert result == expected

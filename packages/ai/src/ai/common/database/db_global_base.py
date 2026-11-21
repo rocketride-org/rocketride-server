@@ -27,29 +27,22 @@ Shared global (connection-level) base class for relational database nodes.
 Derived classes must implement two methods that carry the only
 driver-specific knowledge:
 
-- ``_connection_params``: maps the control's config (the resolver's
-  ``ConfigView``: defaults applied, short names such as ``host``) into a flat
-  dict with canonical keys ``host``, ``user``, ``password``, ``database``.
+- ``_connection_params``: maps the node's effective config (the resolver's
+  ``ConfigView`` for a converted node: defaults applied, short names such as
+  ``host``) into a flat dict with canonical keys ``host``, ``user``,
+  ``password``, ``database``, ``table``.
 
 - ``_build_connection_url``: turns those flat params into a SQLAlchemy DSN
   string, e.g. ``mysql+pymysql://user:pass@host/db``.
 
-Everything else — schema reflection, type inference, table auto-creation —
-is handled here and is dialect-agnostic.
-
-The global holds what is expensive to build and nothing a call decides: the
-engine and its pool, the whole-database reflection, and a bounded cache of
-per-table column maps keyed by table name. The target table, the description,
-the retry bound and the execute gate are parameters, read per call from the
-instance's ``settings`` (plan 4.1 rules 1 and 4). There is no transaction
-here either: every call opens its own and ends it (plan 4.1 rule 3).
+Everything else — schema reflection, type inference, table auto-creation,
+session lifecycle — is handled here and is dialect-agnostic.
 """
 
 import re
 import threading
 
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 from contextlib import ExitStack, contextmanager
 from datetime import datetime
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -73,12 +66,6 @@ from sqlalchemy.exc import DBAPIError
 from rocketlib import IGlobalBase, error, warning
 
 DEFAULT_MAX_EXECUTE_ROWS = 25000
-
-# The most per-table column maps one control keeps. A table is a parameter, so
-# the map of the table a call names is cached by name; past this many names the
-# least recently used one is dropped and reflected again when a call returns to
-# it (one inspector round trip). A cache, never state (plan 4.1 rule 1).
-TABLE_SCHEMA_CACHE_MAX = 64
 
 # Everything a driver or SQLAlchemy appends to its primary message that can
 # echo the executed statement or the values bound into it back to the caller:
@@ -161,20 +148,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any relational database node."""
 
     engine = None
+    tx_registry = None  # type: ignore[assignment]  # TransactionRegistry, set in beginGlobal
     database: str = ''
-    db_schema: Optional[Dict[str, Dict]] = None
-
-    # Column maps by table name, ``{table: {column: (type, comment)}}``: what
-    # the answers lane binds an INSERT against. Filled lazily by
-    # ``_getTableSchema`` / ``_createTableFromData`` for the table a call names,
-    # bounded by ``TABLE_SCHEMA_CACHE_MAX``, created in ``beginGlobal``.
-    table_schemas: Optional['OrderedDict[str, Dict[str, Tuple[str, str]]]'] = None
-
-    # Guards the cache's own bookkeeping (insert, reorder, evict). The maps it
-    # holds are never mutated in place: a publisher rebinds a finished map.
-    _table_schemas_lock: Optional[threading.Lock] = None
-
-    # The row cap of one ``execute`` statement: a fixed bound, not a config leaf.
+    table: str = ''
+    db_description: str = ''
+    schema: Dict[str, Tuple[str, str]] = {}
+    db_schema: Dict[str, Dict] = {}
+    max_validation_attempts: int = 5
+    allow_execute: bool = False
     max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # SQLAlchemy pool sizing for the runtime engine opened in `beginGlobal`.
@@ -189,9 +170,9 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     _clickhouse_warning: Optional[str] = None
 
     # Serialises this node's schema re-reflection: `refresh_schema`'s full
-    # table walk against `_insertData`'s lazy rebuild of a table's column map,
-    # and either of those against another copy of itself. Both writers rebind a
-    # `table_schemas` entry and `db_schema` wholesale, and neither is read by any other IGlobal, so the
+    # table walk against `_insertData`'s lazy rebuild of `schema`, and either
+    # of those against another copy of itself. Both writers rebind `schema` and
+    # `db_schema` wholesale, and neither is read by any other IGlobal, so the
     # state this protects is exactly one node's -- hence one lock per IGlobal,
     # created in `beginGlobal`. A module-level lock covered the same races but
     # also made them cross-node: a refresh walking a wide database (no
@@ -211,10 +192,25 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
         """Map the node's stored config to a flat connection-params dict.
 
-        Must return a dict with these keys: host, user, password, database.
-        The target table is not one of them: it is a parameter, read per call
-        from the instance's ``settings``.
+        Must return a dict with exactly these keys:
+            host, user, password, database, table
         """
+
+    def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
+        """Return the maximum number of EXPLAIN-validation retries for generated SQL.
+
+        Override in a derived class to read the value from the node's config.
+        The base implementation returns 5, matching the services.json default.
+        """
+        return 5
+
+    def _db_description(self, config: Dict[str, Any]) -> str:
+        """Return the user-provided description of the database content and purpose.
+
+        Override in a derived class to read the value from the node's config.
+        The base implementation returns an empty string.
+        """
+        return ''
 
     @abstractmethod
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -418,64 +414,6 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # Table / schema helpers
     # ------------------------------------------------------------------
 
-    def _tableSchema(self, table: str) -> Dict[str, Tuple[str, str]]:
-        """Return the cached column map of ``table``, or an empty map when none is cached.
-
-        The map returned is the published one: a publisher rebinds, it never
-        fills in place, so a reader holds a complete map or none.
-        """
-        with self._table_schemas_lock:
-            schema = self.table_schemas.get(table)
-            if schema is None:
-                return {}
-            # Most recently used last, so eviction takes the coldest name
-            self.table_schemas.move_to_end(table)
-            return schema
-
-    def _publishTableSchema(self, table: str, schema: Dict[str, Tuple[str, str]]) -> None:
-        """Publish the finished column map of ``table``; an empty map forgets the table.
-
-        One assignment per table, so a reader never sees a half-built map. The
-        cache is bounded: past ``TABLE_SCHEMA_CACHE_MAX`` names the least
-        recently used is dropped and reflected again on its next use.
-        """
-        with self._table_schemas_lock:
-            if not schema:
-                self.table_schemas.pop(table, None)
-                return
-            self.table_schemas[table] = schema
-            self.table_schemas.move_to_end(table)
-            while len(self.table_schemas) > TABLE_SCHEMA_CACHE_MAX:
-                self.table_schemas.popitem(last=False)
-
-    def _republishTableSchemas(self, refreshed: Dict[str, Dict], table: str = '') -> None:
-        """Rebuild every cached column map, and the calling call's table's, from a finished walk.
-
-        Called by ``refresh_schema`` under ``reflect_lock`` with the
-        ``_getDatabaseSchema`` result. A cached table the walk found is rebuilt
-        from it (comment slot empty: the walk collects no comments and the map
-        is read by key); one it did not find is forgotten, which re-arms the
-        lazy reflection for a table that comes back. ``table``, the table the
-        calling call names, is published too when the walk found it, so that
-        call's next insert does not reflect it a second time.
-
-        Args:
-            refreshed: The finished ``_getDatabaseSchema`` walk.
-            table: The calling call's table; empty when it names none.
-        """
-        with self._table_schemas_lock:
-            rebuilt: 'OrderedDict[str, Dict[str, Tuple[str, str]]]' = OrderedDict()
-            names = list(self.table_schemas)
-            if table and table not in names:
-                names.append(table)
-            for name in names:
-                table_info = refreshed.get(name)
-                if table_info:
-                    rebuilt[name] = {column: (col_type, '') for column, col_type in table_info['columns']}
-            while len(rebuilt) > TABLE_SCHEMA_CACHE_MAX:
-                rebuilt.popitem(last=False)
-            self.table_schemas = rebuilt
-
     def _tableExists(self, table: str) -> bool:
         """Return True if the table exists in the connected database."""
         if not self.engine:
@@ -635,10 +573,10 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
             # reason `_getTableSchema` is: this runs outside `reflect_lock`,
             # and the table already exists by the time the loop starts, so a
             # second first-batch can be in `_insertData` right now. Filling
-            # the cached map key by key let it snapshot a truthy but incomplete
+            # `self.schema` key by key let it snapshot a truthy but incomplete
             # map and silently drop the columns not yet added.
             schema = {col.name: (str(col.type), '') for col in columns}
-            self._publishTableSchema(table, schema)
+            self.schema = schema
 
             return True
 
@@ -667,14 +605,14 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
                 comment = column.get('comment', '')
                 schema[col_name] = (str(col_type), comment)
 
-            # Publish in a single assignment. Building into the cached map and
+            # Publish in a single assignment. Building into `self.schema` and
             # filling it column by column made every intermediate state visible:
             # `_insertData` reads this map to decide which columns to bind, so a
             # reader arriving mid-rebuild saw a truthy but incomplete map and
             # silently dropped the columns not yet added. Assigning at the end
             # also means a reflection that fails above leaves the previous map
             # in place instead of a half-built one.
-            self._publishTableSchema(table, schema)
+            self.schema = schema
 
             return [(col_name, str(col_type)) for col_name, (col_type, _comment) in schema.items()]
 
@@ -964,25 +902,43 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
-        """Open the engine pool and reflect the database once for this control.
-
-        Everything built here is keyed by the connection alone (host, user,
-        password, database: env, fixed per control). Nothing a call decides is
-        read: the table, the description, the retry bound and the execute gate
-        are parameters and reach the instance through ``settings``.
-        """
         # One reflection lock per node. Created before anything can reflect, so
         # `refresh_schema` and `_insertData` always find a real lock here.
         self.reflect_lock = threading.Lock()
 
-        # The per-table column maps start empty: a table is reflected on the
-        # first call that names it.
-        self._table_schemas_lock = threading.Lock()
-        self.table_schemas = OrderedDict()
-
         # Resolve connection parameters via the subclass-provided mapping.
-        params = self._connection_params(self.config)
+        raw = self.config
+        params = self._connection_params(raw)
+
+        # Read behavior settings from config before opening the engine so
+        # they're available to the instance as soon as beginGlobal returns.
+        self.max_validation_attempts = max(1, self._max_validation_attempts(raw))
+        self.db_description = (self._db_description(raw) or '').strip()
+
+        # The execute tool is opt-in: callers invoking the 'execute' tool
+        # function bypass the LLM translation + is_sql_safe gate, so the node
+        # owner must explicitly enable the capability. Strings like 'false' /
+        # '0' must not be truthy here, so don't use bool() directly.
+        allow_execute = raw.get('allow_execute', False)
+        if isinstance(allow_execute, str):
+            self.allow_execute = allow_execute.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            self.allow_execute = bool(allow_execute)
+        try:
+            self.max_execute_rows = max(1, int(raw.get('max_execute_rows', DEFAULT_MAX_EXECUTE_ROWS)))
+        except (TypeError, ValueError):
+            self.max_execute_rows = DEFAULT_MAX_EXECUTE_ROWS
+        try:
+            self.tx_max_sessions = max(1, int(raw.get('tx_max_sessions', 20)))
+        except (TypeError, ValueError):
+            self.tx_max_sessions = 20
+        try:
+            self.tx_idle_timeout = max(1.0, float(raw.get('tx_idle_timeout', 300)))
+        except (TypeError, ValueError):
+            self.tx_idle_timeout = 300.0
+
         self.database = params['database']
+        self.table = params['table']
 
         # Build the DSN via the subclass; it handles driver selection and
         # any required URL-encoding.
@@ -992,13 +948,35 @@ class DatabaseGlobalBase(IGlobalBase, ABC):
         # (30 by default; a subclass may override both).
         self.engine = create_engine(db_url, pool_size=self.POOL_SIZE, max_overflow=self.MAX_OVERFLOW)
 
+        from ai.common.database.tx_registry import TransactionRegistry
+
+        self.tx_registry = TransactionRegistry(
+            self.engine,
+            max_sessions=self.tx_max_sessions,
+            idle_timeout=self.tx_idle_timeout,
+            max_rows=self.max_execute_rows,
+        )
+
         # Reflect the full database schema once at startup so LLM prompts have
         # complete context without per-query reflection overhead.
         self.db_schema = self._getDatabaseSchema()
 
+        # Reflect the target table schema; it may not exist yet if this
+        # pipeline is configured to write to a brand-new table.
+        #
+        # `_getTableSchema` publishes `self.schema` itself when the reflection
+        # succeeds, so there is nothing to assign on that branch: rebuilding
+        # the same map from the pairs it returns only blanked the reflected
+        # column comment, and `_insertData`, the sole reader, indexes this map
+        # by key. The missing-table branch is the one case it leaves untouched.
+        if self._getTableSchema(self.table) is None:
+            warning(
+                f'Table "{self.table}" does not exist in database "{self.database}". It will be created automatically when data is received. If you prefer to create it manually, please do so before running the pipeline.'
+            )
+            self.schema = {}
+
     def endGlobal(self) -> None:
-        """Dispose the engine pool and drop the caches built on it."""
-        self.table_schemas = None
-        self.db_schema = None
+        if self.tx_registry:
+            self.tx_registry.close_all()
         if self.engine:
             self.engine.dispose()
