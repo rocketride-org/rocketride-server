@@ -32,7 +32,7 @@
 //    demand (see resolver.ts).
 //
 // Persistence: the list lives in the USER'S SERVER STORE
-// (`@/User/.workspace/rocketride.sql.json`) — a connection describes a database
+// (`@me/.workspace/rocketride.sql.json`) — a connection describes a database
 // reachable through the connected server, so its scope is per-user-per-server,
 // and every host (the shell app, the App Builder preview, the VS Code tool
 // mount) reads the same list. Configs are stored AS-IS (no fake client-side
@@ -101,8 +101,8 @@ export type SavedSqlConnection = PipelineBoundConnection | DirectConnection;
 // =============================================================================
 
 /** The user store's app-data folder (shared with the shell's workspace
- *  files). A scope-less path defaults to the User scope (`@/User/...`);
- *  explicit scopes are `@/User`, `@/Team`, `@/Org` (case-exact). */
+ *  files). A path with no root is the caller's own tree (`@me/...`); the
+ *  other roots are `@<team>`, `=team/<tid>` and `@org` (plan 2.5). */
 const STORE_DIR = '.workspace';
 
 /** The server-store file the list persists in — app-id-named, beside the

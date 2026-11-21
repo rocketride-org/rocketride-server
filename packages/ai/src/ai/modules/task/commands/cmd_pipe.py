@@ -62,7 +62,8 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from croniter import croniter
 
 from ai.account import account
-from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY, listing_of
+from ai.account.audience import PUBLIC_AUDIENCE, team_audience, user_audience
+from ai.account.pipe_deploy import listing_of, pointer_run_owner
 from ai.common.dap import TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -206,7 +207,7 @@ class DeployPipeCommands(_DeployBase):
         # The store takes the app door's gate (plan 10.1): only an approved
         # version where the server reviews; where it has no reviewer (OSS)
         # any version that did not fail. The internal rungs keep their rule.
-        if team_id == PUBLIC_AUDIENCE_KEY:
+        if team_id == PUBLIC_AUDIENCE:
             await self._require_store_publishable(org_id, project_id, version)
 
         # The billing decision happens HERE, at pointer time (absolute):
@@ -223,7 +224,7 @@ class DeployPipeCommands(_DeployBase):
             org_id=org_id,
         )
         await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
-        return self.build_response(request, body=dep)
+        return self.build_response(request, body=self._describe(dep))
 
     # =========================================================================
     # READS
@@ -246,13 +247,14 @@ class DeployPipeCommands(_DeployBase):
             # keep every row; users keep member teams + their own space.
             deployments = await account.deployments_list(org_id, None)
             if not self._is_org_admin():
-                visible = set(self._member_team_ids())
+                visible = {team_audience(team_id) for team_id in self._member_team_ids()}
                 if self._account_info.userId:
-                    visible.add(f'user~{self._account_info.userId}')
+                    visible.add(user_audience(self._account_info.userId))
                 # The store rows are the organization's own publications:
                 # public by definition, so every member sees them
-                visible.add(PUBLIC_AUDIENCE_KEY)
+                visible.add(PUBLIC_AUDIENCE)
                 deployments = [d for d in deployments if d.get('teamId') in visible]
+        deployments = [self._describe(d) for d in deployments]
         # Standard list-API envelope ({rows,total,page,pageSize}): rows are
         # already materialized (bounded per-org), so the shared in-Python
         # convention applies. History, by contrast, pages in the BACKEND
@@ -260,7 +262,7 @@ class DeployPipeCommands(_DeployBase):
         body = paginate_rows(
             deployments,
             args,
-            searchable_keys=('projectId', 'pipelineName', 'teamId'),
+            searchable_keys=('projectId', 'pipelineName', 'teamId', 'handle'),
             default_sort=('updatedAt', 'desc'),
             tiebreak_key='projectId',
         )
@@ -274,7 +276,7 @@ class DeployPipeCommands(_DeployBase):
         dep = await account.deployments_get(self._org_id(), team_id, project_id)
         if dep is None:
             raise ValueError(f'No deployment of {project_id} for team {team_id}')
-        return self.build_response(request, body=dep)
+        return self.build_response(request, body=self._describe(dep))
 
     # =========================================================================
     # STATE / REMOVE / SCHEDULES
@@ -298,7 +300,7 @@ class DeployPipeCommands(_DeployBase):
             org_id=org_id,
         )
         await self._notify_deploy_changed(org_id, team_id, project_id, state)
-        return self.build_response(request, body=dep)
+        return self.build_response(request, body=self._describe(dep))
 
     async def _deploy_disable(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Disable a team deployment — the kill switch: NOTHING runs."""
@@ -354,7 +356,7 @@ class DeployPipeCommands(_DeployBase):
             org_id=org_id,
         )
         await self._notify_deploy_changed(org_id, team_id, project_id, 'schedule')
-        return self.build_response(request, body=dep)
+        return self.build_response(request, body=self._describe(dep))
 
     async def _set_schedule_paused(
         self, request: Dict[str, Any], args: Dict[str, Any], paused: bool, reason: str
@@ -381,7 +383,7 @@ class DeployPipeCommands(_DeployBase):
         await self._notify_deploy_changed(
             org_id, team_id, project_id, 'schedule_pause' if paused else 'schedule_resume'
         )
-        return self.build_response(request, body=dep)
+        return self.build_response(request, body=self._describe(dep))
 
     async def _deploy_source_config(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Set one source's execution settings (trace level + debug output)."""
@@ -421,7 +423,7 @@ class DeployPipeCommands(_DeployBase):
             org_id=org_id,
         )
         await self._notify_deploy_changed(org_id, team_id, project_id, 'source_config')
-        return self.build_response(request, body=dep)
+        return self.build_response(request, body=self._describe(dep))
 
     async def _deploy_schedule_pause(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Pause ONE source's schedule (cron/ttl kept; it just stops firing)."""
@@ -482,21 +484,17 @@ class DeployPipeCommands(_DeployBase):
             # module is a TaskConn mixin — a top-level import would be circular.
             from ..task_server_facade import start_server_task_as_team
 
-            # Owner rung: a 'user~{uid}' slot is a PERSONAL (@me) deployment —
+            # Owner rung: a '=user/<uid>' audience is a PERSONAL (@me) deployment —
             # the run is USER-owned (private storage/logs/visibility). Billing
             # is ABSOLUTE: every publish stamped its billing/secrets team at
             # pointer time, and runs only ever read the stamp — a missing one
             # (stamped team deleted, or a pre-stamp record) refuses loudly
             # instead of resolving anything.
-            billing_team = str(dep.get('billingTeamId') or '')
-            if team_id.startswith('user~'):
-                owner_kind, owner_user = 'user', team_id[len('user~') :]
-            else:
-                owner_kind, owner_user = 'team', ''
-                # Team records from before the stamp bill their own audience;
-                # the store slot is no team, so it only ever bills its stamp.
-                if team_id != PUBLIC_AUDIENCE_KEY:
-                    billing_team = billing_team or team_id
+            # (pointer_run_owner decodes the audience: a team pointer from
+            # before the stamp bills its own team; the store is no team, so
+            # it only ever bills its stamp.)
+            owner_kind, owner_user, default_billing, forced_rung = pointer_run_owner(team_id)
+            billing_team = str(dep.get('billingTeamId') or '') or default_billing
             if not billing_team:
                 raise ValueError(
                     'This deployment has no billing team — re-publish it after setting your development team'
@@ -522,7 +520,7 @@ class DeployPipeCommands(_DeployBase):
                 owner_user_id=owner_user,
                 # A store pointer's run sits on the public rung (team-owned by
                 # its billing team); every other slot derives its rung
-                rung='public' if team_id == PUBLIC_AUDIENCE_KEY else '',
+                rung=forced_rung,
                 listing=listing,
             )
         except BaseException:
@@ -608,7 +606,9 @@ class DeployPipeCommands(_DeployBase):
 
         Arguments: ``address`` (``developerId.pipelineId[.source]``; the
         source segment is accepted and ignored — the map covers the whole
-        pipe), optional ``team`` (the per-call ``@team`` override).
+        pipe), optional ``team`` (the per-call ``@team`` override: one of the
+        caller's teams as ``@<team>`` by name ignoring case, ``=team/<tid>``
+        or a team id, read the way the deploy verbs read ``teamId``).
 
         Body: ``{address, rung, version, teamId?, interfaces}`` where
         ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —
@@ -632,7 +632,7 @@ class DeployPipeCommands(_DeployBase):
         account_info = self._account_info
         if account_info is None:
             raise PermissionError('Not authenticated')
-        team = args.get('team') or None
+        team = self._team_override_of(args.get('team'))
 
         # Step 2: THE decision every name call makes (TaskServer.resolve_candidates,
         # plan 3.2): what answers this address for this caller, in the ladder's
@@ -642,7 +642,7 @@ class DeployPipeCommands(_DeployBase):
         # control's spec stays readable) or a publication's pin (the registry
         # artifact). Nothing has to be running on any rung.
         parsed, _rungs, candidates = await self._server.resolve_candidates(
-            address, account_info, 'task.data', team=str(team) if team else None
+            address, account_info, 'task.data', team=team
         )
         pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
         if not candidates:
@@ -660,7 +660,7 @@ class DeployPipeCommands(_DeployBase):
         if pin.rung == 'team':
             # A team publication is read with the same permission a data
             # request on it needs; @me is the caller's own, @public is anyone's
-            self.verify_team_permission(deployment.team_id, 'task.data')
+            self.verify_team_permission(deployment.team, 'task.data')
 
         # Step 3: the pinned artifact, projected through the catalog
         pipeline = await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version)
@@ -672,8 +672,34 @@ class DeployPipeCommands(_DeployBase):
             'interfaces': interfaces,
         }
         if pin.rung == 'team':
-            body['teamId'] = deployment.team_id
+            body['teamId'] = deployment.team
         return self.build_response(request, body=body)
+
+    def _team_override_of(self, value: Any) -> Optional[str]:
+        """
+        The team id a per-call ``team`` override names, or None when it is omitted.
+
+        Read through ``_audience_arg``, the deploy verbs' one reader of a
+        typed team, so ``@<team>`` resolves by name ignoring case against the
+        caller's own teams, ``=team/<tid>`` and a bare id pass as that id.
+        Membership is ``teams_to_probe``'s check, made by the resolver.
+
+        Args:
+            value: The ``team`` argument as the client sent it.
+
+        Returns:
+            The team id, or None.
+
+        Raises:
+            ValueError: A form that names no team (``@me``, ``@public``, ``@org``).
+            PermissionError: A team name that names none of the caller's teams.
+        """
+        if not value:
+            return None
+        audience = self._audience_arg({'teamId': str(value)})
+        if audience.kind != 'team':
+            raise ValueError(f'team takes one of your teams (@<team>, =team/<tid> or a team id), not {value!r}')
+        return audience.id
 
     async def _interfaces_of_control(self, control: Any) -> Dict[str, Any]:
         """

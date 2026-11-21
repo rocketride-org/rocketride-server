@@ -109,14 +109,14 @@ let activeScope: WorkspaceScope = { kind: 'user' };
 const SAFE_TEAM_ID = /^[A-Za-z0-9][A-Za-z0-9_.-]*$/;
 
 /**
- * The physical store-path prefix of the active scope: the '@/Team/=<id>/'
- * scope spelling (resolved and authorized server-side by team membership),
- * or '' for the caller's own tree.
+ * The store-path prefix of the active scope: the team's id root
+ * '=team/<tid>/' (plan 2.5; resolved and authorized server-side by team
+ * membership), or '' for the caller's own tree.
  *
  * @returns The prefix every physical path translation applies.
  */
 function scopePrefix(): string {
-	return activeScope.kind === 'team' ? `@/Team/=${activeScope.teamId}/` : '';
+	return activeScope.kind === 'team' ? `=team/${activeScope.teamId}/` : '';
 }
 
 
@@ -247,7 +247,9 @@ export function storePathToVirtual(storePath: string): string | null {
 	if (prefix) {
 		if (!p.startsWith(prefix)) return null;
 		p = p.slice(prefix.length);
-	} else if (p.startsWith('@/')) {
+	} else if (p.startsWith('@') || p.startsWith('=')) {
+		// Any root ('@me', '@<team>', '=team/<tid>', ...) is another scope:
+		// under the own tree no entry may start with either sigil
 		return null;
 	}
 	const appsRoot = `${PROJECTS_DIR}/${APPDEV_DIR}`;

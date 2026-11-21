@@ -294,7 +294,7 @@ async def test_the_publishers_own_org_is_never_asked(catalog, engines, store):
 async def test_the_callers_own_rungs_are_never_asked(catalog, engines, store):
     """@me (the caller's own deployment) and @spec (their own Play) of a paid pipe."""
     ts = _server()
-    store.deploy('user~user-a', billing='team-1')
+    store.deploy('=user/user-a', billing='team-1')
     store.list('subscription')
 
     mine = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
@@ -328,7 +328,7 @@ async def test_a_scoped_key_is_refused_on_a_paid_publication_even_with_a_subscri
 async def test_the_owners_scoped_key_is_refused_on_their_own_paid_publication(catalog, engines, store):
     """Any publication whose listing is not free: the owner's webhook key included (plan 0 S10)."""
     ts = _server()
-    store.deploy('user~user-a', billing='team-1')
+    store.deploy('=user/user-a', billing='team-1')
     store.list('paywall')
 
     with pytest.raises(PermissionError) as refused:
@@ -423,7 +423,7 @@ async def test_a_binding_by_control_id_inside_the_window_asks_nothing(catalog, e
 async def test_a_scoped_key_binding_by_control_id_is_refused_on_a_paid_control(catalog, engines, store):
     """The scoped-key refusal stands on the control too, not only on the resolver."""
     control = TaskControl(address=ADDRESS, orgId='org-2', rung='public')
-    control.deployment = DeploymentRef(org_id='org-1', team_id='~public', project_id=PIPE)
+    control.deployment = DeploymentRef(org_id='org-1', team_id='@public', project_id=PIPE)
     control.listing = Listing(mode='subscription')
 
     with pytest.raises(PermissionError) as refused:

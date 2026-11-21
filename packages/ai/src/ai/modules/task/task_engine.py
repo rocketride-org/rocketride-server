@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 Task: Pipeline Task Execution and Lifecycle Management System.
 
@@ -46,7 +68,6 @@ from typing import TYPE_CHECKING, Awaitable, Callable, Deque, Dict, Any, List, M
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_fixed
 
 from rocketlib import debug, warning, args as startup_args
-from rocketlib.config import MULTITENANT_BIT
 from hosting import HOSTED_FLAG, SHARED_HOST_FLAG
 from ai.constants import (
     CONST_DEFAULT_MAX_THREADS,
@@ -69,7 +90,7 @@ from ai.constants import (
 from ai.account.base import OutOfCreditsError, SubscriptionRequiredError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
-from ai.common.node_config import node_schema, resolve_node_config
+from ai.common.node_config import resolve_node_config
 from ai.common.rocketride_db import DB_PROVIDERS, db_target, dsn_key, exposes_public_endpoint
 from ai.modules.task.pipeflow import apply_pipeflow_event
 from ai.modules.task.run_log import RunLogWriter
@@ -89,7 +110,7 @@ from rocketride import (
     EVENT_TYPE,
 )
 from .dbg_stdio import DbgStdio
-from .engine_key import CONST_CATALOG_NODE_PREFIX, IndexMap, engine_content, index_map_of, pipeline_stack, stack_order
+from .engine_key import IndexMap, index_map_of, pipeline_stack, shape_spec, stack_order
 from .pipeline import references_env, resolve_pipeline_env, substituted_env
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .task_conn import TaskConn
@@ -378,6 +399,18 @@ CONST_MCP_CLIENT_NODE_PATH = 'nodes.tool_mcp_client'
 CONST_HOSTED_CHILD_FLAG = HOSTED_FLAG
 CONST_SHARED_HOST_CHILD_FLAG = SHARED_HOST_FLAG
 
+# What the credit gate answers a binding that names no caller on a shared
+# engine: the engine has no owner, so nobody would pay for the work
+CONST_NO_PAYING_UNIT = 'This pipe was opened for no caller; a shared engine opens pipes for its callers only'
+
+# The label a shared engine carries where a private one carries its starting
+# control's address (the DAP name, the task file's name, its metrics): a
+# shared engine names no user and no pipeline, only its shape
+CONST_SHARED_ENGINE_LABEL = 'engine'
+
+# How many characters of its key a shared engine's label carries
+CONST_SHARED_ENGINE_LABEL_HASH = 16
+
 
 def _service_capabilities(service: Any) -> List[str]:
     """Capability names of a service definition, lower-cased."""
@@ -472,7 +505,8 @@ async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Opti
     The gate names the binding's CALLER (plan 8.3) when the data path opened
     it: that caller's org is the paying unit, whoever started the engine. A
     binding the engine opens itself (a scan source, a listener) names no
-    caller and is the engine owner's.
+    caller and is the engine owner's; a SHARED engine has no owner, so a
+    binding without a caller is refused there (nobody would pay for it).
 
     The same answer carries the store gate (plan 8.4): a binding whose
     control serves a subscription-priced publication is refused when the
@@ -485,6 +519,8 @@ async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Opti
     from . import store_gate
 
     caller = (arguments or {}).get('caller') or {}
+    if task.shared and not caller:
+        return ChannelReply(body={'refusal': CONST_NO_PAYING_UNIT})
     org_id = str(caller.get('orgId') or '') or task.org_id
     # A binding with no caller (a scan, a listener) is the owner control's
     # where one control holds a private engine (binding_control's fallback),
@@ -512,24 +548,26 @@ register_channel_command('spend.check', _check_spend)
 # ==== Engine identity: the catalog facts behind the content key =============
 
 
-def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, Any], bool]:
+def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, Any], Tuple[str, ...]]:
     """
     What the node catalog says about one component, for the pure engine key.
 
-    The config enters the key RESOLVED (defaults applied, the active branch
-    only), so a spec that spells out a default and one that leaves it out
-    hash the same. ``${ROCKETRIDE_*}`` placeholders stay unexpanded: the key
-    never depends on whose environment would fill them. The key itself is
-    computed by ``engine_key.engine_content``; this is its one impure input
-    (plan 7.2, ALB seam 1).
+    The config is RESOLVED (defaults applied, the active branch only), so a
+    spec that spells out a default and one that leaves it out are one
+    control. ``${ROCKETRIDE_*}`` placeholders stay unexpanded: the identity
+    never depends on whose environment would fill them. The ``classType``
+    words say what kind of node it is; the key reads them for the entry
+    source only (a door shares by shape, a self-driven source does not;
+    ``EngineContent.self_driven``). The key itself is computed by
+    ``engine_key.engine_content``; this is its one impure input (plan 7.2,
+    ALB seam 1).
 
     Args:
         provider: The component's provider.
         stored: The component's stored config.
 
     Returns:
-        The resolved config and whether the component may run on a cross-user
-        engine (certified ``multitenant`` and from the catalog).
+        The resolved config and the service's ``classType`` words.
 
     Raises:
         Exception: The service is unknown or the config does not fit its
@@ -540,32 +578,146 @@ def component_facts(provider: str, stored: Dict[str, Any]) -> Tuple[Dict[str, An
     from rocketlib import getServiceDefinition
 
     config = resolve_node_config(provider, stored).to_dict()
-    schema = node_schema(provider) or {}
     service = getServiceDefinition(provider) or {}
-    certified = bool(int(schema.get('capabilities') or 0) & MULTITENANT_BIT)
-    catalog = str(service.get('path') or '').startswith(CONST_CATALOG_NODE_PREFIX)
-    return config, certified and catalog
+    class_types = service.get('classType') or ()
+    if isinstance(class_types, str):
+        class_types = (class_types,)
+    return config, tuple(str(word) for word in class_types)
 
 
-def engine_sharing(pipeline: Dict[str, Any], source: Optional[str] = None) -> Optional[str]:
+# ==== RocketRide cloud databases: who may open which =========================
+
+
+def db_access(pipeline: Dict[str, Any]) -> Tuple[List[Tuple[str, str]], bool]:
     """
-    How an engine for ``pipeline`` is shared (plan 4.4), for the doors that show it before a publish.
+    Every distinct ``(scope, target)`` the pipeline's DB nodes ask for, and whether it exposes a public endpoint.
+
+    Pass the resolved pipeline, the one the task runs: ``${...}`` expansion
+    rewrites every string, a node's provider included, so the raw pipeline
+    can name other nodes than the ones that start.
+
+    Targets are read through ``resolve_node_config``, the resolver the node
+    itself uses, so the server authorizes exactly the key the node will look
+    up. A malformed scope or target fails the start, and so does a config
+    that does not fit the node's schema (``ConfigError`` is a ``ValueError``).
 
     Args:
-        pipeline: The pipeline spec (its ``source`` key is the default entry).
-        source: The entry component, or None for the spec's own.
+        pipeline: The resolved pipeline.
 
     Returns:
-        ``'users'`` when the engine may be held by controls of different users
-        (a request/response source and every node certified ``multitenant``),
-        ``'owner'`` when each user gets an engine of their own, None when the
-        spec cannot be keyed at all (an unknown node; the start refuses it).
+        The targets (empty without DB nodes) and the public-endpoint flag.
     """
-    try:
-        content = engine_content(pipeline, source or pipeline.get('source'), component_facts)
-    except Exception:
-        return None
-    return 'users' if content.shareable else 'owner'
+    components = pipeline.get('components') or []
+    targets: List[Tuple[str, str]] = []
+    for component in components:
+        if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
+            continue
+        try:
+            pair = db_target(resolve_node_config(component['provider'], component.get('config') or {}))
+        except ValueError as e:
+            raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
+        if pair not in targets:
+            targets.append(pair)
+    return targets, exposes_public_endpoint(components)
+
+
+def db_identity(
+    *,
+    org_id: str,
+    user_id: str,
+    team_id: str,
+    run_kind: str,
+    owner_kind: str,
+    public_endpoint: bool,
+    task_id: str,
+) -> Dict[str, Any]:
+    """
+    A run's identity for ``authorize_db_target`` (SDD 4.4): an engine's at its start, a control's when it attaches.
+
+    Args:
+        org_id: The run's org.
+        user_id: The run's user ('' for a team-owned run).
+        team_id: The run's team.
+        run_kind: ``'dev'`` or ``'deploy'``.
+        owner_kind: ``'user'`` or ``'team'``.
+        public_endpoint: Whether the pipeline exposes a public endpoint.
+        task_id: The run's display id, for the audit trail.
+
+    Returns:
+        The identity dict the account layer reads.
+    """
+    return {
+        'org_id': org_id or '',
+        'user_id': user_id or '',
+        'team_id': team_id or '',
+        'run_kind': run_kind,
+        'owner_kind': owner_kind,
+        'public_endpoint': public_endpoint,
+        'path': 'pipeline',
+        'task_id': task_id,
+    }
+
+
+def db_owner(identity: Mapping[str, Any], scope: str, target: str) -> str:
+    """
+    The team or user id a ``(scope, target)`` names for the run ``identity``.
+
+    Args:
+        identity: ``db_identity`` of the run.
+        scope: ``'org'``, ``'team'`` or ``'user'``.
+        target: The node's target, or '' for the run's own.
+
+    Returns:
+        The target, or the run's own (team scope: the run's team; user scope:
+        the run's user, which a team deploy doesn't have). '' for the org scope.
+    """
+    if scope == 'org':
+        return ''
+    if target:
+        return target
+    return str((identity.get('team_id') if scope == 'team' else identity.get('user_id')) or '')
+
+
+async def authorize_db_targets(
+    identity: Mapping[str, Any], targets: List[Tuple[str, str]]
+) -> List[Tuple[str, str, str]]:
+    """
+    Authorize every database a pipeline's DB nodes use, as the run ``identity`` (SDD 4.4).
+
+    Runs before anything is provisioned, for the engine at its start and for
+    every control that attaches to a running engine. The account layer reads
+    membership live on every call; nothing is cached here.
+
+    Args:
+        identity: ``db_identity`` of the run asking.
+        targets: From ``db_access`` on the resolved pipeline.
+
+    Returns:
+        ``(scope, target, owner)`` per distinct node ``(scope, target)``,
+        where ``owner`` is the team or user id the decision approved
+        (``decision.owner_id``), never re-derived here.
+
+    Raises:
+        PermissionError: a database was denied; carries the reason.
+    """
+    from ai.account import account
+
+    requested = [(scope, target, db_owner(identity, scope, target)) for scope, target in targets]
+    approved: Dict[Tuple[str, str], str] = {}
+    for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
+        request: Dict[str, Any] = {'scope': scope}
+        if scope == 'team':
+            request['team_id'] = owner
+        elif scope == 'user':
+            request['user_id'] = owner
+        decision = await account.authorize_db_target(dict(identity), request)
+        if not decision.allowed:
+            named = f' {owner!r}' if owner else ''
+            raise PermissionError(
+                f'this run may not use the RocketRide cloud {scope} database{named}: {decision.reason}'
+            )
+        approved[(scope, owner)] = decision.owner_id
+    return [(scope, target, approved[(scope, owner)]) for scope, target, owner in requested]
 
 
 # ==== Status notes ============================================================
@@ -807,29 +959,34 @@ class TaskEngine(DAPBase):
         """
         Initialize the engine with configuration and resource setup.
 
-        The identity arguments (id, address, client/team/org, run_kind,
-        owner_kind, trigger) describe the control that STARTS the engine. The
-        run-log continuum and the event identity stamps still follow it until
-        events route per binding (plan 7.5, C.9); per-control state (ttl,
-        trace level, parameters, billing) lives on the holding controls.
+        On a PRIVATE engine (key ``hash:ownerId``) the identity arguments
+        (id, address, client/team/org, run_kind, owner_kind, trigger) describe
+        the control that STARTS it, which is its owner's. A SHARED engine (the
+        bare shape key of a published rung, plan 7.2) is nobody's: the server
+        hands it no user, team, org, address or project, a spec stripped to
+        its shape, no environment and no launch arguments
+        (``TaskServer._new_engine``). Per-control state (ttl, trace level,
+        parameters, billing, the run log) lives on the holding controls.
 
         Args:
             server: Central orchestration server
-            engine_key: The engine's content key (plan 7.2): the hash for a
-                cross-user engine, ``hash:ownerId`` for a private one. It is
+            engine_key: The engine's key (plan 7.2): the bare shape hash for
+                a shared engine, ``hash:ownerId`` for a private one. It is
                 the task file's ``taskId``.
             address: The starting control's address ``developerId.pipelineId.source``
-            pipeline: Complete pipeline configuration (placeholders unexpanded)
+                ('' on a shared engine)
+            pipeline: The pipeline spec (placeholders unexpanded); the shape
+                alone on a shared engine
             launch_args: Launch configuration parameters (``name``, ``args``)
             launch_type: Task creation mode (launch/attach)
-            shared: True for a cross-user engine: it has no single owner, so
+            shared: True for a shared engine: it has no single owner, so
                 unclaimed work on it reaches no one's state or files (S13)
             threads: The engine's thread count (policy outside @spec)
             trace_level: The engine's DEFAULT trace level for work outside any
-                binding (``'none'`` on a cross-user engine, the starting
+                binding (``'none'`` on a shared engine, the starting
                 control's level on a private one; plan 7.4)
             client_id: Account identifier for store access scoping (empty on a
-                cross-user engine)
+                shared engine)
             team_id: Owning team id (rides the task file as trusted identity)
             org_id: Owning org id (rides the task file as trusted identity)
             env: Fixed values for ${...} placeholders, used when no env_source is given
@@ -843,6 +1000,24 @@ class TaskEngine(DAPBase):
                 run-begin marker
             **kwargs: Additional DAP configuration (forwarded to DAPBase)
         """
+        # A shared engine is nobody's (plan 7.2 "Shared-engine identity"): it
+        # is built here, at the one construction choke point, with no user,
+        # team, org, address or project, the spec's shape alone, no
+        # environment, no trace by default and no launch arguments (threads
+        # and args are the server's on a published rung). Whatever the
+        # starting control would have lent it is dropped, so nothing of the
+        # first starter can reach another holder through the engine.
+        if shared:
+            id = f'{CONST_SHARED_ENGINE_LABEL}-{engine_key[:CONST_SHARED_ENGINE_LABEL_HASH]}'
+            project_id = address = client_id = team_id = org_id = ''
+            pipeline = shape_spec(pipeline or {})
+            launch_args = {}
+            trace_level = 'none'
+            env = None
+            env_source = None
+            owner_kind = ''
+            trigger = ''
+
         # Store authentication
         self.id = id
         self.project_id = project_id
@@ -870,6 +1045,12 @@ class TaskEngine(DAPBase):
 
         # Why the engine is unavailable to its holders (an ops stop), or None
         self.unavailable_reason: Optional[str] = None
+
+        # The RocketRide cloud databases this launch's process was handed, as
+        # dsn_key -> the owner the account approved (empty without DB nodes).
+        # The DSNs ride the subprocess environment, once per engine, so a
+        # control that attaches later must ask for exactly these
+        self.db_approved: Dict[str, str] = {}
 
         # Idle management. Each CONTROL ages on its own ttl (plan 7.1); the
         # ENGINE ages on its own inactivity timer (CONST_ENGINE_IDLE_TTL,
@@ -1073,11 +1254,11 @@ class TaskEngine(DAPBase):
         The engine's DEFAULT environment: the ``ROCKETRIDE_*`` values ``pipeline`` references, for a private engine.
 
         A ``(hash, owner)`` engine has one owner, so its bindings without a
-        caller (a scan source's own getPipe) and its uncertified nodes'
-        global config read the owner's values (plan 6.2). A cross-user engine
-        has no default: every value rides the caller's ``_caller.env`` and a
-        certified node refuses env-valued keys at global scope. Loaded at
-        each start, never retained on the engine.
+        caller (a scan source's own getPipe) read the owner's values (plan
+        6.2). A shared engine has no default: it starts with no user
+        environment, and every value rides its control's open in
+        ``_caller.env`` (plan 7.2). Loaded at each start, never retained on
+        the engine.
 
         Args:
             pipeline: The spec about to start.
@@ -1124,96 +1305,30 @@ class TaskEngine(DAPBase):
         'Contact the server operator to restore the database broker configuration and retry the pipeline'
     )
 
-    def _db_access(self, pipeline: Dict[str, Any]) -> Tuple[List[Tuple[str, str]], bool]:
-        """Every distinct ``(scope, target)`` the pipeline's DB nodes ask for
-        (empty without DB nodes), and whether it exposes a public endpoint.
-
-        Pass the resolved pipeline, the one the task runs: ``${...}``
-        expansion rewrites every string, a node's provider included, so the
-        raw pipeline can name other nodes than the ones that start.
-
-        Targets are read through ``resolve_node_config``, the resolver the
-        node itself uses, so the engine authorizes exactly the key the node
-        will look up. A malformed scope or target fails the task start, and
-        so does a config that does not fit the node's schema (``ConfigError``
-        is a ``ValueError``).
-        """
-        components = pipeline.get('components') or []
-        targets: List[Tuple[str, str]] = []
-        for component in components:
-            if not isinstance(component, dict) or component.get('provider') not in DB_PROVIDERS:
-                continue
-            try:
-                pair = db_target(resolve_node_config(component['provider'], component.get('config') or {}))
-            except ValueError as e:
-                raise ValueError(f'{component.get("id") or component["provider"]}: {e}') from e
-            if pair not in targets:
-                targets.append(pair)
-        return targets, exposes_public_endpoint(components)
-
-    def _db_owner(self, scope: str, target: str) -> str:
-        """The team or user id a ``(scope, target)`` names: the target, or
-        the run's own (team scope: the run's team; user scope: the run's
-        user, which a team deploy doesn't have). '' for the org scope.
-        """
-        if scope == 'org':
-            return ''
-        if target:
-            return target
-        return (self.team_id if scope == 'team' else self.client_id) or ''
-
     def _db_identity(self, public_endpoint: bool) -> Dict[str, Any]:
         """The run's identity for ``authorize_db_target`` (SDD 4.4)."""
-        return {
-            'org_id': self.org_id or '',
-            'user_id': self.client_id or '',
-            'team_id': self.team_id or '',
-            'run_kind': self._run_kind,
-            'owner_kind': self._owner_kind,
-            'public_endpoint': public_endpoint,
-            'path': 'pipeline',
-            'task_id': self.id,
-        }
+        return db_identity(
+            org_id=self.org_id,
+            user_id=self.client_id,
+            team_id=self.team_id,
+            run_kind=self._run_kind,
+            owner_kind=self._owner_kind,
+            public_endpoint=public_endpoint,
+            task_id=self.id,
+        )
 
     async def _authorize_db_targets(
         self, targets: List[Tuple[str, str]], public_endpoint: bool
     ) -> List[Tuple[str, str, str]]:
-        """Authorize every database the pipeline's DB nodes use (SDD 4.4).
+        """Authorize every database the pipeline's DB nodes use, as this engine's run (``authorize_db_targets``).
 
-        Runs before anything is provisioned. The account layer reads
-        membership live on every call; nothing is cached here.
-
-        Args:
-            targets, public_endpoint: from ``_db_access`` on the resolved
-                pipeline.
-
-        Returns:
-            ``(scope, target, owner)`` per distinct node ``(scope, target)``,
-            where ``owner`` is the team or user id the decision approved
-            (``decision.owner_id``), never re-derived here.
-
-        Raises:
-            PermissionError: a database was denied; carries the reason.
+        What was approved is kept as ``db_approved`` (``dsn_key`` -> owner):
+        the databases this engine's process was handed, which a control that
+        attaches later must match (``TaskServer._require_engine_db``).
         """
-        from ai.account import account
-
-        requested = [(scope, target, self._db_owner(scope, target)) for scope, target in targets]
-        identity = self._db_identity(public_endpoint)
-        approved: Dict[Tuple[str, str], str] = {}
-        for scope, owner in dict.fromkeys((scope, owner) for scope, _, owner in requested):
-            request: Dict[str, Any] = {'scope': scope}
-            if scope == 'team':
-                request['team_id'] = owner
-            elif scope == 'user':
-                request['user_id'] = owner
-            decision = await account.authorize_db_target(identity, request)
-            if not decision.allowed:
-                named = f' {owner!r}' if owner else ''
-                raise PermissionError(
-                    f'this run may not use the RocketRide cloud {scope} database{named}: {decision.reason}'
-                )
-            approved[(scope, owner)] = decision.owner_id
-        return [(scope, target, approved[(scope, owner)]) for scope, target, owner in requested]
+        wanted = await authorize_db_targets(self._db_identity(public_endpoint), targets)
+        self.db_approved = {dsn_key(scope, target): owner for scope, target, owner in wanted}
+        return wanted
 
     async def _resolve_db_dsns(self, wanted: List[Tuple[str, str, str]]) -> Dict[str, str]:
         """Resolve each authorized database once and key it for the nodes.
@@ -1251,7 +1366,7 @@ class TaskEngine(DAPBase):
     async def _build_subprocess_env(self, db_access: Tuple[List[Tuple[str, str]], bool]) -> Dict[str, str]:
         """Build the environment for the task subprocess.
 
-        ``db_access`` is ``_db_access`` of the resolved pipeline: the
+        ``db_access`` is ``db_access`` of the resolved pipeline: the
         databases to authorize and resolve, and the public-endpoint flag.
 
         The child never gets a copy of the engine's environment: it runs user
@@ -1277,6 +1392,11 @@ class TaskEngine(DAPBase):
         through the environment (the ROCKETRIDE_* env namespace is
         caller-influenced by design): it rides each binding's server-set
         caller context, and what persists is stamped by the server (plan 5.7).
+
+        A SHARED engine starts under the platform identity (plan 7.2): its
+        child gets this baseline and nothing of a user's. Its task file
+        carries no environment, and it never has DB nodes to authorize: a
+        shape with one is owner-qualified (``TaskServer._engine_shape``).
         """
         subprocess_env = filter_subprocess_env(os.environ)
 
@@ -1291,7 +1411,7 @@ class TaskEngine(DAPBase):
         # the DSNs to the node subprocess as a map. Scoped to pipelines that
         # actually contain one of the DB nodes so unrelated tasks never
         # trigger provisioning. A denial fails the task start (a malformed
-        # scope already did, in _db_access). A resolution failure is
+        # scope already did, in db_access). A resolution failure is
         # non-fatal here: no DSN is delivered and every DB node reports the
         # reason passed down.
         targets, public_endpoint = db_access
@@ -1374,7 +1494,10 @@ class TaskEngine(DAPBase):
         bakes nothing per control at launch. Each control's resolved config
         rides its first open as ``_caller.config`` by stack index (the
         component order written here), from which the engine builds that
-        control's IGlobal set (plan 5.3).
+        control's IGlobal set (plan 5.3). A shared engine's file is its shape
+        and nothing else (plan 7.2): the spec it was built with is already
+        stripped (``engine_key.shape_spec``), so no project, name, parameters
+        map, environment or author text of whoever started it is written.
 
         Args:
             pipeline: The pipeline dict as the engine runs it: ``${ROCKETRIDE_*}``
@@ -1393,8 +1516,7 @@ class TaskEngine(DAPBase):
         # The engine's canonical stack of this spec (C.23): the order the
         # components are written in, so position i in the task file is stack
         # index i, the index the engine's traces and every control's open
-        # speak. Its shape hash is logged beside the key it does not replace
-        # yet (C.25 keys engines by it)
+        # speak. Its shape hash is what the engine key is built on (C.25)
         walked_from = pipeline.get('source') or self.source
         stack = pipeline_stack(pipeline, walked_from)
         self._index_cache = index_map_of(pipeline, walked_from, stack)
@@ -1426,9 +1548,9 @@ class TaskEngine(DAPBase):
             'threadCount': self._threads,
             # The engine's DEFAULT environment (plan 6.2): a private engine's
             # owner values for the names the spec references; empty on a
-            # shared engine. Read by bindings without a caller and by an
-            # uncertified node's global config; never part of the engine key.
-            'env': dict(env or {}),
+            # shared engine, whose every value rides its control's open. Read
+            # by bindings without a caller; never part of the engine key.
+            'env': {} if self.shared else dict(env or {}),
             # The engine DEFAULT level, for work outside any binding; the
             # per-binding level rides getPipe() (plan 7.4)
             'pipelineTraceLevel': self._pipelineTraceLevel or None,
@@ -2526,6 +2648,9 @@ class TaskEngine(DAPBase):
                 if event_name == 'apaevt_task' and 'beginSeq' in copy and writer is not None:
                     copy['beginSeq'] = writer.chapter_begin_seq
             event = {**message, 'body': copy}
+            # A shared engine names nobody: the copy names its own control
+            if self.shared:
+                self._name_control(key, event)
             if writer is not None:
                 try:
                     writer.append(event)
@@ -2559,6 +2684,39 @@ class TaskEngine(DAPBase):
             body['teamId'] = control.teamId
         if control.userId:
             body['userId'] = control.userId
+        # The publication's audience (plan 2.5): what a deployment row's
+        # teamId carries, so a client matches its row's events without
+        # parsing either
+        if control.audience:
+            body['audience'] = control.audience
+
+    def _name_control(self, key: str, event: Dict[str, Any]) -> None:
+        """
+        Name the receiving control on its copy of a SHARED engine's event.
+
+        A private engine's events carry its starting control's address as
+        their id and its task name in lifecycle bodies; a shared engine has
+        neither (its id is a label of its key), so each holder's copy carries
+        that holder's own address, project and pipeline name, and never a
+        value another holder supplied.
+
+        Args:
+            key: The receiving control's registry key.
+            event: The control's copy of the event, updated in place.
+        """
+        try:
+            control = self._server.control_by_key(key)
+        except Exception:
+            return
+        # The DAP builder carries the correlation id in the body as __id
+        body = event.get('body')
+        if isinstance(body, dict):
+            if '__id' in body:
+                body['__id'] = control.id
+            if 'projectId' in body:
+                body['projectId'] = control.project_id
+            if 'name' in body:
+                body['name'] = control.display_name
 
     def _author_flow(self, key: str, body: Dict[str, Any]) -> None:
         """
@@ -2772,8 +2930,13 @@ class TaskEngine(DAPBase):
             await writer.open(
                 trigger=control.trigger or self._run_trigger,
                 user=control.userId,
+                # A private engine records the spec it started with; a shared
+                # one holds a shape only, so the continuum records its own
+                # control's spec
                 pipeline_hash=hashlib.sha256(
-                    json.dumps(self._pipeline, sort_keys=True, default=str).encode('utf-8')
+                    json.dumps(
+                        (control.pipeline or {}) if self.shared else self._pipeline, sort_keys=True, default=str
+                    ).encode('utf-8')
                 ).hexdigest()[:16],
                 # The control's own trace level is what its continuum records
                 trace_level=control.trace_level or self._pipelineTraceLevel,
@@ -3372,6 +3535,30 @@ class TaskEngine(DAPBase):
         self._status_trace = []
         self.info = {}
 
+    def _metrics_identity(self) -> Dict[str, Any]:
+        """
+        Who the engine's own usage is reported for: the ``TaskMetrics`` identity arguments.
+
+        A private engine's remainder (what it used beyond what its callers
+        were attributed) is its owner's: the starting control's user, team
+        and org. A SHARED engine has no owner: it reports no identity and
+        writes no remainder debit; its callers' cost rides the per-request
+        usage rows alone (plan 8.3; the remainder is plan 15 item 21, open).
+
+        Returns:
+            The keyword arguments naming the engine to its metrics.
+        """
+        return {
+            'task_id': self.id,
+            'client_id': self.client_id,
+            'user_id': self.client_id,
+            'team_id': self.team_id,
+            'org_id': self.org_id,
+            'pipeline_name': self._task_name or '',
+            'source_name': self._status.name or self.source or '',
+            'debit_remainder': not self.shared,
+        }
+
     async def start_task(self) -> None:
         """
         Launch subprocess and initialize communication interfaces.
@@ -3406,6 +3593,7 @@ class TaskEngine(DAPBase):
             self._exit_event_seen = False
             self._stop_reason = None
             self.dormant_reason = None
+            self.db_approved = {}
 
             # Every start is a new launch: a new engineId, so the trace ids
             # of a dormant restart never alias the previous launch's (plan 7.4)
@@ -3436,7 +3624,7 @@ class TaskEngine(DAPBase):
             # The cloud databases to authorize and the public-endpoint flag
             # come from what runs, not self._pipeline: ${...} expansion can
             # rewrite any string, a node's provider included.
-            db_access = self._db_access(resolved)
+            access = db_access(resolved)
 
             # What the engine RUNS keeps its placeholders (plan 6.2): each
             # caller's values are applied at read from _caller.env, the
@@ -3537,7 +3725,7 @@ class TaskEngine(DAPBase):
             # it rides each binding's server-set caller context.
             # _build_subprocess_env additionally scrubs the RocketRide DB
             # broker credentials and injects the resolved per-tenant DSN.
-            subprocess_env = await self._build_subprocess_env(db_access)
+            subprocess_env = await self._build_subprocess_env(access)
 
             # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
@@ -3583,22 +3771,16 @@ class TaskEngine(DAPBase):
 
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
-                # Fresh metrics per engine start. The engine-level billing
-                # identity is the starting control's; the per-trace
-                # accumulators (TaskMetrics.traces) attribute each request tree
-                # to its own control once metering fills them (plan 8.2, C.13).
+                # Fresh metrics per engine start. The per-trace accumulators
+                # (TaskMetrics.traces) attribute each request tree to its own
+                # control (plan 8.2, C.13); the engine-level identity is the
+                # private engine's owner, and nobody on a shared engine
                 self._task_metrics = TaskMetrics(
                     pid=self._engine_process.pid,
                     task_status=self._status,
-                    task_id=self.id,
-                    client_id=self.client_id,
-                    user_id=self.client_id,
-                    team_id=self.team_id,
-                    org_id=self.org_id,
-                    pipeline_name=self._task_name or '',
-                    source_name=self._status.name or self.source or '',
                     on_update_callback=self._on_metrics_updated,
                     attribute=self._attribute_trace,
+                    **self._metrics_identity(),
                 )
                 self._task_metrics.start_monitoring()
                 self.debug_message(f'Started metrics monitoring for PID {self._engine_process.pid}')

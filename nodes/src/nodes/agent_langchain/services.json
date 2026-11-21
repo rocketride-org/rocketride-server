@@ -29,6 +29,8 @@
 	//
 	"propertyDefinitions": {
 		"agent_description": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Agent description",
@@ -36,12 +38,16 @@
 			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,

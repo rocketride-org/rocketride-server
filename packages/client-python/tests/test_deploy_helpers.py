@@ -54,8 +54,8 @@ ROSTER = _Identity(
             'name': 'Org',
             'permissions': [],
             'teams': [
-                {'id': 't-qa', 'name': 'QA', 'permissions': ['task.control']},
-                {'id': 't-prod', 'name': 'Production', 'permissions': []},
+                {'id': 't-qa', 'name': 'QA', 'permissions': ['task.control'], 'audience': '=team/t-qa'},
+                {'id': 't-prod', 'name': 'Production', 'permissions': [], 'audience': '=team/t-prod'},
             ],
         },
     }
@@ -93,60 +93,71 @@ def test_pick_publish_version_is_none_when_nothing_qualifies():
     assert pick_publish_version([]) is None
 
 
-def test_resolve_deploy_teams_lists_me_first_then_the_roster():
+def test_resolve_deploy_teams_lists_me_first_then_the_roster_by_audience():
+    # Each team is addressed by the audience the server stamped on it
     assert resolve_deploy_teams(ROSTER, []) == [
         {'id': '@me', 'name': 'Me', 'canControl': True},
-        {'id': 't-qa', 'name': 'QA', 'canControl': True},
-        {'id': 't-prod', 'name': 'Production', 'canControl': False},
+        {'id': '=team/t-qa', 'name': 'QA', 'canControl': True},
+        {'id': '=team/t-prod', 'name': 'Production', 'canControl': False},
     ]
 
 
-def test_resolve_deploy_teams_rosterless_derives_from_rows_never_personal():
+def test_resolve_deploy_teams_skips_a_team_with_no_audience():
+    info = _Identity({'userId': 'u1', 'organization': {'teams': [{'id': 't', 'name': 'T', 'permissions': []}]}})
+    assert [t['id'] for t in resolve_deploy_teams(info, [])] == ['@me']
+
+
+def test_resolve_deploy_teams_rosterless_derives_from_the_team_rows_by_rung():
+    # The server marks each row's rung; personal and store rows never become targets
     teams = resolve_deploy_teams(
         _Identity({'userId': 'u1', 'organization': None}),
-        [{'teamId': 'local'}, {'teamId': 'user~u1'}, {'teamId': 'local'}],
+        [
+            {'teamId': '=team/local', 'rung': 'team', 'handle': '@Development'},
+            {'teamId': '=user/u1', 'rung': 'me', 'handle': '@me'},
+            {'teamId': '@public', 'rung': 'public', 'handle': '@public'},
+            {'teamId': '=team/local', 'rung': 'team', 'handle': '@Development'},
+        ],
     )
-    assert [t['id'] for t in teams] == ['@me', 'local']
+    assert teams == [
+        {'id': '@me', 'name': 'Me', 'canControl': True},
+        {'id': '=team/local', 'name': '@Development', 'canControl': True},
+    ]
 
 
 def test_resolve_deploy_teams_admin_controls_every_team():
     admin = _Identity(
-        {'userId': 'u1', 'sysPermissions': ['sys.admin'], 'organization': {'teams': [{'id': 't', 'name': 'T'}]}}
+        {
+            'userId': 'u1',
+            'sysPermissions': ['sys.admin'],
+            'organization': {'teams': [{'id': 't', 'name': 'T', 'audience': '=team/t'}]},
+        }
     )
     assert resolve_deploy_teams(admin, [])[1]['canControl'] is True
 
 
-def test_resolve_team_arg_maps_me_ids_and_names():
+def test_resolve_team_arg_passes_what_was_typed_through():
+    # The server resolves every spelling, names ignoring case; the SDK matches nothing
     teams = resolve_deploy_teams(ROSTER, [])
-    assert resolve_team_arg('@me', teams) == '@me'
-    assert resolve_team_arg('@public', teams) == '@public'
-    assert resolve_team_arg('t-qa', teams) == 't-qa'
-    assert resolve_team_arg('production', teams) == 't-prod'
-    assert resolve_team_arg('t-other', teams) == 't-other'
-    assert resolve_team_arg('', teams) == ''
+    for typed in ('@me', '@public', '@Production', '@production', '=team/t-qa', 'Production', 't-other', ''):
+        assert resolve_team_arg(typed, teams) == typed
+    assert resolve_team_arg('  @QA ', teams) == '@QA'
+    # Two names that differ only by case are the server's to refuse
+    ambiguous = [{'id': 'a', 'name': 'Ops', 'canControl': True}, {'id': 'b', 'name': 'ops', 'canControl': True}]
+    assert resolve_team_arg('@OPS', ambiguous) == '@OPS'
 
 
-def test_resolve_team_arg_refuses_an_ambiguous_name():
-    teams = [{'id': 'a', 'name': 'Ops', 'canControl': True}, {'id': 'b', 'name': 'ops', 'canControl': True}]
-    with pytest.raises(ValueError, match='ambiguous.*a, b'):
-        resolve_team_arg('OPS', teams)
-
-
-def test_team_name_of_names_personal_spaces_and_falls_back():
+def test_team_name_of_is_a_roster_lookup_that_parses_nothing():
     teams = resolve_deploy_teams(ROSTER, [])
-    assert team_name_of(teams, 'user~u1', 'u1') == 'Me'
-    assert team_name_of(teams, 'user~u2', 'u1') == 'Personal'
-    assert team_name_of(teams, '~public', 'u1') == 'Store'
-    assert team_name_of(teams, '@public', 'u1') == 'Store'
-    assert team_name_of(teams, 't-qa', 'u1') == 'QA'
-    assert team_name_of(teams, 't-gone', 'u1') == 't-gone'
+    assert team_name_of(teams, '=team/t-qa', 'u1') == 'QA'
+    assert team_name_of(teams, '@me', 'u1') == 'Me'
+    # Anything else comes back unchanged: rows carry their handle
+    for value in ('=user/u1', '=user/u2', '@public', '=team/t-gone', 't-qa'):
+        assert team_name_of(teams, value, 'u1') == value
 
 
-def test_wire_team_id_of_addresses_own_space_as_me_and_the_store_as_public():
-    assert wire_team_id_of('user~u1', 'u1') == '@me'
-    assert wire_team_id_of('~public', 'u1') == '@public'
-    assert wire_team_id_of('~public', '') == '@public'
-    assert wire_team_id_of('t-qa', 'u1') == 't-qa'
+def test_wire_team_id_of_passes_a_rows_audience_through():
+    for value in ('=user/u1', '@public', '=team/t-qa', '@me'):
+        assert wire_team_id_of(value, 'u1') == value
 
 
 def test_pipeline_name_from_path_strips_the_pipe_extension():

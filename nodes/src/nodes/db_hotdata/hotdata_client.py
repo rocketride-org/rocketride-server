@@ -204,6 +204,26 @@ class HotdataClient:
         self.timeout = timeout
         self.retry_budget_s = retry_budget_s
 
+    def with_retry_budget(self, retry_budget_s: float) -> 'HotdataClient':
+        """Return a view of this client whose retries stop after ``retry_budget_s`` seconds.
+
+        One call's own budget: the client holds no connection, so the view is
+        a copy of five attributes and the shared client is never changed.
+
+        Args:
+            retry_budget_s: The call's retry budget in seconds.
+
+        Returns:
+            HotdataClient: A client for the same workspace with that budget.
+        """
+        return HotdataClient(
+            apikey=self.apikey,
+            workspace_id=self.workspace_id,
+            base_url=self.base_url,
+            timeout=self.timeout,
+            retry_budget_s=retry_budget_s,
+        )
+
     # ------------------------------------------------------------------
     # Transport
     # ------------------------------------------------------------------

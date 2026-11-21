@@ -26,7 +26,7 @@ Zhipu AI GLM binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 
 from .glm_endpoint import is_glm_cloud_api
@@ -76,7 +76,6 @@ class Chat(ChatBase):
         # so fall back to a dummy key. Mirrors the llm_minimax pattern.
         apikey = apikey or 'sk-local-dummy-key'
 
-        # Get the llm via the OpenAI-compatible client
-        self._llm = ChatOpenAI(
-            model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens
-        )
+        # Get the llm via the OpenAI-compatible client: one for every call,
+        # each request binds its model and max_tokens
+        self._llm = ChatOpenAI(model=UNBOUND_MODEL, base_url=serverbase, api_key=apikey, temperature=0)

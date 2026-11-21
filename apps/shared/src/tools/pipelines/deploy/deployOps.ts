@@ -15,9 +15,10 @@
 // (deployMapping.ts) is pure and identity-decoupled, so the only host
 // residue left is publish (it needs the TextDocument — host.pipeline.*).
 //
-// Team identity: rows carry their RAW owner key (`user~{uid}` for personal
-// space); the WIRE only accepts '@me' for the caller's own space —
-// wireTeamIdOf translates once at this boundary, exactly as the host did.
+// Team identity: a row's `teamId` is its audience as the server composed it
+// (plan 2.5) and goes back to the server unchanged — the deploy verbs, the
+// run-log reader, the task monitor and the token lookup all take it. Rows
+// carry their `rung` and `handle` too, so nothing here parses an audience.
 //
 // Store review (plan 10.1): a pipe walks the app's review ladder, so its
 // review state and its submit/withdraw verbs are the App Builder's
@@ -27,7 +28,7 @@
 
 import { ConnectionManager } from 'shell';
 import type { DeployArtifact, DeployHistoryEntry, RocketRideClient } from 'rocketride';
-import { registryIdOf, resolveDeployTeams, teamNameOf, wireTeamIdOf } from 'rocketride';
+import { registryIdOf, resolveDeployTeams } from 'rocketride';
 import { mapVersionCards, mapHistoryRows, mapTeamDeploymentRows, mapScheduleRows, mapDeploymentInfo, withReviewStates } from './deployMapping';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeploymentLoadPayload } from './deployTypes';
 
@@ -38,16 +39,6 @@ function needClient(): RocketRideClient {
 	const client = cm().getClient();
 	if (!client || !cm().isConnected()) throw new Error('Not connected to server');
 	return client;
-}
-
-/** The caller's uid off the mirrored identity ('' pre-auth). */
-function ownUid(): string {
-	return cm().getAccountInfo()?.userId ?? '';
-}
-
-/** RAW row id → the wire id the deploy API accepts. */
-export function toWireTeamId(rawTeamId: string): string {
-	return wireTeamIdOf(rawTeamId, ownUid());
 }
 
 /**
@@ -121,7 +112,7 @@ export async function fetchDeployLifecycle(projectId: string | undefined): Promi
 		const teams = resolveDeployTeams({ getAccountInfo: () => info }, deploymentRows);
 		return {
 			versions: withReviewStates(mapVersionCards((versions.rows ?? []) as DeployArtifact[]), rail),
-			deployments: mapTeamDeploymentRows(deploymentRows, registryId, teams, info?.userId ?? ''),
+			deployments: mapTeamDeploymentRows(deploymentRows, registryId, teams),
 			teams,
 		};
 	} catch {
@@ -141,14 +132,13 @@ export async function fetchDeployLifecycle(projectId: string | undefined): Promi
  * needed beyond the caller's own sequencing).
  *
  * @param projectId - The deployed project.
- * @param rawTeamId - The RAW row id the drawer opened with (`user~{uid}`
- *                    for personal space) — translated to the wire id here.
+ * @param teamId - The row's `teamId` the drawer opened with (its audience),
+ *                 passed to the server unchanged.
  * @param sourceId - The focused source (the record identity), if any.
  * @returns The drawer payload (teamId NOT included — the caller owns it).
  */
-export async function fetchDeployment(projectId: string, rawTeamId: string, sourceId?: string): Promise<DeploymentLoadPayload> {
+export async function fetchDeployment(projectId: string, teamId: string, sourceId?: string): Promise<DeploymentLoadPayload> {
 	const bus = cm();
-	const teamId = toWireTeamId(rawTeamId);
 	const client = needClient();
 
 	// Step 1: the deployment record (version pointer, state, schedules).
@@ -198,17 +188,16 @@ export async function fetchDeployment(projectId: string, rawTeamId: string, sour
 	}
 
 	// Step 5: which sources have a LIVE run right now — server task registry.
-	// A TEAM deployment matches on the descriptor's teamId; a PERSONAL (@me)
-	// deployment matches on the trusted owner scope instead (its row carries
-	// the billing team, never the wire '@me').
-	const tasks = await client.call<{ tasks?: Array<{ source?: string; teamId?: string; runKind?: string; ownerKind?: string; ownerId?: string; pipeline?: { project_id?: string } }> }>('rrext_get_tasks');
-	const personalUid = rawTeamId.startsWith('user~') ? rawTeamId.slice('user~'.length) : undefined;
+	// A deploy run's task row carries the audience of the publication it
+	// serves through: the same string as this deployment's teamId, for a team,
+	// a personal space and the store alike.
+	const tasks = await client.call<{ tasks?: Array<{ source?: string; audience?: string; runKind?: string; pipeline?: { project_id?: string } }> }>('rrext_get_tasks');
 	const runningSources: Record<string, boolean> = {};
 	for (const t of tasks.tasks ?? []) {
 		if (t.pipeline?.project_id !== projectId || !t.source) continue;
-		// runKind on BOTH branches: a team's ordinary pipeline run on the same
+		// runKind too: an ordinary pipeline run on the same
 		// project/source must not mark the source as deploy-running.
-		const matches = personalUid ? t.ownerKind === 'user' && t.ownerId === personalUid && t.runKind === 'deploy' : t.teamId === teamId && t.runKind === 'deploy';
+		const matches = t.audience === teamId && t.runKind === 'deploy';
 		if (matches) runningSources[t.source] = true;
 	}
 
@@ -218,7 +207,7 @@ export async function fetchDeployment(projectId: string, rawTeamId: string, sour
 	const components = Array.isArray(pipeline.components) ? (pipeline.components as Array<{ id?: string; name?: string }>) : [];
 	const sourceName = sourceId ? components.find((c) => c.id === sourceId)?.name || sourceId : undefined;
 	return {
-		teamName: teamNameOf(teams, teamId),
+		teamName: teams.find((t) => t.id === teamId)?.name ?? (dep.handle || teamId),
 		deployment: mapDeploymentInfo(dep, projectId),
 		pipeline,
 		servicesJson: ((bus.getCachedServices() as { services?: Record<string, unknown> } | null)?.services ?? {}) as Record<string, unknown>,
@@ -236,10 +225,11 @@ export async function fetchDeployment(projectId: string, rawTeamId: string, sour
 		schedules: mapScheduleRows(pipeline, dep),
 		...(Object.keys(nextRuns).length > 0 ? { nextRuns } : {}),
 		versions: mapVersionCards(versions.rows ?? []),
-		history: mapHistoryRows(history.rows ?? [], teams, info?.userId ?? ''),
+		history: mapHistoryRows(history.rows ?? []),
 		...(nextRun ? { nextRun } : {}),
 		runningSources,
-		canControl: teams.find((t) => t.id === teamId)?.canControl ?? false,
+		// The caller's own space is always theirs to control; a team by its roster entry
+		canControl: dep.rung === 'me' || (teams.find((t) => t.id === teamId)?.canControl ?? false),
 		isConnected: bus.isConnected(),
 	};
 }
@@ -252,9 +242,9 @@ export async function fetchDeployment(projectId: string, rawTeamId: string, sour
  *  ack; the CALLER drives any refresh afterwards (it owns the focused
  *  source), exactly the old contract. */
 export const deploymentActions = {
-	setDisabled: (projectId: string, rawTeamId: string, disabled: boolean) => (disabled ? needClient().deploy.disable(projectId, toWireTeamId(rawTeamId)) : needClient().deploy.enable(projectId, toWireTeamId(rawTeamId))),
-	deployVersion: (projectId: string, rawTeamId: string, version: number) => needClient().deploy.deploy(projectId, version, toWireTeamId(rawTeamId)),
-	remove: (projectId: string, rawTeamId: string) => needClient().deploy.remove(projectId, toWireTeamId(rawTeamId)),
+	setDisabled: (projectId: string, teamId: string, disabled: boolean) => (disabled ? needClient().deploy.disable(projectId, teamId) : needClient().deploy.enable(projectId, teamId)),
+	deployVersion: (projectId: string, teamId: string, version: number) => needClient().deploy.deploy(projectId, version, teamId),
+	remove: (projectId: string, teamId: string) => needClient().deploy.remove(projectId, teamId),
 	/** Delete one deployed version from the server (plan 2.3); the server
 	 *  refuses by name while a rung pins it, it is in review, or it builds. */
 	deleteVersion: (projectId: string, version: number) => needClient().deploy.delete(projectId, version),
@@ -265,18 +255,17 @@ export const deploymentActions = {
 	/** Withdraw a pending review ('submit' → 'private'), the developer's own
 	 *  cancel; the version is a draft again. */
 	withdrawReview: (projectId: string, version: number) => needClient().withdrawApp(needRegistryId(projectId), version),
-	runSource: (projectId: string, rawTeamId: string, sourceId: string) => needClient().deploy.run(projectId, sourceId, toWireTeamId(rawTeamId)),
-	stopSource: async (projectId: string, rawTeamId: string, sourceId: string) => {
+	runSource: (projectId: string, teamId: string, sourceId: string) => needClient().deploy.run(projectId, sourceId, teamId),
+	stopSource: async (projectId: string, teamId: string, sourceId: string) => {
 		// Existing task machinery: resolve the live task, terminate it. teamId
-		// scopes the lookup to the TEAM's deploy run.
+		// (the row's audience) scopes the lookup to that deployment's run.
 		const client = needClient();
-		const teamId = toWireTeamId(rawTeamId);
 		const token = await client.getTaskToken({ projectId, source: sourceId, teamId });
 		if (token) await client.terminate(token);
 	},
-	setSchedule: (projectId: string, rawTeamId: string, sourceId: string, cron: string | null, ttl?: number | null) => needClient().deploy.setSchedule(projectId, sourceId, cron, toWireTeamId(rawTeamId), { ...(ttl !== null && ttl !== undefined ? { ttl } : {}) }),
-	setSourceConfig: (projectId: string, rawTeamId: string, sourceId: string, traceLevel: string | null, debugOut: boolean) => needClient().deploy.setSourceConfig(projectId, sourceId, toWireTeamId(rawTeamId), { ...(traceLevel ? { traceLevel: traceLevel as 'none' | 'metadata' | 'summary' | 'full' } : {}), debugOut }),
-	setSchedulePaused: (projectId: string, rawTeamId: string, sourceId: string, paused: boolean) => (paused ? needClient().deploy.pauseSchedule(projectId, sourceId, toWireTeamId(rawTeamId)) : needClient().deploy.resumeSchedule(projectId, sourceId, toWireTeamId(rawTeamId))),
+	setSchedule: (projectId: string, teamId: string, sourceId: string, cron: string | null, ttl?: number | null) => needClient().deploy.setSchedule(projectId, sourceId, cron, teamId, { ...(ttl !== null && ttl !== undefined ? { ttl } : {}) }),
+	setSourceConfig: (projectId: string, teamId: string, sourceId: string, traceLevel: string | null, debugOut: boolean) => needClient().deploy.setSourceConfig(projectId, sourceId, teamId, { ...(traceLevel ? { traceLevel: traceLevel as 'none' | 'metadata' | 'summary' | 'full' } : {}), debugOut }),
+	setSchedulePaused: (projectId: string, teamId: string, sourceId: string, paused: boolean) => (paused ? needClient().deploy.pauseSchedule(projectId, sourceId, teamId) : needClient().deploy.resumeSchedule(projectId, sourceId, teamId)),
 	/** Cron preview — THE single evaluator; teamId-free. */
 	preview: (cron: string, count: number) => needClient().deploy.preview(cron, count),
 	/** Validation passthrough (readonly canvas still validates). CONTRACT:

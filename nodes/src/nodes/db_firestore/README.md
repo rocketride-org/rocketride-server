@@ -39,9 +39,11 @@ Pick the credential mode, then name the collection the agent should work in; the
 
 The collection the tools use when a call does not pass its own `collection`. It has no default, and configuration validation warns when it is left blank — leaving it blank is only reasonable when every tool call will name its own collection. Set it to the one collection this node instance is responsible for, for example `orders`; an agent then calls `get_document` with just a `document_id`.
 
+The collection is also a per-call parameter: a pipeline may expose it in its `parameters` map, and each call may then send its own collection, which replaces the configured one for that call only. A tool call resolves its collection in this order: the tool's own `collection` argument, then the call's `collection` parameter, then the configured value.
+
 ### Database ID
 
-The Firestore database this node connects to, defaulting to `(default)`, which is the name Google Cloud gives the first database created in a project. Change it only when the project holds several named Firestore databases and this node should target one of the others. A blank value is treated as `(default)`.
+The Firestore database this node connects to, defaulting to `(default)`, which is the name Google Cloud gives the first database created in a project. Change it only when the project holds several named Firestore databases and this node should target one of the others. A blank value is treated as `(default)`. The value can also come from the `ROCKETRIDE_DB_FIRESTORE_DATABASE` account variable the field references.
 
 ## Authentication
 
@@ -49,7 +51,7 @@ The node uses RocketRide's shared Google Cloud credential resolution and request
 
 **Authentication Type** selects between Application Default Credentials and Service Account JSON. Application Default Credentials is the default and suits an engine running on Google Cloud infrastructure with an attached service account, or a host where ADC has already been provisioned. Selecting Service Account JSON reveals **Service Account Key JSON**, an upload field for the key file; it is stored as a secret and is required in that mode.
 
-**Project ID** is optional. Left blank, the project is taken from the uploaded key file or from the ambient default credentials; set it explicitly when the credentials could resolve to a different project than the one holding the data.
+**Project ID** is optional. Left blank, the project is taken from the uploaded key file or from the ambient default credentials; set it explicitly when the credentials could resolve to a different project than the one holding the data. The project ID can also come from the `ROCKETRIDE_DB_FIRESTORE_PROJECTID` account variable the field references.
 
 Grant the credential enough IAM to read and write the documents the agent will touch. Listing collections is not required — see the startup probe under Notes.
 

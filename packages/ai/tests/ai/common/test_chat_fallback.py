@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import pytest
 
 from ai.common.llm_adapter import Event, LangChainAdapter, is_stop_rejection
@@ -322,6 +324,21 @@ class _FakeChunk:
         self.choices = [_FakeChoice(content, finish_reason)]
 
 
+class _CompatChat:
+    """The chat surface the openai-compatible handler reads: the call, its request values, its raw client."""
+
+    def __init__(self, create_fn, **tuning):
+        self._client = _FakeOpenAIClient(create_fn)
+        self.call = SimpleNamespace(model='deepseek-reasoner')
+        self._tuning = tuning
+
+    def raw_openai_client(self):
+        return self._client
+
+    def call_kwargs(self):
+        return {'model': self.call.model, 'max_tokens': 128, **self._tuning}
+
+
 def test_openai_compat_native_stream_retries_without_stop():
     calls = []
 
@@ -335,16 +352,7 @@ def test_openai_compat_native_stream_retries_without_stop():
             )
         return iter([_FakeChunk('hello', finish_reason='stop')])
 
-    chat = type(
-        'Chat',
-        (),
-        {
-            '_raw_openai_client': _FakeOpenAIClient(create),
-            '_model': 'deepseek-reasoner',
-            '_modelOutputTokens': 128,
-            '_reasoning_kwargs': {},
-        },
-    )()
+    chat = _CompatChat(create)
 
     token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
     try:
@@ -374,16 +382,7 @@ def test_openai_compat_native_stream_retries_on_message_only_body():
             )
         return iter([_FakeChunk('hello', finish_reason='stop')])
 
-    chat = type(
-        'Chat',
-        (),
-        {
-            '_raw_openai_client': _FakeOpenAIClient(create),
-            '_model': 'deepseek-reasoner',
-            '_modelOutputTokens': 128,
-            '_reasoning_kwargs': {},
-        },
-    )()
+    chat = _CompatChat(create)
 
     token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
     try:
@@ -397,6 +396,46 @@ def test_openai_compat_native_stream_retries_on_message_only_body():
     assert 'stop' not in calls[1]
 
 
+def test_openai_compat_native_stream_sends_the_calls_tuning_on_every_attempt():
+    """Every attempt carries the call's request values, its tuning included.
+
+    An Ollama reasoning call binds temperature and reasoning_effort onto the
+    LangChain fallback; the native stream sends the same values, through the
+    retry without stop and the retry without stream_options.
+    """
+    calls = []
+
+    def create(**kwargs):
+        calls.append(dict(kwargs))
+        if 'stop' in kwargs:
+            raise _FakeApiError(
+                "Unsupported parameter: 'stop'",
+                status_code=400,
+                body={'error': {'code': 'unsupported_parameter', 'param': 'stop'}},
+            )
+        if 'stream_options' in kwargs:
+            raise _FakeApiError('Unrecognized request argument: stream_options', status_code=400)
+        return iter([_FakeChunk('hello', finish_reason='stop')])
+
+    chat = _CompatChat(create, temperature=1.0, reasoning_effort='low')
+
+    token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
+    try:
+        text = try_openai_compat_reasoning_stream(chat, 'prompt', lambda _: None, None, None)
+    finally:
+        STOP_SEQUENCES_VAR.reset(token)
+
+    assert text == 'hello'
+    assert len(calls) == 3
+    assert 'stop' in calls[0] and 'stop' not in calls[1]
+    assert 'stream_options' in calls[1] and 'stream_options' not in calls[2]
+    for sent in calls:
+        assert sent['model'] == 'deepseek-reasoner'
+        assert sent['max_tokens'] == 128
+        assert sent['temperature'] == 1.0
+        assert sent['reasoning_effort'] == 'low'
+
+
 def test_openai_compat_native_stream_unrelated_error_does_not_retry():
     calls = []
 
@@ -404,16 +443,7 @@ def test_openai_compat_native_stream_unrelated_error_does_not_retry():
         calls.append(dict(kwargs))
         raise ValueError('authentication failed')
 
-    chat = type(
-        'Chat',
-        (),
-        {
-            '_raw_openai_client': _FakeOpenAIClient(create),
-            '_model': 'deepseek-reasoner',
-            '_modelOutputTokens': 128,
-            '_reasoning_kwargs': {},
-        },
-    )()
+    chat = _CompatChat(create)
 
     token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
     try:
@@ -438,7 +468,7 @@ def test_anthropic_native_stream_retries_without_stop(monkeypatch):
     open_calls = []
 
     class _FakeLLM:
-        def _get_request_payload(self, prompt, stop=None, stream=False):
+        def _get_request_payload(self, prompt, stop=None, stream=False, **_call):
             payloads.append({'stop': stop, 'stream': stream})
             out = {'model': 'claude', 'messages': [], 'max_tokens': 16, 'stream': True}
             if stop:
@@ -473,7 +503,13 @@ def test_anthropic_native_stream_retries_without_stop(monkeypatch):
 
     monkeypatch.setattr(ns, '_open_raw_message_stream', fake_open)
 
-    chat = type('Chat', (), {'_llm': _FakeLLM(), '_thinking_mode_kwargs': {}})()
+    llm = _FakeLLM()
+    chat = SimpleNamespace(
+        _llm_for=lambda: llm,
+        call=SimpleNamespace(model='claude'),
+        call_kwargs=dict,
+        thinking_kwargs=dict,
+    )
     token = STOP_SEQUENCES_VAR.set(['\nObservation:'])
     try:
         events = list(NativeAnthropicAdapter(chat).stream('prompt'))

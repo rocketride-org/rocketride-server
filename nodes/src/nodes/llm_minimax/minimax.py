@@ -27,7 +27,7 @@ MiniMax binding for the ChatLLM.
 
 import re
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from ai.common.llm_adapter import report_usage_metadata
 from langchain_openai import ChatOpenAI
 
@@ -56,32 +56,30 @@ class Chat(ChatBase):
         # Init the base
         super().__init__(provider, connConfig, bag)
 
-        # Get the nodes configuration
-        config = self._config
-
-        # Get the serverbase url; fall back to the MiniMax default so runtime
-        # accepts the same "no explicit serverbase" config that validateConfig does
-        serverbase = config['serverbase']
-
         # Get the api key, use a dummy key if not provided. Local profiles
         # (Ollama / vLLM / TGI) intentionally have no apikey property — local
         # OpenAI-compatible servers accept any token. Mirrors the llm_deepseek pattern.
-        apikey = config.get('apikey') or 'sk-local-dummy-key'
+        # Each model branch names its endpoint, so the client is the call's.
+        self._apikey = self._config.get('apikey') or 'sk-local-dummy-key'
 
+    def _llm_for(self) -> ChatOpenAI:
+        """Return the client of the endpoint that serves this call's model (one per endpoint, keyed cache)."""
+        serverbase = self.call.settings['serverbase']
+        return self._keyed_handle(('llm', serverbase), lambda: self._build(serverbase))
+
+    def _build(self, serverbase: str) -> ChatOpenAI:
+        """Build the client of one endpoint: every request binds its model and max_tokens."""
         # API key is only required when calling MiniMax's cloud API. Matches both
         # api.minimax.io (international) and api.minimaxi.com (China) by substring.
-        if 'api.minimax' in serverbase and apikey == 'sk-local-dummy-key':
+        if 'api.minimax' in serverbase and self._apikey == 'sk-local-dummy-key':
             raise ValueError('MiniMax API key is required for cloud profiles.')
-
-        # Get the llm via the OpenAI-compatible client
-        self._llm = ChatOpenAI(
-            model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens
-        )
+        return ChatOpenAI(model=UNBOUND_MODEL, base_url=serverbase, api_key=self._apikey, temperature=0)
 
     def _chat(self, prompt: str) -> str:
         """Invoke the LLM and strip any <think>...</think> reasoning block from the response."""
-        results = self._llm.invoke(prompt)
+        llm = self.bound_llm()
+        results = llm.invoke(prompt)
         # This override bypasses LangChainAdapter.collect(), the capture point that
         # meters every other non-streaming call, so report from here or the call bills zero.
-        report_usage_metadata(getattr(results, 'usage_metadata', None), self._llm)
+        report_usage_metadata(getattr(results, 'usage_metadata', None), llm)
         return _THINK_BLOCK_RE.sub('', results.content)

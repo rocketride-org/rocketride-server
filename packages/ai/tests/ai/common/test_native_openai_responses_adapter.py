@@ -5,6 +5,8 @@
 
 """Pins NativeOpenAIResponsesAdapter: Responses stream → Events + finish mapping."""
 
+from types import SimpleNamespace
+
 from ai.common.llm_adapter import Event, NativeOpenAIResponsesAdapter
 from ai.web.metrics.metrics import metrics
 
@@ -45,8 +47,10 @@ class _RawClient:
 class _Chat:
     def __init__(self, events):
         self._raw_client = _RawClient(events)
-        self._model = 'gpt-5.6'
-        self._modelOutputTokens = 4096
+        self.call = SimpleNamespace(model='gpt-5.6')
+
+    def getOutputTokens(self):
+        return 4096
 
 
 def test_yields_events_and_completed_maps_to_stop():
@@ -116,8 +120,10 @@ class _ChatStream:
     def __init__(self, stream):
         responses = type('R', (), {'create': lambda _self, **kw: stream})()
         self._raw_client = type('C', (), {'responses': responses})()
-        self._model = 'gpt-5.6'
-        self._modelOutputTokens = 4096
+        self.call = SimpleNamespace(model='gpt-5.6')
+
+    def getOutputTokens(self):
+        return 4096
 
 
 def test_closes_stream_on_exception():

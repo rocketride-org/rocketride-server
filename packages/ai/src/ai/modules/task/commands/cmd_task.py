@@ -55,9 +55,11 @@ from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.app_deploy import _developer_id_of
+from ai.account.audience import deploy_scope_of
 from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
+from ..engine_key import key_owner
 from ..task_control import TeamContext
 
 # Only import for type checking to avoid circular import errors
@@ -485,9 +487,11 @@ class TaskCommands(DAPConn):
 
         The operator's stop (plan 7.2), and the OWNER's (plan 7.1: the verb
         that frees a GPU). ``sys.admin`` and ``internal`` may stop any engine;
-        anyone else may stop an engine whose key carries their owner id (every
-        rung in this PR): their own user id, or a team they hold
-        ``task.control`` on. The engine stops regardless of holds, and every
+        anyone else may stop an engine whose key carries their owner id (a
+        ``@spec`` engine, or a published shape that serves one owner): their
+        own user id, or a team they hold ``task.control`` on. A shared engine
+        (a bare key) is nobody's: only an operator stops it, since it serves
+        other callers. The engine stops regardless of holds, and every
         holder's control is told ``TASK_ENGINE_UNAVAILABLE`` on its next
         request.
 
@@ -514,11 +518,11 @@ class TaskCommands(DAPConn):
                 raise ValueError('engineKey is required')
 
             # Step 2: an operator, or the owner the key names. A key without
-            # an owner (none exist before C.25) is an operator's only
+            # an owner (a shared engine) is an operator's only
             sys_perms = self._account_info.sysPermissions or []
             if 'sys.admin' not in sys_perms and 'internal' not in sys_perms:
-                _, qualified, owner = engine_key.rpartition(':')
-                if not qualified or not owner:
+                owner = key_owner(engine_key)
+                if not owner:
                     raise PermissionError('Stopping a shared engine requires sys.admin')
                 if owner != self._account_info.userId:
                     self.verify_team_permission(owner, 'task.control')
@@ -591,9 +595,14 @@ class TaskCommands(DAPConn):
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
-            team_id = args.get('teamId') or ''
+            team_id = str(args.get('teamId') or '')
             if not project_id or not source:
                 raise ValueError('projectId and source are required')
+
+            # A deployment row's audience passed back unchanged (plan 2.5): a
+            # team's run, or (no team) the caller's own rungs
+            if team_id.startswith(('@', '=')):
+                team_id, _kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
 
             # Verify permission against the requested scope: the named team
             # for a team lookup, the caller's default context otherwise
@@ -665,7 +674,7 @@ class TaskCommands(DAPConn):
                     continue
 
                 # Get current status for name and status string
-                status = control.task.get_status()
+                status = control.status_view()
 
                 # Read name and description from the flat project
                 project = control.pipeline or {}
@@ -693,7 +702,7 @@ class TaskCommands(DAPConn):
                             'token': control.control_id,
                             'controlId': control.control_id,
                             'address': control.address,
-                            'status': status.status,
+                            'status': status.get('status'),
                             # The engine's availability (plan 7.5)
                             'engineState': engine_state,
                             # Owning team — lets clients attribute a task to a
@@ -709,6 +718,12 @@ class TaskCommands(DAPConn):
                             # + ownerId, never by the billing team.
                             'ownerKind': control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user'),
                             'ownerId': control.owner_id,
+                            # The same two facts as the server composes them
+                            # (plan 2.5): who owns the run, and the audience
+                            # of the publication it serves through ('' for a
+                            # dev run). Clients pass them back unchanged.
+                            'owner': control.owner,
+                            'audience': control.audience,
                             'pipeline': control.pipeline,
                         }
                     )

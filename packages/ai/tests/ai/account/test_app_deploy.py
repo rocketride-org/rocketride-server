@@ -1196,7 +1196,11 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     assert result['success'] is True
     # Signal 1: the org-scoped apaevt_deploy invalidation.
     assert broadcasts == [
-        ('apaevt_deploy', {'orgId': 'org1', 'teamId': '', 'projectId': 'acme.brandy', 'action': 'submit'}, 'org1')
+        (
+            'apaevt_deploy',
+            {'orgId': 'org1', 'teamId': '', 'audience': '', 'projectId': 'acme.brandy', 'action': 'submit'},
+            'org1',
+        )
     ]
     # Signal 2: the typed status push — owner org + reviewer only.
     submit_body = {'appId': 'acme.brandy', 'version': 1, 'status': 'submit'}
@@ -1213,7 +1217,11 @@ async def test_review_transitions_push_both_signals(registry, quiet_push, monkey
     result = await handle_deploy_app(dev, _request('withdraw', version=1))
     assert result['success'] is True
     assert broadcasts == [
-        ('apaevt_deploy', {'orgId': 'org1', 'teamId': '', 'projectId': 'acme.brandy', 'action': 'private'}, 'org1')
+        (
+            'apaevt_deploy',
+            {'orgId': 'org1', 'teamId': '', 'audience': '', 'projectId': 'acme.brandy', 'action': 'private'},
+            'org1',
+        )
     ]
     withdraw_body = {'appId': 'acme.brandy', 'version': 1, 'status': 'private'}
     assert owner.events == [('app:statusChanged', withdraw_body)]

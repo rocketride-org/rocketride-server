@@ -39,6 +39,9 @@ class _StubLLM:
         self._content = content
         self.prompts: list[str] = []
 
+    def bind(self, **_kwargs: Any) -> '_StubLLM':
+        return self
+
     def invoke(self, prompt: str, **_kwargs: Any) -> Any:
         self.prompts.append(prompt)
         return type('Result', (), {'content': self._content})()
@@ -46,7 +49,7 @@ class _StubLLM:
 
 def _chat_with(content: Any) -> tuple[str, _StubLLM]:
     """Drive ChatBase._chat over a stub returning ``content``."""
-    chat = ChatBase.__new__(ChatBase)
+    chat = ChatBase('test', {'model': 'test-model'}, {})
     llm = _StubLLM(content)
     chat._llm = llm
     return ChatBase._chat(chat, 'what is 2+2?'), llm

@@ -100,15 +100,44 @@ def test_a_local_branch_keeps_its_own_server_url():
 
 
 # -----------------------------------------------------------------------------
-# The client follows the resolved endpoint
+# The client follows the resolved endpoint of the call's model
 # -----------------------------------------------------------------------------
 
 
+def _chat(conn):
+    """The control's chat, built as the IGlobal builds it (the model leaves refused), and the call's view."""
+    view = _resolve(conn)
+    return deepseek.Chat(_LOGICAL_TYPE, view.restricted(refuse_params=True), {}), view
+
+
+def _client(conn, params=None):
+    """The client one call of ``conn`` goes through, and the values that call binds onto it."""
+    chat, view = _chat(conn)
+    with chat.calling(chat.resolve_call(view.overlay(params))):
+        return chat._llm_for(), chat.call_kwargs()
+
+
 def test_a_local_model_builds_without_a_key():
-    chat = deepseek.Chat(_LOGICAL_TYPE, _resolve({'model': 'deepseek-r1:7b'}), {})
-    assert chat._llm.kwargs['base_url'] == _LOCAL
-    assert chat._llm.kwargs['model'] == 'deepseek-r1:7b'
-    assert chat._llm.kwargs['api_key'] == 'sk-local-dummy-key'
+    llm, kwargs = _client({'model': 'deepseek-r1:7b'})
+    assert llm.kwargs['base_url'] == _LOCAL
+    assert llm.kwargs['model'] == deepseek.UNBOUND_MODEL
+    assert kwargs['model'] == 'deepseek-r1:7b'
+    assert llm.kwargs['api_key'] == 'sk-local-dummy-key'
+
+
+def test_one_chat_serves_a_local_and_a_cloud_model():
+    """The model is a per-call parameter: each call reaches its own model's endpoint, one client each."""
+    chat, view = _chat({'model': 'deepseek-r1:7b', 'apikey': 'sk-test'})
+
+    seen = []
+    for params in ({}, {'model': 'deepseek-chat'}, {}):
+        with chat.calling(chat.resolve_call(view.overlay(params))):
+            seen.append((chat._llm_for(), chat.call_kwargs()['model']))
+
+    (local, local_model), (cloud, cloud_model), (again, _) = seen
+    assert (local.kwargs['base_url'], local_model) == (_LOCAL, 'deepseek-r1:7b')
+    assert (cloud.kwargs['base_url'], cloud_model) == (_CLOUD, 'deepseek-chat')
+    assert again is local, 'the endpoint client is cached, not rebuilt'
 
 
 @pytest.mark.parametrize(
@@ -129,9 +158,9 @@ def test_the_endpoint_is_judged_by_its_host(url, expected):
 def test_a_local_url_mentioning_the_api_in_its_path_is_still_local(monkeypatch):
     """The host decides: the key stays optional and the probe stays off for such a server."""
     conn = {'model': 'deepseek-r1:7b', 'deepseek-r1:7b': {'serverbase': 'http://ollama.lan/api.deepseek/v1'}}
-    chat = deepseek.Chat(_LOGICAL_TYPE, _resolve(conn), {})
-    assert chat._llm.kwargs['api_key'] == 'sk-local-dummy-key'
-    assert chat._llm.kwargs['base_url'] == 'http://ollama.lan/api.deepseek/v1'
+    llm, _ = _client(conn)
+    assert llm.kwargs['api_key'] == 'sk-local-dummy-key'
+    assert llm.kwargs['base_url'] == 'http://ollama.lan/api.deepseek/v1'
     validator, requests, warnings = _validator(monkeypatch, conn)
     validator.validateConfig()
     assert (requests, warnings) == ([], [])
@@ -145,18 +174,18 @@ def test_an_empty_serverbase_is_refused():
     # A blank URL would let the OpenAI client fall back to its own default host
     conn = {'model': 'deepseek-r1:7b', 'deepseek-r1:7b': {'serverbase': '   '}}
     with pytest.raises(ValueError, match='serverbase is required'):
-        deepseek.Chat(_LOGICAL_TYPE, _resolve(conn), {})
+        _client(conn)
 
 
 def test_a_cloud_model_requires_the_key():
     with pytest.raises(ValueError, match='API key is required'):
-        deepseek.Chat(_LOGICAL_TYPE, _resolve({'model': 'deepseek-chat'}), {})
+        _client({'model': 'deepseek-chat'})
 
 
 def test_a_cloud_model_builds_against_the_deepseek_api():
-    chat = deepseek.Chat(_LOGICAL_TYPE, _resolve({'model': 'deepseek-chat', 'apikey': 'sk-test'}), {})
-    assert chat._llm.kwargs['base_url'] == _CLOUD
-    assert chat._llm.kwargs['api_key'] == 'sk-test'
+    llm, _ = _client({'model': 'deepseek-chat', 'apikey': 'sk-test'})
+    assert llm.kwargs['base_url'] == _CLOUD
+    assert llm.kwargs['api_key'] == 'sk-test'
 
 
 # -----------------------------------------------------------------------------

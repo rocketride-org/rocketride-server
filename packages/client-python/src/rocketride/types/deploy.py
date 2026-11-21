@@ -118,7 +118,19 @@ class DeploymentSchedule(TypedDict, total=False):
 class Deployment(TypedDict, total=False):
     """One team's deployment of a project, joined with registry info."""
 
+    # The publication's audience, composed by the server: '=user/<uid>',
+    # '=team/<tid>', '=org/<oid>' or '@public' (the same string as
+    # 'audience'; the wire keeps this name). Pass it back unchanged; never
+    # parse it.
     teamId: str
+    # The publication's audience (same value as teamId).
+    audience: str
+    # The rung as the reader sees it: 'me' (their own personal space),
+    # 'personal' (another user's), 'team', 'org' or 'public'.
+    rung: Literal['me', 'personal', 'team', 'org', 'public']
+    # What to show for the audience: '@me', '@<team>', '@org', '@public',
+    # '=team/<tid>' for a team the reader cannot name, or 'Personal'.
+    handle: str
     projectId: str
     # The registry version this team currently points at.
     version: int
@@ -177,8 +189,13 @@ class DeployHistoryEntry(TypedDict, total=False):
         'failed',
         'reply',
     ]
-    # '' on org-wide rows (publish); the team id on pointer changes.
+    # '' on org-wide rows (publish); the audience on pointer changes.
     teamId: str
+    # On pointer changes: the audience, the reader's rung and the handle to
+    # show, exactly as on a Deployment row.
+    audience: str
+    rung: Literal['me', 'personal', 'team', 'org', 'public']
+    handle: str
     version: int
     actor: DeployActor
 

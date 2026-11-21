@@ -397,7 +397,9 @@ class RocketRideClient(
         Args:
             address: ``developerId.pipelineId[.source]``; a source segment is
                 accepted and ignored.
-            team: Resolve the ``@team`` rung through this one of your teams.
+            team: Resolve the ``@team`` rung through this one of your teams
+                (``@<team>`` by name in any case, ``=team/<tid>`` or a team
+                id; the server resolves it).
 
         Returns:
             ``{'address', 'rung', 'version', 'teamId'?, 'interfaces'}`` where

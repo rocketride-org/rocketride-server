@@ -161,7 +161,9 @@
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names weaviate.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "weaviate",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -178,11 +180,11 @@
 			"enum": {
 				"local": {
 					"title": "Your own Weaviate server",
-					"properties": ["weaviate.local.host", "weaviate.local.port", "weaviate.local.grpc_port", "vector.score", "vector.collection", "weaviate.serverName"]
+					"properties": ["weaviate.local.host", "weaviate.local.port", "weaviate.local.grpc_port", { "base": "vector.score", "param": true }, { "base": "vector.collection", "param": true, "tool": false }, "weaviate.serverName"]
 				},
 				"cloud": {
 					"title": "Weaviate cloud server",
-					"properties": ["weaviate.cloud.host", "weaviate.apikey", "vector.score", "vector.collection", "weaviate.serverName"]
+					"properties": ["weaviate.cloud.host", "weaviate.apikey", { "base": "vector.score", "param": true }, { "base": "vector.collection", "param": true, "tool": false }, "weaviate.serverName"]
 				}
 			}
 		}

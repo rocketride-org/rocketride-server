@@ -1229,6 +1229,11 @@ For a no-RAG chat, drop `embedding_transformer_1`, `qdrant_1`, and `prompt_1` an
   `project_id` + resolved configuration, so to run the same pipe more than once at a time give
   each `use()` its own `token=` segment (it becomes that instance's `project_id`). `project_id`
   is required on every spec.
+- One ENGINE serves every control of one shape: your spec runs share your own engine per
+  shape (a `threads`/`args` value off the server's policy gets an engine of its own), and a
+  published pipe's callers share one engine per shape, each with their own configuration
+  (ROCKETRIDE_CONCEPTS.md, "Engines are shared by shape"). A listener or poller source, or a
+  RocketRide cloud database node, keeps an engine per owner on every rung.
 - **Never block the async event loop** (`input()`, `readFileSync()`, `time.sleep()`): a
   blocked loop starves the websocket keepalive and the connection dies after ~60s idle with
   `Connection closed` / `Connection timeout`. Use the async I/O patterns in

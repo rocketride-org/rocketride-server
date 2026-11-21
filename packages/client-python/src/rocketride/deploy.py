@@ -479,7 +479,7 @@ class DeployApi:
             team_id: Restrict to one team, ``'@me'`` or ``'@public'``; omitted
                 = the visibility model: the caller's member teams, their own
                 personal space and the organization's store rows
-                (``teamId: '~public'``), and the whole org for an org admin.
+                (``teamId: '@public'``), and the whole org for an org admin.
             page: 1-based page number.
             page_size: Rows per page (server-clamped).
             search: Free-text search over projectId/pipelineName/teamId.

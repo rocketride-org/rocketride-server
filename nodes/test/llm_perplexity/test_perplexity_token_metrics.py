@@ -91,6 +91,9 @@ def _make_chat(usage: Optional[dict], *, fail_times: int = 0) -> Any:
         def __init__(self) -> None:
             self.calls = 0
 
+        def bind(self, **_call):
+            return self
+
         def invoke(self, prompt):
             self.calls += 1
             if self.calls <= fail_times:
@@ -100,8 +103,8 @@ def _make_chat(usage: Optional[dict], *, fail_times: int = 0) -> Any:
 
     chat = _node.Chat.__new__(_node.Chat)
     chat._llm = _LLM()
-    chat._model = _MODEL
-    chat._modelTotalTokens = 100000
+    # Built without __init__: its one call, as a node whose model is config has
+    chat._control_call = chat.resolve_call({'model': _MODEL, 'modelTotalTokens': 100000})
     return chat
 
 

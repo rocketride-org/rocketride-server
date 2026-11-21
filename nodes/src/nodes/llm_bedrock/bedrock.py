@@ -149,9 +149,13 @@ class _ChatBedrock(ChatBedrock):
 class Chat(ChatBase):
     """
     Create a Bedrock chat bot.
-    """
 
-    _llm: ChatBedrock
+    langchain-aws fixes the model id and the output window of a ``ChatBedrock``
+    when it is built, and words the window per model family in the request
+    body, so the driver keeps a bounded keyed cache of ``_ChatBedrock`` objects,
+    one per (model id, output window) a call asks for, all over the same two
+    boto3 clients built from the control's credentials and region.
+    """
 
     # Bedrock's own caching of Claude prompts is best effort. The driver marks the end
     # of the prompt's unchanging start so that part is eligible on every call; models
@@ -168,36 +172,56 @@ class Chat(ChatBase):
         # Get the nodes configuration
         config = self._config
 
-        # Get the AWS access Key, don't save it
-        accessKey = config.get('accessKey')
+        # Get the AWS access Key
+        self._access_key = config.get('accessKey')
 
-        # Get the AWS access Key, don't save it
-        secretKey = config.get('secretKey')
+        # Get the AWS secret Key
+        self._secret_key = config.get('secretKey')
 
         # ChatBase checks apikey only: an AWS key left as ${ROCKETRIDE_...} would sign requests.
-        check_credential_resolved(provider, 'accessKey', accessKey)
-        check_credential_resolved(provider, 'secretKey', secretKey)
+        check_credential_resolved(provider, 'accessKey', self._access_key)
+        check_credential_resolved(provider, 'secretKey', self._secret_key)
 
         # Get the AWS region, save it
         self.region = config.get('region')
 
-        # Setup
-        model_prefix = 'us.'
+        # The cross-region inference prefix of the region
+        self._model_prefix = 'us.'
         if self.region[:2] == 'eu':
-            model_prefix = 'eu.'
+            self._model_prefix = 'eu.'
         elif self.region[:2] == 'ap':
-            model_prefix = 'apac.'
+            self._model_prefix = 'apac.'
 
-        # Get the llm
-        self._llm = _ChatBedrock(
-            model=model_prefix + self._model,
-            aws_access_key_id=accessKey,
-            aws_secret_access_key=secretKey,
+    def _llm_for(self) -> ChatBedrock:
+        """Return the ``_ChatBedrock`` of this call's model and output window (keyed cache)."""
+        call = self.call
+        model_id = self._model_prefix + call.model
+        return self._keyed_handle(
+            ('llm', model_id, call.output_tokens), lambda: self._build(model_id, call.output_tokens)
+        )
+
+    def _build(self, model_id: str, output_tokens: int) -> ChatBedrock:
+        """Build one model's object, sharing the boto3 clients of any object already built."""
+        shared = next((handle for handle in self._keyed.values() if isinstance(handle, ChatBedrock)), None)
+        return _ChatBedrock(
+            model=model_id,
+            aws_access_key_id=self._access_key,
+            aws_secret_access_key=self._secret_key,
             region=self.region,
             temperature=0,
-            max_tokens=self._modelOutputTokens,
+            max_tokens=output_tokens,
             custom_get_token_ids=self._estimate_token_ids,
+            client=shared.client if shared is not None else None,
+            bedrock_client=shared.bedrock_client if shared is not None else None,
         )
+
+    def call_kwargs(self) -> Dict[str, Any]:
+        """Return nothing to bind: the cached object already carries the call's model and output window."""
+        return {}
+
+    def getTokens(self, value: str) -> int:
+        """Count tokens with the four-characters-a-token estimate, the same for every model."""
+        return len(self._estimate_token_ids(value))
 
     @staticmethod
     def _estimate_token_ids(text: str) -> list:

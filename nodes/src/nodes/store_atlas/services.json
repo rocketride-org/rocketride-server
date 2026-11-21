@@ -95,14 +95,16 @@
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names atlas.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "atlas",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
 	// Required:
 	//     Defines the properties shown in the node's config panel, in order
 	//
-	"properties": ["atlas.host", "vector.score", "atlas.database", "vector.collection", "atlas.serverName"],
+	"properties": ["atlas.host", { "base": "vector.score", "param": true }, "atlas.database", { "base": "vector.collection", "param": true, "tool": false }, "atlas.serverName"],
 	"legacy": {
 		"selector": "profile",
 		"default": "default",

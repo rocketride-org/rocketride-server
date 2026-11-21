@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 # Security tests for AccountInfo serialization (A1 userToken leak).
 #
 # The push path (apaext_account) fans out to every open connection of a user,
@@ -103,3 +125,55 @@ def test_a_scoped_key_resolves_through_its_frozen_team_only():
 
     assert team_order(_member(['a'], ['a'], endpoints=['acme.p.*'])) == ['a']
     assert team_order(_member(['a', 'b'], ['a', 'b'], endpoints=['acme.p.*'])) == []
+
+
+# =============================================================================
+# AUDIENCES AND TEAM NAMES (plan 2.5)
+# =============================================================================
+
+
+def _named(*teams):
+    """An AccountInfo with the given (id, name) teams."""
+    return AccountInfo(
+        userId='u',
+        auth='rr_k',
+        userToken='rr_k',
+        organization={
+            'id': 'org',
+            'name': '',
+            'permissions': [],
+            'teams': [{'id': tid, 'name': name, 'permissions': []} for tid, name in teams],
+        },
+    )
+
+
+def test_each_connect_result_team_carries_its_audience():
+    out = _named(('t-1', 'Development'), ('t-2', 'Production')).to_connect_result()
+    assert [(t['id'], t['audience']) for t in out['organization']['teams']] == [
+        ('t-1', '=team/t-1'),
+        ('t-2', '=team/t-2'),
+    ]
+    # The push result is the same body with the token blanked
+    pushed = _named(('t-1', 'Development')).to_push_result()
+    assert pushed['organization']['teams'][0]['audience'] == '=team/t-1'
+
+
+def test_a_connect_result_without_an_org_has_no_teams_to_stamp():
+    assert AccountInfo(userId='u', auth='rr_k', userToken='rr_k').to_connect_result()['organization'] is None
+
+
+def test_a_team_name_resolves_ignoring_case_within_the_membership():
+    from ai.account.models import team_id_of_name
+
+    info = _named(('t-1', 'Development'), ('t-2', 'Production'))
+    for name in ('Development', 'development', 'DEVELOPMENT', ' Development '):
+        assert team_id_of_name(info, name) == 't-1'
+    assert team_id_of_name(info, 'Elsewhere') == ''
+    # An id is no name
+    assert team_id_of_name(info, 't-2') == ''
+
+
+def test_a_name_two_teams_share_ignoring_case_resolves_to_neither():
+    from ai.account.models import team_id_of_name
+
+    assert team_id_of_name(_named(('t-1', 'Ops'), ('t-2', 'OPS')), 'ops') == ''

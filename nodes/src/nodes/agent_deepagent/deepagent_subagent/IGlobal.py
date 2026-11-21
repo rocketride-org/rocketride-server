@@ -9,8 +9,8 @@ DeepAgent Subagent — global state for the managed sub-agent node.
 Installs the shared dependencies (from the parent agent_deepagent/
 requirements.txt) and instantiates the ``DeepAgentSubagentDriver`` held on
 ``self.agent``. All user-configured fields (``description``, ``system_prompt``,
-``instructions``) are loaded by ``AgentBase.__init__`` and the driver's own
-``__init__``, so no extra wiring is needed here.
+``instructions``) are per-call parameters the driver reads from the described
+instance's settings, so no configuration is kept here.
 """
 
 from __future__ import annotations

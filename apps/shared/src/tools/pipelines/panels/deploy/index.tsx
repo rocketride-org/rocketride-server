@@ -152,6 +152,7 @@ export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipeline
 			return {
 				teamId: dep.teamId,
 				teamName: dep.teamName,
+				handle: dep.handle,
 				rung: dep.rung,
 				version: dep.version,
 				state: dep.state,

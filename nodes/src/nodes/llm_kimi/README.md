@@ -24,6 +24,8 @@ Choose a model from the **Model** selector. Each listed model pins its model id,
 context window, and output limit, so the UI requires no additional model settings.
 The default is **Kimi K2.6** (`kimi-k2.6`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and endpoint and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

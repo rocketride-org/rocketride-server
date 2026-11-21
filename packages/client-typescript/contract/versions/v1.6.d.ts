@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 477a8d59def21a375c42e39810db8c51441a867f
+// Source commit: 0454e81208faffb3172c24e4e986df226b37d728
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1453,7 +1453,18 @@ export interface DeploymentSchedule {
 }
 /** One team's deployment of a project, joined with registry info. */
 export interface Deployment {
+    /** The publication's audience, composed by the server: `=user/<uid>`,
+        `=team/<tid>`, `=org/<oid>` or `@public` (the same string as `audience`;
+        the wire keeps this name). Pass it back unchanged; never parse it. */
     teamId?: string;
+    /** The publication's audience (same value as `teamId`). */
+    audience?: string;
+    /** The rung as the reader sees it: `me` (their own personal space),
+        `personal` (another user's), `team`, `org` or `public`. */
+    rung?: "me" | "personal" | "team" | "org" | "public";
+    /** What to show for the audience: `@me`, `@<team>`, `@org`, `@public`,
+        `=team/<tid>` for a team the reader cannot name, or `Personal`. */
+    handle?: string;
     projectId?: string;
     /** The registry version this team currently points at. */
     version?: number;
@@ -1492,8 +1503,13 @@ export interface DeployHistoryEntry {
         v1.3 floor wrote it (widening a returned union would break floor
         assignability); compare raw strings for the app-rail extras. */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
-    /** `''` on org-wide rows (publish); the team id on pointer changes. */
+    /** `''` on org-wide rows (publish); the audience on pointer changes. */
     teamId?: string;
+    /** On pointer changes: the audience, the reader's rung and the handle to
+        show, exactly as on a `Deployment` row. */
+    audience?: string;
+    rung?: "me" | "personal" | "team" | "org" | "public";
+    handle?: string;
     version?: number;
     actor?: DeployActor;
     /** Row payload — self-describing by contract (rows render without a
@@ -1993,6 +2009,12 @@ export interface TeamInfo {
      * Examples: `'task.execute'`, `'task.monitor'`, `'store.read'`.
      */
     permissions: string[];
+    /**
+     * The team's audience as the server composes it (`=team/<tid>`): what a
+     * deploy verb's `teamId` takes for this team. Pass it unchanged; never
+     * build or parse one.
+     */
+    audience?: string;
 }
 /**
  * Describes the organisation the authenticated user belongs to.
@@ -4972,7 +4994,7 @@ declare class DeployApi {
      * @param params - Optional team scope + list-API params.
      * @param params.teamId - Restrict to one team, `'@me'` or `'@public'`;
      *   omitted = the visibility model: the caller's member teams, their own
-     *   personal space and the organization's store rows (`teamId: '~public'`),
+     *   personal space and the organization's store rows (`teamId: '@public'`),
      *   and the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
@@ -6951,7 +6973,9 @@ export interface AppRailVersion {
 export declare function pickPublishVersion<T extends AppRailVersion>(rows: T[]): T | null;
 /** One deploy target the caller can address. */
 export interface DeployTeamRef {
-    /** Team id, or '@me' for the caller's personal space. */
+    /** What a deploy verb's `teamId` takes for this target, passed unchanged:
+        '@me' for the caller's personal space, or the team's audience as the
+        server composed it (`=team/<tid>`). */
     id: string;
     /** Display name. */
     name: string;
@@ -6964,12 +6988,15 @@ export interface DeployTeamRef {
  *
  * - '@me' (the personal space) comes first for any signed-in user — it
  *   exists even with zero team memberships.
+ * - Each team of the roster is addressed by the `audience` the server
+ *   stamped on it; a team without one is not addressable and is skipped.
  * - org.admin (and sys.admin) implies the FULL team permission set — the
  *   server resolver's documented expansion; per-team rows only carry
  *   explicit task.* grants for regular members.
  * - Rosterless identities (the OSS single-team server) derive refs from the
- *   deployment rows with control assumed — the server enforces the real
- *   permission on every call. Personal (`user~`) rows never become targets.
+ *   deployment rows the server marked `rung: 'team'`, named by their
+ *   `handle`, with control assumed — the server enforces the real permission
+ *   on every call. No audience string is parsed here.
  *
  * @param client - A connected client (its cached ConnectResult is read), or none.
  * @param deployments - Deployment rows used as the rosterless fallback.
@@ -7033,41 +7060,40 @@ export declare function containerNameOf(name: string): string;
  */
 export declare function devContainerNameOf(slug: string, developerId: string | null | undefined): string;
 /**
- * Resolves a team id to its display name, falling back to the id. Personal
- * (`user~`) owner keys render as "Me" for the caller's own space and
- * "Personal" for another user's (admin visibility) — the raw guid never
- * reaches a label. The store slot (`~public`, or `@public` as the wire
- * addresses it) renders as "Store".
+ * The name of the team ref whose `id` is `teamId`, else `teamId` unchanged.
+ *
+ * @deprecated Show a row's `handle` instead: the server composes it for the
+ * reader (plan 2.5). Kept for the frozen contract; it parses nothing.
  *
  * @param teams - The resolved team refs.
- * @param teamId - The team id (or owner key) to resolve.
- * @param ownUserId - The caller's user id ('' when unknown).
- * @returns The display name, or the id when unknown.
+ * @param teamId - A ref id or a row's `teamId`, matched exactly.
+ * @param _ownUserId - Unused; kept for the frozen signature.
+ * @returns The matching ref's name, or `teamId`.
  */
-export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId?: string): string;
+export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, _ownUserId?: string): string;
 /**
- * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
- * the caller's own `user~{uid}` row is addressed as '@me' and the store row
- * (`~public`) as '@public' (the server never accepts raw owner keys);
- * everything else passes through.
+ * The value to put on the wire for a row's `teamId`: the value itself.
  *
- * @param teamId - The row's team id / owner key.
- * @param ownUserId - The caller's user id ('' when unknown).
- * @returns The team id to put on the wire.
+ * @deprecated A row's `teamId` is its audience and every deploy verb takes
+ * it back unchanged (plan 2.5); there is nothing to translate. Kept for the
+ * frozen contract.
+ *
+ * @param teamId - The row's `teamId`.
+ * @param _ownUserId - Unused; kept for the frozen signature.
+ * @returns `teamId`, unchanged.
  */
-export declare function wireTeamIdOf(teamId: string, ownUserId: string): string;
+export declare function wireTeamIdOf(teamId: string, _ownUserId: string): string;
 /**
- * Resolves what a person typed as a team — '@me', '@public' (the store), a
- * team id, or a team display name (case-insensitive) — to the id to send.
- * An unknown value passes through unchanged (the server validates it; an
- * admin may address a team outside their own roster).
+ * What a person typed as a team, passed through for the server to resolve.
+ * The server reads every spelling (`@me`, `@public`, `@<team>` by name
+ * ignoring case, `=team/<tid>`, a row's audience) and refuses an unknown
+ * one; the SDK matches nothing (plan 2.5).
  *
  * @param input - The typed team ('' = unscoped/default).
- * @param teams - The caller's resolved team refs.
- * @returns The team id to put on the wire.
- * @throws Error when a name matches more than one team.
+ * @param _teams - Unused; kept for the frozen signature.
+ * @returns The typed value, trimmed.
  */
-export declare function resolveTeamArg(input: string, teams: DeployTeamRef[]): string;
+export declare function resolveTeamArg(input: string, _teams: DeployTeamRef[]): string;
 /**
  * The registry name for a pipeline file whose JSON carries none — `.pipe`
  * names live in FILENAMES, and every deploy surface renders pipelineName.

@@ -86,24 +86,30 @@
 	"propertyDefinitions": {
 		"llm_ollama.serverbase": { "base": "llm.local.serverbase", "default": "http://localhost:11434/v1" },
 		"llm_ollama.temperature": {
+			"param": true,
 			"type": "number",
 			"title": "Temperature",
 			"description": "Sampling temperature. Left unset by default so ollama.py can choose: 0 for standard models, and 1.0 for reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) so they emit a final answer instead of looping on empty output. Set an explicit value here to override the auto behavior."
 		},
 		"llm_ollama.reasoning_effort": {
+			"param": true,
 			"type": "string",
 			"title": "Reasoning Effort",
 			"description": "Optional reasoning budget for reasoning models: low, medium, or high. Leave unset to let reasoning models auto-use 'low'; a value set here always wins. Ignored by non-reasoning models.",
 			"enum": ["low", "medium", "high"]
 		},
 		"llm_ollama.customModel": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model id",
 			"description": "Model id exactly as the provider names it",
 			"required": true
 		},
-		"llm_ollama.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16385 },
+		"llm_ollama.custom.modelTotalTokens": { "param": true, "tool": false, "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16385 },
 		"llm_ollama.custom.modelOutputTokens": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
@@ -117,6 +123,8 @@
 	"properties": [
 		{
 			"name": "model",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"description": "LLM model",

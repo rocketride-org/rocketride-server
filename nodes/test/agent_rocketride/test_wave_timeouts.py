@@ -234,19 +234,32 @@ def test_the_tool_timeout_setting_sets_the_limit_and_zero_turns_it_off(wave, mon
 CHECK = 'workspace.compile'
 
 
-def _driver(wave, **config):
-    """Build the driver from node config, through the real resolver (``IGlobalBase.config``)."""
+def _driver(wave):
+    """Build the driver as its IGlobal does; it keeps nothing of the node's config."""
+    from rocketlib import IGlobalBase
+
+    iglobal = IGlobalBase()
+    iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig={})
+    return wave.rocketride_agent.RocketRideDriver(iglobal)
+
+
+def _context(wave, memory, **config):
+    """A run context whose invoker's settings are the call's (stored config ``config``, the real resolver)."""
     from rocketlib import IGlobalBase
 
     iglobal = IGlobalBase()
     iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
-    return wave.rocketride_agent.RocketRideDriver(iglobal)
-
-
-def _context(wave, memory):
+    invoker = SimpleNamespace(settings=iglobal.config.overlay(None))
     tools = SimpleNamespace(list=[{'name': CHECK}, {'name': 'workspace.write'}])
     return wave.rocketride_agent.AgentContext(
-        invoker=None, llm=None, tools=tools, memory=memory, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+        invoker=invoker,
+        llm=None,
+        tools=tools,
+        memory=memory,
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
     )
 
 
@@ -291,13 +304,14 @@ def test_a_write_that_timed_out_holds_done_until_it_lands_and_is_checked(wave, m
         ]
     )
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: next(steps)())
-    driver = _driver(wave, verify_tool=CHECK)
-    driver._tool_timeout_s, driver._max_waves = LIMIT, 8
+    driver = _driver(wave)
     driver.call_tool = call_tool
     driver.sendSSE = lambda *a, **kw: None
 
     try:
-        answer, trace = driver._run(context=_context(wave, Memory()), question=None)
+        # The setting is whole seconds
+        context = _context(wave, Memory(), verify_tool=CHECK, tool_timeout=int(LIMIT), max_waves=8)
+        answer, trace = driver._run(context=context, question=None)
     finally:
         release.set()
 
@@ -323,14 +337,12 @@ def test_a_run_that_fails_waits_for_its_timed_out_call_before_it_ends(wave, monk
     steps = iter([lambda: _reply(tool_calls=[call('workspace.write', path='src/App.tsx')]), planning_fails])
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: next(steps)())
     driver = _driver(wave)
-    driver._tool_timeout_s = LIMIT
     driver.call_tool = lambda context, tool, args: release.wait(timeout=30) and {'ok': True}
     driver.sendSSE = lambda *a, **kw: None
     driver._synthesize = lambda **kw: answered.set() or 'answered from what was gathered'
 
-    thread = threading.Thread(
-        target=lambda: out.update(result=driver._run(context=_context(wave, memory), question=None))
-    )
+    context = _context(wave, memory, tool_timeout=int(LIMIT))
+    thread = threading.Thread(target=lambda: out.update(result=driver._run(context=context, question=None)))
     thread.start()
     try:
         assert answered.wait(WAIT), 'the run never reached its fallback answer'
@@ -371,12 +383,11 @@ def test_waiting_for_a_timed_out_call_is_a_warning_not_an_error(wave, monkeypatc
     )
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: next(steps)())
     driver = _driver(wave)
-    driver._tool_timeout_s = LIMIT
     driver.call_tool = lambda context, tool, args: release.wait(timeout=30) and {'ok': True}
     driver.sendSSE = lambda *a, **kw: None
 
     try:
-        answer, trace = driver._run(context=_context(wave, Memory()), question=None)
+        answer, trace = driver._run(context=_context(wave, Memory(), tool_timeout=int(LIMIT)), question=None)
     finally:
         release.set()
 

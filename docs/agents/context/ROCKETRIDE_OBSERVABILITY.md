@@ -380,8 +380,10 @@ several controls hold, each one's flow follows its own `pipelineTraceLevel`.
 
 ### 5.3b `apaevt_ops`: engine-level output of a SHARED engine (subscribe to `OPS`, `sys.admin` only)
 
-On an engine shared across users, counts, errors, warnings, downloads, exit
-codes, bare `print` output and the debugger channel belong to no single caller.
+On a shared engine (the one engine of a published pipe's shape, held by every
+caller's control on `@me`, `@team` and `@public`), counts, errors, warnings,
+downloads, exit codes, bare `print` output and the debugger channel belong to
+no single caller.
 They leave the server as `apaevt_ops` with body `{ engineKey, kind, ... }`
 (`kind` = the original event name), on the `*` wildcard subscription, bit
 `OPS` (`1 << 10`). `ALL` does NOT include `OPS`: an operator opts in, and the

@@ -27,7 +27,7 @@ Baidu Qianfan binding for the ChatLLM.
 
 from typing import Any, Dict
 
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 from openai import APIConnectionError, APIError, AuthenticationError, RateLimitError
 
@@ -55,12 +55,12 @@ class Chat(ChatBase):
         if not isinstance(apikey, str) or not apikey.strip():
             raise ValueError('Baidu Qianfan API key is required.')
 
+        # One client for every call: each request binds its model and max_tokens
         self._llm = ChatOpenAI(
-            model=self._model,
+            model=UNBOUND_MODEL,
             api_key=apikey.strip(),
             base_url=serverbase,
             temperature=0,
-            max_tokens=self._modelOutputTokens,
         )
 
     def is_retryable_error(self, error):

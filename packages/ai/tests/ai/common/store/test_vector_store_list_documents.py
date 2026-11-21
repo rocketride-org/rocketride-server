@@ -190,17 +190,13 @@ def test_hiding_holds_on_the_real_instance_base():
         pytest.skip('needs the engine rocketlib')
 
     inst = StoreInstanceBase.__new__(StoreInstanceBase)  # no engine wiring, as in test_store_base
-    inst.IGlobal = SimpleNamespace(
-        serverName='rrvector',
-        store=make_store(),
-        embed_query=None,
-        embed_model_name=None,
-        expose_tools=True,
-        allow_write=False,
-    )
+    inst.IGlobal = SimpleNamespace(store=make_store(), embed_query=None, embed_model_name=None)
+    inst.IGlobal._stores = {}
+    inst.IGlobal.store_for = lambda settings: inst.IGlobal.store
+    inst._settings = {'serverName': 'rrvector', 'expose_tools': True, 'allow_write': False}
 
     assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats'}
     inst.IGlobal.store.supports_document_listing = True
     assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'list_documents'}
-    inst.IGlobal.allow_write = True
+    inst._settings['allow_write'] = True
     assert set(inst._collect_tool_methods()) == set(EVERY_TOOL_NAME)

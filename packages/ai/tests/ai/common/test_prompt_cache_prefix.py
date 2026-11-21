@@ -75,7 +75,7 @@ class _CachingChat(ChatBase):
     def __init__(self, replies):
         self.replies = list(replies)
         self.seen = []
-        self._modelOutputTokens = 4096
+        super().__init__('test', {'model': 'test-model', 'modelOutputTokens': 4096}, {})
 
     def chat_string(self, prompt, **_kwargs):
         self.seen.append((prompt, PROMPT_CACHE_PREFIX_VAR.get()))

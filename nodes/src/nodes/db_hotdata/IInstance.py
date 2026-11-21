@@ -33,13 +33,14 @@ import json
 import hashlib
 import re
 import time
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ai.common.schema import Answer, Question
 from ai.common.utils import normalize_tool_input
 from rocketlib import IInstanceBase, debug, error, tool_function, warning
 from rocketlib.types import IInvokeLLM
 
+from .hotdata_client import HotdataClient
 from .hotdata_schema import (
     format_schema_for_prompt,
     get_dialect_prompt_text,
@@ -92,6 +93,15 @@ _ENDED_NOT_BY_THE_SQL = frozenset({'interrupted', 'cancelled', 'canceled'})
 _JOB_PENDING = frozenset({'pending', 'running'})
 _JOB_OK = frozenset({'succeeded', 'ready'})
 _JOB_BAD = frozenset({'failed', 'cancelled', 'canceled'})
+
+#: The state key of the append registry: {fingerprint: [outcome, written-at]}
+#: for the appends this control already sent, shared by every replica.
+_LOADS_KEY = 'loads'
+
+#: The most fingerprints the registry keeps (a few hundred bytes each, far
+#: under the state value cap); past it the oldest settled entries go first,
+#: and a pending reservation is never evicted.
+_LOADS_MAX = 512
 
 #: Load modes Hotdata accepts, and the subset that needs key columns.
 _LOAD_MODES = frozenset({'append', 'replace', 'upsert', 'update', 'delete'})
@@ -228,6 +238,16 @@ class RunInterrupted(RuntimeError):
     ``_run_sql`` can run the same statement again for this status and no other,
     and a RuntimeError so that everything that already treats it as "not the
     statement's fault" keeps doing so.
+    """
+
+
+class JobUnsettled(RuntimeError):
+    """The server accepted a job, and this call never saw it end.
+
+    The poll ran out of time, or reading the job's status failed. The job may
+    still be running, so its outcome is unknown: for a load, rows may yet land.
+    Its own type so that ``load_data`` keeps the append's reservation for it,
+    where a job that ended ``failed`` releases it.
     """
 
 
@@ -506,6 +526,24 @@ def _rows_to_markdown(rows: List[Any], limit: int = 100) -> str:
     return table
 
 
+def _bounded_loads(loads: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep at most ``_LOADS_MAX`` entries of the append registry, evicting settled entries only.
+
+    The registry is one state value (state allows a node 16 keys, so the
+    fingerprints share one): past the bound the oldest settled entries go
+    first. A pending reservation is never evicted, because its load may still
+    be running; ``_seen_load`` refuses a new reservation instead once every
+    slot is pending, so the registry never grows past the bound.
+    """
+    if len(loads) <= _LOADS_MAX:
+        return loads
+    # Oldest settled first; pending reservations are not candidates
+    settled = sorted((fp for fp in loads if loads[fp][0] != 'pending'), key=lambda fp: loads[fp][1])
+    for fingerprint in settled[: len(loads) - _LOADS_MAX]:
+        del loads[fingerprint]
+    return loads
+
+
 def _leading_verb(sql: str) -> str:
     cleaned = _strip_sql_noise(sql).strip()
     if not cleaned:
@@ -518,6 +556,73 @@ def _leading_verb(sql: str) -> str:
 
 class IInstance(IInstanceBase):
     """Tool surface for db_hotdata."""
+
+    # This call's view of the control's client, built on first use (see _client)
+    _call_client: Optional[HotdataClient] = None
+
+    # ------------------------------------------------------------------
+    # The call's client and the append registry (state shared by every replica)
+    # ------------------------------------------------------------------
+
+    def _client(self) -> HotdataClient:
+        """Return the control's client with this call's retry budget (its ``job_timeout_secs``)."""
+        if self._call_client is None:
+            self._call_client = self.IGlobal.client.with_retry_budget(float(self.settings['job_timeout_secs']))
+        return self._call_client
+
+    def _seen_load(self, fingerprint: str) -> Optional[str]:
+        """Reserve an append payload; return the prior outcome if there was one.
+
+        Append is not idempotent on Hotdata's side, so a repeated identical load
+        would duplicate rows. The registry is this node's state: every replica
+        of the control reads and writes the one record, and the check and the
+        reservation happen under its lock because agents fire tool calls in
+        parallel. A ``pending`` reservation is never taken over by another
+        call, however old: no one but its own load can say whether that load
+        is still sending rows, and a replica that stopped mid-load left an
+        unknown subset behind, the same as a ``partial`` load. It leaves the
+        registry only when its own load records or releases it, or when the
+        record expires with the control.
+
+        Returns:
+            None when this payload is new (and is now reserved), otherwise the
+            stored outcome: ``pending``, ``complete`` or ``partial``. The caller
+            must call ``_release_load`` if the load then fails in a way that
+            shows no row landed, or ``_record_load`` with the final outcome once
+            it settles; a load whose end it never saw stays ``pending``.
+
+        Raises:
+            RuntimeError: Every slot of the registry holds a pending
+                reservation, so a new one could only be made by dropping a
+                load that may still be running.
+        """
+        with self.state.lock(_LOADS_KEY):
+            loads = self.state.get(_LOADS_KEY) or {}
+            existing = loads.get(fingerprint)
+            if existing is not None:
+                return existing[0]
+            if sum(1 for entry in loads.values() if entry[0] == 'pending') >= _LOADS_MAX:
+                raise RuntimeError(
+                    f'db_hotdata: {_LOADS_MAX} appends are already in flight on this node, so this one was not '
+                    'sent. Wait for one of them to finish, then call load_data again.'
+                )
+            loads[fingerprint] = ['pending', time.time()]
+            self.state.put(_LOADS_KEY, _bounded_loads(loads))
+            return None
+
+    def _record_load(self, fingerprint: str, outcome: str) -> None:
+        """Record how a reserved load finished: 'complete' or 'partial'."""
+        with self.state.lock(_LOADS_KEY):
+            loads = self.state.get(_LOADS_KEY) or {}
+            loads[fingerprint] = [outcome, time.time()]
+            self.state.put(_LOADS_KEY, _bounded_loads(loads))
+
+    def _release_load(self, fingerprint: str) -> None:
+        """Undo a reservation whose load landed no row, so a retry can run."""
+        with self.state.lock(_LOADS_KEY):
+            loads = self.state.get(_LOADS_KEY) or {}
+            if loads.pop(fingerprint, None) is not None:
+                self.state.put(_LOADS_KEY, loads)
 
     # ------------------------------------------------------------------
     # Internals
@@ -556,10 +661,10 @@ class IInstance(IInstanceBase):
         # duplicate every row, which is precisely what the cache prevents. The
         # fingerprint is scoped to the database id, so a genuinely new database
         # already gets a fresh load without this.
-        response = glb.client.query(
+        response = self._client().query(
             sql=sql,
             database_id=database_id,
-            async_after_ms=glb.async_after_ms,
+            async_after_ms=self.settings['async_after_ms'],
         )
 
         # result_id names the WHOLE server-side result, while `rows` is only the
@@ -610,7 +715,7 @@ class IInstance(IInstanceBase):
 
         result_id = response.get('result_id')
         if result_id:
-            payload = glb.client.get_result(result_id, database_id=database_id, offset=0, limit=limit)
+            payload = self._client().get_result(result_id, database_id=database_id, offset=0, limit=limit)
             raw = payload.get('rows') or payload.get('data') or []
             rows = _rows_as_objects(raw, payload.get('columns'))
             result = {'rows': rows[:limit], 'row_count': len(rows[:limit]), 'sql': sql}
@@ -629,7 +734,7 @@ class IInstance(IInstanceBase):
 FROM information_schema.columns
 WHERE table_schema NOT IN ('information_schema')
 ORDER BY table_schema, table_name, ordinal_position"""
-        rows = self._run_sql(sql, self.IGlobal.max_execute_rows).get('rows') or []
+        rows = self._run_sql(sql, self.settings['max_execute_rows']).get('rows') or []
         grouped: Dict[Tuple[Any, Any], Dict[str, Any]] = {}
         for row in rows:
             if not isinstance(row, dict):
@@ -660,7 +765,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 f"WHERE table_name = '{table}' AND table_schema = '{schema}' "
                 'ORDER BY ordinal_position'
             )
-            rows = self._run_sql(sql, self.IGlobal.max_execute_rows).get('rows') or []
+            rows = self._run_sql(sql, self.settings['max_execute_rows']).get('rows') or []
         except Exception as e:  # noqa: BLE001
             warning(f'db_hotdata: could not read the columns of {schema}.{table}: {e}')
             return []
@@ -678,11 +783,10 @@ ORDER BY table_schema, table_name, ordinal_position"""
 
     def _await_run(self, run_id: str, database_id: str = '') -> Dict[str, Any]:
         """Poll a query run to a terminal state under a monotonic deadline."""
-        glb = self.IGlobal
-        deadline = time.monotonic() + glb.job_timeout_secs
+        deadline = time.monotonic() + self.settings['job_timeout_secs']
         delay = _POLL_BASE_S
         while True:
-            run = glb.client.get_query_run(run_id, database_id=database_id)
+            run = self._client().get_query_run(run_id, database_id=database_id)
             status = str(run.get('status') or '').lower()
             if status in _TERMINAL_BAD:
                 message = _run_failure_text(run, status)
@@ -710,7 +814,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             if status in _TERMINAL_OK:
                 return run
             if time.monotonic() + delay > deadline:
-                raise RuntimeError(f'db_hotdata: query did not finish within {glb.job_timeout_secs}s')
+                raise RuntimeError(f'db_hotdata: query did not finish within {self.settings["job_timeout_secs"]}s')
             time.sleep(delay)
             delay = min(delay * 2, _POLL_MAX_S)
 
@@ -751,7 +855,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         table = str(args.get('table') or '').strip()
 
         if connection_id:
-            payload = glb.client.information_schema(
+            payload = self._client().information_schema(
                 connection_id=connection_id,
                 schema=schema,
                 table=table,
@@ -803,9 +907,8 @@ ORDER BY table_schema, table_name, ordinal_position"""
     )
     def execute(self, args: Any) -> Dict[str, Any]:
         args = normalize_tool_input(args, tool_name='execute')
-        glb = self.IGlobal
 
-        if not glb.allow_execute:
+        if not self.settings['allow_execute']:
             warning('db_hotdata: execute is disabled (allow_execute is off)')
             raise RuntimeError('db_hotdata: raw SQL execution is disabled; enable allow_execute on the node')
 
@@ -891,7 +994,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             if not items:
                 debug('db_hotdata: no items to load')
                 return
-            self.load_data({'table': self.IGlobal.table, 'rows': items, 'mode': 'append'})
+            self.load_data({'table': self.settings['table'].strip(), 'rows': items, 'mode': 'append'})
         except Exception as e:
             # Re-raise rather than only logging. The answers lane has no output
             # lane to emit to, so swallowing here would let the run report
@@ -973,7 +1076,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             database = self.IGlobal.get_database()
             connection_id = database.get('default_connection_id')
             if connection_id:
-                payload = self.IGlobal.client.information_schema(
+                payload = self._client().information_schema(
                     connection_id=connection_id,
                     include_columns=True,
                 )
@@ -1012,7 +1115,6 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 'No LLM is connected to this Hotdata node. Natural-language questions need an llm '
                 'connection; raw SQL through the execute tool (client.database.query) works without one.'
             )
-        glb = self.IGlobal
 
         q = Question(role='You are a Hotdata SQL query generator.')
         q.addInstruction(
@@ -1026,7 +1128,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         )
         q.addContext(self._schema_context())
 
-        db_desc = (getattr(glb, 'db_description', '') or '').strip()
+        db_desc = (self.settings['db_description'] or '').strip()
         if db_desc:
             q.addContext(f'Data context: {db_desc}')
 
@@ -1074,7 +1176,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
 
     def _resolve_limit(self, raw_limit: Any) -> int:
         """Clamp a caller-supplied row limit, rejecting JSON booleans."""
-        cap = self.IGlobal.max_execute_rows
+        cap = self.settings['max_execute_rows']
         if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
             return min(250, cap)
         return max(1, min(raw_limit, cap))
@@ -1106,7 +1208,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         if not question_text:
             raise ValueError('db_hotdata: question is required')
         limit = self._resolve_limit(args.get('limit'))
-        attempts = max(1, int(getattr(self.IGlobal, 'max_attempts', 3) or 3))
+        attempts = max(1, int(self.settings['max_attempts']))
 
         previous_sql = ''
         last_error = ''
@@ -1162,7 +1264,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             raise ValueError('db_hotdata: question is required')
 
         limit = self._resolve_limit(args.get('limit'))
-        attempts = max(1, int(getattr(self.IGlobal, 'max_attempts', 3) or 3))
+        attempts = max(1, int(self.settings['max_attempts']))
 
         previous_sql = ''
         last_error = ''
@@ -1217,7 +1319,14 @@ ORDER BY table_schema, table_name, ordinal_position"""
     # ------------------------------------------------------------------
 
     def _await_job(self, response: Dict[str, Any]) -> Dict[str, Any]:
-        """Follow a 202 job to completion, or pass a synchronous result straight through."""
+        """Follow a 202 job to completion, or pass a synchronous result straight through.
+
+        Raises:
+            RuntimeError: The job ended failed or cancelled.
+            JobUnsettled: The job did not end within the call's
+                ``job_timeout_secs``, or reading its status failed; it may
+                still be running.
+        """
         # The polled status is lowercased below, so the envelope casing is not
         # guaranteed either. A 'Pending' envelope would otherwise be treated as
         # a finished job and the caller would keep a dedup reservation for rows
@@ -1227,27 +1336,35 @@ ORDER BY table_schema, table_name, ordinal_position"""
         if not job_id:
             return response
 
-        glb = self.IGlobal
-        deadline = time.monotonic() + glb.job_timeout_secs
+        deadline = time.monotonic() + self.settings['job_timeout_secs']
         delay = _POLL_BASE_S
         while True:
-            job = glb.client.get_job(job_id)
+            # The job is accepted from here on: a status read that fails leaves its outcome unknown
+            try:
+                job = self._client().get_job(job_id)
+            except Exception as exc:
+                raise JobUnsettled(
+                    f'db_hotdata: job {job_id} was accepted, but reading its status failed: {exc}'
+                ) from exc
             status = str(job.get('status') or '').lower()
             if status in _JOB_BAD:
                 message = job.get('error_message') or status
                 raise RuntimeError(f'db_hotdata: job {job_id} failed: {message}')
             if status == 'partially_succeeded':
                 warning(f'db_hotdata: job {job_id} only partially succeeded')
-                # Flag it so load_data releases the dedup reservation: only some
-                # rows landed, so a retry of the same payload must not be
-                # skipped as a duplicate.
+                # Flag it so load_data records the append as partial: an
+                # unknown subset of the rows landed, so a retry of the same
+                # payload is refused rather than duplicating that subset.
                 job = dict(job)
                 job['partial'] = True
                 return job
             if status in _JOB_OK:
                 return job
             if time.monotonic() + delay > deadline:
-                raise RuntimeError(f'db_hotdata: job {job_id} did not finish within {glb.job_timeout_secs}s')
+                raise JobUnsettled(
+                    f'db_hotdata: job {job_id} did not finish within {self.settings["job_timeout_secs"]}s '
+                    'and may still be running'
+                )
             time.sleep(delay)
             delay = min(delay * 2, _POLL_MAX_S)
 
@@ -1259,7 +1376,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         success for our purposes.
         """
         try:
-            self.IGlobal.client.create_table(
+            self._client().create_table(
                 database_id=database_id,
                 schema=schema,
                 name=table,
@@ -1328,7 +1445,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         mode = str(args.get('mode') or 'append').strip().lower()
         if mode not in _LOAD_MODES:
             raise ValueError(f'db_hotdata: mode must be one of {", ".join(sorted(_LOAD_MODES))}')
-        if mode in _DESTRUCTIVE_MODES and not glb.allow_destructive_load:
+        if mode in _DESTRUCTIVE_MODES and not self.settings['allow_destructive_load']:
             raise ValueError(
                 f'db_hotdata: mode "{mode}" overwrites or removes existing rows and is disabled; '
                 'enable allow_destructive_load on the node, or use append or upsert'
@@ -1362,7 +1479,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             fingerprint = hashlib.sha256(
                 f'{database_id}|{schema}.{table}|result:{result_id}'.encode('utf-8')
             ).hexdigest()
-            prior = glb.seen_load(fingerprint)
+            prior = self._seen_load(fingerprint)
             if prior is not None:
                 out = {'table': table, 'schema': schema, 'mode': mode, 'result_id': result_id}
                 if prior == 'pending':
@@ -1400,7 +1517,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 # says nothing about this one, and skipping the load would leave the
                 # table missing entirely.
                 fingerprint = hashlib.sha256(f'{database_id}|{schema}.{table}|'.encode('utf-8') + payload).hexdigest()
-                prior = glb.seen_load(fingerprint)
+                prior = self._seen_load(fingerprint)
                 if prior is not None:
                     out = {'table': table, 'schema': schema, 'mode': mode}
                     if prior == 'pending':
@@ -1437,20 +1554,20 @@ ORDER BY table_schema, table_name, ordinal_position"""
                         )
                     return out
 
-            upload_id = glb.client.upload_bytes(
-                payload,
-                filename=f'{table}.ndjson',
-                content_type='application/x-ndjson',
-            )
-            data_format = 'json'
-
-        # The dedup fingerprint above is a reservation. If anything from here on
-        # fails, release it: otherwise the agent's retry is skipped as a
-        # duplicate and the rows are silently never loaded.
+        # The dedup fingerprint above is a reservation. A failure that shows no
+        # row landed releases it: otherwise the agent's retry is skipped as a
+        # duplicate and the rows are silently never loaded. The upload is inside
+        # this scope, because a failed upload sent no load at all.
         try:
+            if not result_id:
+                upload_id = self._client().upload_bytes(
+                    payload,
+                    filename=f'{table}.ndjson',
+                    content_type='application/x-ndjson',
+                )
+                data_format = 'json'
             try:
                 result = self._perform_load(
-                    glb,
                     database_id=database_id,
                     schema=schema,
                     table=table,
@@ -1504,14 +1621,13 @@ ORDER BY table_schema, table_name, ordinal_position"""
                     missing = [c for c in columns if not any(c in row for row in rows)]
                     debug(f'db_hotdata: widening {len(rows)} row(s) to the {len(columns)} columns of {schema}.{table}')
                     # A fresh upload: the failed load has already consumed the old one.
-                    upload_id = glb.client.upload_bytes(
+                    upload_id = self._client().upload_bytes(
                         _to_ndjson(projected),
                         filename=f'{table}.ndjson',
                         content_type='application/x-ndjson',
                     )
                     try:
                         result = self._perform_load(
-                            glb,
                             database_id=database_id,
                             schema=schema,
                             table=table,
@@ -1543,22 +1659,36 @@ ORDER BY table_schema, table_name, ordinal_position"""
                             'have every producer emit every column. '
                             f'Server said: {widen_error}'
                         ) from widen_error
+        except JobUnsettled as e:
+            # The server accepted the load and this call never saw it end, so its
+            # rows may still land. The reservation stays pending: releasing it
+            # would let an identical retry append them a second time.
             if fingerprint:
-                glb.record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
-            # A partial append deliberately KEEPS its reservation. Append is not
-            # idempotent, so an unknown subset of the payload already landed and
-            # a blind retry would duplicate exactly those rows. There is no safe
-            # automatic action here: the caller has to reconcile. Releasing would
-            # trade silent data loss for silent duplication.
-            return result
+                raise JobUnsettled(
+                    f'{e}. Its rows may still land, so an identical load_data reports in_progress instead '
+                    f'of sending them again; query {schema}.{table} to see what landed.'
+                ) from e
+            raise
         except Exception:
             if fingerprint:
-                glb.release_load(fingerprint)
+                self._release_load(fingerprint)
             raise
+
+        # Outside the release scope: the load has ended and rows are in the
+        # table (all of them, or for a partial load some), so if recording that
+        # fails the reservation stays pending rather than being released for a
+        # retry that would append them again.
+        if fingerprint:
+            self._record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
+        # A partial append deliberately KEEPS its reservation. Append is not
+        # idempotent, so an unknown subset of the payload already landed and
+        # a blind retry would duplicate exactly those rows. There is no safe
+        # automatic action here: the caller has to reconcile. Releasing would
+        # trade silent data loss for silent duplication.
+        return result
 
     def _perform_load(
         self,
-        glb,
         *,
         database_id,
         schema,
@@ -1570,10 +1700,10 @@ ORDER BY table_schema, table_name, ordinal_position"""
         key,
         rows,
     ) -> Dict[str, Any]:
-        """Issue the load and wait for it. Split out so load_data can release the
-        dedup reservation on any failure below the upload.
+        """Issue the load and wait for it. Split out so load_data can settle the
+        dedup reservation by how the load failed (see ``JobUnsettled``).
         """
-        response = glb.client.load_table(
+        response = self._client().load_table(
             database_id=database_id,
             schema=schema,
             table=table,
@@ -1582,7 +1712,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             result_id=result_id,
             data_format=data_format,
             key=key,
-            async_after_ms=glb.async_after_ms,
+            async_after_ms=self.settings['async_after_ms'],
         )
         finished = self._await_job(response)
         row_count = finished.get('row_count')
@@ -1670,7 +1800,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
         schema = str(args.get('schema') or '').strip() or database.get('default_schema') or 'main'
         index_name = str(args.get('index_name') or '').strip() or f'{table}_{column}_{index_type}'
 
-        response = glb.client.create_index(
+        response = self._client().create_index(
             connection_id=connection_id,
             schema=schema,
             table=table,
@@ -1678,7 +1808,7 @@ ORDER BY table_schema, table_name, ordinal_position"""
             columns=[column],
             index_type=index_type,
             metric=str(args.get('metric') or '').strip(),
-            async_after_ms=glb.async_after_ms,
+            async_after_ms=self.settings['async_after_ms'],
         )
         finished = self._await_job(response)
         debug(f'db_hotdata: built {index_type} index {index_name} on {schema}.{table}.{column}')

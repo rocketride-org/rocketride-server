@@ -78,6 +78,9 @@ export interface TeamDeploymentSchedule {
 export interface TeamDeployment {
 	teamId: string;
 	teamName: string;
+	/** The audience's handle as the server composed it for the caller
+	    ('@me', '@<team>', '@public', '=team/<tid>', 'Personal'); shown, never parsed. */
+	handle: string;
 	/** The rung the row's slot is (stamped by the host, which knows the caller). */
 	rung: DeploymentRung;
 	version: number;

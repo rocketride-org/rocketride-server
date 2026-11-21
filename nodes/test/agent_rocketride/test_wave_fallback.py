@@ -214,11 +214,17 @@ def test_a_planning_error_with_notes_still_gets_an_answer(wave, driver, monkeypa
         raise failure
 
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', plan_wave)
-    driver._max_waves = 3
     driver._synthesize = lambda **kw: f'answered from: {kw["scratch"]}'
 
     context = wave.rocketride_agent.AgentContext(
-        invoker=None, llm=None, tools=None, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+        invoker=SimpleNamespace(settings={'max_waves': 3}),
+        llm=None,
+        tools=None,
+        memory=None,
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
     )
     answer, trace = driver._run(context=context, question=None)
 
@@ -236,11 +242,17 @@ def test_a_reply_cannot_remove_the_result_its_own_call_gets(wave, driver, monkey
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: reply)
     monkeypatch.setattr(wave.rocketride_agent, 'execute_wave', lambda calls, **kw: [dict(READ)])
     memory, seen = FakeMemory(), {}
-    driver._max_waves = 1
     # The run clears its own keys when it ends, so look at what was cleared before the answer.
     driver._synthesize = lambda **kw: seen.update(kw, cleared=list(memory.cleared)) or 'synthesized'
     context = wave.rocketride_agent.AgentContext(
-        invoker=None, llm=None, tools=None, memory=memory, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+        invoker=SimpleNamespace(settings={'max_waves': 1}),
+        llm=None,
+        tools=None,
+        memory=memory,
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
     )
 
     driver._run(context=context, question=None)

@@ -71,52 +71,67 @@ describe('pickPublishVersion', () => {
 describe('teams', () => {
 	const roster = withIdentity({
 		userId: 'u1',
-		organization: { id: 'o', name: 'Org', permissions: [], teams: [{ id: 't-qa', name: 'QA', permissions: ['task.control'] }, { id: 't-prod', name: 'Production', permissions: [] }] } as unknown as ConnectResult['organization'],
+		organization: {
+			id: 'o',
+			name: 'Org',
+			permissions: [],
+			teams: [
+				{ id: 't-qa', name: 'QA', permissions: ['task.control'], audience: '=team/t-qa' },
+				{ id: 't-prod', name: 'Production', permissions: [], audience: '=team/t-prod' },
+			],
+		} as unknown as ConnectResult['organization'],
 	});
 
-	it('resolveDeployTeams lists @me first, then the roster with control rights', () => {
+	it('resolveDeployTeams lists @me first, then the roster by its audience with control rights', () => {
 		expect(resolveDeployTeams(roster, [])).toEqual([
 			{ id: '@me', name: 'Me', canControl: true },
-			{ id: 't-qa', name: 'QA', canControl: true },
-			{ id: 't-prod', name: 'Production', canControl: false },
+			{ id: '=team/t-qa', name: 'QA', canControl: true },
+			{ id: '=team/t-prod', name: 'Production', canControl: false },
 		]);
 	});
 
-	it('resolveDeployTeams derives teams from rows for a rosterless identity, never personal rows', () => {
-		const teams = resolveDeployTeams(withIdentity({ userId: 'u1', organization: null }), [{ teamId: 'local' }, { teamId: 'user~u1' }, { teamId: 'local' }]);
-		expect(teams.map((t) => t.id)).toEqual(['@me', 'local']);
+	it('resolveDeployTeams skips a team with no audience', () => {
+		const info = withIdentity({ userId: 'u1', organization: { id: 'o', name: 'Org', permissions: [], teams: [{ id: 't', name: 'T', permissions: [] }] } as unknown as ConnectResult['organization'] });
+		expect(resolveDeployTeams(info, []).map((t) => t.id)).toEqual(['@me']);
 	});
 
-	it('resolveTeamArg maps @me, @public, ids, and names (case-insensitive); unknowns pass through', () => {
+	it('resolveDeployTeams derives teams from the team rows by rung for a rosterless identity', () => {
+		const rows = [
+			{ teamId: '=team/local', rung: 'team' as const, handle: '@Development' },
+			{ teamId: '=user/u1', rung: 'me' as const, handle: '@me' },
+			{ teamId: '@public', rung: 'public' as const, handle: '@public' },
+			{ teamId: '=team/local', rung: 'team' as const, handle: '@Development' },
+		];
+		expect(resolveDeployTeams(withIdentity({ userId: 'u1', organization: null }), rows)).toEqual([
+			{ id: '@me', name: 'Me', canControl: true },
+			{ id: '=team/local', name: '@Development', canControl: true },
+		]);
+	});
+
+	it('resolveTeamArg passes what was typed through: the server resolves every spelling', () => {
 		const teams = resolveDeployTeams(roster, []);
-		expect(resolveTeamArg('@me', teams)).toBe('@me');
-		expect(resolveTeamArg('@public', teams)).toBe('@public');
-		expect(resolveTeamArg('t-qa', teams)).toBe('t-qa');
-		expect(resolveTeamArg('production', teams)).toBe('t-prod');
-		expect(resolveTeamArg('t-other', teams)).toBe('t-other');
-		expect(resolveTeamArg('', teams)).toBe('');
+		for (const typed of ['@me', '@public', '@Production', '@production', '=team/t-qa', 'Production', 't-other', '']) {
+			expect(resolveTeamArg(typed, teams)).toBe(typed);
+		}
+		expect(resolveTeamArg('  @QA ', teams)).toBe('@QA');
+		// Two names that differ only by case are the server's to refuse
+		expect(resolveTeamArg('@OPS', [{ id: 'a', name: 'Ops', canControl: true }, { id: 'b', name: 'ops', canControl: true }])).toBe('@OPS');
 	});
 
-	it('resolveTeamArg refuses an ambiguous name', () => {
-		const teams = [{ id: 'a', name: 'Ops', canControl: true }, { id: 'b', name: 'ops', canControl: true }];
-		expect(() => resolveTeamArg('OPS', teams)).toThrow(/ambiguous.*a, b/);
-	});
-
-	it('teamNameOf names personal spaces and the store, and falls back to the id', () => {
+	it('teamNameOf is a roster lookup that parses nothing', () => {
 		const teams = resolveDeployTeams(roster, []);
-		expect(teamNameOf(teams, 'user~u1', 'u1')).toBe('Me');
-		expect(teamNameOf(teams, 'user~u2', 'u1')).toBe('Personal');
-		expect(teamNameOf(teams, '~public', 'u1')).toBe('Store');
-		expect(teamNameOf(teams, '@public', 'u1')).toBe('Store');
-		expect(teamNameOf(teams, 't-qa', 'u1')).toBe('QA');
-		expect(teamNameOf(teams, 't-gone', 'u1')).toBe('t-gone');
+		expect(teamNameOf(teams, '=team/t-qa', 'u1')).toBe('QA');
+		expect(teamNameOf(teams, '@me', 'u1')).toBe('Me');
+		// Anything else comes back unchanged: rows carry their handle
+		for (const value of ['=user/u1', '=user/u2', '@public', '=team/t-gone', 't-qa']) {
+			expect(teamNameOf(teams, value, 'u1')).toBe(value);
+		}
 	});
 
-	it("wireTeamIdOf addresses the caller's own space as @me and the store as @public", () => {
-		expect(wireTeamIdOf('user~u1', 'u1')).toBe('@me');
-		expect(wireTeamIdOf('~public', 'u1')).toBe('@public');
-		expect(wireTeamIdOf('~public', '')).toBe('@public');
-		expect(wireTeamIdOf('t-qa', 'u1')).toBe('t-qa');
+	it("wireTeamIdOf passes a row's audience through", () => {
+		for (const value of ['=user/u1', '@public', '=team/t-qa', '@me']) {
+			expect(wireTeamIdOf(value, 'u1')).toBe(value);
+		}
 	});
 });
 
