@@ -241,6 +241,16 @@ class RunInterrupted(RuntimeError):
     """
 
 
+class JobUnsettled(RuntimeError):
+    """The server accepted a job, and this call never saw it end.
+
+    The poll ran out of time, or reading the job's status failed. The job may
+    still be running, so its outcome is unknown: for a load, rows may yet land.
+    Its own type so that ``load_data`` keeps the append's reservation for it,
+    where a job that ended ``failed`` releases it.
+    """
+
+
 def _run_failure_text(run: Dict[str, Any], fallback: str) -> str:
     """Why a query run failed, in the server's words.
 
@@ -577,8 +587,9 @@ class IInstance(IInstanceBase):
         Returns:
             None when this payload is new (and is now reserved), otherwise the
             stored outcome: ``pending``, ``complete`` or ``partial``. The caller
-            must call ``_release_load`` if the load then fails, or
-            ``_record_load`` with the final outcome once it settles.
+            must call ``_release_load`` if the load then fails in a way that
+            shows no row landed, or ``_record_load`` with the final outcome once
+            it settles; a load whose end it never saw stays ``pending``.
 
         Raises:
             RuntimeError: Every slot of the registry holds a pending
@@ -607,7 +618,7 @@ class IInstance(IInstanceBase):
             self.state.put(_LOADS_KEY, _bounded_loads(loads))
 
     def _release_load(self, fingerprint: str) -> None:
-        """Undo a reservation whose load did not complete, so a retry can run."""
+        """Undo a reservation whose load landed no row, so a retry can run."""
         with self.state.lock(_LOADS_KEY):
             loads = self.state.get(_LOADS_KEY) or {}
             if loads.pop(fingerprint, None) is not None:
@@ -1308,7 +1319,14 @@ ORDER BY table_schema, table_name, ordinal_position"""
     # ------------------------------------------------------------------
 
     def _await_job(self, response: Dict[str, Any]) -> Dict[str, Any]:
-        """Follow a 202 job to completion, or pass a synchronous result straight through."""
+        """Follow a 202 job to completion, or pass a synchronous result straight through.
+
+        Raises:
+            RuntimeError: The job ended failed or cancelled.
+            JobUnsettled: The job did not end within the call's
+                ``job_timeout_secs``, or reading its status failed; it may
+                still be running.
+        """
         # The polled status is lowercased below, so the envelope casing is not
         # guaranteed either. A 'Pending' envelope would otherwise be treated as
         # a finished job and the caller would keep a dedup reservation for rows
@@ -1321,24 +1339,31 @@ ORDER BY table_schema, table_name, ordinal_position"""
         deadline = time.monotonic() + self.settings['job_timeout_secs']
         delay = _POLL_BASE_S
         while True:
-            job = self._client().get_job(job_id)
+            # The job is accepted from here on: a status read that fails leaves its outcome unknown
+            try:
+                job = self._client().get_job(job_id)
+            except Exception as exc:
+                raise JobUnsettled(
+                    f'db_hotdata: job {job_id} was accepted, but reading its status failed: {exc}'
+                ) from exc
             status = str(job.get('status') or '').lower()
             if status in _JOB_BAD:
                 message = job.get('error_message') or status
                 raise RuntimeError(f'db_hotdata: job {job_id} failed: {message}')
             if status == 'partially_succeeded':
                 warning(f'db_hotdata: job {job_id} only partially succeeded')
-                # Flag it so load_data releases the dedup reservation: only some
-                # rows landed, so a retry of the same payload must not be
-                # skipped as a duplicate.
+                # Flag it so load_data records the append as partial: an
+                # unknown subset of the rows landed, so a retry of the same
+                # payload is refused rather than duplicating that subset.
                 job = dict(job)
                 job['partial'] = True
                 return job
             if status in _JOB_OK:
                 return job
             if time.monotonic() + delay > deadline:
-                raise RuntimeError(
-                    f'db_hotdata: job {job_id} did not finish within {self.settings["job_timeout_secs"]}s'
+                raise JobUnsettled(
+                    f'db_hotdata: job {job_id} did not finish within {self.settings["job_timeout_secs"]}s '
+                    'and may still be running'
                 )
             time.sleep(delay)
             delay = min(delay * 2, _POLL_MAX_S)
@@ -1529,17 +1554,18 @@ ORDER BY table_schema, table_name, ordinal_position"""
                         )
                     return out
 
-            upload_id = self._client().upload_bytes(
-                payload,
-                filename=f'{table}.ndjson',
-                content_type='application/x-ndjson',
-            )
-            data_format = 'json'
-
-        # The dedup fingerprint above is a reservation. If anything from here on
-        # fails, release it: otherwise the agent's retry is skipped as a
-        # duplicate and the rows are silently never loaded.
+        # The dedup fingerprint above is a reservation. A failure that shows no
+        # row landed releases it: otherwise the agent's retry is skipped as a
+        # duplicate and the rows are silently never loaded. The upload is inside
+        # this scope, because a failed upload sent no load at all.
         try:
+            if not result_id:
+                upload_id = self._client().upload_bytes(
+                    payload,
+                    filename=f'{table}.ndjson',
+                    content_type='application/x-ndjson',
+                )
+                data_format = 'json'
             try:
                 result = self._perform_load(
                     database_id=database_id,
@@ -1633,18 +1659,33 @@ ORDER BY table_schema, table_name, ordinal_position"""
                             'have every producer emit every column. '
                             f'Server said: {widen_error}'
                         ) from widen_error
+        except JobUnsettled as e:
+            # The server accepted the load and this call never saw it end, so its
+            # rows may still land. The reservation stays pending: releasing it
+            # would let an identical retry append them a second time.
             if fingerprint:
-                self._record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
-            # A partial append deliberately KEEPS its reservation. Append is not
-            # idempotent, so an unknown subset of the payload already landed and
-            # a blind retry would duplicate exactly those rows. There is no safe
-            # automatic action here: the caller has to reconcile. Releasing would
-            # trade silent data loss for silent duplication.
-            return result
+                raise JobUnsettled(
+                    f'{e}. Its rows may still land, so an identical load_data reports in_progress instead '
+                    f'of sending them again; query {schema}.{table} to see what landed.'
+                ) from e
+            raise
         except Exception:
             if fingerprint:
                 self._release_load(fingerprint)
             raise
+
+        # Outside the release scope: the load has ended and rows are in the
+        # table (all of them, or for a partial load some), so if recording that
+        # fails the reservation stays pending rather than being released for a
+        # retry that would append them again.
+        if fingerprint:
+            self._record_load(fingerprint, 'partial' if result.get('partial') else 'complete')
+        # A partial append deliberately KEEPS its reservation. Append is not
+        # idempotent, so an unknown subset of the payload already landed and
+        # a blind retry would duplicate exactly those rows. There is no safe
+        # automatic action here: the caller has to reconcile. Releasing would
+        # trade silent data loss for silent duplication.
+        return result
 
     def _perform_load(
         self,
@@ -1659,8 +1700,8 @@ ORDER BY table_schema, table_name, ordinal_position"""
         key,
         rows,
     ) -> Dict[str, Any]:
-        """Issue the load and wait for it. Split out so load_data can release the
-        dedup reservation on any failure below the upload.
+        """Issue the load and wait for it. Split out so load_data can settle the
+        dedup reservation by how the load failed (see ``JobUnsettled``).
         """
         response = self._client().load_table(
             database_id=database_id,

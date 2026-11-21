@@ -2556,6 +2556,142 @@ def test_pending_then_failure_lets_a_retry_through():
 
 
 # ---------------------------------------------------------------------------
+# The reservation is released only when no row can have landed
+#
+# A failed upload sent no load, and a job that ended failed landed nothing:
+# both release it. A job this call never saw end (the poll ran out of time, or
+# reading its status failed) may still be landing rows, and a load that landed
+# but could not be recorded has its rows in the table: both keep it pending.
+# ---------------------------------------------------------------------------
+
+
+def _job_global(calls, *, upload=None, get_job=None, state=None):
+    """A global whose load is accepted as a job (a 202 envelope) and followed through ``get_job``."""
+    g = _global()
+    if state is not None:
+        g.node_state = state
+    g.client = SimpleNamespace(
+        create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
+        create_table=lambda **_kw: {},
+        information_schema=lambda **_kw: {'tables': []},
+        upload_bytes=upload or (lambda *_a, **_k: 'upl-1'),
+        load_table=lambda **_kw: calls.append(1) or {'status': 'pending', 'id': 'job-1'},
+        get_job=get_job or (lambda _i: {'status': 'succeeded', 'row_count': 1}),
+    )
+    g.database = {'id': 'db-1', 'default_schema': 'main'}
+    return g
+
+
+def _stalled_poll(monkeypatch):
+    """A job that never ends, on a clock each poll's sleep advances, so it outlives the call's timeout at once."""
+    clock = [0.0]
+    monkeypatch.setattr(iinstance_mod.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(iinstance_mod.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    return lambda _i: {'status': 'running'}
+
+
+def _lost_poll(_monkeypatch):
+    """A job whose status cannot be read after the server accepted it."""
+
+    def _get_job(_i):
+        raise RuntimeError('hotdata: GET /v1/jobs/job-1 failed with HTTP 503')
+
+    return _get_job
+
+
+class _OnePutFails(_FakeState):
+    """A state store whose ``put`` fails once, on the write numbered ``fail_on``."""
+
+    def __init__(self, fail_on):
+        super().__init__()
+        self.puts = 0
+        self.fail_on = fail_on
+
+    def put(self, key, value, ttl=None):
+        self.puts += 1
+        if self.puts == self.fail_on:
+            raise RuntimeError('state: put failed')
+        super().put(key, value, ttl)
+
+
+def test_a_failed_upload_releases_its_reservation():
+    """The upload failed, so no load was sent: an identical retry is sent, not reported in progress."""
+    calls = []
+    uploads = []
+
+    def _upload(*_a, **_k):
+        uploads.append(1)
+        if len(uploads) == 1:
+            raise RuntimeError('hotdata: upload PUT failed with HTTP 503')
+        return 'upl-2'
+
+    g = _job_global(calls, upload=_upload)
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    with pytest.raises(RuntimeError, match='upload PUT failed'):
+        inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert g.node_state.get('loads') == {}, 'a failed upload must not leave a reservation behind'
+
+    out = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert 'in_progress' not in out
+    assert out['row_count'] == 1
+    assert len(uploads) == 2 and len(calls) == 1, 'the retry must upload and load the rows'
+
+
+@pytest.mark.parametrize('poll', [_stalled_poll, _lost_poll], ids=['poll-timeout', 'status-read-failed'])
+def test_an_accepted_load_whose_end_was_not_seen_keeps_its_reservation(monkeypatch, poll):
+    """The job may still be landing rows, so an identical retry reports in_progress and sends nothing."""
+    calls = []
+    g = _job_global(calls, get_job=poll(monkeypatch))
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    with pytest.raises(iinstance_mod.JobUnsettled, match='in_progress'):
+        inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert [entry[0] for entry in g.node_state.get('loads').values()] == ['pending']
+
+    again = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert again.get('in_progress') is True
+    assert len(calls) == 1, 'the retry must not append the rows while the first load may still land them'
+
+
+def test_a_job_that_ended_failed_still_releases_its_reservation():
+    """A job the server reports failed landed nothing, so the identical retry is sent."""
+    calls = []
+    jobs = [{'status': 'failed', 'error_message': 'bad ndjson'}, {'status': 'succeeded', 'row_count': 1}]
+    g = _job_global(calls, get_job=lambda _i: jobs.pop(0))
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    with pytest.raises(RuntimeError, match='bad ndjson') as raised:
+        inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert not isinstance(raised.value, iinstance_mod.JobUnsettled)
+    assert g.node_state.get('loads') == {}
+
+    out = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert out['row_count'] == 1
+    assert len(calls) == 2
+
+
+def test_a_landed_append_that_cannot_be_recorded_keeps_its_reservation():
+    """The rows are in the table, so a failure to record that must not free them for a second append."""
+    calls = []
+    # Write 1 reserves the payload; write 2 records the finished load, and fails
+    g = _job_global(calls, state=_OnePutFails(fail_on=2))
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    with pytest.raises(RuntimeError, match='put failed'):
+        inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert [entry[0] for entry in g.node_state.get('loads').values()] == ['pending']
+
+    again = inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    assert again.get('in_progress') is True
+    assert len(calls) == 1, 'the landed rows must not be appended a second time'
+
+
+# ---------------------------------------------------------------------------
 # get_sql must apply the same guard as get_data and execute
 #
 # Raised in review: get_sql handed back generated SQL unchecked, so a write verb
