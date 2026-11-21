@@ -33,7 +33,7 @@ The registered tool names are the bare method names below (an agent catalog name
 | `get_data` | Requires a non-empty `question`; optional `limit` is clamped to the graph row cap. Returns sanitized rows, generated query, applied limit, and truncation state; generation/execution failure returns `error`, `valid: false`, and no rows. |
 | `get_schema` | Takes no meaningful arguments and returns reflected `labels`, node properties, and relationships. |
 | `get_query` | Requires a non-empty `question`, with optional `limit`; returns validated read-only Cypher and `valid: true`, or an `error`/off-topic `answer` with `valid: false`. |
-| `execute` | Requires raw `query`, accepts an optional object `params` for `$name` placeholders, and runs the statement without LLM translation; it raises an error unless `allow_execute` is enabled. A read whose result exceeds the execute row cap fails. A write whose result exceeds it is already saved, so it returns the capped rows with `truncated: true`. A reply that reaches the server's `RESULTSET_SIZE` counts as over the cap. |
+| `execute` | Requires raw `query` and runs it without LLM translation; it raises an error unless `allow_execute` is enabled. Optional `params` binds `$name` values. If the result exceeds the execute row cap, the call fails and nothing is saved. A statement the openCypher grammar can name is wrapped in `CALL { }`, which needs FalkorDB 4.0 or newer. A statement the grammar does not recognize is classified with `EXPLAIN`: a plan that returns rows is refused, because the plan does not name the columns, and nothing is written. `RETURN *` is refused until the columns are named. |
 | `dialect` | Takes no meaningful arguments and returns `{dialect: "falkordb"}`. |
 | `query` | Requires non-empty `cypher`; accepts optional object `params` and optional `graph`. Returns columns, serialized rows, count, and truncation state; Redis failures return `error` with empty rows. |
 | `list_graphs` | Takes no arguments and returns graph names, or `error` with an empty graph list on a Redis failure. |
@@ -61,9 +61,7 @@ The manual profile passes host, port, optional username/password, and TLS to the
 
 ### Write access, row caps, and timeout
 
-`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` caps what `execute` returns. FalkorDB saves a statement before it returns and cannot roll it back, so the cap applies to the reply: a read over the cap fails, while a write over the cap returns the first rows with `truncated: true` and no error, because retrying a saved write would store it twice. `query_timeout_ms` bounds a single server query.
-
-Both caps are applied after the client has read the whole server reply, so neither limits what one query loads into worker memory. The bound for that is FalkorDB's own `RESULTSET_SIZE` setting, which the official Docker image sets to 10,000. The server cuts a larger result to that size without reporting it. `execute` reads `RESULTSET_SIZE` on every call and treats a reply that reaches it as over the cap, since a complete reply of exactly that size looks the same: a read fails, and a write returns its rows with `truncated: true`. The `query` tool does not read it, so while `RESULTSET_SIZE` is below `max_rows`, a `query` result can be incomplete with no `truncated` flag and no error.
+`allow_writes` defaults to false, using `GRAPH.RO_QUERY` so the server rejects write clauses. Enable it only for a trusted workload; direct `query` then uses `GRAPH.QUERY` and can return write statistics. `max_rows` truncates ordinary results and marks them truncated; `max_execute_rows` makes oversized direct-execute results fail, and that write is not saved. A returning `execute` whose columns the openCypher grammar can name is wrapped in a `CALL { }` subquery so the server itself rejects an over-cap result and saves nothing. That clause needs FalkorDB 4.0 or newer; an older server fails the call with a message naming that version, and nothing is saved. A statement the grammar does not recognize is classified with `EXPLAIN`. Index creation, `FOREACH`, and `LOAD CSV` do not return rows and still run. A plan that returns rows is refused, because `EXPLAIN` does not name the columns, and nothing is written. `RETURN *` is refused until the returned columns are named. `execute` also accepts `params` for `$name` placeholders, so values are bound instead of pasted into the query text. `query_timeout_ms` bounds a single server query.
 
 ## Authentication
 
@@ -92,7 +90,7 @@ The direct query tool serializes graph nodes, relationships, paths, maps, lists,
 | `graph_falkordb.graph` | `string` | **Default Graph**<br/>A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another. | `"agent"` |
 | `graph_falkordb.host` | `string` | **Host**<br/>FalkorDB host, e.g. localhost or your-instance.falkordb.cloud. | `"localhost"` |
 | `graph_falkordb.max_attempts` | `integer` | **Max Validation Attempts**<br/>Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query. | `5` |
-| `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool. A read over the cap fails. A write over the cap is already saved, so it returns the first rows flagged as truncated. | `25000` |
+| `graph_falkordb.max_execute_rows` | `integer` | **Max Execute Rows**<br/>Upper cap on rows returned by the execute tool. The query fails if exceeded, so one statement cannot exhaust worker memory. | `25000` |
 | `graph_falkordb.max_rows` | `integer` | **Max Rows**<br/>Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated. | `250` |
 | `graph_falkordb.password` | `string` | **Password**<br/>Password for the FalkorDB instance. Stored encrypted. When set it is the one used, replacing any password embedded in the FalkorDB URL. Leave empty for no auth, or to use the one the URL already carries. | `""` |
 | `graph_falkordb.port` | `integer` | **Port**<br/>FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port. | `6379` |
@@ -104,7 +102,7 @@ The direct query tool serializes graph nodes, relationships, paths, maps, lists,
 
 ## Dependencies
 
-- `falkordb` `>=1.6.1,<2`
+- `falkordb` `>=1.6,<2`
 - `redis` `>=7.1,<8`
 
 ## Source
