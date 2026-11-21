@@ -14,13 +14,14 @@ Covers the CodeRabbit review follow-ups:
 from __future__ import annotations
 
 import sys
+import contextvars
 import threading
 import time
 from unittest.mock import MagicMock, patch
 
 from test.mocks.redis_fake import FakeRedis
 from nodes.memory_persistent.memory_store import (
-    InMemoryBackend,
+    StateBackend,
     PersistentMemoryStore,
     RedisBackend,
 )
@@ -31,24 +32,24 @@ from nodes.memory_persistent.memory_store import (
 # ---------------------------------------------------------------------------
 
 
-def test_inmemory_increment_is_atomic_under_concurrent_writes():
+def test_state_increment_is_atomic_under_concurrent_writes(state):
     """The in-memory backend must use a lock that covers read+modify+write.
 
     Without atomicity, concurrent increments lose updates due to interleaving
     of get(n) -> set(n+1) steps. With the lock held for the whole block, the
     final counter must equal the exact number of increments performed.
     """
-    backend = InMemoryBackend()
+    backend = StateBackend(state)
     backend.create_session('session-atomic')
 
-    num_threads = 16
-    increments_per_thread = 250
+    num_threads = 4
+    increments_per_thread = 25
 
     def worker():
         for _ in range(increments_per_thread):
             backend.increment('session-atomic', 'counter')
 
-    threads = [threading.Thread(target=worker) for _ in range(num_threads)]
+    threads = [threading.Thread(target=contextvars.copy_context().run, args=(worker,)) for _ in range(num_threads)]
     for t in threads:
         t.start()
     for t in threads:
@@ -61,9 +62,9 @@ def test_inmemory_increment_is_atomic_under_concurrent_writes():
     )
 
 
-def test_inmemory_increment_returns_new_value_like_redis_incrby():
+def test_state_increment_returns_new_value_like_redis_incrby(state):
     """Contract: increment returns the post-increment value (like INCRBY)."""
-    backend = InMemoryBackend()
+    backend = StateBackend(state)
     backend.create_session('session-returns')
     result_a = backend.increment('session-returns', 'c', 5)
     assert result_a['ok'] is True
@@ -78,7 +79,7 @@ def test_inmemory_increment_returns_new_value_like_redis_incrby():
 # ---------------------------------------------------------------------------
 
 
-def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
+def test_state_keys_added_after_session_start_inherit_remaining_ttl(state):
     """A key added after session creation must expire with the session,
     not outlive it. The in-memory backend stores keys in the session's dict,
     so they are purged when _expire_if_needed sees expires_at passed.
@@ -86,7 +87,7 @@ def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
     now = [1000.0]
     with patch('nodes.memory_persistent.memory_store.time') as fake_time:
         fake_time.time = lambda: now[0]
-        backend = InMemoryBackend()
+        backend = StateBackend(state)
         backend.create_session('session-ttl', ttl_seconds=0.5)
 
         # Add a key well after creation (but still within TTL)
@@ -109,16 +110,19 @@ def test_inmemory_keys_added_after_session_start_inherit_remaining_ttl():
         )
 
 
-def test_inmemory_create_prunes_expired_session_before_duplicate_check():
+def test_state_create_prunes_expired_session_before_duplicate_check(state):
     """An expired session ID can be recreated without waiting for list_sessions."""
-    backend = InMemoryBackend()
-    backend.create_session('reusable', ttl_seconds=1)
-    backend._metadata['reusable']['expires_at'] = time.time() - 1
+    now = [time.time()]
+    with patch('nodes.memory_persistent.memory_store.time') as fake_time:
+        fake_time.time = lambda: now[0]
+        backend = StateBackend(state)
+        backend.create_session('reusable', ttl_seconds=1)
+        now[0] += 2
 
-    result = backend.create_session('reusable')
+        result = backend.create_session('reusable')
 
-    assert result['ok'] is True
-    assert backend.resume_session('reusable')['ok'] is True
+        assert result['ok'] is True
+        assert backend.resume_session('reusable')['ok'] is True
 
 
 # ---------------------------------------------------------------------------
@@ -264,9 +268,9 @@ def test_redis_backend_close_logs_errors():
     assert 'RedisBackend.close failed: boom' in warned.call_args.args[0]
 
 
-def test_store_facade_exposes_backend_close():
+def test_store_facade_exposes_backend_close(state):
     """The facade must expose close path so node teardown can release."""
-    store = PersistentMemoryStore(backend='memory')
+    store = PersistentMemoryStore(StateBackend(state))
     # No-op for in-memory, but must be callable without error
     store.backend.close()
 

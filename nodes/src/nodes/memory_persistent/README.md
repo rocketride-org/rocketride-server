@@ -42,9 +42,12 @@ the default `localhost:6379`.
 
 ## Configuration
 
-Choose a backend first. The in-memory default is appropriate for testing; a
-Redis deployment needs its connection values and a retention policy. The
-generated schema below is the complete field reference.
+Choose a backend first. The default keeps sessions in the node's state, which
+the server stores per owner, so any engine replica serves the next call; it
+holds at most 15 sessions per owner and keeps a session at most seven days after
+its last write. A Redis deployment needs its connection values and a retention
+policy. The history cap, auto-summarization and session TTL are per-call
+parameters. The generated schema below is the complete field reference.
 
 ### Backend
 
@@ -67,9 +70,10 @@ backend selected when no reachable Redis service is available.
 `session_ttl_hours` controls the TTL assigned when a new session is created.
 The default `0` means no expiry; a value greater than zero expires all data,
 keys, history, and metadata for that session together. Set a positive value
-when stale context should be discarded automatically. With the in-memory
-backend, expiry is removed lazily when the session is accessed or sessions are
-listed; Redis aligns the backend keys with the session metadata TTL.
+when stale context should be discarded automatically. With the state backend
+a session record is written with its remaining TTL (and with no TTL it lives
+seven days after its last write); Redis aligns the backend keys with the
+session metadata TTL.
 
 ### History retention
 
@@ -109,9 +113,9 @@ use Redis `INCRBY` with the Redis backend.
 ### Backend behavior
 
 Both backends return deep copies for stored values and history entries. Redis
-serializes stored values as JSON under the `rr:memory` key prefix, while the
-in-memory backend has no external dependency. The global store is initialized
-once for a pipe and its backend is closed when the pipe ends.
+serializes stored values as JSON under the `rr:memory` key prefix, and the
+state backend stores JSON in the node's state. The Redis connection is opened
+once per control and closed when the control ends.
 
 ## Upstream docs
 

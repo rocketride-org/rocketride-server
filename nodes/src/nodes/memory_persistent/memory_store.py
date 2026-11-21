@@ -6,8 +6,10 @@
 """
 Persistent cross-session memory store with pluggable backends.
 
-Supports Redis for production and an in-memory backend for testing.
-All operations are thread-safe and return deep copies to prevent mutation.
+Two backends: the binding's ``self.state`` (the default: small JSON values the
+server keeps per owner, so any replica serves the next call) and the owner's
+own Redis. The facade carries one call's knobs (history cap, summarization,
+session time to live). Every operation returns copies, never live values.
 """
 
 from __future__ import annotations
@@ -111,182 +113,216 @@ class MemoryBackend(ABC):
 
 
 # ---------------------------------------------------------------------------
-# InMemory backend (for testing)
+# State backend (the binding's self.state)
 # ---------------------------------------------------------------------------
 
-_MAX_INMEMORY_SESSIONS = 1000
+#: The most sessions one owner keeps on one node. A node holds at most 16 live
+#: state keys per owner and address (plan 5.7): one per session and the index.
+MAX_STATE_SESSIONS = 15
+
+#: The state key of the session index: ``{session_id: expires_at or None}``.
+_INDEX_KEY = 'sessions'
 
 
-class InMemoryBackend(MemoryBackend):
-    """Thread-safe in-memory backend for testing and development."""
+def _session_key(session_id: str) -> str:
+    """The state key of one session's record (its data, history and expiry)."""
+    return f'session:{session_id}'
 
-    def __init__(self) -> None:
-        """Initialize empty session stores with a threading lock."""
-        self._lock = threading.Lock()
-        # {session_id: {key: value}}
-        self._sessions: Dict[str, Dict[str, Any]] = {}
-        # {session_id: [history_entry, ...]}
-        self._history: Dict[str, List[Dict[str, Any]]] = {}
-        # {session_id: created_at_timestamp}
-        self._metadata: Dict[str, Dict[str, Any]] = {}
 
-    def _expire_if_needed(self, session_id: str) -> bool:
-        """Check and remove an expired session. Must be called while holding ``_lock``.
+class StateBackend(MemoryBackend):
+    """
+    Sessions in ``self.state``: one record per session plus one index, owned by the binding's control.
 
-        Returns ``True`` if the session was expired and removed.
+    The server keys every value by the control's organization, owner, address
+    and node id, so another owner's sessions are out of reach by construction.
+    A record is ``{'data': {key: value}, 'history': [...], 'created_at',
+    'ttl_seconds', 'expires_at'}``; it is written with the session's remaining
+    time to live, and a session with none takes the state store's maximum
+    (seven days after its last write). Values are JSON.
+    """
+
+    def __init__(self, state: Any) -> None:
         """
-        meta = self._metadata.get(session_id)
-        if meta and meta.get('expires_at') and time.time() > meta['expires_at']:
-            self._sessions.pop(session_id, None)
-            self._history.pop(session_id, None)
-            self._metadata.pop(session_id, None)
-            return True
-        return False
+        Bind the backend to one binding's state door.
 
-    def _prune_expired_sessions(self) -> None:
-        """Remove all expired sessions. Must be called while holding ``_lock``."""
-        for sid in list(self._metadata):
-            self._expire_if_needed(sid)
+        Args:
+            state: The instance's ``self.state`` (``get``/``put``/``delete``/``lock``).
+        """
+        self._state = state
+
+    # -- records ------------------------------------------------------------
+
+    def _index(self) -> Dict[str, Optional[float]]:
+        """The session index with every expired entry left out."""
+        now = time.time()
+        index = self._state.get(_INDEX_KEY) or {}
+        return {sid: expires for sid, expires in index.items() if not expires or expires > now}
+
+    def _record(self, session_id: str) -> Optional[Dict[str, Any]]:
+        """A live session's record, or None when it is absent or past its expiry."""
+        record = self._state.get(_session_key(session_id))
+        if record is None:
+            return None
+        expires = record.get('expires_at')
+        if expires and time.time() > expires:
+            return None
+        return record
+
+    def _save(self, session_id: str, record: Dict[str, Any]) -> None:
+        """Write a record with the session's remaining time to live."""
+        expires = record.get('expires_at')
+        ttl = max(1.0, expires - time.time()) if expires else None
+        self._state.put(_session_key(session_id), record, ttl=ttl)
+
+    def _missing(self, session_id: str) -> Dict[str, Any]:
+        """The answer for a session that is not there."""
+        return {'ok': False, 'error': f'Session {session_id!r} not found'}
+
+    def _update(self, session_id: str, change) -> Dict[str, Any]:
+        """
+        Read-modify-write one live session under its lock.
+
+        Args:
+            session_id: The session.
+            change: ``(record) -> result``; mutates the record, which is then saved.
+
+        Returns:
+            The change's result, or the not-found answer.
+        """
+        with self._state.lock(_session_key(session_id)):
+            record = self._record(session_id)
+            if record is None:
+                return self._missing(session_id)
+            result = change(record)
+            self._save(session_id, record)
+            return result
+
+    # -- sessions -----------------------------------------------------------
 
     def create_session(self, session_id: str, ttl_seconds: Optional[float] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
-        with self._lock:
-            self._prune_expired_sessions()
-            if session_id in self._sessions:
+        with self._state.lock(_INDEX_KEY):
+            # Entries whose record is gone (its time to live ran out) free their place
+            index = {sid: expires for sid, expires in self._index().items() if self._record(sid) is not None}
+            if session_id in index:
                 return {'ok': False, 'error': f'Session {session_id!r} already exists'}
-            if len(self._sessions) >= _MAX_INMEMORY_SESSIONS:
-                return {'ok': False, 'error': f'Maximum sessions ({_MAX_INMEMORY_SESSIONS}) reached'}
+            if len(index) >= MAX_STATE_SESSIONS:
+                return {'ok': False, 'error': f'Maximum sessions ({MAX_STATE_SESSIONS}) reached'}
             now = time.time()
-            self._sessions[session_id] = {}
-            self._history[session_id] = []
-            self._metadata[session_id] = {
-                'created_at': now,
-                'ttl_seconds': ttl_seconds,
-                'expires_at': (now + ttl_seconds) if ttl_seconds else None,
-            }
+            expires = (now + ttl_seconds) if ttl_seconds else None
+            self._save(
+                session_id,
+                {'data': {}, 'history': [], 'created_at': now, 'ttl_seconds': ttl_seconds, 'expires_at': expires},
+            )
+            index[session_id] = expires
+            self._state.put(_INDEX_KEY, index)
             return {'ok': True, 'session_id': session_id}
 
     def resume_session(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
-        with self._lock:
-            if session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            if self._expire_if_needed(session_id):
-                return {'ok': False, 'error': f'Session {session_id!r} has expired'}
-            return {'ok': True, 'session_id': session_id, 'key_count': len(self._sessions[session_id])}
+        record = self._record(session_id)
+        if record is not None:
+            return {'ok': True, 'session_id': session_id, 'key_count': len(record['data'])}
+        listed = self._state.get(_INDEX_KEY) or {}
+        if session_id in listed:
+            return {'ok': False, 'error': f'Session {session_id!r} has expired'}
+        return self._missing(session_id)
 
     def list_sessions(self) -> List[str]:
-        with self._lock:
-            self._prune_expired_sessions()
-            return sorted(self._sessions.keys())
+        return sorted(self._index())
 
     def delete_session(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
-        with self._lock:
-            if session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            keys_cleared = sorted(self._sessions[session_id].keys())
-            self._sessions.pop(session_id, None)
-            self._history.pop(session_id, None)
-            self._metadata.pop(session_id, None)
+        with self._state.lock(_INDEX_KEY):
+            record = self._record(session_id)
+            index = self._state.get(_INDEX_KEY) or {}
+            if record is None and session_id not in index:
+                return self._missing(session_id)
+            self._state.delete(_session_key(session_id))
+            index.pop(session_id, None)
+            self._state.put(_INDEX_KEY, index)
+            keys_cleared = sorted(record['data']) if record else []
             return {'ok': True, 'session_id': session_id, 'keys_cleared': keys_cleared}
+
+    # -- memory operations ----------------------------------------------------
 
     def put(self, session_id: str, key: str, value: Any) -> Dict[str, Any]:
         _validate_session_id(session_id)
         _validate_key(key)
-        with self._lock:
-            if self._expire_if_needed(session_id) or session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            self._sessions[session_id][key] = copy.deepcopy(value)
-            self._history[session_id].append(
-                {
-                    'op': 'put',
-                    'key': key,
-                    'timestamp': time.time(),
-                }
-            )
+
+        def change(record):
+            record['data'][key] = copy.deepcopy(value)
+            record['history'].append({'op': 'put', 'key': key, 'timestamp': time.time()})
             return {'ok': True, 'session_id': session_id, 'key': key}
+
+        return self._update(session_id, change)
 
     def get(self, session_id: str, key: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
         _validate_key(key)
-        with self._lock:
-            if self._expire_if_needed(session_id) or session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            store = self._sessions[session_id]
-            if key not in store:
-                return {'ok': False, 'session_id': session_id, 'key': key, 'value': None}
-            return {'ok': True, 'session_id': session_id, 'key': key, 'value': copy.deepcopy(store[key])}
+        record = self._record(session_id)
+        if record is None:
+            return self._missing(session_id)
+        if key not in record['data']:
+            return {'ok': False, 'session_id': session_id, 'key': key, 'value': None}
+        return {'ok': True, 'session_id': session_id, 'key': key, 'value': record['data'][key]}
 
     def list_keys(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
-        with self._lock:
-            if self._expire_if_needed(session_id) or session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            return {'ok': True, 'session_id': session_id, 'keys': sorted(self._sessions[session_id].keys())}
+        record = self._record(session_id)
+        if record is None:
+            return self._missing(session_id)
+        return {'ok': True, 'session_id': session_id, 'keys': sorted(record['data'])}
 
     def clear(self, session_id: str, key: Optional[str] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
         if key is not None:
             _validate_key(key)
-        with self._lock:
-            if self._expire_if_needed(session_id) or session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            store = self._sessions[session_id]
+
+        def change(record):
+            data = record['data']
             if key:
-                removed = key in store
-                store.pop(key, None)
-                cleared = [key] if removed else []
+                cleared = [key] if key in data else []
+                data.pop(key, None)
             else:
-                cleared = sorted(store.keys())
-                store.clear()
-            self._history[session_id].append(
-                {
-                    'op': 'clear',
-                    'key': key,
-                    'cleared': cleared,
-                    'timestamp': time.time(),
-                }
-            )
+                cleared = sorted(data)
+                data.clear()
+            record['history'].append({'op': 'clear', 'key': key, 'cleared': cleared, 'timestamp': time.time()})
             return {'ok': True, 'session_id': session_id, 'cleared': cleared}
+
+        return self._update(session_id, change)
 
     def get_history(self, session_id: str, limit: int = 50) -> Dict[str, Any]:
         _validate_session_id(session_id)
-        with self._lock:
-            if self._expire_if_needed(session_id) or session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            history = self._history.get(session_id, [])
-            # Return most recent entries (tail)
-            entries = history[-limit:] if limit > 0 else history
-            return {'ok': True, 'session_id': session_id, 'entries': copy.deepcopy(entries)}
+        record = self._record(session_id)
+        if record is None:
+            return self._missing(session_id)
+        history = record['history']
+        entries = history[-limit:] if limit > 0 else history
+        return {'ok': True, 'session_id': session_id, 'entries': entries}
 
     def increment(self, session_id: str, key: str, amount: int = 1) -> Dict[str, Any]:
         _validate_session_id(session_id)
         _validate_key(key)
-        with self._lock:
-            if self._expire_if_needed(session_id) or session_id not in self._sessions:
-                return {'ok': False, 'error': f'Session {session_id!r} not found'}
-            current = self._sessions[session_id].get(key, 0)
-            new_value = current + amount
-            self._sessions[session_id][key] = new_value
-            self._history[session_id].append(
-                {
-                    'op': 'put',
-                    'key': key,
-                    'timestamp': time.time(),
-                }
-            )
-            return {'ok': True, 'session_id': session_id, 'key': key, 'value': new_value}
+
+        def change(record):
+            value = record['data'].get(key, 0) + amount
+            record['data'][key] = value
+            record['history'].append({'op': 'put', 'key': key, 'timestamp': time.time()})
+            return {'ok': True, 'session_id': session_id, 'key': key, 'value': value}
+
+        return self._update(session_id, change)
 
     def replace_history(self, session_id: str, entries: List[Dict[str, Any]]) -> None:
         _validate_session_id(session_id)
-        with self._lock:
-            if not self._expire_if_needed(session_id) and session_id in self._history:
-                self._history[session_id] = copy.deepcopy(entries)
+
+        def change(record):
+            record['history'] = copy.deepcopy(entries)
+
+        self._update(session_id, change)
 
     def close(self) -> None:
-        """No-op for in-memory storage."""
-        pass
+        """Nothing to release: the state door belongs to the binding."""
 
 
 # ---------------------------------------------------------------------------
@@ -614,52 +650,33 @@ class RedisBackend(MemoryBackend):
 
 
 class PersistentMemoryStore:
-    """Facade over a pluggable backend with auto-summarization support.
+    """
+    One call's view of a session backend: its history cap, its summarization and its session time to live.
 
-    Parameters
-    ----------
-    backend : str
-        ``'redis'`` or ``'memory'`` (in-memory for testing).
-    max_history : int
-        Maximum history entries before auto-summarization triggers.
-    auto_summarize : bool
-        Whether to auto-summarize when history exceeds *max_history*.
-    redis_host, redis_port, redis_password : str/int
-        Redis connection parameters (only used when backend is ``'redis'``).
-    session_ttl_hours : float
-        Default TTL in hours for new sessions (0 = no expiry).
+    Args:
+        backend: The backend: a ``StateBackend`` over the binding's state, or the control's ``RedisBackend``.
+        max_history: Maximum history entries before auto-summarization triggers.
+        auto_summarize: Whether to auto-summarize when history exceeds ``max_history``.
+        session_ttl_hours: Time to live in hours for sessions this call creates (0 = none).
     """
 
     def __init__(
         self,
-        backend: str = 'memory',
+        backend: MemoryBackend,
         max_history: int = 100,
         auto_summarize: bool = True,
-        redis_host: str = 'localhost',
-        redis_port: int = 6379,
-        redis_password: Optional[str] = None,
         session_ttl_hours: float = 0,
     ) -> None:
-        """Create a PersistentMemoryStore with the specified backend and options."""
+        """Wrap ``backend`` with one call's settings."""
         self.max_history = max_history
         self.auto_summarize = auto_summarize
         self.session_ttl_hours = session_ttl_hours
         self._ttl_seconds: Optional[float] = session_ttl_hours * 3600 if session_ttl_hours > 0 else None
-
-        if backend == 'redis':
-            self._backend: MemoryBackend = RedisBackend(
-                host=redis_host,
-                port=redis_port,
-                password=redis_password,
-            )
-        elif backend == 'memory':
-            self._backend = InMemoryBackend()
-        else:
-            raise ValueError(f'Unknown backend: {backend!r}. Must be "redis" or "memory".')
+        self._backend = backend
 
     @property
     def backend(self) -> MemoryBackend:
-        """Expose the underlying backend for testing."""
+        """The backend this call reads and writes."""
         return self._backend
 
     # -- Session management -------------------------------------------------
