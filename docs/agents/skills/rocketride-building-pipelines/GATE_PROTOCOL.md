@@ -121,7 +121,7 @@ Gates are binary or fixed-menu. Never turn a gate into open-ended reasoning. Use
     page(s) you actually need (or just answer from the bundled index/schemas — that's even cheaper).
     Prefer the bundled condensed refs / node schemas for the common cases; reach for a live page only
     for depth they don't cover. Resolve URLs from the map — don't invent paths or hosts (e.g. the SDK
-    `use` page is `docs.rocketride.org/develop/typescript/methods/use.md`, not `/develop/use.md`).
+    `use` page is `docs.rocketride.ai/develop/typescript/methods/use.md`, not `/develop/use.md`).
 
 **Lazy disclosure**
 17. **Schema fetch is lazy — per selected node, never eager/bulk.** Fetch a node's schema only when

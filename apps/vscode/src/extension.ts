@@ -614,7 +614,7 @@ function registerUtilityCommands(context: vscode.ExtensionContext): void {
 
 	const commands = [
 		vscode.commands.registerCommand('rocketride.sidebar.documentation.open', () => {
-			vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.org/'));
+			vscode.env.openExternal(vscode.Uri.parse('https://docs.rocketride.ai/'));
 		}),
 		vscode.commands.registerCommand('rocketride.sidebar.connection.connect', async () => {
 			try {

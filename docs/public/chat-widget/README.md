@@ -319,7 +319,7 @@ A demo page showing both modes with live theming controls is included at `packag
 
 ## Links
 
-- [Documentation](https://docs.rocketride.org/)
+- [Documentation](https://docs.rocketride.ai/)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)

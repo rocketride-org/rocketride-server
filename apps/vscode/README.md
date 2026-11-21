@@ -123,7 +123,7 @@ Additional commands are available via the sidebar and context menus:
 
 ## Links
 
-- [Documentation](https://docs.rocketride.org/)
+- [Documentation](https://docs.rocketride.ai/)
 - [Discord](https://discord.gg/PMXrtenMsY)
 - [GitHub](https://github.com/rocketride-org/rocketride-server)
 - [Contributing](https://github.com/rocketride-org/rocketride-server/blob/develop/CONTRIBUTING.md)

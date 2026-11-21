@@ -211,9 +211,9 @@ Take a pipeline's `provider` values from the MCP `list_components` tool or from 
 
 ## Machine-readable docs
 
-- [`/llms.txt`](https://docs.rocketride.org/llms.txt): an index of every page with a one-line description.
-- [`/llms-full.txt`](https://docs.rocketride.org/llms-full.txt): the full text of every page in one file.
-- Any page as markdown: drop the trailing slash from its URL and add `.md`, for example `https://docs.rocketride.org/quickstart.md`.
+- [`/llms.txt`](https://docs.rocketride.ai/llms.txt): an index of every page with a one-line description.
+- [`/llms-full.txt`](https://docs.rocketride.ai/llms-full.txt): the full text of every page in one file.
+- Any page as markdown: drop the trailing slash from its URL and add `.md`, for example `https://docs.rocketride.ai/quickstart.md`.
 
 ## Go deeper
 
