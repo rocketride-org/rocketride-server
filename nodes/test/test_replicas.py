@@ -209,6 +209,21 @@ def test_one_owner_never_moves_another_owners_count(tmp_path):
     assert [texts[1], texts[3], texts[4]] == [['1'], ['2'], ['3']]
 
 
+def test_two_nodes_of_one_pipeline_keep_their_own_count(tmp_path):
+    # Both nodes name the key 'count' for one owner at one address: the node id
+    # in the server's key keeps the two values apart
+    node = _node(tmp_path, 'counter_nodes', _IN_STATE)
+    with ReplicaServer() as server:
+        first = Replica(server, node, 'counter', 'counter_1')
+        second = Replica(server, node, 'counter', 'counter_2')
+        outputs = run([_count(ALICE)] * 5, [first, second])
+        scopes = sorted(server.state._scopes)
+    texts = _texts(outputs)
+    assert texts[0::2] == [['1'], ['2'], ['3']]
+    assert texts[1::2] == [['1'], ['2']]
+    assert [scope.rsplit('/', 1)[1] for scope in scopes] == ['counter_1', 'counter_2']
+
+
 def test_a_binding_the_server_cannot_name_is_refused(tmp_path):
     node = _node(tmp_path, 'counter_unclaimed', _IN_STATE)
     with ReplicaServer() as server:

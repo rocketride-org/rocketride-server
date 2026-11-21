@@ -30,6 +30,8 @@
 	//
 	"propertyDefinitions": {
 		"agent_description": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Agent description",
@@ -37,24 +39,32 @@
 			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
 		"role": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Role",
 			"description": "Agent role name (e.g. 'Financial Analyst'). Maps to CrewAI Agent(role=...).",
 			"default": "Assistant"
 		},
 		"goal": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Goal",
@@ -62,6 +72,8 @@
 			"default": ""
 		},
 		"backstory": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Backstory",
@@ -69,6 +81,7 @@
 			"default": ""
 		},
 		"task_description": {
+			"param": true,
 			"type": "string",
 			"format": "textarea",
 			"title": "Task",
@@ -76,6 +89,7 @@
 			"default": ""
 		},
 		"expected_output": {
+			"param": true,
 			"type": "string",
 			"format": "textarea",
 			"title": "Expected Output",

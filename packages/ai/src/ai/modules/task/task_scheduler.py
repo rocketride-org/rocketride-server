@@ -54,7 +54,7 @@ from croniter import croniter
 from rocketlib import debug, error, warning
 
 from ai.account import account
-from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY
+from ai.account.pipe_deploy import listing_of, pointer_run_owner
 from .deploy_events import broadcast_deploy_changed
 from .task_control import DeploymentRef
 from .task_server_facade import start_server_task_as_team
@@ -413,22 +413,18 @@ class TaskScheduler:
             pipeline = dict(pipeline)
             pipeline['source'] = source_id
 
-            # Owner rung: a 'user~{uid}' slot is a PERSONAL (@me) deployment —
-            # the run is USER-owned; a plain team id is the team-owned
+            # Owner rung: a '=user/<uid>' audience is a PERSONAL (@me) deployment —
+            # the run is USER-owned; a team audience is the team-owned
             # dispatch (no human identity). Billing is ABSOLUTE: the stamp
             # was written at pointer time, and fires only ever read it — a
             # missing stamp (team deleted, pre-stamp record) is
             # permission-shaped: permanent until a human re-publishes, so
             # mark errored, don't retry.
-            billing_team = str(dep.get('billingTeamId') or '')
-            if team_id.startswith('user~'):
-                owner_kind, owner_user = 'user', team_id[len('user~') :]
-            else:
-                owner_kind, owner_user = 'team', ''
-                # Team records from before the stamp bill their own audience;
-                # the store slot is no team, so it only ever bills its stamp.
-                if team_id != PUBLIC_AUDIENCE_KEY:
-                    billing_team = billing_team or team_id
+            # (pointer_run_owner decodes the audience: a team pointer from
+            # before the stamp bills its own team; the store is no team, so
+            # it only ever bills its stamp.)
+            owner_kind, owner_user, default_billing, forced_rung = pointer_run_owner(team_id)
+            billing_team = str(dep.get('billingTeamId') or '') or default_billing
             if not billing_team:
                 error(f'[SCHEDULER] {entry.key}: no billing team stamped; marking errored')
                 await self._mark_errored(org_id, team_id, project_id)
@@ -436,6 +432,9 @@ class TaskScheduler:
 
             try:
                 ttl = sched.get('ttl')
+                # The store listing of the version this run starts (plan 8.4):
+                # the control's store gate holds for anyone who reaches it
+                listing = await listing_of(account, org_id, project_id, dep['version'])
                 control_id = await start_server_task_as_team(
                     self._server,
                     pipeline,
@@ -454,7 +453,8 @@ class TaskScheduler:
                     owner_user_id=owner_user,
                     # A store pointer's run sits on the public rung (team-owned
                     # by its billing team); every other slot derives its rung
-                    rung='public' if team_id == PUBLIC_AUDIENCE_KEY else '',
+                    rung=forced_rung,
+                    listing=listing,
                 )
             except PermissionError as e:
                 # Permission-shaped failures are permanent until a human acts —

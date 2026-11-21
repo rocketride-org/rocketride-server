@@ -130,8 +130,8 @@ class TestScopePaths:
         assert scope_paths('dev', CLIENT, TEAM) == ('', CLIENT)
 
     def test_deploy_is_team_scoped(self):
-        # Deploy: the internal-identity scope grammar + team id as scope id.
-        assert scope_paths('deploy', CLIENT, TEAM) == (f'@/Team/={TEAM}/', TEAM)
+        # Deploy: the team's id root (plan 2.5) + team id as scope id.
+        assert scope_paths('deploy', CLIENT, TEAM) == (f'=team/{TEAM}/', TEAM)
 
     def test_deploy_without_team_is_user_scoped(self):
         # A TEAMLESS deploy is a USER-OWNED (@me) deploy: its continuum lives
@@ -141,8 +141,8 @@ class TestScopePaths:
 
     @pytest.mark.parametrize('bad', ['../x', './x', '/x', 'a/b', 'a\\b', '.', '..', '@x', '=x', '.x'])
     def test_deploy_rejects_path_unsafe_team_ids(self, bad):
-        # team_id is embedded into the '=<id>' segment of the store's
-        # id-reference grammar — separators, traversal, and reserved
+        # team_id is embedded into the id segment of the '=team/<tid>'
+        # root — separators, traversal, and reserved
         # sigils must never reach the path (defense in depth; upstream
         # callers validate membership first).
         with pytest.raises(ValueError):

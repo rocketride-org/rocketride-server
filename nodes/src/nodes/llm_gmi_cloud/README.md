@@ -22,7 +22,8 @@ retryable; authentication and other API errors are mapped to friendly messages
 
 Two safety behaviors are enforced on the endpoint URL: it must use **HTTPS**, and the
 hostname must be `gmi-serving.com` or a subdomain of it (an SSRF guard on user-supplied
-endpoints). This is checked both at save time and when the pipeline starts. An API key is
+endpoints). This is checked at save time, and again before the node first builds the
+client of an endpoint, when a call first reaches it. An API key is
 required. Shared models pin the shared endpoint `https://api.gmi-serving.com/v1`;
 deploy-on-demand models require an endpoint URL, and the Custom model's endpoint
 defaults to the shared one.
@@ -39,6 +40,8 @@ Choose a model from the **Model** selector for a shared or deployed model. Each 
 model pins its model id and context limit; shared models also pin the shared endpoint,
 so most pipelines only need an API key. The default is **DeepSeek V3**
 (`deepseek-ai/DeepSeek-V3-0324`).
+
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call. Each model names its own endpoint, checked against gmi-serving.com when a call first reaches it.
 
 ### Models
 

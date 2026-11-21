@@ -47,7 +47,7 @@ from ai.modules.task.task_server import TaskServer
 from ai.modules.task.trace_owner import TraceOwners
 
 from . import test_task_engine_sharing as sharing
-from .test_task_engine_sharing import _caller, _data_conn, _pipeline, _server, _start
+from .test_task_engine_sharing import _caller, _data_conn, _pipeline, _publish, _server, _start
 
 catalog = sharing.catalog
 engines = sharing.engines
@@ -58,15 +58,20 @@ engines = sharing.engines
 
 
 async def _two_holders(ts, *, shared=False):
-    """One owner Plays one shape under two project ids: two controls, ONE engine.
+    """Two controls on ONE engine.
 
-    ``shared`` marks the engine cross-user so the routing rules of a shared
-    engine (plan 7.5; no such engine starts before C.25) are exercised on it.
+    Private: one owner Plays one shape under two project ids. ``shared``: two
+    users' controls on the published rung hold the shape's one bare-keyed
+    engine (plan 7.2), so the routing rules of a shared engine (plan 7.5) are
+    exercised on a real one.
     """
-    a = await _start(ts, _pipeline(), user='user-a')
-    b = await _start(ts, _pipeline(project_id='docBrainCopy'), user='user-a')
-    assert a.task is b.task and not a.task.shared
-    a.task.shared = shared
+    if shared:
+        a = await _publish(ts, _pipeline(), user='user-a')
+        b = await _publish(ts, _pipeline(project_id='docBrainCopy'), user='user-b')
+    else:
+        a = await _start(ts, _pipeline(), user='user-a')
+        b = await _start(ts, _pipeline(project_id='docBrainCopy'), user='user-a')
+    assert a.task is b.task and a.task.shared is shared
     return a, b
 
 
@@ -462,21 +467,40 @@ async def test_a_borrowed_tool_pipe_is_claimed_and_released_in_one_frame(catalog
 
 
 @pytest.mark.asyncio
+async def test_a_controls_copy_of_an_event_carries_its_publications_audience(catalog, engines):
+    """A deployment row's teamId is its audience; the events of the run it started carry the same string (plan 2.5)."""
+    from ai.modules.task.task_control import DeploymentRef
+
+    ts = _server()
+    control = await _start(ts, _pipeline())
+
+    # A dev run serves through no publication: no audience rides its events
+    body = {}
+    control.task._stamp_control_identity(control.key, body)
+    assert 'audience' not in body
+
+    control.deployment = DeploymentRef(org_id='org-1', team_id='=team/team-staging', project_id='docBrain')
+    body = {}
+    control.task._stamp_control_identity(control.key, body)
+    assert body['audience'] == '=team/team-staging'
+
+
+@pytest.mark.asyncio
 async def test_a_claim_names_the_publication_that_answered(catalog, engines, engine_log):
-    """The usage row is keyed by the answering publication (plan 8.2): the claim carries its slot and version."""
+    """The usage row is keyed by the answering publication (plan 8.2): the claim carries its audience and version."""
     from ai.modules.task.task_control import DeploymentRef
 
     ts = _server()
     control = await _start(ts, _pipeline())
     assert control.publication() == ('', None)  # a dev run serves through no publication
-    control.deployment = DeploymentRef(org_id='org-1', team_id='team-staging', project_id='docBrain')
+    control.deployment = DeploymentRef(org_id='org-1', team_id='=team/team-staging', project_id='docBrain')
     control.version = 5
     conn = _data_conn(ts, control)
 
     await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain')
 
     owner = ts.trace_owners.owner('1.1.7')
-    assert (owner.team, owner.version) == ('team-staging', 5)
+    assert (owner.team, owner.version) == ('=team/team-staging', 5)
     ts.trace_owners.release('1.1.7')
     late = ts.trace_owners.owner('1.1.7')
-    assert late.late is True and (late.team, late.version) == ('team-staging', 5)
+    assert late.late is True and (late.team, late.version) == ('=team/team-staging', 5)

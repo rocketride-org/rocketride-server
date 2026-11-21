@@ -60,8 +60,9 @@ class TraceOwner:
             from one request to the next. None for a tree nobody metered.
         address: The control's address, for the usage row's pipe segment.
         rung: The rung the control resolved on, for the row's key and context.
-        team: The audience slot of the publication that answered (a team id,
-            ``user~{uid}`` or ``~public``); ``''`` for a dev run. Part of the
+        team: The audience of the publication that answered (``=user/<uid>``,
+            ``=team/<tid>``, ``=org/<oid>`` or ``@public``, composed by
+            ``audience.py``); ``''`` for a dev run. Part of the
             usage row's key, so two publications never share a row (plan 8.2).
         version: The artifact version that answered; None for a dev run.
     """

@@ -72,11 +72,17 @@ def _make_chat(content: str, usage: Optional[dict]) -> Any:
     class _LLM:
         model = _MODEL
 
+        def bind(self, **_call):
+            return self
+
         def invoke(self, prompt):
             return _Result(content, usage)
 
     chat = _node.Chat.__new__(_node.Chat)
-    chat._llm = _LLM()
+    llm = _LLM()
+    # Built without __init__: its one call, and the client of its one endpoint
+    chat._control_call = chat.resolve_call({'model': _MODEL})
+    chat._llm_for = lambda: llm
     return chat
 
 

@@ -92,6 +92,8 @@ The default profile needs nothing set — connect an LLM and the node runs. The
 three fields shape *how* it behaves: what a parent agent is told about it, what
 guidance its prompt carries, and whether ungrounded answers are allowed.
 
+Every setting is a per-call parameter: a pipeline can expose any of them in its `parameters` map, and each call then runs with its own values on the same running node, which keeps nothing of them between calls. A caller may set them; an LLM may not, through a tool call.
+
 ### Agent description
 
 Only matters when this node is connected to a parent agent as a tool. The

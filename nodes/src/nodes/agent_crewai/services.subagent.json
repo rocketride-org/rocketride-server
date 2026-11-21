@@ -27,18 +27,24 @@
 	//
 	"propertyDefinitions": {
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide this sub-agent when the Manager delegates to it.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"role": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Role",
 			"description": "Sub-agent role name (e.g. 'Financial Analyst'). The Manager uses this name when routing delegation. Maps to CrewAI Agent(role=...).",
 			"default": "Specialist"
 		},
 		"goal": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Goal",
@@ -46,6 +52,8 @@
 			"default": ""
 		},
 		"backstory": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Backstory",
@@ -53,6 +61,7 @@
 			"default": ""
 		},
 		"task_description": {
+			"param": true,
 			"type": "string",
 			"format": "textarea",
 			"title": "Task",
@@ -60,6 +69,7 @@
 			"default": ""
 		},
 		"expected_output": {
+			"param": true,
 			"type": "string",
 			"format": "textarea",
 			"title": "Expected Output",

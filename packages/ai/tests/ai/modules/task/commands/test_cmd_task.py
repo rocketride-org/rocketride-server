@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 Unit tests for ai.modules.task.commands.cmd_task.TaskCommands and the
 file-storage handlers extracted into ai.modules.task.commands.cmd_store.StoreCommands.
@@ -696,10 +718,13 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             run_kind=run_kind,
             owner_kind=owner_kind,
             owner_id=owner_id,
+            owner=f'={owner_kind}/{owner_id}',
+            audience=f'=team/{team_id}' if run_kind == 'deploy' else '',
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
             task=task,
             engine_state='running' if status is running_status else 'stopped',
+            status_view=lambda: vars(status),
             dormant=False,
         )
 
@@ -730,6 +755,9 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
     # from a non-empty teamId (dev runs carry an attribution team too).
     assert response['body']['tasks'][0]['runKind'] == 'dev'
     assert response['body']['tasks'][0]['engineState'] == 'running'
+    # The owner and the audience as the server composes them (plan 2.5): a
+    # dev run is its user's and serves through no publication
+    assert (row['owner'], row['audience']) == ('=user/user-1', '')
 
 
 @pytest.mark.asyncio
@@ -748,10 +776,13 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         run_kind='dev',
         owner_kind='user',
         owner_id='user-1',
+        owner='=user/user-1',
+        audience='',
         source='my-source',
         pipeline=None,
         task=task,
         engine_state='running',
+        status_view=lambda: vars(status),
         dormant=False,
     )
 
@@ -859,7 +890,7 @@ async def test_store_fs_read_clamps_negative_offset(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Virtual scope mounts ('@' / '@/Team') in fs_list_dir / fs_stat
+# Virtual roots ('@' lists one entry per root) in fs_list_dir / fs_stat
 # ---------------------------------------------------------------------------
 
 
@@ -905,8 +936,10 @@ async def test_root_listing_is_pure_and_filters_reserved_names(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_at_listing_shows_mounts_by_capability(monkeypatch):
-    """Joined mode: '@' lists User/Team always, Org only for org.admin."""
+async def test_at_listing_shows_one_entry_per_root_by_capability(monkeypatch):
+    """'@' lists one entry per root (plan 2.5): @me always, one @<team> per
+    membership, @org only for org.admin.
+    """
     server = MagicMock()
     fs = MagicMock()
     fs.list_dir = AsyncMock()
@@ -914,43 +947,49 @@ async def test_at_listing_shows_mounts_by_capability(monkeypatch):
 
     conn = _make_conn(account_info=_org_account(org_perms=['org.admin']), server=server)
     response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
-    assert [e['name'] for e in response['body']['entries']] == ['User', 'Team', 'Org']
+    assert [e['name'] for e in response['body']['entries']] == ['@me', '@Development', '@org']
 
     conn = _make_conn(account_info=_org_account(), server=server)
     response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
-    assert [e['name'] for e in response['body']['entries']] == ['User', 'Team']
+    assert [e['name'] for e in response['body']['entries']] == ['@me', '@Development']
 
-    # The mounts are virtual — the store is never consulted.
+    # The roots are virtual — the store is never consulted.
     fs.list_dir.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_listing_team_mount_returns_memberships_not_storage(monkeypatch):
-    """Listing '@/Team' is VIRTUAL: the caller's teams by display name with the
-    id in the entry body — never a physical teams/ listing.
+async def test_at_listing_names_teams_with_their_ids_not_storage(monkeypatch):
+    """A team's entry is VIRTUAL: its root by display name with the id in the
+    entry body — never a physical teams/ listing. An = root is never listed,
+    and a team whose name the grammar cannot carry stays reachable by id only.
     """
     server = MagicMock()
     fs = MagicMock()
     fs.list_dir = AsyncMock()
     _patch_store_file_store(monkeypatch, fs)
 
-    conn = _make_conn(account_info=_org_account(), server=server)
-    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@/Team'})
+    account = _org_account()
+    account.organization['teams'].append({'id': 'team-9', 'name': 'Public', 'permissions': ['task.store']})
+    conn = _make_conn(account_info=account, server=server)
+    response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
 
     fs.list_dir.assert_not_called()
-    assert response['body']['entries'] == [{'name': 'Development', 'type': 'dir', 'id': 'team-1', 'virtual': True}]
+    assert response['body']['entries'] == [
+        {'name': '@me', 'type': 'dir', 'virtual': True},
+        {'name': '@Development', 'type': 'dir', 'id': 'team-1', 'virtual': True},
+    ]
 
 
 @pytest.mark.asyncio
 async def test_stat_scope_mounts_synthesize_directories(monkeypatch):
-    """fs_stat on the bare mounts reports a virtual directory."""
+    """fs_stat on '@' and on the @me and @org roots reports a virtual directory."""
     server = MagicMock()
     fs = MagicMock()
     fs.stat = AsyncMock()
     _patch_store_file_store(monkeypatch, fs)
 
     conn = _make_conn(account_info=_org_account(), server=server)
-    for path in ('@', '@/User', '@/Team', '@/Org', '/@/Team/'):
+    for path in ('@', '@me', '@ME', '@org', '/@me/', '\\@org'):
         response = await StoreCommands._store_fs_stat(conn, {}, {'path': path})
         assert response['body'] == {'exists': True, 'type': 'dir', 'virtual': True}
     fs.stat.assert_not_called()
@@ -958,8 +997,8 @@ async def test_stat_scope_mounts_synthesize_directories(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_no_org_session_at_listing(monkeypatch):
-    """A session without an organization still gets User/Team (its team
-    list is simply empty) but never Org.
+    """A session without an organization still gets @me (it has no teams)
+    but never @org.
     """
     server = MagicMock()
     fs = MagicMock()
@@ -969,7 +1008,7 @@ async def test_no_org_session_at_listing(monkeypatch):
     conn = _make_conn(account_info=_account_info(), server=server)
     response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': '@'})
 
-    assert [e['name'] for e in response['body']['entries']] == ['User', 'Team']
+    assert [e['name'] for e in response['body']['entries']] == ['@me']
 
 
 # ---------------------------------------------------------------------------
@@ -1004,18 +1043,22 @@ async def test_listing_hides_system_trees_from_ordinary_sessions(monkeypatch):
     conn = _make_conn(account_info=_org_account(), server=MagicMock())
     # The tail of the matrix is the normalization-bypass family: spellings
     # that reach a scope root only AFTER normalize_path collapses them
-    # ('@//User', '@/./User', '\\@\\User', '/'). The filter and the store
-    # must judge the SAME normalized path — filtering on the raw spelling
-    # would let these list the user root with the system trees visible.
+    # ('@me//', '/@me/.', '\\@me', '/'). The filter and the store must judge
+    # the SAME normalized path — filtering on the raw spelling would let
+    # these list the user root with the system trees visible.
     for path in (
         '',
-        '@/User',
-        '@/Org',
-        '@/Team/=team-1',
-        '@/User/=other-user',
-        '@//User',
-        '@/./User',
-        '\\@\\User',
+        '@me',
+        '@ME',
+        '@org',
+        '@Development',
+        '=team/team-1',
+        '=org/org-1',
+        '=user/other-user',
+        '@me//',
+        '/@me/.',
+        '\\@me',
+        '\\=team\\team-1',
         '/',
     ):
         response = await StoreCommands._store_fs_list_dir(conn, {}, {'path': path})

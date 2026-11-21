@@ -52,7 +52,7 @@ from ai.modules.task.task_engine import TaskEngine
 from ai.modules.task.types import TaskError
 
 from .. import test_task_engine_sharing as sharing
-from ..test_task_engine_sharing import _caller, _data_conn, _pipeline, _server, _start
+from ..test_task_engine_sharing import _caller, _data_conn, _pipeline, _publish, _server, _start
 
 # The sharing module's fixtures, under their own names
 catalog = sharing.catalog
@@ -165,6 +165,30 @@ async def test_a_client_sent_reserved_key_never_reaches_the_engine(catalog, engi
     if subcommand == 'open':
         assert all(key not in forwarded['object'] for key in reserved)
         assert forwarded['_caller']['config'] != reserved['config']
+
+
+@pytest.mark.asyncio
+async def test_a_client_sent_config_on_a_shared_engine_never_reaches_it(catalog, engines, engine_log):
+    """C.25 exit: on one engine shared by two users, an open carries ITS control's config, never the one a client sent."""
+    ts = _server()
+    a = await _publish(ts, _pipeline(instructions=['Be brief.']), user='user-a')
+    b = await _publish(ts, _pipeline(instructions=['Be thorough.']), user='user-b')
+    assert a.task is b.task and a.task.shared
+    conn = _data_conn(ts, b)
+    conn._account_info = _caller('user-b')
+
+    await _frame(
+        conn,
+        subcommand='open',
+        object={'name': 'x', 'config': a.config},
+        mimeType='text/plain',
+        config=a.config,
+    )
+
+    forwarded = engine_log[-1]
+    assert forwarded['engine'] is a.task and 'config' not in forwarded and 'config' not in forwarded['object']
+    assert forwarded['_caller']['config'] == b.config != a.config
+    assert forwarded['_caller']['controlId'] == b.control_id and forwarded['_caller']['userId'] == 'user-b'
 
 
 @pytest.mark.asyncio

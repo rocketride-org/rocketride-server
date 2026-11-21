@@ -38,6 +38,7 @@ import asyncio
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from ai.account import Store
+from ai.account.audience import deploy_scope_of
 from ai.account.models import resolve_task_permissions
 from ai.common.dap import DAPConn, TransportBase
 from ai.modules.task.run_log import RunLogReader
@@ -139,6 +140,10 @@ class LogCommands(DAPConn):
         deploy-kind but user-owned. teamId WINS over runKind: a team scope
         is always the deploy continuum.
 
+        ``teamId`` is a team id, or a deployment row's audience passed back
+        unchanged (plan 2.5): ``=team/<tid>`` is that team's continuum and
+        the caller's own ``=user/<uid>`` their personal deploy continuum.
+
         Args:
             args: The subcommand arguments.
 
@@ -146,8 +151,14 @@ class LogCommands(DAPConn):
             ``(team_id, run_kind)`` — ``('', 'dev')`` for own dev streams,
             ``('', 'deploy')`` for own @me streams, ``(<id>, 'deploy')``
             for a team scope.
+
+        Raises:
+            ValueError: An audience this reader cannot address (another
+                user's space, an org, the store).
         """
-        team_id = args.get('teamId') or ''
+        team_id = str(args.get('teamId') or '')
+        if team_id.startswith(('@', '=')):
+            return deploy_scope_of(team_id, str(self._account_info.userId or ''))
         if team_id:
             return team_id, 'deploy'
         return '', ('deploy' if args.get('runKind') == 'deploy' else 'dev')
@@ -248,7 +259,7 @@ class LogCommands(DAPConn):
         # this runs. .logs is a SYSTEM TREE — the file API denies it to
         # every session identity — so the reader acts through an INTERNAL
         # identity anchored at the caller's namespace; the reader's scope
-        # helper turns teamId into the '@/Team/=<id>/' prefix. The DOMAIN
+        # helper turns teamId into the '=team/<tid>/' prefix. The DOMAIN
         # permission gate is _verify_log_access above.
         from ai.account import RequestContext
 

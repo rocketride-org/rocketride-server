@@ -281,6 +281,13 @@ export interface TeamInfo {
 	 * Examples: `'task.execute'`, `'task.monitor'`, `'store.read'`.
 	 */
 	permissions: string[];
+
+	/**
+	 * The team's audience as the server composes it (`=team/<tid>`): what a
+	 * deploy verb's `teamId` takes for this team. Pass it unchanged; never
+	 * build or parse one.
+	 */
+	audience?: string;
 }
 
 /**

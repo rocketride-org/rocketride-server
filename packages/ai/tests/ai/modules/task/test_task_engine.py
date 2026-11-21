@@ -42,6 +42,7 @@ from ai.modules.task.task_engine import (
     CONST_TRACE_PREVIEW_BYTES,
     TaskEngine,
     cap_trace_payload,
+    db_access,
     filter_subprocess_env,
     merge_status_notes,
     resolve_parameter_tokens,
@@ -720,7 +721,7 @@ async def test_forward_task_event_non_debugger_routes_to_server_broadcast():
 
 
 # ---------------------------------------------------------------------------
-# _db_access
+# db_access
 # ---------------------------------------------------------------------------
 
 
@@ -730,19 +731,19 @@ def test_db_access_detects_each_provider():
     """
     for provider in ('rocketride_sql', 'rocketride_vector', 'rocketride_graph'):
         pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': provider}]}
-        assert TaskEngine._db_access(_task(), pipeline) == ([('org', '')], True), provider
+        assert db_access(pipeline) == ([('org', '')], True), provider
 
 
 def test_db_access_empty_without_db_nodes():
     """Ordinary pipelines never trigger provisioning."""
     pipeline = {'components': [{'id': 'a', 'provider': 'chat'}, {'id': 'b', 'provider': 'db_postgres'}]}
-    assert TaskEngine._db_access(_task(), pipeline) == ([], True)
+    assert db_access(pipeline) == ([], True)
 
 
 def test_db_access_tolerates_malformed_components():
     """Missing components / non-dict entries must not raise at task start."""
-    assert TaskEngine._db_access(_task(), {}) == ([], False)
-    assert TaskEngine._db_access(_task(), {'components': ['not-a-dict', {'no-provider': True}]}) == ([], False)
+    assert db_access({}) == ([], False)
+    assert db_access({'components': ['not-a-dict', {'no-provider': True}]}) == ([], False)
 
 
 # ---------------------------------------------------------------------------
@@ -759,8 +760,8 @@ def _env_task(pipeline=None):
 
 
 async def _build_env(t):
-    """Build the env the way start_task does: from _db_access of the pipeline."""
-    return await TaskEngine._build_subprocess_env(t, TaskEngine._db_access(t, t._pipeline))
+    """Build the env the way start_task does: from db_access of the pipeline."""
+    return await TaskEngine._build_subprocess_env(t, db_access(t._pipeline))
 
 
 def _patch_resolve(monkeypatch, fake):

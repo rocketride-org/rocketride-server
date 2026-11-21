@@ -98,6 +98,8 @@ class _FakeIInstance:
     def __init__(self, tools) -> None:
         self._agent_host = _FakeHost(tools)
         self.instance = _FakeInner()
+        # This call's settings: no guard, no instructions, the default loop bound
+        self.settings = {}
 
 
 def _driver(plans: List[Dict[str, Any]]) -> RocketRideDriver:
@@ -111,10 +113,6 @@ def _driver(plans: List[Dict[str, Any]]) -> RocketRideDriver:
         The driver, with call_tool left real so dispatches are recorded.
     """
     d = RocketRideDriver.__new__(RocketRideDriver)
-    d._instructions = []
-    d._agent_description = ''
-    d._require_tool_call = False
-    d._max_waves = 10
     plan_iter = iter(plans)
     d.call_llm_json = lambda context, prompt, **kw: next(plan_iter)
     return d

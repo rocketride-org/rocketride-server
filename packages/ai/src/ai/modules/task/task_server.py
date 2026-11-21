@@ -63,9 +63,11 @@ Central orchestration server managing:
   ``(owner, rung, project_id, hash(resolved config))`` and handled by a
   control id, each holding exactly one engine
 - Engines (``TaskEngine``): the running processes, keyed by the SHAPE of the
-  spec qualified by its owner (every rung in this PR; C.25 drops the owner
-  on the published rungs) and shared by every control of that owner whose
-  spec has that shape
+  spec: qualified by its owner on ``@spec`` (one engine per owner per shape),
+  bare on the published rungs (one engine per shape for every caller, each
+  control with its own IGlobal set), except a shape that can serve one owner
+  only (a self-driven source, a RocketRide cloud database), which keeps its
+  owner on every rung
 - DAP connections (debugging and control interfaces)
 - Event broadcasting (real-time monitoring and notifications)
 - Resource management (automatic cleanup and metrics)
@@ -109,14 +111,16 @@ from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
 from ai.account.base import OutOfCreditsError
 from ai.account.models import AccountInfo, home_team, resolve_run_permissions, resolve_task_permissions
-from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
+from ai.account.pipe_deploy import Pin, listing_of, resolve_pins, teams_to_probe
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .trace_owner import TraceOwners
+from . import store_gate
 from .task_control import (
     RUNGS,
     CallerConfigError,
     DeploymentRef,
+    Listing,
     TaskControl,
     TeamContext,
     config_hash,
@@ -125,9 +129,18 @@ from .task_control import (
     mint_control_id,
     rung_of,
 )
-from .engine_key import EngineContent, engine_content
+from .engine_key import EngineContent, engine_content, key_owner, properties_digest
 from .node_id import node_id
-from .task_engine import TaskEngine, component_facts, hosted_refusal, resolve_parameter_tokens
+from .task_engine import (
+    TaskEngine,
+    authorize_db_targets,
+    component_facts,
+    db_access,
+    db_identity,
+    hosted_refusal,
+    resolve_parameter_tokens,
+)
+from ai.common.rocketride_db import DB_PROVIDERS, dsn_key
 from .types import LAUNCH_TYPE, EngineState, TaskError
 from .pipeline import MultipleSourcesError, resolve_implied_source
 from .commands.cmd_monitor import owner_key
@@ -1354,6 +1367,11 @@ class TaskServer(DAPBase):
         ``@team`` control never beats the caller's own ``@me`` deployment.
         A live ``@spec``/``@me`` hit answers without reading publications.
 
+        The rung that answers is also where the store gate stands (plan 0
+        S9/S10, 8.4): a publication whose listing is not free refuses a key
+        scoped to ``endpoints`` and a caller with no subscription, before
+        any engine starts; a live control answers from the verdict it holds.
+
         Args:
             address: ``developerId.pipelineId[.source]``.
             account_info: The request's account (required).
@@ -1366,12 +1384,17 @@ class TaskServer(DAPBase):
 
         Raises:
             TaskError: As ``resolve_control``; TASK_NOT_REGISTERED lists the rungs tried.
-            PermissionError: As ``resolve_control``.
+            PermissionError: As ``resolve_control``, or a scoped key on a
+                publication that is not free (``required='account key'``).
+            SubscriptionRequiredError: The caller has no subscription to a
+                subscription-priced publication.
         """
         parsed, rungs, candidates = await self.resolve_candidates(address, account_info, require, team=team)
         for candidate in candidates:
             if isinstance(candidate, TaskControl):
-                return self._check_engine_available(candidate), False
+                control = self._check_engine_available(candidate)
+                await store_gate.require_access(control, account_info)
+                return control, False
             # A pinned artifact without the named source yields nothing; the
             # next candidate in the order answers
             control, started = await self._start_from_pin(candidate, parsed, account_info, require)
@@ -1452,7 +1475,7 @@ class TaskServer(DAPBase):
                 live is not None
                 and not placed
                 and live_rank is not None
-                and live_rank <= _rank(pin.rung, pin.deployment.team_id)
+                and live_rank <= _rank(pin.rung, pin.deployment.team)
             ):
                 candidates.append(live)
                 placed = True
@@ -1668,7 +1691,10 @@ class TaskServer(DAPBase):
             TaskError: TASK_SOURCE_REQUIRED (two-segment address, several
                 sources and no default).
             PermissionError: No permission on the team, no home team for a
-                public run, or outside the key's endpoints scope.
+                public run, outside the key's endpoints scope, or a scoped
+                key on a publication that is not free.
+            SubscriptionRequiredError: The caller's org has no subscription
+                to a subscription-priced publication.
             ValueError: A personal deployment without its billing stamp.
         """
         # Deferred: the account singleton and the facade (which imports
@@ -1708,10 +1734,12 @@ class TaskServer(DAPBase):
         user_id = account_info.userId
         home = home_team(account_info)
         if pin.rung == 'team':
-            owner_kind, owner_id, owner_user = 'team', deployment.team_id, ''
-            billing_team = deployment.team_id
-            context = TeamContext(deployment.team_id, 'key' if endpoints is not None else 'answering')
-            perms = resolve_task_permissions(account_info, deployment.team_id)
+            # The answering team is the id inside the deployment's audience
+            answering = deployment.team
+            owner_kind, owner_id, owner_user = 'team', answering, ''
+            billing_team = answering
+            context = TeamContext(answering, 'key' if endpoints is not None else 'answering')
+            perms = resolve_task_permissions(account_info, answering)
             if not perms or (require and require not in perms):
                 raise PermissionError(f'Permission {require or "task"!r} denied for this task')
         elif pin.rung == 'me':
@@ -1730,7 +1758,28 @@ class TaskServer(DAPBase):
         org_id = str(org.get('id') or deployment.org_id)
         key = control_key(pin.rung, owner_id, address)
 
-        # Step 3: one start per index key; a concurrent request attaches
+        # Step 3: the store gate, with the publication in hand and before any
+        # engine starts (plan 0 S9/S10): the listing of the pinned version
+        # refuses a scoped key and a caller with no subscription. The caller's
+        # org is read as the account states it: an account that names none is
+        # never taken for the publisher's
+        listing = await listing_of(account, deployment.org_id, deployment.project_id, pin.version)
+        store_gate.require_account_key(listing, endpoints, address)
+        caller_org = str(org.get('id') or '')
+        asked = store_gate.needs_subscription(listing, pin.rung, caller_org, deployment.org_id)
+        refusal = await store_gate.subscription_refusal(
+            listing,
+            rung=pin.rung,
+            caller_org=caller_org,
+            publisher_org=deployment.org_id,
+            pipe_name=deployment.project_id,
+            address=address,
+        )
+        if refusal is not None:
+            raise refusal
+        confirmed_at = time.monotonic() if asked else 0.0
+
+        # Step 4: one start per index key; a concurrent request attaches
         async with self._engines.control_start_lock(key):
             existing = next((c for c in self._task_control.lookup(key) if c.live), None)
             if existing is not None:
@@ -1751,10 +1800,14 @@ class TaskServer(DAPBase):
                 developer_id=parsed.developer_id,
                 version=pin.version,
                 team_context=context,
+                listing=listing,
             )
 
-        # Step 4: the started control, checked like any other hit
-        return self._verify_control(self.control_by_key(started), account_info, require), True
+        # Step 5: the started control, checked like any other hit; the
+        # subscription just confirmed stands for its allow window
+        control = self._verify_control(self.control_by_key(started), account_info, require)
+        control.subscription_allowed_at = confirmed_at
+        return control, True
 
     def assign_port(self) -> int:
         """
@@ -2496,6 +2549,7 @@ class TaskServer(DAPBase):
         version: Optional[int] = None,
         team_context: Optional[TeamContext] = None,
         deployment_epoch: Optional[float] = None,
+        listing: Optional[Listing] = None,
     ) -> Dict[str, Any]:
         """
         Resolve a spec to a control and acquire its hold on an engine, starting one if needed.
@@ -2538,6 +2592,8 @@ class TaskServer(DAPBase):
                 disable/remove after that moment refuses the control instead
                 of registering it (plan 7.2): the window between the state
                 read and the registration is closed. Default: now.
+            listing: The store listing of the version a published rung
+                started from (trusted dispatch only). Default: free.
 
         Returns:
             Dict[str, Any]: The task's identity; ``token`` carries the CONTROL
@@ -2760,6 +2816,7 @@ class TaskServer(DAPBase):
         control.setup_declared_parameters()
         control.deployment = deployment
         control.version = version
+        control.listing = listing or Listing()
         control.team_context = team_context or TeamContext(
             control.teamId, 'home' if control.run_kind == 'dev' else 'deploying'
         )
@@ -2803,6 +2860,15 @@ class TaskServer(DAPBase):
         refusal = hosted_refusal(resolve_pipeline_env(control.pipeline, control.env))
         if refusal:
             raise ValueError(refusal)
+
+        # The RocketRide cloud databases are authorized for EVERY control as
+        # its own run, before it holds an engine (SDD 4.4): an engine's own
+        # start authorizes the databases of the control that starts it only
+        control.db_approved = await self._authorize_control_db(control)
+
+        # A bare key is a SHARED engine (plan 7.2): nobody's, started with no
+        # user environment; every value rides each control's open
+        shared = not key_owner(key)
 
         def _same_spec(existing: TaskControl) -> bool:
             """Whether ``existing`` runs this call's spec: its configuration on the engine of this shape."""
@@ -2875,6 +2941,10 @@ class TaskServer(DAPBase):
             # A deployment disabled or removed while the artifact loaded or the
             # engine started never gets a registered control (plan 7.2)
             self._refuse_if_revoked(control, state_epoch)
+            # A running engine was handed its databases at its start: this
+            # control's must be exactly those (an engine this call builds is
+            # started with this control's own below)
+            self._require_engine_db(control, engine)
             # Hold it, register the control and schedule its idle expiry
             engine.acquire(control.key, control.ttl)
             control.task = engine
@@ -2896,11 +2966,11 @@ class TaskServer(DAPBase):
                 lambda: self._new_engine(
                     control,
                     key=key,
-                    shared=False,
+                    shared=shared,
                     threads=threads,
                     launch_args=args,
-                    env=env or {},
-                    env_source=env_source,
+                    env=None if shared else env or {},
+                    env_source=None if shared else env_source,
                 ),
                 _register,
             )
@@ -2954,11 +3024,23 @@ class TaskServer(DAPBase):
         """
         The engine key, thread count and resolved content of ``control``'s spec (plan 7.2).
 
-        The key is the spec's SHAPE qualified by the control's owner on every
-        rung in this PR (C.25 leaves the published rungs bare); the resolved
-        config by stack index is the control's own identity and what its open
-        carries. Threads come from policy outside @spec; a @spec call may set
-        them (the starter's value holds for the engine's life).
+        The key is the spec's SHAPE (plan 4.4): ``hash:ownerId`` on ``@spec``,
+        the bare hash on the published rungs, where every control of that
+        shape holds the one engine. Threads and args come from policy outside
+        ``@spec``; a ``@spec`` call may set them, and one that departs from
+        policy gets an engine of its own (``hash+digest:ownerId``), so a name
+        call never attaches to a developer's non-default engine. The starter's
+        values hold for the engine's life.
+
+        Two kinds of shape keep their owner on every rung (``private``): a
+        self-driven source (a listener, a poller, a scan; read from the
+        source's catalog ``classType``, ``EngineContent.self_driven``), whose
+        engine runs the one listener its starting control configured, and a
+        shape with a RocketRide cloud database node (``DB_PROVIDERS``), whose
+        DSNs are authorized for the starting run and ride the engine process's
+        environment, once per engine (``TaskEngine._build_subprocess_env``).
+        The resolved config by stack index is the control's own identity and
+        what its open carries.
 
         Args:
             control: The control (its pipeline, source, rung and owner are set).
@@ -2971,9 +3053,9 @@ class TaskServer(DAPBase):
             TaskError: TASK_ENGINE_START_FAILED when the spec cannot be keyed.
         """
         try:
-            # Parameter tokens are decoded here when the deployment secret is
-            # set: the config rides the open as plain values, like the task
-            # file carried them until now
+            # Step 1: the content. Parameter tokens are decoded here when the
+            # deployment secret is set: the config rides the open as plain
+            # values, like the task file carried them until now
             spec = resolve_parameter_tokens(copy.deepcopy(control.pipeline))
             content = engine_content(spec, control.source, component_facts)
         except Exception as exc:
@@ -2986,12 +3068,105 @@ class TaskServer(DAPBase):
                 address=control.address,
                 engineKey='',
             ) from exc
+        # Step 2: the engine properties. Policy outside @spec; a @spec call's
+        # own threads/args, when they depart from policy, key an engine of
+        # their own
         threads = CONST_DEFAULT_MAX_THREADS
+        properties = ''
         if control.rung == 'spec':
             requested_threads = launch_args.get('threads')
             if requested_threads is not None:
                 threads = requested_threads
-        return content.key(rung=control.rung, owner_id=control.owner_id), threads, content
+            engine_args = list(launch_args.get('args') or [])
+            if threads != CONST_DEFAULT_MAX_THREADS or engine_args:
+                properties = properties_digest(threads, engine_args)
+
+        # Step 3: the key, its owner kept where the shape serves one owner only
+        private = any(provider in DB_PROVIDERS for provider in content.types.values())
+        key = content.key(rung=control.rung, owner_id=control.owner_id, private=private, properties=properties)
+        return key, threads, content
+
+    @staticmethod
+    async def _authorize_control_db(control: TaskControl) -> Dict[str, str]:
+        """
+        Authorize the RocketRide cloud databases ``control``'s DB nodes use, as the control's own run (SDD 4.4).
+
+        Runs for every control before it holds an engine, a running one
+        included: the engine's own start authorizes the databases of the
+        control that starts it, and a control attaching later is authorized
+        here, with its own identity, on its own config. The account layer
+        reads membership live on every call.
+
+        Args:
+            control: The control (its pipeline, env and identity are set).
+
+        Returns:
+            ``dsn_key`` -> the owner the account approved, per database; empty
+            without DB nodes.
+
+        Raises:
+            PermissionError: A database was denied; carries the reason.
+            ValueError: A DB node's scope or target is malformed.
+        """
+        # Step 1: what the control's DB nodes ask for, read from the spec as
+        # its bindings will run it (its own environment filled in)
+        targets, public_endpoint = db_access(resolve_pipeline_env(control.pipeline, control.env))
+        if not targets:
+            return {}
+
+        # Step 2: authorized as this control's run, never the engine's
+        identity = db_identity(
+            org_id=control.orgId,
+            user_id=control.client_id,
+            team_id=control.teamId,
+            run_kind=control.run_kind,
+            owner_kind=control.owner_kind,
+            public_endpoint=public_endpoint,
+            task_id=control.id,
+        )
+        approved = await authorize_db_targets(identity, targets)
+        return {dsn_key(scope, target): owner for scope, target, owner in approved}
+
+    @staticmethod
+    def _require_engine_db(control: TaskControl, engine: TaskEngine) -> None:
+        """
+        Refuse a hold on a started engine whose process was handed other databases than ``control`` was approved for.
+
+        The DSNs ride the engine process's environment, once per engine
+        (``TaskEngine._build_subprocess_env``), so a control whose DB nodes
+        name a database the process does not hold, or hold for another owner,
+        would read nothing or the wrong tenant. An engine still ``NEW`` is
+        being built by this very control and will be started with its
+        databases.
+
+        Args:
+            control: The control about to take a hold (``db_approved`` set).
+            engine: The engine it would hold.
+
+        Raises:
+            TaskError: TASK_ENGINE_UNAVAILABLE naming the databases.
+        """
+        if engine.state is EngineState.NEW:
+            return
+        handed = engine.db_approved
+        wanted = control.db_approved
+        if not handed and not wanted:
+            return
+        # The process holds exactly the databases it was handed, resolved in
+        # the org it started for: a control must want exactly those, in that
+        # org (a user scope resolves per org, so the owner alone is not enough)
+        keys = set(handed) | set(wanted)
+        missing = sorted(key for key in keys if handed.get(key) != wanted.get(key))
+        if not missing and str(engine.org_id or '') != str(control.orgId or ''):
+            missing = sorted(keys)
+        if missing:
+            raise TaskError(
+                TaskError.ENGINE_UNAVAILABLE,
+                f'The running engine {engine.engine_key!r} was started with other RocketRide cloud databases '
+                f'than this pipeline uses ({", ".join(missing)}); stop that engine and run again',
+                address=control.address,
+                engineKey=engine.engine_key,
+            )
 
     def _new_engine(
         self,
@@ -3007,15 +3182,17 @@ class TaskServer(DAPBase):
         """
         Build (not start) an engine for ``key`` on behalf of ``control``.
 
-        A cross-user engine names no user (S13), anchors no storage, carries
-        no caller's env (it holds the placeholders; env rides per call) and
-        traces nothing by default; a private engine is its owner's. Every
-        engine of this PR is private (owner-qualified on every rung).
+        A shared engine (a bare key, plan 7.2) names no user (S13), anchors
+        no storage, carries no caller's env (it holds the placeholders; env
+        rides per call), traces nothing by default and is built from the
+        spec's shape alone: ``TaskEngine`` drops whatever of ``control`` it
+        would otherwise keep. A private engine (``hash:ownerId``) is its
+        owner's.
 
         Args:
             control: The control the engine is started for.
             key: The engine key (plan 7.2).
-            shared: True for a cross-user engine (never, before C.25).
+            shared: True for a shared engine (its key names no owner).
             threads: The engine's thread count.
             launch_args: The launch arguments (``name``, ``args``).
             env: Fixed values for ${...} placeholders (private engines).
@@ -3124,10 +3301,26 @@ class TaskServer(DAPBase):
         if stopped is None or not control.dormant:
             return stopped
 
+        # The account answers again before a dormant control takes a hold:
+        # membership revoked since the control started refuses the rejoin and
+        # leaves it on its stopped engine
+        control.db_approved = await self._authorize_control_db(control)
+
         def _hold(engine: TaskEngine) -> None:
+            # A control removed while this request waited (the account
+            # question, the start gate) takes no hold: nothing could release it
+            if self._task_control.get(control.key) is not control:
+                raise TaskError(
+                    TaskError.ENGINE_UNAVAILABLE,
+                    f'Task "{control.id}" was removed while its engine was being started again',
+                    address=control.address,
+                )
             # A concurrent request through this control may have moved it
             if control.task is engine:
                 return
+            # Another holder started it again with its own databases: this
+            # control's must be exactly those
+            self._require_engine_db(control, engine)
             control.task.release(control.key)
             engine.acquire(control.key, control.ttl)
             control.task = engine
@@ -3285,6 +3478,7 @@ class TaskServer(DAPBase):
                     rung='' if control.rung == 'spec' else control.rung,
                     version=control.version,
                     team_context=control.team_context,
+                    listing=control.listing,
                     # The predecessor's state epoch carries over: a deployment
                     # revoked since it registered refuses the successor too
                     deployment_epoch=control.registered_at,

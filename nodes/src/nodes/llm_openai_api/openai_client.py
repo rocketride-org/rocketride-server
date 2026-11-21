@@ -4,7 +4,7 @@ Supports custom base_url for providers like Featherless, Together, Groq, Ollama,
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 from openai import APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -30,12 +30,12 @@ class Chat(ChatBase):
         apikey = config.get('apikey')
         base_url = config.get('base_url') or None
 
-        # Build kwargs for ChatOpenAI
+        # Build kwargs for ChatOpenAI: one client for every call, each request
+        # binds its model and max_tokens
         kwargs = {
-            'model': self._model,
+            'model': UNBOUND_MODEL,
             'api_key': apikey,
             'temperature': 0,
-            'max_tokens': self._modelOutputTokens,
         }
         if base_url:
             kwargs['base_url'] = base_url

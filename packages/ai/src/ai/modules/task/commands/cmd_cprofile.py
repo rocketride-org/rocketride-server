@@ -54,6 +54,7 @@ Architecture:
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from .engine_access import engine_for, wait_running
+from ..engine_key import key_owner
 from ai.common.cprofile_manager import profiler
 
 # Only import for type checking to avoid circular import errors
@@ -144,8 +145,8 @@ class CProfileCommands(DAPConn):
         # Step 2: anyone else, only their own private engine on @spec / @me
         engine = control.task
         if control.rung in _PROFILE_RUNGS and engine is not None and not engine.shared:
-            _, qualified, owner = engine.engine_key.rpartition(':')
-            if qualified and owner and owner == control.owner_id:
+            owner = key_owner(engine.engine_key)
+            if owner and owner == control.owner_id:
                 return
 
         # Step 3: refused, with what it needed (the permission_denied body)

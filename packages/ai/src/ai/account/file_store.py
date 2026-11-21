@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 FileStore - General-purpose binary file system interface for RocketRide.
 
@@ -20,7 +42,7 @@ Usage:
     await fs.write('data/input.csv', b'col1,col2\\n1,2\\n')
     data = await fs.read('data/input.csv')
     entries = await fs.list_dir('data/')
-    shared = await fs.list_dir('@/Team/Development/reports')
+    shared = await fs.list_dir('@Development/reports')
 """
 
 import json
@@ -30,7 +52,20 @@ from enum import Enum
 from pathlib import PurePosixPath
 from typing import Any, Optional
 
-from .models import RequestContext, resolve_task_permissions
+from .models import RequestContext, resolve_task_permissions, team_id_of_name
+from .roots import (
+    KIND_CONTROL,
+    KIND_ME,
+    KIND_NONE,
+    KIND_ORG,
+    KIND_PUBLIC,
+    KIND_SPEC,
+    KIND_TEAM,
+    KIND_USER,
+    Root,
+    format_root,
+    parse_root,
+)
 from .store import IStore, StorageError
 
 # Sentinel file used to represent empty directories on object stores
@@ -135,27 +170,28 @@ def mint_directory_url(dir_path: str, entry_file: str, expires_in: int = 86400, 
 # RequestContext the FileStore was constructed with (the same per-request
 # identity every on_* handler carries — see models.RequestContext).
 #
-# Scope grammar (wire paths) — the JOINED filesystem rooted at '@':
-#   <rest>                   → users/<client_id>/files/<rest>  (simple mode)
-#   @/User/<rest>            → users/<client_id>/files/<rest>  (same tree,
-#                              joined-mode spelling — @/User is implicitly ME)
-#   @/Team/<ref>/<rest>      → teams/<teamId>/files/<rest>     (ref required:
-#                              a display name from my membership, or =<id>)
-#   @/Org/<rest>             → orgs/<myOrgId>/files/<rest>     (implicitly MY
-#                              org — org.admin only)
-#   @/User/=<uid>/<rest>, @/Org/=<oid>/<rest> → cross-boundary id references,
-#                              sys.admin/internal only (support access).
-# '@' itself is a virtual mount listing served by cmd_store, never resolved
-# here; its children compose by ordinary path joining (listing '@' returns
-# 'User'/'Team'/'Org', join gives '@/Team', and so on down the tree). The
-# spellings are case-exact and alias-free — one location, one path string.
-# @/User and @/Org take no name reference — each caller has exactly one of
-# both, so a '='-free next segment is already the path; @/Team keeps its
-# mandatory reference (N teams). Names on the wire, ids on disk; name
-# resolution consults ONLY the caller's own membership. Unknown, foreign,
-# permission-less, and ambiguous references deny with ONE identical message
-# (no existence leak). Top-of-scope entry names may not start with '=' (so
-# id references can never be shadowed by real files) or '@' (grammar room).
+# Store paths open with an optional ROOT, the first part before the first
+# '/', which says whose tree is meant (plan 2.5). The grammar is read by
+# ``roots.parse_root`` alone; this module only decides which roots are
+# storage places and who may resolve them:
+#   <rest>               → users/<client_id>/files/<rest>   (the caller's own)
+#   @me/<rest>           → users/<client_id>/files/<rest>   (the same tree)
+#   @<team>/<rest>       → teams/<teamId>/files/<rest>      (a team, by name,
+#                          from the caller's own membership, ignoring case)
+#   @org/<rest>          → orgs/<myOrgId>/files/<rest>      (the caller's
+#                          active org; org.admin only)
+#   =team/<tid>/<rest>   → teams/<tid>/files/<rest>         (a team, by id)
+#   =org/<oid>/<rest>    → orgs/<oid>/files/<rest>          (an org, by id)
+#   =user/<uid>/<rest>   → users/<uid>/files/<rest>         (a user, by id:
+#                          sys.admin and internal subsystems only)
+# '@spec', '@public' and '=control/<id>' are roots of the grammar but no
+# storage places, and are refused. '@' itself is a virtual listing served by
+# cmd_store (one entry per root the caller can open), never resolved here.
+# Names on the wire, ids on disk; name resolution consults ONLY the caller's
+# own membership. Unknown, foreign, permission-less, and ambiguous references
+# deny with ONE identical message (no existence leak). Under any root the
+# first entry name may not start with '=' or '@' (so a root can never be
+# shadowed by a real file).
 # =============================================================================
 
 # SYSTEM-OWNED subtrees: written by the engine, served by their own domain
@@ -172,6 +208,9 @@ _DEFAULT_PERMISSION = 'task.store'
 # The uniform denial for scoped paths — identical for unknown, foreign,
 # permission-less, and ambiguous references so nothing leaks existence.
 _DENIED = 'Access denied for scoped path'
+
+# The physical top directory of each id root's tree.
+_PHYSICAL_ROOTS = {KIND_TEAM: 'teams', KIND_ORG: 'orgs', KIND_USER: 'users'}
 
 
 def _audit_crossing(ctx: 'RequestContext', client_id: str, target: str) -> None:
@@ -200,8 +239,8 @@ def normalize_path(path: str) -> str:
     Every consumer that makes a decision about a wire path (the resolver
     below via ``FileStore._validate_path``, cmd_store's scope-root filter)
     must run this SAME routine first, so no two components can ever disagree
-    about which location a spelling addresses ('@//User', '@/./User' and
-    '\\@\\User' all normalize to '@/User' — deciding on the raw spelling
+    about which location a spelling addresses ('@me//x', '@me/./x' and
+    '\\@me\\x' all normalize to '@me/x' — deciding on the raw spelling
     while resolving the normalized one is a filter bypass).
 
     Rules: backslashes become '/', leading slashes drop, '..' and control /
@@ -230,91 +269,33 @@ def normalize_path(path: str) -> str:
     return normalized
 
 
-def parse_scope(normalized: str) -> 'tuple[str, Optional[str], str]':
-    """Split a NORMALIZED path into (scope_kind, scope_ref, rest).
+def parse_scope(normalized: str) -> Root:
+    """Split a NORMALIZED path into its storage root and the rest.
 
-    Must be fed the output of ``_validate_path`` — normalizing first is what
-    defeats the ``\\@\\Team\\...``, ``/@/Team/...``, ``./@/Team/...`` bypass
-    family (all of those normalize INTO the ``@`` grammar and are parsed
-    here, never around it).
+    Must be fed the output of ``_validate_path``: normalizing first is what
+    defeats the ``\\=team\\x``, ``/=team/x``, ``./@me/x`` bypass family (all
+    of those normalize INTO the root grammar and are parsed there, never
+    around it). The grammar itself is ``roots.parse_root``; this function
+    only refuses the roots that are not storage places.
 
-    Grammar v3 — the joined filesystem rooted at '@'. Scope references:
-      bare segment  = display NAME, resolved through the caller's own
-                      membership (the canonical, round-trippable spelling)
-      ``=<id>``     = literal id, stripped and used as-is (scripts and
-                      cross-boundary sys.admin access) — ids can never
-                      collide with names by construction.
-    @/Team takes a MANDATORY reference (a caller has N teams); @/User and
-    @/Org take NONE (a caller has exactly one of each — they are implicitly
-    "me" / "my org"), so their next segment is already the path UNLESS it
-    starts with '=' (a cross-boundary id reference, sys.admin/internal).
-    Spellings are case-exact ('@/team' is an error, not an alias).
+    Kinds returned (``Root.kind``, with ``by_id`` and ``ref``):
+      - ``none``                    the caller's own tree (a plain path)
+      - ``me``                      the caller's own tree (``@me/``)
+      - ``team`` by name or by id   ``@<team>/`` or ``=team/<tid>/``
+      - ``org`` by word or by id    ``@org/`` or ``=org/<oid>/``
+      - ``user`` by id              ``=user/<uid>/``
 
-    Kinds:
-      - no leading '@'            -> ('own',  None, path) (caller's namespace)
-      - '@/User[/rest]'           -> ('user', None, rest) (alias of own tree)
-      - '@/User/=<uid>[/rest]'    -> ('user', '=uid', rest)
-      - '@/Team/<ref>[/rest]'     -> ('team', ref,  rest)
-      - '@/Org[/rest]'            -> ('org',  None, rest) (caller's own org)
-      - '@/Org/=<oid>[/rest]'     -> ('org',  '=oid', rest)
-      - bare '@' (a virtual mount listing owned by cmd_store), any other
-        '@*' first segment, an unknown '@/<Child>', or '@/Team' without a
-        reference -> ValueError.
-    To keep id references unshadowable, the FIRST rest segment of any scope
-    may not start with '=' -> ValueError (such names cannot be created, so
-    they never appear in listings either).
+    Raises:
+        ValueError: The path is not in the root grammar (bare ``@``, the
+            retired ``@/User``, ``@/Team/<ref>`` and ``@/Org`` spellings, an
+            unknown ``=`` kind, a first entry starting with ``@`` or ``=``),
+            or its root is no storage place (``@spec``, ``@public``,
+            ``=control/<id>``).
     """
-    if not normalized.startswith('@'):
-        kind, ref, rest = 'own', None, normalized
-    else:
-        parts = normalized.split('/')
-        if parts[0] != '@':
-            # '@team', '@foo', ... — the whole '@*' family stays reserved.
-            raise ValueError(f'Reserved path segment: {parts[0]!r} (the joined filesystem lives under @/)')
-        if len(parts) < 2:
-            raise ValueError("Reserved path segment: '@' is the virtual mount root (list it, not resolve it)")
-        child = parts[1]
-        if child not in ('User', 'Team', 'Org'):
-            raise ValueError(f'Unknown scope {child!r} (only @/User, @/Team and @/Org exist — case-exact)')
-        if child == 'Team':
-            # N teams — the reference segment is mandatory.
-            if len(parts) < 3 or not parts[2]:
-                raise ValueError('@/Team/ requires a reference segment')
-            kind, ref, rest = 'team', parts[2], '/'.join(parts[3:])
-        elif len(parts) >= 3 and parts[2].startswith('='):
-            # @/User/@/Org with an explicit cross-boundary id reference.
-            kind, ref, rest = child.lower(), parts[2], '/'.join(parts[3:])
-        else:
-            # @/User/@/Org implicit self — everything after is already path.
-            kind, ref, rest = child.lower(), None, '/'.join(parts[2:])
-
-    # Reserve the '=' and '@' sigils at the top of every scope: a real entry
-    # named '=x' would shadow (or be shadowed by) an id reference and become
-    # unaddressable/ambiguous, and '@*' is grammar room (a plain path can
-    # never start with '@' — it parses as scope grammar above — but a scoped
-    # rest could smuggle one in). Denied on creation => never listed either.
-    first = rest.split('/', 1)[0] if rest else ''
-    if first.startswith('='):
-        raise ValueError("Names starting with '=' are reserved for id references")
-    if first.startswith('@'):
-        raise ValueError("Names starting with '@' are reserved (scope grammar)")
-    return (kind, ref, rest)
-
-
-def _split_ref(ref: str) -> 'tuple[bool, str]':
-    """Split a scope reference into (is_id, value) per the ``=`` rule.
-
-    ``=<id>`` means literal id: strip the sigil, then VALIDATE the id as a
-    path-safe segment — ``=..`` / ``=.`` / ``=`` would otherwise traverse out
-    of the scope tree when embedded into the physical path (slashes are
-    already impossible post-normalization).
-    """
-    if not ref.startswith('='):
-        return (False, ref)
-    ident = ref[1:]
-    if not ident or ident in ('.', '..'):
-        raise ValueError(f'Invalid id reference: {ref!r}')
-    return (True, ident)
+    root = parse_root(normalized)
+    if root.kind in (KIND_SPEC, KIND_PUBLIC, KIND_CONTROL):
+        raise ValueError(f'{format_root(root.kind, root.ref, root.by_id)} is not a storage place')
+    return root
 
 
 def _team_ids(account_info) -> 'set[str]':
@@ -342,33 +323,41 @@ def validate_storage_root(root: str) -> str:
     return '/'.join(segments)
 
 
-def storage_root_for(owner_kind: str, user_id: str, team_id: str, project_id: str) -> str:
-    """The storage anchor of a control's owner: where its nodes' plain paths resolve (plan 5.7).
+def storage_root_for(owner_kind: str, user_id: str, team_id: str, project_id: str, org_id: str = '') -> str:
+    """The storage anchor of a control's owner: where its nodes' plain paths resolve (plan 2.5, 5.7).
 
     A TEAM-owned run (a @team deploy) anchors in a task-specific subtree of
     TEAM storage, so teammates can watch and replay it and two deployments
-    never share working storage; a USER-owned run (an interactive run, a
-    personal @me deploy) anchors in the owner's whole user tree, private and
-    never colliding with the team's run of the same project. Node-level paths
-    are identical in both.
+    never share working storage; an ORG-owned run anchors the same way in the
+    org's tree; a USER-owned run (an interactive run, a personal @me deploy)
+    anchors in the owner's whole user tree, private and never colliding with
+    the team's run of the same project. Node-level paths are identical in all.
 
     Args:
-        owner_kind: ``'team'`` or ``'user'``.
+        owner_kind: ``'team'``, ``'org'`` or ``'user'``.
         user_id: The owning (or launching) user.
         team_id: The owning team of a team-owned run.
         project_id: The pipeline's short id.
+        org_id: The owning org of an org-owned run.
 
     Returns:
         The validated root.
 
     Raises:
-        ValueError: There is no owner to anchor in (an anonymous run), or an
-            identifier is not a path-safe segment.
+        ValueError: There is no owner to anchor in (an anonymous run), an
+            identifier is not a path-safe segment, or the owner kind is
+            unknown.
     """
     if owner_kind == 'team':
         if not team_id or not project_id:
             raise ValueError('team-owned runs require a team_id and a project_id for their storage anchor')
         return validate_storage_root(f'teams/{team_id}/files/tasks/{project_id}')
+    if owner_kind == 'org':
+        if not org_id or not project_id:
+            raise ValueError('org-owned runs require an org_id and a project_id for their storage anchor')
+        return validate_storage_root(f'orgs/{org_id}/files/tasks/{project_id}')
+    if owner_kind != 'user':
+        raise ValueError(f'Unknown owner kind for a storage anchor: {owner_kind!r}')
     if not user_id:
         raise ValueError('a run with no owner has no storage anchor')
     return validate_storage_root(f'users/{user_id}/files')
@@ -377,18 +366,17 @@ def storage_root_for(owner_kind: str, user_id: str, team_id: str, project_id: st
 def _resolve_team_name(account_info, name: str) -> str:
     """Resolve a team display name to its id — caller's own org ONLY.
 
-    Names are case-sensitive and must be unique among the caller's teams
-    (per-org uniqueness is DB-enforced, but fail closed anyway). Unknown or
-    ambiguous names raise the SAME uniform error — and a foreign org's names
-    are inexpressible by construction, since the only dictionary consulted is
-    the caller's own membership list.
+    Names match ignoring case (``models.team_id_of_name``, by the key the
+    teams table is unique on) and must name exactly one of the caller's teams
+    (fail closed on a duplicate). Unknown or ambiguous names raise the SAME
+    uniform error — and a foreign org's names are inexpressible by
+    construction, since the only dictionary consulted is the caller's own
+    membership list.
     """
-    org = getattr(account_info, 'organization', None) or {}
-    teams = org.get('teams', []) if isinstance(org, dict) else []
-    matches = [t for t in teams if t.get('name') == name]
-    if len(matches) == 1 and matches[0].get('id'):
-        return matches[0]['id']
-    raise PermissionError(_DENIED)
+    team_id = team_id_of_name(account_info, name)
+    if not team_id:
+        raise PermissionError(_DENIED)
+    return team_id
 
 
 def resolve_scope(
@@ -401,34 +389,38 @@ def resolve_scope(
 
     THE enforcement point: called for every path of every operation, against
     the bound RequestContext. Returns ``(kind, scope_root, rest)`` — kind is
-    the parsed scope kind ('own'/'user'/'team'/'org'), returned so callers
+    whose tree resolved ('own'/'team'/'org'/'user'), returned so callers
     never re-parse a path this function already parsed.
 
-    Identity handling:
-      - ``ctx.source == 'engine'`` (subprocess tool nodes): plain paths only;
-        every ``@`` spelling (including the harmless-looking ``@/User`` alias)
-        and every system tree is rejected — LLM-generated paths can never
-        wander out of the task owner's namespace.
-      - ``'internal'`` sysPermission (trusted subsystems): mechanical, id
-        (``=``) references only, no checks — system trees included (the
-        run-log writer and the domain APIs act through this identity).
-      - sys.admin sessions: full access everywhere, system trees included;
-        team names still resolve in their OWN org only, ``=id`` references
-        cross boundaries mechanically (the platform support capability).
-      - ordinary sessions: the OWN tree (plain paths and the ``@/User/<rest>``
-        alias) is unconditional — ownership is the authorization, no team or
-        org grant consulted; team references (name or ``=id``) resolve
-        strictly within their own membership and require ``task.store``;
-        ``@/Org`` (implicitly their one org) needs ``org.admin``; SYSTEM
-        TREES ARE FULLY DENIED — logs/deployments are reachable only through
-        their domain APIs (rrext_log / rrext_deploy), never the file API.
+    Who may resolve what (plan 2.5):
+      - ``ctx.source == 'engine'`` (a node's ``self.files``): plain paths
+        only; every root (``@me/`` and ``=user/`` included) and every system
+        tree is rejected — LLM-generated paths can never wander out of the
+        run's storage anchor.
+      - ``'internal'`` sysPermission (trusted subsystems: the run-log writer,
+        the deploy commands): they hold ids, so they write ``=`` roots,
+        resolved by id with no checks, system trees included. A team name or
+        ``@org/`` means nothing to them and is refused.
+      - sys.admin sessions: everything, system trees included; a team of
+        their own org by name, any team, org or user by id. Every non-member
+        or foreign crossing is audited.
+      - ordinary sessions: the OWN tree (plain paths and ``@me/``) is
+        unconditional — ownership is the authorization, no team or org grant
+        consulted; ``@<team>/`` and ``=team/<tid>/`` as a member holding
+        ``task.store``; ``@org/`` and ``=org/<oid>/`` in their own org with
+        ``org.admin``; ``=user/<uid>/`` never. SYSTEM TREES ARE FULLY DENIED —
+        logs/deployments are reachable only through their domain APIs
+        (rrext_log / rrext_deploy), never the file API.
 
     Raises:
         PermissionError: Identity may not touch the addressed location (or
             the reference is unknown/foreign/ambiguous — uniform message).
-        ValueError: Malformed scope grammar or id reference.
+        ValueError: The path is not in the root grammar, or its root is no
+            storage place.
     """
-    kind, ref, rest = parse_scope(normalized)
+    root = parse_scope(normalized)
+    rest = root.rest
+    own = root.kind in (KIND_NONE, KIND_ME)
 
     # -- Engine (a node's self.files): most restricted — plain paths, no system trees
     # Every path is relative to the binding owner's storage anchor (chroot
@@ -436,11 +428,11 @@ def resolve_scope(
     # task-specific team subtree for deploy runs — so node-level paths are
     # identical in both modes and can never leave the anchor.
     if ctx.source == 'engine':
-        if kind != 'own':
-            raise PermissionError('Scoped (@) paths are not available in the engine context')
+        if root.kind != KIND_NONE:
+            raise PermissionError('Rooted (@ and =) paths are not available in the engine context')
         if _system_tree(rest):
             raise PermissionError(f'{_system_tree(rest)}/ is not available in the engine context')
-        return (kind, engine_root or f'users/{client_id}/files', rest)
+        return ('own', engine_root or f'users/{client_id}/files', rest)
 
     account_info = ctx.account_info
     if account_info is None:
@@ -456,77 +448,72 @@ def resolve_scope(
     # rrext_deploy) write .logs/.deployments through exactly this identity —
     # pinned by test_internal_identity_writes_logs.
     if is_internal:
-        if kind == 'own' or (kind == 'user' and ref is None):
-            return (kind, f'users/{client_id}/files', rest)
-        if ref is None:
-            raise PermissionError(_DENIED)  # internal has no org context
-        is_id, value = _split_ref(ref)
-        if not is_id:
-            raise PermissionError(_DENIED)  # internal has no name dictionary
-        root = {'team': 'teams', 'org': 'orgs', 'user': 'users'}[kind]
-        return (kind, f'{root}/{value}/files', rest)
+        if own:
+            return ('own', f'users/{client_id}/files', rest)
+        if not root.by_id:
+            raise PermissionError(_DENIED)  # internal has no name dictionary and no org context
+        return (root.kind, f'{_PHYSICAL_ROOTS[root.kind]}/{root.ref}/files', rest)
 
     # -- System trees: sys.admin may do anything, everyone else nothing ------
     # (Checked before scope resolution so the denial is uniform and early.)
     if _system_tree(rest) and not is_sys_admin:
         raise PermissionError(f'{_system_tree(rest)}/ is system-owned (use its API)')
 
-    # -- Own namespace: plain paths and their joined-mode alias @/User/<rest> -
+    # -- Own namespace: plain paths and @me/<rest> ---------------------------
     # Ownership IS the authorization: this branch resolves to the caller's
     # own users/<id>/files tree by construction, so an authenticated
     # identity needs no team- or org-carried permission. Personal storage
     # must survive every org/team context switch — routing it through the
     # active org's team grants denied users their own files whenever an
     # org switch landed them somewhere they hold no team membership.
-    if kind == 'own' or (kind == 'user' and ref is None):
-        return (kind, f'users/{client_id}/files', rest)
+    if own:
+        return ('own', f'users/{client_id}/files', rest)
 
-    # -- @/Org: implicitly MY org — org.admin only; =id crosses for sys.admin -
-    if kind == 'org':
+    # -- =user/<uid>: the support spelling — sys.admin only, always audited --
+    if root.kind == KIND_USER:
+        if not is_sys_admin:
+            raise PermissionError(_DENIED)
+        _audit_crossing(ctx, client_id, f'users/{root.ref}')
+        return ('user', f'users/{root.ref}/files', rest)
+
+    # -- @org and =org/<oid>: MY org with org.admin; another org for sys.admin
+    if root.kind == KIND_ORG:
         org = account_info.organization if isinstance(account_info.organization, dict) else {}
-        if ref is not None:
-            value = _split_ref(ref)[1]  # parse guarantees the '=' form here
-            if value != org.get('id'):
-                if is_sys_admin:
-                    _audit_crossing(ctx, client_id, f'orgs/{value}')
-                    return (kind, f'orgs/{value}/files', rest)
+        if root.by_id and root.ref != org.get('id'):
+            if not is_sys_admin:
                 raise PermissionError(_DENIED)
+            _audit_crossing(ctx, client_id, f'orgs/{root.ref}')
+            return ('org', f'orgs/{root.ref}/files', rest)
         if not org.get('id'):
             raise PermissionError(_DENIED)
         if 'org.admin' not in (org.get('permissions') or []) and not is_sys_admin:
             raise PermissionError(_DENIED)
-        return (kind, f'orgs/{org["id"]}/files', rest)
+        return ('org', f'orgs/{org["id"]}/files', rest)
 
-    is_id, value = _split_ref(ref)
-
-    # -- @/User/=<uid>: cross-boundary support spelling — sys.admin only -----
-    if kind == 'user':
-        if not is_sys_admin:
-            raise PermissionError(_DENIED)
-        _audit_crossing(ctx, client_id, f'users/{value}')
-        return (kind, f'users/{value}/files', rest)
-
-    # -- @/Team -----------------------------------------------------------------
-    if is_id:
-        if value in _team_ids(account_info):
-            team_id = value
+    # -- @<team> and =team/<tid> ---------------------------------------------
+    # (parse_scope let only none/me/user/org/team through, so this is a team.)
+    if root.kind != KIND_TEAM:
+        raise ValueError(f'Unknown storage root kind: {root.kind!r}')
+    if root.by_id:
+        if root.ref in _team_ids(account_info):
+            team_id = root.ref
         elif is_sys_admin:
             # A team the caller is NOT a member of — a boundary crossing,
             # unlike the member resolution above (which crosses nothing).
-            _audit_crossing(ctx, client_id, f'teams/{value}')
-            team_id = value
+            _audit_crossing(ctx, client_id, f'teams/{root.ref}')
+            team_id = root.ref
         else:
             raise PermissionError(_DENIED)
     else:
-        team_id = _resolve_team_name(account_info, ref)
+        team_id = _resolve_team_name(account_info, root.ref)
 
     if is_sys_admin:
-        return (kind, f'teams/{team_id}/files', rest)
+        return ('team', f'teams/{team_id}/files', rest)
 
     perms = resolve_task_permissions(account_info, team_id)
     if _DEFAULT_PERMISSION not in perms:
         raise PermissionError(_DENIED)
-    return (kind, f'teams/{team_id}/files', rest)
+    return ('team', f'teams/{team_id}/files', rest)
 
 
 def _sanitize_download_name(name: str) -> str:
@@ -579,8 +566,8 @@ class FileStore:
     against the ``RequestContext`` bound at construction — the SAME
     per-request identity the DAP handlers carry, so identity flows wire →
     handler → store unchanged. Plain paths scope to
-    ``users/<client_id>/files/`` exactly as before; the ``@/Team/<ref>/`` and
-    ``@/Org/`` grammar resolves to ``teams/<id>/files/`` /
+    ``users/<client_id>/files/`` exactly as before; the ``@<team>/``, ``=team/<tid>/`` and
+    ``@org/`` roots resolve to ``teams/<id>/files/`` /
     ``orgs/<id>/files/`` with the policy table deciding the required
     access rule per subtree (system trees are internal/sys.admin only).
 
@@ -1037,7 +1024,7 @@ class FileStore:
         if not validated:
             raise StorageError('rmdir requires a non-empty path')
 
-        # Scope-root guard: NO root — '@/Team/<ref>', '@/Org', or the
+        # Scope-root guard: NO root — '@<team>', '=team/<tid>', '@org', or the
         # caller's own account root — may be the rmdir target; each would
         # wipe a whole file area. Universal (not kind-conditional) like the
         # delete/rename guards, so it holds even if a future normalization
@@ -1330,7 +1317,7 @@ class FileStore:
         # session's identity), and the signed JWT is the capability. The
         # fetch handler serves the claim verbatim — it re-resolves nothing,
         # because its internal identity has no name dictionary and no org
-        # context, so a name-based '@/Team/<name>' or '@/Org' wire path
+        # context, so a name-based '@<team>' or '@org' wire path
         # could never resolve there (it would 500 instead of serving).
         payload = {
             'sub': self._client_id,
@@ -1358,7 +1345,7 @@ class FileStore:
 
         THE single resolver+authorizer: normalization happens FIRST (via
         ``_validate_path`` — the one normalizer, which is what defeats the
-        ``\\@\\Team\\...`` / ``/@/Team/...`` / ``./@/Team/...`` bypass family),
+        ``\\=team\\x`` / ``/=team/x`` / ``./@me/x`` bypass family),
         then ``resolve_scope`` maps the scope grammar to the
         physical root and enforces the policy-required permission for the
         bound identity.

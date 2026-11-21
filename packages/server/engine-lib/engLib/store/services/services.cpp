@@ -226,8 +226,8 @@ static Error checkDepth(const json::Value &definition) noexcept {
 //		"capabilities":
 //			The node's PROTOCOL_CAPS bitmask - the same value the service
 //			summary carries - so a consumer of the resolved schema (the
-//			config resolver) applies the "multitenant" rule without a
-//			second lookup.
+//			config resolver, which hands it to the node as
+//			config.node.capabilities) needs no second lookup.
 //
 //	Property definition file
 //	-----------------------------------
@@ -270,10 +270,6 @@ static Error checkDepth(const json::Value &definition) noexcept {
 //				The endpoint requires network access
 //			"datanet"
 //				The endpoint requires datanet protocol access
-//			"multitenant"
-//				The node is certified reentrant-safe across callers, so a
-//				pipe built only from such nodes may share one engine
-//				between users (PROTOCOL_CAPS::MULTITENANT)
 //
 //      "classType":
 //          The type of the node. The following types are currently
@@ -1117,7 +1113,7 @@ Error IServices::buildSchema(ServiceDefinition &def, size_t *total) {
 
     // The capabilities bitmask - the one carrier of the node's
     // capabilities, so the resolved schema is self-contained for the
-    // config resolver (the multitenant rule reads it here)
+    // config resolver (config.node.capabilities reads it here)
     schema["capabilities"] = def.capabilities;
 
     def.serviceSchema = _mv(schema);
@@ -1507,8 +1503,6 @@ ErrorOr<std::optional<IServices::ServiceDefinition>> IServices::parseDefinition(
             def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::DEPRECATED;
         else if (cap == "experimental")
             def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::EXPERIMENTAL;
-        else if (cap == "multitenant")
-            def.capabilities |= url::UrlConfig::PROTOCOL_CAPS::MULTITENANT;
         else
             return APERR(Ec::InvalidParam, "Invalid cap setting", cap, "in",
                          definitionPath);

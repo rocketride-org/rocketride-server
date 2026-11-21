@@ -27,7 +27,7 @@ from __future__ import annotations
 import asyncio
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -580,6 +580,13 @@ def _attribution(org='org-1', user='user-a', team='team-home'):
     return BillingAttribution(org_id=org, team_id=team, user_id=user)
 
 
+def _key(
+    org='org-1', user='user-a', team='team-home', rung='team', publication='team-1', version=5, resource='hold_time'
+):
+    """The ledger key of the default test usage, with any fact replaced."""
+    return task_metrics.usage_key(org, user, team, 'acme.docBrain', rung, publication, version, resource)
+
+
 def _usage(trace_id, control_key='team.team-1.acme.docBrain.chat', billing=None, team='team-1', version=5):
     return task_metrics.TraceUsage(
         control_key=control_key,
@@ -592,7 +599,7 @@ def _usage(trace_id, control_key='team.team-1.acme.docBrain.chat', billing=None,
 
 
 def test_a_closed_tree_becomes_one_request_of_its_paying_unit(fake_psutil, no_gpu, mock_billing_rates):
-    """The engine's final bucket for a tree is converted at the rates and queued under the caller's day row."""
+    """The engine's final bucket for a tree is converted at the rates and queued under the caller's row."""
     sink = task_metrics.UsageSink(post=None)
     tm, _ = _make_metrics(fake_psutil)
     tm._attribute = lambda trace_id: _usage(trace_id)
@@ -604,8 +611,7 @@ def test_a_closed_tree_becomes_one_request_of_its_paying_unit(fake_psutil, no_gp
             'traces': {'7': {'timers': {'hold_time': 500.0}, 'counters': {'bytes_in': 10}, 'closed': True}},
         }
     )
-    day = task_metrics.UsageSink.day_number()
-    key = f'usage:{day}:acme.docBrain:team:team-1:5:user-a:hold_time'
+    key = _key()
     assert list(sink.pending) == [key]
     pending = sink.pending[key]
     assert pending['amount'] == 0.5 and pending['request_count'] == 1  # 500 ms x 0.001; bytes_in bills nothing
@@ -614,31 +620,60 @@ def test_a_closed_tree_becomes_one_request_of_its_paying_unit(fake_psutil, no_gp
     assert (context['rung'], context['team'], context['version']) == ('team', 'team-1', 5) and 7 not in tm.traces
 
 
-def test_two_publications_used_by_one_caller_on_one_day_are_two_rows(fake_psutil, no_gpu, mock_billing_rates):
+def test_two_publications_used_by_one_caller_are_two_rows(fake_psutil, no_gpu, mock_billing_rates):
     """The publication that answered is in the key: Staging and Production never share a row (plan 8.2)."""
     sink = task_metrics.UsageSink(post=None)
-    now = 20772 * 86400 + 10
-    sink.post(_usage(1, team='staging', version=5), {'hold_time': 0.5}, now=now)
-    sink.post(_usage(2, team='production', version=4), {'hold_time': 0.25}, now=now)
-    sink.post(_usage(3, team='production', version=4), {'hold_time': 0.25}, now=now)
-    assert sorted(sink.pending) == [
-        'usage:20772:acme.docBrain:team:production:4:user-a:hold_time',
-        'usage:20772:acme.docBrain:team:staging:5:user-a:hold_time',
-    ]
-    production = sink.pending['usage:20772:acme.docBrain:team:production:4:user-a:hold_time']
+    sink.post(_usage(1, team='staging', version=5), {'hold_time': 0.5})
+    sink.post(_usage(2, team='production', version=4), {'hold_time': 0.25})
+    sink.post(_usage(3, team='production', version=4), {'hold_time': 0.25})
+    assert set(sink.pending) == {_key(publication='production', version=4), _key(publication='staging')}
+    production = sink.pending[_key(publication='production', version=4)]
     assert production['request_count'] == 2 and production['row']['context']['team'] == 'production'
 
 
 def test_a_dev_run_serves_through_no_publication(fake_psutil, no_gpu, mock_billing_rates):
-    """A dev run's row carries '-' where a published rung carries the slot and version, and None in the context."""
+    """A dev run names no publication: its key hashes none and its context carries None for slot and version."""
     sink = task_metrics.UsageSink(post=None)
     usage = task_metrics.TraceUsage(
         control_key='dev.user-a.acme.docBrain.chat', billing=_attribution(), address='acme.docBrain.chat', rung='dev'
     )
-    sink.post(usage, {'hold_time': 0.5}, now=20772 * 86400 + 10)
-    key = 'usage:20772:acme.docBrain:dev:-:-:user-a:hold_time'
+    sink.post(usage, {'hold_time': 0.5})
+    key = _key(rung='dev', publication=None, version=None)
     assert list(sink.pending) == [key]
     assert (sink.pending[key]['row']['context']['team'], sink.pending[key]['row']['context']['version']) == (None, None)
+
+
+def test_the_usage_key_is_fixed_length_and_changes_with_every_fact():
+    """Every fact that makes two usages different rows changes the key; an absent fact is not the text 'None'."""
+    base = dict(org='org-1', user='user-a', team='team-home', rung='team', publication='team-1', version=5)
+    keys = {_key(**base)}
+    for fact, other in (
+        ('org', 'org-2'),
+        ('user', None),
+        ('team', None),
+        ('rung', 'public'),
+        ('publication', None),
+        ('version', 6),
+        ('resource', 'tokens'),
+    ):
+        keys.add(_key(**{**base, fact: other}))
+    assert len(keys) == 8 and all(len(key) == 70 and key.startswith('usage:') for key in keys)
+    assert _key(user=None) != _key(user='None')
+    # Adjacent facts never run together
+    assert task_metrics.usage_key('a', 'bc', None, 'p.q', 'team', None, None, 'r') != task_metrics.usage_key(
+        'ab', 'c', None, 'p.q', 'team', None, None, 'r'
+    )
+
+
+def test_usage_on_two_days_adds_into_one_row(monkeypatch):
+    """There is no day in the key: a control's usage tomorrow adds to the row it charged today."""
+    sink = task_metrics.UsageSink(post=None)
+    monkeypatch.setattr(task_metrics.time, 'time', lambda: 20772 * 86400 + 10)
+    sink.post(_usage(1), {'hold_time': 0.5})
+    monkeypatch.setattr(task_metrics.time, 'time', lambda: 20773 * 86400 + 10)
+    sink.post(_usage(2), {'hold_time': 0.25})
+    assert list(sink.pending) == [_key()] and sink.pending[_key()]['request_count'] == 2
+    assert 'day' not in sink.pending[_key()]['row']['context']
 
 
 def test_an_open_tree_is_tracked_and_an_unclaimed_tree_stays_engine_level(fake_psutil, no_gpu, mock_billing_rates):
@@ -685,18 +720,17 @@ async def test_the_sink_coalesces_increments_and_retries_a_failed_write_under_it
         return True
 
     sink = task_metrics.UsageSink(post=post)
-    now = 20772 * 86400 + 10
-    sink.post(_usage(1), {'hold_time': 0.5}, now=now)
-    sink.post(_usage(2), {'hold_time': 0.25, 'tokens': 2.0}, now=now)
-    key = 'usage:20772:acme.docBrain:team:team-1:5:user-a:hold_time'
+    sink.post(_usage(1), {'hold_time': 0.5})
+    sink.post(_usage(2), {'hold_time': 0.25, 'tokens': 2.0})
+    key = _key()
     assert sink.pending[key]['amount'] == 0.75 and sink.pending[key]['request_count'] == 2
-    assert sink.pending['usage:20772:acme.docBrain:team:team-1:5:user-a:tokens']['request_count'] == 1
+    assert sink.pending[_key(resource='tokens')]['request_count'] == 1
     first_id = sink.pending[key]['increment_id']
 
     await sink.flush()
     assert writes == [] and sink.pending == {} and len(sink.unconfirmed) == 2, 'detached, unconfirmed, nothing lost'
     # Posted while the first write is out: a NEW entry under a new id
-    sink.post(_usage(3), {'hold_time': 0.75}, now=now)
+    sink.post(_usage(3), {'hold_time': 0.75})
     assert sink.pending[key]['increment_id'] != first_id
     fail['on'] = False
     await sink.flush()
@@ -713,13 +747,122 @@ def sink_second_id(holds):
     return holds[1]['increment_id']
 
 
-def test_a_tree_without_a_paying_unit_is_not_posted():
+def test_a_tree_without_a_paying_org_is_not_posted():
+    """The org pays (plan 8.3): no attribution, or one naming no org, has nobody to charge."""
     sink = task_metrics.UsageSink(post=None)
     usage = _usage(1)
     usage.billing = None
     sink.post(usage, {'hold_time': 1.0})
-    sink.post(_usage(2, billing=_attribution(user='')), {'hold_time': 1.0})
+    sink.post(_usage(2, billing=_attribution(org='')), {'hold_time': 1.0})
     assert sink.pending == {}
+
+
+def test_a_run_with_no_caller_is_posted_with_its_team_and_no_user():
+    """A scheduled or run-now team run has no caller: its row carries the team and no user."""
+    sink = task_metrics.UsageSink(post=None)
+    sink.post(_usage(1, billing=_attribution(user='', team='team-1')), {'hold_time': 0.5})
+    key = _key(user=None, team='team-1')
+    assert list(sink.pending) == [key]
+    row = sink.pending[key]['row']
+    assert (row['org_id'], row['user_id'], row['team_id']) == ('org-1', None, 'team-1')
+
+
+def test_a_run_with_no_caller_and_no_team_is_posted_for_its_org_alone():
+    """An org-owned run (plan 8.3) names neither a user nor a team."""
+    sink = task_metrics.UsageSink(post=None)
+    sink.post(_usage(1, billing=_attribution(user='', team=''), team=''), {'hold_time': 0.5})
+    [pending] = sink.pending.values()
+    assert (pending['row']['org_id'], pending['row']['user_id'], pending['row']['team_id']) == ('org-1', None, None)
+
+
+def test_two_paying_units_never_share_a_key():
+    """One user calling from two orgs: the org is in the key, so each org's usage is its own row."""
+    writes = []
+
+    async def post(**row):
+        writes.append(row)
+        return True
+
+    sink = task_metrics.UsageSink(post=post)
+    sink.post(_usage(1, billing=_attribution(org='org-1')), {'hold_time': 0.5})
+    sink.post(_usage(2, billing=_attribution(org='org-1')), {'hold_time': 0.25})
+    sink.post(_usage(3, billing=_attribution(org='org-2', team='team-b')), {'hold_time': 1.0})
+    asyncio.run(sink.flush())
+
+    assert sorted((w['org_id'], w['team_id'], w['amount'], w['request_count']) for w in writes) == [
+        ('org-1', 'team-home', 0.75, 2),
+        ('org-2', 'team-b', 1.0, 1),
+    ]
+    assert len({w['increment_id'] for w in writes}) == 2 and len({w['idempotency_key'] for w in writes}) == 2
+
+
+def test_a_failed_usage_write_is_logged_as_an_error(monkeypatch):
+    """A lost billing write is an error, not debug output; the increment stays for the next flush."""
+    errors = []
+    monkeypatch.setattr(task_metrics, 'error', errors.append)
+
+    async def post(**row):
+        raise RuntimeError('ledger down')
+
+    sink = task_metrics.UsageSink(post=post)
+    sink.post(_usage(1), {'hold_time': 0.5})
+    asyncio.run(sink.flush())
+
+    assert len(errors) == 1 and 'ledger down' in errors[0] and _key() in errors[0]
+    assert len(sink.unconfirmed) == 1
+
+
+def test_the_engine_debit_of_a_run_with_no_user_names_its_team(fake_psutil, no_gpu, monkeypatch):
+    """A team-owned run's engine line is written with the team and no user (plan 8.3)."""
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', '', 'team-1', 'run-1'
+    status.tokens.cpu_utilization = 2.0
+    rows = []
+
+    async def apply_debit(**row):
+        rows.append(row)
+        return True
+
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+    asyncio.run(tm._report_to_billing_system())
+
+    assert [(row['org_id'], row['user_id'], row['team_id']) for row in rows] == [('org-1', None, 'team-1')]
+
+
+def test_a_shared_engine_writes_no_remainder_debit(fake_psutil, no_gpu, monkeypatch):
+    """A shared engine has no owner: its callers' cost rides their usage rows; the remainder is plan 15 item 21."""
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', 'user-1', 'team-1', 'run-1'
+    tm.debit_remainder = False
+    status.tokens.cpu_utilization = 2.0
+    apply_debit = AsyncMock(return_value=True)
+
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+    asyncio.run(tm._report_to_billing_system())
+
+    apply_debit.assert_not_awaited()
+
+
+def test_a_failed_engine_debit_is_logged_as_an_error(fake_psutil, no_gpu, monkeypatch):
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', 'user-1', 'team-1', 'run-1'
+    status.tokens.cpu_utilization = 2.0
+    errors = []
+    monkeypatch.setattr(task_metrics, 'error', errors.append)
+
+    async def apply_debit(**row):
+        raise RuntimeError('ledger down')
+
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+    asyncio.run(tm._report_to_billing_system())
+
+    assert len(errors) == 1 and 'ledger down' in errors[0]
 
 
 def test_a_zero_replacement_stays_eligible_until_its_write_succeeds(fake_psutil, no_gpu, monkeypatch):

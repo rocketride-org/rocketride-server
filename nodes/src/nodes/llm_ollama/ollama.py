@@ -26,7 +26,7 @@ Ollame binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 
 
@@ -60,28 +60,30 @@ class Chat(ChatBase):
         if not serverbase.rstrip('/').endswith('/v1'):
             serverbase = serverbase.rstrip('/') + '/v1'
 
-        # Reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) loop at temperature 0 and
-        # spend the whole output budget on hidden reasoning, returning empty content — which
-        # breaks expectJson agent steps. Detect them via the stamped reasoning capability or
-        # the model name, then default to a non-zero temperature + low reasoning_effort so they
-        # emit the final answer. Both are overridable from the pipe config; non-reasoning models
-        # (llama/qwen2.5/mistral) keep temperature 0 and send no reasoning_effort.
-        model_name = (self._model or '').lower()
-        is_reasoning = bool(self._is_reasoning) or any(hint in model_name for hint in self.REASONING_HINTS)
+        # Get the llm: one for every call, each request binds its model,
+        # max_tokens, temperature and reasoning effort
+        self._llm = ChatOpenAI(model=UNBOUND_MODEL, base_url=serverbase, api_key=apikey)
+
+    def call_kwargs(self) -> Dict[str, Any]:
+        """
+        Return this call's request values, its temperature and reasoning effort included.
+
+        Reasoning models (gpt-oss, deepseek-r1, qwen3, qwq, ...) loop at temperature 0 and
+        spend the whole output budget on hidden reasoning, returning empty content — which
+        breaks expectJson agent steps. Detect them via the stamped reasoning capability or
+        the model name, then default to a non-zero temperature + low reasoning_effort so they
+        emit the final answer. Both are the call's to override; non-reasoning models
+        (llama/qwen2.5/mistral) keep temperature 0 and send no reasoning_effort.
+        """
+        call = self.call
+        kwargs = super().call_kwargs()
+        model_name = (call.model or '').lower()
+        is_reasoning = call.reasoning or any(hint in model_name for hint in self.REASONING_HINTS)
 
         # Both leaves have no schema default on purpose: unset means model-dependent.
-        temperature = config.get('temperature')
-        if temperature is None:
-            temperature = 1.0 if is_reasoning else 0
-        reasoning_effort = config.get('reasoning_effort') or ('low' if is_reasoning else None)
-        model_kwargs = {'reasoning_effort': reasoning_effort} if reasoning_effort else {}
-
-        # Get the llm
-        self._llm = ChatOpenAI(
-            model=self._model,
-            base_url=serverbase,
-            api_key=apikey,
-            temperature=temperature,
-            max_tokens=self._modelOutputTokens,
-            model_kwargs=model_kwargs,
-        )
+        temperature = call.settings.get('temperature')
+        kwargs['temperature'] = (1.0 if is_reasoning else 0) if temperature is None else temperature
+        reasoning_effort = call.settings.get('reasoning_effort') or ('low' if is_reasoning else None)
+        if reasoning_effort:
+            kwargs['reasoning_effort'] = reasoning_effort
+        return kwargs

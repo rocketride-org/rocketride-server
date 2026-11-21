@@ -55,6 +55,7 @@ hub that respects access permissions and client preferences.
 import time
 from typing import TYPE_CHECKING, Dict, Any, List
 from ai.common.dap import DAPConn, TransportBase
+from ai.account.audience import deploy_scope_of
 from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
@@ -443,12 +444,12 @@ class MonitorCommands(DAPConn):
                         continue
 
                     # Get the task status once
-                    status = target.task.get_status()
+                    status = target.status_view()
 
                     # Only include tasks that are "active" (not idle, not completed)
                     # Active states: STARTING(1), INITIALIZING(2), RUNNING(3), STOPPING(4)
                     # Exclude: NONE(0), COMPLETED(5), CANCELLED(6)
-                    if status.state in [
+                    if status.get('state') in [
                         TASK_STATE.STARTING.value,
                         TASK_STATE.INITIALIZING.value,
                         TASK_STATE.RUNNING.value,
@@ -457,7 +458,7 @@ class MonitorCommands(DAPConn):
                         tasks.append(
                             {
                                 'id': target.id,
-                                'name': status.name,
+                                'name': status.get('name'),
                                 'projectId': target.project_id,
                                 'source': target.source,
                                 # Identity stamps (parity with the per-event
@@ -777,8 +778,13 @@ class MonitorCommands(DAPConn):
         project_id = args.get('projectId', None)
         source = args.get('source', None)
         pipe_id = args.get('pipeId', None)
-        team_id = args.get('teamId') or ''
+        team_id = str(args.get('teamId') or '')
         run_kind = args.get('runKind') or ''
+
+        # A deployment row's audience passed back unchanged (plan 2.5): a
+        # team's deploy run, or the caller's own personal one
+        if team_id.startswith(('@', '=')):
+            team_id, run_kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
 
         # Determine the desired event subscription level
         types = args.get('types', None)

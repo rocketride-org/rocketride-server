@@ -79,7 +79,7 @@ def test_unchanged_restarts_publish_nothing_and_a_changed_bundle_publishes_one(e
     _boot()
     raw1, meta1 = _meta(store_dir)
     assert [v['version'] for v in meta1['versions']] == [1]
-    assert meta1['publishes']['~public']['version'] == 1
+    assert meta1['publishes']['@public']['version'] == 1
 
     # Two more unchanged restarts: the registry file is byte-identical.
     for _ in range(2):
@@ -93,7 +93,7 @@ def test_unchanged_restarts_publish_nothing_and_a_changed_bundle_publishes_one(e
     _boot()
     raw2, meta2 = _meta(store_dir)
     assert [v['version'] for v in meta2['versions']] == [1, 2]
-    assert meta2['publishes']['~public']['version'] == 2
+    assert meta2['publishes']['@public']['version'] == 2
     assert meta2['nextVersion'] == 3
 
     # And restarts after it are no-ops again.

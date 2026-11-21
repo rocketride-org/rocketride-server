@@ -507,18 +507,6 @@ class MiscCommands(DAPConn):
                 data = dict(data)
                 data['errors'] = list(data.get('errors') or []) + placeholder_errors
 
-            # The engine-key decision the publisher will get (plan 4.4): across
-            # users, or one engine per user, by the entry source and the nodes'
-            # certification; absent when the spec cannot be keyed (its errors say why)
-            if 'components' in pipeline:
-                from ..task_engine import engine_sharing  # the engine module imports this package: lazy
-
-                # The source validation ran against (an explicit argument, the
-                # spec's own, or the implied one), not only the spec's key
-                sharing = engine_sharing(pipeline, source or None)
-                if sharing is not None:
-                    data = dict(data)
-                    data['engineSharing'] = sharing
             if conversion is not None:
                 data = dict(data)
                 # The converted text is the engine's echo of what it validated
@@ -884,14 +872,14 @@ class MiscCommands(DAPConn):
             if control.task is None:
                 continue
             try:
-                status = control.task.get_status()
+                status = control.status_view()
             except Exception as e:
                 # Control torn down between snapshot and row build — skip it, the
                 # same defensive stance _build_task_rows takes, so one dead task
                 # never fails the whole connections/dashboard response.
                 self.debug_message(f'Error reading task status for connection map "{control.id}": {e}')
                 continue
-            task_name = getattr(status, 'name', None) or control.source
+            task_name = status.get('name') or control.source
             # Monitor keys are owner-scoped — build from the control's owner
             # (once per control; they do not vary per connection).
             project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
@@ -917,12 +905,12 @@ class MiscCommands(DAPConn):
             if control.task is None:
                 continue
             try:
-                status = control.task.get_status()
+                status = control.status_view()
             except Exception as e:
                 # Control torn down mid-snapshot — skip it (matches _build_task_rows).
                 self.debug_message(f'Error reading task status for project map "{control.id}": {e}')
                 continue
-            task_name = getattr(status, 'name', None) or control.source
+            task_name = status.get('name') or control.source
             # Use the task_name prefix (before the dot) as project label
             name_parts = task_name.split('.', 1)
             project_names.setdefault(control.project_id, name_parts[0])
@@ -996,10 +984,12 @@ class MiscCommands(DAPConn):
         tasks = []
         for control in task_controls:
             try:
-                task_status = control.task.get_status()
-                start = getattr(task_status, 'startTime', 0) or 0
-                end = getattr(task_status, 'endTime', 0) or 0
-                completed = getattr(task_status, 'completed', False)
+                # The control's own view: on a shared engine its own counts,
+                # its own name and no engine totals (plan 7.5)
+                task_status = control.status_view()
+                start = task_status.get('startTime', 0) or 0
+                end = task_status.get('endTime', 0) or 0
+                completed = task_status.get('completed', False)
                 if completed and start > 0 and end > 0:
                     elapsed = end - start
                 elif start > 0:
@@ -1007,14 +997,10 @@ class MiscCommands(DAPConn):
                 else:
                     elapsed = 0
 
-                # Convert Pydantic metrics model to plain dict for JSON serialization
-                metrics_raw = getattr(task_status, 'metrics', None)
-                metrics_dict = metrics_raw.model_dump() if hasattr(metrics_raw, 'model_dump') else metrics_raw
-
                 tasks.append(
                     {
                         'id': control.id,
-                        'name': getattr(task_status, 'name', control.source),
+                        'name': task_status.get('name', control.source),
                         # The control's address: what a front end hands to
                         # tool()/interfaces to reach this run (plan 3.6)
                         'address': control.address,
@@ -1028,10 +1014,10 @@ class MiscCommands(DAPConn):
                         'startTime': start,
                         'elapsedTime': elapsed,
                         'completed': completed,
-                        'status': getattr(task_status, 'status', None) if not completed else None,
-                        'exitCode': getattr(task_status, 'exitCode', None) if completed else None,
+                        'status': task_status.get('status') if not completed else None,
+                        'exitCode': task_status.get('exitCode') if completed else None,
                         'endTime': end if completed else None,
-                        'state': getattr(task_status, 'state', 0),
+                        'state': task_status.get('state', 0),
                         # The CONTROL's idle time: each holder ages on its own
                         'idleTime': int(control.idle_seconds()),
                         # Its engine: 'running', 'starting' or 'stopped' (a
@@ -1039,11 +1025,11 @@ class MiscCommands(DAPConn):
                         # status body carries as engine.availability (plan 7.5)
                         'engineState': control.engine_state,
                         'ttl': getattr(control, 'ttl', 0),
-                        'metrics': metrics_dict,
-                        'totalCount': getattr(task_status, 'totalCount', 0),
-                        'completedCount': getattr(task_status, 'completedCount', 0),
-                        'rateCount': getattr(task_status, 'rateCount', 0),
-                        'rateSize': getattr(task_status, 'rateSize', 0),
+                        'metrics': task_status.get('metrics'),
+                        'totalCount': task_status.get('totalCount', 0),
+                        'completedCount': task_status.get('completedCount', 0),
+                        'rateCount': task_status.get('rateCount', 0),
+                        'rateSize': task_status.get('rateSize', 0),
                     }
                 )
             except Exception as e:

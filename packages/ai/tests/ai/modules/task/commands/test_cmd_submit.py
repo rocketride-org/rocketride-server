@@ -131,7 +131,7 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
 ):
     """threads=4 on a name call: ignored and stamped, the engine keeps the policy shape."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     conn = _conn(ts, _caller())
 
     body = await _submit(conn, name=ADDRESS, data=b'hello', threads=4, ttl=5, objinfo={'name': 'q'})
@@ -159,7 +159,7 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
 async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog, engines, deployments, data_path):
     """The round trip's tree is the submitting control's, this connection first, and counts in its stats (plan 7.5)."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     conn = _conn(ts, _caller())
     claims: List[tuple] = []
     real_claim = ts.trace_owners.claim
@@ -195,7 +195,7 @@ async def test_a_close_that_carries_the_objects_error_counts_the_binding_failed(
 
     monkeypatch.setattr(TaskEngine, '_send_data', send)
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     body = await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'hello')
     assert body['error'] == 'the parser refused it'
     control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
@@ -207,7 +207,7 @@ async def test_a_close_that_carries_the_objects_error_counts_the_binding_failed(
 async def test_without_data_the_call_returns_the_control_id_for_streaming(catalog, engines, deployments, data_path):
     """No inline data (on_sse, or a large payload): stamps and the control id, nothing delivered."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
 
     body = await _submit(_conn(ts, _caller()), name='acme.docBrain')
 
@@ -229,8 +229,8 @@ async def test_rung_order_and_the_rungs_tried(catalog, engines, deployments):
 async def test_team_overrides_the_order_for_one_call(catalog, engines, deployments, data_path):
     """team= answers from that team; the order answers the next call."""
     ts = _server()
-    deployments.deploy('team-1', billing='team-1')
-    deployments.deploy('team-2', billing='team-2', version=2)
+    deployments.deploy('=team/team-1', billing='team-1')
+    deployments.deploy('=team/team-2', billing='team-2', version=2)
     account = _caller(teams=('team-1', 'team-2'))
     conn = _conn(ts, account)
 
@@ -244,7 +244,7 @@ async def test_a_failed_write_still_closes_its_pipe_and_the_failure_is_what_the_
 ):
     """The server adds no deadline: a write fails only when the engine says so, and the pipe is then closed."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     closed: List[int] = []
 
     async def send(self, request):
@@ -266,7 +266,7 @@ async def test_a_failed_write_still_closes_its_pipe_and_the_failure_is_what_the_
 async def test_timeout_is_not_a_server_argument(catalog, engines, deployments, monkeypatch):
     """A ``timeout`` the client sends is not applied: the request runs until the engine answers."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
 
     async def send(self, request):
         if request['arguments']['subcommand'] == 'write':
@@ -283,7 +283,7 @@ async def test_params_ride_the_inline_open_and_an_unknown_name_is_refused(catalo
     """Per-call params enter by the open (one door); a name the map does not expose is param_rejected."""
     ts = _server()
     exposed = {'tone': 'prompt_1.instructions'}
-    deployments.deploy('team-1', pipeline=_pipeline(parameters=exposed))
+    deployments.deploy('=team/team-1', pipeline=_pipeline(parameters=exposed))
     conn = _conn(ts, _caller())
 
     body = await _submit(conn, name=ADDRESS, data=b'x', params={'tone': 'dry'})
@@ -305,7 +305,7 @@ async def test_params_ride_the_inline_open_and_an_unknown_name_is_refused(catalo
 async def test_a_data_request_on_a_name_starts_its_publication_like_process(catalog, engines, deployments):
     """send/pipe (and the HTTP door through them) resolve through the same resolver: an artifact start."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     conn = _conn(ts, _caller())
 
     control = await conn.resolve_control_or_start({'arguments': {'token': ADDRESS}}, 'task.data')
@@ -323,7 +323,7 @@ async def test_a_start_that_never_confirms_running_is_engine_start_failed(
 ):
     """The liveness detector's bare TimeoutError reaches the caller as the structured error, with the key."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     conn = _conn(ts, _caller())
     monkeypatch.setattr(TaskEngine, 'wait_for_running', AsyncMock(side_effect=TimeoutError('silent')))
 
@@ -463,7 +463,7 @@ async def test_the_probe_advertises_process():
 async def test_the_cleanup_close_after_a_failed_write_is_bounded(catalog, engines, deployments, monkeypatch):
     """An engine that stops answering the cleanup close cannot hold the failed request open; the write's failure is what propagates."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_CLOSE_SECONDS', 0.05)
 
     async def send(self, request):
@@ -488,7 +488,7 @@ async def test_a_cleanup_close_the_wait_gave_up_on_keeps_its_binding_until_it_fi
 ):
     """The bounded wait does not end the binding: the node's doors serve the close still running on the engine."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     monkeypatch.setattr(cmd_submit, 'CONST_SUBMIT_CLOSE_SECONDS', 0.05)
     release = asyncio.Event()
     seen = {}

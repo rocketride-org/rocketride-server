@@ -556,7 +556,7 @@ def test_s6_a_trailing_newline_is_not_a_segment(bad):
         build_address('acme', 'docBrain', 'parsePDF\n')
 
 
-@pytest.mark.parametrize('bad', ['a/b', 'a b', 'user~1', ' lead', 'tab\tid', ''])
+@pytest.mark.parametrize('bad', ['a/b', 'a b', 'id~1', ' lead', 'tab\tid', ''])
 def test_s6_identity_boundary_rejects_path_and_scope_characters(bad):
     """userId/teamId ingestion rejects '/', whitespace and '~'."""
     with pytest.raises(TaskError):

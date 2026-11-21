@@ -149,6 +149,29 @@ class TestScopeInference:
         assert reader_stub['run_kind'] == 'dev'
 
     @pytest.mark.asyncio
+    async def test_a_team_audience_is_that_teams_deploy_stream(self, reader_stub):
+        # A deployment row's teamId (its audience) passed back unchanged
+        # addresses the team's deploy continuum, gated on that team
+        conn = _make_conn(_account_info())
+        await conn._log_chapters({}, _args(teamId=f'=team/{TEAM}'))
+        assert (reader_stub['team_id'], reader_stub['run_kind']) == (TEAM, 'deploy')
+
+    @pytest.mark.asyncio
+    async def test_the_callers_own_audience_is_their_personal_deploy_stream(self, reader_stub):
+        conn = _make_conn(_account_info())
+        await conn._log_chapters({}, _args(teamId='=user/user-1'))
+        conn.verify_permission.assert_called_once_with('task.monitor')
+        assert (reader_stub['team_id'], reader_stub['run_kind']) == ('', 'deploy')
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('audience', ['=user/other', '@public', '=org/org-1', '@me', '=team/t/x'])
+    async def test_an_audience_this_reader_cannot_address_is_refused(self, reader_stub, audience):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError):
+            await conn._log_chapters({}, _args(teamId=audience))
+        assert 'run_kind' not in reader_stub
+
+    @pytest.mark.asyncio
     async def test_run_kind_is_not_a_wire_argument(self, reader_stub):
         # runKind is ignored like any unknown argument: the scope alone
         # decides which continuum a request addresses.

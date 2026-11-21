@@ -36,40 +36,21 @@
 
 import * as fs from 'fs';
 import { Command } from 'commander';
-import { RocketRideClient } from '../../client/client';
-import { resolveDeployTeams, resolveTeamArg, teamNameOf } from '../../client/deploy-helpers';
-import type { DeployTeamRef } from '../../client/deploy-helpers';
+import { resolveTeamArg } from '../../client/deploy-helpers';
 import { Deployment, DeployHistoryEntry } from '../../client/types';
 import { Output } from '../output';
 import { addDeployConnectionOptions, connectDeploy, promptLine, runCliCommand, formatWhen } from '../common';
 
-/** The caller's teams and identity, for naming rows and resolving `--team`. */
-interface TeamContext {
-	teams: DeployTeamRef[];
-	ownUserId: string;
-}
-
 /**
- * Reads the caller's addressable teams off the connected identity — the
- * same resolution the VS Code deploy panels use.
+ * A typed `--team` as the wire takes it: passed through, for the server to
+ * resolve ('@me', '@public', '@<team>' by name in any case, '=team/<tid>',
+ * a row's audience, or a team id).
  *
- * @param client - Connected deploy client.
- * @param deployments - Rows that seed a rosterless (OSS) identity's teams.
- * @returns The team context.
- */
-function teamContextOf(client: RocketRideClient, deployments: Deployment[] = []): TeamContext {
-	return { teams: resolveDeployTeams(client, deployments), ownUserId: client.getAccountInfo()?.userId ?? '' };
-}
-
-/**
- * Resolves a typed `--team` ('@me', a team name, or an id) to its wire id.
- *
- * @param client - Connected deploy client.
  * @param team - The typed team ('' = unscoped).
- * @returns The team id to send.
+ * @returns The value to send.
  */
-function teamArgOf(client: RocketRideClient, team: string | undefined): string {
-	return resolveTeamArg(team ?? '', teamContextOf(client).teams);
+function teamArgOf(team: string | undefined): string {
+	return resolveTeamArg(team ?? '', []);
 }
 
 /**
@@ -77,12 +58,11 @@ function teamArgOf(client: RocketRideClient, team: string | undefined): string {
  *
  * @param out - The output channel.
  * @param deployment - The row to print.
- * @param ctx - Names teams instead of printing raw ids.
  */
-function printDeployment(out: Output, deployment: Deployment, ctx: TeamContext): void {
+function printDeployment(out: Output, deployment: Deployment): void {
 	out.line(`${deployment.projectId ?? '?'}  v${deployment.version ?? '?'}  ${deployment.state ?? '?'}  ${deployment.pipelineName ?? ''}`.trimEnd());
 	if (deployment.teamId) {
-		out.line(`  Team: ${teamNameOf(ctx.teams, deployment.teamId, ctx.ownUserId)}`);
+		out.line(`  Team: ${deployment.handle || deployment.teamId}`);
 	}
 	if (deployment.deployedAt) {
 		out.line(`  Deployed: ${formatWhen(deployment.deployedAt)}`);
@@ -90,15 +70,14 @@ function printDeployment(out: Output, deployment: Deployment, ctx: TeamContext):
 }
 
 /**
- * Adds the display `teamName` to a deployment row for `--json` (the raw
- * `teamId` stays — scripts address teams by id).
+ * Adds the display `teamName` (the server's `handle`) to a deployment row
+ * for `--json` (the raw `teamId`, its audience, stays — scripts pass it back).
  *
  * @param deployment - The row.
- * @param ctx - The team context.
  * @returns The row with `teamName`.
  */
-function withTeamName(deployment: Deployment, ctx: TeamContext): Deployment & { teamName?: string } {
-	return deployment.teamId ? { ...deployment, teamName: teamNameOf(ctx.teams, deployment.teamId, ctx.ownUserId) } : deployment;
+function withTeamName(deployment: Deployment): Deployment & { teamName?: string } {
+	return deployment.teamId ? { ...deployment, teamName: deployment.handle || deployment.teamId } : deployment;
 }
 
 /**
@@ -106,13 +85,12 @@ function withTeamName(deployment: Deployment, ctx: TeamContext): Deployment & { 
  *
  * @param out - The output channel.
  * @param entry - The audit-trail row.
- * @param ctx - Names teams instead of printing raw ids.
  */
-function printHistoryEntry(out: Output, entry: DeployHistoryEntry, ctx: TeamContext): void {
+function printHistoryEntry(out: Output, entry: DeployHistoryEntry): void {
 	const actor = entry.actor as { name?: string; email?: string } | undefined;
 	const who = actor?.name || actor?.email || '';
 	const version = entry.version !== undefined ? ` v${entry.version}` : '';
-	const team = entry.teamId ? ` team ${teamNameOf(ctx.teams, entry.teamId, ctx.ownUserId)}` : '';
+	const team = entry.teamId ? ` team ${entry.handle || entry.teamId}` : '';
 	out.line(`${formatWhen(entry.at)}  ${entry.action ?? '?'}${version}${team}${who ? `  by ${who}` : ''}`);
 	const data = entry.data as { message?: string; comment?: string } | undefined;
 	if (data?.comment) {
@@ -144,7 +122,7 @@ export async function executeDeploySourceConfig(project: string, source: string,
 	}
 	const client = await connectDeploy(options, out);
 	if (!client) return 1;
-	const teamId = teamArgOf(client, options.team);
+	const teamId = teamArgOf(options.team);
 	// step: carry over the setting the user did not pass
 	const current = traceLevel === undefined || options.debugOut === undefined ? (await client.deploy.get(project, teamId)).schedules?.[source] : undefined;
 	const deployment = await client.deploy.setSourceConfig(project, source, teamId, {
@@ -153,7 +131,7 @@ export async function executeDeploySourceConfig(project: string, source: string,
 	});
 	const config = deployment.schedules?.[source];
 	out.line(`Source ${project}/${source}: trace ${config?.traceLevel ?? traceLevel ?? 'full'}, debug output ${(config?.debugOut ?? options.debugOut) ? 'on' : 'off'}.`);
-	out.result({ deployment: withTeamName(deployment, teamContextOf(client, [deployment])) });
+	out.result({ deployment: withTeamName(deployment) });
 	return 0;
 }
 
@@ -215,15 +193,16 @@ export function registerDeployCommands(program: Command): void {
 Every verb uses the deployment target (ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY_APIKEY)
 and never falls back to the development connection.
 
---team and --deploy-to take @me (your personal space), a team name, or a team id.
-Output names teams ('Me', team names); --json keeps teamId and adds teamName.
+--team and --deploy-to take @me (your personal space), @<team> (a team by name, in any case),
+=team/<tid>, @public (the store), or a team id; the server resolves them.
+Output shows each row's handle (@me, @<team>, @public); --json keeps teamId and adds teamName.
 
 Examples:
   rocketride deploy add pipelines/ingest.pipe --deploy-to @me      deploy and point your space at it
-  rocketride deploy list --team QA                                 deployments for one team
-  rocketride deploy publish <project> 3 --team QA                  point a team at version 3 (rollback too)
+  rocketride deploy list --team @QA                                deployments for one team
+  rocketride deploy publish <project> 3 --team @QA                 point a team at version 3 (rollback too)
   rocketride deploy source-config <project> <source> --team @me --trace-level summary --debug-out
-  rocketride deploy schedule set <project> <source> "0 9 * * 1-5" --team QA`,
+  rocketride deploy schedule set <project> <source> "0 9 * * 1-5" --team @QA`,
 		);
 
 	// ── deploy add ───────────────────────────────────────────────────────
@@ -232,7 +211,7 @@ Examples:
 		.description('Deploy a pipeline (.pipe) or a node package as the next registry version (deploying activates nothing)')
 		.option('--kind <kind>', 'Artifact kind: pipe or node', 'pipe')
 		.option('--comment <text>', 'What-changed note kept in the registry')
-		.option('--deploy-to <team>', 'Also point this team (@me, a name, or an id) at the new version in the same call')
+		.option('--deploy-to <team>', 'Also point this team (@me, @<team>, =team/<tid>, @public, or an id) at the new version in the same call')
 		.action(async (file, options) => {
 			await runCliCommand(options, async (out) => {
 				if (options.kind !== 'pipe' && options.kind !== 'node') {
@@ -243,7 +222,7 @@ Examples:
 				}
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const deployTo = options.deployTo !== undefined ? teamArgOf(client, options.deployTo) : undefined;
+				const deployTo = options.deployTo !== undefined ? teamArgOf(options.deployTo) : undefined;
 				let result;
 				if (options.kind === 'pipe') {
 					// A pipeline publishes PER PIPE (plan §9): the .pipe itself,
@@ -272,25 +251,24 @@ Examples:
 	const listCmd = deployCmd
 		.command('list')
 		.description('List deployments')
-		.option('--team <team>', 'Scope to one team (@me, a name, or an id)')
+		.option('--team <team>', 'Scope to one team (@me, @<team>, =team/<tid>, @public, or an id)')
 		.action(async (options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const envelope = await client.deploy.list({ teamId: options.team !== undefined ? teamArgOf(client, options.team) : undefined });
+				const envelope = await client.deploy.list({ teamId: options.team !== undefined ? teamArgOf(options.team) : undefined });
 				const rows = envelope.rows || [];
-				const ctx = teamContextOf(client, rows);
 				if (rows.length === 0) {
 					out.line('No deployments found');
 				} else {
 					out.line(`Found ${rows.length} deployment(s) (of ${envelope.total}):`);
 					out.line('');
 					for (const row of rows) {
-						printDeployment(out, row, ctx);
+						printDeployment(out, row);
 						out.line('');
 					}
 				}
-				out.result({ deployments: rows.map((row) => withTeamName(row, ctx)), total: envelope.total });
+				out.result({ deployments: rows.map((row) => withTeamName(row)), total: envelope.total });
 				return 0;
 			});
 		});
@@ -300,20 +278,19 @@ Examples:
 	const getCmd = deployCmd
 		.command('get <project>')
 		.description("Show one deployment's state")
-		.option('--team <team>', 'Team the deployment belongs to (@me, a name, or an id)', '')
+		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
 		.action(async (project, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const deployment = await client.deploy.get(project, teamArgOf(client, options.team));
-				const ctx = teamContextOf(client, [deployment]);
-				printDeployment(out, deployment, ctx);
+				const deployment = await client.deploy.get(project, teamArgOf(options.team));
+				printDeployment(out, deployment);
 				const schedules = deployment.schedules || {};
 				for (const [sourceId, schedule] of Object.entries(schedules)) {
 					const state = schedule.paused ? 'paused' : schedule.cron ? 'active' : 'none';
 					out.line(`  Schedule ${sourceId}: ${schedule.cron ?? '-'} (${state}); trace ${schedule.traceLevel ?? 'full'}, debug output ${schedule.debugOut ? 'on' : 'off'}`);
 				}
-				out.result({ deployment: withTeamName(deployment, ctx) });
+				out.result({ deployment: withTeamName(deployment) });
 				return 0;
 			});
 		});
@@ -349,19 +326,18 @@ Examples:
 	const historyCmd = deployCmd
 		.command('history <project>')
 		.description("Show a project's deploy/publish audit trail")
-		.option('--team <team>', 'Scope to one team (@me, a name, or an id)')
+		.option('--team <team>', 'Scope to one team (@me, @<team>, =team/<tid>, @public, or an id)')
 		.action(async (project, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const envelope = await client.deploy.history(project, { teamId: options.team !== undefined ? teamArgOf(client, options.team) : undefined });
+				const envelope = await client.deploy.history(project, { teamId: options.team !== undefined ? teamArgOf(options.team) : undefined });
 				const rows = envelope.rows || [];
-				const ctx = teamContextOf(client);
 				if (rows.length === 0) {
 					out.line('No history found');
 				} else {
 					for (const row of rows) {
-						printHistoryEntry(out, row, ctx);
+						printHistoryEntry(out, row);
 					}
 				}
 				out.result({ history: rows, total: envelope.total });
@@ -377,7 +353,7 @@ Examples:
 	const publishCmd = deployCmd
 		.command('publish <project> <version>')
 		.description('Bind a team to a registry version (first publish, update, promote, rollback)')
-		.option('--team <team>', 'Team to bind (@me, a name, or an id)', '')
+		.option('--team <team>', 'Team to bind (@me, @<team>, =team/<tid>, @public, or an id)', '')
 		.action(async (project, version, options) => {
 			await runCliCommand(options, async (out) => {
 				const versionNum = parseInt(version, 10);
@@ -386,11 +362,10 @@ Examples:
 				}
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const deployment = await client.deploy.deploy(project, versionNum, teamArgOf(client, options.team));
-				const ctx = teamContextOf(client, [deployment]);
-				out.line(`Published ${project} v${versionNum}${deployment.teamId ? ` to ${teamNameOf(ctx.teams, deployment.teamId, ctx.ownUserId)}` : ''}.`);
-				printDeployment(out, deployment, ctx);
-				out.result({ deployment: withTeamName(deployment, ctx) });
+				const deployment = await client.deploy.deploy(project, versionNum, teamArgOf(options.team));
+				out.line(`Published ${project} v${versionNum}${deployment.teamId ? ` to ${deployment.handle || deployment.teamId}` : ''}.`);
+				printDeployment(out, deployment);
+				out.result({ deployment: withTeamName(deployment) });
 				return 0;
 			});
 		});
@@ -400,12 +375,12 @@ Examples:
 	const runCmd = deployCmd
 		.command('run <project> <source>')
 		.description("Trigger a deployment's source to run now")
-		.option('--team <team>', 'Team whose deployment runs (@me, a name, or an id)', '')
+		.option('--team <team>', 'Team whose deployment runs (@me, @<team>, =team/<tid>, @public, or an id)', '')
 		.action(async (project, source, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				const result = await client.deploy.run(project, source, teamArgOf(client, options.team));
+				const result = await client.deploy.run(project, source, teamArgOf(options.team));
 				out.line(`Run started for ${project}/${source}${result.token ? ` (token ${result.token})` : ''}.`);
 				out.result(result);
 				return 0;
@@ -442,14 +417,16 @@ Examples:
 	const interfacesCmd = deployCmd
 		.command('interfaces <address>')
 		.description("The callable nodes of the publication that answers an address, by classType (no engine started)")
-		.option('--team <teamId>', 'Resolve the @team rung through this one of your teams')
+		.option('--team <team>', 'Resolve the @team rung through this one of your teams (@<team>, =team/<tid>, or an id)')
 		.action(async (address, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				// `--team` takes a name or an id like the sibling verbs; an omitted
-				// override stays omitted (the caller's team order decides)
-				const team = options.team ? teamArgOf(client, String(options.team)) : '';
+				// `--team` is passed through for the server to resolve to one of
+				// your teams, as the sibling verbs' is (the per-call team option
+				// gives way to a rooted address in C.32); an omitted override
+				// stays omitted (the caller's team order decides)
+				const team = options.team ? teamArgOf(String(options.team)) : '';
 				const answer = await client.interfaces(address, team ? { team } : {});
 				if (!out.jsonRequested) {
 					const where = answer.rung === 'team' ? `@team ${answer.teamId}` : `@${answer.rung}`;
@@ -476,12 +453,12 @@ Examples:
 		const cmd = deployCmd
 			.command(`${verb} <project>`)
 			.description(description)
-			.option('--team <team>', 'Team the deployment belongs to (@me, a name, or an id)', '')
+			.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
 			.action(async (project, options) => {
 				await runCliCommand(options, async (out) => {
 					const client = await connectDeploy(options, out);
 					if (!client) return 1;
-					const deployment = await client.deploy[verb](project, teamArgOf(client, options.team));
+					const deployment = await client.deploy[verb](project, teamArgOf(options.team));
 					out.line(`Deployment ${project} ${verb}d.`);
 					out.result({ deployment });
 					return 0;
@@ -509,7 +486,7 @@ Examples:
 	const sourceConfigCmd = deployCmd
 		.command('source-config <project> <source>')
 		.description("Set one source's run settings: trace level and full debug output")
-		.option('--team <team>', 'Team the deployment belongs to (@me, a name, or an id)', '')
+		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
 		.option('--trace-level <level>', 'none, metadata, summary, or full (default: full)')
 		.option('--debug-out', 'Turn full task debug output on')
 		.option('--no-debug-out', 'Turn full task debug output off')
@@ -548,14 +525,14 @@ Examples:
 	const scheduleSetCmd = scheduleCmd
 		.command('set <project> <source> <cron>')
 		.description("Set a source's schedule (5-field cron), or 'none' to clear it")
-		.option('--team <team>', 'Team the deployment belongs to (@me, a name, or an id)', '')
+		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
 		.option('--ttl <seconds>', 'Run window in seconds (fixed window)')
 		.action(async (project, source, cron, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
 				const schedule = cron === 'none' ? null : cron;
-				const deployment = await client.deploy.setSchedule(project, source, schedule, teamArgOf(client, options.team), {
+				const deployment = await client.deploy.setSchedule(project, source, schedule, teamArgOf(options.team), {
 					ttl: options.ttl !== undefined ? parseInt(options.ttl, 10) : undefined,
 				});
 				out.line(schedule ? `Schedule set for ${project}/${source}: ${schedule}` : `Schedule cleared for ${project}/${source}.`);
@@ -572,12 +549,12 @@ Examples:
 		const cmd = scheduleCmd
 			.command(`${verb} <project> <source>`)
 			.description(description)
-			.option('--team <team>', 'Team the deployment belongs to (@me, a name, or an id)', '')
+			.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
 			.action(async (project, source, options) => {
 				await runCliCommand(options, async (out) => {
 					const client = await connectDeploy(options, out);
 					if (!client) return 1;
-					const deployment = await client.deploy[methodName](project, source, teamArgOf(client, options.team));
+					const deployment = await client.deploy[methodName](project, source, teamArgOf(options.team));
 					out.line(`Schedule ${verb}d for ${project}/${source}.`);
 					out.result({ deployment });
 					return 0;

@@ -65,6 +65,8 @@ the agent needs to take actions or retrieve information. Most pipelines can
 leave the profile selection alone and set the fields that shape delegation and
 answering behavior.
 
+Every setting is a per-call parameter: a pipeline can expose any of them in its `parameters` map, and each call then runs with its own values on the same running node, which keeps nothing of them between calls. A caller may set them; an LLM may not, through a tool call.
+
 ### Agent description
 
 This text is added to the registered `run_agent` tool description when it is

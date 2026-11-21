@@ -325,10 +325,10 @@ subscription time.
 object counts: what each request cost its caller is accounted per request
 instead. Every request tree's pipe hold (admission to `putPipe`, less the GPU
 queue wait it sat through), bytes and model timings are booked to the tree
-and, when it closes, added to the caller's DAY row in the ledger
-(`usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}`, one row per
-day, pipe, publication (rung, team, version), user and resource, with a `request_count`). Nothing per request
-rides the status body.
+and, when it closes, added to the caller's usage row in the ledger: one row per
+paying unit (org, user, billing team), pipe, publication (rung, team, version) and resource, with a
+`request_count` and a `modified_at` that says when it was last charged. The row's key is `usage:` and a
+SHA-256 of those facts; there is no day in it. Nothing per request rides the status body.
 
 `state` enum mapping:
 `0=NONE, 1=STARTING, 2=INITIALIZING, 3=RUNNING, 4=STOPPING, 5=COMPLETED, 6=CANCELLED`.
@@ -358,8 +358,10 @@ produced: each component entry/exit with its lane data and any error.
 
 ### 5.3b `apaevt_ops`: engine-level output of a SHARED engine (subscribe to `OPS`, `sys.admin` only)
 
-On an engine shared across users, counts, errors, warnings, downloads, exit
-codes, bare `print` output and the debugger channel belong to no single caller.
+On a shared engine (the one engine of a published pipe's shape, held by every
+caller's control on `@me`, `@team` and `@public`), counts, errors, warnings,
+downloads, exit codes, bare `print` output and the debugger channel belong to
+no single caller.
 They leave the server as `apaevt_ops` with body `{ engineKey, kind, ... }`
 (`kind` = the original event name), on the `*` wildcard subscription, bit
 `OPS` (`1 << 10`). `ALL` does NOT include `OPS`: an operator opts in, and the

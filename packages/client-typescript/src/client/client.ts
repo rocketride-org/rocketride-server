@@ -1809,16 +1809,21 @@ export class RocketRideClient extends DAPClient {
 		// requestTimeout still applies, as the caller's own bound). A caller
 		// that wants to stop a request streams through its own pipe and calls
 		// cancel() on it.
-		let stamps: SUBMIT_RESULT;
-		try {
-			stamps = (await this.call('rrext_submit', arguments_)) as SUBMIT_RESULT;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+		// A refusal keeps the server's code (SUBSCRIPTION_REQUIRED,
+		// OUT_OF_CREDITS, TASK_*) on a PipeException
+		const submitRequest = this.buildRequest('rrext_submit', { arguments: arguments_ });
+		this._onTrace?.(TraceType.Request, redactProtocolMessage(submitRequest));
+		const submitResponse = await this.request(submitRequest);
+		if (submitResponse.success === false) {
+			this._onTrace?.(TraceType.Error, redactProtocolMessage(submitResponse));
+			const message = String(submitResponse.message ?? '');
 			if (message.startsWith('Unsupported command: rrext_submit')) {
 				throw new Error('This server does not support submit(); upgrade the server');
 			}
-			throw err;
+			throw new PipeException({ ...submitResponse, message: message || 'rrext_submit failed' });
 		}
+		this._onTrace?.(TraceType.Success, redactProtocolMessage(submitResponse));
+		const stamps = (submitResponse.body ?? submitResponse) as SUBMIT_RESULT;
 		if (inline || data === undefined) {
 			return stamps;
 		}
@@ -1972,7 +1977,7 @@ export class RocketRideClient extends DAPClient {
 	 * equality on the classType word: `chat`, `dropper`, `database`.
 	 *
 	 * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
-	 * @param options.team - Resolve the `@team` rung through this one of your teams.
+	 * @param options.team - Resolve the `@team` rung through this one of your teams (`@<team>` by name in any case, `=team/<tid>` or a team id; the server resolves it).
 	 * @returns The answering rung and version, and the interface map.
 	 * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
 	 *         address is outside a scoped key's endpoints.

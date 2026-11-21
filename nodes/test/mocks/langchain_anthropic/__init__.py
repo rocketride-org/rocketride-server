@@ -2,6 +2,8 @@
 Mock langchain_anthropic for llm_anthropic node testing.
 """
 
+import copy
+
 MOCK_LLM_RESPONSE = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
 
 
@@ -17,6 +19,12 @@ class ChatAnthropic:
         self.model = model
         self.api_key = api_key
         self.temperature = temperature
+
+    def bind(self, **kwargs):
+        """Bind a call's request values (model, max_tokens, ...): a copy naming the call's model, as metering reads it."""
+        bound = copy.copy(self)
+        bound.model = kwargs.get('model', self.model)
+        return bound
 
     def invoke(self, prompt) -> _MockMessage:
         return _MockMessage(MOCK_LLM_RESPONSE)

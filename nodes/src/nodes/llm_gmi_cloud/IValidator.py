@@ -27,7 +27,7 @@ GMI Cloud save-time validation.
 
 The engine imports this module alone in CONFIG mode: the schema check is the
 resolver (``self.config``), the endpoint URL is held to HTTPS on the GMI
-domain (shared with IGlobal, which refuses to start on any other host), and
+domain (shared with the chat, which builds no client for any other host), and
 the semantic check is a one-token probe against the provider. The provider
 SDK is imported inside the probe so this module stays import-light.
 """
@@ -76,7 +76,9 @@ class IValidator(IValidatorBase):
         """
         # The schema check: a config that does not fit raises ConfigError here,
         # before any probe. syntaxOnly asks for that check alone.
-        config = self.config
+        # The model leaves are per-call parameters, which self.config refuses: the
+        # probe checks the values a call that sets none of them runs with
+        config = self.config.overlay(None)
         if syntaxOnly:
             return
 

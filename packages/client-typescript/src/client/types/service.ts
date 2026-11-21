@@ -335,6 +335,6 @@ export enum PROTOCOL_CAPS {
 	/** Driver is experimental */
 	EXPERIMENTAL = 1 << 16,
 
-	/** Node is certified reentrant-safe for cross-user sharing */
+	/** Retired: the server sets it on no node and reads it nowhere (engines share by shape) */
 	MULTITENANT = 1 << 17,
 }

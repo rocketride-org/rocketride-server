@@ -25,8 +25,10 @@
 
 from typing import Any, Dict
 from openai import AuthenticationError, APIError, RateLimitError, APIConnectionError
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
+
+from .IValidator import validate_serverbase
 
 
 class Chat(ChatBase):
@@ -44,23 +46,26 @@ class Chat(ChatBase):
         """
         super().__init__(provider, connConfig, bag)
 
-        config = self._config
+        # Use a dummy key placeholder so the LLM client initialises without
+        # crashing when the user has not yet saved a valid API key. Each model
+        # branch names its endpoint, so the client is the call's (``_llm_for``).
+        self._apikey = self._config.get('apikey') or 'sk-dummy'
 
-        serverbase = config.get('serverbase')
+    def _llm_for(self) -> ChatOpenAI:
+        """Return the client of the endpoint that serves this call's model (one per endpoint, keyed cache)."""
+        serverbase = self.call.settings.get('serverbase')
         if not serverbase:
             raise ValueError('GMI Cloud serverbase is required.')
+        return self._keyed_handle(('llm', serverbase), lambda: self._build(serverbase))
 
-        # Use a dummy key placeholder so the LLM client initialises without
-        # crashing when the user has not yet saved a valid API key.
-        apikey = config.get('apikey') or 'sk-dummy'
-
-        self._llm = ChatOpenAI(
-            model=self._model,
-            base_url=serverbase,
-            api_key=apikey,
-            temperature=0,
-            max_tokens=self._modelOutputTokens,
-        )
+    def _build(self, serverbase: str) -> ChatOpenAI:
+        """Build the client of one endpoint after its host check: every request binds its model and max_tokens."""
+        # The schema pins the shared endpoint per model and requires one for the
+        # deploy-on-demand models; only the host rule is checked here
+        err = validate_serverbase(serverbase)
+        if err:
+            raise ValueError(err)
+        return ChatOpenAI(model=UNBOUND_MODEL, base_url=serverbase, api_key=self._apikey, temperature=0)
 
     def is_retryable_error(self, error):
         """Determine if the error is retryable."""

@@ -42,6 +42,9 @@ from pydantic import BaseModel
 
 from rocketride.types.client import AppManifestEntry
 
+from .audience import AudienceError, team_audience
+from .roots import team_name_key
+
 
 # =============================================================================
 # NESTED SHAPES
@@ -58,6 +61,9 @@ class TeamInfo(TypedDict):
     id: str
     name: str
     permissions: list[str]
+    # The team's audience (plan 2.5, '=team/<tid>'), composed by
+    # to_connect_result: a client passes it back unchanged and parses none.
+    audience: NotRequired[str]
 
 
 class OrgInfo(TypedDict):
@@ -171,13 +177,29 @@ class AccountInfo(BaseModel):
         The ``auth`` field is intentionally excluded so that the raw credential
         is never echoed back over the wire to a connecting client.
 
+        Each team entry carries its ``audience`` (plan 2.5): the string a
+        client passes back unchanged wherever a deploy verb takes ``teamId``,
+        so no client composes or parses one.
+
         Returns:
             dict: All AccountInfo fields except ``auth``, suitable for sending
                   as the body of a DAP connect response.
         """
         # Use pydantic's model_dump with an explicit exclusion set so that the
         # raw authentication credential is never returned to the client.
-        return self.model_dump(exclude={'auth'})
+        data = self.model_dump(exclude={'auth'})
+
+        # Stamp each team's audience, composed by the one composer. A team id
+        # the grammar cannot carry gets none: it is addressable by no client.
+        org = data.get('organization')
+        if isinstance(org, dict):
+            for team in org.get('teams') or []:
+                if isinstance(team, dict) and team.get('id'):
+                    try:
+                        team['audience'] = team_audience(str(team['id']))
+                    except AudienceError:
+                        team.pop('audience', None)
+        return data
 
     def to_push_result(self) -> dict:
         """
@@ -515,3 +537,33 @@ def home_team(account_info: AccountInfo) -> str:
     """
     order = team_order(account_info)
     return order[0] if order else ''
+
+
+def team_id_of_name(account_info: AccountInfo, name: str) -> str:
+    """
+    The id of the caller's team called ``name``, matched ignoring case (plan 2.5).
+
+    Names compare by ``roots.team_name_key``, the key the teams table is
+    unique on, so ``@development`` and ``@Development`` are one team. Only the
+    caller's own membership is consulted, so another org's names are
+    inexpressible by construction.
+
+    Args:
+        account_info: The request's account.
+        name: A team name as typed (the ``<team>`` of ``@<team>``).
+
+    Returns:
+        The team id, or ``''`` when no team, or more than one, carries the
+        name (two teams whose names differ only by case predate the rule;
+        they stay reachable by id).
+    """
+    org = getattr(account_info, 'organization', None) or {}
+    teams = org.get('teams') if isinstance(org, dict) else getattr(org, 'teams', None)
+    key = team_name_key(name)
+    matches = []
+    for team in teams or []:
+        team_id = team.get('id') if isinstance(team, dict) else getattr(team, 'id', None)
+        team_name = team.get('name') if isinstance(team, dict) else getattr(team, 'name', None)
+        if team_id and team_name_key(team_name or '') == key:
+            matches.append(str(team_id))
+    return matches[0] if len(matches) == 1 else ''

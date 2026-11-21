@@ -320,11 +320,13 @@ Deployment-target verbs (the `ROCKETRIDE_DEPLOY_*` pair), following the
 platform vocabulary — **deploy** = version to the server's registry,
 **publish** = bind a rung to a version. Every `--team` / `--deploy-to`
 takes `@me` (your personal space), `@public` (the store: a `ready`
-version, which on a server that reviews means approved), a team name, or a
-team id. The exception is `deploy interfaces`: its `--team` names one of
-your teams only, and leaving it out lets your team order decide. Output
-names teams instead of printing raw ids (`--json` keeps `teamId` and adds
-`teamName`). An unnamed pipeline deploys under its file name.
+version, which on a server that reviews means approved), `@<team>` (a team
+by name, in any case), `=team/<tid>`, or a team id; the server resolves
+them. The exception is `deploy interfaces`: its `--team` names one of your
+teams only (`@<team>`, `=team/<tid>` or an id), and leaving it out lets your
+team order decide. Output shows each row's handle (`@me`, `@<team>`,
+`@public`; `--json` keeps `teamId` and adds `teamName`). An unnamed
+pipeline deploys under its file name.
 
 ```bash
 rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version from ONE .pipe: the pipe plus the readme, icon and README-referenced files its store block names; a folder argument is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)
@@ -333,7 +335,7 @@ rocketride deploy list                                              # deployment
 rocketride deploy get <projectId> --team <teamId>                   # one deployment's state + schedules
 rocketride deploy versions <projectId>                              # registry versions
 rocketride deploy artifact <projectId> <version>                    # fetch one registry version's artifact JSON
-rocketride deploy interfaces <address> [--team <teamId>]            # the callable nodes of the publication that answers the address, by classType (no engine started)
+rocketride deploy interfaces <address> [--team <team>]              # the callable nodes of the publication that answers the address, by classType (no engine started)
 rocketride deploy history <projectId>                               # deploy/publish audit trail
 rocketride deploy run <projectId> <sourceId> --team <teamId>        # run now; no run window: ends when the pipeline finishes or is terminated
 rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <teamId> --ttl 32400

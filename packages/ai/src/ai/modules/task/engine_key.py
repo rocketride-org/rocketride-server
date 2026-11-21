@@ -26,7 +26,7 @@ The engine key: the content identity of a pipeline spec (plan section 7.2).
 PURE by contract (ALB seam 1): this module imports the standard library
 only. No server, no account, no asyncio, no node catalog. Anything that has
 to consult the catalog (resolving a stored config, reading a node's
-certification) is done by the caller and handed in, either as the resolved
+``classType``) is done by the caller and handed in, either as the resolved
 values (``engine_key``) or as a ``facts`` callable (``engine_content``). A
 front end that is not the task server computes the same key from the same
 inputs; ``test_engine_key_parity`` holds a server process and a bare
@@ -40,9 +40,20 @@ args, env values, per-call params, the owner, ``project_id``/``name``/
 ``description``, layout and ttl. The resolved config is still computed here
 (``EngineContent.resolved_config`` / ``config_by_index``): it validates the
 spec and is the control's configuration identity, never hashed into the
-engine key. In this PR every rung qualifies the key by its owner,
-``hash:ownerId`` (plan 13 Step 3c PR 1); C.25 leaves the published rungs
-bare.
+engine key.
+
+SHARING IS BY RUNG (plan 4.4, C.25). On ``@spec`` the key is
+``hash:ownerId``: one engine per owner per shape, and a spec call whose
+``threads``/``args`` depart from policy gets ``hash+<digest>:ownerId``, an
+engine of its own. On the published rungs (``@me``, ``@team``, ``@public``)
+the key is the BARE hash: every control whose spec has that shape, whoever
+owns it, holds the one engine, each with its own IGlobal set. Nothing else
+decides sharing, with one conservative exception: a shape that can serve
+only one owner keeps ``hash:ownerId`` on every rung. Its entry source driving
+itself (``EngineContent.self_driven``, read from the catalog's ``classType``)
+is decided here; anything else (the server's RocketRide cloud database
+nodes, whose DSNs ride the engine process once) the caller states through
+``private``.
 
 The STACK ORDER (C.23) is the engine's own canonical walk, read through the
 engine binding ``engLib.pipelineStack`` when the process has the engine
@@ -51,8 +62,9 @@ every control's config and every trace speaks, and the SHAPE hash
 (``EngineContent.shape_hash``), which ignores component ids. The module never
 imports the engine: it looks the binding up in ``sys.modules`` and, in a
 bare interpreter or on an engine without the binding, falls back to the
-component id order. The engine key itself is still ``content_hash`` until
-C.25 switches it to the shape hash.
+component id order. The engine key is built on the shape hash
+(``EngineContent.key_hash``); without the binding it falls back to
+``content_hash``, which still names the component ids.
 """
 
 import hashlib
@@ -62,23 +74,29 @@ from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple
 
 # ==== Policy constants =========================================================
 
-#: Request/response sources: every unit of work arrives as a request from a
-#: caller, so an engine running one of them can serve many callers. Listener
-#: sources (discord, telegram, a scan) have no caller per unit of work.
-CONST_SHAREABLE_SOURCES = frozenset({'webhook', 'chat', 'dropper'})
+#: The rungs whose engines are keyed ``hash:ownerId`` (plan 4.4): the spec
+#: rung alone. The published rungs share one engine per shape.
+OWNER_QUALIFIED_RUNGS = frozenset({'spec'})
 
-#: Catalog nodes ship with the engine and load from the ``nodes`` package;
-#: anything else (``local_nodes``, a workspace node) is not a catalog node.
-CONST_CATALOG_NODE_PREFIX = 'nodes.'
+#: The ``classType`` words a source's catalog entry carries beside ``source``
+#: when it is a DOOR: its work arrives through the server, one request at a
+#: time, each stamped with the control that sent it. A source without one of
+#: them drives itself (a listener, a poller, a scan): it opens its own
+#: bindings from the IGlobal of the one control that started it, so its
+#: engine serves that control's owner only (``EngineContent.self_driven``).
+CONST_DOOR_CLASS_TYPES = frozenset({'webhook', 'chat', 'dropper', 'tools'})
 
-#: The rungs whose engines are keyed ``hash:ownerId``: every rung in this PR
-#: (no cross-owner sharing before C.25, which shrinks this to ``spec``).
-OWNER_QUALIFIED_RUNGS = frozenset({'spec', 'me', 'team', 'public'})
+#: Separates the hash from the digest of off-policy engine properties, and
+#: the owner from what precedes it, in an engine key.
+CONST_PROPERTIES_SEPARATOR = '+'
+CONST_OWNER_SEPARATOR = ':'
+
+#: Hex digits of the engine-properties digest in a key.
+CONST_PROPERTIES_DIGEST_LENGTH = 12
 
 #: What the caller's catalog says about one component: its resolved config
-#: and whether it may run on a cross-user engine (``multitenant`` certified
-#: and from the catalog). Called as ``facts(provider, stored_config)``.
-ComponentFacts = Callable[[str, Dict[str, Any]], Tuple[Dict[str, Any], bool]]
+#: and its ``classType`` words. Called as ``facts(provider, stored_config)``.
+ComponentFacts = Callable[[str, Dict[str, Any]], Tuple[Dict[str, Any], Tuple[str, ...]]]
 
 
 # ==== The stack order ============================================================
@@ -263,6 +281,52 @@ def index_map_of(
     )
 
 
+# ==== The shape of a spec ========================================================
+
+#: The component keys that are shape: what a shared engine's spec keeps.
+CONST_SHAPE_COMPONENT_KEYS = ('id', 'provider', 'input', 'control')
+
+#: The spec keys that are shape (``components`` is rebuilt, see ``shape_spec``).
+CONST_SHAPE_SPEC_KEYS = ('version', 'source', 'avoidMocks')
+
+
+def shape_spec(pipeline: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    A spec reduced to its SHAPE: what a shared engine is built with (plan 7.2).
+
+    A shared engine is nobody's, so it holds nothing of whoever started it:
+    no project id, name or description, no ``parameters`` map, no component
+    configuration, name or layout. Providers, wiring, the source and
+    ``avoidMocks`` stay, with the component ids the first starter wrote
+    (every holder reaches a component through its stack index).
+
+    Args:
+        pipeline: The spec a control submitted.
+
+    Returns:
+        A new spec with the shape alone; every component's config is empty.
+    """
+    shape: Dict[str, Any] = {key: pipeline[key] for key in CONST_SHAPE_SPEC_KEYS if key in pipeline}
+    shape['project_id'] = ''
+    components: List[Dict[str, Any]] = []
+    for component in pipeline.get('components') or []:
+        if not isinstance(component, dict):
+            continue
+        entry: Dict[str, Any] = {}
+        for key in CONST_SHAPE_COMPONENT_KEYS:
+            if key not in component:
+                continue
+            value = component[key]
+            # The wiring is copied: the engine's spec shares nothing with the control's
+            entry[key] = (
+                [dict(edge) if isinstance(edge, dict) else edge for edge in value] if isinstance(value, list) else value
+            )
+        entry['config'] = {}
+        components.append(entry)
+    shape['components'] = components
+    return shape
+
+
 # ==== The pure key =============================================================
 
 
@@ -335,22 +399,68 @@ def content_hash(
     return hashlib.sha256(content.encode('utf-8')).hexdigest()
 
 
-def qualified_key(hash_value: str, *, rung: str, owner_id: str) -> str:
+def properties_digest(threads: Any, args: Any) -> str:
     """
-    The registry key of an engine: the shape hash, qualified by its owner on an owner-qualified rung.
+    The digest of an engine's off-policy properties: what a ``@spec`` call's ``threads``/``args`` add to its key.
+
+    Args:
+        threads: The requested thread count.
+        args: The requested engine arguments, in order (order is meaning on a command line).
+
+    Returns:
+        A short hex digest of the pair.
+    """
+    content = json.dumps([threads, list(args or [])], default=str)
+    return hashlib.sha256(content.encode('utf-8')).hexdigest()[:CONST_PROPERTIES_DIGEST_LENGTH]
+
+
+def qualified_key(
+    hash_value: str,
+    *,
+    rung: str,
+    owner_id: str,
+    private: bool = False,
+    properties: str = '',
+) -> str:
+    """
+    The registry key of an engine: the shape hash, qualified by its owner where the engine is one owner's.
 
     Args:
         hash_value: The spec's shape hash.
         rung: The rung the control resolved on (``spec``, ``me``, ``team``, ``public``).
         owner_id: The owning user (or team, for a team-owned run).
+        private: True for a shape that can serve one owner only, on any rung
+            (a self-driven source, a RocketRide cloud database): it keeps its owner.
+        properties: ``properties_digest`` of a ``@spec`` call's off-policy
+            ``threads``/``args``, or '' at policy. Ignored outside ``@spec``,
+            where both are the server's.
 
     Returns:
-        ``hash:ownerId`` on a rung in :data:`OWNER_QUALIFIED_RUNGS` (every
-        rung in this PR), the bare ``hash`` otherwise.
+        ``hash:ownerId`` (``hash+properties:ownerId`` off policy) on a rung in
+        :data:`OWNER_QUALIFIED_RUNGS`, ``hash:ownerId`` for a private shape on
+        a published rung, and the bare ``hash`` otherwise: the key every
+        control of that shape shares.
     """
-    if rung not in OWNER_QUALIFIED_RUNGS or not owner_id:
+    owned = rung in OWNER_QUALIFIED_RUNGS
+    if not owner_id or not (owned or private):
         return hash_value
-    return f'{hash_value}:{owner_id}'
+    if owned and properties:
+        hash_value = f'{hash_value}{CONST_PROPERTIES_SEPARATOR}{properties}'
+    return f'{hash_value}{CONST_OWNER_SEPARATOR}{owner_id}'
+
+
+def key_owner(key: str) -> str:
+    """
+    The owner an engine key names, or '' for a bare (shared) key.
+
+    Args:
+        key: An engine key.
+
+    Returns:
+        The owner id after the last separator; '' when the key has none.
+    """
+    _, qualified, owner = str(key or '').rpartition(CONST_OWNER_SEPARATOR)
+    return owner if qualified else ''
 
 
 def engine_key(
@@ -361,9 +471,15 @@ def engine_key(
     rung: str,
     owner_id: str,
     avoid_mocks: bool = False,
+    private: bool = False,
+    properties: str = '',
 ) -> str:
     """
-    The engine key of a spec's shape (plan 7.2, ALB seam 1).
+    The engine key of a spec from its parts alone, for a process without the engine binding (ALB seam 1).
+
+    Built on ``content_hash``: the fallback the server itself takes where
+    ``pipelineStack`` is absent. A process with the binding keys by the shape
+    hash (``EngineContent.key``).
 
     Args:
         types: Component id -> provider.
@@ -372,6 +488,8 @@ def engine_key(
         rung: The rung the control resolved on.
         owner_id: The owner the key is qualified with.
         avoid_mocks: The spec's ``avoidMocks`` flag (see ``content_hash``).
+        private: See ``qualified_key``.
+        properties: See ``qualified_key``.
 
     Returns:
         The engine key, also the task file's ``taskId``.
@@ -380,6 +498,8 @@ def engine_key(
         content_hash(types, connections, source, avoid_mocks=avoid_mocks),
         rung=rung,
         owner_id=owner_id,
+        private=private,
+        properties=properties,
     )
 
 
@@ -407,16 +527,15 @@ class EngineContent:
         connections: Component id -> stable-order wiring.
         source: The entry component id.
         content_hash: sha256 over the sort-keyed JSON of the shape, ids
-            included: the engine key until C.25.
+            included: the key's hash only where the process has no engine
+            binding.
         shape_hash: The engine's SHAPE hash (C.23): the canonical stack's
             providers and wiring by stack index plus ``avoidMocks``, ids and
             configuration outside it; None where the process has no engine
-            binding. Logged beside the content hash; not yet the key.
+            binding. The key's hash (``key_hash``).
         index_map: Author id <-> stack index for this spec.
-        shareable: What the catalog certifies (a request/response source and
-            every component ``multitenant`` from the catalog). Not consulted
-            for the key in this PR (every rung is owner-qualified); C.25
-            removes it with the certification.
+        source_classes: The entry source's ``classType`` words from the
+            catalog (``self_driven`` reads them).
         avoid_mocks: The spec's ``avoidMocks`` flag; part of the shape.
     """
 
@@ -430,7 +549,7 @@ class EngineContent:
         'content_hash',
         'shape_hash',
         'index_map',
-        'shareable',
+        'source_classes',
         'avoid_mocks',
     )
 
@@ -442,7 +561,7 @@ class EngineContent:
         types: Dict[str, str],
         connections: Dict[str, Dict[str, List[Dict[str, str]]]],
         source: str,
-        shareable: bool,
+        source_classes: Tuple[str, ...] = (),
         avoid_mocks: bool = False,
         index_map: Optional[IndexMap] = None,
     ) -> None:
@@ -453,24 +572,55 @@ class EngineContent:
         self.types = types
         self.connections = connections
         self.source = source
-        self.shareable = shareable
+        self.source_classes = tuple(source_classes)
         self.avoid_mocks = avoid_mocks
         self.index_map = index_map if index_map is not None else IndexMap(sorted(types), 0, engine_indexes=False)
         self.shape_hash = self.index_map.shape_hash
         self.content_hash = content_hash(types, connections, source, avoid_mocks=avoid_mocks)
 
-    def key(self, *, rung: str, owner_id: str) -> str:
+    @property
+    def key_hash(self) -> str:
+        """The hash the engine key is built on: the shape hash, or the content hash without the engine binding."""
+        return self.shape_hash or self.content_hash
+
+    @property
+    def self_driven(self) -> bool:
+        """
+        Whether the entry source drives itself: a listener, a poller or a scan (plan 4.4).
+
+        Such a source starts inside the ``beginGlobal`` of the control that
+        started it and opens its own bindings, so its engine has exactly one
+        control by nature and stays keyed by its owner on every rung. A DOOR
+        source (:data:`CONST_DOOR_CLASS_TYPES`) receives its work from the
+        server, each request stamped with its control, and shares by shape.
+        A source the catalog says nothing about is taken as self-driven: the
+        conservative reading.
+        """
+        return not CONST_DOOR_CLASS_TYPES.intersection(self.source_classes)
+
+    def key(self, *, rung: str, owner_id: str, private: bool = False, properties: str = '') -> str:
         """
         The engine key for this shape.
 
         Args:
             rung: The rung the control resolved on.
             owner_id: The owner the key is qualified with.
+            private: A reason beside the source for the engine to serve one
+                owner only (see ``qualified_key``); a self-driven source is
+                private by itself.
+            properties: ``properties_digest`` of a ``@spec`` call's
+                off-policy ``threads``/``args``, or ''.
 
         Returns:
             The engine key.
         """
-        return qualified_key(self.content_hash, rung=rung, owner_id=owner_id)
+        return qualified_key(
+            self.key_hash,
+            rung=rung,
+            owner_id=owner_id,
+            private=private or self.self_driven,
+            properties=properties,
+        )
 
 
 def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFacts) -> EngineContent:
@@ -486,39 +636,34 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
     unknown node, a config that does not fit its schema) is an ERROR, raised
     as ``facts`` raised it, and so is a spec the engine's walk refuses: a
     spec that cannot be keyed is never run (audit 2026-11-12).
-    ``shareable`` records what the catalog certifies (a request/response
-    source and every component ``multitenant`` from the catalog); nothing
-    reads it for the key in this PR.
 
     Args:
         pipeline: The spec as submitted (placeholders unexpanded).
         source: The entry component id.
-        facts: The caller's catalog: ``facts(provider, stored) -> (resolved, shareable)``.
+        facts: The caller's catalog: ``facts(provider, stored) -> (resolved, classType words)``.
 
     Returns:
-        EngineContent: the resolved parts, the content and shape hashes and the certification.
+        EngineContent: the resolved parts, the content and shape hashes and the source's classes.
     """
     resolved: Dict[str, Dict[str, Any]] = {}
     by_index: List[Dict[str, Any]] = []
     stored_by_index: List[Dict[str, Any]] = []
     types: Dict[str, str] = {}
     wiring: Dict[str, Dict[str, List[Dict[str, str]]]] = {}
-    shareable = True
+    classes: Dict[str, Tuple[str, ...]] = {}
     # The one stack order: the engine's walk when the process has it
     index_map = index_map_of(pipeline, source)
     for component in index_map.order(list(pipeline.get('components', []) or [])):
         component_id = str(component.get('id'))
         provider = str(component.get('provider') or '')
         stored = component.get('config') or {}
-        config, component_shareable = facts(provider, stored)
+        config, class_types = facts(provider, stored)
         resolved[component_id] = config
         by_index.append(config)
         stored_by_index.append(dict(stored))
         types[component_id] = provider
         wiring[component_id] = connections_of(component)
-        shareable = shareable and component_shareable
-    source_provider: Optional[str] = types.get(str(source))
-    shareable = shareable and source_provider in CONST_SHAREABLE_SOURCES
+        classes[component_id] = tuple(str(word) for word in class_types or ())
     return EngineContent(
         resolved,
         by_index,
@@ -526,7 +671,7 @@ def engine_content(pipeline: Mapping[str, Any], source: str, facts: ComponentFac
         types,
         wiring,
         source,
-        shareable,
+        classes.get(str(source), ()),
         avoid_mocks=bool(pipeline.get('avoidMocks')),
         index_map=index_map,
     )

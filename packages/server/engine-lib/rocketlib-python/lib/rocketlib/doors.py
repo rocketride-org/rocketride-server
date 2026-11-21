@@ -33,17 +33,22 @@ lives behind one of these doors instead.
 Both are clients of the SERVER. A request carries the binding it is made from
 (the server-minted ``correlationId`` of the request, which the instance froze
 with its caller when the engine bound it) plus the node's own key or path, and
-nothing else: the server finds the control that owns the binding and decides
-from its own record whose rows and whose files those are; a binding that has
-ended reaches nothing. No identity crosses the process boundary in
-the request direction, so a node that rewrites what it believes about its
-caller mislabels its own logs and reaches nobody else's data.
+nothing else about who is asking: the server finds the control that owns the
+binding and decides from its own record whose rows and whose files those are;
+a binding that has ended reaches nothing. No identity crosses the process
+boundary in the request direction, so a node that rewrites what it believes
+about its caller mislabels its own logs and reaches nobody else's data. A
+state request also names the node's component id (``nodeId``), which only
+picks a node inside the owner's own pipeline.
 
 - ``NodeState``: small JSON values (``get``/``put``/``delete``/``incr``, and
   ``with state.lock(key):`` around a read-modify-write). The node names only
   its own part of the key; the server escapes it and prefixes it with the
-  owner (org, owner, address). Values are capped and expire with the
-  control's idle policy unless a ``ttl`` says otherwise.
+  owner (org, owner, address) and the node's id, so two nodes of one pipeline
+  never share a key. Values are capped. Every value expires: with the
+  control's idle policy unless a ``ttl`` says otherwise, and after 7 days at
+  most, counted from its last write. One node holds at most 16 keys at a
+  time; a write that would add a 17th is refused.
 - ``NodeFiles``: the account file store rooted at the owner's tree (the
   task's team subtree on the deploy rail), with the operations clients get
   from ``rrext_store``; ``get_url`` defaults to a short expiry.
@@ -146,25 +151,37 @@ class NodeState:
     """
     ``self.state``: small JSON values that survive a call, owned by the binding's control (plan 5.7).
 
-    Every request names this door's binding; the server turns the node's key
-    into the physical one. Read-modify-write goes inside ``lock``::
+    Every request names this door's binding and its node; the server turns
+    the node's key into the physical one, which belongs to this node alone:
+    another node of the same pipeline that uses the same key name has its own
+    value. Read-modify-write goes inside ``lock``::
 
         with self.state.lock(key):
             window = self.state.get(key) or []
             window.append(value)
             self.state.put(key, window[-100:])
+
+    Every value expires, 7 days after its last write at most; ``put`` and
+    ``incr`` restart the expiry, so a value still in use is kept by writing
+    it. A node holds at most 16 keys at a time: a write that would add
+    another raises ``DoorError`` until a key is deleted or expires, and a
+    write to a key the node already holds always fits.
     """
 
-    def __init__(self, binding: str):
+    def __init__(self, binding: str, node_id: str):
         """
-        Bind the door to one binding.
+        Bind the door to one binding of one node.
 
         Args:
             binding: The binding's ``correlationId`` from its frozen caller
                 (empty for engine-level work, which the server answers only on
                 an engine one control holds).
+            node_id: The node's component id in the pipeline
+                (``config.node.id``); the server keeps each node's keys apart
+                by it.
         """
         self._binding = str(binding or '')
+        self._node_id = str(node_id or '')
         # Per THREAD, key -> the token of the lease a ``lock`` block of that
         # thread holds: a write to a held key names it, and the server refuses
         # the write once that lease lapsed. Worker threads sharing the door
@@ -179,10 +196,17 @@ class NodeState:
         return held
 
     def _args(self, key: str, **extra: Any) -> Dict[str, Any]:
-        """The arguments of one request: the binding, the node's key, the rest."""
+        """
+        The arguments of one request: the binding, the node's id, the node's key, the rest.
+
+        Raises:
+            DoorError: The key is not a non-empty string, or this door has no node id.
+        """
         if not isinstance(key, str) or not key:
             raise DoorError('a state key is a non-empty string')
-        return {'correlationId': self._binding, 'key': key, **extra}
+        if not self._node_id:
+            raise DoorError('self.state needs the node id the engine gives a node in a pipeline; this one has none')
+        return {'correlationId': self._binding, 'nodeId': self._node_id, 'key': key, **extra}
 
     def _write_args(self, key: str, **extra: Any) -> Dict[str, Any]:
         """The arguments of a write: a key this thread holds is fenced by its own lock's token."""
@@ -213,7 +237,8 @@ class NodeState:
         Args:
             key: The node's key.
             value: Any JSON value (capped by the server).
-            ttl: Seconds until it expires; None follows the control's idle policy.
+            ttl: Seconds until it expires, 7 days at most; None follows the
+                control's idle policy, capped at 7 days.
         """
         _send('state.put', self._write_args(key, value=value, ttl=ttl))
 
@@ -234,7 +259,8 @@ class NodeState:
         Args:
             key: The node's key.
             amount: The increment (negative to decrement).
-            ttl: Seconds until it expires; None follows the control's idle policy.
+            ttl: Seconds until it expires, 7 days at most; None follows the
+                control's idle policy, capped at 7 days.
 
         Returns:
             The new value.

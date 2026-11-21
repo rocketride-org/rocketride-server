@@ -420,6 +420,19 @@ def _cache_creation_tokens(details: dict) -> int:
     return int(details.get('ephemeral_5m_input_tokens') or 0) + int(details.get('ephemeral_1h_input_tokens') or 0)
 
 
+def llm_model_name(llm: Any) -> str:
+    """Return the model a LangChain object's request names, for metering.
+
+    A binding (``llm.bind(model=...)``, how ChatBase sends a call's model) names
+    its bound model; the object it wraps was built with a placeholder, which no
+    provider bills. A plain object names the model it was built with.
+    """
+    bound = getattr(llm, 'kwargs', None)
+    if isinstance(bound, dict) and bound.get('model'):
+        return str(bound['model'])
+    return str(getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or '')
+
+
 def report_usage_metadata(usage: Any, llm: Any) -> None:
     """Extract LangChain ``usage_metadata`` and report it (fresh input + cache split).
 
@@ -432,7 +445,7 @@ def report_usage_metadata(usage: Any, llm: Any) -> None:
     # provider answering a non-numeric count would otherwise turn a paid, successful
     # response into a failed turn (a retry loop reads the raise as a provider error).
     try:
-        model = getattr(llm, 'model', None) or getattr(llm, 'model_name', '') or ''
+        model = llm_model_name(llm)
         fresh, out, cr, cc = _split_input_cache(usage)
     except Exception as exc:
         debug_usage_failure(exc)
@@ -562,7 +575,7 @@ class LangChainAdapter:
             report_llm_tokens(
                 max(0, total_in - cache_read - cache_creation),
                 out_toks,
-                model=str(getattr(self.llm, 'model', None) or getattr(self.llm, 'model_name', '') or ''),
+                model=llm_model_name(self.llm),
                 cache_read_tokens=cache_read,
                 cache_creation_tokens=cache_creation,
             )
@@ -614,14 +627,16 @@ class NativeOpenAIResponsesAdapter:
     def stream(self, user_text: str) -> Iterator[Event]:
         self.history.append({'role': 'user', 'content': user_text})
         chat = self.chat
+        # The call this request serves: its model, and the window its reply may fill
+        call = chat.call
         parts: list[str] = []
         input_tokens = output_tokens = cache_read = 0
         stream = chat._raw_client.responses.create(
-            model=chat._model,
+            model=call.model,
             input=user_text,
             store=False,  # stateless: don't retain prompts/responses server-side (30-day default).
             reasoning={'summary': 'auto'},
-            max_output_tokens=chat._modelOutputTokens,
+            max_output_tokens=chat.getOutputTokens(),
             stream=True,
         )
         # try/finally + close() so a raise or early GeneratorExit releases the HTTP
@@ -673,7 +688,7 @@ class NativeOpenAIResponsesAdapter:
             report_llm_tokens(
                 max(0, input_tokens - cache_read),
                 output_tokens,
-                model=str(getattr(self.chat, '_model', '') or ''),
+                model=str(call.model or ''),
                 cache_read_tokens=cache_read,
             )
         assistant = {'role': 'assistant', 'content': ''.join(parts)}

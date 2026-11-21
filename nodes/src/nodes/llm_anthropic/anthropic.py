@@ -25,12 +25,12 @@
 Anthropic binding for the ChatLLM.
 
 Extended-thinking streaming is handled globally via
-``ai.common.llm_native_stream`` (``_native_stream_provider = 'anthropic'``).
+``ai.common.llm_native_stream`` (``native_stream_key()`` names 'anthropic' for a thinking call).
 """
 
 from typing import Any, Dict
 
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from ai.common.llm_native_stream import (
     PROMPT_CACHE_PREFIX_VAR,
     apply_prompt_cache_breakpoint,
@@ -73,12 +73,10 @@ class Chat(ChatBase):
         """
         Initialize the Anthropic chat bot.
         """
-        # Init the chat base: it resolves the model (the custom branch included),
-        # the token limits and refuses a key left as ${ROCKETRIDE_...}.
+        # Init the chat base: it refuses a key left as ${ROCKETRIDE_...}. The
+        # model, its output window and extended thinking are the call's.
         super().__init__(provider, connConfig, bag)
         config = self._config
-        model = self._model
-        model_gate = gate_model_name(str(model) if model is not None else '')
 
         # Get the API key, don't save it
         apikey = (config.get('apikey') or '').strip()
@@ -88,20 +86,28 @@ class Chat(ChatBase):
         if not apikey or not apikey.startswith('sk-ant'):
             raise ValueError('Invalid Anthropic API key format, please check your API key.')
 
-        # Extended thinking is opt-in per node (config extendedThinking, default off) and only
-        # for reasoning models. It is NOT baked into the client: the native streaming adapter adds
-        # it per call, so thinking activates on the interactive streaming path only — never on the
-        # agent / expectJson path (which has no streaming and stays on the plain LangChain client).
-        self._thinking_mode_kwargs: Dict[str, Any] = {}
-        if self._is_reasoning and parse_bool(config.get('extendedThinking')):
-            self._thinking_mode_kwargs = build_anthropic_thinking_kwargs(model_gate, self._modelOutputTokens)
-        self._extended_thinking = bool(self._thinking_mode_kwargs)
-        if self._extended_thinking:
-            self._native_stream_provider = 'anthropic'
-
+        # One client for every call: each request binds its model and max_tokens
         self._llm = _ChatAnthropic(
-            model=model,
+            model=UNBOUND_MODEL,
             api_key=apikey,
-            max_tokens=self._modelOutputTokens,
             custom_get_token_ids=_estimate_token_ids,
         )
+
+    def thinking_kwargs(self) -> Dict[str, Any]:
+        """
+        Return this call's extended-thinking request values, or ``{}``.
+
+        Extended thinking is opt-in per call (``extendedThinking``, default off)
+        and only for reasoning models. It is NOT baked into the client: the
+        native streaming adapter adds it per call, so thinking activates on the
+        interactive streaming path only, never on the agent / expectJson path
+        (which has no streaming and stays on the plain LangChain request).
+        """
+        call = self.call
+        if not (call.reasoning and parse_bool(call.settings.get('extendedThinking'))):
+            return {}
+        return build_anthropic_thinking_kwargs(gate_model_name(str(call.model or '')), call.output_tokens)
+
+    def native_stream_key(self) -> str:
+        """Stream through the native Messages API when this call thinks; otherwise the LangChain stream."""
+        return 'anthropic' if self.thinking_kwargs() else ''

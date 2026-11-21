@@ -22,7 +22,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""``self.state`` and ``self.files`` from the node's side (plan 5.7): only the binding and the node's key leave the engine."""
+"""``self.state`` and ``self.files`` from the node's side (plan 5.7): only the binding, the node's id and its key leave the engine."""
 
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ from types import SimpleNamespace
 import pytest
 from rocketlib import doors
 from rocketlib.doors import DoorError, NodeFiles, NodeState, setNodeChannel
-from rocketlib.filters import IInstanceBase
+from rocketlib.filters import IGlobalBase, IInstanceBase
 
 # ==== A recording channel ========================================================
 
@@ -70,30 +70,98 @@ def channel():
 # ==== self.state =================================================================
 
 
-def test_a_request_carries_the_binding_and_the_key_only(channel):
+def test_every_state_request_names_the_node(channel, monkeypatch):
+    monkeypatch.setattr(doors.time, 'sleep', lambda seconds: None)
+    recorder = channel(
+        ({'found': False}, None),
+        ({}, None),
+        ({'value': 1}, None),
+        ({'deleted': True}, None),
+        ({'acquired': False}, None),
+        ({'acquired': True, 'token': 't1'}, None),
+        ({}, None),
+        ({'released': True}, None),
+    )
+    state = NodeState('cid', 'anomaly_1')
+    state.get('k')
+    state.put('k', 1)
+    state.incr('n')
+    state.delete('k')
+    with state.lock('k'):
+        state.put('k', 2)
+    assert [r[0] for r in recorder.requests] == [
+        'state.get',
+        'state.put',
+        'state.incr',
+        'state.delete',
+        'state.lock',
+        'state.lock',
+        'state.put',
+        'state.unlock',
+    ]
+    assert all(r[1]['nodeId'] == 'anomaly_1' and r[1]['correlationId'] == 'cid' for r in recorder.requests)
+
+
+def test_two_doors_of_one_binding_name_their_own_nodes(channel):
+    recorder = channel()
+    NodeState('cid', 'anomaly_1').put('series:cpu', [1])
+    NodeState('cid', 'anomaly_2').put('series:cpu', [2])
+    assert [(r[1]['nodeId'], r[1]['key']) for r in recorder.requests] == [
+        ('anomaly_1', 'series:cpu'),
+        ('anomaly_2', 'series:cpu'),
+    ]
+
+
+@pytest.mark.parametrize('node_id', ['', None])
+def test_a_door_without_a_node_id_sends_nothing(channel, node_id):
+    recorder = channel()
+    state = NodeState('cid', node_id)
+    for request in (
+        lambda: state.get('k'),
+        lambda: state.put('k', 1),
+        lambda: state.incr('k'),
+        lambda: state.delete('k'),
+    ):
+        with pytest.raises(DoorError, match='needs the node id'):
+            request()
+    with pytest.raises(DoorError, match='needs the node id'):
+        with state.lock('k'):
+            pass
+    assert recorder.requests == []
+
+
+def test_a_request_carries_the_binding_the_node_and_the_key_only(channel):
     recorder = channel(({'found': True, 'value': [1, 2]}, None), ({}, None))
-    state = NodeState('cid-41')
+    state = NodeState('cid-41', 'node_1')
     assert state.get('series:cpu') == [1, 2]
     state.put('series:cpu', [1, 2, 3], ttl=60)
     assert recorder.requests == [
-        ('state.get', {'correlationId': 'cid-41', 'key': 'series:cpu'}, None),
-        ('state.put', {'correlationId': 'cid-41', 'key': 'series:cpu', 'value': [1, 2, 3], 'ttl': 60}, None),
+        ('state.get', {'correlationId': 'cid-41', 'nodeId': 'node_1', 'key': 'series:cpu'}, None),
+        (
+            'state.put',
+            {'correlationId': 'cid-41', 'nodeId': 'node_1', 'key': 'series:cpu', 'value': [1, 2, 3], 'ttl': 60},
+            None,
+        ),
     ]
 
 
 def test_absent_is_the_default_and_a_stored_null_is_null(channel):
     channel(({'found': False}, None), ({'found': True, 'value': None}, None))
-    state = NodeState('cid')
+    state = NodeState('cid', 'node_1')
     assert state.get('k', 'fallback') == 'fallback'
     assert state.get('k', 'fallback') is None
 
 
 def test_incr_and_delete(channel):
     recorder = channel(({'value': 5}, None), ({'deleted': True}, None))
-    state = NodeState('cid')
+    state = NodeState('cid', 'node_1')
     assert state.incr('n', 5) == 5
     assert state.delete('n') is True
-    assert recorder.requests[0] == ('state.incr', {'correlationId': 'cid', 'key': 'n', 'amount': 5, 'ttl': None}, None)
+    assert recorder.requests[0] == (
+        'state.incr',
+        {'correlationId': 'cid', 'nodeId': 'node_1', 'key': 'n', 'amount': 5, 'ttl': None},
+        None,
+    )
 
 
 def test_lock_retries_until_free_and_releases_with_its_token(channel, monkeypatch):
@@ -104,9 +172,13 @@ def test_lock_retries_until_free_and_releases_with_its_token(channel, monkeypatc
         ({'acquired': True, 'token': 't1'}, None),
         ({'released': True}, None),
     )
-    with NodeState('cid').lock('k'):
+    with NodeState('cid', 'node_1').lock('k'):
         assert [r[0] for r in recorder.requests] == ['state.lock'] * 3
-    assert recorder.requests[-1] == ('state.unlock', {'correlationId': 'cid', 'key': 'k', 'token': 't1'}, None)
+    assert recorder.requests[-1] == (
+        'state.unlock',
+        {'correlationId': 'cid', 'nodeId': 'node_1', 'key': 'k', 'token': 't1'},
+        None,
+    )
 
 
 def test_writes_to_a_held_key_are_fenced_by_its_lease(channel):
@@ -118,7 +190,7 @@ def test_writes_to_a_held_key_are_fenced_by_its_lease(channel):
         ({'released': True}, None),
         ({}, None),
     )
-    state = NodeState('cid')
+    state = NodeState('cid', 'node_1')
     with state.lock('k'):
         state.put('k', 1)
         state.incr('k')
@@ -142,7 +214,7 @@ def test_a_nested_lock_on_the_same_key_gives_the_outer_block_its_token_back(chan
         ({'released': True}, None),
         ({}, None),
     )
-    state = NodeState('cid')
+    state = NodeState('cid', 'node_1')
     with state.lock('k'):
         with state.lock('k'):
             state.put('k', 1)
@@ -171,7 +243,7 @@ def test_two_threads_sharing_a_door_never_mix_lease_tokens():
                 return {'acquired': True, 'token': next(tokens)}, None
         return {}, None
 
-    state = NodeState('cid')
+    state = NodeState('cid', 'node_1')
     a_locked, b_locked, a_done = threading.Event(), threading.Event(), threading.Event()
 
     def holder_a():
@@ -208,20 +280,20 @@ def test_lock_gives_up_after_its_timeout(channel, monkeypatch):
     monkeypatch.setattr(doors.time, 'sleep', lambda seconds: now.__setitem__(0, now[0] + seconds))
     channel(*[({'acquired': False}, None)] * 100)
     with pytest.raises(DoorError, match='held by another binding'):
-        with NodeState('cid').lock('k', timeout=1.0):
+        with NodeState('cid', 'node_1').lock('k', timeout=1.0):
             pass
 
 
 def test_a_refusal_is_a_door_error_with_the_servers_reason(channel):
     channel(RuntimeError('state.get: this binding belongs to no control the server can name'))
     with pytest.raises(DoorError, match='belongs to no control'):
-        NodeState('cid').get('k')
+        NodeState('cid', 'node_1').get('k')
 
 
 def test_no_channel_outside_the_engine():
     setNodeChannel(None)
     with pytest.raises(DoorError, match='no data channel'):
-        NodeState('cid').get('k')
+        NodeState('cid', 'node_1').get('k')
 
 
 # ==== self.files =================================================================
@@ -289,10 +361,63 @@ def test_get_url_defaults_to_a_short_expiry(channel):
 class _Instance(IInstanceBase):
     """An instance the way the engine builds one: a pipe that serves one binding at a time."""
 
-    def __init__(self, caller):
+    def __init__(self, caller, node_id='node_1'):
         self.instance = SimpleNamespace(traceId=17, caller=caller)
+        self.IGlobal = _global(node_id)
         # The engine's one write, before beginInstance()
         self._caller = caller
+
+
+def _global(node_id):
+    """The control's IGlobal as the engine sets it up: ``glb`` carries the component id."""
+    glb = IGlobalBase()
+    glb.glb = SimpleNamespace(id=node_id, logicalType='counter', physicalType='python', capabilities=0, controlId='c')
+    return glb
+
+
+def test_the_state_door_names_the_instances_own_node(channel):
+    recorder = channel()
+    caller = {'correlationId': 'cid-a', 'userId': 'alice'}
+    first, second = _Instance(caller, 'anomaly_1'), _Instance(caller, 'anomaly_2')
+    first.state.put('series:cpu', [1])
+    second.state.put('series:cpu', [2])
+    first.state.incr('n')
+    assert [(r[0], r[1]['nodeId'], r[1]['correlationId']) for r in recorder.requests] == [
+        ('state.put', 'anomaly_1', 'cid-a'),
+        ('state.put', 'anomaly_2', 'cid-a'),
+        ('state.incr', 'anomaly_1', 'cid-a'),
+    ]
+
+
+def test_an_instance_with_no_global_has_no_state(channel):
+    recorder = channel()
+
+    class _Bare(IInstanceBase):
+        def __init__(self):
+            self.instance = SimpleNamespace(traceId=5, caller=None)
+
+    with pytest.raises(DoorError, match='needs the node id'):
+        _Bare().state.get('k')
+    assert recorder.requests == []
+
+
+def test_a_state_read_before_the_global_is_assigned_does_not_stick(channel):
+    """The engine assigns IGlobal after the constructor: a door built before it names no node and is not kept."""
+    recorder = channel()
+
+    class _Early(IInstanceBase):
+        def __init__(self):
+            self.instance = SimpleNamespace(traceId=5, caller=None)
+            self._caller = {'correlationId': 'cid-a', 'userId': 'alice'}
+            self.early = self.state
+
+    instance = _Early()
+    with pytest.raises(DoorError, match='needs the node id'):
+        instance.early.get('k')
+    instance.IGlobal = _global('node_1')
+    instance.state.put('k', 1)
+    assert instance.state is instance.state, 'the door that names its node is the one kept'
+    assert [(r[0], r[1]['nodeId']) for r in recorder.requests] == [('state.put', 'node_1')]
 
 
 def test_the_doors_name_the_binding_frozen_at_bind(channel):
@@ -316,6 +441,8 @@ def test_a_binding_without_a_caller_is_engine_level_work(channel):
     class _Unbound(IInstanceBase):
         def __init__(self):
             self.instance = SimpleNamespace(traceId=5, caller=None)
+            self.IGlobal = _global('node_1')
 
     _Unbound().state.get('k')
     assert recorder.requests[0][1]['correlationId'] == ''
+    assert recorder.requests[0][1]['nodeId'] == 'node_1'
