@@ -64,7 +64,9 @@ import time
 from typing import TYPE_CHECKING, Dict, Any, Union, Optional
 from rocketride import EVENT_TYPE
 from ai.common.dap import DAPConn, TransportBase
-from ai.constants import CONST_AUTH_MAX_ATTEMPTS_PER_CONN
+from ai.constants import CONST_ACCEPT_PROTOCOL_1, CONST_AUTH_MAX_ATTEMPTS_PER_CONN, CONST_WIRE_PROTOCOL
+from . import legacy_wire
+from .types import TaskError
 from .commands.cmd_task import TaskCommands
 from .commands.cmd_data import DataCommands
 from .commands.cmd_submit import SubmitCommands
@@ -307,6 +309,11 @@ class TaskConn(
         self._last_activity: float = time.time()
         self._client_info: Dict[str, str] = {}
 
+        # The wire protocol this connection speaks, negotiated at login
+        # (on_auth). Until a login says otherwise it is the server's own, so
+        # the commands served before authentication are never translated.
+        self._protocol: int = CONST_WIRE_PROTOCOL
+
         # Brute-force guard: per-connection lifetime count of auth requests.
         # Enforced in on_auth against CONST_AUTH_MAX_ATTEMPTS_PER_CONN so a
         # single WebSocket cannot submit an unbounded stream of credentials.
@@ -320,6 +327,10 @@ class TaskConn(
         timestamp before delegating to the parent DAPConn send implementation.
         This ensures dashboard metrics remain accurate for every message sent.
 
+        This is the single outbound seam of the connection, and the outbound
+        protocol-1 guard: a protocol-1 connection receives the 1.x spellings
+        beside the server's own (``legacy_wire.encode``).
+
         Args:
             message (Dict[str, Any]): The fully-formed DAP message dict to transmit.
                 Must be JSON-serialisable; encoding is handled by the transport layer.
@@ -328,6 +339,9 @@ class TaskConn(
         self._messages_out += 1
         # Update last activity timestamp so idle-time tracking stays accurate
         self._last_activity = time.time()
+        # A 1.x client reads the old field spellings: add them at the edge
+        if self._protocol == 1:
+            message = legacy_wire.encode(message)
         # Delegate to the parent transport send implementation
         await super().send(message)
 
@@ -338,9 +352,17 @@ class TaskConn(
 
         The rrext_public_* prefix convention lets public commands (catalog
         browsing, server probe) bypass auth without maintaining a whitelist.
+
+        This is the single inbound seam of the connection, and the inbound
+        protocol-1 guard: a protocol-1 connection's requests are renamed to
+        the server's spellings (``legacy_wire.decode``) before any handler
+        sees them.
         """
         if message is None:
             message = {}
+        # A 1.x client writes the old field spellings: rename them at the edge
+        if self._protocol == 1:
+            message = legacy_wire.decode(message)
         self._messages_in += 1
         self._last_activity = time.time()
         cmd = message.get('command', '')
@@ -389,6 +411,11 @@ class TaskConn(
         auth attempt count exceeds the cap, further auth requests are rejected and
         the connection is scheduled for disconnect. Successful auth does not reset
         the counter: the cap is a per-connection lifetime limit.
+
+        The login also negotiates the wire protocol (``_negotiate_protocol``):
+        a ``protocol`` this server does not speak is refused with
+        ``TASK_VERSION_MISMATCH`` before the credential is looked at, and the
+        connection is scheduled for disconnect.
         """
         args = request.get('arguments') or {}
 
@@ -396,6 +423,16 @@ class TaskConn(
         self._auth_attempts += 1
         if self._auth_attempts > CONST_AUTH_MAX_ATTEMPTS_PER_CONN:
             err = self.build_error(request, 'Too many authentication attempts')
+            await self.send(err)
+            self._transport.disconnect()
+            return
+
+        # Negotiate the wire protocol before anything else: a client this
+        # server cannot talk to is told so, whatever its credential is
+        try:
+            protocol = self._negotiate_protocol(args)
+        except TaskError as e:
+            err = self.build_exception(request, e)
             await self.send(err)
             self._transport.disconnect()
             return
@@ -455,6 +492,10 @@ class TaskConn(
             if args.get('clientVersion'):
                 self._client_info['version'] = str(args['clientVersion'])
 
+            # The session speaks the protocol its login negotiated: from here
+            # the two guards (on_receive, send) translate for protocol 1
+            self._protocol = protocol
+
             # Notify dashboard subscribers
             await self._server.broadcast_server_event(
                 EVENT_TYPE.DASHBOARD,
@@ -466,6 +507,9 @@ class TaskConn(
                         'connectionId': self.get_connection_id(),
                         'clientName': self._client_info.get('name'),
                         'clientVersion': self._client_info.get('version'),
+                        # Which wire protocol the login negotiated: the count
+                        # of protocol-1 logins decides when the translator goes
+                        'protocol': self._protocol,
                         'clientId': self._account_info.userId if self._account_info else None,
                     },
                 },
@@ -475,6 +519,45 @@ class TaskConn(
             # Apps are already populated in AccountInfo by the account service
             # (desktop apps with full manifest + subscription status).
             return self.build_response(request, body=result.to_connect_result())
+
+    @staticmethod
+    def _negotiate_protocol(args: Dict[str, Any]) -> int:
+        """
+        Decide the wire protocol of a login from its ``protocol`` argument.
+
+        A 1.x SDK sends no ``protocol``: that is protocol 1, served through
+        ``legacy_wire`` while ``CONST_ACCEPT_PROTOCOL_1`` is on. The integer
+        ``CONST_WIRE_PROTOCOL`` is this server's own protocol. Every other
+        value, and a missing one once protocol 1 is no longer accepted, is
+        refused.
+
+        Args:
+            args: The login arguments.
+
+        Returns:
+            int: 1 or ``CONST_WIRE_PROTOCOL``.
+
+        Raises:
+            TaskError: ``TASK_VERSION_MISMATCH`` with ``serverProtocol`` and
+                ``clientProtocol`` (None when the login named none).
+        """
+        if 'protocol' not in args:
+            if CONST_ACCEPT_PROTOCOL_1:
+                return 1
+            client_protocol = None
+        else:
+            client_protocol = args['protocol']
+            # bool is an int in Python: True must not pass for a number
+            if type(client_protocol) is int and client_protocol == CONST_WIRE_PROTOCOL:
+                return CONST_WIRE_PROTOCOL
+
+        named = 'no protocol' if client_protocol is None else f'protocol {client_protocol!r}'
+        raise TaskError(
+            TaskError.VERSION_MISMATCH,
+            f'This server speaks protocol {CONST_WIRE_PROTOCOL}; the client sent {named}',
+            serverProtocol=CONST_WIRE_PROTOCOL,
+            clientProtocol=client_protocol,
+        )
 
     async def on_deauth(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """

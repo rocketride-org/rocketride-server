@@ -157,6 +157,9 @@ class TaskError(RuntimeError):
     - TASK_PARAM_REJECTED: per-call ``params`` named a public name the
       pipeline's ``parameters`` map does not expose (plan 5.4 item 5);
       ``errors`` lists ``{name, reason}`` per rejected key
+    - TASK_VERSION_MISMATCH: a login named a wire protocol this server does
+      not speak (plan 3.8, 11.2), or named none while protocol 1 is no
+      longer accepted; ``serverProtocol`` and ``clientProtocol``
 
     Extra keyword fields (``field``, ``address``, ``sources``, …) become
     attributes so a caller can classify on more than the code.
@@ -172,6 +175,7 @@ class TaskError(RuntimeError):
     PAYLOAD_TOO_LARGE = 'TASK_PAYLOAD_TOO_LARGE'
     ENGINE_START_FAILED = 'TASK_ENGINE_START_FAILED'
     PARAM_REJECTED = 'TASK_PARAM_REJECTED'
+    VERSION_MISMATCH = 'TASK_VERSION_MISMATCH'
 
     def __init__(self, code: str, message: str, **fields: Any):
         super().__init__(message)

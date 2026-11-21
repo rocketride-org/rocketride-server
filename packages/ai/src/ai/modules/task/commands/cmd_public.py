@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING, Dict, Any
 from rocketlib import debug, getVersion
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
+from ai.constants import CONST_WIRE_PROTOCOL
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -84,7 +85,7 @@ class PublicCommands(DAPConn):
         Return server metadata without requiring authentication.
 
         Replaces the former ``auth { infoOnly: true }`` hack. Returns
-        version, capabilities, platform, and public apps list.
+        version, wire protocol, capabilities, platform, and public apps list.
 
         Also carries the Stripe publishable key (``pk_*`` — public by
         design) when the server has one configured, so browser and
@@ -105,6 +106,10 @@ class PublicCommands(DAPConn):
         acct = self._server._server.account
         info = {
             'version': getVersion(),
+            # The wire protocol major. It alone decides compatibility: a
+            # client sends the one it speaks at login and the server refuses
+            # a value it does not speak (plan 11.2)
+            'protocol': CONST_WIRE_PROTOCOL,
             'capabilities': acct.capabilities,
             'platform': sys.platform,
             # Server features a client checks before using them: an SDK's

@@ -29,7 +29,7 @@ import { redactProtocolMessage } from './core/TransportBase.js';
 import { DAPClient } from './core/DAPClient.js';
 import { DAPMessage, EventCallback, RocketRideClientConfig, ConnectCallback, DisconnectCallback, ConnectErrorCallback, ConnectResult, ServerInfoResult, TraceType } from './types/index.js';
 import { TASK_STATUS, UPLOAD_RESULT, PIPELINE_RESULT, SUBMIT_RESULT, PipelineConfig, PipeInterfaces, DashboardResponse, ListPageRequest, ListConnectionsResponse, ListTasksResponse, ServicesResponse, ServiceDefinitionsResponse, ServiceDefinition, ValidationResult, ConvertResult, CProfileStatusResponse, CProfileStopResponse, CProfileReportResponse, CProfileReportTreeResponse, CProfileThreadsResponse } from './types/index.js';
-import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX } from './constants.js';
+import { CONST_DEFAULT_WEB_CLOUD, CONST_DEFAULT_WEB_PROTOCOL, CONST_DEFAULT_WEB_PORT, SUBMIT_INLINE_MAX, WIRE_PROTOCOL } from './constants.js';
 import { Question } from './schema/Question.js';
 import { AccountApi } from './account.js';
 import { BillingApi } from './billing.js';
@@ -951,7 +951,8 @@ export class RocketRideClient extends DAPClient {
 			this._assertCurrentOperation(operation);
 
 			// Consent/expiry may change while transport is opening. No await between resolution and send.
-			const authArguments: Record<string, unknown> = { auth: operation.pkce ? this._resolveCredential(operation.pkce) : operation.credentialKey };
+			// `protocol` names the wire protocol this SDK speaks: the server refuses a login whose protocol it does not speak.
+			const authArguments: Record<string, unknown> = { auth: operation.pkce ? this._resolveCredential(operation.pkce) : operation.credentialKey, protocol: WIRE_PROTOCOL };
 			if (this._clientDisplayName) authArguments.clientName = this._clientDisplayName;
 			if (this._clientDisplayVersion) authArguments.clientVersion = this._clientDisplayVersion;
 

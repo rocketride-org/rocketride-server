@@ -174,6 +174,7 @@ class DASHBOARD_EVENT_CONNECTION_ADDED(_DASHBOARD_EVENT_BASE):
     connectionId: int
     clientName: Optional[str]
     clientVersion: Optional[str]
+    protocol: Optional[int]  # Wire protocol the login negotiated: 2, or 1 for a 1.x client that named none
     clientId: Optional[str]
 
 

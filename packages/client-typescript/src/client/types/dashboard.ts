@@ -193,6 +193,8 @@ interface DashboardConnectionAdded extends DashboardEventBase {
 	clientName?: string | null;
 	/** Client version from auth handshake. */
 	clientVersion?: string | null;
+	/** Wire protocol the login negotiated: 2, or 1 for a 1.x client that named none. */
+	protocol?: number | null;
 	/** Account identifier. */
 	clientId?: string | null;
 }

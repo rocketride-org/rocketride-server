@@ -213,6 +213,8 @@ Close the connection to the RocketRide server and stop automatic reconnection. I
 
 `connect()`/`disconnect()` are convenience wrappers over two independent concerns: the WebSocket transport (attach/detach) and the DAP auth handshake (login/logout). Use the primitives below when you need to manage them separately: e.g. attach once, then log in and out under different credentials without reopening the socket.
 
+Every login also names the wire protocol the SDK speaks: the auth arguments carry `protocol: 2`, and `get_server_info()` reports the server's own value as `protocol`. That one number decides compatibility; package versions are never compared. A server refuses a login whose `protocol` it does not speak with the error code `TASK_VERSION_MISMATCH` and closes the connection, so `login()`/`connect()` raise `AuthenticationException`. A 1.x SDK sends no `protocol`: the server serves it as protocol 1 and translates the renamed wire fields (`pipe_id` beside `pipeId`) at the connection, until that support is retired.
+
 #### `async attach(uri: Optional[str] = None, *, timeout: Optional[float] = None) -> None`
 
 Open the WebSocket transport without authenticating. If `uri` is provided and differs from the current URI, detaches first; attaching to the same URI is a no-op. `timeout` (seconds) bounds the connect.

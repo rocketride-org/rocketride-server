@@ -16,6 +16,9 @@ The connection has two layers you can drive together or separately:
   operations like catalog browsing.
 - **Login** performs the DAP auth handshake over an attached transport and returns a
   `ConnectResult` carrying your full identity (user, organizations, apps, teams).
+  Every login names the wire protocol the SDK speaks (`protocol: 2` in the auth
+  arguments); a server that does not speak it refuses the login with the error code
+  `TASK_VERSION_MISMATCH` and closes the connection.
 
 `connect()` does both in one call; `disconnect()` logs out and detaches. The state
 probes mirror the layers: `is_attached()` (socket open) and `is_authenticated()`

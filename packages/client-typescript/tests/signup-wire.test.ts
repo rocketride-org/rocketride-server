@@ -1,6 +1,7 @@
 import { afterEach, it as test, jest } from '@jest/globals';
 import assert from 'node:assert/strict';
 import { RocketRideClient } from '../src/client/client';
+import { WIRE_PROTOCOL } from '../src/client/constants';
 import { TransportWebSocket } from '../src/client/core/TransportWebSocket';
 import { normalizeSignupProperties } from '../src/client/index';
 import type { PkceCredential, SignupProperties } from '../src/client/types/signup';
@@ -56,6 +57,26 @@ async function captureAuth(method: 'login' | 'connect', pkce: PkceCredential, be
 }
 
 for (const method of ['login', 'connect'] as const) {
+	test(`${method} names the wire protocol in the auth arguments`, async () => {
+		jest.spyOn(TransportWebSocket.prototype, 'connect').mockResolvedValue();
+		jest.spyOn(TransportWebSocket.prototype, 'disconnect').mockResolvedValue();
+		const client = new RocketRideClient({ env: {}, persist: false });
+		let authArguments: Record<string, unknown> | undefined;
+		jest.spyOn(client, 'request').mockImplementation(async (request) => {
+			assert.equal(request.command, 'auth');
+			authArguments = request.arguments;
+			return { type: 'response', command: 'auth', seq: 1, request_seq: 0, success: true, body: { userToken: 'test-token' } };
+		});
+		try {
+			await client[method]('rr_key');
+			assert.equal(WIRE_PROTOCOL, 2);
+			assert.strictEqual(authArguments?.protocol, 2);
+			assert.equal(authArguments?.auth, 'rr_key');
+		} finally {
+			await client.detach();
+		}
+	});
+
 	test(`${method} defers a throwing signup getter until transport readiness and still authenticates`, async () => {
 		let getterCalls = 0;
 		const hostileCredential: PkceCredential = {
