@@ -31,6 +31,8 @@ An agent flow: `load_data` the rows, `build_index` on the text column, then `get
 | `questions` | `answers` | Natural-language question, answered and emitted as an answer payload                                                                                        |
 | `answers`   | —         | JSON rows, loaded into the configured table. A fenced or prose-wrapped object is unwrapped; `{"rows": [...]}` becomes N rows; text carrying no JSON raises  |
 
+On the `questions` lanes the step fails when Hotdata reports an error (`HotdataError`) or the query run fails, is interrupted, cancelled or times out (`RunFailedError`); no `text`, `table` or `answers` output is written for that question.
+
 ## As a tool
 
 | Function      | Description                                                                                                 |

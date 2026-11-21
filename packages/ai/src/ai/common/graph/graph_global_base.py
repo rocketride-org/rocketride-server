@@ -45,6 +45,19 @@ from rocketlib import IGlobalBase, debug, warning
 from ai.common.config import Config
 from ai.common.utils import config_int, parse_bool
 
+
+class GraphUnavailableError(RuntimeError):
+    """The graph database could not be reached, or dropped the connection, while serving a request.
+
+    A driver's ``_validate_query`` raises this instead of returning
+    ``(False, message)`` when the EXPLAIN step failed because the server is
+    unreachable: that is not a verdict on the query, so it must neither be fed
+    back to the LLM as "your query was rejected" nor let a lane finish as though
+    the question had been answered. Keep the message generic; the driver's text
+    belongs in the engine log.
+    """
+
+
 DEFAULT_MAX_EXECUTE_ROWS = 25000
 DEFAULT_MAX_VALIDATION_ATTEMPTS = 5
 

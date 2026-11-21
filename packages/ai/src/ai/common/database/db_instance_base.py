@@ -42,6 +42,7 @@ from typing import Any, Dict, List
 
 import json
 import threading
+import traceback
 
 from rocketlib import IInstanceBase, debug, error, warning, tool_function
 from sqlalchemy import MetaData, Table as SQLTable, insert, text
@@ -52,7 +53,7 @@ from ai.common.table import Table
 from ai.common.utils import parse_bool
 from rocketlib.types import IInvokeLLM
 
-from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase
+from .db_global_base import DEFAULT_MAX_EXECUTE_ROWS, DatabaseGlobalBase, DatabaseUnavailableError
 from .sql_safety import is_sql_safe
 
 
@@ -176,12 +177,25 @@ def _format_table(table_info: dict) -> dict:
     return result
 
 
-# What get_data and the question lanes report when _executeSQLQuery returns None
+# What get_data reports when _executeSQLQuery raises DatabaseLaneError
 _QUERY_EXECUTION_FAILED = 'Query execution failed'
 
 
 class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
+
+
+class DatabaseLaneError(RuntimeError):
+    """A pipeline lane statement failed against the database.
+
+    Raised by the lane handlers (``writeQuestions``, ``writeTable``,
+    ``writeAnswers``) instead of returning normally, so the engine marks the step
+    and the task failed. The message is deliberately generic: the lane caller is
+    an upstream node or a person who never wrote the statement, and the driver's
+    sentence can carry a host name, a port or a fragment of the statement. The
+    full exception is in the engine log, written by ``error()`` before this is
+    raised.
+    """
 
 
 class _QuestionFailed(RuntimeError):
@@ -333,8 +347,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             return sql_result
 
         sql_query = sql_result['sql']
-        result = self._executeSQLQuery(sql_query)
-        if result is None:
+        try:
+            result = self._executeSQLQuery(sql_query)
+        except DatabaseLaneError:
+            # The tool contract is an explicit `valid: False` result, not an
+            # exception. The lane handlers rely on the raise instead.
             return {'valid': False, 'error': _QUERY_EXECUTION_FAILED, 'sql': sql_query, 'rows': []}
 
         rows = [self._sanitize_row(row) for row in result]
@@ -422,7 +439,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         question = question.strip()
         limit = args.get('limit', 250)
-        result = self._buildSQLQuery(question, limit=limit)
+        try:
+            result = self._buildSQLQuery(question, limit=limit)
+        except DatabaseUnavailableError as e:
+            # The tool contract is an explicit `valid: False` result; the lane
+            # handler raises instead.
+            return {'error': str(e), 'valid': False}
 
         is_valid = parse_bool(result.get('isValid', False))
         sql_query = result.get('query', '')
@@ -991,16 +1013,22 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         return result.answer
 
-    def _executeSQLQuery(self, query: str) -> list[dict] | None:
+    def _executeSQLQuery(self, query: str) -> list[dict]:
         """Execute a generated SELECT on a read-only, time-limited connection and return rows as a list of dicts.
+
+        There is no failure return value: a database failure raises
+        ``DatabaseLaneError``. This used to return ``None``, and the lane handler
+        then emitted the string ``"None"`` as the answer, which reads downstream
+        as a successful, empty result.
 
         Args:
             query: The generated SQL.
 
         Returns:
-            One dict per row, or None when the database refused or failed the query.
+            One dict per row.
 
         Raises:
+            DatabaseLaneError: The database refused or failed the query (the cause is in the engine log).
             Exception: Any error that is not a database failure, such as the RuntimeError of a dialect without a
                 read-only mode.
         """
@@ -1016,8 +1044,8 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # including when readonly=1 refuses a write
             if not _isDbFailure(e):
                 raise
-            error(f'Error executing SQL query: {e}')
-            return None
+            error(f'Error executing SQL query: {type(e).__name__}: {e}\n{traceback.format_exc()}')
+            raise DatabaseLaneError(f'{self._db_display_name()} query failed (details are in the engine log)') from None
 
     def _executeRawQuery(self, query: str, params: list | None = None, row_mode: str = 'object') -> dict:
         """Execute a raw SQL statement (read or write) without LLM or safety gating.
@@ -1103,6 +1131,14 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
         lanes = self.instance.getListeners()
 
+        # The result is decided inside the `try` and written outside it. A write to a
+        # downstream node can fail (a DB node downstream raising on its own outage
+        # reaches this caller as a plain `Exception`); if the writes sat in the `try`,
+        # the catch-all below would log that failure and return, and the step would
+        # complete with the rows never written.
+        result: Any = None
+        executed = False
+
         try:
             # Ask the LLM to translate the natural-language question into SQL.
             query_json = self._buildSQLQuery(question_text)
@@ -1123,11 +1159,15 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
 
             executed = is_valid_query and bool(sql_query)
             # When the LLM decides it isn't a DB question, `sql_query` holds its prose answer.
+            # A database failure raises DatabaseLaneError (logged by `_executeSQLQuery`)
             result = self._executeSQLQuery(sql_query) if executed else sql_query
-            # The database rejected the statement at run time (the cause is in the log)
-            if executed and result is None:
-                raise _QuestionFailed(_QUERY_EXECUTION_FAILED)
 
+        except (DatabaseLaneError, DatabaseUnavailableError):
+            # `_executeSQLQuery` / `_validateQuery` have logged the cause. Fail the step: emitting
+            # anything here, an error object included, lets the pipeline carry on as if the question
+            # had been answered. This must stay ahead of the catch-all below, which would otherwise
+            # turn the outage into an error on the lanes and return normally.
+            raise
         except Exception as e:
             # The caller needs to know the question failed, not only the log: on the
             # text/answers lanes when one is wired, otherwise through the engine's
@@ -1203,7 +1243,12 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             self._insertData(rows)
         except Exception as e:
-            error(f'Error inserting table data: {e}')
+            # Fail the step. Returning normally here reported success for rows
+            # that were never written.
+            error(f'Error inserting table data: {type(e).__name__}: {e}\n{traceback.format_exc()}')
+            raise DatabaseLaneError(
+                f'{self._db_display_name()} table write failed (details are in the engine log)'
+            ) from None
 
     def writeAnswers(self, answer: Answer) -> None:
         """Handle incoming structured answer data — extract JSON rows and insert."""
@@ -1216,7 +1261,11 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
         try:
             self._insertData(items)
         except Exception as e:
-            error(f'Error in writeAnswers: {e}')
+            # Fail the step, same as `writeTable`.
+            error(f'Error in writeAnswers: {type(e).__name__}: {e}\n{traceback.format_exc()}')
+            raise DatabaseLaneError(
+                f'{self._db_display_name()} answers write failed (details are in the engine log)'
+            ) from None
 
     # ------------------------------------------------------------------
     # Data insertion

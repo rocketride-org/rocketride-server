@@ -56,6 +56,14 @@ class _StubRedisError(Exception):
     pass
 
 
+class _StubRedisConnectionError(_StubRedisError):
+    pass
+
+
+class _StubRedisTimeoutError(_StubRedisError):
+    pass
+
+
 class _StubBase:
     """Stand-in for IInstanceBase / IGlobalBase — the engine supplies the real one."""
 
@@ -127,6 +135,8 @@ def _install_stubs() -> None:
 
     redis_exceptions = types.ModuleType('redis.exceptions')
     redis_exceptions.RedisError = _StubRedisError
+    redis_exceptions.ConnectionError = _StubRedisConnectionError
+    redis_exceptions.TimeoutError = _StubRedisTimeoutError
     redis = types.ModuleType('redis')
     redis.exceptions = redis_exceptions
 
@@ -731,6 +741,53 @@ def test_write_questions_emits_error_for_unsafe_query_not_prose():
     emitted = [str(e) for e in cap.answers + cap.text]
     assert all('DELETE' not in e for e in emitted)  # never the unsafe query
     assert any('write or admin' in e for e in emitted)
+
+
+@pytest.mark.parametrize(
+    'exc', [_StubRedisConnectionError('refused'), _StubRedisTimeoutError('slow'), ConnectionRefusedError('refused')]
+)
+def test_validate_query_raises_when_the_server_cannot_be_reached(exc):
+    glb = _FakeGlobal(_FakeGraph(raise_error=exc))
+
+    with pytest.raises(graph_base.GraphUnavailableError):
+        glb._validate_query('MATCH (n) RETURN n')
+
+
+def test_validate_query_still_reports_a_server_rejection_as_a_message():
+    ok, message = _FakeGlobal(_FakeGraph(raise_error=mod.RedisError('Invalid input')))._validate_query(
+        'MATCH (n RETURN n'
+    )
+
+    assert ok is False and 'Invalid input' in message
+
+
+def test_an_unreachable_server_during_explain_fails_the_question_lane_without_a_repair_loop():
+    glb = _FakeGlobal(_FakeGraph(raise_error=_StubRedisConnectionError('refused')))
+    inst = _instance(glb)
+    calls = []
+    inst._buildQueryOnce = lambda *a, **k: calls.append(1) or {'isValid': True, 'query': 'MATCH (n) RETURN n'}
+    cap = _CapturingInstance({'answers', 'text'})
+    inst.instance = cap
+
+    with pytest.raises(graph_base.GraphUnavailableError):
+        inst.writeQuestions(_question('Which people know Alice?'))
+
+    assert len(calls) == 1
+    assert cap.answers == [] and cap.text == []
+
+
+def test_a_failed_execute_statement_fails_the_lane_and_emits_nothing():
+    glb = _FakeGlobal(_FakeGraph(raise_error=ConnectionError('Connection refused redis://10.0.0.9:6379')))
+    glb.allow_execute = True
+    inst = _instance(glb)
+    cap = _CapturingInstance({'text', 'table', 'answers'})
+    inst.instance = cap
+
+    with pytest.raises(sys.modules['ai.common.graph.graph_instance_base'].GraphLaneError) as raised:
+        inst.writeQuestions(_execute_question('CREATE (:Lease {id: 1})'))
+
+    assert '10.0.0.9' not in str(raised.value)
+    assert cap.text == [] and cap.tables == [] and cap.answers == []
 
 
 def test_get_data_truncated_is_honest_when_limit_exceeds_row_cap():
