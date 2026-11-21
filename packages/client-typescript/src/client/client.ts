@@ -217,7 +217,8 @@ export class DataPipe {
 				throw new PipeException({ message: msg });
 			}
 
-			this._client._ssePipeCallbacks.set(this._traceId, this._onSSE);
+			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
+			this._client._ssePipeTraces.set(this._pipeId, this._traceId);
 		}
 
 		// Only mark opened after the server-side pipe is fully consistent (including SSE setup).
@@ -357,7 +358,8 @@ export class DataPipe {
 
 			// Unregister SSE callback and scoped monitor subscription
 			if (this._onSSE !== undefined && this._pipeId !== undefined && this._traceId !== undefined) {
-				this._client._ssePipeCallbacks.delete(this._traceId);
+				this._client._ssePipeCallbacks.delete(this._pipeId);
+				this._client._ssePipeTraces.delete(this._pipeId);
 				try {
 					await this._client.setEvents(this._token, [], this._pipeId);
 				} catch {
@@ -483,12 +485,22 @@ export class RocketRideClient extends DAPClient {
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
 	/**
-	 * SSE callbacks by the request tree's wire `traceId`, which every SSE body
-	 * carries. A pipe slot is reused by the next binding once a pipe closes; a
-	 * traceId never is, so an event that arrives after its pipe closed never
-	 * reaches the next pipe opened on the same slot.
+	 * SSE callbacks by pipe slot. A slot is reused by the next binding once a
+	 * pipe closes, so delivery also checks the event's `traceId` against
+	 * `_ssePipeTraces` (the member types are part of the append-only shell
+	 * contract, so the map keeps its key).
 	 */
-	readonly _ssePipeCallbacks = new Map<string, (type: string, data: Record<string, unknown>) => Promise<void>>();
+	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
+
+	/**
+	 * The request tree (wire `traceId`) each SSE slot was registered for.
+	 *
+	 * The callbacks stay keyed by slot (that member's type is part of the
+	 * shell contract, which is append-only); an event is delivered only when
+	 * its `traceId` is the one its slot was registered under, so a late event
+	 * of a closed pipe never reaches the next pipe opened on the same slot.
+	 */
+	readonly _ssePipeTraces = new Map<number, string>();
 
 	// Desired state model — replaces old flag soup
 	private _desiredState: 'detached' | 'attached' | 'authenticated' = 'detached';
@@ -2350,9 +2362,10 @@ export class RocketRideClient extends DAPClient {
 		// Dispatch pipe-scoped SSE events to the registered DataPipe callback,
 		// by the request tree (never by the slot, which the next pipe reuses)
 		if (eventType === 'apaevt_sse') {
+			const pipeId = (eventBody as Record<string, unknown>)?.pipeId as number | undefined;
 			const traceId = (eventBody as Record<string, unknown>)?.traceId;
-			if (typeof traceId === 'string') {
-				const cb = this._ssePipeCallbacks.get(traceId);
+			if (pipeId !== undefined && typeof traceId === 'string' && this._ssePipeTraces.get(pipeId) === traceId) {
+				const cb = this._ssePipeCallbacks.get(pipeId);
 				if (cb) {
 					try {
 						const body = eventBody as Record<string, unknown>;

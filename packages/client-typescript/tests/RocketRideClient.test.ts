@@ -2306,7 +2306,8 @@ describe('RocketRideClient SSE dispatch', () => {
 		await client.onEvent(sse(7, 'n.e.2', 'chunk'));
 
 		expect(seen).toEqual(['second:chunk']);
-		expect(Array.from(client._ssePipeCallbacks.keys())).toEqual(['n.e.2']);
+		expect(Array.from(client._ssePipeCallbacks.keys())).toEqual([7]);
+		expect(client._ssePipeTraces.get(7)).toBe('n.e.2');
 		// The server still narrows each subscription by slot
 		expect(setEvents.mock.calls).toEqual([
 			['=control/1234abcd', ['SSE'], 7],
@@ -3204,7 +3205,8 @@ describe('RocketRideClient lifecycle operations', () => {
 		let sseStarted = false;
 		const onEvent = jest.fn(async (_message: DAPMessage) => undefined);
 		const client = makeClient({ onEvent });
-		client._ssePipeCallbacks.set('n.e.7', async () => {
+		client._ssePipeTraces.set(7, 'n.e.7');
+		client._ssePipeCallbacks.set(7, async () => {
 			sseStarted = true;
 			await sseGate;
 		});

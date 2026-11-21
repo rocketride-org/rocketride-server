@@ -143,14 +143,14 @@ export interface DeployHistoryEntry {
 	seq?: number;
 	/** Unix timestamp (seconds). */
 	at?: number;
-	/** Pipe rails: `publish`, `deploy`, `rollback`, `enable`, `disable`,
-	    `errored`, `remove`, and `delete` when a deployed version's storage is
-	    removed; `pause`/`resume` appear only on rows written before the
-	    enable/disable vocabulary (the trail is immutable). App rails add a
-	    binding's lifecycle as its state (`enabled`/`disabled`/`removed`), the
-	    review transitions (`request`/`approved`/`rejected`/`withdrawn`/
-	    `failed`) and the human `reply` row. */
-	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove' | 'delete' | 'enabled' | 'disabled' | 'removed' | 'request' | 'approved' | 'rejected' | 'withdrawn' | 'failed' | 'reply';
+	/** `pause`/`resume` appear only on rows written before the
+	    enable/disable vocabulary (the trail is immutable). App rails also
+	    carry `delete`, a binding's lifecycle as its state (`enabled`/
+	    `disabled`/`removed`), the review transitions (`request`/`approved`/
+	    `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime:
+	    the union names the pipe-rail actions only, because the shell contract
+	    (append-only) re-exports this type; compare raw strings for the rest. */
+	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
 	/** `''` on org-wide rows (publish); the audience on pointer changes. */
 	teamId?: string;
 	/** On pointer changes: the audience, the reader's rung and the handle to
