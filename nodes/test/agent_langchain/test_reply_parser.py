@@ -202,8 +202,9 @@ class TestSentinel:
             # Cut off inside content that is an object, and with the members the other way round.
             '{"type":"final","content":{"company":"Acme"',
             '{"content":"Acme reported revenue","type":"final"',
-            # A type named inside the content does not make it something else.
+            # A type named inside the content does not make it something else, in either member order.
             '{"type":"final","content":{"type":"tool_call","note":"unfinished',
+            '{"content":{"type":"tool_call","note":"unfinished"},"type":"final"',
         ],
     )
     def test_an_envelope_that_was_cut_off_after_the_marker_is_not_an_answer(self, after):
@@ -259,6 +260,13 @@ class TestSentinel:
         assert parse(raw) is None
         assert reply._parse_failure_hint(raw).endswith('do not answer in prose.')
 
+    def test_a_final_line_stacked_onto_a_tool_call_that_lost_its_type_is_not_delivered(self):
+        """A name and its arguments with no "type" is a call that will not run. Its claim is not the answer."""
+        raw = 'Here is the result:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.'
+
+        assert parse(raw) is None
+        assert reply._parse_failure_hint(raw).endswith('do not answer in prose.')
+
     def test_a_broken_tool_call_with_a_final_line_stacked_after_it_is_retried(self):
         """Not delivered as the stacked answer, and the hint asks for the call, not for prose."""
         raw = BROKEN_TOOL_CALL + STACKED_FINAL
@@ -287,6 +295,8 @@ class TestSentinel:
             'Thinking about a tool call.',
             # A JSON object that does not parse and was never an envelope.
             '{"note": "a "quoted" word"}',
+            # A name alone is not a tool call that lost its type.
+            '{"name": "crm.create"}',
         ],
     )
     def test_other_text_before_the_sentinel_does_not_take_it_away(self, before):
@@ -638,6 +648,12 @@ class TestSalvage:
         assert reply._salvage_final_content(raw) is None
         assert parse(raw) is None
 
+    def test_an_envelope_quoted_later_in_the_answer_does_not_make_the_object_before_it_one(self):
+        """The object right after the closing decides. Reading on to a later example refused a finished answer."""
+        raw = '{"type":"final","content":"Before {"a":"b"} {"c":"d"}; schema {"type":"final"}; done."}'
+
+        assert parse(raw).content == 'Before {"a":"b"} {"c":"d"}; schema {"type":"final"}; done.'
+
     def test_an_object_that_is_no_envelope_after_a_closing_is_part_of_the_answer(self):
         """Only a second envelope makes a reply two envelopes. An answer may hold one JSON object after another."""
         raw = '{"type":"final","content":"Before {"a":"b"} {"c":"d"} after "it"."}'
@@ -746,6 +762,45 @@ class TestRetryHint:
             'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.'
         )
         assert 'Write the answer after' not in hint
+
+    def test_a_cut_off_final_is_asked_for_as_an_answer_whatever_its_content_names(self):
+        """The envelope's own type decides the hint. A tool call named inside the content asked for a tool call."""
+        hint = reply._parse_failure_hint('FINAL>>> {"type":"final","content":{"type":"tool_call","note":"unfinished')
+
+        assert 'SAME tool call' not in hint
+        assert hint.endswith(f'send the answer as {FINAL_SENTINEL} followed by plain text.')
+
+    @pytest.mark.parametrize(
+        'raw',
+        ['{"name":"crm.create","args":{}}', 'Here is the result:\n{"name":"crm.create","args":{}}'],
+    )
+    def test_a_tool_call_that_lost_its_type_is_asked_for_again_as_a_tool_call(self, raw):
+        """Pointing it at the sentinel would trade the work for a sentence about it."""
+        hint = reply._parse_failure_hint(raw)
+
+        assert 'not one of the allowed shapes' in hint
+        assert hint.endswith('Send the tool call again as {"type":"tool_call","name":"server.tool","args":{...}}.')
+        assert FINAL_SENTINEL not in hint
+
+    @pytest.mark.parametrize(
+        'text, kind',
+        [
+            # The envelope's own type, whatever its members hold and in whatever order they come.
+            ('{"type":"final","content":{"type":"tool_call","note":"unfin', 'final'),
+            ('{"content":{"type":"tool_call","note":"x"},"type":"final"', 'final'),
+            ('{"args":{"type":"final","note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}', 'tool_call'),
+            ('{"args":[{"type":"final"}],"type":"tool_calls","calls":[{"name":"a "b""}]}', 'tool_calls'),
+            ('Sure.\n{"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            # A type that is no envelope's is none, whatever is nested under it.
+            ('{"type":"task","args":{"type":"tool_call","x":"a "b" c"}}', None),
+            # No type of its own to read: the text is searched, and a tool call wins.
+            ('{"note":"x "y z","args":{"type":"tool_call"', 'tool_call'),
+            ('{"content":"abc', None),
+            ('no braces at all', None),
+        ],
+    )
+    def test_what_an_unparsed_reply_set_out_to_be(self, text, kind):
+        assert reply._attempted_kind(text) == kind
 
     def test_a_broken_tool_call_stays_one_when_final_is_named_first(self):
         """A "type":"final" inside the arguments, ahead of the envelope's own type, does not turn the call into an answer."""
@@ -887,8 +942,13 @@ class TestRunModelTurn:
             ('Sure, let me do that.\n' + BROKEN_TOOL_CALL + STACKED_FINAL, 'not valid JSON'),
             # A cut-off answer is not prose to deliver either, with or without a line before it.
             ('Here is the answer:\n' + CUT_OFF_FINAL, 'Unterminated string'),
-            # A tool call that lost its "type" is work that never ran, also after a line of prose.
+            # A tool call that lost its "type" is work that never ran, also after a line of prose,
+            # and also with a claim about it stacked on.
             ('Here is the result:\n{"name":"crm.create","args":{}}', 'named a tool and its arguments with no "type"'),
+            (
+                'Here is the result:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.',
+                'named a tool and its arguments with no "type"',
+            ),
             # The marker alone is protocol text, not an answer.
             (FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
             ('Let me think.\n' + FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
@@ -962,6 +1022,19 @@ class TestRunModelTurn:
             reply._run_model_turn(ask)
         assert len(feedback) == 3
         assert f'send the answer as {FINAL_SENTINEL} followed by plain text' in feedback[1]
+
+    def test_a_tool_call_that_lost_its_type_runs_once_the_hint_is_followed(self):
+        """The claim stacked onto it is not delivered. The hint asks for the call, and the repaired call is the turn."""
+        ask, feedback = scripted(
+            'Here is the result:\n{"name":"crm.create","args":{"name":"Acme"}}\nFINAL>>> Created.',
+            TOOL_CALL,
+        )
+
+        turn = reply._run_model_turn(ask)
+
+        assert [(c['name'], c['args']) for c in turn.tool_calls] == [('crm.create', {'name': 'Acme'})]
+        assert len(feedback) == 2
+        assert FINAL_SENTINEL not in feedback[1].split('It broke here')[0]
 
     def test_a_stacked_final_does_not_replace_the_tool_call_it_follows(self):
         ask, feedback = scripted(TOOL_CALL + STACKED_FINAL)

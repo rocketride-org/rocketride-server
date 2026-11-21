@@ -382,8 +382,8 @@ _FINAL_ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{\s*"type"\s*:\s*"f
 #: The end of a `final` envelope: the quote that closes the content, then the closing brace, then the fence if there was one.
 _FINAL_ENVELOPE_CLOSE = re.compile(r'"\s*\}\s*(?:```\s*)?$')
 
-#: A closing followed straight away by the opening of another object. When that object names an
-#: envelope type, the reply is two envelopes and not one (``_is_stacked``).
+#: A closing followed straight away by the opening of another object. When that object is an
+#: envelope, the reply is two envelopes and not one (``_is_stacked``).
 _STACKED_OBJECT = re.compile(r'"\s*\}\s*(?:```\s*)?\{')
 
 #: A markdown fence that encloses all of a text. Group 1 is what is inside it.
@@ -401,6 +401,11 @@ _ATTEMPTED_TYPE = re.compile(r'"type"\s*:\s*"(tool_calls?|final)"')
 
 #: The digits of a ``\uXXXX`` escape. ``int(x, 16)`` alone also takes a sign, a space and an underscore.
 _HEX4 = re.compile(r'[0-9A-Fa-f]{4}')
+
+#: What follows a ``"type"`` key when its value is a plain string. Group 1 is the value.
+_TYPE_VALUE = re.compile(r'\s*:\s*"([^"\\]*)"')
+
+_ENVELOPE_KINDS = ('tool_call', 'tool_calls', 'final')
 
 _TOOL_CALL_SHAPE = '{"type":"tool_call","name":"server.tool","args":{...}}'
 
@@ -423,40 +428,71 @@ def _without_fence(raw: str) -> str:
     return s
 
 
+def _own_type(text: str) -> Optional[str]:
+    """
+    The ``"type"`` an unparsed JSON object carries itself, and not one nested in a member's value.
+
+    Walks the first object in `text` as far as it goes and reads the first ``"type"`` member at its
+    top level, whatever comes before it and whatever its other members hold. Returns None when the
+    object ends or the text runs out before one is found. Escaping that is broken can put the walk
+    out of step with the object, which is why ``_attempted_kind`` falls back to searching the text.
+    """
+    at = text.find('{')
+    depth = 0
+    while 0 <= at < len(text):
+        ch = text[at]
+        if ch == '"':
+            end = at + 1
+            while end < len(text) and (text[end] != '"' or _is_escaped(text, end)):
+                end += 1
+            if end >= len(text):
+                return None
+            if depth == 1 and text[at + 1 : end] == 'type':
+                value = _TYPE_VALUE.match(text, end + 1)
+                if value:
+                    return value.group(1)
+            at = end + 1
+            continue
+        if ch in '{[':
+            depth += 1
+        elif ch in '}]':
+            depth -= 1
+            if depth <= 0:
+                return None
+        at += 1
+    return None
+
+
 def _attempted_kind(text: str) -> Optional[str]:
     """
     The envelope type a reply is, or was reaching for: ``tool_call``, ``tool_calls``, ``final`` or None.
 
-    When the first object parses, its own ``"type"`` decides, so a ``"type"`` nested in a tool's
-    arguments or quoted in an answer does not. When nothing parses, the text is searched, and a
-    tool-call type anywhere in it wins over ``final``: a broken call must stay a call.
+    The envelope's own ``"type"`` decides, so one nested in a tool's arguments or in an answer's
+    content does not: the parsed object's when the first object parses, and the one at its top
+    level when it does not (``_own_type``). Only when neither is there to read is the text
+    searched, and then a tool-call type anywhere in it wins over ``final``: a broken call must
+    stay a call.
     """
     obj = _extract_first_json_object(text)
     if isinstance(obj, dict):
         kind = obj.get('type')
-        return kind if kind in ('tool_call', 'tool_calls', 'final') else None
+        return kind if kind in _ENVELOPE_KINDS else None
+    own = _own_type(text)
+    if own is not None:
+        return own if own in _ENVELOPE_KINDS else None
     kinds = [match.group(1) for match in _ATTEMPTED_TYPE.finditer(text)]
     return next((kind for kind in kinds if kind != 'final'), kinds[0] if kinds else None)
 
 
-def _first_named_kind(text: str) -> Optional[str]:
-    """
-    The envelope type a text names first: its own, unless the members come in another order.
-
-    For telling what an unparsed envelope set out to be when the answer to that must not depend on
-    what its content mentions. A cut-off `final` whose content names a tool call is still a `final`.
-    """
-    obj = _extract_first_json_object(text)
-    if isinstance(obj, dict):
-        kind = obj.get('type')
-        return kind if kind in ('tool_call', 'tool_calls', 'final') else None
-    first = _ATTEMPTED_TYPE.search(text)
-    return first.group(1) if first else None
-
-
 def _attempted_tool_call(text: str) -> bool:
-    """Whether the text is a tool-call envelope, or a broken attempt at one."""
-    return _attempted_kind(text) in ('tool_call', 'tool_calls')
+    """Whether the text is a tool-call envelope, a broken attempt at one, or one that lost its ``"type"``."""
+    return _attempted_kind(text) in ('tool_call', 'tool_calls') or _tool_call_without_type(text)
+
+
+def _tool_call_without_type(text: str) -> bool:
+    """Whether the first JSON object in the text has a tool call's members, a name and its arguments, and no ``"type"``."""
+    obj = _extract_first_json_object(text)
+    return isinstance(obj, dict) and 'type' not in obj and isinstance(obj.get('name'), str) and 'args' in obj
 
 
 def _extract_first_json_object(raw: Any) -> Any:
@@ -554,8 +590,13 @@ def _is_escaped(text: str, at: int) -> bool:
 
 
 def _is_stacked(body: str) -> bool:
-    """Whether the text after an envelope's opening holds a closing and then another envelope, in either member order."""
-    return any(_ATTEMPTED_TYPE.search(body, stacked.end() - 1) for stacked in _STACKED_OBJECT.finditer(body))
+    """
+    Whether the text after an envelope's opening holds a closing and then another envelope.
+
+    The object right after the closing decides, by its own type and in either member order. An
+    envelope quoted further on in the answer does not make an ordinary object before it one.
+    """
+    return any(_attempted_kind(body[stacked.end() - 1 :]) is not None for stacked in _STACKED_OBJECT.finditer(body))
 
 
 def _salvage_final_content(raw: Any) -> Optional[str]:
@@ -686,7 +727,7 @@ def _sentinel_answer(text: str) -> Optional[str]:
         obj = None
     if isinstance(obj, dict) and obj.get('type') == 'final':
         return _final_text(obj.get('content', ''))
-    if not (_looks_like_envelope(text) and _first_named_kind(text) == 'final'):
+    if not (_looks_like_envelope(text) and _attempted_kind(text) == 'final'):
         return text
     if isinstance(_extract_first_json_object(text), dict):
         return text
@@ -753,8 +794,16 @@ def _envelope_before(raw: str, at: int) -> str:
 
 
 def _reads_sentinel(text: str, marker: Any) -> bool:
-    """Whether the parser reads the ``FINAL>>>`` line `marker` matched as the sentinel, and not as text of a call or an answer."""
-    return not _attempted_tool_call(text[: marker.start()]) and _envelope_before(text, marker.start()) == 'closed'
+    """
+    Whether the parser reads the ``FINAL>>>`` line `marker` matched as the sentinel.
+
+    It does not after a tool call, a broken one and one that lost its ``"type"`` included: the line
+    is a claim about work that has not run. Nor inside an envelope that is still open, where the
+    line is the answer's own text.
+    """
+    if _attempted_tool_call(text[: marker.start()]):
+        return False
+    return _envelope_before(text, marker.start()) == 'closed'
 
 
 def _parse_tool_call_envelope(raw: Any) -> Any:
@@ -776,7 +825,8 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
     after it. The model stacked an answer about the result onto the call that
     was to produce it, and taking the sentinel would drop the work and deliver
     the claim. The first object counts, as it does when a JSON `final` is
-    stacked onto a call, and whether or not prose comes before the call.
+    stacked onto a call, and whether or not prose comes before the call. A call
+    that lost its ``"type"`` does not run, and its claim is not delivered either.
 
     Nor is a ``FINAL>>>`` line inside the content of a `final` envelope that is
     still open there: it is the answer's own text. When a broken envelope may or
@@ -857,10 +907,10 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
         return f'ended at {_FINAL_SENTINEL} with no answer after it.', '', f'Write the answer after {_FINAL_SENTINEL}.'
 
     attempted = _attempted_kind(text)
-    wanted_a_tool_call = attempted in ('tool_call', 'tool_calls')
+    wanted_a_tool_call = _attempted_tool_call(text)
     # Diagnose the JSON itself: without its fence, and from its opening brace when prose came first.
     candidate = _without_fence(text)
-    if attempted and not candidate.startswith('{') and '{' in candidate:
+    if (attempted or wanted_a_tool_call) and not candidate.startswith('{') and '{' in candidate:
         candidate = candidate[candidate.find('{') :]
     try:
         json.loads(candidate)
@@ -915,12 +965,6 @@ def _parse_failure_hint(raw: Any) -> str:
     """
     problem, excerpt, remedy = _diagnose(raw)
     return f'Your last output {problem}{excerpt} {remedy}'.strip()
-
-
-def _tool_call_without_type(raw: str) -> bool:
-    """Whether the reply's first JSON object has a tool call's members, a name and its arguments, and no ``"type"``."""
-    obj = _extract_first_json_object(raw)
-    return isinstance(obj, dict) and 'type' not in obj and isinstance(obj.get('name'), str) and 'args' in obj
 
 
 def _run_model_turn(ask: Callable[[str], Any]) -> Any:

@@ -118,13 +118,14 @@ and without the parallel `tool_calls` form:
   follows the marker is a `final` envelope, its content is the answer, and one
   that was cut off there is retried.
 - A tool call with a `FINAL>>>` line stacked after it is run as the tool call:
-  the line is a claim about work not yet done.
+  the line is a claim about work not yet done. A tool call that lost its `type`
+  does not run, and the line stacked after it is not delivered either.
 - A `FINAL>>>` line after a broken `final` envelope that may or may not have
   closed before it is not read either way: the reply is retried.
 
 A reply that is neither a tool call nor an answer is retried twice, each time
-with a hint that says what was wrong and how to send it: a broken tool call is
-asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
+with a hint that says what was wrong and how to send it: a broken tool call, or
+one that lost its `type`, is asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
 JSON object (it may be an answer, or a tool call that lost its `type`) either
 way. After the third reply, prose with no envelope is delivered as the answer.
 An empty reply, a `FINAL>>>` with nothing after it, a JSON object that is
