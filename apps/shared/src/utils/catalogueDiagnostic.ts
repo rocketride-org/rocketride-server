@@ -38,6 +38,10 @@ export type CataloguePayload = {
 /** What the output channel should say about one catalogue update. */
 export type CatalogueDiagnostic = {
 	level: 'error' | 'warning';
+	/** What is wrong and how to find out more, in words that hold in every
+	 *  host (the canvas gate shows this). */
+	cause: string;
+	/** The output-channel line: the cause and what the extension does about it. */
 	message: string;
 };
 
@@ -67,12 +71,14 @@ export function catalogueDiagnostic(payload: CataloguePayload): CatalogueDiagnos
 	if (payload.servicesError) {
 		return {
 			level: 'error',
+			cause: `Node catalogue unavailable: ${payload.servicesError}.`,
 			message: `Node catalogue unavailable: ${payload.servicesError}. The node palette stays empty and .rocketride/services-catalog.json is not written until this is resolved.`,
 		};
 	}
 	if (!payload.services || Object.keys(payload.services).length === 0) {
 		return {
 			level: 'warning',
+			cause: 'Node catalogue is empty: the engine returned zero services. One malformed node definition empties the whole catalogue. Restart the engine with --trace=Services to see which.',
 			message: 'Node catalogue is empty: the engine returned zero services, so .rocketride/services-catalog.json is not written. One malformed node definition empties the whole catalogue. Restart the engine with --trace=Services to see which.',
 		};
 	}

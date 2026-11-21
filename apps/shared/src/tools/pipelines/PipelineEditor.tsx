@@ -31,9 +31,11 @@ import { DeveloperIdBanner } from './components/DeveloperIdBanner';
 import type { NewPipelineIdentity } from './components/NewPipelineForm';
 import { INITIAL_CONVERT_STATE, applyConvertResult, currentBanner, documentSig, gearMessages, markAttempted, shouldConvert } from './convertOnOpen';
 import type { IConvertOnOpenState, IConversionBanner } from './convertOnOpen';
+import { catalogGate } from './catalogGate';
+import type { CataloguePayload } from '../../utils/catalogueDiagnostic';
 
 import type { IProject } from 'shell';
-import { createMirroredPrefsStore, ConnectionManager, PrefsProvider, useAuthUser } from 'shell';
+import { createMirroredPrefsStore, ConnectionManager, ConnectionState, PrefsProvider, useAuthUser, useConnectionStatus } from 'shell';
 import ProjectView from './ProjectView';
 import type { IAssetsHost } from '../../components/assets';
 import { parseServerEvent, isDevLiveEvent, isTeamLiveEvent } from './hostEvents';
@@ -86,6 +88,11 @@ export interface IPipelineEditorHost {
 	/** Document display name for the page header (shell hosts; VS Code omits
 	 *  it — its editor tab already names the document). */
 	documentTitle?: string;
+	/** The document's file name without its `.pipe` extension (`docBrain` for
+	 *  `pipelines/docBrain/docBrain.pipe`): convert-on-open names a nameless
+	 *  pipeline after it (plan §5.6.8). A display stem, never an id; omitted
+	 *  where the document is no file (the live-task viewer). */
+	fileStem?: string;
 	/** Whether the document has unsaved changes. */
 	isDirty: boolean;
 	/** Whether the document has never been saved. */
@@ -259,6 +266,9 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	// --- Framework state off the bus (mirrors + retained topics) --------------
 
 	const [servicesJson, setServicesJson] = useState<Record<string, any>>({});
+	// The last catalog reply (null until one arrives): what the canvas gate
+	// says while no catalog is held. servicesJson keeps the last GOOD catalog.
+	const [catalogue, setCatalogue] = useState<CataloguePayload | null>(null);
 	const [isConnected, setIsConnected] = useState(false);
 	const [serverHost, setServerHost] = useState('');
 	const [statusMap, setStatusMap] = useState<Record<string, TaskStatus>>({});
@@ -285,20 +295,44 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 			const url = cm.getHttpUrl();
 			if (url) setServerHost(url);
 		};
-		const applyServices = (payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | null): void => {
+		const applyServices = (payload: { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | null, cacheRead = false): void => {
+			// The gate's reply. A cache read that is empty and carries no error is
+			// a fetch still in flight, not an answer.
+			if (payload && (!cacheRead || payload.servicesError || Object.keys(payload.services ?? {}).length > 0)) {
+				setCatalogue({ services: payload.services ?? {}, ...(payload.servicesError ? { servicesError: payload.servicesError } : {}) });
+			}
 			if (!payload?.services || payload.servicesError) return;
 			if (Object.keys(payload.services).length === 0) return;
 			registerServiceIcons({ services: payload.services as Record<string, { icon?: string }>, icons: payload.icons ?? {} });
 			setServicesJson(payload.services as Record<string, any>);
 		};
 		applyConnection();
-		applyServices(cm.getCachedServices() as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | null);
+		applyServices(cm.getCachedServices() as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string } | null, true);
 		const offs = [
 			cm.on('shell:statusChange', applyConnection),
 			cm.on('shell:servicesUpdated', (payload) => applyServices(payload as { services: Record<string, unknown>; icons?: Record<string, string>; servicesError?: string })),
 		];
 		return () => offs.forEach((off) => off());
 	}, []);
+
+	// --- The canvas gate -------------------------------------------------------
+	// Until a catalog is held the DESIGN view says why instead of drawing a
+	// canvas with no lanes, palette or forms (catalogGate decides).
+	const connectionStatus = useConnectionStatus();
+	const canvasGate = useMemo(
+		() =>
+			catalogGate(
+				Object.keys(servicesJson).length,
+				{
+					connected: isConnected,
+					connecting: connectionStatus.state === ConnectionState.CONNECTING,
+					hasCredentials: connectionStatus.hasCredentials,
+					...(connectionStatus.lastFailure ? { failure: { kind: connectionStatus.lastFailure.kind, ...(connectionStatus.lastFailure.lastError ? { lastError: connectionStatus.lastFailure.lastError } : {}) } } : {}),
+				},
+				catalogue
+			),
+		[servicesJson, isConnected, connectionStatus, catalogue]
+	);
 
 	// --- Env-variable keys (the config widgets' ${...} autocomplete) ----------
 	// Always fetched from the realm client on connect; the host's feed pushes
@@ -528,8 +562,11 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 		// the same text twice; a failed call is not retried until the text changes.
 		convertStateRef.current = markAttempted(convertStateRef.current, docSig);
 		const sent = current as Record<string, unknown>;
+		// A nameless pipeline is named after its file, never after a GUID id; an
+		// untitled document has no file name of its own yet.
+		const nameHint = host.isNew ? undefined : host.fileStem;
 		void client
-			.convert({ pipeline: sent })
+			.convert({ pipeline: sent, ...(nameHint ? { nameHint } : {}) })
 			.then((result) => {
 				// The frame unmounted: nobody holds the document any more.
 				if (!mountedRef.current) return;
@@ -826,6 +863,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 				project={project}
 				{...(host.documentTitle !== undefined ? { documentTitle: host.documentTitle } : {})}
 				servicesJson={servicesJson}
+				canvasGate={canvasGate}
 				isConnected={isConnected}
 				{...(host.cloudConnectionConfigured !== undefined ? { cloudConnectionConfigured: host.cloudConnectionConfigured } : {})}
 				isSubscribed={host.isSubscribed}

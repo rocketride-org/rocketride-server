@@ -583,9 +583,14 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		[besideDoc]
 	);
 
+	// The file name without `.pipe`: convert-on-open names a nameless
+	// pipeline after it (plan §5.6.8).
+	const fileStem = useMemo(() => pipeStemOf(filename) ?? undefined, [filename]);
+
 	const editorHost = useMemo<IPipelineEditorHost>(
 		() => ({
 			documentTitle,
+			...(fileStem ? { fileStem } : {}),
 			isDirty,
 			isNew,
 			isReadonly,
@@ -616,7 +621,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 			openFile: handleOpenFile,
 			exportDocument: handleExport,
 		}),
-		[documentTitle, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleOpenTool, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleReadFile, handleReadImageDataUri, handleWriteFile, handleOpenFile, handleExport]
+		[documentTitle, fileStem, isDirty, isNew, isReadonly, initialViewState, onViewStateChangeProp, onContentChanged, handleSave, performSave, filename, pipeline, handlePublish, runAction, isSubscribed, promptSubscribe, handleOpenLink, handleOpenTool, handleCreateEndpointKey, handleRegisterDeveloper, handleNewPipelineIdentity, handleCreatePipeline, handleCancelNew, handleReadFile, handleReadImageDataUri, handleWriteFile, handleOpenFile, handleExport]
 	);
 
 	// --- Render --------------------------------------------------------------
