@@ -33,11 +33,11 @@ def _attempt(instance):
     """Take and give back one request's slot; forward what happened on the text lane."""
     limiter = instance._limiter()
     try:
-        limiter.acquire()
+        slot = limiter.acquire()
     except Exception as e:  # noqa: BLE001 - each replica imports its own RateLimitError class
         instance.instance.writeText(type(e).__name__)
         return
-    limiter.release()
+    limiter.release(slot)
     instance.instance.writeText('ok')
 
 

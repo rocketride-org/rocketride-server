@@ -12,12 +12,15 @@ resolve without the engine runtime.
 
 from __future__ import annotations
 
+import itertools
 import sys
 import types
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock
+
+import pytest
 
 _NODE_DIR = Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_gcs'
 
@@ -81,8 +84,16 @@ def _scoped_stubs() -> Iterator[None]:
 
 
 with _scoped_stubs():
+    import tool_gcs.IInstance as instance_module  # noqa: E402
     from tool_gcs.IGlobal import IGlobal  # noqa: E402
     from tool_gcs.IInstance import IInstance, download_path, join_gcs_prefix  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def download_ids(monkeypatch):
+    """Number the downloads 0001, 0002, ... instead of drawing random ids."""
+    ids = itertools.count(1)
+    monkeypatch.setattr(instance_module, 'secrets', types.SimpleNamespace(token_hex=lambda n: f'{next(ids):04d}'))
 
 
 def test_join_gcs_prefix_empty():
@@ -219,17 +230,69 @@ def test_download_file_success_and_replaces_previous():
     inst, _client, bucket = _make_instance(prefix='data', max_download_bytes=100, blob=_blob(b'data'))
 
     first = inst.download_file({'file_name': 'a.txt'})
-    assert first == {'success': True, 'path': 'gcs/data/a.txt', 'size': 4}
+    assert first == {'success': True, 'path': 'gcs/data/0001-a.txt', 'size': 4}
     bucket.blob.assert_called_with('data/a.txt')
-    assert inst.files.stored == {'gcs/data/a.txt': b'data'}
+    assert inst.files.stored == {'gcs/data/0001-a.txt': b'data'}
 
     second = inst.download_file({'file_name': 'b.txt'})
-    assert second == {'success': True, 'path': 'gcs/data/b.txt', 'size': 4}
-    assert inst.files.stored == {'gcs/data/b.txt': b'data'}
-    assert inst.state.get('last_download') == 'gcs/data/b.txt'
+    assert second == {'success': True, 'path': 'gcs/data/0002-b.txt', 'size': 4}
+    assert inst.files.stored == {'gcs/data/0002-b.txt': b'data'}
+    assert inst.state.get('last_download') == 'gcs/data/0002-b.txt'
 
 
 def test_download_path_keeps_the_object_path_inside_the_download_root():
-    assert download_path('data/a.txt') == 'gcs/data/a.txt'
-    assert download_path('../../etc/passwd') == 'gcs/etc/passwd'
-    assert download_path('') == 'gcs/object'
+    assert download_path('data/a.txt', '0001') == 'gcs/data/0001-a.txt'
+    assert download_path('../../etc/passwd', '0001') == 'gcs/etc/0001-passwd'
+    assert download_path('', '0001') == 'gcs/0001-object'
+
+
+def test_two_nodes_of_one_owner_never_delete_each_others_downloads():
+    # One owner's file store, two tool_gcs nodes (each with its own state)
+    # downloading an object of the same name
+    first, _client, _bucket = _make_instance(prefix='', blob=_blob(b'data'))
+    second, _client, _bucket = _make_instance(prefix='', blob=_blob(b'data'))
+    second.files = first.files
+    first.download_file({'file_name': 'a.txt'})
+    second.download_file({'file_name': 'a.txt'})
+    first.download_file({'file_name': 'b.txt'})
+    # The first node's next download replaced its own file only
+    assert second.state.get('last_download') == 'gcs/0002-a.txt'
+    assert first.files.stored == {'gcs/0002-a.txt': b'data', 'gcs/0003-b.txt': b'data'}
+
+
+def test_a_concurrent_download_never_leaves_the_record_on_a_deleted_file():
+    # The record names a.txt. One call downloads a.txt again; while its bytes
+    # are being written, another call of the node downloads b.txt and finishes
+    # first, deleting the previous download. The record must name a file that
+    # exists, and the first call's own file must not be the one deleted.
+    rewrite, _client, _bucket = _make_instance(prefix='', blob=_blob(b'data'))
+    other, _client, _bucket = _make_instance(prefix='', blob=_blob(b'data'))
+    other.files, other.state = rewrite.files, rewrite.state
+    rewrite.download_file({'file_name': 'a.txt'})
+
+    files = rewrite.files
+    write = files.write
+    interleaved = []
+
+    def write_then_let_the_other_call_finish(path, data):
+        write(path, data)
+        if not interleaved:
+            interleaved.append(None)
+            interleaved[0] = other.download_file({'file_name': 'b.txt'})
+
+    files.write = write_then_let_the_other_call_finish
+    assert rewrite.download_file({'file_name': 'a.txt'}) == {'success': True, 'path': 'gcs/0002-a.txt', 'size': 4}
+    assert interleaved[0] == {'success': True, 'path': 'gcs/0003-b.txt', 'size': 4}
+    assert rewrite.state.get('last_download') == 'gcs/0002-a.txt'
+    assert files.stored == {'gcs/0002-a.txt': b'data'}
+
+
+def test_a_download_whose_record_fails_leaves_no_file():
+    inst, _client, _bucket = _make_instance(prefix='', blob=_blob(b'data'))
+
+    def refuse(key, value, ttl=None):
+        raise RuntimeError('state.put refused')
+
+    inst.state.put = refuse
+    assert 'refused' in inst.download_file({'file_name': 'a.txt'})['error']
+    assert inst.files.stored == {}

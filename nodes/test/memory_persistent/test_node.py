@@ -31,9 +31,12 @@ from nodes.memory_persistent.memory_store import (
     StateBackend,
     PersistentMemoryStore,
     RedisBackend,
+    _session_key,
     _validate_key,
     _validate_session_id,
 )
+
+from test.mocks.redis_fake import FakeRedis
 
 from ..framework.controls import control_config
 
@@ -781,6 +784,55 @@ class TestStateBounds:
             backend.create_session(f's{i}')
         assert backend.delete_session('s0')['ok'] is True
         assert backend.create_session('again')['ok'] is True
+
+    def test_a_session_whose_record_expired_is_not_listed(self, state):
+        # A session with no ttl is indexed with no expiry, and its record lives
+        # a little less than the index: once the record's ttl runs out (the
+        # state store drops it), the session is gone everywhere, the listing included
+        backend = StateBackend(state)
+        backend.create_session('kept')
+        backend.create_session('lapsed')
+        state.delete(_session_key('lapsed'))
+        assert backend.resume_session('lapsed')['ok'] is False
+        assert backend.list_sessions() == ['kept']
+
+
+# =============================================================================
+# 12b. Redis: one namespace per owner (plan 12 B)
+# =============================================================================
+
+
+class TestRedisNamespace:
+    """One pool, one view per owner namespace: a namespace's keys never meet another's."""
+
+    @staticmethod
+    def _pool() -> RedisBackend:
+        """One control's pool over a fake Redis client."""
+        fake_redis_module = MagicMock()
+        fake_redis_module.Redis.return_value = FakeRedis()
+        with patch.dict(sys.modules, {'redis': fake_redis_module}):
+            return RedisBackend(host='fake', port=0)
+
+    def test_a_view_shares_the_pool_and_keys_inside_its_namespace(self):
+        pool = self._pool()
+        view = pool.for_namespace('ns:1@x')
+        assert view._client is pool._client and view._lock is pool._lock
+        view.create_session('s1')
+        view.put('s1', 'k', 'v')
+        assert view._meta_key('s1') == 'rr:memory:@ns%3A1%40x:s1:__meta__'
+        assert view.list_sessions() == ['s1']
+
+        # Another namespace on the same pool sees none of it
+        other = pool.for_namespace('ns-2')
+        assert other.list_sessions() == []
+        assert other.resume_session('s1')['ok'] is False
+        assert other.create_session('s1')['ok'] is True
+        assert other.get('s1', 'k')['ok'] is False
+        assert view.get('s1', 'k')['value'] == 'v'
+
+    def test_a_view_needs_a_namespace(self):
+        with pytest.raises(ValueError, match='namespace is required'):
+            self._pool().for_namespace('')
 
 
 # =============================================================================

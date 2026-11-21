@@ -31,11 +31,16 @@ The bucket, the object prefix and the download cap are this call's
 (``self.files``), not to the engine host's disk, so whichever replica serves
 the next call, and the filesystem tool, can read it. Only the most recent
 download is kept: its path is the node's state, and a new download deletes
-it from any replica.
+it from any replica. The owner's file store is shared by every node of every
+pipeline the owner runs, so every download gets a path of its own: no download
+overwrites another's file, and a node deleting its previous download never
+reaches a file another node or another call still names.
 """
 
 from __future__ import annotations
 
+import contextlib
+import secrets
 from typing import Any
 
 from rocketlib import IInstanceBase, tool_function, warning
@@ -69,18 +74,21 @@ def _as_dict(args: Any) -> dict:
     return args if isinstance(args, dict) else {}
 
 
-def download_path(object_name: str) -> str:
+def download_path(object_name: str, download_id: str) -> str:
     """
-    The file-store path a downloaded object lands at.
+    The file-store path one download of an object lands at.
 
     Args:
         object_name: The object's full name in the bucket (prefix included).
+        download_id: This download's id, which leads the file name.
 
     Returns:
-        A relative path under ``gcs/`` that keeps the object's own path.
+        A relative path under ``gcs/`` that keeps the object's folders, its
+        file name led by the download's id (``gcs/data/<id>-a.txt``).
     """
     parts = [part for part in object_name.replace('\\', '/').split('/') if part not in ('', '.', '..')]
-    return '/'.join([DOWNLOAD_ROOT, *parts]) if parts else f'{DOWNLOAD_ROOT}/object'
+    *folders, name = parts or ['object']
+    return '/'.join([DOWNLOAD_ROOT, *folders, f'{download_id}-{name}'])
 
 
 class IInstance(IInstanceBase):
@@ -93,16 +101,41 @@ class IInstance(IInstanceBase):
         settings = self.settings
         return str(settings.bucketName or '').strip(), str(settings.prefix or '').strip()
 
-    def _replace_last_download(self, path: str) -> None:
-        """Record ``path`` as the most recent download and delete the one it replaces."""
-        with self.state.lock(LAST_DOWNLOAD_KEY):
-            previous = self.state.get(LAST_DOWNLOAD_KEY)
-            self.state.put(LAST_DOWNLOAD_KEY, path)
+    def _publish_download(self, data: bytes, object_name: str) -> str:
+        """
+        Store ``data`` as the node's most recent download and delete the one it replaces.
+
+        The path is this download's own, so the write needs no lock (a write
+        of up to ``maxDownloadBytes`` would outlast the lock's lease and the
+        other callers' wait), and a concurrent download can neither overwrite
+        it nor delete it before it is recorded: a path is recorded once, and
+        only the download that replaces that record deletes it. The record is
+        read and written under the state lock.
+
+        Args:
+            data: The object's bytes.
+            object_name: The object's full name in the bucket.
+
+        Returns:
+            The download's path in the owner's file store.
+        """
+        path = download_path(object_name, secrets.token_hex(8))
+        self.files.write(path, data)
+        try:
+            with self.state.lock(LAST_DOWNLOAD_KEY):
+                previous = self.state.get(LAST_DOWNLOAD_KEY)
+                self.state.put(LAST_DOWNLOAD_KEY, path)
+        except BaseException:
+            # Never recorded, so nothing would ever delete it
+            with contextlib.suppress(Exception):
+                self.files.delete(path)
+            raise
         if previous and previous != path:
             try:
                 self.files.delete(previous)
             except Exception as e:
                 warning(f'tool_gcs: failed to remove the previous download {previous}: {e}')
+        return path
 
     @staticmethod
     def _read_capped(blob: Any, max_bytes: int) -> bytes | None:
@@ -176,9 +209,7 @@ class IInstance(IInstanceBase):
                     )
                 }
 
-            path = download_path(file_name)
-            self.files.write(path, data)
-            self._replace_last_download(path)
+            path = self._publish_download(data, file_name)
             return {'success': True, 'path': path, 'size': len(data)}
         except Exception as e:
             return {'error': f'Failed to download file: {e}'}

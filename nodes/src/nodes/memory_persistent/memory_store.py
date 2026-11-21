@@ -22,6 +22,7 @@ import threading
 import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
+from urllib.parse import quote
 
 from ai.constants import CONST_STATE_MAX_TTL_SECONDS
 from rocketlib import warning
@@ -284,7 +285,10 @@ class StateBackend(MemoryBackend):
         return self._missing(session_id)
 
     def list_sessions(self) -> List[str]:
-        return sorted(self._index())
+        # A session with no expiry is listed with None and its record lives a
+        # little less than the index: a listed id whose record is gone is no
+        # session, as create_session and resume_session already treat it
+        return sorted(sid for sid in self._index() if self._record(sid) is not None)
 
     def delete_session(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
@@ -386,19 +390,28 @@ class StateBackend(MemoryBackend):
 # Redis backend
 # ---------------------------------------------------------------------------
 
+#: The prefix of every key the Redis backend writes.
 _REDIS_PREFIX = 'rr:memory'
-_REDIS_SESSIONS_KEY = f'{_REDIS_PREFIX}:__sessions__'
 
 
 class RedisBackend(MemoryBackend):
     """Redis-backed persistent memory store.
 
-    Key layout:
-        rr:memory:{session_id}:{key}   — stored values (JSON-serialized)
-        rr:memory:{session_id}:__keys__  — set of keys in session
-        rr:memory:{session_id}:__history__ — list of history entries
-        rr:memory:{session_id}:__meta__   — hash with session metadata
-        rr:memory:__sessions__            — set of all session IDs
+    The control holds one connection pool; each call reaches it through
+    ``for_namespace``, a view whose every key lies in the owner's namespace,
+    so two owners whose controls point at one Redis and name one session id
+    never read or overwrite each other's session (plan 12 B). The namespace
+    is the owner's opaque id (the instance keeps it in the owner's files),
+    never a caller identity.
+
+    Key layout, ``{ns}`` being ``rr:memory:@{namespace}`` for a namespace's
+    view (the namespace percent-escaped) and ``rr:memory`` for the pool itself
+    (a session id never starts with ``@``, so the two never meet):
+        {ns}:{session_id}:{key}        — stored values (JSON-serialized)
+        {ns}:{session_id}:__keys__     — set of keys in session
+        {ns}:{session_id}:__history__  — list of history entries
+        {ns}:{session_id}:__meta__     — hash with session metadata
+        {ns}:__sessions__              — set of the namespace's session IDs
     """
 
     def __init__(
@@ -415,26 +428,51 @@ class RedisBackend(MemoryBackend):
             **kwargs,
         )
         self._lock = threading.Lock()
+        self._prefix = _REDIS_PREFIX
+
+    def for_namespace(self, namespace: str) -> RedisBackend:
+        """
+        This pool's view of one owner's sessions.
+
+        Args:
+            namespace: The owner's namespace id (non-empty).
+
+        Returns:
+            A backend sharing this connection pool and its lock whose every key
+            lies in the namespace. It is never closed: the pool is the control's.
+
+        Raises:
+            ValueError: ``namespace`` is empty.
+        """
+        if not namespace:
+            raise ValueError('memory_persistent: a Redis namespace is required')
+        view = copy.copy(self)
+        view._prefix = f'{_REDIS_PREFIX}:@{quote(namespace, safe="")}'
+        return view
+
+    @property
+    def _sessions_key(self) -> str:
+        return f'{self._prefix}:__sessions__'
 
     def _data_key(self, session_id: str, key: str) -> str:
-        return f'{_REDIS_PREFIX}:{session_id}:{key}'
+        return f'{self._prefix}:{session_id}:{key}'
 
     def _keys_key(self, session_id: str) -> str:
-        return f'{_REDIS_PREFIX}:{session_id}:__keys__'
+        return f'{self._prefix}:{session_id}:__keys__'
 
     def _history_key(self, session_id: str) -> str:
-        return f'{_REDIS_PREFIX}:{session_id}:__history__'
+        return f'{self._prefix}:{session_id}:__history__'
 
     def _meta_key(self, session_id: str) -> str:
-        return f'{_REDIS_PREFIX}:{session_id}:__meta__'
+        return f'{self._prefix}:{session_id}:__meta__'
 
     def _require_live_session(self, session_id: str) -> tuple[Optional[Dict[str, Any]], Optional[int]]:
         """Return an error and TTL for a missing or expired session."""
-        if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+        if not self._client.sismember(self._sessions_key, session_id):
             return {'ok': False, 'error': f'Session {session_id!r} not found'}, None
         remaining_ms = self._client.pttl(self._meta_key(session_id))
         if remaining_ms == -2:
-            self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+            self._client.srem(self._sessions_key, session_id)
             return {'ok': False, 'error': f'Session {session_id!r} has expired'}, None
         return None, remaining_ms
 
@@ -464,15 +502,15 @@ class RedisBackend(MemoryBackend):
     def create_session(self, session_id: str, ttl_seconds: Optional[float] = None) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+            if self._client.sismember(self._sessions_key, session_id):
                 remaining_ms = self._client.pttl(self._meta_key(session_id))
                 if remaining_ms == -2:
-                    self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                    self._client.srem(self._sessions_key, session_id)
                 else:
                     return {'ok': False, 'error': f'Session {session_id!r} already exists'}
             now = time.time()
             pipe = self._client.pipeline()
-            pipe.sadd(_REDIS_SESSIONS_KEY, session_id)
+            pipe.sadd(self._sessions_key, session_id)
             pipe.hset(
                 self._meta_key(session_id),
                 mapping={
@@ -488,32 +526,32 @@ class RedisBackend(MemoryBackend):
     def resume_session(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+            if not self._client.sismember(self._sessions_key, session_id):
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             # Check if meta key still exists (TTL may have expired it)
             if not self._client.exists(self._meta_key(session_id)):
                 # Clean up stale session reference
-                self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                self._client.srem(self._sessions_key, session_id)
                 return {'ok': False, 'error': f'Session {session_id!r} has expired'}
             key_count = self._client.scard(self._keys_key(session_id))
             return {'ok': True, 'session_id': session_id, 'key_count': key_count}
 
     def list_sessions(self) -> List[str]:
         with self._lock:
-            members = self._client.smembers(_REDIS_SESSIONS_KEY)
+            members = self._client.smembers(self._sessions_key)
             # Prune sessions whose metadata has expired. Use list
             # comprehensions (bulk growth) instead of per-iteration appends.
             liveness = [(sid, bool(self._client.exists(self._meta_key(sid)))) for sid in members]
             active = [sid for sid, alive in liveness if alive]
             stale = [sid for sid, alive in liveness if not alive]
             if stale:
-                self._client.srem(_REDIS_SESSIONS_KEY, *stale)
+                self._client.srem(self._sessions_key, *stale)
             return sorted(active)
 
     def delete_session(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+            if not self._client.sismember(self._sessions_key, session_id):
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             # Gather all data keys
             members = self._client.smembers(self._keys_key(session_id))
@@ -526,7 +564,7 @@ class RedisBackend(MemoryBackend):
             pipe = self._client.pipeline()
             for k in keys_to_delete:
                 pipe.delete(k)
-            pipe.srem(_REDIS_SESSIONS_KEY, session_id)
+            pipe.srem(self._sessions_key, session_id)
             pipe.execute()
             return {'ok': True, 'session_id': session_id, 'keys_cleared': sorted(members)}
 
@@ -534,14 +572,14 @@ class RedisBackend(MemoryBackend):
         _validate_session_id(session_id)
         _validate_key(key)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+            if not self._client.sismember(self._sessions_key, session_id):
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             # Guard against reviving an expired session whose meta key has
             # already been evicted by Redis TTL but whose session ID is still
             # in the global sessions set.
             remaining_ms = self._client.pttl(self._meta_key(session_id))
             if remaining_ms == -2:
-                self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                self._client.srem(self._sessions_key, session_id)
                 return {'ok': False, 'error': f'Session {session_id!r} has expired'}
             serialized = json.dumps(value)
             pipe = self._client.pipeline()
@@ -656,11 +694,11 @@ class RedisBackend(MemoryBackend):
         _validate_session_id(session_id)
         _validate_key(key)
         with self._lock:
-            if not self._client.sismember(_REDIS_SESSIONS_KEY, session_id):
+            if not self._client.sismember(self._sessions_key, session_id):
                 return {'ok': False, 'error': f'Session {session_id!r} not found'}
             remaining_ms = self._client.pttl(self._meta_key(session_id))
             if remaining_ms == -2:
-                self._client.srem(_REDIS_SESSIONS_KEY, session_id)
+                self._client.srem(self._sessions_key, session_id)
                 return {'ok': False, 'error': f'Session {session_id!r} has expired'}
             # Use native Redis INCRBY for atomic increment
             data_key = self._data_key(session_id, key)

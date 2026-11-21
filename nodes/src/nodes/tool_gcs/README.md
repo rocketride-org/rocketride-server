@@ -40,7 +40,9 @@ is an error string rather than raising.
 `download_file` requires `file_name`, the object's name or path inside the
 bucket, which is likewise resolved beneath the configured **Path Prefix**. On
 success it returns `success`, `path` (the file's path in the owner's file store,
-under `gcs/`, readable with the filesystem tool), and `size` in bytes. Every failure — client not connected, bucket not
+under `gcs/` with the object's folders and its file name led by the download's
+id, such as `gcs/reports/3f9c2a1b7d4e6f80-q1.csv`, readable with the filesystem
+tool), and `size` in bytes. Every failure — client not connected, bucket not
 configured, object over the size cap, or any GCS error — comes back as a
 dictionary with a single `error` key, so an agent should check for `error`
 before reading `path`.
@@ -48,16 +50,19 @@ before reading `path`.
 Only the most recent download is retained: its path is the node's state, and a
 new download (on whichever engine replica serves it) deletes the previous file.
 An agent that needs a downloaded file must consume it before requesting the
-next one.
+next one. Every download gets a path of its own, so two `tool_gcs` nodes of one
+owner (or two calls of one node) never overwrite or delete each other's files,
+even when they download objects of the same name.
 
 ## Configuration
 
 Set the bucket the node is allowed to touch and how it authenticates; the rest
 has working defaults. **Bucket Name** is what makes the tool functions usable —
 without it both functions return a "Bucket name not configured" error. The node
-verifies its credentials and fetches the bucket at startup, so a bad key, a
-missing bucket, or insufficient permission fails the pipeline immediately
-rather than at the agent's first call.
+builds its credentials and storage client at startup, so a malformed key fails
+the pipeline immediately. The bucket is a per-call parameter and is not checked
+at startup: a missing bucket or insufficient permission comes back as an `error`
+from the agent's first call that reaches it.
 
 ### Bucket Name
 
@@ -104,8 +109,8 @@ types are available:
 
 **Project ID** is optional in both modes. Left blank, it is taken from the
 service account key or from the ambient credentials. The identity needs
-permission to read the configured bucket and to list its objects; the startup
-bucket check will fail otherwise.
+permission to read the configured bucket and to list its objects; without it,
+each tool call returns an `error`.
 
 ## Limitations
 

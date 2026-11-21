@@ -74,18 +74,21 @@ class Chat(ChatBase):
             )
         return f'Ollama Vision error: {error_msg}'
 
-    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+    def chat(self, question: Question) -> Answer:
         """Send a vision request to Ollama and get the response.
 
         Args:
             question: The call's question: its first question is the prompt (the call's
                 ``settings.prompt``), its context carries the image.
-            system_prompt: The call's system prompt (``settings.systemPrompt``); empty for none.
 
         Returns:
             The model's answer.
         """
         from langchain_core.messages import HumanMessage, SystemMessage
+
+        # The call's system prompt: every path into this chat (the lanes, ``ask``,
+        # ``writeQuestions``) runs under ``calling``, so the call carries it
+        system_prompt = self.call.settings.get('systemPrompt') or ''
 
         # Extract image data URL from context
         image_data = None

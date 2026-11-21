@@ -37,6 +37,7 @@ per-call params. Google Cloud Storage is a stand-in: nothing reaches Google.
 from __future__ import annotations
 
 import io
+import re
 import sys
 from types import ModuleType, SimpleNamespace
 
@@ -125,11 +126,21 @@ def stand_in_gcs(monkeypatch):
 # ==== Calls =========================================================================
 
 
+#: A download's id, which leads its file name (random, so each run draws others).
+DOWNLOAD_ID = re.compile(r'\b[0-9a-f]{16}-')
+
+
+def _unnumbered(text: str) -> str:
+    """``text`` with every download id written ``<id>-``, so two runs compare equal."""
+    return DOWNLOAD_ID.sub('<id>-', text)
+
+
 def _download(owner, name, **params):
     """One call downloading one object; forwards the tool's answer."""
 
     def invoke(instance):
-        instance.instance.writeText(repr(sorted(instance.download_file({'file_name': name}).items())))
+        answer = instance.download_file({'file_name': name})
+        instance.instance.writeText(_unnumbered(repr(sorted(answer.items()))))
 
     return Call(owner=owner, params=params, invoke=invoke)
 
@@ -140,7 +151,7 @@ def _listing(owner):
     def invoke(instance):
         entries = instance.files.list_dir('gcs').get('entries', [])
         files = {entry['name']: instance.files.read(f'gcs/{entry["name"]}') for entry in entries}
-        instance.instance.writeText(repr(sorted(files.items())))
+        instance.instance.writeText(_unnumbered(repr(sorted(files.items()))))
 
     return Call(owner=owner, invoke=invoke)
 
@@ -175,10 +186,25 @@ def test_a_download_lands_in_the_owners_files_and_replaces_the_previous_one():
     alternating, reference = _run(calls)
     assert alternating == reference
     texts = _texts(reference)
-    assert texts[0] == repr([('path', 'gcs/a.txt'), ('size', 5), ('success', True)])
-    assert texts[1] == repr([('a.txt', b'alpha')])
-    # The second download, on the other replica, deleted the first
-    assert texts[3] == repr([('b.txt', b'bravo')])
+    assert texts[0] == repr([('path', 'gcs/<id>-a.txt'), ('size', 5), ('success', True)])
+    # The download is read back on the other replica
+    assert texts[1] == repr([('<id>-a.txt', b'alpha')])
+    assert texts[3] == repr([('<id>-b.txt', b'bravo')])
+
+
+def test_a_download_on_one_replica_replaces_the_one_made_on_the_other():
+    # Calls 0 and 1 run on different replicas: the second download deletes the first
+    calls = [_download(ALICE, 'a.txt'), _download(ALICE, 'b.txt'), _listing(ALICE)]
+    alternating, reference = _run(calls)
+    assert alternating == reference
+    assert _texts(reference)[2] == repr([('<id>-b.txt', b'bravo')])
+
+
+def test_a_second_download_of_one_object_replaces_the_first():
+    calls = [_download(ALICE, 'a.txt'), _download(ALICE, 'a.txt'), _listing(ALICE)]
+    alternating, reference = _run(calls)
+    assert alternating == reference
+    assert _texts(reference)[2] == repr([('<id>-a.txt', b'alpha')])
 
 
 def test_the_bucket_and_the_cap_are_each_calls_own():
@@ -191,12 +217,12 @@ def test_the_bucket_and_the_cap_are_each_calls_own():
     assert alternating == reference
     texts = _texts(reference)
     assert 'exceeds' in texts[0] and 'maxDownloadBytes (10)' in texts[0]
-    assert texts[2] == repr([('a.txt', b'other-alpha')])
+    assert texts[2] == repr([('<id>-a.txt', b'other-alpha')])
 
 
 def test_another_owners_download_never_touches_mine():
     calls = [_download(ALICE, 'a.txt'), _download(BOB, 'b.txt'), _listing(ALICE), _listing(BOB)]
     together, _ = _run(calls)
     texts = _texts(together)
-    assert texts[2] == repr([('a.txt', b'alpha')])
-    assert texts[3] == repr([('b.txt', b'bravo')])
+    assert texts[2] == repr([('<id>-a.txt', b'alpha')])
+    assert texts[3] == repr([('<id>-b.txt', b'bravo')])

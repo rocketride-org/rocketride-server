@@ -312,8 +312,10 @@ per-call parameters a caller may set and an LLM may not:
 - **Concurrency**: at most `maxConcurrentRequests` requests in flight.
 
 The windows are fixed, not sliding: a burst straddling a window boundary can reach
-twice a limit for an instant. A request refused by one limit gives back what it took
-from the others.
+twice a limit for an instant. A request refused by one limit, or stopped by a failing
+state operation, gives back what it took from the others. Each in-flight slot expires
+330 seconds after it was taken, so a slot held by an engine replica that died
+mid-request frees itself then; refused attempts do not extend it.
 
 The limiter does **not** queue or block: when a limit is hit the tool call fails
 immediately with an error telling the agent to retry after a short delay (or to wait

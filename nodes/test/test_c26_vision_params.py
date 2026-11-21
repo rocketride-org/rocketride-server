@@ -216,8 +216,10 @@ def test_detect_sends_each_call_its_own_prompt_and_threshold():
 def test_detect_refuses_a_prompt_that_names_no_class():
     glb, model = _control('detect', 'detector', DETECT_OPEN_VOCAB)
     model.backend = glb.config.engine
-    with pytest.raises(ValueError, match='requires a non-empty prompt'):
+    with pytest.raises(ValueError, match='requires a non-empty prompt') as refused:
         _call('nodes.detect.IInstance', glb, {'prompt': ' . , '}).beginInstance()
+    # A caller's override is fixed on the call, not in the UI
+    assert 'passes the prompt in its parameters' in str(refused.value)
 
 
 def test_detect_segment_sends_each_call_its_own_threshold_and_edge():
@@ -333,8 +335,9 @@ class _Chat(ChatBase):
         super().__init__('test', config, {})
         self.calls = []
 
-    def chat(self, question, system_prompt=''):
-        """Record what the call sends; answer without a provider."""
+    def chat(self, question):
+        """Record what the call sends (its system prompt is the call's, as a driver reads it); answer without a provider."""
+        system_prompt = self.call.settings.get('systemPrompt') or ''
         self.calls.append((self.call.model, question.questions[0].text, system_prompt))
         return SimpleNamespace(getText=lambda: 'an answer')
 
@@ -388,7 +391,8 @@ def _openai_sdk(sent):
             self.chat = SimpleNamespace(completions=self)
 
         def create(self, model, messages):
-            sent.append({'model': model})
+            system = [message['content'] for message in messages if message['role'] == 'system']
+            sent.append({'model': model, 'system': system[0] if system else ''})
             return _reply('seen')
 
     errors = {'RateLimitError': type('RateLimitError', (Exception,), {})}
@@ -404,7 +408,7 @@ def _gemini_sdk(sent):
             self.models = self
 
         def generate_content(self, model, contents, config=None):
-            sent.append({'model': model})
+            sent.append({'model': model, 'system': (config or {}).get('system_instruction', '')})
             return SimpleNamespace(text='seen')
 
     parts = SimpleNamespace(from_bytes=lambda **kwargs: kwargs, from_text=lambda **kwargs: kwargs)
@@ -425,7 +429,8 @@ def _mistral_sdk(sent):
             self.chat = self
 
         def complete(self, **request):
-            sent.append({'model': request['model']})
+            system = [message['content'][0]['text'] for message in request['messages'] if message['role'] == 'system']
+            sent.append({'model': request['model'], 'system': system[0] if system else ''})
             return _reply('seen')
 
     tokenizers = _module('mistral_common.tokens.tokenizers.mistral', MistralTokenizer=object)
@@ -445,7 +450,15 @@ def _ollama_sdk(sent):
             self.kwargs = kwargs
 
         def invoke(self, messages):
-            sent.append({'model': self.kwargs['model'], 'max_tokens': self.kwargs['max_tokens']})
+            # The system message is the plain text one; the human message carries the image parts
+            system = [message for message in messages if isinstance(message, str)]
+            sent.append(
+                {
+                    'model': self.kwargs['model'],
+                    'max_tokens': self.kwargs['max_tokens'],
+                    'system': system[0] if system else '',
+                }
+            )
             return SimpleNamespace(content='seen')
 
     messages = _module(
@@ -499,10 +512,42 @@ def test_each_call_reaches_the_provider_on_its_own_model(monkeypatch, node):
     for call in calls:
         # The request runs on a worker thread in most drivers: the call is read before it
         with chat.calling(call):
-            assert chat.chat(_image_question(), system_prompt='').getText() == 'seen'
+            assert chat.chat(_image_question()).getText() == 'seen'
     assert [request['model'] for request in sent] == [other_model, default_model]
     if node == 'llm_vision_ollama':
         assert [request['max_tokens'] for request in sent] == [call.output_tokens for call in calls]
+
+
+@pytest.mark.parametrize('node', sorted(DRIVERS))
+def test_the_inherited_ask_sends_the_calls_system_prompt(monkeypatch, node):
+    # ask (LLMBase) reaches the chat with the question alone: the system prompt
+    # is the call's, so it reaches the provider on this path as on the lanes
+    sent = []
+    module, fakes = PROVIDERS[node](sent)
+    driver = _load_driver(monkeypatch, node, module, fakes)
+    config = _vision_config(node)
+    glb = SimpleNamespace(config=config, _chat=driver.Chat('test', config, {}))
+    for params in ({}, {'systemPrompt': 'Answer in French.'}):
+        instance = bind_call(importlib.import_module(f'nodes.{node}.IInstance').IInstance(), glb, params)
+        assert instance.ask(SimpleNamespace(question=_image_question())).getText() == 'seen'
+    assert [request['system'] for request in sent] == ['', 'Answer in French.']
+
+
+@pytest.mark.parametrize('node', sorted(DRIVERS))
+def test_the_context_window_is_the_one_the_call_resolved(monkeypatch, node):
+    # One budget: the window the prompt checks read is the window the call's
+    # output limit was validated against, a custom model whose caller cleared
+    # the window included (the schema's default fills it; no driver keeps a fallback of its own)
+    module, fakes = PROVIDERS[node]([])
+    driver = _load_driver(monkeypatch, node, module, fakes)
+    config = _vision_config(node)
+    glb = SimpleNamespace(config=config, _chat=driver.Chat('test', config, {}))
+    custom = {'model': 'custom', 'customModel': 'my-vision-model'}
+    windows = []
+    for params in ({}, custom, {**custom, 'custom.modelTotalTokens': None}):
+        instance = bind_call(importlib.import_module(f'nodes.{node}.IInstance').IInstance(), glb, params)
+        windows.append((instance.getContextLength(None), glb._chat.resolve_call(instance.settings).total_tokens))
+    assert all(read == resolved for read, resolved in windows)
 
 
 def test_a_vision_chat_outside_a_call_refuses_to_guess_its_model(monkeypatch):

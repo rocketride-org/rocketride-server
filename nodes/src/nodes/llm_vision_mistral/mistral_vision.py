@@ -211,17 +211,20 @@ class Chat(ChatBase):
         else:
             return (3, 1.0)
 
-    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+    def chat(self, question: Question) -> Answer:
         """Send a vision request to Mistral AI and get the response.
 
         Args:
             question: The call's question: its first question is the prompt (the call's
                 ``settings.prompt``), its context carries the image.
-            system_prompt: The call's system prompt (``settings.systemPrompt``); empty for none.
 
         Returns:
             The model's answer.
         """
+        # The call's system prompt: every path into this chat (the lanes, ``ask``,
+        # ``writeQuestions``) runs under ``calling``, so the call carries it
+        system_prompt = self.call.settings.get('systemPrompt') or ''
+
         # The call's model and its retry configuration
         model = self.call.model
         max_retries, base_delay = self._getRetryConfig(model)

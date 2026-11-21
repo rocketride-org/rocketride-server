@@ -63,9 +63,13 @@ def call_prompt(backend: str, prompt: Optional[str]) -> Optional[str]:
     prompt = (prompt or '').strip()
     classes = [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
     if backend in OPEN_VOCAB_BACKENDS and not classes:
+        # The prompt is a per-call parameter: a caller's override is fixed on
+        # the call, the configured default in the UI
         raise ValueError(
-            f'detect: engine "{backend}" requires a non-empty prompt. '
-            'Set a prompt in the UI (e.g. "person . car . dog") and restart the pipeline.'
+            f'detect: engine "{backend}" requires a non-empty prompt naming at least one class '
+            '(e.g. "person . car . dog"). A caller that passes the prompt in its parameters must '
+            'pass one that names a class; a call on the configured prompt needs it set in the UI '
+            'and the pipeline restarted.'
         )
     return prompt or None
 

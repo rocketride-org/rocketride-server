@@ -467,8 +467,7 @@ class IInstance(IInstanceBase):
 
         # Enforce the call's rate limits, counted in the control's state, before executing the request
         rate_limiter = self._limiter()
-        if rate_limiter is not None:
-            rate_limiter.acquire()
+        slot = rate_limiter.acquire() if rate_limiter is not None else None
 
         try:
             return execute_request(
@@ -483,7 +482,7 @@ class IInstance(IInstanceBase):
             )
         finally:
             if rate_limiter is not None:
-                rate_limiter.release()
+                rate_limiter.release(slot)
 
     def _guardrails(self):
         """This call's guardrails, built from its settings once per binding."""

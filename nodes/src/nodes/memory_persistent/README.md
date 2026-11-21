@@ -115,9 +115,15 @@ use Redis `INCRBY` with the Redis backend.
 ### Backend behavior
 
 Both backends return deep copies for stored values and history entries. Redis
-serializes stored values as JSON under the `rr:memory` key prefix, and the
-state backend stores JSON in the node's state. The Redis connection is opened
-once per control and closed when the control ends.
+serializes stored values as JSON under the owner's key prefix,
+`rr:memory:@<namespace>`: the namespace is a random id the node creates on the
+owner's first call and keeps in the owner's file store
+(`.memory_persistent/redis-namespace.json`), so two owners whose controls point
+at the same Redis and name the same session ID keep separate sessions. Deleting
+that file starts a new namespace, and the sessions stored under the old one are
+no longer reachable. The state backend stores JSON in the node's state, which
+the server keys by owner. The Redis connection is opened once per control and
+closed when the control ends.
 
 ## Upstream docs
 

@@ -282,7 +282,7 @@ class IInstance(IInstanceBase):
                     documents.append(doc)
                     metadata.chunkId = metadata.chunkId + 1
 
-                if 'keyPoints' in result and result['keyPoints'] and self.IGlobal:
+                if 'keyPoints' in result and result['keyPoints'] and self.settings.numberOfKeyPointWords:
                     text = 'Key Points:'
                     for keyPoint in result['keyPoints']:
                         text += '- ' + keyPoint + '\n'

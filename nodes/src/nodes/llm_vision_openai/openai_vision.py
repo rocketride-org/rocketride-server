@@ -64,11 +64,6 @@ class Chat(ChatBase):
 
         self._api_key = api_key
 
-    def getTotalTokens(self) -> int:
-        """Get the total token limit of the call's model."""
-        configured = self.call.settings.get('modelTotalTokens')
-        return 128000 if configured is None else configured
-
     def getTokens(self, value: str) -> int:
         """Approximate token count (4 chars per token heuristic)."""
         if not value.strip():
@@ -105,13 +100,12 @@ class Chat(ChatBase):
         retryable = ['timeout', 'timed out', '500', '502', '503', '504', 'server error']
         return any(p in error_msg for p in retryable)
 
-    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+    def chat(self, question: Question) -> Answer:
         """Send an image to OpenAI Vision and get the response.
 
         Args:
             question: The call's question: its first question is the prompt (the call's
                 ``settings.prompt``), its context carries the image.
-            system_prompt: The call's system prompt (``settings.systemPrompt``); empty for none.
 
         Returns:
             The model's answer.
@@ -119,6 +113,10 @@ class Chat(ChatBase):
         max_retries = 1
         base_delay = 1.0
         last_error = None
+
+        # The call's system prompt: every path into this chat (the lanes, ``ask``,
+        # ``writeQuestions``) runs under ``calling``, so the call carries it
+        system_prompt = self.call.settings.get('systemPrompt') or ''
 
         # The call's model, read on this thread: the request thread below does not see the call
         model = self.call.model

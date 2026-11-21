@@ -195,6 +195,12 @@ class _FakeLLMBase(_FakeIInstanceBase):
         """Return this call's values, resolved by the control's chat from this call's settings."""
         return self.IGlobal._chat.resolve_call(self.settings)
 
+    def _question(self, question):
+        """Ask the control's chat under this call, as the real one does for a chat without streaming."""
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.chat(question)
+
 
 def _make_stubs():
     """Build the rocketlib and ai.common.* stub modules these nodes import."""
@@ -639,7 +645,7 @@ class _StubChat:
         """Serve the call for the block; nothing to publish here."""
         return contextlib.nullcontext(call)
 
-    def chat(self, question, system_prompt=''):
+    def chat(self, question):
         """Return a fixed answer without calling any service."""
         return _StubAnswer()
 

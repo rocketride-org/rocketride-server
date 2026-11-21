@@ -47,6 +47,14 @@ def test_services_documents_lane_maps_to_answers_and_documents():
 class _StubBase:
     """Stand-in for rocketlib IInstanceBase / IGlobalBase."""
 
+    #: This call's settings view, as the real base keeps it.
+    _settings = None
+
+    @property
+    def settings(self):
+        """This call's settings, served over ``_settings`` like the real base's."""
+        return self._settings
+
     def preventDefault(self) -> None:
         pass
 
