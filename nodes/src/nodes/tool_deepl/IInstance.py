@@ -150,16 +150,16 @@ class IInstance(IInstanceBase):
         # back to the node config default. target_lang is required, so it errors
         # only when neither the arg nor the config supplies one. Resolved values
         # are written back into args so the pure builder stays arg-only.
-        target_lang = _resolve_str(args.get('target_lang'), getattr(self.IGlobal, 'target_lang', None))
+        target_lang = _resolve_str(args.get('target_lang'), (self.settings.targetLang or '').strip() or 'EN-US')
         if not target_lang:
             return _translate_error('target_lang is required: set it on the call or as the node default')
         args['target_lang'] = target_lang
 
-        formality = _resolve_enum(args.get('formality'), getattr(self.IGlobal, 'formality', None), VALID_FORMALITIES)
+        formality = _resolve_enum(args.get('formality'), (self.settings.formality or '').strip(), VALID_FORMALITIES)
         if formality is not None:
             args['formality'] = formality
 
-        model_type = _resolve_enum(args.get('model_type'), getattr(self.IGlobal, 'model_type', None), VALID_MODEL_TYPES)
+        model_type = _resolve_enum(args.get('model_type'), (self.settings.modelType or '').strip(), VALID_MODEL_TYPES)
         if model_type is not None:
             args['model_type'] = model_type
 

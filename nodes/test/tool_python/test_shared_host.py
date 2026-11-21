@@ -15,19 +15,20 @@ from types import SimpleNamespace
 
 import pytest
 
-from nodes.tool_python.IGlobal import IGlobal
+from nodes.tool_python.IGlobal import IGlobal, sandbox_limits
 
 _FLAGS = ('--hosted', '--shared-host')
 _CONFIG = {'allowedModules': [{'moduleName': 'os'}]}
 
 
 def _begin(monkeypatch, *flags, config=_CONFIG):
-    """Start the node's IGlobal on a stored config; ``self.config`` resolves it through the engine's schema."""
+    """One call's sandbox limits under a stored config, resolved through the engine's schema."""
     monkeypatch.setattr(sys, 'argv', [*(a for a in sys.argv if a not in _FLAGS), *flags])
-    iglobal = IGlobal.__new__(IGlobal)
-    iglobal.glb = SimpleNamespace(logicalType='tool_python', connConfig=dict(config))
-    iglobal.beginGlobal()
-    return iglobal
+    control = IGlobal.__new__(IGlobal)
+    control.glb = SimpleNamespace(logicalType='tool_python', connConfig=dict(config))
+    # The limits are one call's: read from its settings (no params: the control's stored values)
+    allowed_modules, timeout = sandbox_limits(control.config.overlay(None))
+    return SimpleNamespace(allowed_modules=allowed_modules, timeout=timeout)
 
 
 def test_unset_timeout_means_the_sandbox_default(monkeypatch):

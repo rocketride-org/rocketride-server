@@ -78,6 +78,25 @@ SCHEMAS = {
     'tool_pipe': (['tool_description', 'return_type'], ['tool_description', 'return_type'], {}),
     'mcp_client': (['serverName'], ['serverName'], {'streamable-http': {'endpoint': 'https://mcp.example'}}),
     'tool_butterbase': (['serverName'], ['serverName'], {'bearer': 'k1'}),
+    'media_inspect': (
+        ['request', 'event_type', 'chunk_kb', 'max_input_mb', 'silence_db', 'silence_ms', 'peak_ms', 'scene_threshold'],
+        ['chunk_kb', 'max_input_mb'],
+        {},
+    ),
+    'tool_deepl': (['targetLang', 'formality', 'modelType'], [], {'apikey': 'k1'}),
+    'tool_tavily': (['maxResults', 'searchDepth', 'topic'], [], {'apikey': 'k1'}),
+    'tool_exa_search': (['numResults', 'useAutoprompt', 'searchType', 'includeText'], [], {'apikey': 'k1'}),
+    'summarization': (
+        ['numberOfSummaries', 'numberOfSummaryWords', 'numberOfKeyPointWords', 'numberOfEntities'],
+        [],
+        {},
+    ),
+    'tool_python': (['timeout', 'allowedModules'], ['timeout', 'allowedModules'], {}),
+    'tool_guild': (
+        ['agent', 'resultMode', 'timeout', 'maxSessions', 'verifyTls'],
+        ['maxSessions', 'verifyTls'],
+        {'apiKeyId': 'k1', 'apiKeySecret': 'k2', 'owner': 'acme', 'workspace': 'ws'},
+    ),
     **{
         f'response_{lane}': (_RESPONSE, _RESPONSE, {})
         for lane in ('answers', 'audio', 'documents', 'hash', 'image', 'json', 'questions', 'table', 'text', 'video')
