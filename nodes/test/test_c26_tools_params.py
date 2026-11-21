@@ -46,6 +46,9 @@ _RESPONSE = ['laneName']
 #: The scan_cropper scan types, each with its own detection branch.
 _SCANS = ('album', 'detail', 'loose', 'textured')
 
+#: The ner model entries, each with its own confidence threshold.
+_NER_MODELS = ('bertBase', 'bertLarge', 'biomedical', 'custom', 'deberta', 'distilbert', 'xlmRoberta')
+
 #: Every check the custom guardrails profile exposes.
 _GUARDRAILS_CUSTOM = (
     'policy_mode',
@@ -159,6 +162,37 @@ SCHEMAS = {
         + [f'custom.{key}' for key in _GUARDRAILS_CUSTOM if key != 'expected_format'],
         {},
     ),
+    'anonymize_text': (['anonymizeChar', 'entityTypes', 'redactionStyle'], ['entityTypes'], {}),
+    'ner': (
+        ['store_in_metadata'] + [f'{model}.min_confidence' for model in _NER_MODELS],
+        ['store_in_metadata'],
+        {},
+    ),
+    'audio_transcribe': (
+        ['language', 'chunk_duration', 'beam_size', 'vad_filter', 'vad_threshold']
+        + ['vad_min_silence_duration_ms', 'vad_speech_pad_ms', 'vad_max_speech_duration_s'],
+        [],
+        {},
+    ),
+    'audio_tts': (['kokoro_voice'], [], {}),
+    'embedding_openai': (['model'], ['model'], {'apikey': 'k1'}),
+    'embedding_transformer': (
+        ['custom.truncate_dim', 'custom.document_prefix', 'custom.query_prefix'],
+        ['custom.truncate_dim'],
+        {'profile': 'custom', 'custom': {'model': 'sentence-transformers/all-MiniLM-L6-v2'}},
+    ),
+    'embedding_video': (
+        [f'extraction.{key}' for key in ('interval', 'max_frames', 'start_time', 'duration', 'maxVideoSizeMB')],
+        ['extraction.max_frames', 'extraction.maxVideoSizeMB'],
+        {},
+    ),
+    'rerank_cohere': (['profile', 'top_n', 'min_score', 'custom.model'], [], {'apikey': 'k1'}),
+    'accessibility_describe': (
+        ['systemPrompt', 'prompt', 'prioritizeHazards', 'spatialFormat'],
+        ['systemPrompt'],
+        {'apikey': 'k1'},
+    ),
+    'search_exa': (['type', 'numResults', 'includeHighlights', 'highlightChars'], [], {'apikey': 'k1'}),
     **{
         f'response_{lane}': (_RESPONSE, _RESPONSE, {})
         for lane in ('answers', 'audio', 'documents', 'hash', 'image', 'json', 'questions', 'table', 'text', 'video')

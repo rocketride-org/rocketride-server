@@ -43,10 +43,11 @@ class IGlobal(IGlobalBase):
         depends(requirements)
 
     def beginGlobal(self):
-        """Create the rerank client from the resolved config (model, top_n, min_score, apikey).
+        """Create the rerank client from the resolved config (the API key).
 
-        The schema pins the model of the named entries, requires a name for
-        the custom one and requires the key, so the client gets a usable config.
+        The schema requires the key, so the client gets a usable config. The
+        model (pinned by a named entry, or the custom one's name), the result
+        count and the score threshold are each call's settings.
         """
         self._ensure_dependencies()
 

@@ -42,9 +42,10 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self):
         """Build the OpenAI embedding client from the resolved config.
 
-        The model is the selector and the API key a required leaf, so both are
-        set by the time this runs; the key arrives through the node config (a
-        ${ROCKETRIDE_EMBEDDING_OPENAI_APIKEY} reference resolved per call).
+        The API key is a required leaf, so it is set by the time this runs; the
+        key arrives through the node config (a ${ROCKETRIDE_EMBEDDING_OPENAI_APIKEY}
+        reference resolved per control). The model is each call's: the wrapper
+        keeps one embedder per model a call asks for.
         """
         bag = self.IEndpoint.endpoint.bag
         self.embedding = OpenAIEmbeddingWrapper(self.config.node.provider, self.config, bag)

@@ -79,6 +79,7 @@
 			"description": "Hugging Face model to use for frame embedding"
 		},
 		"embedding.interval": {
+			"param": true,
 			"type": "number",
 			"title": "Interval (in seconds) between frames",
 			"description": "Time in seconds between extracted frames",
@@ -86,6 +87,8 @@
 			"minimum": 0.01
 		},
 		"embedding.max_frames": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Maximum number of frames to extract (0=unlimited)",
 			"description": "Limit the total number of frames extracted from the video. Set to 0 for unlimited.",
@@ -93,18 +96,22 @@
 			"minimum": 0
 		},
 		"embedding.start_time": {
+			"param": true,
 			"type": "number",
 			"title": "Start time (in seconds) for frame extraction (0=beginning)",
 			"default": 0,
 			"minimum": 0
 		},
 		"embedding.duration": {
+			"param": true,
 			"type": "number",
 			"title": "Duration (in seconds) for frame extraction (0=end of video)",
 			"default": 0,
 			"minimum": 0
 		},
 		"embedding.maxVideoSizeMB": {
+			"param": true,
+			"tool": false,
 			"type": "number",
 			"title": "Maximum video file size (MB)",
 			"description": "Maximum allowed video file size in megabytes. Videos exceeding this limit will be rejected.",

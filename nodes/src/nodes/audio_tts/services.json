@@ -72,6 +72,7 @@
 	//
 	"propertyDefinitions": {
 		"audio_tts.kokoro_voice": {
+			"param": true,
 			"type": "string",
 			"title": "Voice",
 			"description": "Kokoro voice. The language is derived automatically from the voice prefix (af_/am_ → American, bf_/bm_ → British, ef_/em_ → Spanish, etc.).",

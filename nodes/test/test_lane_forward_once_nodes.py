@@ -460,16 +460,15 @@ def test_anomaly_detector_documents_without_metadata_are_delivered_once():
 class _StubRecognizer:
     """Stand-in for the GLiNER-backed recognizer."""
 
-    store_in_metadata = True
-
-    def extract_entities(self, text):
+    def extract_entities(self, text, min_confidence):
         """Return one fixed entity."""
         return [{'entity_group': 'PER', 'word': 'Obama'}]
 
 
 def _ner():
-    """Build a ner instance with a stub recognizer, begun as the engine begins every binding."""
+    """Build a ner instance with a stub recognizer and the call's settings, begun as the engine begins every binding."""
     inst, fake = _build('ner', types.SimpleNamespace(recognizer=_StubRecognizer()))
+    inst.settings = types.SimpleNamespace(min_confidence=0.9, store_in_metadata=True)
     inst.beginInstance()
     return inst, fake
 
@@ -526,14 +525,16 @@ class _StubAnswer:
 class _StubSearch:
     """Stand-in for the Exa search backend."""
 
-    def chat(self, question):
+    def chat(self, question, settings):
         """Return a fixed answer without calling any service."""
         return _StubAnswer()
 
 
 def _search_exa(listeners):
-    """Build a search_exa instance with the given connected lanes."""
-    return _build('search_exa', types.SimpleNamespace(search=_StubSearch()), listeners)
+    """Build a search_exa instance with the given connected lanes (the search knobs are the call's)."""
+    inst, fake = _build('search_exa', types.SimpleNamespace(search=_StubSearch()), listeners)
+    inst.settings = types.SimpleNamespace(type='auto', numResults=5, includeHighlights=True, highlightChars=600)
+    return inst, fake
 
 
 def test_search_exa_question_delivered_once_with_listener():
@@ -766,12 +767,14 @@ def _context_optimizer(optimizer):
     """Build a context_optimizer instance with the given optimizer.
 
     Args:
-        optimizer: The optimizer IGlobal exposes, or None for config mode.
+        optimizer: The call's optimizer (beginInstance builds it from the call's settings), or None for config mode.
 
     Returns:
         (inst, fake_instance).
     """
-    return _build('context_optimizer', types.SimpleNamespace(optimizer=optimizer))
+    inst, fake = _build('context_optimizer', types.SimpleNamespace(catalog=None))
+    inst.optimizer = optimizer
+    return inst, fake
 
 
 def test_context_optimizer_delivers_only_the_trimmed_question():

@@ -56,7 +56,7 @@ class IInstance(IInstanceBase):
         Args:
             documents (List[Doc]): A list of documents to encode.
         """
-        self.IGlobal.embedding.encodeChunks(documents)  # Encode document chunks
+        self.IGlobal.embedding.encodeChunks(documents, self.settings.model)  # Encode with the call's model
 
     def writeQuestions(self, question: Question):
         """
@@ -65,4 +65,4 @@ class IInstance(IInstanceBase):
         Args:
             question (Question): The question to encode.
         """
-        self.IGlobal.embedding.encodeQuestion(question)  # Encode the question
+        self.IGlobal.embedding.encodeQuestion(question, self.settings.model)  # Encode with the call's model

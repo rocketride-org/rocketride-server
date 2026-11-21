@@ -141,7 +141,8 @@ class TestNerWriteDocuments:
         """Build a node instance whose recognizer returns the given entities."""
         instance = IInstance()
         instance.IGlobal = MagicMock()
-        instance.IGlobal.recognizer.store_in_metadata = True
+        # The threshold and the metadata switch are the call's settings
+        instance.settings = types.SimpleNamespace(min_confidence=0.9, store_in_metadata=True)
         instance.IGlobal.recognizer.extract_entities.return_value = entities
         return instance
 

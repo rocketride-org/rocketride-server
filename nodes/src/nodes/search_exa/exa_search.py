@@ -48,22 +48,28 @@ class ExaSearch(ChatBase):
 
         Args:
             provider: The provider name.
-            config: The resolved node config (apikey, type, numResults, includeHighlights, highlightChars).
+            config: The control's resolved config (apikey). The search knobs (type,
+                numResults, includeHighlights, highlightChars) are each call's:
+                ``chat`` takes them.
             bag: The endpoint bag (read-only; the backend lives on the IGlobal).
         """
         super().__init__(provider, config, bag)
         self._apikey = config['apikey'].strip()
-        self._search_type = config['type']
-        self._num_results = int(config['numResults'])
-        self._include_highlights = bool(config['includeHighlights'])
-        self._highlight_chars = int(config['highlightChars'])
 
     def getTokens(self, value: str) -> int:
         """Estimate token usage for the given text using a word-based heuristic."""
         return max(1, int(len(str(value).split()) / 0.75))
 
-    def chat(self, question: Question) -> Answer:
-        """Execute one Exa search request and return the raw result payload as an answer."""
+    def chat(self, question: Question, settings: Any) -> Answer:
+        """Execute one Exa search request and return the raw result payload as an answer.
+
+        Args:
+            question: The call's question; exactly one question text.
+            settings: The call's settings (type, numResults, includeHighlights, highlightChars).
+
+        Returns:
+            The raw Exa result as a JSON answer.
+        """
         queries = _get_question_texts(question)
         if not queries:
             raise ValueError('search_exa requires a non-empty question')
@@ -73,13 +79,13 @@ class ExaSearch(ChatBase):
 
         payload: Dict[str, Any] = {
             'query': query,
-            'type': self._search_type,
-            'numResults': self._num_results,
+            'type': settings.type,
+            'numResults': int(settings.numResults),
         }
-        if self._include_highlights:
+        if settings.includeHighlights:
             payload['contents'] = {
                 'highlights': {
-                    'maxCharacters': self._highlight_chars,
+                    'maxCharacters': int(settings.highlightChars),
                 }
             }
 

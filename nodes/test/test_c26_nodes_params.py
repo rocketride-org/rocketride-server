@@ -259,3 +259,301 @@ def test_guardrails_applies_each_calls_policy():
 
     # The basic policy has no topic list and forwards; the custom call blocks the topic
     assert outcomes == [1, 0]
+
+
+# ==== anonymize ==================================================================
+
+
+class _RecordingRecognizer:
+    """Stands in for the GLiNER recognizer: records each call's labels and redaction."""
+
+    def __init__(self):
+        self.calls = []
+
+    def process(self, text, labels, existing_matches=None, *, redaction_style, anonymize_char):
+        self.calls.append((labels, redaction_style, anonymize_char))
+        return text
+
+
+def test_anonymize_redacts_each_call_by_its_own_settings():
+    recognizer = _RecordingRecognizer()
+    glb = SimpleNamespace(config=control_config('anonymize_text'), recognizer=recognizer)
+    for params in ({}, {'redactionStyle': 'token', 'anonymizeChar': '*', 'entityTypes': ['email', ' ']}):
+        instance = _call('nodes.anonymize', glb, params)
+        instance.instance = SimpleNamespace(writeText=lambda text: None)
+        instance.preventDefault = lambda: None
+        instance.open(None)
+        instance.writeText('Mail ann@example.com')
+        instance.closing()
+
+    (default_labels, default_style, default_char), second = recognizer.calls
+    assert (default_style, default_char) == ('mask', '\u2588')
+    assert 'email' in default_labels and 'person' in default_labels
+    # A blank entry is dropped; the call's list is used as given otherwise
+    assert second == (['email'], 'token', '*')
+
+
+# ==== ner ========================================================================
+
+
+def test_ner_filters_each_call_by_its_own_threshold():
+    thresholds = []
+    recognizer = SimpleNamespace(extract_entities=lambda text, min_confidence: thresholds.append(min_confidence) or [])
+    glb = SimpleNamespace(config=control_config('ner'), recognizer=recognizer)
+    for params in ({}, {'bertLarge.min_confidence': 0.5}):
+        instance = _call('nodes.ner', glb, params)
+        instance.beginInstance()
+        instance.instance = SimpleNamespace(writeText=lambda text: None)
+        instance.preventDefault = lambda: None
+        instance.writeText('Barack Obama')
+    assert thresholds == [0.9, 0.5]
+
+
+# ==== audio_transcribe ===========================================================
+
+
+class _RecordingWhisper:
+    """Stands in for ai.common.models.Whisper: counts loads, records each request's decode values."""
+
+    built = 0
+
+    def __init__(self, model_name, output_fields=None, compute_type=None, **kwargs):
+        type(self).built += 1
+        self.requests = []
+
+    def transcribe(self, audio, **kwargs):
+        self.requests.append(kwargs)
+        return {'$segments': []}
+
+
+def test_audio_transcribe_decodes_each_call_by_its_own_settings(monkeypatch):
+    node = 'nodes.audio_transcribe'
+    monkeypatch.setattr(importlib.import_module(f'{node}.IGlobal'), 'Whisper', _RecordingWhisper)
+    _RecordingWhisper.built = 0
+    glb = _control(node, 'audio_transcribe')
+    for params in ({}, {'language': 'de', 'beam_size': 1, 'vad_max_speech_duration_s': 30}):
+        glb.transcribe(b'\x00\x01' * 800, _call(node, glb, params).settings)
+
+    first, second = glb._whisper.requests
+    assert _RecordingWhisper.built == 1
+    assert (first['language'], first['beam_size'], 'max_speech_duration_s' in first['vad_parameters']) == (
+        'en',
+        5,
+        False,
+    )
+    assert (second['language'], second['beam_size'], second['vad_parameters']['max_speech_duration_s']) == (
+        'de',
+        1,
+        30,
+    )
+
+
+# ==== audio_tts ==================================================================
+
+
+class _RecordingModelClient:
+    """Stands in for the model-server client: one per loaded language, records the voices it speaks."""
+
+    loaded = []
+
+    def __init__(self, address):
+        self.voices = []
+
+    def load_model(self, repo, loader, options):
+        type(self).loaded.append(options['lang_code'])
+
+    def send_command(self, command, arguments):
+        self.voices.append(arguments['inputs'][0]['voice'])
+        return {'result': [{'wav_base64': 'UklGRg=='}]}
+
+    def disconnect(self):
+        pass
+
+
+def test_audio_tts_keeps_one_engine_per_language(monkeypatch, tmp_path):
+    import os
+
+    module = importlib.import_module('nodes.audio_tts.IGlobal')
+    monkeypatch.setattr(module, 'get_model_server_address', lambda: 'ms:5590')
+    monkeypatch.setattr(module, 'ModelClient', _RecordingModelClient)
+    _RecordingModelClient.loaded = []
+    glb = _control('nodes.audio_tts', 'audio_tts')
+    for params in ({}, {'kokoro_voice': 'bf_emma'}, {'kokoro_voice': 'af_bella'}):
+        result = glb.synthesize('hello', _call('nodes.audio_tts', glb, params).settings.kokoro_voice)
+        os.remove(result['path'])
+
+    # Two languages, two loaders; the second American voice reuses the first loader
+    assert _RecordingModelClient.loaded == ['a', 'b']
+    assert glb._clients['a'].voices == ['af_heart', 'af_bella']
+    assert glb._clients['b'].voices == ['bf_emma']
+    glb.endGlobal()
+
+
+# ==== embedding_openai ===========================================================
+
+
+class _RecordingEmbeddings:
+    """Stands in for langchain_openai.OpenAIEmbeddings: one per model, records what it embeds."""
+
+    built = []
+
+    def __init__(self, openai_api_key, model):
+        type(self).built.append(model)
+        self.model = model
+        self.embedding_ctx_length = 8191
+
+    def embed_query(self, text):
+        return [0.0, 1.0, 2.0]
+
+    def embed_documents(self, texts):
+        return [[0.0, 1.0, 2.0] for _ in texts]
+
+
+def test_embedding_openai_embeds_each_call_with_its_own_model(monkeypatch):
+    from ai.common.schema import Question
+
+    module = importlib.import_module('nodes.embedding_openai.OpenAIEmbeddingWrapper')
+    monkeypatch.setattr(module, 'OpenAIEmbeddings', _RecordingEmbeddings)
+    _RecordingEmbeddings.built = []
+    config = control_config('embedding_openai', {'apikey': 'k1'})
+    glb = SimpleNamespace(config=config, embedding=module.OpenAIEmbeddingWrapper('embedding_openai', config, {}))
+    models = []
+    for params in ({}, {'model': 'text-embedding-3-large'}, {}):
+        question = Question()
+        question.addQuestion('what is it?')
+        _call('nodes.embedding_openai', glb, params).writeQuestions(question)
+        models.append(question.questions[0].embedding_model)
+
+    assert models == ['text-embedding-3-small', 'text-embedding-3-large', 'text-embedding-3-small']
+    # One embedder per model, built on first use (no rebuild for the repeated model)
+    assert _RecordingEmbeddings.built == ['text-embedding-3-small', 'text-embedding-3-large']
+
+
+# ==== embedding_transformer ======================================================
+
+
+def test_embedding_transformer_encodes_each_call_with_its_own_knobs():
+    from ai.common.schema import Question
+
+    encoded = []
+    embedding = SimpleNamespace(
+        encodeQuestion=lambda question, prefix, truncate_dim: encoded.append((prefix, truncate_dim))
+    )
+    stored = {'profile': 'custom', 'custom': {'model': 'sentence-transformers/all-MiniLM-L6-v2'}}
+    glb = SimpleNamespace(config=control_config('embedding_transformer', stored), embedding=embedding)
+    for params in ({}, {'custom.truncate_dim': 64, 'custom.query_prefix': 'query: '}):
+        instance = _call('nodes.embedding_transformer', glb, params)
+        instance.beginInstance()
+        question = Question()
+        question.addQuestion('what is it?')
+        instance.writeQuestions(question)
+    assert encoded == [('', 0), ('query: ', 64)]
+
+
+def test_embedding_transformer_truncates_the_leading_dimensions():
+    import numpy as np
+
+    module = importlib.import_module('nodes.embedding_transformer.sentenceTransformer')
+    vectors = np.arange(12, dtype=np.float32).reshape(2, 6)
+    assert module.Embedding._truncate(vectors, 4).tolist() == [[0, 1, 2, 3], [6, 7, 8, 9]]
+    assert module.Embedding._truncate(vectors, 0) is vectors
+
+
+# ==== embedding_video ============================================================
+
+
+def test_embedding_video_caps_each_call_at_its_own_size():
+    from rocketlib import AVI_ACTION
+
+    glb = SimpleNamespace(config=control_config('embedding_video'))
+    accepted = []
+    for params in ({}, {'extraction.maxVideoSizeMB': 1}):
+        instance = _call('nodes.embedding_video', glb, params)
+        instance._video_data = bytearray()
+        instance.writeVideo(AVI_ACTION.WRITE, 'video/mp4', b'\x00' * (2 * 1024 * 1024))
+        accepted.append(instance._video_data is not None)
+    # The default 500 MB cap takes the 2 MB clip; the call capped at 1 MB rejects it
+    assert accepted == [True, False]
+
+
+# ==== rerank_cohere ==============================================================
+
+
+def test_rerank_cohere_reranks_each_call_with_its_own_model_and_bounds():
+    from ai.common.schema import Doc
+
+    calls = []
+    reranker = SimpleNamespace(rerank_with_threshold=lambda **kwargs: calls.append(kwargs) or [])
+    glb = SimpleNamespace(config=control_config('rerank_cohere', {'apikey': 'k1'}), _reranker=reranker)
+    custom = {'profile': 'custom', 'custom.model': 'my-reranker', 'top_n': 2, 'min_score': 0.4}
+    for params in ({}, custom):
+        instance = _call('nodes.rerank_cohere', glb, params)
+        instance.instance = SimpleNamespace(writeDocuments=lambda docs: None, writeAnswers=lambda answer: None)
+        question = Question()
+        question.addQuestion('what is it?')
+        question.documents.append(Doc(page_content='a document'))
+        instance.writeQuestions(question)
+
+    assert [(c['model'], c['top_n'], c['min_score']) for c in calls] == [
+        ('rerank-english-v3.0', 5, 0.0),
+        ('my-reranker', 2, 0.4),
+    ]
+
+
+# ==== accessibility_describe =====================================================
+
+
+def test_accessibility_describe_prompts_each_call_by_its_own_settings():
+    from rocketlib import AVI_ACTION
+
+    asked = []
+    chat = SimpleNamespace(
+        chat=lambda question, system_prompt: (
+            asked.append((question.questions[0].text, system_prompt))
+            or SimpleNamespace(getText=lambda: 'a description')
+        )
+    )
+    glb = SimpleNamespace(config=control_config('accessibility_describe', {'apikey': 'k1'}), chat=chat)
+    for params in ({}, {'prompt': 'Read the sign.', 'spatialFormat': 'relative', 'prioritizeHazards': 'low'}):
+        instance = _call('nodes.accessibility_describe', glb, params)
+        instance.instance = SimpleNamespace(writeText=lambda text: None)
+        instance.preventDefault = lambda: None
+        for action, buffer in ((AVI_ACTION.BEGIN, b''), (AVI_ACTION.WRITE, b'\x89PNG'), (AVI_ACTION.END, b'')):
+            instance.writeImage(action, 'image/png', buffer)
+
+    (first_prompt, first_system), (second_prompt, second_system) = asked
+    assert first_prompt.startswith('Describe this image for a blind person.')
+    assert 'clock positions' in first_system and 'MUST lead with hazards' in first_system
+    assert second_prompt == 'Read the sign.'
+    assert 'relative directions' in second_system and 'MUST lead with hazards' not in second_system
+
+
+# ==== search_exa =================================================================
+
+
+def test_search_exa_sends_each_call_its_own_search_knobs(monkeypatch):
+    module = importlib.import_module('nodes.search_exa.exa_search')
+    sent = []
+
+    def post(url, headers, json, timeout):
+        sent.append(json)
+        return SimpleNamespace(status_code=200, json=lambda: {'results': []})
+
+    monkeypatch.setattr(module.requests, 'post', post)
+    config = control_config('search_exa', {'apikey': 'k1'})
+    glb = SimpleNamespace(config=config, search=module.ExaSearch('search_exa', config, {}))
+    for params in ({}, {'type': 'neural', 'numResults': 2, 'includeHighlights': False}):
+        instance = _call('nodes.search_exa', glb, params)
+        instance.instance = SimpleNamespace(hasListener=lambda lane: lane == 'answers', writeAnswers=lambda a: None)
+        instance.preventDefault = lambda: None
+        question = Question()
+        question.addQuestion('rocket engines')
+        instance.writeQuestions(question)
+
+    assert sent[0] == {
+        'query': 'rocket engines',
+        'type': 'auto',
+        'numResults': 5,
+        'contents': {'highlights': {'maxCharacters': 600}},
+    }
+    assert sent[1] == {'query': 'rocket engines', 'type': 'neural', 'numResults': 2}

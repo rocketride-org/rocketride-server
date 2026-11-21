@@ -83,6 +83,7 @@
 			"required": true
 		},
 		"search_exa.type": {
+			"param": true,
 			"type": "string",
 			"title": "Search Type",
 			"default": "auto",
@@ -93,6 +94,7 @@
 			]
 		},
 		"search_exa.numResults": {
+			"param": true,
 			"type": "integer",
 			"title": "Results",
 			"default": 5,
@@ -100,11 +102,13 @@
 			"maximum": 20
 		},
 		"search_exa.includeHighlights": {
+			"param": true,
 			"type": "boolean",
 			"title": "Include Highlights",
 			"default": true
 		},
 		"search_exa.highlightChars": {
+			"param": true,
 			"type": "integer",
 			"title": "Highlight Chars",
 			"default": 600,

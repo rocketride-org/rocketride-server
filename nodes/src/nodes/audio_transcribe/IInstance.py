@@ -96,15 +96,17 @@ class IInstance(IInstanceBase):
         """
         Initialize the instance-level transcription pipeline.
 
-        Creates a `Transcribe` object with parameters from the global config and
-        sets up the callback for receiving transcribed text.
+        Creates a `Transcribe` object buffering by this call's chunk duration and
+        decoding through the control's model with this call's language and decode
+        values, and sets up the callback for receiving transcribed text.
         """
         from .transcribe import Transcribe
 
+        settings = self.settings
         self._transcribe = Transcribe(
             segment_callback=self._segment_callback,
-            transcribe=self.IGlobal.transcribe,
-            chunk_duration=self.IGlobal.chunk_duration,
+            transcribe=lambda audio: self.IGlobal.transcribe(audio, settings),
+            chunk_duration=settings.chunk_duration,
         )
 
     def open(self, object: Entry):

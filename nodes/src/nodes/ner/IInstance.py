@@ -61,7 +61,7 @@ class IInstance(IInstanceBase):
         self.current_text += text
 
         # Extract entities from the text
-        entities = self.IGlobal.recognizer.extract_entities(text)
+        entities = self.IGlobal.recognizer.extract_entities(text, self.settings.min_confidence)
         self.current_entities.extend(entities)
 
         # Pass through the original text
@@ -82,13 +82,13 @@ class IInstance(IInstanceBase):
 
         for doc in documents:
             # Extract entities from document content
-            entities = self.IGlobal.recognizer.extract_entities(doc.page_content)
+            entities = self.IGlobal.recognizer.extract_entities(doc.page_content, self.settings.min_confidence)
 
             # Create a deep copy to avoid modifying the original
             enriched_doc = doc.model_copy(deep=True)
 
             # Store entities in metadata if configured
-            if self.IGlobal.recognizer.store_in_metadata:
+            if self.settings.store_in_metadata:
                 if enriched_doc.metadata is None:
                     # Build from the instance so objectId, nodeId, parent, permissionId
                     # and signature are inherited from the object being processed. A

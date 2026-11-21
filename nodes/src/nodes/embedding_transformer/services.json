@@ -80,6 +80,8 @@
 			"description": "Hugging face model to use for embedding"
 		},
 		"embedding.truncate_dim": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Truncate dimensions",
 			"description": "Truncate embeddings to this dimensionality (0 = use model default)",
@@ -87,12 +89,14 @@
 			"minimum": 0
 		},
 		"embedding.document_prefix": {
+			"param": true,
 			"type": "string",
 			"title": "Document prefix",
 			"description": "Prefix prepended to document text before encoding (e.g. 'search_document: ', 'passage: ')",
 			"default": ""
 		},
 		"embedding.query_prefix": {
+			"param": true,
 			"type": "string",
 			"title": "Query prefix",
 			"description": "Prefix prepended to query text before encoding (e.g. 'search_query: ', 'query: ')",

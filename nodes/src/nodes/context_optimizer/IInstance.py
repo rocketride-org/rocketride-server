@@ -22,14 +22,17 @@
 # =============================================================================
 
 import copy
+from typing import TYPE_CHECKING
 
 from rocketlib import IInstanceBase, Entry, debug, warning
 from .IGlobal import IGlobal
-from .optimizer import ContextOptimizer
 from ai.common.schema import Doc
 from ai.common.schema import Question
 from ai.common.schema import QuestionHistory
 from ai.common.schema import QuestionText
+
+if TYPE_CHECKING:
+    from .optimizer import ContextOptimizer
 
 
 def blank_budgeted_fields(question: Question) -> Question:
@@ -86,7 +89,7 @@ class IInstance(IInstanceBase):
 
     IGlobal: IGlobal  # Reference to global context providing the model-window catalog
 
-    optimizer: ContextOptimizer | None = None
+    optimizer: 'ContextOptimizer | None' = None
 
     def beginInstance(self):
         """Build this call's optimizer from its settings over the control's catalog.
@@ -96,6 +99,9 @@ class IInstance(IInstanceBase):
         percentage falls back with a warning, never an error). With no catalog
         (the control never began) there is no optimizer and questions pass through.
         """
+        # Imported here: the optimizer module pulls in the shared config helpers
+        from .optimizer import ContextOptimizer
+
         catalog = self.IGlobal.catalog
         self.optimizer = ContextOptimizer(self.settings, catalog) if catalog is not None else None
 

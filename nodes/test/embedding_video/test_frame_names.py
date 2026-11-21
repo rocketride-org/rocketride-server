@@ -128,13 +128,7 @@ class _Endpoint:
 
 
 class _FakeGlobal:
-    """The extraction settings and embedding model `_process_video` reads."""
-
-    start_time = 0.0
-    duration = 0.0
-    frame_interval = 1.0
-    max_frames = 0
-    max_video_size_bytes = 10 * 1024 * 1024
+    """The embedding model and device lock `_process_video` uses."""
 
     def __init__(self):
         self.device_lock = threading.Lock()
@@ -171,7 +165,10 @@ def node(monkeypatch):
     inst.instance = _Capture()
     inst.IEndpoint = _Endpoint()
     inst.IGlobal = _FakeGlobal()
+    # The extraction settings are the call's
+    inst._settings = SimpleNamespace(start_time=0.0, duration=0.0, interval=1.0, max_frames=0, maxVideoSizeMB=10)
     inst.open(None)
+
     return inst
 
 
