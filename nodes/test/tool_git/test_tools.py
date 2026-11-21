@@ -20,7 +20,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, Optional
 from unittest.mock import MagicMock, create_autospec, patch
 
@@ -125,14 +125,14 @@ with patch.dict(
 def _make_instance() -> IInstance:
     """Create an IInstance with a spec-matched GitRepo mock, bypassing __init__.
 
-    Sets ``read_only_mode = False`` on the mock so dispatch tests for write
+    Binds call settings with readOnlyMode off so dispatch tests for write
     tools exercise the call path. Read-only-mode behavior is covered separately
     in TestReadOnlyMode.
     """
     inst = IInstance.__new__(IInstance)
     inst.IGlobal = MagicMock()
     inst.IGlobal.repo = create_autospec(GitRepo, instance=True, spec_set=True)
-    inst.IGlobal.repo.read_only_mode = False
+    inst._settings = SimpleNamespace(safeMode=True, readOnlyMode=False)
     return inst
 
 
@@ -437,7 +437,7 @@ class TestIInstanceBranch(unittest.TestCase):
         inst.IGlobal.repo.branch_delete.return_value = {'deleted': 'old-branch'}
         result = _ok(_invoke(inst, 'git.branch_delete', {'name': 'old-branch', 'force': True}))
         self.assertEqual(result['deleted'], 'old-branch')
-        inst.IGlobal.repo.branch_delete.assert_called_once_with(name='old-branch', force=True)
+        inst.IGlobal.repo.branch_delete.assert_called_once_with(name='old-branch', force=True, safe_mode=True)
 
     def test_merge(self) -> None:
         """git.merge returns the merge status from the mocked repo."""
@@ -483,14 +483,14 @@ class TestIInstanceRemote(unittest.TestCase):
             'status': 'pushed',
         }
         _invoke(inst, 'git.push')
-        inst.IGlobal.repo.push.assert_called_once_with(remote='origin', branch=None, force=False)
+        inst.IGlobal.repo.push.assert_called_once_with(remote='origin', branch=None, force=False, safe_mode=True)
 
     def test_push_force_flag(self) -> None:
         """git.push forwards force=True to GitRepo.push."""
         inst = _make_instance()
         inst.IGlobal.repo.push.return_value = {'remote': 'origin', 'branch': 'main', 'status': 'pushed'}
         _invoke(inst, 'git.push', {'force': True})
-        inst.IGlobal.repo.push.assert_called_once_with(remote='origin', branch=None, force=True)
+        inst.IGlobal.repo.push.assert_called_once_with(remote='origin', branch=None, force=True, safe_mode=True)
 
     def test_pull_passes_remote(self) -> None:
         """git.pull forwards a custom remote to GitRepo.pull."""
@@ -612,12 +612,12 @@ class TestReadOnlyMode(unittest.TestCase):
     """Verify readOnlyMode blocks every mutating tool at dispatch and lets reads through."""
 
     def _make_readonly_instance(self) -> IInstance:
-        """Build an IInstance whose mocked repo reports read_only_mode=True."""
+        """Build an IInstance whose call settings have readOnlyMode on."""
         inst = IInstance.__new__(IInstance)
         inst.IGlobal = MagicMock()
-        # Plain MagicMock (no spec_set) so we can freely set read_only_mode.
+        # Plain MagicMock (no spec_set): the read-only gate is the call's setting, not the repo's.
         inst.IGlobal.repo = MagicMock()
-        inst.IGlobal.repo.read_only_mode = True
+        inst._settings = SimpleNamespace(safeMode=True, readOnlyMode=True)
         return inst
 
     def test_commit_blocked_when_readonly(self) -> None:
@@ -706,9 +706,9 @@ class TestReadOnlyMode(unittest.TestCase):
         inst.IGlobal.repo.stash.assert_not_called()
 
     def test_writes_allowed_when_readonly_disabled(self) -> None:
-        """When read_only_mode=False, write tools dispatch normally."""
+        """When the call's readOnlyMode is off, write tools dispatch normally."""
         inst = self._make_readonly_instance()
-        inst.IGlobal.repo.read_only_mode = False
+        inst._settings = SimpleNamespace(safeMode=True, readOnlyMode=False)
         inst.IGlobal.repo.commit.return_value = {
             'sha': 'abc',
             'short_sha': 'abc',
@@ -835,7 +835,6 @@ def _repo_with_workdir(workdir: str) -> GitRepo:
     repo._repo = MagicMock()
     repo._repo.workdir = workdir
     repo._repo_path = workdir
-    repo.safe_mode = True
     return repo
 
 
@@ -845,8 +844,6 @@ def _repo_for_merge(analysis: int, status: Optional[Dict[str, int]] = None) -> t
     backend = MagicMock()
     wrapper._repo = backend
     wrapper._repo_path = '/tmp/repo'
-    wrapper.safe_mode = True
-    wrapper.read_only_mode = False
 
     their_branch = MagicMock()
     their_branch.target = 'their-target'
@@ -1104,7 +1101,7 @@ def test_real_fast_forward_rejects_and_preserves_all_dirty_files(tmp_path, real_
     (tmp_path / 'untracked.txt').write_text('protected untracked\n', encoding='utf-8')
     before_status = repo.status()
 
-    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    wrapper = module.GitRepo(repo_path=str(tmp_path))
     with pytest.raises(module.GitError, match='clean working tree'):
         wrapper.merge('feature')
 
@@ -1127,7 +1124,7 @@ def test_real_normal_merge_rejects_dirty_tree_before_merge_state(tmp_path, real_
     main_tip = _commit_files(pygit2_module, repo, tmp_path, {'main.txt': 'main\n'}, 'main')
     (tmp_path / 'unstaged.txt').write_text('protected\n', encoding='utf-8')
 
-    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    wrapper = module.GitRepo(repo_path=str(tmp_path))
     with pytest.raises(module.GitError, match='unstaged.txt'):
         wrapper.merge('feature')
 
@@ -1146,7 +1143,7 @@ def test_real_clean_fast_forward_still_succeeds(tmp_path, real_git_modules) -> N
     feature_tip = _commit_files(pygit2_module, repo, tmp_path, {'feature.txt': 'feature\n'}, 'feature')
     _checkout(repo, 'main')
 
-    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    wrapper = module.GitRepo(repo_path=str(tmp_path))
     result = wrapper.merge('feature')
 
     assert result['status'] == 'fast_forwarded'
@@ -1166,7 +1163,7 @@ def test_real_clean_normal_merge_creates_two_parent_commit(tmp_path, real_git_mo
     _checkout(repo, 'main')
     main_tip = _commit_files(pygit2_module, repo, tmp_path, {'main.txt': 'main\n'}, 'main')
 
-    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    wrapper = module.GitRepo(repo_path=str(tmp_path))
     result = wrapper.merge('feature')
 
     merge_commit = repo.get(repo.head.target)
@@ -1188,7 +1185,7 @@ def test_real_clean_conflict_aborts_to_original_head(tmp_path, real_git_modules)
     _checkout(repo, 'main')
     main_tip = _commit_files(pygit2_module, repo, tmp_path, {'conflict.txt': 'main\n'}, 'main')
 
-    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    wrapper = module.GitRepo(repo_path=str(tmp_path))
     with pytest.raises(module.GitError, match='Merge conflict in: conflict.txt'):
         wrapper.merge('feature')
 
@@ -1207,7 +1204,7 @@ def test_real_up_to_date_merge_preserves_dirty_tree(tmp_path, real_git_modules) 
     (tmp_path / 'unstaged.txt').write_text('keep me\n', encoding='utf-8')
     before_status = repo.status()
 
-    wrapper = module.GitRepo(repo_path=str(tmp_path), read_only_mode=False)
+    wrapper = module.GitRepo(repo_path=str(tmp_path))
     result = wrapper.merge('already-merged')
 
     assert result == {'status': 'up_to_date', 'branch': 'already-merged'}
@@ -1420,3 +1417,23 @@ class TestIntegrationRealRepo(unittest.TestCase):
         """grep() finds 'def' keyword matches across tracked files in the real repository."""
         result = self._repo.grep(pattern=r'\bdef\b', path=None)
         self.assertIsInstance(result, list)
+
+
+def test_one_control_serves_calls_with_their_own_gates() -> None:
+    """The safeMode and readOnlyMode gates are each call's: one repository, three calls, three outcomes."""
+    first = _make_instance()
+    repo = first.IGlobal.repo
+    repo.push.return_value = {'remote': 'origin', 'branch': 'main', 'status': 'pushed'}
+    second = IInstance.__new__(IInstance)
+    second.IGlobal = first.IGlobal
+    second._settings = SimpleNamespace(safeMode=False, readOnlyMode=False)
+    third = IInstance.__new__(IInstance)
+    third.IGlobal = first.IGlobal
+    third._settings = SimpleNamespace(safeMode=True, readOnlyMode=True)
+
+    _invoke(first, 'git.push', {'force': True})
+    _invoke(second, 'git.push', {'force': True})
+    refused = _invoke(third, 'git.push', {'force': True})
+
+    assert [call.kwargs['safe_mode'] for call in repo.push.call_args_list] == [True, False]
+    assert 'read-only mode' in refused['error']

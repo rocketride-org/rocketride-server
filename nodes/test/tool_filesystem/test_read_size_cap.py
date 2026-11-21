@@ -12,8 +12,8 @@ Covers the per-call ``maxBytes`` cap added on top of ``FileStore.read``:
 * rejected with ``ValueError`` on non-int / non-positive input.
 
 These are pure-Python unit tests — no server, no engine, no real FileStore.
-The node module is imported under a stubbed ``rocketlib`` and a stubbed
-``tool_filesystem`` package so the relative ``from .IGlobal import IGlobal``
+The node module is imported under a stubbed ``rocketlib`` and a synthetic
+``tool_filesystem`` package so the relative ``from .policy import ...``
 resolves without dragging in the engine runtime.
 """
 
@@ -74,17 +74,12 @@ def _install_rocketlib_stub() -> None:
 
 
 def _install_tool_filesystem_pkg_stub() -> None:
-    """Install a synthetic ``tool_filesystem`` package with a stub ``IGlobal``.
-
-    Importing the production ``tool_filesystem.IGlobal`` would pull in the
-    real ``rocketlib``. We replace the submodule with a tiny stand-in that
-    mirrors the attribute surface ``IInstance`` reads (``allow_*``,
-    ``path_patterns``).
+    """Install a synthetic ``tool_filesystem`` package rooted at the real node directory.
 
     The synthesised package's ``__path__`` points at the real node directory,
     so a subsequent ``import tool_filesystem.IInstance`` finds the production
-    ``IInstance.py`` while the relative ``from .IGlobal`` lookup resolves to
-    our stub.
+    ``IInstance.py`` and its ``policy.py`` (stdlib plus ``rocketlib.warning``)
+    without executing the package ``__init__``.
     """
     if 'tool_filesystem' in sys.modules:
         return
@@ -92,46 +87,6 @@ def _install_tool_filesystem_pkg_stub() -> None:
     pkg = types.ModuleType('tool_filesystem')
     pkg.__path__ = [str(_NODE_DIR)]
     sys.modules['tool_filesystem'] = pkg
-
-    iglobal_mod = types.ModuleType('tool_filesystem.IGlobal')
-
-    class _IGlobalStub:
-        """Mirror of the production ``IGlobal`` attribute surface for tests."""
-
-        allow_read: bool = True
-        allow_write: bool = True
-        allow_list: bool = True
-        allow_mkdir: bool = True
-        allow_stat: bool = True
-        allow_delete: bool = False
-        path_patterns: list | None = None
-
-    iglobal_mod.IGlobal = _IGlobalStub
-    # Read from the production source rather than restated: the sink resolves the config
-    # value by member name, so a copy that drifted would be a silent divergence.
-    iglobal_mod.OnConflict = _load_production_on_conflict()
-    sys.modules['tool_filesystem.IGlobal'] = iglobal_mod
-
-
-def _load_production_on_conflict():
-    """The real ``OnConflict`` enum, read straight out of ``IGlobal.py``.
-
-    Executing that module needs ``ai``/``rocketlib``, which this suite deliberately avoids
-    importing; the enum itself is stdlib-only, so it is compiled on its own instead.
-    """
-    import ast
-    from enum import IntEnum
-
-    tree = ast.parse((_NODE_DIR / 'IGlobal.py').read_text(encoding='utf-8'))
-    for node in tree.body:
-        if isinstance(node, ast.ClassDef) and node.name == 'OnConflict':
-            members = {
-                stmt.targets[0].id: ast.literal_eval(stmt.value)
-                for stmt in node.body
-                if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name)
-            }
-            return IntEnum('OnConflict', members)
-    raise AssertionError('OnConflict not found in IGlobal.py')
 
 
 # Stub rocketlib only while importing the node, then restore so it never leaks.
@@ -145,7 +100,7 @@ try:
         MAX_READ_LIMIT,
         IInstance,
     )
-    from tool_filesystem.IGlobal import IGlobal  # noqa: E402
+    from tool_filesystem.policy import CallPolicy  # noqa: E402
 finally:
     if _saved_rl is not None:
         sys.modules['rocketlib'] = _saved_rl
@@ -174,21 +129,18 @@ def file_store():
 
 @pytest.fixture
 def instance(file_store):
-    """Construct an ``IInstance`` wired to a fresh stub IGlobal and the files double.
+    """Construct an ``IInstance`` wired to a default call policy and the files double.
 
-    The engine normally attaches ``self.IGlobal`` from C++ and the server
-    answers ``self.files``; for unit tests a subclass takes the double as its
-    ``files`` door. ``allow_read`` defaults to True.
+    The engine normally binds the call's settings (the policy is built from
+    them) and the server answers ``self.files``; for unit tests a subclass
+    takes the double as its ``files`` door. ``allow_read`` defaults to True.
 
     Returns:
         IInstance whose ``self.files`` is the double.
     """
     inst = type('IInstanceUnderTest', (IInstance,), {'files': None})()
     inst.files = file_store
-    glb = IGlobal()
-    glb.allow_read = True
-    glb.path_patterns = None
-    inst.IGlobal = glb
+    inst._call_policy = CallPolicy()
     return inst
 
 

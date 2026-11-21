@@ -108,6 +108,39 @@ def test_iinstance_invoke_goes_through_handle_invoke_and_refuses():
     d, client = _driver({'read_only': True})
     inst = IInstanceMod.IInstance()
     inst.IGlobal = types.SimpleNamespace(driver=d)
+    # The call's view of the driver: the driver built with the call's settings
+    inst._call_driver = d
     with pytest.raises(ValueError, match=READ_ONLY_TEXT):
         inst.invoke({'op': 'tool.invoke', 'tool_name': 'masky.speak', 'input': {'text': 'hi', 'avatar_id': 'A'}})
     assert client.calls == []
+
+
+def test_one_driver_serves_two_calls_through_their_own_views():
+    """A call's view shares the control's client and registries and carries the call's settings."""
+    d, client = _driver()
+    read_only = d.for_call({'read_only': True, 'include_media_urls': False})
+    writable = d.for_call({'read_only': False, 'include_media_urls': True})
+
+    with pytest.raises(ValueError, match=READ_ONLY_TEXT):
+        _invoke(read_only, 'masky.speak', {'text': 'hi', 'avatar_id': 'A'})
+    assert client.calls == []
+
+    assert read_only._client is writable._client is d._client
+    assert read_only._images is writable._images is d._images
+    assert read_only._jobs is d._jobs and read_only._conversations is d._conversations
+    assert (read_only._include_media_urls, writable._include_media_urls) == (False, True)
+    assert d._settings == {}
+
+
+def test_an_instance_works_through_its_calls_view_of_the_driver(monkeypatch):
+    """The instance builds its view from its own settings (read_settings), never the control's."""
+    d, _client = _driver()
+    inst = IInstanceMod.IInstance()
+    inst.IGlobal = types.SimpleNamespace(driver=d)
+    monkeypatch.setattr(
+        IInstanceMod, 'read_settings', lambda settings: {'read_only': True, 'include_media_urls': False, **settings}
+    )
+    inst.settings = {'action': 'live'}
+    view = inst._driver()
+    assert view is inst._driver()
+    assert view._settings['action'] == 'live' and view._client is d._client

@@ -193,7 +193,7 @@ def _injected_sleep(inst):
     from tool_github.github_client import RetryPolicy
 
     slept = []
-    inst.IGlobal.retry_policy = RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
+    inst._options().retry_policy = RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
     return slept
 
 

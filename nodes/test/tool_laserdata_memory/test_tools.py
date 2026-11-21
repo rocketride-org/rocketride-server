@@ -248,20 +248,14 @@ class FakeLaser:
 
 
 class StubGlobal:
-    """IGlobal stand-in for IInstance tests: drives coroutines synchronously."""
+    """IGlobal stand-in for IInstance tests: drives coroutines synchronously, records each wait budget."""
 
-    def __init__(self, state, **overrides):
+    def __init__(self, state):
         self.state = state
         self.connection_string = 'iggy:laser@localhost:8090'
-        self.namespace = 'ns-default'
-        self.allow_namespace_override = True
-        self.folded = True
-        self.recall_limit = 10
-        self.op_timeout = 30
-        for k, v in overrides.items():
-            setattr(self, k, v)
 
-    def run(self, coro, *, timeout=None):
+    def run(self, coro, *, timeout):
+        self.state.setdefault('timeouts', []).append(timeout)
         return asyncio.run(coro)
 
     def get_laser(self):
@@ -280,10 +274,24 @@ def _pin_normalizer(monkeypatch):
 
 
 def _instance(state=None, **overrides):
-    """Construct an IInstance bound to a StubGlobal; returns (instance, call state)."""
+    """Construct an IInstance bound to a StubGlobal and the call's settings; returns (instance, call state)."""
     state = state if state is not None else {'calls': []}
     inst = IInstance()
-    inst.IGlobal = StubGlobal(state, **overrides)
+    inst.IGlobal = StubGlobal(state)
+    if 'connection_string' in overrides:
+        # The connection is the control's
+        inst.IGlobal.connection_string = overrides.pop('connection_string')
+    # The namespace, its override gate, the recall defaults and the timeout are the call's settings
+    inst.settings = SimpleNamespace(
+        **{
+            'namespace': 'ns-default',
+            'allow_namespace_override': True,
+            'folded': True,
+            'recall_limit': 10,
+            'op_timeout': 30,
+            **overrides,
+        }
+    )
     return inst, state
 
 
@@ -356,11 +364,35 @@ def test_begin_global_reads_the_cloud_branch(bridge):
 
 def test_begin_global_unset_leaves_mean_the_defaults(bridge):
     glb = bridge()
-    assert glb.recall_limit == 10
-    assert glb.op_timeout == 30
-    assert glb.folded is True
-    assert glb.allow_namespace_override is True
     assert glb.stream == 'rocketride-memory'
+    # The recall defaults are a call's settings: a call with no params reads the schema defaults
+    settings = glb._resolved()
+    assert (settings.recall_limit, settings.op_timeout) == (10, 30)
+    assert settings.folded is True
+    assert settings.allow_namespace_override is True
+
+
+def test_the_control_config_refuses_the_call_settings(bridge):
+    from rocketlib.config import ConfigError
+
+    glb = bridge()
+    for key in ('namespace', 'allow_namespace_override', 'folded', 'recall_limit', 'op_timeout'):
+        with pytest.raises(ConfigError):
+            getattr(glb.config, key)
+
+
+def test_one_control_serves_calls_with_their_own_options():
+    """One control (one bridge, one connection) serves calls with their own timeout, limit and namespace."""
+    state = {'calls': []}
+    first, _ = _instance(state)
+    second, _ = _instance(state, op_timeout=5, recall_limit=3, namespace='team-b')
+    second.IGlobal = first.IGlobal
+    first.remember({'content': 'a fact'})
+    second.remember({'content': 'a fact'})
+    second.recall({})
+    assert state['timeouts'] == [30, 5, 5]
+    assert first._public_namespace({}, 'remember') == 'ns-default'
+    assert second._public_namespace({}, 'remember') == 'team-b'
 
 
 @pytest.mark.parametrize(
@@ -409,7 +441,7 @@ def test_run_executes_on_bridge_loop(bridge):
     async def where():
         return threading.current_thread().name
 
-    assert glb.run(where()) == 'tool_laserdata_memory-loop'
+    assert glb.run(where(), timeout=30) == 'tool_laserdata_memory-loop'
 
 
 def test_run_timeout_maps_to_runtime_error(bridge):
@@ -429,7 +461,7 @@ def test_run_when_not_open_raises():
         return 1
 
     with pytest.raises(RuntimeError, match='not open'):
-        glb.run(noop())
+        glb.run(noop(), timeout=30)
 
 
 def test_get_laser_connects_once_across_threads(bridge, monkeypatch):
@@ -496,7 +528,7 @@ def test_run_rejected_while_closing(bridge):
         return 1
 
     with pytest.raises(RuntimeError, match='not open'):
-        glb.run(noop())
+        glb.run(noop(), timeout=30)
 
 
 def test_end_global_closes_and_clears(bridge, monkeypatch):

@@ -124,6 +124,32 @@ def flat_config(flat: dict | None) -> FlatConfig:
     return FlatConfig(flat)
 
 
+def call_options(github_client, **overrides) -> types.SimpleNamespace:
+    """
+    A call's options as ``IInstance._options`` builds them from the schema defaults, with ``overrides``.
+
+    For the tests that wire a stand-in IGlobal: the options are the call's settings,
+    so such a test sets them on the instance (``inst._call_options``).
+
+    Args:
+        github_client: The node's ``github_client`` module the test imported.
+        **overrides: Option values to replace (``default_repo``, ``read_only``, ``tools``, ...).
+
+    Returns:
+        The options namespace.
+    """
+    values = {
+        'default_repo': '',
+        'read_only': False,
+        'tools': frozenset(),
+        'graphql_max_bytes': github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+        'graphql_allow_mutations': False,
+        'retry_policy': github_client.RetryPolicy(),
+    }
+    values.update(overrides)
+    return types.SimpleNamespace(**values)
+
+
 if str(_NODES_SRC) not in sys.path:
     sys.path.insert(0, str(_NODES_SRC))
 
@@ -184,6 +210,11 @@ def install_stubs(node_config: dict | None = None) -> None:
     mod_rl.tool_function = mock_tool_function
 
     class IInstanceBase:
+        @property
+        def settings(self):
+            """A call with no params of its own: the control's stored values (the full resolved view)."""
+            return self.IGlobal._resolved()
+
         def _collect_tool_methods(self):
             # Same walk as rocketlib's IInstanceBase: every @tool_function method by name.
             return {

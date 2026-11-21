@@ -33,7 +33,7 @@ def github(monkeypatch):
 
 
 def _begin_error(cfg) -> str:
-    """The message beginGlobal raises for ``cfg``: its readers, in its order, on the flat config.
+    """The message the node's readers raise for ``cfg`` (a call's options, then the control's auth), on the flat config.
 
     Past the schema on purpose: it stores a credentialMap as the form's rows, so the
     object, JSON-text, bad-key and bad-value cases here are the node's own checks.
@@ -55,8 +55,10 @@ def _validate_warnings(cfg) -> list[str]:
         from tool_github.IValidator import IValidator
 
         validator = IValidator()
-        # The view the resolver would serve, handed in directly (see _begin_error)
+        # The views the resolver would serve, handed in directly (see _begin_error): the
+        # restricted one for the auth, the full one for the options (params)
         validator._config_restricted = flat_config(cfg)
+        validator._config_view = flat_config(cfg)
         validator.validateConfig()
         return [str(call.args[0]) for call in warning.call_args_list]
 
@@ -902,5 +904,5 @@ def test_invalid_default_repository_is_refused_at_start_without_echoing_it(githu
 
 def test_default_repository_is_stripped_and_used_for_routing(github):
     with real_node({'credentialMap': {'acme/api': 'tok-exact'}, 'defaultRepo': ' acme/api '}) as inst:
-        assert inst.IGlobal.default_repo == 'acme/api'
-        assert inst.IGlobal.get_token(inst.IGlobal.default_repo) == 'tok-exact'
+        assert inst._options().default_repo == 'acme/api'
+        assert inst.IGlobal.get_token(inst._options().default_repo) == 'tok-exact'
