@@ -22,7 +22,7 @@ import uuid
 import psutil
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Tuple
-from rocketlib import debug
+from rocketlib import debug, error
 from ai.constants import (
     CONST_METRICS_SAMPLE_INTERVAL,
     CONST_BILLING_REPORT_INTERVAL,
@@ -79,7 +79,10 @@ class UsageSink:
     The PUBLICATION that answered (rung, audience slot, version; ``-`` where a
     dev run has none) is part of the key, so one caller's calls through
     Staging and through Production on one day are two rows and a per-team
-    count is a plain group-by (decided 2026-11-16). Posting
+    count is a plain group-by (decided 2026-11-16). The org pays; the user
+    and the team attribute, and either may be absent: a run with no caller (a
+    schedule, a run-now, a listener) carries ``-`` for the user in the key and
+    no user on the row, an org-owned run no team either (plan 8.3). Posting
     coalesces the increments of one row until ``flush`` (the billing report
     interval, and engine end), an optimisation only: a buffered increment is
     dropped when the database confirms the write, and a failed write rides
@@ -111,8 +114,11 @@ class UsageSink:
             now: The close time (injectable).
         """
         billing = usage.billing
-        if billing is None or not getattr(billing, 'org_id', '') or not getattr(billing, 'user_id', ''):
+        # The org is the payer; without one there is nobody to charge. A user
+        # is attribution only: a run with no caller still pays
+        if billing is None or not getattr(billing, 'org_id', ''):
             return
+        user_id = getattr(billing, 'user_id', '') or None
         pipe = '.'.join(usage.address.split('.')[:2]) if usage.address else ''
         day = self.day_number(now)
         # The publication segments: a dev run serves through none, so its
@@ -122,7 +128,7 @@ class UsageSink:
         for resource, amount in tokens.items():
             if amount <= 0:
                 continue
-            key = f'usage:{day}:{pipe}:{usage.rung or "-"}:{team}:{version}:{billing.user_id}:{resource}'
+            key = f'usage:{day}:{pipe}:{usage.rung or "-"}:{team}:{version}:{user_id or "-"}:{resource}'
             pending = self._pending.get(key)
             if pending is None:
                 pending = self._pending[key] = {
@@ -133,7 +139,7 @@ class UsageSink:
                     'request_count': 0,
                     'row': {
                         'org_id': billing.org_id,
-                        'user_id': billing.user_id,
+                        'user_id': user_id,
                         'team_id': billing.team_id or None,
                         'resource': resource,
                         'idempotency_key': key,
@@ -185,7 +191,8 @@ class UsageSink:
                     **pending['row'],
                 )
             except Exception as e:
-                debug(
+                # Unbilled usage until the retry lands: an operator must see it
+                error(
                     f'[TaskMetrics] Usage increment {pending["row"]["idempotency_key"]} ({increment_id}) not '
                     f'written, retried on the next flush: {e}'
                 )
@@ -775,8 +782,10 @@ class TaskMetrics:
                 idem_key = f'task:{self.billing_run_id}:{description}'
                 await account.apply_debit(
                     org_id=self.org_id,
-                    user_id=self.user_id,
-                    team_id=self.team_id,
+                    # Attribution only: a team- or org-owned run has no user,
+                    # an org-owned one no team (plan 8.3)
+                    user_id=self.user_id or None,
+                    team_id=self.team_id or None,
                     resource=resource,
                     amount=amount,
                     idempotency_key=idem_key,
@@ -790,7 +799,8 @@ class TaskMetrics:
                 else:
                     self._debited.discard(description)
         except Exception as e:
-            debug(f'[TaskMetrics] Error writing to billing ledger: {e}')
+            # Unbilled usage until the next report replaces the row: an operator must see it
+            error(f'[TaskMetrics] Error writing to billing ledger: {e}')
 
     async def _monitoring_loop(self) -> None:
         """

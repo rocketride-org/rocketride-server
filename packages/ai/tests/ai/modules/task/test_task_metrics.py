@@ -713,13 +713,85 @@ def sink_second_id(holds):
     return holds[1]['increment_id']
 
 
-def test_a_tree_without_a_paying_unit_is_not_posted():
+def test_a_tree_without_a_paying_org_is_not_posted():
+    """The org pays (plan 8.3): no attribution, or one naming no org, has nobody to charge."""
     sink = task_metrics.UsageSink(post=None)
     usage = _usage(1)
     usage.billing = None
     sink.post(usage, {'hold_time': 1.0})
-    sink.post(_usage(2, billing=_attribution(user='')), {'hold_time': 1.0})
+    sink.post(_usage(2, billing=_attribution(org='')), {'hold_time': 1.0})
     assert sink.pending == {}
+
+
+def test_a_run_with_no_caller_is_posted_with_its_team_and_no_user():
+    """A scheduled or run-now team run has no caller: its row carries the team, '-' for the user in the key."""
+    sink = task_metrics.UsageSink(post=None)
+    sink.post(_usage(1, billing=_attribution(user='', team='team-1')), {'hold_time': 0.5}, now=20772 * 86400 + 10)
+    key = 'usage:20772:acme.docBrain:team:team-1:5:-:hold_time'
+    assert list(sink.pending) == [key]
+    row = sink.pending[key]['row']
+    assert (row['org_id'], row['user_id'], row['team_id']) == ('org-1', None, 'team-1')
+
+
+def test_a_run_with_no_caller_and_no_team_is_posted_for_its_org_alone():
+    """An org-owned run (plan 8.3) names neither a user nor a team."""
+    sink = task_metrics.UsageSink(post=None)
+    sink.post(_usage(1, billing=_attribution(user='', team=''), team=''), {'hold_time': 0.5}, now=20772 * 86400 + 10)
+    [pending] = sink.pending.values()
+    assert (pending['row']['org_id'], pending['row']['user_id'], pending['row']['team_id']) == ('org-1', None, None)
+
+
+def test_a_failed_usage_write_is_logged_as_an_error(monkeypatch):
+    """A lost billing write is an error, not debug output; the increment stays for the next flush."""
+    errors = []
+    monkeypatch.setattr(task_metrics, 'error', errors.append)
+
+    async def post(**row):
+        raise RuntimeError('ledger down')
+
+    sink = task_metrics.UsageSink(post=post)
+    sink.post(_usage(1), {'hold_time': 0.5}, now=20772 * 86400 + 10)
+    asyncio.run(sink.flush())
+
+    assert len(errors) == 1 and 'ledger down' in errors[0] and 'usage:20772:' in errors[0]
+    assert len(sink.unconfirmed) == 1
+
+
+def test_the_engine_debit_of_a_run_with_no_user_names_its_team(fake_psutil, no_gpu, monkeypatch):
+    """A team-owned run's engine line is written with the team and no user (plan 8.3)."""
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', '', 'team-1', 'run-1'
+    status.tokens.cpu_utilization = 2.0
+    rows = []
+
+    async def apply_debit(**row):
+        rows.append(row)
+        return True
+
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+    asyncio.run(tm._report_to_billing_system())
+
+    assert [(row['org_id'], row['user_id'], row['team_id']) for row in rows] == [('org-1', None, 'team-1')]
+
+
+def test_a_failed_engine_debit_is_logged_as_an_error(fake_psutil, no_gpu, monkeypatch):
+    import sys
+
+    tm, status = _make_metrics(fake_psutil)
+    tm.org_id, tm.user_id, tm.team_id, tm.billing_run_id = 'org-1', 'user-1', 'team-1', 'run-1'
+    status.tokens.cpu_utilization = 2.0
+    errors = []
+    monkeypatch.setattr(task_metrics, 'error', errors.append)
+
+    async def apply_debit(**row):
+        raise RuntimeError('ledger down')
+
+    monkeypatch.setattr(sys.modules['ai.account'].account, 'apply_debit', apply_debit)
+    asyncio.run(tm._report_to_billing_system())
+
+    assert len(errors) == 1 and 'ledger down' in errors[0]
 
 
 def test_a_zero_replacement_stays_eligible_until_its_write_succeeds(fake_psutil, no_gpu, monkeypatch):
