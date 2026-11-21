@@ -21,10 +21,17 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Exercise streamed media through a live engine and stock persistence nodes."""
+"""Exercise streamed media through a live engine and stock persistence nodes.
+
+The persistence nodes save through the store. Under ``--runtime=k8s`` a pod
+sees none of the engine's files, so the engine refuses such a pipeline before
+it starts; the test then asserts that refusal, in that runtime's own words
+(as ``tool_filesystem/test_live_anchor.py`` does).
+"""
 
 import asyncio
 import json
+import os
 import time
 import uuid
 
@@ -35,6 +42,10 @@ from .test_streams import NODE, media as media_fixture
 media = media_fixture
 
 pytestmark = [pytest.mark.requires_server, pytest.mark.integration, pytest.mark.timeout(600)]
+
+# The runtime the test server runs tasks with (set by the builder)
+_K8S = os.environ.get('ROCKETRIDE_TEST_RUNTIME') == 'k8s'
+_K8S_REFUSAL = 'tool_filesystem is not available under --runtime=k8s'
 
 
 def pipeline(request, output):
@@ -99,7 +110,13 @@ async def test_streamed_operations_through_engine(client, media, record_property
         document = pipeline(request, root + '/' + request['mode'])
         validation = await client.validate(document)
         assert not validation.get('errors'), validation.get('errors')
-        token = (await client.use(pipeline=document, source='source', threads=1))['token']
+        try:
+            token = (await client.use(pipeline=document, source='source', threads=1))['token']
+        except Exception as e:
+            # Only the k8s runtime may refuse, and only with its own reason
+            if _K8S and _K8S_REFUSAL in str(e):
+                return
+            raise
         try:
             started = time.perf_counter()
             pipe = await client.pipe(
