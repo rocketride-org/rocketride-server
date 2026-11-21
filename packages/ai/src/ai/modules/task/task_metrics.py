@@ -130,6 +130,15 @@ class UsageSink:
                 continue
             key = f'usage:{day}:{pipe}:{usage.rung or "-"}:{team}:{version}:{user_id or "-"}:{resource}'
             pending = self._pending.get(key)
+            # Increments coalesce only for ONE paying unit. An open entry of
+            # another org or billing team under this key (one user calling from
+            # two orgs, an engine shared by two owners) is detached to be
+            # written as it stands, and this post opens its own
+            if pending is not None and (
+                pending['row']['org_id'] != billing.org_id or pending['row']['team_id'] != (billing.team_id or None)
+            ):
+                self._unconfirmed[pending['increment_id']] = self._pending.pop(key)
+                pending = None
             if pending is None:
                 pending = self._pending[key] = {
                     # The increment's own identity: the ledger refuses a second

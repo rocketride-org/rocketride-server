@@ -741,6 +741,28 @@ def test_a_run_with_no_caller_and_no_team_is_posted_for_its_org_alone():
     assert (pending['row']['org_id'], pending['row']['user_id'], pending['row']['team_id']) == ('org-1', None, None)
 
 
+def test_two_paying_units_under_one_key_never_share_an_increment():
+    """One key, two orgs (a user calling from each): each org's usage is written under its own identity."""
+    writes = []
+
+    async def post(**row):
+        writes.append(row)
+        return True
+
+    sink = task_metrics.UsageSink(post=post)
+    now = 20772 * 86400 + 10
+    sink.post(_usage(1, billing=_attribution(org='org-1')), {'hold_time': 0.5}, now=now)
+    sink.post(_usage(2, billing=_attribution(org='org-1')), {'hold_time': 0.25}, now=now)
+    sink.post(_usage(3, billing=_attribution(org='org-2', team='team-b')), {'hold_time': 1.0}, now=now)
+    asyncio.run(sink.flush())
+
+    assert sorted((w['org_id'], w['team_id'], w['amount'], w['request_count']) for w in writes) == [
+        ('org-1', 'team-home', 0.75, 2),
+        ('org-2', 'team-b', 1.0, 1),
+    ]
+    assert len({w['increment_id'] for w in writes}) == 2
+
+
 def test_a_failed_usage_write_is_logged_as_an_error(monkeypatch):
     """A lost billing write is an error, not debug output; the increment stays for the next flush."""
     errors = []
