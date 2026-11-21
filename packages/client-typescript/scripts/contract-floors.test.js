@@ -64,6 +64,7 @@ const {
 	extractBundleBody,
 	assignPinAliases,
 	typeFloorLines,
+	ALL_KEYS_TYPE,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,
@@ -298,6 +299,7 @@ function conformanceProgram(live, pick = (lines) => lines) {
 		check.push(`import type { ${name} as Frozen_${name} } from './frozen';`);
 		check.push(`import type { ${name} as Current_${name} } from './live';`);
 	}
+	check.push(ALL_KEYS_TYPE);
 	for (const [name, arity] of PINNED) check.push(...pick(typeFloorLines(name, name, arity)));
 	return { 'frozen.d.ts': FROZEN_FIXTURE, 'live.ts': live, 'check.ts': `${check.join('\n')}\nexport {};\n` };
 }
@@ -339,8 +341,8 @@ test('typeFloorLines: a generic pin is applied at its frozen arity', () => {
 	assert.deepEqual(typeFloorLines('Box', 'Box__v2_1', 1), [
 		'const _t_Box__v2_1: Frozen_Box__v2_1<any> = {} as Current_Box<any>;',
 		'void _t_Box__v2_1;',
-		'const _k_Box__v2_1: { [K in keyof Frozen_Box__v2_1<any>]-?: K } = ' +
-			'{} as { [K in keyof Current_Box<any>]-?: K };',
+		'const _k_Box__v2_1: { [K in _AllKeys<Frozen_Box__v2_1<any>>]-?: K } = ' +
+			'{} as { [K in _AllKeys<Current_Box<any>>]-?: K };',
 		'void _k_Box__v2_1;',
 	]);
 });

@@ -229,6 +229,13 @@ function assignPinAliases(pins) {
 }
 
 /**
+ * The distributive key helper the type pins use. A key assertion collects
+ * keys across every branch of a union, so a key dropped from one branch of a
+ * union type is caught too. Declared once per checker file.
+ */
+const ALL_KEYS_TYPE = 'type _AllKeys<T> = T extends unknown ? keyof T : never;';
+
+/**
  * The two assertions of one type pin. Generic floors are applied at the
  * frozen arity (`<any, …>`): a bare generic is TS2314, and an arity change
  * surfaces as one here.
@@ -253,7 +260,7 @@ function typeFloorLines(name, alias, arity) {
 	return [
 		`const _t_${alias}: ${frozen} = {} as ${current};`,
 		`void _t_${alias};`,
-		`const _k_${alias}: { [K in keyof ${frozen}]-?: K } = {} as { [K in keyof ${current}]-?: K };`,
+		`const _k_${alias}: { [K in _AllKeys<${frozen}>]-?: K } = {} as { [K in _AllKeys<${current}>]-?: K };`,
 		`void _k_${alias};`,
 	];
 }
@@ -359,6 +366,7 @@ module.exports = {
 	extractBundleBody,
 	assignPinAliases,
 	typeFloorLines,
+	ALL_KEYS_TYPE,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,

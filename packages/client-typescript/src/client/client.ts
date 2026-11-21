@@ -218,7 +218,7 @@ export class DataPipe {
 			}
 
 			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
-			this._client._ssePipeTraces.set(this._pipeId, this._traceId);
+			this._client._sseTraceCallbacks.set(this._traceId, this._onSSE);
 		}
 
 		// Only mark opened after the server-side pipe is fully consistent (including SSE setup).
@@ -358,8 +358,10 @@ export class DataPipe {
 
 			// Unregister SSE callback and scoped monitor subscription
 			if (this._onSSE !== undefined && this._pipeId !== undefined && this._traceId !== undefined) {
-				this._client._ssePipeCallbacks.delete(this._pipeId);
-				this._client._ssePipeTraces.delete(this._pipeId);
+				if (this._client._ssePipeCallbacks.get(this._pipeId) === this._onSSE) {
+					this._client._ssePipeCallbacks.delete(this._pipeId);
+				}
+				this._client._sseTraceCallbacks.delete(this._traceId);
 				try {
 					await this._client.setEvents(this._token, [], this._pipeId);
 				} catch {
@@ -487,20 +489,18 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * SSE callbacks by pipe slot. A slot is reused by the next binding once a
 	 * pipe closes, so delivery also checks the event's `traceId` against
-	 * `_ssePipeTraces` (the member types are part of the append-only shell
+	 * `_sseTraceCallbacks` (the member types are part of the append-only shell
 	 * contract, so the map keeps its key).
 	 */
 	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	/**
-	 * The request tree (wire `traceId`) each SSE slot was registered for.
-	 *
-	 * The callbacks stay keyed by slot (that member's type is part of the
-	 * shell contract, which is append-only); an event is delivered only when
-	 * its `traceId` is the one its slot was registered under, so a late event
-	 * of a closed pipe never reaches the next pipe opened on the same slot.
+	 * SSE callbacks by the request tree's wire `traceId`: the key delivery
+	 * uses. A slot number is engine-local and reused, so two open pipes on two
+	 * engines can share one; a traceId names its server and launch and is never
+	 * reused. `_ssePipeCallbacks` keeps its frozen type and is no longer read.
 	 */
-	readonly _ssePipeTraces = new Map<number, string>();
+	readonly _sseTraceCallbacks = new Map<string, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	// Desired state model — replaces old flag soup
 	private _desiredState: 'detached' | 'attached' | 'authenticated' = 'detached';
@@ -2364,8 +2364,8 @@ export class RocketRideClient extends DAPClient {
 		if (eventType === 'apaevt_sse') {
 			const pipeId = (eventBody as Record<string, unknown>)?.pipeId as number | undefined;
 			const traceId = (eventBody as Record<string, unknown>)?.traceId;
-			if (pipeId !== undefined && typeof traceId === 'string' && this._ssePipeTraces.get(pipeId) === traceId) {
-				const cb = this._ssePipeCallbacks.get(pipeId);
+			if (typeof traceId === 'string') {
+				const cb = this._sseTraceCallbacks.get(traceId);
 				if (cb) {
 					try {
 						const body = eventBody as Record<string, unknown>;
