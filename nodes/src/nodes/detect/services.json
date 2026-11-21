@@ -45,7 +45,8 @@
 			"description": "Minimum confidence score (0.0-1.0) to include a detection",
 			"default": 0.3,
 			"minimum": 0.0,
-			"maximum": 1.0
+			"maximum": 1.0,
+			"param": true
 		},
 		"detect.prompt": {
 			"type": "string",
@@ -53,7 +54,8 @@
 			"title": "Detection prompt",
 			"description": "Example: \"person . car . dog\" (period or comma-separated list) or \"red car\" / \"person in a hat\" (described object). Returns all matching regions. Matches objects and attributes, not spatial relationships, so \"the car on the left\" returns all cars, not just the left one.",
 			"required": true,
-			"minLength": 1
+			"minLength": 1,
+			"param": true
 		}
 	},
 	//

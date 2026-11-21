@@ -98,7 +98,7 @@ class IInstance(IInstanceBase):
             # Nothing consumes either lane, so decoding would be pure cost.
             return
 
-        result = self.IGlobal.orient(source, self._mime, wants_image)
+        result = self.IGlobal.orient(source, self._mime, wants_image, self.settings)
         if result is None:
             error(f'image_orient: could not decode {self._mime}; forwarding unchanged')
             self._forward(source, wants_image)

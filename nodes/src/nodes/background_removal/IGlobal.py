@@ -21,24 +21,32 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Global handler for the Background Removal node.
+
+The control's profile pins the model and its revision, which are the weights
+loaded here once per control. The inference edge is a per-call parameter: the
+instance reads it from its settings and caps each source image before the
+remover sees it.
+"""
+
 from rocketlib import IGlobalBase
 from ai.common.models.base import make_device_lock
 from ai.common.models.vision.background import BackgroundRemover
 
 
 class IGlobal(IGlobalBase):
+    """One control's background remover: the loaded model and the lock that serializes local inference."""
+
     remover = None
     device_lock = None
-    max_edge = 1024
 
     def beginGlobal(self):
-        """Build the shared BackgroundRemover facade from the resolved config.
+        """Build the shared BackgroundRemover facade for the control's profile.
 
-        The selected profile pins the model and its revision; the resolver has
-        already bounded maxEdge to the schema's range.
+        The selected profile pins the model and its revision.
         """
         config = self.config
-        self.max_edge = config.maxEdge
 
         # device=None -> model server when --modelserver is set, else local.
         self.remover = BackgroundRemover(model_name=config.model, device=None, revision=config.revision)

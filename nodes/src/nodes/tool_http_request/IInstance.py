@@ -40,6 +40,7 @@ from rocketlib import IInstanceBase, tool_function
 
 from .http_client import _build_final_url, execute_request
 from .IGlobal import IGlobal, _CREDENTIAL_HEADERS
+from .rate_limiter import StateRateLimiter
 
 
 def _match(pattern, url):
@@ -445,11 +446,12 @@ class IInstance(IInstanceBase):
         if not isinstance(args, dict):
             raise ValueError('Tool input must be a JSON object (dict)')
 
-        # Snapshot before any work: endGlobal can clear these mid-call.
-        config_auth = self.IGlobal.config_auth
-        url_patterns = list(self.IGlobal.url_patterns or [])
-        enabled_methods = set(self.IGlobal.enabled_methods or ())
-        default_headers = dict(self.IGlobal.default_headers or {})
+        # This call's guardrails, from its settings
+        guardrails = self._guardrails()
+        config_auth = guardrails.config_auth
+        url_patterns = list(guardrails.url_patterns or [])
+        enabled_methods = set(guardrails.enabled_methods or ())
+        default_headers = dict(guardrails.default_headers or {})
 
         # A configured credential is the only credential: reject per-call auth
         # before shortcuts fold it into the canonical ``auth`` object.
@@ -463,8 +465,8 @@ class IInstance(IInstanceBase):
         # execution helper uses the same final-URL construction path.
         self._validate_guardrails(args, enabled_methods, url_patterns)
 
-        # Enforce rate limits before executing the request
-        rate_limiter = self.IGlobal.rate_limiter
+        # Enforce the call's rate limits, counted in the control's state, before executing the request
+        rate_limiter = self._limiter()
         if rate_limiter is not None:
             rate_limiter.acquire()
 
@@ -483,12 +485,32 @@ class IInstance(IInstanceBase):
             if rate_limiter is not None:
                 rate_limiter.release()
 
+    def _guardrails(self):
+        """This call's guardrails, built from its settings once per binding."""
+        guardrails = self.__dict__.get('_http_guardrails')
+        if guardrails is None:
+            guardrails = IGlobal.guardrails(self.settings)
+            self.__dict__['_http_guardrails'] = guardrails
+        return guardrails
+
+    def _limiter(self):
+        """
+        This call's rate limiter over the control's state, or None when rate limiting is off.
+
+        The counters live in ``self.state``, so every replica serving the control
+        counts against the same limits.
+        """
+        if '_http_limiter' not in self.__dict__:
+            limits = self._guardrails().limits
+            self.__dict__['_http_limiter'] = StateRateLimiter(self.state, limits) if limits else None
+        return self.__dict__['_http_limiter']
+
     def _validate_guardrails(self, args, enabled_methods=None, url_patterns=None):
         """Enforce allowed methods + URL whitelist from config."""
         if enabled_methods is None:
-            enabled_methods = self.IGlobal.enabled_methods or set()
+            enabled_methods = self._guardrails().enabled_methods or set()
         if url_patterns is None:
-            url_patterns = self.IGlobal.url_patterns or []
+            url_patterns = self._guardrails().url_patterns or []
 
         valid_methods = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'}
         valid_auth_types = {'none', 'basic', 'bearer', 'api_key'}

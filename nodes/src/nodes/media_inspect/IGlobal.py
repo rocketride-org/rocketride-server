@@ -30,25 +30,15 @@ from rocketlib import IGlobalBase
 class IGlobal(IGlobalBase):
     """Node-wide configuration; input files live only in each instance.
 
-    The leaves (request, event_type, thresholds, chunk and input sizes) are read
-    from ``self.config``; the two byte counts derived from them are kept here.
+    Every leaf (request, event_type, thresholds, chunk and input sizes) is a
+    per-call parameter the instance reads from ``self.settings``.
     """
 
-    chunk_bytes: int = 1024 * 1024
-    max_input_bytes: int = 16384 * 1024 * 1024
-
     def beginGlobal(self):
-        """Install the dependencies and derive the byte sizes from the resolved config."""
+        """Install the dependencies; every key of the node is read per call from its settings."""
         from depends import load_depends
 
         load_depends(__file__)
-        config = self.config
-        self.chunk_bytes = config.chunk_kb * 1024
-        self.max_input_bytes = config.max_input_mb * 1024 * 1024
-
-    def input_limit(self) -> int:
-        """The largest input one object may carry, in bytes (an accessor: instances read IGlobal through methods)."""
-        return self.max_input_bytes
 
     def endGlobal(self):
         """No persistent media or storage binding is retained by the global."""

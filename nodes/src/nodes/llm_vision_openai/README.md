@@ -25,6 +25,8 @@ Choose a model from the **Model** selector, then provide the API key and prompts
 analysis task. Each listed model pins its model id and context limit. The default is
 **GPT-4.1** (`gpt-4.1`).
 
+The model settings (the selector, a custom model id and its token limits), the system prompt and the prompt are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which keeps one API key and sends each request on the call's model. The call's output limit is not sent. A caller may choose the model, its limits and the system prompt; an LLM may set only the prompt, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

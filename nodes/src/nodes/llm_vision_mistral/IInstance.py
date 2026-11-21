@@ -44,6 +44,20 @@ class IInstance(LLMBase):
         """
         self.image_data = None
 
+    def _describe(self, question):
+        """
+        Ask the control's chat about one image, on this call's model and with this call's system prompt.
+
+        Args:
+            question: The image as its context and the call's prompt as its question.
+
+        Returns:
+            The model's answer.
+        """
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.chat(question, system_prompt=self.settings.systemPrompt or '')
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         # Handle AVI_BEGIN action
         if action == AVI_ACTION.BEGIN:
@@ -70,10 +84,10 @@ class IInstance(LLMBase):
             question.addContext(image_data_url)
 
             # Add the prompt as a question
-            question.addQuestion(self.IGlobal._chat._prompt)
+            question.addQuestion(self.settings.prompt)
 
             # Call the LLM and get the answer
-            answer = self.IGlobal._chat.chat(question)
+            answer = self._describe(question)
 
             # Send the answer to the pipeline as text
             self.instance.writeText(answer.getText())
@@ -107,10 +121,10 @@ class IInstance(LLMBase):
             # page_content is base64-encoded PNG (frame grabber always outputs PNG)
             image_data_url = f'data:image/png;base64,{doc.page_content}'
             question.addContext(image_data_url)
-            question.addQuestion(self.IGlobal._chat._prompt)
+            question.addQuestion(self.settings.prompt)
 
             try:
-                answer = self.IGlobal._chat.chat(question)
+                answer = self._describe(question)
             except Exception as e:
                 warning(f'Mistral Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
                 continue

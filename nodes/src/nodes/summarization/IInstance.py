@@ -69,34 +69,34 @@ class IInstance(IInstanceBase):
         question: Question = Question(type=QuestionType.QUESTION, role='You are a document summarizer.')
 
         # Add the instruction to the question
-        if self.IGlobal.numberOfSummaryWords:
+        if self.settings.numberOfSummaryWords:
             question.addInstruction(
                 'Summary',
                 f"""
                 Provide a concise summary of the document. The summary should be clear
-                and focused, no longer than {self.IGlobal.numberOfSummaryWords} words, and
+                and focused, no longer than {self.settings.numberOfSummaryWords} words, and
                 highlight the most important aspects without unnecessary details in
                 paragraph form.
                 """,
             )
 
-        if self.IGlobal.numberOfKeyPointWords:
+        if self.settings.numberOfKeyPointWords:
             question.addInstruction(
                 'Key Points',
                 f"""
                 Identify and summarize the most important details and insights
-                from the document, using no more than {self.IGlobal.numberOfKeyPointWords}
+                from the document, using no more than {self.settings.numberOfKeyPointWords}
                 for each key point.
                 """,
             )
 
-        if self.IGlobal.numberOfEntities:
+        if self.settings.numberOfEntities:
             question.addInstruction(
                 'Entities',
                 f"""
                 List the main entities (e.g., people, organizations, products, events, dates, locations)
                 mentioned in the document. Include only the most significant entities, up to a maximum
-                of {self.IGlobal.numberOfEntities} entities, that directly relate to the document's content.
+                of {self.settings.numberOfEntities} entities, that directly relate to the document's content.
                 """,
             )
 
@@ -212,7 +212,7 @@ class IInstance(IInstanceBase):
         chunks = self.summarySplitter.split_text(self.text)
 
         # Respect the maximum number of chunks to process
-        chunks = chunks[: self.IGlobal.numberOfSummaries]
+        chunks = chunks[: self.settings.numberOfSummaries]
 
         # Process all the chunks we have
         results = []
@@ -230,10 +230,10 @@ class IInstance(IInstanceBase):
 
             # Gather up all the summaries, key points and entities
             for result in results:
-                if 'summary' in result and self.IGlobal.numberOfSummaryWords:
+                if 'summary' in result and self.settings.numberOfSummaryWords:
                     summaries += '    ' + result['summary'] + '\n\n'
 
-                if 'keyPoints' in result and result['keyPoints'] and self.IGlobal.numberOfKeyPointWords:
+                if 'keyPoints' in result and result['keyPoints'] and self.settings.numberOfKeyPointWords:
                     for keyPoint in result['keyPoints']:
                         if isinstance(keyPoint, dict):
                             title = keyPoint.get('title', '')
@@ -242,7 +242,7 @@ class IInstance(IInstanceBase):
                         else:
                             keyPoints += f'   - {keyPoint}\n'
 
-                if 'entities' in result and result['entities'] and self.IGlobal.numberOfEntities:
+                if 'entities' in result and result['entities'] and self.settings.numberOfEntities:
                     for entity in result['entities']:
                         entities += '   -' + entity + '\n'
 
@@ -274,7 +274,7 @@ class IInstance(IInstanceBase):
 
             # Output each section as it's own document
             for result in results:
-                if 'summary' in result and self.IGlobal.numberOfSummaryWords:
+                if 'summary' in result and self.settings.numberOfSummaryWords:
                     text = str('Summary:\n')
                     text += result['summary'] + '\n'
 
@@ -291,7 +291,7 @@ class IInstance(IInstanceBase):
                     documents.append(doc)
                     metadata.chunkId = metadata.chunkId + 1
 
-                if 'entities' in result and result['entities'] and self.IGlobal.numberOfEntities:
+                if 'entities' in result and result['entities'] and self.settings.numberOfEntities:
                     text = 'Entities:\n'
                     for entity in result['entities']:
                         text += '- ' + entity + '\n'

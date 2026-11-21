@@ -4,10 +4,14 @@
 # =============================================================================
 
 """
-Persistent Memory node — global (per-pipe) state.
+Persistent Memory node — global (per-control) state.
 
-Creates the ``PersistentMemoryStore`` with the configured backend and
-makes it available to all instances via ``self.store``.
+The backend is the control's: on the ``redis`` branch the IGlobal holds the
+connection pool to the owner's Redis; on the ``memory`` branch it holds
+nothing, because the sessions live in each binding's ``self.state``, which
+the server keeps per owner so any replica serves the next call. The history
+cap, the summarization and the session time to live are per-call parameters
+the instance reads from its settings.
 """
 
 from __future__ import annotations
@@ -16,45 +20,41 @@ import os
 
 from rocketlib import IGlobalBase
 
-from .memory_store import PersistentMemoryStore
+from .memory_store import RedisBackend
 
 
 class IGlobal(IGlobalBase):
-    """Global state for memory_persistent: holds the store built from the resolved config."""
+    """Global state for memory_persistent: the Redis pool on the redis branch, else nothing."""
 
-    store = None
+    redis = None
 
     def beginGlobal(self) -> None:
-        """Build the persistent memory store from the node configuration."""
+        """Connect to the owner's Redis when the control's backend is ``redis``."""
+        config = self.config
+        if config.backend != 'redis':
+            return
+
         from depends import depends  # type: ignore
 
         # Load the requirements (the redis client is imported by the redis backend)
         requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
-        # The resolved config: the backend selector, flattened to the active branch
-        config = self.config
-        self.store = PersistentMemoryStore(
-            backend=config.backend,
-            max_history=config.max_history,
-            auto_summarize=config.auto_summarize,
-            # The redis keys exist only on the redis branch of the backend selector;
-            # the in-memory backend's view has none, so the store's own defaults apply
-            redis_host=config.get('redis_host', 'localhost'),
-            redis_port=config.get('redis_port', 6379),
-            redis_password=config.get('redis_password') or None,
-            session_ttl_hours=float(config.session_ttl_hours),
+        self.redis = RedisBackend(
+            host=config.redis_host,
+            port=config.redis_port,
+            password=config.get('redis_password') or None,
         )
 
     def endGlobal(self) -> None:
-        """Release resources and close backend connections.
+        """Release the Redis pool.
 
         Uses ``try/finally`` to guarantee the backend is released even if
         ``close()`` raises (e.g. transient Redis error during disconnect),
         preventing connection leaks in long-running pipelines.
         """
         try:
-            if self.store is not None:
-                self.store.backend.close()
+            if self.redis is not None:
+                self.redis.close()
         finally:
-            self.store = None
+            self.redis = None

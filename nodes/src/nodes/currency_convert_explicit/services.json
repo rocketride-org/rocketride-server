@@ -78,7 +78,8 @@
 			"description": "Currency code to convert FROM (e.g. EUR). Only facts tagged with this currency are converted; case-insensitive.",
 			"default": "EUR",
 			"minLength": 1,
-			"maxLength": 16
+			"maxLength": 16,
+			"param": true
 		},
 		"currency_convert_explicit.target_currency": {
 			"type": "string",
@@ -86,21 +87,24 @@
 			"description": "Currency code to convert TO (e.g. USD).",
 			"default": "USD",
 			"minLength": 1,
-			"maxLength": 16
+			"maxLength": 16,
+			"param": true
 		},
 		"currency_convert_explicit.rate": {
 			"type": "number",
 			"title": "Conversion rate",
 			"description": "The stated multiplier applied to the source amount (target = source × rate). Supply the rate deliberately; nothing is fetched.",
 			"default": 1.0,
-			"minimum": 0
+			"minimum": 0,
+			"param": true
 		},
 		"currency_convert_explicit.rate_date": {
 			"type": "string",
 			"title": "Rate date",
 			"description": "The date the rate applies to (ISO 8601, e.g. 2026-06-30). Recorded in the conversion provenance.",
 			"default": "",
-			"maxLength": 32
+			"maxLength": 32,
+			"param": true
 		},
 		"currency_convert_explicit.amount_field": {
 			"type": "string",
@@ -108,7 +112,8 @@
 			"description": "The fact field holding the numeric amount to convert.",
 			"default": "amount",
 			"minLength": 1,
-			"maxLength": 128
+			"maxLength": 128,
+			"param": true
 		},
 		"currency_convert_explicit.currency_field": {
 			"type": "string",
@@ -116,7 +121,8 @@
 			"description": "The fact field holding the currency code.",
 			"default": "currency",
 			"minLength": 1,
-			"maxLength": 128
+			"maxLength": 128,
+			"param": true
 		},
 		"currency_convert_explicit.decimals": {
 			"type": "integer",
@@ -124,7 +130,8 @@
 			"description": "Number of fractional digits for the converted amount (rounded half-up).",
 			"default": 2,
 			"minimum": 0,
-			"maximum": 10
+			"maximum": 10,
+			"param": true
 		}
 	},
 	//

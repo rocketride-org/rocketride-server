@@ -22,22 +22,27 @@
 # =============================================================================
 
 """
-Token-bucket rate limiter with concurrency control for HTTP requests.
+Rate limits for HTTP requests, counted in the control's ``self.state``.
 
-Enforces three independent limits:
-  - requests per second  (token bucket, refills every second)
-  - requests per minute  (token bucket, refills every minute)
-  - max concurrent requests  (semaphore)
+Three independent limits:
+  - requests per second  (a one-second window)
+  - requests per minute  (a one-minute window)
+  - concurrent requests  (an in-flight count)
 
-All limits are configurable via services.json; sensible defaults are provided.
-Thread-safe: uses a single ``threading.Lock`` for the token buckets and a
-``threading.Semaphore`` for concurrency.
+The counters live in the node's state, which the server keeps per owner, so
+every replica serving the control counts against the same limits (a limiter
+held per process let N replicas send N times the limit). Each counter moves
+with the state store's atomic ``incr``; the window counters expire a window
+after they close, so the node holds at most seven live keys. The windows are
+fixed, not sliding: a burst straddling a boundary can reach twice a limit for
+an instant. A request refused by one limit gives back what it took from the
+others.
 """
 
 from __future__ import annotations
 
-import threading
 import time
+from typing import Any, NamedTuple
 
 
 class RateLimitError(Exception):
@@ -49,79 +54,74 @@ DEFAULT_MAX_PER_SECOND = 10
 DEFAULT_MAX_PER_MINUTE = 100
 DEFAULT_MAX_CONCURRENT = 5
 
+#: The state key of the in-flight count.
+_INFLIGHT_KEY = 'inflight'
 
-class RateLimiter:
-    """Token-bucket rate limiter with concurrent-request semaphore."""
+#: The in-flight count outlives the longest request (300 s) by a margin, so a
+#: replica that died mid-request gives its slot back when the count expires.
+_INFLIGHT_TTL = 330
 
-    def __init__(
-        self,
-        *,
-        max_per_second: int = DEFAULT_MAX_PER_SECOND,
-        max_per_minute: int = DEFAULT_MAX_PER_MINUTE,
-        max_concurrent: int = DEFAULT_MAX_CONCURRENT,
-    ) -> None:
-        """Initialise token buckets and concurrency semaphore."""
-        # --- per-second bucket ---
-        self._ps_capacity = max(max_per_second, 1)
-        self._ps_tokens = float(self._ps_capacity)
-        self._ps_refill_rate = float(self._ps_capacity)  # tokens / second
 
-        # --- per-minute bucket ---
-        self._pm_capacity = max(max_per_minute, 1)
-        self._pm_tokens = float(self._pm_capacity)
-        self._pm_refill_rate = self._pm_capacity / 60.0  # tokens / second
+class RateLimits(NamedTuple):
+    """One call's limits."""
 
-        self._last_refill = time.monotonic()
-        self._lock = threading.Lock()
+    per_second: int
+    per_minute: int
+    concurrent: int
 
-        # --- concurrency semaphore ---
-        self._max_concurrent = max(max_concurrent, 1)
-        self._semaphore = threading.Semaphore(self._max_concurrent)
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+class StateRateLimiter:
+    """One call's rate limits over the control's state."""
+
+    def __init__(self, state: Any, limits: RateLimits) -> None:
+        """
+        Bind the limits to a binding's state door.
+
+        Args:
+            state: The instance's ``self.state``.
+            limits: The call's limits.
+        """
+        self._state = state
+        self._limits = limits
 
     def acquire(self) -> None:
-        """Acquire a rate-limit slot, or raise ``RateLimitError``."""
-        # 1. Check concurrency limit first (non-blocking) so we never
-        #    consume tokens for a request that would be rejected anyway.
-        if not self._semaphore.acquire(blocking=False):
+        """
+        Take an in-flight slot and a request from both windows, or raise ``RateLimitError``.
+
+        Raises:
+            RateLimitError: A limit is reached; nothing stays taken.
+        """
+        state = self._state
+        limits = self._limits
+
+        # 1. The in-flight count first, so a refused request never spends a window
+        if state.incr(_INFLIGHT_KEY, 1, ttl=_INFLIGHT_TTL) > max(limits.concurrent, 1):
+            state.incr(_INFLIGHT_KEY, -1, ttl=_INFLIGHT_TTL)
             raise RateLimitError(
-                f'Too many concurrent requests: max {self._max_concurrent} in-flight. Please wait for an ongoing request to complete.'
+                f'Too many concurrent requests: max {limits.concurrent} in-flight. '
+                'Please wait for an ongoing request to complete.'
             )
 
-        # 2. Check token buckets (per-second + per-minute).
+        # 2. The two windows: what one refuses, the other gives back
+        now = time.time()
+        second = f'second:{int(now)}'
+        minute = f'minute:{int(now // 60)}'
         try:
-            with self._lock:
-                self._refill()
-                if self._ps_tokens < 1.0:
-                    raise RateLimitError(
-                        f'Rate limit exceeded: max {self._ps_capacity} requests per second. Please retry after a short delay.'
-                    )
-                if self._pm_tokens < 1.0:
-                    raise RateLimitError(
-                        f'Rate limit exceeded: max {self._pm_capacity} requests per minute. Please retry after a short delay.'
-                    )
-                self._ps_tokens -= 1.0
-                self._pm_tokens -= 1.0
+            if state.incr(second, 1, ttl=2) > max(limits.per_second, 1):
+                state.incr(second, -1, ttl=2)
+                raise RateLimitError(
+                    f'Rate limit exceeded: max {limits.per_second} requests per second. Please retry after a short delay.'
+                )
+            if state.incr(minute, 1, ttl=120) > max(limits.per_minute, 1):
+                state.incr(minute, -1, ttl=120)
+                state.incr(second, -1, ttl=2)
+                raise RateLimitError(
+                    f'Rate limit exceeded: max {limits.per_minute} requests per minute. Please retry after a short delay.'
+                )
         except RateLimitError:
-            self._semaphore.release()
+            state.incr(_INFLIGHT_KEY, -1, ttl=_INFLIGHT_TTL)
             raise
 
     def release(self) -> None:
-        """Release the concurrency slot after a request completes."""
-        self._semaphore.release()
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
-    def _refill(self) -> None:
-        """Refill both token buckets based on elapsed time.  Caller holds ``_lock``."""
-        now = time.monotonic()
-        elapsed = now - self._last_refill
-        self._last_refill = now
-
-        self._ps_tokens = min(self._ps_capacity, self._ps_tokens + elapsed * self._ps_refill_rate)
-        self._pm_tokens = min(self._pm_capacity, self._pm_tokens + elapsed * self._pm_refill_rate)
+        """Give the in-flight slot back after a request completes."""
+        self._state.incr(_INFLIGHT_KEY, -1, ttl=_INFLIGHT_TTL)

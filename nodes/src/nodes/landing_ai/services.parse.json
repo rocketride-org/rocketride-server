@@ -38,7 +38,9 @@
 			"default": "dpt-2-latest",
 			"enum": [
 				["dpt-2-latest", "DPT-2 (latest)"]
-			]
+			],
+			"param": true,
+			"tool": false
 		},
 		"landing_ai_parse.region": {
 			"type": "string",

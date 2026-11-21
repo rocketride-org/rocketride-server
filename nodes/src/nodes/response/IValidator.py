@@ -92,8 +92,9 @@ class IValidator(IValidatorBase):
         Raises:
             ConfigError: The stored configuration does not fit the schema.
         """
-        config = self.config
+        self.config
         if syntaxOnly:
             return
-        if message := reserved_key_error(config):
+        # laneName is a param, which self.config refuses: the stored value is in the full view
+        if message := reserved_key_error(self._resolved()):
             warning(message)

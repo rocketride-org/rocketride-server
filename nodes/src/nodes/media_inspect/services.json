@@ -27,30 +27,35 @@
 			"type": "string",
 			"title": "Operation request (JSON)",
 			"format": "textarea",
+			"param": true,
 			"default": "{}",
 			"description": "JSON request: probe, levels (range, ranges, scan, scan_scenes) or stills (stills array). Sources arrive as media streams."
 		},
 		"media_inspect.event_type": {
 			"type": "string",
 			"title": "Name of the progress event this pipeline emits",
+			"param": true,
 			"default": "media_inspect",
 			"minLength": 1
 		},
-		"media_inspect.chunk_kb": { "type": "integer", "title": "Stream chunk size (KB)", "default": 1024, "minimum": 64, "maximum": 8192 },
+		"media_inspect.chunk_kb": { "param": true, "tool": false, "type": "integer", "title": "Stream chunk size (KB)", "default": 1024, "minimum": 64, "maximum": 8192 },
 		"media_inspect.max_input_mb": {
 			"type": "integer",
 			"title": "Maximum cumulative input per object (MiB)",
+			"param": true,
+			"tool": false,
 			"default": 16384,
 			"minimum": 1,
 			"maximum": 1048576,
 			"description": "Total incoming media bytes, including all assets; enforced even when stream size is undeclared."
 		},
-		"media_inspect.silence_db": { "type": "number", "title": "Silence threshold (dB)", "default": -40, "maximum": 0 },
-		"media_inspect.silence_ms": { "type": "integer", "title": "Shortest silence worth reporting (ms)", "default": 700, "minimum": 1 },
-		"media_inspect.peak_ms": { "type": "integer", "title": "Length of one loudness bucket (ms)", "default": 100, "minimum": 10 },
+		"media_inspect.silence_db": { "param": true, "type": "number", "title": "Silence threshold (dB)", "default": -40, "maximum": 0 },
+		"media_inspect.silence_ms": { "param": true, "type": "integer", "title": "Shortest silence worth reporting (ms)", "default": 700, "minimum": 1 },
+		"media_inspect.peak_ms": { "param": true, "type": "integer", "title": "Length of one loudness bucket (ms)", "default": 100, "minimum": 10 },
 		"media_inspect.scene_threshold": {
 			"type": "number",
 			"title": "Scene score a shot change has to cross",
+			"param": true,
 			"default": 0.35,
 			"minimum": 0,
 			"maximum": 1

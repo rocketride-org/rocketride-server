@@ -83,6 +83,7 @@
 			"type": "string",
 			"title": "Voice",
 			"description": "OpenAI TTS voice. The newer voices (marin, cedar) require a GPT-4o TTS model.",
+			"param": true,
 			"default": "alloy",
 			"enum": [
 				["alloy", "Alloy"],
@@ -111,6 +112,7 @@
 			"type": "string",
 			"title": "Model",
 			"description": "OpenAI TTS model",
+			"param": true,
 			"default": "gpt-4o-mini-tts",
 			"enum": {
 				"gpt-4o-mini-tts": { "title": "GPT-4o mini TTS - Fast, steerable, multilingual" },

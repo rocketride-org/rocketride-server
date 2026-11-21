@@ -134,6 +134,7 @@ class IInstance(IInstanceBase):
             vector_scores=vector_scores,
             top_k=int(self.settings.top_k),
             rrf_k=int(self.settings.rrf_k),
+            alpha=float(self.settings.alpha),
         )
 
         # Map results back to Doc objects, preserving original metadata

@@ -18,27 +18,31 @@ from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Question, Answer
 
 from .IGlobal import IGlobal
+from .memory_store import PersistentMemoryStore, StateBackend
 
 
 class IInstance(IInstanceBase):
-    """One request's view of the shared memory store: its sessions are the caller's (plan 12 B)."""
+    """One call's view of the control's sessions."""
 
-    def _scoped(self, session_id):
+    def _store(self) -> PersistentMemoryStore:
         """
-        The caller's session: a session id a client names is qualified by the
-        caller, so on a shared engine two callers naming one id never read
-        each other's memory. A binding without a caller keeps the bare id.
+        This call's store: the control's backend with this call's history cap, summarization and session ttl.
 
-        Args:
-            session_id: The id from the message metadata, or None.
+        On the ``memory`` branch the backend is this binding's ``self.state``,
+        which the server keys by the control's owner: a session id names a
+        session of that owner only, on whichever replica serves the call.
 
         Returns:
-            The scoped id, or None when none was given.
+            The store this call reads and writes.
         """
-        if not session_id:
-            return session_id
-        owner = self.caller.userId
-        return f'{owner}__{session_id}' if owner else session_id
+        settings = self.settings
+        backend = self.IGlobal.redis or StateBackend(self.state)
+        return PersistentMemoryStore(
+            backend,
+            max_history=settings.max_history,
+            auto_summarize=settings.auto_summarize,
+            session_ttl_hours=float(settings.session_ttl_hours),
+        )
 
     """Pipeline instance for the memory_persistent node.
 
@@ -67,10 +71,7 @@ class IInstance(IInstanceBase):
         Args:
             question: The question from the questions lane; it is copied, never mutated.
         """
-        store = self.IGlobal.store
-        if store is None:
-            self.instance.writeQuestions(question)
-            return self.preventDefault()
+        store = self._store()
 
         # Deep copy to prevent mutation of the original question
         question = copy.deepcopy(question)
@@ -78,7 +79,7 @@ class IInstance(IInstanceBase):
         # Extract session_id from question metadata (if present)
         session_id = None
         if hasattr(question, 'metadata') and isinstance(question.metadata, dict):
-            session_id = self._scoped(question.metadata.get('session_id'))
+            session_id = question.metadata.get('session_id')
         self._current_session_id = session_id
 
         if session_id:
@@ -126,10 +127,7 @@ class IInstance(IInstanceBase):
         Args:
             answer: The answer from the answers lane; it is copied, never mutated.
         """
-        store = self.IGlobal.store
-        if store is None:
-            self.instance.writeAnswers(answer)
-            return self.preventDefault()
+        store = self._store()
 
         # Deep copy to prevent mutation
         answer = copy.deepcopy(answer)
@@ -137,7 +135,7 @@ class IInstance(IInstanceBase):
         # Extract session_id from answer metadata
         session_id = None
         if hasattr(answer, 'metadata') and isinstance(answer.metadata, dict):
-            session_id = self._scoped(answer.metadata.get('session_id'))
+            session_id = answer.metadata.get('session_id')
         if not session_id:
             session_id = self._current_session_id
 

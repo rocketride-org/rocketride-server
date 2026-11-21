@@ -52,6 +52,20 @@ class IInstance(LLMBase):
         self._cached_answer = None
         self._cache_from_image = False
 
+    def _describe(self, question):
+        """
+        Ask the control's chat about one image, on this call's model and with this call's system prompt.
+
+        Args:
+            question: The image as its context and the call's prompt as its question.
+
+        Returns:
+            The model's answer.
+        """
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.chat(question, system_prompt=self.settings.systemPrompt or '')
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Handle AVI image protocol for streaming image frames."""
         if action == AVI_ACTION.BEGIN:
@@ -84,10 +98,10 @@ class IInstance(LLMBase):
                 image_base64 = base64.b64encode(bytes(self.image_data)).decode('utf-8')
                 image_data_url = f'data:{mimeType};base64,{image_base64}'
                 question.addContext(image_data_url)
-                question.addQuestion(self.IGlobal._chat._prompt)
+                question.addQuestion(self.settings.prompt)
 
                 try:
-                    answer = self.IGlobal._chat.chat(question)
+                    answer = self._describe(question)
                     self._cached_answer = answer.getText()
                     self._cache_from_image = True
                     self.instance.writeText(self._cached_answer)
@@ -124,10 +138,10 @@ class IInstance(LLMBase):
                 question = Question()
                 # All Image doc producers (frame_grabber, thumbnail, embedding_image) normalize to PNG
                 question.addContext(f'data:image/png;base64,{doc.page_content}')
-                question.addQuestion(self.IGlobal._chat._prompt)
+                question.addQuestion(self.settings.prompt)
 
                 try:
-                    answer = self.IGlobal._chat.chat(question)
+                    answer = self._describe(question)
                 except Exception as e:
                     chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
                     warning(f'OpenAI Vision: inference failed for chunk {chunk_id}: {e}')

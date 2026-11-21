@@ -68,7 +68,7 @@ class IInstance(IInstanceBase):
         Args:
             image: Decoded input PIL image for this frame.
         """
-        resized, original_size = resize_for_inference(image, self.IGlobal.max_edge)
+        resized, original_size = resize_for_inference(image, self.settings.maxEdge)
         t0 = time.perf_counter()
         with self.IGlobal.device_lock:
             depth_np = self.IGlobal.estimator.estimate(resized)

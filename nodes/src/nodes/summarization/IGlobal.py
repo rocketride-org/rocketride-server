@@ -27,21 +27,9 @@ from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    # The four counts; the schema defaults until beginGlobal runs
-    numberOfSummaries: int = 2
-    numberOfSummaryWords: int = 1500
-    numberOfKeyPointWords: int = 250
-    numberOfEntities: int = 25
-
     def beginGlobal(self) -> None:
-        """Install the dependencies and read the four counts from the resolved config."""
+        """Install the dependencies; the four counts are per-call parameters the instance reads."""
         from depends import depends  # type: ignore
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
-
-        config = self.config
-        self.numberOfSummaries = int(config.numberOfSummaries)
-        self.numberOfSummaryWords = int(config.numberOfSummaryWords)
-        self.numberOfKeyPointWords = int(config.numberOfKeyPointWords)
-        self.numberOfEntities = int(config.numberOfEntities)

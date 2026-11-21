@@ -15,7 +15,11 @@
 	//
 	// Optional:
 	//		Local property definitions. The API key is a required secret the account
-	//		variable supplies; the bounds cap every agent-driven execution.
+	//		variable supplies, and the endpoint and the region come from the
+	//		environment with it. The snapshot, the language and the auto-stop
+	//		interval are creation arguments of the one shared sandbox, so they
+	//		are the control's. The two bounds cap every agent-driven execution
+	//		and are read per call (parameters).
 	//
 	"propertyDefinitions": {
 		"tool_daytona.apikey": {
@@ -31,14 +35,16 @@
 			"title": "API URL",
 			"description": "Daytona API endpoint. Leave empty for the default cloud (https://app.daytona.io/api); set for self-hosted Daytona.",
 			"default": "",
-			"optional": true
+			"optional": true,
+			"env": "ROCKETRIDE_DAYTONA_API_URL"
 		},
 		"tool_daytona.target": {
 			"type": "string",
 			"title": "Target Region",
 			"description": "Sandbox region, e.g. \"us\" or \"eu\". Leave empty for the organization default.",
 			"default": "",
-			"optional": true
+			"optional": true,
+			"env": "ROCKETRIDE_DAYTONA_TARGET"
 		},
 		"tool_daytona.snapshot": {
 			"type": "string",
@@ -72,7 +78,8 @@
 			"description": "Max seconds a single run_code/run_command call may take.",
 			"default": 120,
 			"minimum": 1,
-			"maximum": 1200
+			"maximum": 1200,
+			"param": true
 		},
 		"tool_daytona.max_output_chars": {
 			"type": "integer",
@@ -80,7 +87,8 @@
 			"description": "Output longer than this is truncated before being returned to the agent.",
 			"default": 50000,
 			"minimum": 1000,
-			"maximum": 1000000
+			"maximum": 1000000,
+			"param": true
 		}
 	},
 	"properties": ["type", "tool_daytona.apikey", "tool_daytona.api_url", "tool_daytona.target", "tool_daytona.snapshot", "tool_daytona.language", "tool_daytona.auto_stop_minutes", "tool_daytona.exec_timeout_secs", "tool_daytona.max_output_chars"],

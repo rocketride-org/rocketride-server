@@ -114,6 +114,7 @@
 			"default": ""
 		},
 		"facts.fields": {
+			"param": true,
 			"type": "array",
 			"title": "Fields",
 			"description": "The facts to extract from each record.",
@@ -128,12 +129,14 @@
 			"type": "boolean",
 			"title": "Validate",
 			"description": "Run a second validator prompt pass that double-checks extracted facts and reconciles on disagreement.",
+			"param": true,
 			"default": true
 		},
 		"facts.include_provenance": {
 			"type": "boolean",
 			"title": "Include Provenance",
 			"description": "Auto-attach provenance (page, table id, row, column, source text, confidence) to every emitted fact.",
+			"param": true,
 			"default": true
 		}
 	},
