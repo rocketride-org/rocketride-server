@@ -17,7 +17,11 @@ Values belong to series: one series by default, or one per value of a
 metadata field you name. Each series keeps its own fixed-size history in the
 node's state, outside the engine, so it survives from one call to the next
 and every replica that serves the pipeline scores the series from the same
-history; a history nobody adds to expires with the pipeline's idle timeout.
+history. A history belongs to one detector node: two detectors in one
+pipeline never share one, even for the same series name. A history nobody
+adds to expires with the pipeline's idle timeout, and after 7 days at most;
+each new value keeps it alive. One detector keeps at most 16 series at a
+time: a value for a 17th series is refused until an older series expires.
 Each value is evaluated against the existing history and only then added to
 it. This node is experimental.
 
