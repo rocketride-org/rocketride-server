@@ -25,6 +25,8 @@
 				"Drive scopes to request. readonly: list, read metadata, download, and export only. write: full read/write ",
 				"(create, update, copy, move, trash, folders, and sharing)."
 			],
+			"param": true,
+			"tool": false,
 			"default": "write",
 			"enum": [
 				["readonly", "Read-only"],
@@ -38,6 +40,8 @@
 				"Off by default. When off, permission_create refuses anyone-with-link grants and grants to a domain or user ",
 				"outside the account's own domain. Turn on to allow sharing files publicly or with external parties."
 			],
+			"param": true,
+			"tool": false,
 			"default": false
 		},
 		"allowHardDelete": {
@@ -47,6 +51,8 @@
 				"Off by default. When off, file_delete (which permanently deletes a file, bypassing Trash and irreversibly) is ",
 				"refused. Turn on to allow permanent deletion; file_trash is the recoverable alternative."
 			],
+			"param": true,
+			"tool": false,
 			"default": false
 		}
 	},
@@ -64,7 +70,7 @@
 				"access": "write"
 			}
 		},
-		"dropped": [],
+		"dropped": ["customerId", "service.customerId"],
 		"credential": {
 			"userToken": "user.userAuth"
 		}

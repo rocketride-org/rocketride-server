@@ -201,7 +201,12 @@ def _make(cfg=None, results=None, account_domain=None):
     """Build an IInstance wired to a FakeDrive and a real resolved GoogleAccess."""
     inst = drive_iinstance.IInstance()
     access = ga.resolve_google_access(cfg or {'access': 'write'}, ga.DRIVE)
-    inst.IGlobal = types.SimpleNamespace(service=FakeDrive(results or {}), access=access, account_domain=account_domain)
+    service = FakeDrive(results or {})
+    # The control serves the service of a tier; the binding resolved its access once
+    inst.IGlobal = types.SimpleNamespace(
+        service=service, service_for=lambda tier: service, account_domain=account_domain
+    )
+    inst.__dict__['_google_access'] = access
     return inst
 
 

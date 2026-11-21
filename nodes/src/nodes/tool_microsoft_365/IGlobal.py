@@ -33,6 +33,11 @@ modules. Unlike the Google Workspace base, there is no discovery-service build
 here - Graph is plain REST, so ``build_auth`` returns a :class:`GraphAuth`
 credential object rather than a service handle. Service-specific post-build
 state hooks in via :meth:`_after_begin`.
+
+The credential (``authType`` and its branch) is the control's. The access
+tier and the gate flags are per-call parameters: Graph never binds the tier
+into a token, so one auth serves every tier and each call resolves and
+checks its own.
 """
 
 from __future__ import annotations
@@ -46,13 +51,13 @@ from .graph_client import GraphService, build_auth
 
 
 class MicrosoftToolGlobalBase(IGlobalBase):
-    """Resolved access + built Graph auth for one Microsoft 365 service."""
+    """The control's Graph auth for one Microsoft 365 service, and its AccessSpec."""
 
     SERVICE: GraphService  # set by each service subclass
     SPEC_NAME: str = ''  # AccessSpec attribute name in nodes.core.microsoft_access
 
     auth: Any = None
-    access: Any = None
+    spec: Any = None
     cfg: Any = None
 
     def _spec(self):
@@ -70,18 +75,16 @@ class MicrosoftToolGlobalBase(IGlobalBase):
         # The shared requirements.txt lives at the tool_microsoft_365/ level.
         depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
-        from nodes.core.microsoft_access import resolve_microsoft_access
-
         # The resolved view holds the active authType branch flattened beside the
         # access tier and the gate flags (allowPublicSharing, allowHardDelete),
         # which _resolve_flags reads next to 'access'.
         cfg = self.config
-        self.access = resolve_microsoft_access(cfg, self._spec())
+        self.spec = self._spec()
         self.cfg = cfg
-        self.auth = build_auth(self.SERVICE, cfg['authType'], cfg, self.access.scopes)
+        self.auth = build_auth(self.SERVICE, cfg['authType'], cfg)
         self._after_begin(cfg)
 
     def endGlobal(self) -> None:
         self.auth = None
-        self.access = None
+        self.spec = None
         self.cfg = None

@@ -154,7 +154,10 @@ class FakeGmail:
 def make_inst(access_tier='modify', results=None, config=None):
     access = ga.resolve_google_access({'access': access_tier, **(config or {})}, ga.GMAIL)
     inst = IInstance.IInstance()
-    inst.IGlobal = types.SimpleNamespace(service=FakeGmail(results or {}), access=access)
+    service = FakeGmail(results or {})
+    # The control serves the service of a tier; the binding resolved its access once
+    inst.IGlobal = types.SimpleNamespace(service=service, service_for=lambda tier: service)
+    inst.__dict__['_google_access'] = access
     return inst
 
 
@@ -654,7 +657,7 @@ def _inst_with_token(monkeypatch, access_tier: str, token: dict | None) -> 'IIns
     """Return an IInstance whose settings simulate a persisted user token."""
     inst = make_inst(access_tier)
     token_json = json.dumps(token) if token is not None else ''
-    settings = {'authType': 'user', 'userAuth': token_json}
+    settings = {'authType': 'user', 'userAuth': token_json, 'access': access_tier}
     monkeypatch.setattr(IInstance.IInstance, 'settings', property(lambda self: settings))
     return inst
 

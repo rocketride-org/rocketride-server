@@ -22,6 +22,8 @@
 			"type": "string",
 			"title": "Access level",
 			"description": "Graph scopes to request. readonly: list, search, read metadata, and download only. write: full read/write (upload, create folders, copy/move/rename, trash/restore, and sharing).",
+			"param": true,
+			"tool": false,
 			"default": "write",
 			"enum": [
 				["readonly", "Read-only"],
@@ -32,12 +34,16 @@
 			"type": "boolean",
 			"title": "Allow public / org-wide sharing",
 			"description": "Off by default. When off, create_sharing_link refuses 'anonymous' links and invite only accepts recipients that resolve to individual directory users (distribution lists and unresolvable addresses are refused). Turn on to allow public links and unrestricted invites.",
+			"param": true,
+			"tool": false,
 			"default": false
 		},
 		"onedrive.allowHardDelete": {
 			"type": "boolean",
 			"title": "Allow permanent delete",
 			"description": "Off by default. When off, only trash/restore are available; permanent delete is refused.",
+			"param": true,
+			"tool": false,
 			"default": false
 		}
 	},

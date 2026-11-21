@@ -22,6 +22,8 @@
 			"type": "string",
 			"title": "Access level",
 			"description": "Graph scopes to request. readonly: read worksheets, ranges, and tables only. write: full read/write (update ranges, add worksheets/tables/charts, create workbooks).",
+			"param": true,
+			"tool": false,
 			"default": "write",
 			"enum": [
 				["readonly", "Read-only"],

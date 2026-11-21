@@ -40,7 +40,7 @@ from typing import Any, Callable
 
 from rocketlib import IInstanceBase
 
-from .graph_client import GraphService, token_scope_report
+from .graph_client import GraphService, require_token_scopes, token_scope_report
 
 
 class MicrosoftToolInstanceBase(IInstanceBase):
@@ -51,12 +51,28 @@ class MicrosoftToolInstanceBase(IInstanceBase):
     # -----------------------------------------------------------------------
 
     def _auth(self):
-        """Return the shared Graph auth credential handle."""
+        """
+        Return the control's Graph auth, once this call's tier is known to be granted.
+
+        A user grant must carry the scopes of the tier the call asks for; the
+        check runs once per binding, on the call's first Graph request.
+        """
+        if not self.__dict__.get('_graph_scopes_checked'):
+            settings = self.settings
+            if settings['authType'] == 'user':
+                require_token_scopes(self.SERVICE, settings, self._access().scopes)
+            self.__dict__['_graph_scopes_checked'] = True
         return self.IGlobal.auth
 
     def _access(self):
-        """Return the node's access descriptor (tier, scopes, flags)."""
-        return self.IGlobal.access
+        """Return this call's access descriptor (tier, scopes, flags), resolved once per binding."""
+        access = self.__dict__.get('_graph_access')
+        if access is None:
+            from nodes.core.microsoft_access import resolve_microsoft_access
+
+            access = resolve_microsoft_access(self.settings, self.IGlobal.spec)
+            self.__dict__['_graph_access'] = access
+        return access
 
     # -----------------------------------------------------------------------
     # Shared argument validators (string/int validators come from
@@ -86,12 +102,13 @@ class MicrosoftToolInstanceBase(IInstanceBase):
         being swallowed — this tool exists precisely for the broken cases.
         """
         access = self._access()
+        # The diagnostic reports a missing scope below rather than refusing on it
+        auth = self.IGlobal.auth
         out: dict = {
-            'connection_ok': self._auth() is not None,
+            'connection_ok': auth is not None,
             'access': getattr(access, 'tier', None),
             'requiredScopes': list(getattr(access, 'scopes', []) or []),
         }
-        auth = self._auth()
         if probe is not None and auth is not None:
             try:
                 probe(auth)

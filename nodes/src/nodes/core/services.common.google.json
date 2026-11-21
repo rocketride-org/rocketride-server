@@ -12,7 +12,7 @@
 			"enum": {
 				"service": {
 					"title": "Service",
-					"properties": ["google.customerId", "google.adminEmail", "google.serviceKey"]
+					"properties": ["google.adminEmail", "google.serviceKey"]
 				},
 				"user": {
 					"title": "User",
@@ -23,16 +23,6 @@
 		"google.userAuth": {
 			"title": "Login with Google",
 			"type": "oauth2"
-		},
-		"google.customerId": {
-			"type": "string",
-			"title": "Customer ID",
-			"description": [
-				"Enter your Google Workspace Customer ID.\n\n",
-				"This unique identifier is assigned to your organization by Google. ",
-				"It is used to specify the particular Google ",
-				"Workspace domain you want to manage."
-			]
 		},
 		"google.adminEmail": {
 			"type": "string",
