@@ -23,7 +23,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""Tenki Sandbox tool node: config, and the one session every call of the pipeline shares, with its recovery."""
+"""Luxor Sandbox tool node: config, and the one session every call of the pipeline shares, with its recovery."""
 
 from __future__ import annotations
 
@@ -61,13 +61,13 @@ from luxor_ai import (
 )
 
 # The Tenki-era names and their warnings live with the validator, which the editor loads without the SDK
-from .IValidator import _DEFAULT_BASE_URL, _TENKI_API_HOST, _host_of, _retired_names
+from .IValidator import _effective_base_url, _retired_names
 from .sdk_shims import bound_file_calls, reset_data_plane, stop_keeping_output
 
 # The deadline of every control-plane and file call; git clones share it, so it never drops below the exec timeout.
 _MIN_RPC_TIMEOUT_SECS = 60
 _READY_WAIT_SECS = 180  # the SDK's own readiness budget
-# Measured 2026-10-05 and 2026-10-09: after a pause Tenki refuses a resume for up to about 48 s ("paused source is still
+# Measured 2026-10-05 and 2026-10-09: after a pause Luxor refuses a resume for up to about 48 s ("paused source is still
 # being torn down", "snapshot not yet durable"), so a refused resume is asked again while the session still waits.
 _RESUME_RETRY_SECS = 120
 _RESUME_RETRY_PAUSE_SECS = 5
@@ -75,7 +75,7 @@ _WARM_UP_TIMEOUT_SECS = 10
 _WARM_UP_WAIT_SECS = 40
 # How long endGlobal waits for a call holding the session lock before it closes the session anyway.
 _END_LOCK_WAIT_SECS = 10
-# USER_SHUTDOWN is not in Tenki's documented lifecycle, but it is in the protocol.
+# USER_SHUTDOWN is not in Luxor's documented lifecycle, but it is in the protocol.
 _GONE_STATES = frozenset({'TERMINATING', 'TERMINATED', 'USER_SHUTDOWN'})
 _SHUTTING_DOWN = 'tool_tenki: the pipeline is shutting down, so no sandbox session is used'
 TOOL_GROUPS = frozenset({'execution', 'filesystem', 'git'})
@@ -105,7 +105,7 @@ _VM_LINK_DOWN = re.compile(r'failed to (?:connect to|read) vsock')
 
 
 def about_the_vm_link(error: Exception) -> bool:
-    """Whether a "no such file" error is about Tenki's socket to the VM rather than a path inside it."""
+    """Whether a "no such file" error is about Luxor's socket to the VM rather than a path inside it."""
     return isinstance(error, TenkiFileNotFoundError) and _VM_LINK_DOWN.search(str(error)) is not None
 
 
@@ -138,14 +138,14 @@ def _names(raw, field: str) -> list[str]:
     return names
 
 
-# Tenki's rule (measured 2026-10-09): RFC 1123 hostname labels, optionally after one leading "*.".
+# Luxor's rule (measured 2026-10-09): RFC 1123 hostname labels, optionally after one leading "*.".
 _DOMAIN = re.compile(r'^(\*\.)?[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*$')
 _MAX_DOMAINS = 256
 _MAX_DOMAIN_CHARS = 253
 
 
 def _allowed_domains(raw) -> list[str]:
-    """The outbound allowlist, lowercase and without a trailing dot as Tenki stores it; any refused entry raises."""
+    """The outbound allowlist, lowercase and without a trailing dot as Luxor stores it; any refused entry raises."""
     domains, refused, positions = [], [], []
     for position, name in enumerate(_names(raw, 'allow_domains'), 1):
         domain = name.lower().rstrip('.')
@@ -183,7 +183,7 @@ def _secret_settings(cfg) -> tuple[tuple[str, ...], tuple[str, ...]]:
     return policies, domains
 
 
-# The name Tenki reads after "secrets://" (luxor-ai 1.5.2); any other name would never be substituted.
+# The name Luxor reads after "secrets://" (luxor-ai 1.5.2); any other name would never be substituted.
 _SECRET_NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_-]{0,127}')
 # How GitHub, GitLab and Slack tokens begin: no secret's name does.
 _TOKEN_PREFIXES = ('ghp_', 'gho_', 'ghu_', 'ghs_', 'ghr_', 'github_pat_', 'glpat-', 'xoxb-', 'xoxp-')
@@ -239,7 +239,7 @@ def _git_auth_url(raw: str) -> str:
 
 
 def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...]) -> tuple[str, str]:
-    """The URL prefix git_clone authenticates under and the Tenki secret it names, or ('', '') when off."""
+    """The URL prefix git_clone authenticates under and the Luxor secret it names, or ('', '') when off."""
     secret = cfg.get('git_auth_secret')
     if secret is None or (isinstance(secret, str) and not secret.strip()):
         return '', ''
@@ -265,7 +265,7 @@ def _git_auth_settings(cfg, policies: tuple[str, ...], domains: tuple[str, ...])
             f'{prefix} in tenki.secret_policies.'
         )
     host = urllib.parse.urlsplit(prefix).hostname
-    # Tenki documents that a wildcard entry matches exactly one label: *.example.com covers api.example.com only.
+    # Luxor documents that a wildcard entry matches exactly one label: *.example.com covers api.example.com only.
     if not any(
         domain == host or (domain.startswith('*.') and host.partition('.')[2] == domain[2:]) for domain in domains
     ):
@@ -317,7 +317,7 @@ def _tool_groups(raw) -> frozenset:
 
 
 def _size(value: int, key: str, lo: int, hi: int) -> int:
-    """A sizing field: 0 leaves it to Tenki or the image, anything else must be in the SDK's range.
+    """A sizing field: 0 leaves it to Luxor or the image, anything else must be in the SDK's range.
 
     The schema caps the value at ``hi`` and admits 0; the floor between is
     what the SDK refuses before sending, so it is checked here.
@@ -395,11 +395,11 @@ class IGlobal(IGlobalBase):
         self.git_auth_url, self.git_auth_secret = _git_auth_settings(cfg, self.secret_policies, self.allow_domains)
         self.cpu_cores = _size(cfg.cpu_cores, 'cpu_cores', 1, 16)
         memory_mb = _size(cfg.memory_mb, 'memory_mb', 512, 65536)
-        self.memory_mb = memory_mb - memory_mb % 2  # Tenki requires an even size; both bounds are even
+        self.memory_mb = memory_mb - memory_mb % 2  # Luxor requires an even size; both bounds are even
         self.disk_size_gb = _size(cfg.disk_size_gb, 'disk_size_gb', 5, 100)
         self.exec_timeout_secs = cfg.exec_timeout_secs
         self.max_duration_minutes = cfg.max_duration_minutes
-        # Tenki refuses 0 and accepted a minute to a year (measured 2026-10-09); its own default is seven days.
+        # Luxor refuses 0 and accepted a minute to a year (measured 2026-10-09); its own default is seven days.
         self.pause_retention_hours = cfg.pause_retention_hours
         self.max_output_chars = cfg.max_output_chars
         outlives = _outlives_the_session(self.exec_timeout_secs, self.max_duration_minutes)
@@ -414,8 +414,8 @@ class IGlobal(IGlobalBase):
             raise Exception('tool_tenki: base_url is required')
         for retired in _retired_names(apikey, base_url):
             warning(f'tool_tenki: {retired}')
-        if _host_of(base_url) == _TENKI_API_HOST:
-            base_url = _DEFAULT_BASE_URL  # a deployed pipeline shows nobody the warning, and would break on 2027-01-01
+        # Swapped, not only warned about: a deployed pipeline shows nobody the warning, and would break on 2027-01-01.
+        base_url = _effective_base_url(base_url)
         self.client = Client(auth_token=apikey, base_url=base_url, timeout=self.rpc_timeout_secs)
 
     def path_lock(self, path: str) -> threading.Lock:
@@ -543,7 +543,7 @@ class IGlobal(IGlobalBase):
             return None
 
     def _resume(self, session: Sandbox, budget: float) -> str | None:
-        """Ask Tenki to resume ``session`` until it takes; return 'RUNNING', or the gone state (None: unknown)."""
+        """Ask Luxor to resume ``session`` until it takes; return 'RUNNING', or the gone state (None: unknown)."""
         self._warm_id = None  # a resume replaces the SDK's data-plane connection
         deadline = time.monotonic() + budget
         while True:
@@ -592,7 +592,7 @@ class IGlobal(IGlobalBase):
 
     @staticmethod
     def _state(session: Sandbox) -> str | None:
-        """The session's state now, or None if Tenki no longer knows it."""
+        """The session's state now, or None if Luxor no longer knows it."""
         try:
             return session.refresh().state
         except SessionNotFoundError:
@@ -625,14 +625,14 @@ class IGlobal(IGlobalBase):
     def _create_session(self) -> Sandbox:
         sizing = {'cpu_cores': self.cpu_cores, 'memory_mb': self.memory_mb, 'disk_size_gb': self.disk_size_gb}
         create_kwargs = {
-            # Only what was set: with an image Tenki keeps the image's disk unless one is sent (luxor-ai 1.5.2).
+            # Only what was set: with an image Luxor keeps the image's disk unless one is sent (luxor-ai 1.5.2).
             **{key: value for key, value in sizing.items() if value},
-            # Tenki has no idle timeout, so this is what stops a session nothing closes (an engine crash): Tenki
+            # Luxor has no idle timeout, so this is what stops a session nothing closes (an engine crash): Luxor
             # pauses it then. sticky stays False: a sticky session discards max_duration.
             'max_duration': self.max_duration_minutes * 60,
             'pause_retention': self.pause_retention_hours * 3600,
             'allow_inbound': False,
-            # Explicit: with outbound off Tenki ignores allow_domains, so a changed SDK default would change both.
+            # Explicit: with outbound off Luxor ignores allow_domains, so a changed SDK default would change both.
             'allow_outbound': True,
             'name': f'rocketride-tool-tenki-{self.label + "-" if self.label else ""}{uuid.uuid4().hex[:8]}',
             'tags': ['rocketride', self._run_tag],
