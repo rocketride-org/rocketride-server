@@ -323,7 +323,7 @@ class AccountBase(ABC):
     async def apply_debit(
         self,
         org_id: str,
-        user_id: str,
+        user_id: str | None,
         team_id: str | None,
         resource: str,
         amount: float,
@@ -342,8 +342,8 @@ class AccountBase(ABC):
 
         Args:
             org_id:          Organisation to debit.
-            user_id:         User whose task triggered the burn (required for attribution).
-            team_id:         Team the task belongs to (None when task has no team scope).
+            user_id:         User the burn is attributed to, or None for a run with no user (a team- or org-owned run).
+            team_id:         Team the burn is attributed to, or None for a run with no team scope.
             resource:        Billing bucket (e.g. tokens, video, audio).
             amount:          Positive amount to debit (negated internally).
             idempotency_key: Namespaced dedup key (e.g. ``task:abc123:gpu_memory``).
@@ -373,7 +373,7 @@ class AccountBase(ABC):
     async def apply_usage(
         self,
         org_id: str,
-        user_id: str,
+        user_id: str | None,
         team_id: str | None,
         resource: str,
         amount: float,
@@ -384,23 +384,25 @@ class AccountBase(ABC):
         increment_id: str = '',
     ) -> bool:
         """
-        Add one increment of named-pipe usage to its DAY row (plan 8.2, S11).
+        Add one increment of named-pipe usage to its ledger row (plan 8.2, S11).
 
         Unlike ``apply_debit`` (a REPLACING upsert for an owned run's
-        cumulative per-task rows), this is ADDITIVE: the row keyed
-        ``usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}``
-        gains ``amount`` and ``request_count``, atomically in the database, so
-        any number of engines and servers may add into one day's row; the
-        publication that answered is part of the key, so two publications
-        never share a row. OSS keeps no ledger and returns False.
+        cumulative per-task rows), this is ADDITIVE: the row under
+        ``idempotency_key`` gains ``amount`` and ``request_count``, atomically
+        in the database, so any number of engines and servers may add into one
+        row. The key (``task_metrics.usage_key``) is a hash of the paying
+        unit, the publication that answered and the resource, with no day in
+        it: one row holds all the usage of that unit through that publication,
+        and the ledger's ``modified_at`` says when it was last charged. OSS
+        keeps no ledger and returns False.
 
         Args:
             org_id:          The paying org (the caller's).
-            user_id:         The caller.
-            team_id:         The caller's HOME team (plan 8.3), or None.
+            user_id:         The caller, or None for a run with no caller (a schedule, a run-now, a listener).
+            team_id:         The team the usage is attributed to, or None.
             resource:        Billing bucket (``tokens``, or a custom resource).
             amount:          Positive tokens to add (negated internally, like a debit).
-            idempotency_key: The day row's key.
+            idempotency_key: The row's key (``task_metrics.usage_key``).
             request_count:   Requests this increment covers.
             context:         Audit context (the publication served, source, rung).
             description:     Line-item detail (the metric name).
@@ -457,10 +459,10 @@ class AccountBase(ABC):
 
         OSS keeps no ledger (``apply_usage`` is a no-op), so there is no row
         to group and the answer is an empty list. The SaaS implementation
-        reads only ``org_id``'s usage day rows, keyed
-        ``usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}``,
-        and groups them by pipe, rung, answering team and version, so a
-        publisher never sees other orgs' calls.
+        reads only ``org_id``'s usage rows (one per paying unit per
+        publication, the publication readable in the row's context) and groups
+        them by pipe, rung, answering team and version, so a publisher never
+        sees other orgs' calls.
 
         Args:
             org_id: Organisation to query (the viewer's org).

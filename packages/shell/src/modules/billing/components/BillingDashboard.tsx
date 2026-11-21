@@ -488,11 +488,11 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 		() =>
 			data.map((row) => ({
 				id: row.id,
-				name: row.id === '__none__' ? '(unassigned)' : row.name ?? '--',
+				name: row.id === '__none__' ? (mode === 'user' ? 'Scheduled and unattended runs' : 'No team (organization)') : row.name ?? '--',
 				total: Object.values(row.credits).reduce((s, v) => s + v, 0),
 				resources: Object.keys(row.credits).length,
 			})),
-		[data]
+		[data, mode]
 	);
 
 	// Column definitions — first column label follows the active mode.
@@ -502,7 +502,7 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 	// top-consumers-first rollup order.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side: user display name with email fallback, or team name; "(unassigned)" pools usage rows carrying no user/team id.', headerSort: true },
+			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side: user display name with email fallback, or team name; a run with no caller (a schedule, a run-now, a listener) has no user and pools under "Scheduled and unattended runs"; usage with no team pools under "No team (organization)".', headerSort: true },
 			{
 				title: 'Total Tokens',
 				field: 'total',
