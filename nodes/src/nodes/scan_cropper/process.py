@@ -130,15 +130,15 @@ def _region(rect, page_area: float) -> dict:
 
 def build_split_scan(config):
     """
-    Bind the node's config into the single callable ``IInstance`` uses.
+    Bind one call's settings into the single callable ``IInstance`` uses.
 
-    Called once from ``IGlobal.beginGlobal``, so per-object work never re-parses config. The
+    Called once per call from ``IInstance.beginInstance``, so per-object work never re-parses the settings. The
     ``quality`` decision is deliberately *not* frozen here: when it is 'auto' the answer depends
     on the bytes of each individual scan, so it is resolved per input, inside ``split_scan``,
     where those bytes are in hand.
 
     Args:
-        config: The node's resolved config, keyed on bare field names.
+        config: The call's resolved settings, keyed on bare field names.
 
     Returns:
         Callable: ``split_scan(image_bytes, want_images)``.

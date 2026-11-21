@@ -125,7 +125,7 @@ _POSITIVE_CLASSES = frozenset({'revenue', 'asset'})
 
 
 def default_config() -> Dict[str, Any]:
-    """Built-in configuration; ``IGlobal`` merges engine config over this.
+    """Built-in configuration; the node merges each call's settings over this.
 
     Every field has a working default so the node validates with zero
     configuration — only the ``category_metric_mismatch`` check is skipped when
@@ -260,7 +260,7 @@ def validate_fact(fact: Any, config: Dict[str, Any]) -> Any:
     if not isinstance(cat_map, dict):
         cat_map = DEFAULT_CATEGORY_METRIC_MAP
     # These fields accept only off/warning/error (not 'ok'); enforce that here
-    # too so the pure function upholds the same contract as IGlobal in isolation.
+    # too so the pure function upholds the same contract as the node's instance in isolation.
     sign_sev = config.get('sign', 'warning')
     if sign_sev not in ('off', 'warning', 'error'):
         sign_sev = 'warning'

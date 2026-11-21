@@ -6,11 +6,12 @@
 """
 Node-behavior test: scan_cropper emits one image stream per photo, plus an audit record.
 
-Drives the real ``IInstance`` (image lane BEGIN/WRITE/END) with a fake ``IGlobal.split_scan``,
-which is the node's single seam onto cv2 — the same trick ``image_cleanup``'s provenance test
-plays with ``IGlobal.process``. That is what lets this run at all: the nodes/test suite uses the
-engine's bundled Python, which carries rocketlib and ai.common but neither cv2 nor Pillow, so a
-test that reached real detection could not execute. The canned crop bytes are deliberately
+Drives the real ``IInstance`` (image lane BEGIN/WRITE/END) with a fake ``split_scan`` (the one
+``beginInstance`` binds to the call's settings), which is the node's single seam onto cv2 — the
+same trick ``image_cleanup``'s provenance test plays with ``IGlobal.process``. That is what lets
+this run at all: the nodes/test suite uses the engine's bundled Python, which carries rocketlib
+and ai.common but neither cv2 nor Pillow, so a test that reached real detection could not
+execute. The canned crop bytes are deliberately
 opaque for the same reason.
 
 What is actually asserted here is the plumbing the detector cannot check itself: that N photos
@@ -72,14 +73,14 @@ class _Capture:
         self.texts.append(text)
 
 
-class _FakeGlobal:
-    """Returns canned results, so nothing here needs an imaging library."""
+class _FakeSplit:
+    """Stands for the call's bound ``split_scan``: returns canned results, so nothing here needs an imaging library."""
 
     def __init__(self, result):
         self._result = result
         self.calls = []
 
-    def split_scan(self, image_bytes, want_images):
+    def __call__(self, image_bytes, want_images):
         self.calls.append((len(image_bytes), want_images))
         return self._result
 
@@ -133,7 +134,7 @@ def _make(result, listeners=('image', 'text')):
     """An IInstance wired to a capturing binding and a canned split_scan."""
     inst = IInstance()
     inst.instance = _Capture(listeners)
-    inst.IGlobal = _FakeGlobal(result)
+    inst.split_scan = _FakeSplit(result)
     inst.open(None)
     return inst
 
@@ -323,7 +324,7 @@ class TestListenerGating:
 
         _send_stream(inst, _descriptor_payload())
 
-        assert inst.IGlobal.calls == []
+        assert inst.split_scan.calls == []
         assert inst.instance.calls == []
         assert inst.instance.texts == []
 
@@ -338,7 +339,8 @@ class TestListenerGating:
 
         _send_stream(inst, _descriptor_payload())
 
-        assert inst.IGlobal.calls == [(len(b'scan-bytes'), False)]
+        assert inst.split_scan.calls == [(len(b'scan-bytes'), False)]
+
         assert inst.instance.calls == []
         assert json.loads(inst.instance.texts[0])['count'] == 1
 

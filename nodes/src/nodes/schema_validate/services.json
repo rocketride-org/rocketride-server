@@ -65,6 +65,7 @@
 	//
 	"propertyDefinitions": {
 		"schema_validate.amount_field": {
+			"param": true,
 			"type": "string",
 			"title": "Amount field",
 			"description": "The fact field holding the numeric amount (presence and sign checks).",
@@ -73,6 +74,7 @@
 			"maxLength": 128
 		},
 		"schema_validate.currency_field": {
+			"param": true,
 			"type": "string",
 			"title": "Currency field",
 			"description": "The fact field holding the currency code (presence check only).",
@@ -81,6 +83,7 @@
 			"maxLength": 128
 		},
 		"schema_validate.metric_field": {
+			"param": true,
 			"type": "string",
 			"title": "Metric field",
 			"description": "The fact field naming the line item (e.g. 'Cost of goods sold') - the classifier input for the mismatch check.",
@@ -89,6 +92,7 @@
 			"maxLength": 128
 		},
 		"schema_validate.category_field": {
+			"param": true,
 			"type": "string",
 			"title": "Category field",
 			"description": "The fact field holding the declared classification (e.g. revenue, expense) - checked against the metric.",
@@ -97,6 +101,7 @@
 			"maxLength": 128
 		},
 		"schema_validate.category_metric_map": {
+			"param": true,
 			"type": "object",
 			"title": "Category to metric keywords",
 			"description": "Map of canonical category to metric keyword substrings that imply it. Drives the cost-as-revenue check. The default map covers revenue, expense, asset, and liability; set an explicit empty map to disable the metric/category mismatch check.",
@@ -108,6 +113,7 @@
 			}
 		},
 		"schema_validate.sign": {
+			"param": true,
 			"type": "string",
 			"title": "Sign check severity",
 			"description": "Severity for a sign-convention violation (e.g. an expense with a positive amount). Set to 'off' to disable the check.",
@@ -119,6 +125,8 @@
 			]
 		},
 		"schema_validate.require_provenance": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Require provenance",
 			"description": "Severity for a fact that arrives with no usable provenance list (absent, empty, or not a list). Set to 'off' to disable the flag; a provenance entry is still appended.",

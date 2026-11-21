@@ -51,6 +51,24 @@ SPATIAL_PROMPTS = {
 }
 
 
+def system_prompt_for(settings: Any) -> str:
+    """
+    Compose one call's system instruction: its text plus the hazard and spatial modifiers.
+
+    Args:
+        settings: The call's settings (systemPrompt, prioritizeHazards, spatialFormat);
+            the schema default of systemPrompt is the full accessibility prompt.
+
+    Returns:
+        The instruction sent with the request.
+    """
+    return (
+        settings.systemPrompt
+        + HAZARD_PROMPTS.get(settings.prioritizeHazards, '')
+        + SPATIAL_PROMPTS.get(settings.spatialFormat, '')
+    )
+
+
 class AccessibilityVisionError(Exception):
     """Raised when accessibility vision analysis fails."""
 
@@ -60,16 +78,15 @@ class Chat(ChatBase):
 
     _model: str = ''
     _client: genai.Client
-    _system_prompt: str = ''
-    _prompt: str = ''
 
     def __init__(self, provider: str, connConfig: Any, bag: dict[str, Any]):
         """Initialize the Gemini Vision accessibility chat instance.
 
         Args:
             provider: The node's logical type.
-            connConfig: The node's resolved config (defaults applied, flat): model,
-                apikey, systemPrompt, prompt, prioritizeHazards, spatialFormat, modelTotalTokens.
+            connConfig: The control's resolved config (defaults applied, flat): model,
+                apikey, modelTotalTokens. The prompts and their modifiers are each
+                call's (see ``system_prompt_for``; the question carries the prompt).
             bag: The endpoint's shared runtime state.
         """
         super().__init__(provider, connConfig, bag)
@@ -77,14 +94,6 @@ class Chat(ChatBase):
 
         self._model = config.model
         api_key = config.apikey
-
-        # Build the system prompt from the configured text (the schema default
-        # is the full accessibility prompt) plus the config modifiers
-        self._system_prompt = config.systemPrompt
-        self._system_prompt += HAZARD_PROMPTS.get(config.prioritizeHazards, '')
-        self._system_prompt += SPATIAL_PROMPTS.get(config.spatialFormat, '')
-
-        self._prompt = config.prompt
 
         if not api_key:
             raise ValueError('Missing Google AI API key. Get one at https://aistudio.google.com/apikey')
@@ -101,11 +110,6 @@ class Chat(ChatBase):
             raise ValueError(f'Failed to initialize Google AI client: {e!s}') from e
 
         self._modelTotalTokens = config.modelTotalTokens
-
-    @property
-    def prompt(self) -> str:
-        """Get the current analysis prompt."""
-        return self._prompt
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""
@@ -140,15 +144,24 @@ class Chat(ChatBase):
         retryable = ['timeout', 'connection', '500', '502', '503', '504', 'internal server error']
         return any(phrase in error_msg for phrase in retryable)
 
-    def chat(self, question: Question) -> Answer:
-        """Send an image to Gemini for accessibility-focused scene description."""
+    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+        """Send an image to Gemini for accessibility-focused scene description.
+
+        Args:
+            question: The call's question: its first question is the prompt (the
+                call's ``settings.prompt``), its context carries the image.
+            system_prompt: The call's composed system instruction (``system_prompt_for``).
+
+        Returns:
+            The model's description.
+        """
         max_retries = 3
         base_delay = 1.0
         last_error = None
 
         # Extract image data from context
         image_data = None
-        prompt_text = self._prompt
+        prompt_text = ''
         if not question.context:
             raise ValueError('No image provided for accessibility description.')
         for context_item in question.context:
@@ -188,7 +201,7 @@ class Chat(ChatBase):
                     model=self._model,
                     contents=contents,
                     config={
-                        'system_instruction': self._system_prompt,
+                        'system_instruction': system_prompt,
                         'temperature': 0.3,
                         'max_output_tokens': 1024,
                     },

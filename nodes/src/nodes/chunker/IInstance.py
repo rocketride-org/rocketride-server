@@ -31,6 +31,7 @@ from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Doc, DocMetadata
 
 from .IGlobal import IGlobal
+from .chunker_strategies import ChunkingStrategy, SentenceChunker, TokenChunker
 
 
 class IInstance(IInstanceBase):
@@ -39,6 +40,38 @@ class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
     chunkId: int = 0
+    strategy: ChunkingStrategy | None = None
+
+    def beginInstance(self):
+        """Build this call's chunking strategy from its settings.
+
+        The resolver has applied the selected strategy's defaults and bounded
+        the sizes; the one cross-field rule (overlap below size) is checked here.
+        The token strategy borrows the control's tokenizer for its encoding.
+
+        Raises:
+            ValueError: The overlap is not smaller than the chunk size.
+        """
+        settings = self.settings
+        chunk_size = settings.chunk_size
+        chunk_overlap = settings.chunk_overlap
+
+        if chunk_overlap >= chunk_size:
+            raise ValueError(f'chunk_overlap ({chunk_overlap}) must be less than chunk_size ({chunk_size})')
+
+        if settings.strategy == 'token':
+            self.strategy = TokenChunker(
+                chunk_size=chunk_size,
+                chunk_overlap=chunk_overlap,
+                encoding_name=settings.encoding_name,
+                encoder=self.IGlobal.encoder_for(settings.encoding_name),
+            )
+        else:
+            self.strategy = SentenceChunker(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+
+    def endInstance(self):
+        """Release this call's chunking strategy."""
+        self.strategy = None
 
     def open(self, obj: Entry):
         """Reset the chunk counter so each new object starts at chunkId=0."""
@@ -105,7 +138,7 @@ class IInstance(IInstanceBase):
         start_char, end_char, and total_chunks so downstream nodes can
         reconstruct the original document if needed.
         """
-        if self.IGlobal.strategy is None:
+        if self.strategy is None:
             raise RuntimeError('Chunker strategy not initialized')
 
         chunked_docs: list[Doc] = []
@@ -121,7 +154,7 @@ class IInstance(IInstanceBase):
             source_metadata, parent_id = self._copy_metadata(getattr(document, 'metadata', None))
 
             # Chunk the text
-            chunks = self.IGlobal.strategy.chunk(text)
+            chunks = self.strategy.chunk(text)
             total_chunks = len(chunks)
 
             if total_chunks == 0:

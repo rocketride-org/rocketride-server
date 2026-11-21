@@ -6,9 +6,10 @@
 """
 Cognee node - global (per-pipe) state.
 
-Reads the cognee server URL, optional API key, default dataset, and recall
-settings from the resolved node config. The three instance tools reuse this
-state.
+Reads the cognee server URL and optional API key from the resolved node
+config. The three instance tools reuse this state; the dataset scope, its
+override gate, the recall defaults and the request timeout are each call's
+settings.
 """
 
 from __future__ import annotations
@@ -39,11 +40,6 @@ class IGlobal(IGlobalBase):
 
     base_url: str = 'http://localhost:8000'
     api_key: str = ''
-    dataset: str = 'main'
-    allow_dataset_override: bool = False
-    search_type: str = 'GRAPH_COMPLETION_DECOMPOSITION'
-    top_k: int = 15
-    request_timeout: int = 120
 
     def beginGlobal(self) -> None:
         """Load the cognee connection config (once per pipe)."""
@@ -61,14 +57,8 @@ class IGlobal(IGlobalBase):
         # reference resolved per call); there is no process-env fallback
         self.api_key = str(cfg.api_key or '').strip()
 
-        # A blank dataset would silently widen the scope to the server default
-        self.dataset = cfg.dataset.strip()
-        if not self.dataset:
-            raise Exception('tool_cognee: dataset is required')
-        self.allow_dataset_override = cfg.allow_dataset_override
-        self.search_type = cfg.search_type
-        self.top_k = cfg.top_k
-        self.request_timeout = cfg.request_timeout
+        # The dataset scope, its override gate, the retrieval defaults and the
+        # request timeout are each call's: the instance reads them from its settings
 
     def endGlobal(self) -> None:
         """Clear the cached API key when the pipe tears down."""

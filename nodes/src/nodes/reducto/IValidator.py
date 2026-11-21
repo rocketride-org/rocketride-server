@@ -104,7 +104,8 @@ class IValidator(IValidatorBase):
             ValueError: An advanced-mode option field is not a Python dictionary.
         """
         config = self.config
-        check_option_dicts(config)
+        # The mode and the option fields are params, which self.config refuses: the stored values are in the full view
+        check_option_dicts(self._resolved())
         if syntaxOnly:
             return
         # An unfilled reference is reported as such; the probe must not send the placeholder as the key

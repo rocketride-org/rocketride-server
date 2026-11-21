@@ -110,8 +110,8 @@ class IInstance(
         a disabled tool) and ``tool.invoke`` (calling one anyway is refused).
         """
         methods = super()._collect_tool_methods()
-        enabled = self.IGlobal.tool_groups
-        allow_raw = self.IGlobal.allow_raw_request
+        enabled = self._options().tool_groups
+        allow_raw = self._options().allow_raw_request
 
         published: dict[str, Callable] = {}
         for name, method in methods.items():

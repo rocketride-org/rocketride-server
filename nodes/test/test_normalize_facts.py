@@ -503,7 +503,6 @@ def _build_instance_stubs():
 
 _PKG_MODULES = (
     'nodes.normalize_facts.IInstance',
-    'nodes.normalize_facts.IGlobal',
     'nodes.normalize_facts.normalize',
     'nodes.normalize_facts',
 )
@@ -533,9 +532,14 @@ finally:
 def _make_instance():
     """Build an IInstance wired to capture stubs; returns (inst, emitted, prevented)."""
     inst = _II.IInstance()
-    rules = dict(CFG)
-    # The instance reads the compiled rules through the accessor (methods-only IGlobal, plan 4.2)
-    inst.IGlobal = types.SimpleNamespace(rules=rules, normalization_rules=lambda: rules)
+    # The rules are built from the call's settings (the node has no IGlobal)
+    inst.settings = types.SimpleNamespace(
+        label_field='label',
+        value_field='value',
+        default_currency='',
+        decimal_format='auto',
+        label_to_metric={'Turnover': 'revenue'},
+    )
     emitted = []
     prevented = []
     inst.instance = types.SimpleNamespace(writeAnswers=emitted.append)

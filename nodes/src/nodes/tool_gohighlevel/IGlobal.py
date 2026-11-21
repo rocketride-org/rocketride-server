@@ -24,16 +24,15 @@
 """
 GoHighLevel tool node - global (shared) state.
 
-Reads the sub-account Private Integration Token, the location id it is scoped to,
-the read-only flag, the published tool groups, and the raw-request switch from the
-resolved node config.
+Reads the sub-account Private Integration Token and the location id it is scoped to
+from the resolved node config. The read-only flag, the published tool groups and the
+raw-request switch are each call's settings (``GoHighLevelToolsBase._options``).
 """
 
 from __future__ import annotations
 
 from rocketlib import IGlobalBase, warning
 
-from .tool_groups import DEFAULT_GROUPS, normalize_groups
 
 #: Every Private Integration Token observed so far carries this prefix. It is not a
 #: documented guarantee, so a token without it is warned about and still used.
@@ -45,17 +44,14 @@ class IGlobal(IGlobalBase):
 
     token: str = ''
     location_id: str = ''
-    read_only: bool = False
-    tool_groups: frozenset = DEFAULT_GROUPS
-    allow_raw_request: bool = True
 
     def beginGlobal(self) -> None:
         """Read the resolved node config and fail early when the node cannot reach an account.
 
         The schema requires the token and the location id (the token is opaque, so the
         location cannot be derived from it, and without a location id GoHighLevel
-        answers 403 with a message that blames the token) and pins ``toolGroups`` to
-        the groups this node implements, so a misspelt group never reaches here.
+        answers 403 with a message that blames the token). The tool surface and the
+        write gate are each call's settings, read by the instance.
 
         Raises:
             Exception: If the token or the location id is blank after stripping.
@@ -69,9 +65,6 @@ class IGlobal(IGlobalBase):
         # reference resolved per call)
         self.token = str(cfg.privateIntegrationToken or '').strip()
         self.location_id = str(cfg.locationId or '').strip()
-        self.read_only = cfg.readOnly
-        self.tool_groups = normalize_groups(cfg.toolGroups)
-        self.allow_raw_request = cfg.allowRawRequest
 
         if not self.token:
             raise Exception('tool_gohighlevel: privateIntegrationToken is required')
@@ -87,6 +80,3 @@ class IGlobal(IGlobalBase):
         """Release shared state, wiping the credential."""
         self.token = ''
         self.location_id = ''
-        self.read_only = False
-        self.tool_groups = DEFAULT_GROUPS
-        self.allow_raw_request = True

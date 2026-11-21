@@ -22,26 +22,22 @@
 # =============================================================================
 
 import os
-from typing import Callable
 
 from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
     """
-    Process-wide setup for the scan cropper: read the resolved config once, then bind the algorithm.
+    Process-wide setup for the scan cropper: install the imaging dependencies, hold nothing.
 
-    Nothing here touches an image. Its whole job is to make ``split_scan`` available to every
-    instance with the node's tunables already baked in, so per-object work never re-reads the
-    config and ``IInstance`` never has to know a tunable exists.
+    Every tunable (the scan type and its detection values, deskew, the crop quality) is a
+    per-call parameter: each call binds its own settings into ``split_scan`` (see
+    ``IInstance.beginInstance``). There is no model or handle to keep.
     """
-
-    # split_scan(image_bytes, want_images) -> (crops, regions) | None
-    split_scan: Callable = None
 
     def beginGlobal(self) -> None:
         """
-        Install the dependencies, then import the imaging code and bind the resolved config to it.
+        Install the dependencies the imaging code imports at module scope.
 
         The import order is load-bearing rather than stylistic. ``process``/``detect``/``geometry``
         import cv2 at module scope, so importing any of them before ``depends()`` has run would
@@ -53,12 +49,3 @@ class IGlobal(IGlobalBase):
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
-
-        from .process import build_split_scan
-
-        # The resolved config: defaults applied, the selected scan type's values flat
-        self.split_scan = build_split_scan(self.config)
-
-    def endGlobal(self) -> None:
-        """Release the bound callable; there is no model or handle to tear down."""
-        self.split_scan = None

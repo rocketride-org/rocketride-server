@@ -88,7 +88,8 @@ def _run_threads(n: int, glb: IGlobal) -> list:
 
     def work() -> None:
         try:
-            results.append(glb.transcribe(b'\x00\x01' * 1600))
+            # A call with no params of its own decodes by the stored values (the full resolved view)
+            results.append(glb.transcribe(b'\x00\x01' * 1600, glb._resolved()))
         except Exception as e:  # surfaced through the assert below
             errors.append(e)
 

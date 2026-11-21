@@ -48,7 +48,7 @@ from scan_cropper.process import _params_from_config, resolve_quality  # noqa: E
 
 
 def _resolve(conn_config):
-    """Resolve a stored config exactly as IGlobal.beginGlobal() would."""
+    """Resolve a stored config exactly as a call's settings resolve it."""
     return resolveConfig(rocketlib.getServiceSchema('scan_cropper'), conn_config)
 
 

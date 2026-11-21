@@ -35,7 +35,7 @@ class IInstance(IInstanceBase):
 
         temp_path: Optional[str] = None
         try:
-            payload = self.IGlobal.synthesize(value)
+            payload = self.IGlobal.synthesize(value, self.settings.kokoro_voice)
             temp_path = payload['path']
             with open(temp_path, 'rb') as fin:
                 raw = fin.read()

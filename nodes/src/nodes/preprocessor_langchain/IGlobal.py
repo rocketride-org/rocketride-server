@@ -21,21 +21,64 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import Any, Optional
+"""
+Global handler for the LangChain text splitter node.
+
+The splitter class, its options and the chunk size are per-call parameters.
+Most splitters are cheap to build, but the spaCy splitter loads a language
+pipeline and the NLTK one checks its tokenizer data, so the control keeps a
+small bounded cache of built splitters keyed by the call's settings: calls
+that split the same way share one, and a new combination builds its own.
+"""
+
+import threading
+from collections import OrderedDict
+from typing import Any, Mapping
+
 from rocketlib import IGlobalBase
+
+# ==== Constants ==================================================================
+
+#: The most splitters one control keeps; the least recently used is dropped first.
+MAX_SPLITTERS = 8
 
 
 class IGlobal(IGlobalBase):
-    preprocessor: Optional[Any] = None
+    """IGlobal for the LangChain splitter node: the splitters calls have asked for, keyed by their settings."""
 
     def beginGlobal(self):
-        """Create the LangChain splitter from the resolved config (splitter, mode, sizes, options)."""
+        """Create the empty splitter cache and its lock."""
+        self._lock = threading.Lock()
+        self._splitters = OrderedDict()
+
+    def preprocessor_for(self, settings: Mapping[str, Any]):
+        """
+        The splitter for one call's settings, built on first use.
+
+        Args:
+            settings: The call's resolved settings (splitter, mode, sizes, the splitter's options).
+
+        Returns:
+            The cached or newly built ``PreProcessor``.
+        """
         # Imported here: the module installs langchain when it loads
         from .langchain import PreProcessor
 
-        bag = self.IEndpoint.endpoint.bag
-        self.preprocessor = PreProcessor(self.config.node.provider, self.config, bag)
+        key = tuple(sorted((name, repr(value)) for name, value in settings.items()))
+        with self._lock:
+            preprocessor = self._splitters.get(key)
+            if preprocessor is not None:
+                self._splitters.move_to_end(key)
+                return preprocessor
+
+            # Build the new one, then drop the least recently used past the bound
+            preprocessor = PreProcessor(settings.node.provider, settings)
+            self._splitters[key] = preprocessor
+            while len(self._splitters) > MAX_SPLITTERS:
+                self._splitters.popitem(last=False)
+            return preprocessor
 
     def endGlobal(self):
-        # Destroy the preprocessor
-        self.preprocessor = None
+        """Drop every cached splitter and the lock."""
+        self._splitters = None
+        self._lock = None

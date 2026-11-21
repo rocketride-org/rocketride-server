@@ -162,23 +162,16 @@ class PreProcessor:
     """
 
     languageParsers: Dict[str, Any] = {}
-    language: str = 'auto'
 
     def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """
-        Initialize the splitter with the given programming language.
-
-        Supported languages: 'auto', 'c', 'cpp', 'python', 'javascript', 'typescript'
+        Initialize the splitter; the language is chosen per call (see ``process``).
 
         Args:
             provider: The node's logical type.
-            config: The resolved node config (language, strlen).
+            config: The control's resolved node config (nothing in it configures the splitter).
             bag: The endpoint's shared bag.
         """
-        # Init the base
-
-        # Save the language
-        self.language = config['language']
 
     def _getParser(self, language: str) -> Parser:
         """
@@ -294,21 +287,23 @@ class PreProcessor:
         for ch in node.children:
             self._extract_chunks(ch, source, chunks)
 
-    def process(self, code: str) -> List[str]:
+    def process(self, code: str, language: str = 'auto') -> List[str]:
         """
         Split the given source code into meaningful chunks using TreeSitter.
-        """
-        language = None
 
-        if self.language == 'auto':
+        Args:
+            code: The source text.
+            language: The call's language: 'auto', 'c', 'cpp', 'python', 'javascript' or 'typescript'.
+
+        Returns:
+            The chunks; empty when ``auto`` cannot tell the language.
+        """
+        if language == 'auto':
             # Use regex-based language detection
             language = detect_language_by_regex(code)
 
             if not language or language == 'None':
                 return []
-        else:
-            # Use the specified language
-            language = self.language
 
         # Get our parser
         parser = self._getParser(language)

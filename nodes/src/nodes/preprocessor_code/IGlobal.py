@@ -29,7 +29,7 @@ class IGlobal(IGlobalBase):
     preprocessor: Optional[Any] = None
 
     def beginGlobal(self):
-        """Create the code splitter from the resolved config (language, strlen)."""
+        """Create the code splitter; each call names its language (a setting the instance passes)."""
         # Imported here: the module installs tree-sitter when it loads
         from .code import PreProcessor
 

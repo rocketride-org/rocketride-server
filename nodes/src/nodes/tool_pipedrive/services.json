@@ -29,6 +29,8 @@
 			"optional": true
 		},
 		"pipedrive.readOnly": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Read-only mode",
 			"description": "When enabled, every create, update and delete tool is blocked, and the generic request tool only accepts GET. Safe for agents that should only inspect the CRM.",
@@ -39,6 +41,8 @@
 			]
 		},
 		"pipedrive.toolGroups": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Tool groups",
 			"description": "Which groups of Pipedrive tools this node publishes to the agent. The full API is 255 tools, which is more than an LLM can choose between reliably, so only the selected groups are exposed. Pick one or more from the list; tool counts are shown per group, and selections totalling more than 120 log a warning but still run. Selecting <b>All groups</b> publishes everything and skips that warning.",
@@ -77,6 +81,8 @@
 			"default": ["deals", "persons", "organizations", "activities", "pipelines", "stages", "notes", "search"]
 		},
 		"pipedrive.allowRawRequest": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Allow raw API requests",
 			"description": "Publishes the generic <b>request</b> tool, which can call any Pipedrive v1 endpoint by method and path. It uses the same authentication, rate-limit handling and read-only enforcement as the typed tools. Disable to restrict the agent to the typed tools only.",

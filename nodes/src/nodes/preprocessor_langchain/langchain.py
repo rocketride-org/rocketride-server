@@ -243,14 +243,13 @@ class PreProcessor:
             monitorStatus(f'Loading preprocessor complete {provider}/{splitter}')
             return splitter_instance
 
-    def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
+    def __init__(self, provider: str, config: Mapping):
         """
-        Initialize the preprocessor with the provider, the resolved config, and the bag.
+        Initialize the preprocessor with the provider and one call's resolved settings.
 
         Args:
             provider: The node's logical type.
-            config: The resolved node config (splitter, mode, strlen, tokens and the splitter's options).
-            bag: The endpoint's shared bag.
+            config: The call's settings (splitter, mode, strlen, tokens and the splitter's options).
         """
         # Init the base
 

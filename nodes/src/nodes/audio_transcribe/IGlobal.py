@@ -38,12 +38,13 @@ class IGlobal(IGlobalBase):
     --modelserver is set, otherwise runs locally with faster-whisper.
     """
 
-    def transcribe(self, audio: Any) -> List[SimpleNamespace]:
+    def transcribe(self, audio: Any, settings: Any) -> List[SimpleNamespace]:
         """
-        Transcribe the given audio using the Whisper model.
+        Transcribe the given audio using the Whisper model, decoding by one call's settings.
 
         Args:
             audio: PCM int16 bytes (16 kHz mono), or numpy float32 array in [-1, 1].
+            settings: The call's settings: language, beam_size, vad_filter and the four VAD values.
 
         Returns:
             List of segment-like objects with .text, .start, .end for downstream use.
@@ -53,21 +54,24 @@ class IGlobal(IGlobalBase):
             return []
 
         vad_parameters = {
-            'threshold': self._whisper_threshold,
-            'min_silence_duration_ms': self._whisper_min_silence_duration_ms,
-            'speech_pad_ms': self._whisper_speech_pad_ms,
+            'threshold': settings.vad_threshold,
+            'min_silence_duration_ms': settings.vad_min_silence_duration_ms,
+            'speech_pad_ms': settings.vad_speech_pad_ms,
         }
         # 0 = no limit: upstream's default is inf, which JSON cannot express, so omit the
         # key. This key only — threshold=0 and speech_pad_ms=0 are real values.
-        if self._whisper_max_speech_duration_s:
-            vad_parameters['max_speech_duration_s'] = self._whisper_max_speech_duration_s
+        if settings.vad_max_speech_duration_s:
+            vad_parameters['max_speech_duration_s'] = settings.vad_max_speech_duration_s
 
+        # The language and the decode values travel with the request; they are not part of
+        # the loaded model's identity (one model serves every call)
         with self.transcribe_lock:
             result = self._whisper.transcribe(
                 audio_bytes,
-                beam_size=self._whisper_beam_size,
-                vad_filter=self._whisper_vad_filter,
+                beam_size=settings.beam_size,
+                vad_filter=settings.vad_filter,
                 vad_parameters=vad_parameters,
+                language=settings.language,
             )
 
         segments = result.get('$segments') or []
@@ -96,8 +100,8 @@ class IGlobal(IGlobalBase):
         """
         Initialize the global state.
 
-        - Reading configuration values
-        - Loading the Whisper model via ai.common.models (model server or local)
+        - Loading the Whisper model via ai.common.models (model server or local) for the
+          control's model and precision; the language and the decode values are each call's
         - Preparing the transcription guard: a lock in-process, a no-op with --modelserver
         """
         # Local inference serializes here: one in-process copy with one CTranslate2
@@ -112,29 +116,16 @@ class IGlobal(IGlobalBase):
         config = self.config
 
         self.model_name = config.model
-        language = config.language
         compute_type = config.compute_type
 
         # ai.common.models.Whisper: uses model server if --modelserver set, else local
         self._whisper = Whisper(
             self.model_name,
             output_fields=['$text', '$segments'],
-            language=language,
             compute_type=compute_type,
         )
 
-        # Transcribe()'s buffering; IInstance passes it through (#1809).
-        self.chunk_duration = config.chunk_duration
-
-        # Decode-time parameters, forwarded per request (#1809)
-        self._whisper_beam_size = config.beam_size
-        self._whisper_vad_filter = config.vad_filter
-        self._whisper_threshold = config.vad_threshold
-        self._whisper_min_silence_duration_ms = config.vad_min_silence_duration_ms
-        self._whisper_speech_pad_ms = config.vad_speech_pad_ms
-        self._whisper_max_speech_duration_s = config.vad_max_speech_duration_s
-
-        debug(f'    Audio transcribe: model={self.model_name}, language={language}, compute_type={compute_type}')
+        debug(f'    Audio transcribe: model={self.model_name}, compute_type={compute_type}')
 
     def endGlobal(self):
         """Clean up global state."""
