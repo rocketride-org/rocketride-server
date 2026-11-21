@@ -425,16 +425,18 @@ def try_openai_compat_reasoning_stream(
     if client is None:
         return None
     kwargs: Dict[str, Any] = {
-        'model': model,
         'messages': [{'role': 'user', 'content': prompt}],
         'stream': True,
         # Ask for the usage-bearing final chunk; without this the whole reasoning
         # path (DeepSeek/Qwen/xAI/Ollama on custom base URLs) bills zero tokens.
         # A strict proxy that rejects it raises below and we fall back to non-streaming.
         'stream_options': {'include_usage': True},
-        'max_tokens': chat.getOutputTokens(),
     }
-    kwargs.update(getattr(chat, '_reasoning_kwargs', {}))
+    # The call's request values, exactly as the LangChain fallback binds them: the
+    # model, its output limit and the driver's tuning (Ollama's temperature and
+    # reasoning_effort, Kimi's temperature). The retries below drop only stop and
+    # stream_options, so every attempt carries them.
+    kwargs.update(chat.call_kwargs())
     stop = STOP_SEQUENCES_VAR.get() or None
     if stop:
         kwargs['stop'] = stop

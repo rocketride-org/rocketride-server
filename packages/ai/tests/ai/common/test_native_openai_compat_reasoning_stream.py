@@ -98,8 +98,8 @@ class _Chat:
     def raw_openai_client(self):
         return self._raw_openai_client
 
-    def getOutputTokens(self):
-        return 4096
+    def call_kwargs(self):
+        return {'model': self.call.model, 'max_tokens': 4096}
 
 
 def _run(chat):

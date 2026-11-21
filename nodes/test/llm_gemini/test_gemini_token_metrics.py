@@ -110,11 +110,16 @@ class _Response:
         self.prompt_feedback = prompt_feedback
 
 
-def _make_chat(response: _Response):
-    """A Chat whose client returns the given response, with no __init__ plumbing."""
+def _make_chat(response: _Response, sent: Optional[list] = None):
+    """A Chat whose client returns the given response, with no __init__ plumbing.
+
+    ``sent``, when given, collects each request's model and config.
+    """
 
     class _Models:
-        def generate_content(self, model: str, contents: str) -> _Response:
+        def generate_content(self, model: str, contents: str, config: Any = None) -> _Response:
+            if sent is not None:
+                sent.append({'model': model, 'config': config})
             return response
 
     chat = _node.Chat.__new__(_node.Chat)
@@ -146,6 +151,22 @@ def test_thoughts_are_billed_as_output():
 
     assert _counters()['llm_output_tokens'] == 512
     assert _counters()['llm_input_tokens'] == 30
+
+
+def test_each_call_sends_its_own_model_and_output_limit():
+    """The call's output limit reaches the request: one chat serves two calls with different limits."""
+    sent: list = []
+    chat = _make_chat(_Response(_Usage(prompt=1, candidates=1)), sent)
+
+    for limit in (2048, 8192):
+        call = chat.resolve_call({'model': _MODEL, 'modelTotalTokens': 100000, 'modelOutputTokens': limit})
+        with chat.calling(call):
+            assert chat._chat('q') == 'hi'
+
+    assert sent == [
+        {'model': _MODEL, 'config': {'max_output_tokens': 2048}},
+        {'model': _MODEL, 'config': {'max_output_tokens': 8192}},
+    ]
 
 
 def test_no_usage_on_the_response_is_a_no_op():
@@ -241,7 +262,7 @@ def test_a_text_free_response_is_asked_once_not_retried():
     blocked = _Response(_Usage(prompt=30, candidates=0), text=None, candidates=[_Candidate(finish_reason='SAFETY')])
 
     class _Models:
-        def generate_content(self, model: str, contents: str) -> _Response:
+        def generate_content(self, model: str, contents: str, config: Any = None) -> _Response:
             calls.append(contents)
             return blocked
 

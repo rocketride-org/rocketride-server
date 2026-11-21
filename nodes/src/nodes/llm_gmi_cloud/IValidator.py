@@ -27,7 +27,7 @@ GMI Cloud save-time validation.
 
 The engine imports this module alone in CONFIG mode: the schema check is the
 resolver (``self.config``), the endpoint URL is held to HTTPS on the GMI
-domain (shared with IGlobal, which refuses to start on any other host), and
+domain (shared with the chat, which builds no client for any other host), and
 the semantic check is a one-token probe against the provider. The provider
 SDK is imported inside the probe so this module stays import-light.
 """

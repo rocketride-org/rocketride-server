@@ -60,7 +60,7 @@ OpenAI-compatible server that serves the same model id.
 
 ## Authentication
 
-Cloud models require a MiniMax API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.minimax` (covers both `api.minimax.io` international and `api.minimaxi.com` China) and no key is set, the node raises `MiniMax API key is required for cloud profiles.` at startup.
+Cloud models require a MiniMax API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.minimax` (covers both `api.minimax.io` international and `api.minimaxi.com` China) and no key is set, the node raises `MiniMax API key is required for cloud profiles.` when a call first reaches that endpoint. The node builds each endpoint's client on first use, so a node starts without checking the key.
 
 Local models (vLLM / SGLang / MLX / Ollama) need no key: leave `apikey` empty and the node passes a dummy key (`sk-local-dummy-key`), which local OpenAI-compatible servers accept.
 

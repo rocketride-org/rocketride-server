@@ -171,12 +171,15 @@ class Chat(ChatBase):
             AttributeError: If the model is not properly configured
 
         Note:
-            The model is the call's (self.call.model), sent per request.
+            The model and the output limit are the call's (self.call), sent per request.
             The model should be a valid Gemini model identifier (e.g., 'gemini-pro').
         """
-        # Generate content using the call's model
-        model = self.call.model
-        response = self._client.models.generate_content(model=model, contents=prompt)
+        # Generate content on the call's model, capped at the call's output limit
+        call = self.call
+        model = call.model
+        response = self._client.models.generate_content(
+            model=model, contents=prompt, config={'max_output_tokens': call.output_tokens}
+        )
 
         # Before the text check, deliberately: a response that carried no text
         # still burned tokens, and a safety block is exactly the run somebody

@@ -22,7 +22,8 @@ retryable; authentication and other API errors are mapped to friendly messages
 
 Two safety behaviors are enforced on the endpoint URL: it must use **HTTPS**, and the
 hostname must be `gmi-serving.com` or a subdomain of it (an SSRF guard on user-supplied
-endpoints). This is checked both at save time and when the pipeline starts. An API key is
+endpoints). This is checked at save time, and again before the node first builds the
+client of an endpoint, when a call first reaches it. An API key is
 required. Shared models pin the shared endpoint `https://api.gmi-serving.com/v1`;
 deploy-on-demand models require an endpoint URL, and the Custom model's endpoint
 defaults to the shared one.

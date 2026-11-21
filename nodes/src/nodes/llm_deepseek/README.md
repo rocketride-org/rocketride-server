@@ -86,8 +86,9 @@ OpenAI-compatible endpoint that serves it (`https://api.deepseek.com/v1` by defa
 
 Whenever the endpoint is the DeepSeek API (`api.deepseek.com`), a key is required
 and must begin with `sk-`: a missing key raises `DeepSeek API key is required for the
-DeepSeek API endpoint.` and another format raises `Invalid DeepSeek API key format` at
-startup. Local endpoints need no credential, so the node supplies the placeholder
+DeepSeek API endpoint.` and another format raises `Invalid DeepSeek API key format` when
+a call first reaches that endpoint. The node builds each endpoint's client on first use,
+so a node starts without checking the key. Local endpoints need no credential, so the node supplies the placeholder
 `sk-local-dummy-key` required by the OpenAI client when no key is set.
 
 ## Notes
