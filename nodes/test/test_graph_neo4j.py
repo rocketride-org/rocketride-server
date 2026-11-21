@@ -71,6 +71,11 @@ class _StubBase:
     def __init__(self, *args, **kwargs):
         pass
 
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them; a test sets ``_settings``."""
+        return self._settings
+
 
 class _StubTable:
     @staticmethod
@@ -317,21 +322,25 @@ class _FakeDriver:
 
 
 class _FakeGlobal(_glb_mod.IGlobal):
-    """The real Neo4J IGlobal with a fake Bolt driver."""
+    """The real Neo4J IGlobal with a fake Bolt driver: the driver and the schema, nothing a call decides."""
 
     def __init__(self, driver, *, database='neo4j'):
         self.driver = driver
         self.database = database
-        self.max_execute_rows = 25000
-        self.max_validation_attempts = 5
-        self.allow_execute = False
-        self.db_description = ''
         self.graph_schema = {'nodes': {}, 'relationships': []}
 
 
-def _instance(global_state):
+def _settings(**overrides):
+    """One call's settings: the node's params at their schema defaults, overridden per test."""
+    settings = {'db_description': '', 'max_attempts': 5, 'allow_execute': False}
+    settings.update(overrides)
+    return settings
+
+
+def _instance(global_state, **settings):
     inst = mod.IInstance()
     inst.IGlobal = global_state
+    inst._settings = _settings(**settings)
     return inst
 
 
@@ -343,7 +352,7 @@ def _instance(global_state):
 def test_run_query_refuses_write_cypher():
     glb = _FakeGlobal(_FakeDriver())
     with pytest.raises(ValueError):
-        glb._run_query('MATCH (n) DELETE n')
+        glb._run_query('MATCH (n) DELETE n', settings=_settings())
     # The unsafe query must never reach the driver.
     assert glb.driver.calls == []
 
@@ -351,7 +360,7 @@ def test_run_query_refuses_write_cypher():
 def test_run_query_uses_read_access_mode():
     driver = _FakeDriver(_FakeResult(records=[{'name': 'Alice'}]))
     glb = _FakeGlobal(driver)
-    rows = glb._run_query('MATCH (n) RETURN n.name AS name')
+    rows = glb._run_query('MATCH (n) RETURN n.name AS name', settings=_settings())
     assert rows == [{'name': 'Alice'}]
     assert driver.session_kwargs[0].get('default_access_mode') == 'READ'
 
@@ -359,7 +368,7 @@ def test_run_query_uses_read_access_mode():
 def test_run_query_returns_one_past_limit_for_truncation():
     records = [{'n': i} for i in range(10)]
     glb = _FakeGlobal(_FakeDriver(_FakeResult(records=records)))
-    rows = glb._run_query('MATCH (n) RETURN n', limit=3)
+    rows = glb._run_query('MATCH (n) RETURN n', limit=3, settings=_settings())
     # limit+1 rows so the caller can detect truncation.
     assert len(rows) == 4
 
@@ -367,18 +376,18 @@ def test_run_query_returns_one_past_limit_for_truncation():
 def test_run_query_without_limit_falls_back_to_read_row_cap():
     records = [{'n': i} for i in range(10)]
     glb = _FakeGlobal(_FakeDriver(_FakeResult(records=records)))
-    glb.max_execute_rows = 4  # read_row_cap defaults to this
+    settings = _settings(max_execute_rows=4)
     # The pipeline `questions` lane calls with no limit; it must not stream
     # the whole result set into worker memory.
-    assert len(glb._run_query('MATCH (n) RETURN n')) == 4
+    assert len(glb._run_query('MATCH (n) RETURN n', settings=settings)) == 4
 
 
 def test_run_query_clamps_limit_to_read_row_cap():
     records = [{'n': i} for i in range(10)]
     glb = _FakeGlobal(_FakeDriver(_FakeResult(records=records)))
-    glb.max_execute_rows = 2
+    settings = _settings(max_execute_rows=2)
     # A caller limit above the cap cannot lift it: cap+1 rows at most.
-    assert len(glb._run_query('MATCH (n) RETURN n', limit=9)) == 3
+    assert len(glb._run_query('MATCH (n) RETURN n', limit=9, settings=settings)) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -390,14 +399,14 @@ def test_affected_rows_counted_even_when_write_returns_rows():
     # CREATE (n) RETURN n writes AND returns a row — affected_rows must not be 0.
     result = _FakeResult(records=[{'n': 'Alice'}], counters=_FakeCounters(nodes_created=1, properties_set=1))
     glb = _FakeGlobal(_FakeDriver(result))
-    out = glb._run_query_raw('CREATE (n:Person {name: "Alice"}) RETURN n')
+    out = glb._run_query_raw('CREATE (n:Person {name: "Alice"}) RETURN n', settings=_settings())
     assert out['rows']
     assert out['affected_rows'] == 2  # would have been 0 before the fix
 
 
 def test_execute_raw_commits_in_an_explicit_transaction():
     driver = _FakeDriver(_FakeResult(records=[{'n': 1}]))
-    out = _FakeGlobal(driver)._run_query_raw('CREATE (n:Item) RETURN 1 AS n')
+    out = _FakeGlobal(driver)._run_query_raw('CREATE (n:Item) RETURN 1 AS n', settings=_settings())
     assert out['rows'] == [{'n': 1}]
     assert driver.tx_events == ['begin', 'commit']
     assert driver.tx_timeouts == [_glb_mod.IGlobal.QUERY_TIMEOUT]
@@ -406,9 +415,9 @@ def test_execute_raw_commits_in_an_explicit_transaction():
 def test_execute_raw_rolls_back_over_max_execute_rows():
     driver = _FakeDriver(_FakeResult(records=[{'n': i} for i in range(10)]))
     glb = _FakeGlobal(driver)
-    glb.max_execute_rows = 3
+    settings = _settings(max_execute_rows=3)
     with pytest.raises(ValueError, match='max_execute_rows'):
-        glb._run_query_raw('UNWIND range(1, 10) AS i CREATE (n:Item {id: i}) RETURN n.id')
+        glb._run_query_raw('UNWIND range(1, 10) AS i CREATE (n:Item {id: i}) RETURN n.id', settings=settings)
     # Nothing is saved, so a caller that retries after the error cannot duplicate the write.
     assert driver.tx_events == ['begin', 'rollback']
 
@@ -416,7 +425,7 @@ def test_execute_raw_rolls_back_over_max_execute_rows():
 def test_execute_raw_rolls_back_when_the_driver_raises():
     driver = _FakeDriver(raise_error=_StubNeo4jError('boom'))
     with pytest.raises(_StubNeo4jError, match='boom'):
-        _FakeGlobal(driver)._run_query_raw('CREATE (:Item)')
+        _FakeGlobal(driver)._run_query_raw('CREATE (:Item)', settings=_settings())
     assert driver.tx_events == ['begin', 'rollback']
 
 
@@ -424,7 +433,7 @@ def test_execute_raw_binds_params():
     driver = _FakeDriver(_FakeResult())
     rows = [{'id': 1}, {'id': 2}]
     query = 'UNWIND $rows AS row MERGE (:Item {id: row.id})'
-    _FakeGlobal(driver)._run_query_raw(query, params={'rows': rows})
+    _FakeGlobal(driver)._run_query_raw(query, params={'rows': rows}, settings=_settings())
     assert driver.calls == [(query, {'rows': rows})]
 
 
@@ -443,7 +452,7 @@ def test_execute_raw_binds_params():
 def test_execute_raw_runs_batched_statements_in_auto_commit(query):
     # Neo4j refuses these inside an explicit transaction.
     driver = _FakeDriver(_FakeResult())
-    _FakeGlobal(driver)._run_query_raw(query)
+    _FakeGlobal(driver)._run_query_raw(query, settings=_settings())
     assert driver.tx_events == []
     assert driver.calls == [(query, {})]
 
@@ -459,7 +468,7 @@ def test_execute_raw_runs_batched_statements_in_auto_commit(query):
 def test_execute_raw_keeps_other_statements_in_a_transaction(query):
     # The batching keywords only count as live Cypher, not in a string, a comment or a variable name.
     driver = _FakeDriver(_FakeResult())
-    _FakeGlobal(driver)._run_query_raw(query)
+    _FakeGlobal(driver)._run_query_raw(query, settings=_settings())
     assert driver.tx_events == ['begin', 'commit']
 
 
@@ -470,14 +479,14 @@ def test_execute_raw_keeps_other_statements_in_a_transaction(query):
 
 def test_validate_query_runs_explain():
     driver = _FakeDriver(_FakeResult())
-    ok, err = _FakeGlobal(driver)._validate_query('MATCH (n) RETURN n')
+    ok, err = _FakeGlobal(driver)._validate_query('MATCH (n) RETURN n', settings=_settings())
     assert ok is True and err == ''
     assert driver.calls[0][0].startswith('EXPLAIN ')
 
 
 def test_validate_query_reports_error():
     driver = _FakeDriver(raise_error=_StubNeo4jError('syntax error'))
-    ok, err = _FakeGlobal(driver)._validate_query('MATCH (n RETURN n')
+    ok, err = _FakeGlobal(driver)._validate_query('MATCH (n RETURN n', settings=_settings())
     assert ok is False and 'syntax error' in err
 
 
@@ -494,8 +503,7 @@ def test_dialect_reports_neo4j():
 def test_execute_tool_passes_params_to_the_driver():
     driver = _FakeDriver(_FakeResult())
     glb = _FakeGlobal(driver)
-    glb.allow_execute = True
-    _instance(glb).execute({'query': 'CREATE (n:Person {name: $name})', 'params': {'name': 'Ada'}})
+    _instance(glb, allow_execute=True).execute({'query': 'CREATE (n:Person {name: $name})', 'params': {'name': 'Ada'}})
     assert driver.calls == [('CREATE (n:Person {name: $name})', {'name': 'Ada'})]
 
 
@@ -567,3 +575,19 @@ def test_get_data_enforces_limit_and_flags_truncation():
     assert out['valid'] is True
     assert len(out['rows']) == 3
     assert out['truncated'] is True
+
+
+# ---------------------------------------------------------------------------
+# One control, two calls: the execute gate is each call's own
+# ---------------------------------------------------------------------------
+
+
+def test_two_calls_on_one_global_carry_their_own_execute_gate():
+    driver = _FakeDriver(_FakeResult())
+    glb = _FakeGlobal(driver)
+
+    _instance(glb, allow_execute=True).execute({'query': 'CREATE (n:Item)'})
+    with pytest.raises(ValueError, match='allow_execute'):
+        _instance(glb, allow_execute=False).execute({'query': 'CREATE (n:Item)'})
+
+    assert driver.calls == [('CREATE (n:Item)', {})]

@@ -67,7 +67,7 @@ Both caps are applied after the client has read the whole server reply, so neith
 
 ## Authentication
 
-Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings, an unavailable server, or (in read-only mode) a configured graph that does not exist all fail before a tool call, rather than surfacing as a Redis error on the first query.
+Manual connections can omit credentials or provide the configured username and password. URL connections may carry credentials, but the separate Password field takes precedence when present. The node probes the connection at startup, so malformed connection settings or an unavailable server fail before a tool call. A configured graph that does not exist fails the first read-only call with a clear message (a write-capable call may create it), rather than surfacing as a Redis error on the query.
 
 ## Notes
 

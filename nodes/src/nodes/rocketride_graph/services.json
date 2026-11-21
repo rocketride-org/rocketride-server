@@ -84,6 +84,7 @@
 			"type": "string",
 			"title": "Graph description",
 			"default": "",
+			"param": true,
 			"description": "What is this graph used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
 			"format": "textarea"
 		},
@@ -92,6 +93,8 @@
 			"title": "Graph name",
 			"default": "rocketride",
 			"minLength": 1,
+			"param": true,
+			"tool": false,
 			"description": "Name of the AGE graph to query in your RocketRide cloud database"
 		},
 		"rocketridegraph.max_attempts": {
@@ -100,6 +103,8 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 10,
+			"param": true,
+			"tool": false,
 			"description": "Maximum number of times to re-ask the LLM if validation rejects the generated Cypher"
 		},
 		"rocketridegraph.max_rows": {
@@ -108,6 +113,8 @@
 			"default": 1000,
 			"minimum": 1,
 			"maximum": 25000,
+			"param": true,
+			"tool": false,
 			"description": "Row ceiling for read queries on the questions lane and get_data tool"
 		},
 		"rocketridegraph.query_timeout_ms": {
@@ -116,12 +123,16 @@
 			"default": 30000,
 			"minimum": 100,
 			"maximum": 600000,
+			"param": true,
+			"tool": false,
 			"description": "Per-query statement timeout applied inside each query's transaction"
 		},
 		"rocketridegraph.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
+			"param": true,
+			"tool": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or read-only safety checks. Resource limits still apply. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		},
 		"rocketridegraph.scope": {

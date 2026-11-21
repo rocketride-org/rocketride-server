@@ -47,6 +47,10 @@ class IInstance(IInstanceBase):
             raise RuntimeError('HydraDB client is not configured')
         return self.IGlobal.client
 
+    def _collection(self) -> str:
+        """Return the collection this call reads and writes: a per-call parameter."""
+        return self.settings['collection'].strip()
+
     # ------------------------------------------------------------------
     # Tool methods
     # ------------------------------------------------------------------
@@ -95,7 +99,7 @@ class IInstance(IInstanceBase):
             raise ValueError('"metadata" must be an object if provided')
 
         client = self._require_client()
-        result = client.store_memory(text.strip(), metadata=metadata)
+        result = client.store_memory(text.strip(), metadata=metadata, collection=self._collection())
         return {'status': 'ok', 'result': result}
 
     @tool_function(
@@ -141,14 +145,14 @@ class IInstance(IInstanceBase):
 
         max_results = args.get('max_results')
         if max_results is None:
-            max_results = self.IGlobal.max_results
+            max_results = self.settings['max_results']
         elif isinstance(max_results, bool) or not isinstance(max_results, int):
             raise ValueError('"max_results" must be an integer')
         else:
             max_results = max(1, min(100, max_results))
 
         client = self._require_client()
-        result = client.query(query.strip(), type='all', max_results=max_results)
+        result = client.query(query.strip(), type='all', max_results=max_results, collection=self._collection())
         results = client.extract_results(result)
         return {'results': results, 'result': result}
 
@@ -193,7 +197,7 @@ class IInstance(IInstanceBase):
             raise ValueError('"source_id" must be a non-empty string if provided')
 
         client = self._require_client()
-        result = client.relations(source_id=source_id.strip() if source_id else None)
+        result = client.relations(source_id=source_id.strip() if source_id else None, collection=self._collection())
         return {'relations': client.unwrap(result), 'result': result}
 
     @tool_function(

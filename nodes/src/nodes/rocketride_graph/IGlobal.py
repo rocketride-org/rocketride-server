@@ -38,10 +38,19 @@ query runs inside one transaction whose settings are ``SET LOCAL`` only (the
 translated plan carries them). The safe path additionally makes its
 transaction ``READ ONLY`` — server-side write protection, with the base's
 ``is_cypher_safe`` regex and the layer's semantic firewall as defence-in-depth.
+One transaction per call: every path commits or rolls back before it returns.
+
+What the control keeps: the tenant connection (``scope`` / ``target``, the
+expensive thing) and the AGE version. The graph name, the row cap, the timeout
+and the gates are per-call parameters read from the calling instance's
+``settings``; the reflected schema is a bounded cache keyed by graph name,
+filled on a graph's first use.
 """
 
 import os
 import re
+import threading
+from collections import OrderedDict
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from depends import depends
@@ -56,7 +65,7 @@ import psycopg2
 from psycopg2 import sql
 
 from rocketlib import warning
-from ai.common.graph import GraphGlobalBase
+from ai.common.graph import GraphGlobalBase, max_execute_rows
 from ai.common.graph.age import (
     CAPABILITY_TABLES,
     DEFAULT_AGE_VERSION,
@@ -85,37 +94,68 @@ SCHEMA_REL_LIMIT = 100
 VALID_LABEL = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,62}$')
 
 
+#: The most graph schemas one control keeps. A tenant database holds a handful
+#: of graphs; past this the least recently used entry is reflected again on its
+#: next use (a cache: losing an entry costs time, never an answer).
+SCHEMA_CACHE_LIMIT = 16
+
+
+# =============================================================================
+# The per-call values of this node, read from a call's settings
+# =============================================================================
+
+
+def graph_name(settings: Mapping) -> str:
+    """Return the AGE graph this call addresses."""
+    return str(settings['graph']).strip()
+
+
+def max_rows(settings: Mapping) -> int:
+    """Return this call's row ceiling for the safe read path (the schema bounds it)."""
+    return int(settings['max_rows'])
+
+
+def query_timeout_ms(settings: Mapping) -> int:
+    """Return this call's statement timeout in milliseconds (the schema bounds it)."""
+    return int(settings['query_timeout_ms'])
+
+
 class IGlobal(GraphGlobalBase):
     """Postgres + Apache AGE global for the RocketRide cloud graph node."""
 
     client = None
-    graph_name: str = DEFAULT_GRAPH_NAME
-    max_rows: int = DEFAULT_MAX_ROWS
-    query_timeout_ms: int = DEFAULT_QUERY_TIMEOUT_MS
     age_version: str = ''
     supports_execute_params = True
+    # The graph is a per-call parameter: nothing to reflect before a call names one.
+    reflect_at_start = False
+
+    # Bounded cache: graph name -> reflected schema, least recently used last
+    # out. Built in _open_driver, dropped in _close_driver.
+    _schemas: Optional[OrderedDict] = None
+    _schema_lock: Optional[threading.Lock] = None
 
     # ------------------------------------------------------------------
     # Driver lifecycle
     # ------------------------------------------------------------------
 
     def _open_driver(self, config: Mapping) -> None:
-        """Read the delivered DSN, connect, and fail fast on a missing graph.
+        """Read the delivered DSN, connect, and fail fast on a database without AGE.
 
-        The schema supplies the defaults and bounds the row cap and the
-        timeout, so the values are read as they are.
+        Only ``scope`` and ``target`` are read: a different value is a
+        different tenant database, hence a different control. Whether a graph
+        exists is checked when a call first names it (``schema_for``).
         """
-        self.graph_name = config['graph'].strip()
-        self.max_rows = int(config['max_rows'])
-        self.query_timeout_ms = int(config['query_timeout_ms'])
+        self._schemas = OrderedDict()
+        self._schema_lock = threading.Lock()
 
         # The one RocketRide difference: the delivered DSN, no connection config.
         dsn = resolve_rocketride_dsn(*db_target(config))
+
         # Bounded connect so an unreachable pooler fails fast (matches the
         # probe's 3s timeout) instead of waiting out the OS TCP timeout.
         self.client = psycopg2.connect(dsn, connect_timeout=3)
 
-        # Fail-fast round-trip: AGE present + the tenant graph exists.
+        # Fail-fast round-trip: AGE present.
         with self.client.cursor() as cur:
             cur.execute("SELECT extversion FROM pg_extension WHERE extname = 'age'")
             row = cur.fetchone()
@@ -127,21 +167,10 @@ class IGlobal(GraphGlobalBase):
                     f'rocketride_graph: no Cypher rules for Apache AGE {self.age_version}; '
                     f'using the strict AGE {DEFAULT_AGE_VERSION} rules'
                 )
-            cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (self.graph_name,))
-            graph_exists = cur.fetchone() is not None
         self.client.commit()
 
-        if not graph_exists:
-            # The provisioner creates the default graph in every tenant
-            # database. Any other name must already exist: the node never
-            # creates a graph itself.
-            raise RuntimeError(
-                f'AGE graph {self.graph_name!r} does not exist in the tenant database. '
-                f'Every RocketRide database comes with the {DEFAULT_GRAPH_NAME!r} graph; use it, '
-                f"or create this one first (SELECT create_graph('{self.graph_name}'))."
-            )
-
     def _close_driver(self) -> None:
+        self._schemas = None
         if self.client is not None:
             self.client.close()
             self.client = None
@@ -151,16 +180,77 @@ class IGlobal(GraphGlobalBase):
         probe_connection(config)
 
     # ------------------------------------------------------------------
+    # The schema cache: one entry per graph a call has named
+    # ------------------------------------------------------------------
+
+    def schema_for(self, settings: Mapping) -> Dict[str, Any]:
+        """Return the schema of the graph this call addresses, reflecting it on first use.
+
+        The first use of a name checks that the graph exists and reflects it
+        (up to 1 + SCHEMA_LABEL_LIMIT + SCHEMA_REL_LIMIT single-row queries);
+        every later call of any binding reads the cached entry. A missing graph
+        is not cached: it may be created before the next call.
+
+        Args:
+            settings: The calling instance's ``self.settings``.
+
+        Returns:
+            Dict[str, Any]: ``{'nodes': {...}, 'relationships': [...]}``.
+
+        Raises:
+            RuntimeError: The graph does not exist in the tenant database.
+        """
+        name = graph_name(settings)
+        with self._schema_lock:
+            # Step 1: a graph already reflected is served from the cache
+            cached = self._schemas.get(name)
+            if cached is not None:
+                self._schemas.move_to_end(name)
+                return cached
+
+            # Step 2: the node never creates a graph, so a missing one is an error
+            self._require_graph(name)
+
+            # Step 3: reflection is a convenience for the LLM prompt, never a prerequisite
+            try:
+                schema = self._reflect_schema(name)
+            except Exception as e:
+                warning(f'rocketride_graph: schema reflection failed, continuing without it: {e}')
+                schema = {'nodes': {}, 'relationships': []}
+
+            # Step 4: keep it, dropping the least recently used entry past the bound
+            self._schemas[name] = schema
+            while len(self._schemas) > SCHEMA_CACHE_LIMIT:
+                self._schemas.popitem(last=False)
+            return schema
+
+    def _require_graph(self, name: str) -> None:
+        """Raise when the tenant database has no AGE graph called ``name``."""
+        try:
+            with self.client.cursor() as cur:
+                cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (name,))
+                graph_exists = cur.fetchone() is not None
+            self.client.commit()
+        except Exception:
+            self.client.rollback()
+            raise
+        if not graph_exists:
+            # The provisioner creates the default graph in every tenant
+            # database. Any other name must already exist: the node never
+            # creates a graph itself.
+            raise RuntimeError(
+                f'AGE graph {name!r} does not exist in the tenant database. '
+                f'Every RocketRide database comes with the {DEFAULT_GRAPH_NAME!r} graph; use it, '
+                f"or create this one first (SELECT create_graph('{name}'))."
+            )
+
+    # ------------------------------------------------------------------
     # Query paths — everything routes through the translation layer
     # ------------------------------------------------------------------
 
-    @property
-    def read_row_cap(self) -> int:
-        """Node-owner row ceiling for the safe read path."""
-        return self.max_rows
-
-    def _firewall_config(self) -> FirewallConfig:
-        return FirewallConfig(statement_timeout_ms=self.query_timeout_ms)
+    def read_row_cap(self, settings: Mapping) -> int:
+        """Row ceiling of this call's safe read path (its ``max_rows``)."""
+        return max_rows(settings)
 
     def _translate(
         self,
@@ -168,15 +258,19 @@ class IGlobal(GraphGlobalBase):
         params: Optional[Dict[str, Any]] = None,
         limit: Optional[int] = None,
         mode: TranslateMode = TranslateMode.SAFE,
+        *,
+        graph: str,
+        timeout_ms: int,
     ) -> TranslatedQuery:
+        """Translate Cypher for ``graph``, with ``timeout_ms`` as the plan's statement timeout."""
         return translate(
             query,
             params=params,
             limit=limit,
             mode=mode,
-            graph_name=self.graph_name,
+            graph_name=graph,
             age_version=self.age_version or DEFAULT_AGE_VERSION,
-            firewall=self._firewall_config(),
+            firewall=FirewallConfig(statement_timeout_ms=timeout_ms),
         )
 
     def _require_transactional_client(self) -> None:
@@ -264,39 +358,64 @@ class IGlobal(GraphGlobalBase):
             cur.execute(f'DEALLOCATE {name}')
             raise
 
-    def _run_query(self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None) -> List[Dict]:
+    def _run_query(
+        self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None, *, settings: Mapping
+    ) -> List[Dict]:
         """Read-only path: translate (safe mode) and run in a READ ONLY txn."""
-        cap = self.read_row_cap if limit is None else min(int(limit), self.read_row_cap) + 1
-        plan = self._translate(query, params=params, limit=cap, mode=TranslateMode.SAFE)
+        row_cap = max_rows(settings)
+        cap = row_cap if limit is None else min(int(limit), row_cap) + 1
+        plan = self._translate(
+            query,
+            params=params,
+            limit=cap,
+            mode=TranslateMode.SAFE,
+            graph=graph_name(settings),
+            timeout_ms=query_timeout_ms(settings),
+        )
         raw_rows = self._execute_plan(plan, fetch_cap=cap)
         return [decode_row(plan, row) for row in raw_rows]
 
-    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _run_query_raw(
+        self, query: str, params: Optional[Dict[str, Any]] = None, *, settings: Mapping
+    ) -> Dict[str, Any]:
         """EXECUTE path: translation still applies (AGE can't run bare Cypher);
         only the semantic firewall is skipped, never the resource caps.
 
         ``params`` binds ``$name`` values through the plan's prepared
         statement, so they skip the parser and the query-length cap (they
-        have their own size cap, ``max_params_bytes``).
+        have their own size cap, ``max_params_bytes``). ``settings`` is the
+        calling instance's ``self.settings``.
         """
-        plan = self._translate(query, params=params, mode=TranslateMode.RAW)
-        max_rows = self.max_execute_rows
-        raw_rows = self._execute_plan(plan, fetch_cap=max_rows + 1, max_rows=max_rows)
+        plan = self._translate(
+            query,
+            params=params,
+            mode=TranslateMode.RAW,
+            graph=graph_name(settings),
+            timeout_ms=query_timeout_ms(settings),
+        )
+        row_cap = max_execute_rows(settings)
+        raw_rows = self._execute_plan(plan, fetch_cap=row_cap + 1, max_rows=row_cap)
         rows = [decode_row(plan, row) for row in raw_rows]
         # AGE exposes no write counters (unlike Bolt); affected_rows reports
         # the result-row count — 0 for writes without a RETURN clause.
         return {'rows': rows, 'affected_rows': len(rows)}
 
-    def _validate_query(self, query: str) -> Tuple[bool, str]:
+    def _validate_query(self, query: str, *, settings: Mapping) -> Tuple[bool, str]:
         """EXPLAIN the translated statement without executing it.
 
         Translation errors (syntax, firewall, capability) surface here too, so
         the LLM repair loop receives the layer's actionable messages.
         """
         try:
-            plan = self._translate(query, mode=TranslateMode.SAFE)
+            plan = self._translate(
+                query,
+                mode=TranslateMode.SAFE,
+                graph=graph_name(settings),
+                timeout_ms=query_timeout_ms(settings),
+            )
         except AgeTranslationError as e:
             return False, str(e)
+
         # Same precondition as _execute_plan (this method opens an identical
         # READ ONLY + SET LOCAL transaction), folded into this method's
         # return-a-message contract.
@@ -322,8 +441,8 @@ class IGlobal(GraphGlobalBase):
     # Schema reflection — AGE catalog + bounded sampling
     # ------------------------------------------------------------------
 
-    def _reflect_schema(self) -> Dict[str, Any]:
-        """Labels from ``ag_catalog.ag_label``; property types by sampling.
+    def _reflect_schema(self, graph: Optional[str] = None) -> Dict[str, Any]:
+        """Labels of ``graph`` from ``ag_catalog.ag_label``; property types by sampling.
 
         Best-effort by contract: any failure warns and degrades to a partial
         (or empty) schema rather than blocking startup.
@@ -338,7 +457,7 @@ class IGlobal(GraphGlobalBase):
                     'SELECT l.name, l.kind FROM ag_catalog.ag_label l '
                     'JOIN ag_catalog.ag_graph g ON l.graph = g.graphid '
                     "WHERE g.name = %s AND l.name NOT LIKE '\\_ag\\_%%'",
-                    (self.graph_name,),
+                    (graph,),
                 )
                 labels = cur.fetchall()
             self.client.commit()
@@ -351,19 +470,19 @@ class IGlobal(GraphGlobalBase):
         edge_labels = [name for name, kind in labels if kind == 'e'][:SCHEMA_REL_LIMIT]
 
         for label in vertex_labels:
-            schema['nodes'][label] = self._sample_properties(label)
+            schema['nodes'][label] = self._sample_properties(graph, label)
 
         for etype in edge_labels:
-            start, end = self._sample_edge_endpoints(etype)
+            start, end = self._sample_edge_endpoints(graph, etype)
             schema['relationships'].append({'type': etype, 'start': start, 'end': end})
 
         return schema
 
-    def _sample_properties(self, label: str) -> List[Tuple[str, str]]:
-        """One-row property sample from the label's backing table."""
+    def _sample_properties(self, graph: str, label: str) -> List[Tuple[str, str]]:
+        """One-row property sample from the label's backing table in ``graph``."""
         try:
             with self.client.cursor() as cur:
-                cur.execute(sql.SQL('SELECT properties FROM {} LIMIT 1').format(sql.Identifier(self.graph_name, label)))
+                cur.execute(sql.SQL('SELECT properties FROM {} LIMIT 1').format(sql.Identifier(graph, label)))
                 row = cur.fetchone()
             self.client.commit()
         except Exception as e:
@@ -375,8 +494,8 @@ class IGlobal(GraphGlobalBase):
         properties = decode_agtype(row[0]) or {}
         return [(key, type(value).__name__) for key, value in properties.items()]
 
-    def _sample_edge_endpoints(self, etype: str) -> Tuple[str, str]:
-        """Start/end labels for one sampled edge of the given type."""
+    def _sample_edge_endpoints(self, graph: str, etype: str) -> Tuple[str, str]:
+        """Start/end labels for one sampled edge of the given type in ``graph``."""
         # The one Cypher string the node assembles itself, so hold the label
         # to the same identifier rule the layer applies to graph names: AGE
         # allows backtick-quoted labels with arbitrary characters, and those
@@ -389,6 +508,9 @@ class IGlobal(GraphGlobalBase):
                 f'MATCH (a)-[r:{etype}]->(b) RETURN label(a) AS s, label(b) AS e',
                 limit=1,
                 mode=TranslateMode.SAFE,
+                graph=graph,
+                # Reflection is the node's own query: the default timeout, not a caller's
+                timeout_ms=DEFAULT_QUERY_TIMEOUT_MS,
             )
             raw = self._execute_plan(plan, fetch_cap=1)
         except Exception as e:

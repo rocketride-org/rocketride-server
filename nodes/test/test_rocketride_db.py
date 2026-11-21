@@ -331,7 +331,7 @@ class TestRocketrideSqlConnection:
         assert params['user'] == 'rruser'
         assert params['password'] == 'rrpass'
         assert params['database'] == 'rrtenant'
-        assert params['table'] == 'widgets'
+        assert 'table' not in params  # a per-call param, read from the instance's settings
 
     def test_build_connection_url_uses_cached_dsn(self, monkeypatch):
         _deliver(monkeypatch)
@@ -404,9 +404,6 @@ class TestSqlEnginePoolSize:
         db_global = sys.modules['ai.common.database.db_global_base']
         calls = []
         monkeypatch.setattr(db_global, 'create_engine', lambda url, **kw: calls.append(kw) or types.SimpleNamespace())
-        tx_registry = types.ModuleType('ai.common.database.tx_registry')
-        tx_registry.TransactionRegistry = lambda *a, **kw: None
-        monkeypatch.setitem(sys.modules, 'ai.common.database.tx_registry', tx_registry)
         monkeypatch.setattr(type(glb), '_getDatabaseSchema', lambda self: {})
         monkeypatch.setattr(type(glb), '_getTableSchema', lambda self, table: {})
         glb.glb = types.SimpleNamespace(logicalType='rocketride_sql', connConfig={'table': 'widgets'})
@@ -715,7 +712,8 @@ class TestRocketrideGraphConnection:
         _deliver(monkeypatch, org=TEST_DSN, **{'team:t-1': 'postgresql://t1'})
         glb._open_driver(_resolved('rocketride_graph', {'scope': 'team', 'target': 't-1'}))
         assert connects == ['postgresql://t1']
-        assert (glb.graph_name, glb.max_rows, glb.query_timeout_ms) == ('rocketride', 1000, 30000)
+        # The graph, the row cap and the timeout are per-call params: no graph is read or reflected yet
+        assert glb._schemas == {}
 
     def test_save_time_probe_outside_a_task_is_silent(self, monkeypatch):
         _, validator, warnings, connects = _graph_iglobal(monkeypatch)

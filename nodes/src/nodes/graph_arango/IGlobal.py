@@ -63,13 +63,11 @@ class IGlobal(IGlobalBase):
     #    'graphs': [...], 'views': [...]}
     graph_schema: Dict[str, Any]
 
-    # Unprefixed config values set during beginGlobal.
+    # Unprefixed config values set during beginGlobal. The description, the
+    # retry budget, the row cap and the execute gate are per-call parameters:
+    # the instance reads them from its settings.
     endpoint: str = ''
     database: str = '_system'
-    db_description: str = ''
-    max_validation_attempts: int = 5
-    allow_execute: bool = False
-    max_execute_rows: int = DEFAULT_MAX_EXECUTE_ROWS
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -78,22 +76,15 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self) -> None:
         """Open the ArangoDB client, verify connectivity, and cache the schema.
 
-        The resolver applied the defaults, bounded max_attempts and
-        max_execute_rows to the schema's ranges, and flattened the selected
-        authentication branch (user/password or token).
+        The resolver applied the defaults and flattened the selected
+        authentication branch (user/password or token). Only what opens the
+        verified handle is read here: everything a call decides is a parameter.
         """
         self.graph_schema = {'collections': {}, 'graphs': [], 'views': []}
         config = self.config
 
         self.endpoint = config.endpoint.strip()
         self.database = config.database.strip()
-        self.db_description = config.db_description
-        self.max_validation_attempts = config.max_attempts
-        # EXECUTE path is opt-in: a caller passing QuestionType.EXECUTE bypasses
-        # the LLM translation + _is_aql_safe gate, so the node owner must
-        # explicitly enable the capability.
-        self.allow_execute = config.allow_execute
-        self.max_execute_rows = config.max_execute_rows
 
         try:
             self.client = ArangoClient(hosts=self.endpoint)
@@ -125,13 +116,19 @@ class IGlobal(IGlobalBase):
     # ------------------------------------------------------------------
 
     def _run_query(
-        self, aql: str, bind_vars: Optional[Dict] = None, *, max_runtime: float = QUERY_MAX_RUNTIME
+        self,
+        aql: str,
+        bind_vars: Optional[Dict] = None,
+        *,
+        max_rows: int,
+        max_runtime: float = QUERY_MAX_RUNTIME,
     ) -> List[Dict]:
         """Execute a read-only AQL query and return rows as a list of plain dicts.
 
         Args:
             aql (str): The AQL query to execute.
             bind_vars (Optional[Dict]): Bind parameters for the query.
+            max_rows (int): The calling call's row cap (its ``max_execute_rows``).
             max_runtime (float): Maximum seconds the query may run before being aborted.
 
         Returns:
@@ -156,9 +153,8 @@ class IGlobal(IGlobalBase):
             max_runtime=max_runtime,
             memory_limit=self.QUERY_MEMORY_LIMIT,
         )
-        # Result cap: stop at max_execute_rows so a missing or oversized LIMIT can
-        # never stream an unbounded result back through the pipeline.
-        max_rows = self.max_execute_rows
+        # Result cap: stop at the call's max_execute_rows so a missing or
+        # oversized LIMIT can never stream an unbounded result back through the pipeline.
         rows: List[Dict] = []
         for doc in cursor:
             if len(rows) >= max_rows:
@@ -167,18 +163,20 @@ class IGlobal(IGlobalBase):
             rows.append(doc)
         return rows
 
-    def _run_query_raw(self, aql: str, *, max_runtime: float = QUERY_MAX_RUNTIME) -> Dict[str, Any]:
+    def _run_query_raw(self, aql: str, *, max_rows: int, max_runtime: float = QUERY_MAX_RUNTIME) -> Dict[str, Any]:
         """Execute a raw AQL statement without the ``_is_aql_safe`` gate.
 
         Used by the EXECUTE path where the caller has accepted the risk of running
         write AQL directly. Returns ``{'rows': [...], 'affected_rows': N}`` to mirror
         the SQL ``_executeRawQuery`` shape — ``affected_rows`` is derived from the
         cursor statistics when no rows are returned (e.g. INSERT without RETURN).
+        ``max_rows`` is the calling call's ``max_execute_rows``. One statement is
+        one server-side transaction that ends with the call; nothing is held for
+        a later one.
 
         Raises:
             arango.exceptions.ArangoError: Caught at the IInstance handler per precedent.
         """
-        max_rows = self.max_execute_rows
         cursor = self.db.aql.execute(aql, count=False, max_runtime=max_runtime, memory_limit=self.QUERY_MEMORY_LIMIT)
         rows: List[Dict] = []
         for doc in cursor:

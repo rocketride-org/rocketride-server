@@ -107,7 +107,7 @@ class IInstance(IInstanceBase):
 
         aql = aql_result['aql']
         try:
-            rows = self.IGlobal._run_query(aql)
+            rows = self.IGlobal._run_query(aql, max_rows=self.settings['max_execute_rows'])
         except Exception as e:
             return {'error': str(e), 'aql': aql, 'rows': []}
         return {'rows': rows[:limit], 'aql': aql, 'row_limit': limit}
@@ -247,11 +247,11 @@ class IInstance(IInstanceBase):
 
         # EXECUTE: caller passes raw AQL; bypass LLM translation + safety check.
         if question.type == QuestionType.EXECUTE:
-            if not self.IGlobal.allow_execute:
+            if not self.settings['allow_execute']:
                 warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
                 return
             try:
-                execute_result = self.IGlobal._run_query_raw(question_text)
+                execute_result = self.IGlobal._run_query_raw(question_text, max_rows=self.settings['max_execute_rows'])
                 rows = execute_result['rows']
                 affected = execute_result['affected_rows']
                 markdown = self._formatResultAsMarkdown(rows) if rows else None
@@ -279,7 +279,7 @@ class IInstance(IInstanceBase):
             executed = is_valid and bool(aql)
 
             if executed:
-                result = self.IGlobal._run_query(aql)
+                result = self.IGlobal._run_query(aql, max_rows=self.settings['max_execute_rows'])
             else:
                 # Off-topic question -> the LLM's text answer; exhausted validation
                 # -> the EXPLAIN error (don't emit the rejected query as an answer).
@@ -312,7 +312,9 @@ class IInstance(IInstanceBase):
         last_error: Optional[str] = None
         result: Dict = {}
 
-        for attempt in range(self.IGlobal.max_validation_attempts):
+        # The retry budget is this call's: each attempt is an LLM round trip
+        max_attempts = self.settings['max_attempts']
+        for attempt in range(max_attempts):
             result = self._buildAqlQueryOnce(
                 question_text,
                 limit=limit,
@@ -333,15 +335,11 @@ class IInstance(IInstanceBase):
             if ok:
                 return result
 
-            warning(
-                f'AQL validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
-            )
+            warning(f'AQL validation attempt {attempt + 1}/{max_attempts} failed: {explain_error}')
             previous_aql = aql
             last_error = explain_error
 
-        warning(
-            f'AQL validation failed after {self.IGlobal.max_validation_attempts} attempt(s); marking the query invalid.'
-        )
+        warning(f'AQL validation failed after {max_attempts} attempt(s); marking the query invalid.')
         # Retries exhausted: the query never passed EXPLAIN, so it is NOT valid.
         # Flag it (and carry the last error) so callers report a failure rather
         # than treating a rejected query as valid.
@@ -394,8 +392,9 @@ class IInstance(IInstanceBase):
         question: Question = Question(type=QuestionType.QUESTION, role='You are a technical assistant.')
         question.addQuestion(question_text)
 
-        if self.IGlobal.db_description:
-            question.addContext(f'Database description: {self.IGlobal.db_description}')
+        db_description = self.settings['db_description']
+        if db_description:
+            question.addContext(f'Database description: {db_description}')
 
         if schema_description:
             question.addContext(schema_description)

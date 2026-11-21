@@ -34,7 +34,7 @@ from the base class.
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from depends import depends
@@ -49,7 +49,7 @@ from redis.exceptions import RedisError
 
 from rocketlib import debug, warning
 
-from ai.common.graph import GraphGlobalBase
+from ai.common.graph import GraphGlobalBase, allow_execute, max_execute_rows
 from ai.common.utils import config_int, parse_bool
 
 from falkordb import FalkorDB
@@ -73,54 +73,93 @@ SCHEMA_REL_LIMIT = 100
 SCHEMA_LABEL_LIMIT = 200
 
 
+# =============================================================================
+# The per-call values of this node, read from a call's settings
+# =============================================================================
+
+
+def allow_writes(settings: Mapping) -> bool:
+    """Return whether this call's query tool may write (GRAPH.QUERY instead of GRAPH.RO_QUERY)."""
+    return parse_bool(settings.get('allow_writes'))
+
+
+def max_rows(settings: Mapping) -> int:
+    """Return this call's row ceiling for reads, never above its EXECUTE ceiling."""
+    return config_int(settings, 'max_rows', DEFAULT_ROW_CAP, min_value=1, max_value=max_execute_rows(settings))
+
+
+def query_timeout_ms(settings: Mapping) -> int:
+    """Return this call's server-side timeout for one query, in milliseconds."""
+    return config_int(settings, 'query_timeout_ms', DEFAULT_TIMEOUT_MS, min_value=100, max_value=600000)
+
+
+def write_capable(settings: Mapping) -> bool:
+    """Return whether either write path (the query tool's writes, or EXECUTE) is on for this call."""
+    return allow_writes(settings) or allow_execute(settings)
+
+
 class IGlobal(GraphGlobalBase):
-    """FalkorDB-specific global connection state."""
+    """FalkorDB-specific global connection state: the client and what is known about the default graph."""
 
     supports_execute_params = True
 
     client: Optional[FalkorDB] = None
 
     graph_name: str = DEFAULT_GRAPH
-    allow_writes: bool = False
-    max_rows: int = 250
-    query_timeout_ms: int = DEFAULT_TIMEOUT_MS
+    # Cache: True once the default graph was seen on the server. A graph that
+    # exists is never looked up again; a missing one is looked up on every
+    # read-only call, since a write-capable call may have created it meanwhile.
+    graph_known: bool = False
 
     # ------------------------------------------------------------------
     # Driver hooks
     # ------------------------------------------------------------------
 
     def _open_driver(self, config: Dict[str, Any]) -> None:
-        """Create the FalkorDB client and fail fast on a bad host, credentials, or graph name."""
+        """Create the FalkorDB client and fail fast on a bad host or credentials."""
         self.graph_name = _resolve_graph_name(config)
-        self.allow_writes = parse_bool(config.get('allow_writes'))
-        self.max_rows = config_int(config, 'max_rows', DEFAULT_ROW_CAP, min_value=1, max_value=self.max_execute_rows)
-        self.query_timeout_ms = config_int(
-            config, 'query_timeout_ms', DEFAULT_TIMEOUT_MS, min_value=100, max_value=600000
-        )
 
         self.client = self._connect(config)
+
         # Round-trip now so a wrong host or password fails at pipeline start
-        # rather than on the first tool call. FalkorDB has no per-database
-        # session open to piggyback a "does this graph exist" check on (unlike
-        # Neo4j's session(database=...)), so check list_graphs() by hand:
-        # select_graph() on a missing name always succeeds and only fails
-        # later, on the first real query, with a cryptic "ERR Invalid graph
-        # operation on empty key" (#2155).
-        #
-        # Only when neither write path is enabled: FalkorDB creates a graph
-        # lazily on its first write, so a write-capable node may legitimately
-        # be pointed at a graph that does not exist yet. A read-only node can
-        # never create one, so a missing graph there can only ever be a
-        # misconfiguration -- exactly this issue's silent fallback to the
-        # unrelated default graph "agent".
-        if not self.allow_writes and not parse_bool(config.get('allow_execute')):
-            graphs = [str(g) for g in (self.client.list_graphs() or [])]
-            if self.graph_name not in graphs:
-                available = ', '.join(graphs) or 'none'
-                raise Exception(
-                    f'FalkorDB graph "{self.graph_name}" does not exist on this server '
-                    f'(available: {available}). Set "Default Graph" to an existing graph name.'
-                )
+        # rather than on the first tool call, and note whether the default
+        # graph is there. Whether a MISSING graph is an error depends on the
+        # call (see require_graph): the write gates are per-call parameters.
+        self.graph_known = self.graph_name in self.list_graphs()
+
+    def require_graph(self, settings: Mapping) -> None:
+        """Refuse a read-only call on a default graph that does not exist.
+
+        FalkorDB has no per-database session open to piggyback a "does this
+        graph exist" check on (unlike Neo4j's session(database=...)):
+        select_graph() on a missing name always succeeds and only fails later,
+        on the first real query, with a cryptic "ERR Invalid graph operation on
+        empty key" (#2155).
+
+        Only when neither write path is on for the call: FalkorDB creates a
+        graph lazily on its first write, so a write-capable call may
+        legitimately address a graph that does not exist yet. A read-only call
+        can never create one, so a missing graph there can only ever be a
+        misconfiguration -- exactly that issue's silent fallback to the
+        unrelated default graph "agent".
+
+        Args:
+            settings: The calling instance's ``self.settings``.
+
+        Raises:
+            Exception: The default graph is not on the server and the call cannot create it.
+        """
+        if self.graph_known or write_capable(settings):
+            return
+        graphs = self.list_graphs()
+        if self.graph_name in graphs:
+            self.graph_known = True
+            return
+        available = ', '.join(graphs) or 'none'
+        raise Exception(
+            f'FalkorDB graph "{self.graph_name}" does not exist on this server '
+            f'(available: {available}). Set "Default Graph" to an existing graph name.'
+        )
 
     def _close_driver(self) -> None:
         if self.client is not None:
@@ -137,7 +176,7 @@ class IGlobal(GraphGlobalBase):
         may legitimately be pointed at a graph that does not exist yet, and
         a warning there would just be noise. A read-only node can never
         create one, so this is the save-time half of the same check
-        _open_driver raises on -- catching the silent fallback to the
+        require_graph raises on -- catching the silent fallback to the
         unrelated default graph "agent" (#2155) before the pipeline runs.
         """
         try:
@@ -176,12 +215,13 @@ class IGlobal(GraphGlobalBase):
                 except Exception:
                     pass
 
-    @property
-    def read_row_cap(self) -> int:
-        """Node-owner ceiling on rows a natural-language read query returns."""
-        return self.max_rows
+    def read_row_cap(self, settings: Mapping) -> int:
+        """Ceiling on rows a natural-language read query of this call returns (its ``max_rows``)."""
+        return max_rows(settings)
 
-    def _run_query(self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None) -> List[Dict]:
+    def _run_query(
+        self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None, *, settings: Mapping
+    ) -> List[Dict]:
         """Execute a read-only Cypher query through GRAPH.RO_QUERY.
 
         Read-only is enforced by the server, not by a regex: ro_query rejects
@@ -189,13 +229,18 @@ class IGlobal(GraphGlobalBase):
 
         With ``limit`` set the caller wants truncation detection, so return one
         row past it (still bounded by ``max_rows``); with no limit (the lane
-        path) fall back to the node's ``max_rows`` cap.
+        path) fall back to the call's ``max_rows`` cap. ``settings`` is the
+        calling instance's ``self.settings``.
         """
-        cap = self.max_rows if limit is None else min(int(limit), self.max_rows) + 1
-        result = self.select_graph().ro_query(query, params=params or None, timeout=self.query_timeout_ms)
+        self.require_graph(settings)
+        row_cap = max_rows(settings)
+        cap = row_cap if limit is None else min(int(limit), row_cap) + 1
+        result = self.select_graph().ro_query(query, params=params or None, timeout=query_timeout_ms(settings))
         return self._rows_as_dicts(result, cap=cap)
 
-    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _run_query_raw(
+        self, query: str, params: Optional[Dict[str, Any]] = None, *, settings: Mapping
+    ) -> Dict[str, Any]:
         """Execute a raw statement with writes allowed (the EXECUTE path).
 
         FalkorDB saves a statement before it returns and has no rollback, so a
@@ -211,6 +256,7 @@ class IGlobal(GraphGlobalBase):
             query (str): The raw Cypher statement.
             params (Optional[Dict[str, Any]]): Values for ``$name`` placeholders,
                 bound through the client's ``CYPHER`` header.
+            settings (Mapping): The calling instance's ``self.settings``.
 
         Returns:
             Dict[str, Any]: ``{'rows': [...], 'affected_rows': int}``, plus
@@ -219,18 +265,18 @@ class IGlobal(GraphGlobalBase):
         Raises:
             ValueError: A read result is over the cap.
         """
-        max_rows = self.max_execute_rows
+        row_cap = max_execute_rows(settings)
         server_cap = self._server_reply_cap()
-        result = self.select_graph().query(query, params=params or None, timeout=self.query_timeout_ms)
+        result = self.select_graph().query(query, params=params or None, timeout=query_timeout_ms(settings))
 
-        rows = self._rows_as_dicts(result, cap=max_rows + 1)
+        rows = self._rows_as_dicts(result, cap=row_cap + 1)
         # Count writes unconditionally: unlike SQL, a Cypher write commonly also
         # returns rows (CREATE (n) RETURN n), so `rows` being non-empty does not
         # mean nothing was written. _affected_rows is 0 for a pure read anyway.
         affected = _affected_rows(result)
-        if len(rows) > max_rows:
-            read_error = f'EXECUTE query exceeded max_execute_rows={max_rows}'
-            write_note = f'EXECUTE result cut to max_execute_rows={max_rows}; the statement is saved'
+        if len(rows) > row_cap:
+            read_error = f'EXECUTE query exceeded max_execute_rows={row_cap}'
+            write_note = f'EXECUTE result cut to max_execute_rows={row_cap}; the statement is saved'
         elif server_cap is not None and len(result.result_set or []) >= server_cap:
             # A reply of exactly RESULTSET_SIZE rows reads the same whether it is complete or cut.
             read_error = (
@@ -245,11 +291,12 @@ class IGlobal(GraphGlobalBase):
             raise ValueError(read_error)
 
         warning(write_note)
-        return {'rows': rows[:max_rows], 'affected_rows': affected, 'truncated': True}
+        return {'rows': rows[:row_cap], 'affected_rows': affected, 'truncated': True}
 
-    def _validate_query(self, query: str) -> Tuple[bool, str]:
+    def _validate_query(self, query: str, *, settings: Mapping) -> Tuple[bool, str]:
         """Check syntax with EXPLAIN without running the query."""
         try:
+            self.require_graph(settings)
             self.select_graph().explain(query)
             return True, ''
         except RedisError as e:
@@ -257,8 +304,12 @@ class IGlobal(GraphGlobalBase):
         except Exception as e:
             return False, str(e)
 
-    def _reflect_schema(self) -> Dict[str, Any]:
-        """Reflect labels with their properties, plus the relationship patterns in use."""
+    def _reflect_schema(self, graph: Optional[str] = None) -> Dict[str, Any]:
+        """Reflect the default graph: labels with their properties, plus the relationship patterns in use.
+
+        Runs once per control, before any call, so it uses the default query
+        timeout: ``query_timeout_ms`` is a per-call parameter.
+        """
         schema: Dict[str, Any] = {'nodes': {}, 'relationships': []}
 
         try:
@@ -272,7 +323,7 @@ class IGlobal(GraphGlobalBase):
                 'MATCH (a)-[r]->(b) '
                 'RETURN DISTINCT labels(a)[0] AS start, type(r) AS type, labels(b)[0] AS end '
                 f'LIMIT {SCHEMA_REL_LIMIT}',
-                timeout=self.query_timeout_ms,
+                timeout=DEFAULT_TIMEOUT_MS,
             )
             schema['relationships'] = [
                 {'type': str(row[1] or ''), 'start': str(row[0] or ''), 'end': str(row[2] or '')}
@@ -327,7 +378,7 @@ class IGlobal(GraphGlobalBase):
             # labels — it comes from db.labels(), never from user input.
             result = graph.ro_query(
                 f'MATCH (n:`{label}`) RETURN properties(n) LIMIT {SCHEMA_SAMPLE_SIZE}',
-                timeout=self.query_timeout_ms,
+                timeout=DEFAULT_TIMEOUT_MS,
             )
             rows = result.result_set or []
             if not rows or not rows[0]:
@@ -339,7 +390,7 @@ class IGlobal(GraphGlobalBase):
 
     def _column(self, graph, cypher: str) -> List[str]:
         """Run a single-column procedure call and return its values as strings."""
-        result = graph.ro_query(cypher, timeout=self.query_timeout_ms)
+        result = graph.ro_query(cypher, timeout=DEFAULT_TIMEOUT_MS)
         return [str(row[0]) for row in (result.result_set or []) if row]
 
     @classmethod

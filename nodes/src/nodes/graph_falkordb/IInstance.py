@@ -41,7 +41,7 @@ from rocketlib import tool_function
 from ai.common.graph import GraphInstanceBase
 from ai.common.utils import normalize_tool_input
 
-from .IGlobal import IGlobal, _header_names, _serialize_value
+from .IGlobal import IGlobal, _header_names, _serialize_value, allow_writes, max_rows, query_timeout_ms
 
 
 class IInstance(GraphInstanceBase):
@@ -100,10 +100,10 @@ class IInstance(GraphInstanceBase):
             f'language instead, use get_data. '
             + (
                 'Reads AND writes (CREATE/MERGE/SET/DELETE) are allowed.'
-                if self.IGlobal.allow_writes
+                if allow_writes(self.settings)
                 else 'Read-only: write clauses (CREATE/MERGE/SET/DELETE) are rejected by the server.'
             )
-            + f' At most {self.IGlobal.max_rows} rows are returned.'
+            + f' At most {max_rows(self.settings)} rows are returned.'
         ),
     )
     def query(self, args):
@@ -116,16 +116,23 @@ class IInstance(GraphInstanceBase):
         if params is not None and not isinstance(params, dict):
             raise ValueError('"params" must be an object when provided')
 
+        # The gate, the cap and the timeout are this call's
+        settings = self.settings
+        writes = allow_writes(settings)
+
         try:
+            # A read-only call on the default graph needs that graph to exist
+            if args.get('graph') is None:
+                self.IGlobal.require_graph(settings)
             graph = self.IGlobal.select_graph(args.get('graph'))
             # Writes go through GRAPH.QUERY only when the node owner enabled them;
             # otherwise GRAPH.RO_QUERY makes the server reject them.
-            run = graph.query if self.IGlobal.allow_writes else graph.ro_query
-            result = run(cypher, params=params or None, timeout=self.IGlobal.query_timeout_ms)
+            run = graph.query if writes else graph.ro_query
+            result = run(cypher, params=params or None, timeout=query_timeout_ms(settings))
         except RedisError as e:
             return {'error': str(e), 'columns': [], 'rows': [], 'row_count': 0, 'truncated': False}
 
-        cap = self.IGlobal.max_rows
+        cap = max_rows(settings)
         raw_rows = result.result_set or []
         rows = [[_serialize_value(cell) for cell in row] for row in raw_rows[:cap]]
 
@@ -135,7 +142,7 @@ class IInstance(GraphInstanceBase):
             'row_count': len(rows),
             'truncated': len(raw_rows) > cap,
         }
-        if self.IGlobal.allow_writes:
+        if writes:
             stats = _write_stats(result)
             if stats:
                 out['stats'] = stats

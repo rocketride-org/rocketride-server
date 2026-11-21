@@ -83,7 +83,7 @@ class IInstance(GraphInstanceBase):
         args = normalize_tool_input(args, tool_name='get_schema')
         label_filter = optional_str(args, 'label', tool_name='get_schema')
 
-        schema = self.IGlobal.graph_schema or {}
+        schema = self.IGlobal.schema_for(self.settings) or {}
         nodes = schema.get('nodes', {})
         rels = schema.get('relationships', [])
 
