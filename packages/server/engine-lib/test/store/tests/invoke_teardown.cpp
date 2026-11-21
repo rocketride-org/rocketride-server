@@ -37,7 +37,8 @@
 // waits for it up to the drain deadline, that the last call to leave an
 // ended stack frees it, and that calls made after the end are refused. They
 // also check that no pipe is handed out or published once the end has
-// started.
+// started, that the globals are not ended while a pipe build reads them,
+// and that the end lets go of the task.
 //
 // The pipeline is [pipe, rr_test_caller, rr_test_target, rr_test_build, null,
 // bottom]. A worker thread plays the Python side: through a handle, as Python
@@ -129,6 +130,8 @@ TEST_CASE("store::invokeTeardown") {
     // comes from its closed gate, and a refused call is not counted.
     //-----------------------------------------------------------------
     SECTION("calls after the end are refused") {
+        // The gate is open until the end closes it
+        REQUIRE_FALSE(fx.caller->hasEnded());
         fx.endPipeline();
         REQUIRE(fx.caller->hasEnded());
 
@@ -278,6 +281,7 @@ TEST_CASE("store::invokeTeardown") {
               std::string::npos);
 
         const auto stack = fx.dropStack();
+        REQUIRE_FALSE(stack.freed());
         fx.state->release.set();
         fx.finishWorker();
         REQUIRE_NO_ERROR(fx.state->error());
@@ -297,7 +301,10 @@ TEST_CASE("store::invokeTeardown") {
 
         fx.state->returnDuringEnd = true;
         fx.deadline.set(kDeadline);
+
+        // The endpoint and the held call still hold the stack
         const auto stack = fx.dropStack();
+        REQUIRE_FALSE(stack.freed());
         fx.endPipeline();
         REQUIRE(stack.freed());
 
@@ -371,6 +378,9 @@ TEST_CASE("store::invokeTeardown") {
         REQUIRE(fx.state->entered.wait());
 
         fx.deadline.set(kDeadline);
+
+        // The endpoint's pool still holds the idle stack
+        REQUIRE_FALSE(idle.freed());
         fx.endPipeline();
         CHECK(fx.logCapture.text().find("still in flight") !=
               std::string::npos);
@@ -381,7 +391,10 @@ TEST_CASE("store::invokeTeardown") {
         // The busy stack keeps its links while its call runs
         REQUIRE(fx.pipe->pipe.get() == fx.pipe.get());
         REQUIRE(fx.caller->pipe.get() == fx.pipe.get());
+
+        // Without the fixture's references, the held call keeps it alive
         const auto busy = fx.dropStack();
+        REQUIRE_FALSE(busy.freed());
 
         fx.state->release.set();
         fx.finishWorker();
@@ -402,7 +415,9 @@ TEST_CASE("store::invokeTeardown") {
         fx.endPipeline();
         REQUIRE_FALSE(fx.state->targetReturned.load());
 
+        // Without the fixture's references, the held call keeps it alive
         const auto stack = fx.dropStack();
+        REQUIRE_FALSE(stack.freed());
         fx.state->release.set();
         fx.finishWorker();
         REQUIRE(fx.state->targetReturned.load());
@@ -464,11 +479,19 @@ TEST_CASE("store::invokeTeardown") {
         auto refused = ep->getPipe();
         REQUIRE_ERROR(refused, Ec::PipelineEnded, PipelineEndedMessage);
 
+        // The idle stack is still in the pool: the end ends the stacks only
+        // after its drain, which waits for the held call
+        if (withIdlePipe)
+            REQUIRE_FALSE(weakIdle.expired());
+
         fx.state->release.set();
         fx.finishWorker();
         REQUIRE_NO_ERROR(fx.finishEnd());
         REQUIRE_NO_ERROR(fx.state->error());
         REQUIRE(ep->getPipeCount() == 0);
+
+        // The end has finished and cleared the open mode: the same refusal
+        REQUIRE_ERROR(ep->getPipe(), Ec::PipelineEnded, PipelineEndedMessage);
 
         REQUIRE(fx.dropStack().freed());
         REQUIRE(weakIdle.expired());
@@ -483,10 +506,10 @@ TEST_CASE("store::invokeTeardown") {
     }
 
     //-----------------------------------------------------------------
-    // A pipe build that is still running when the end starts is refused
-    // where it would publish its stack: the builder gets the refusal, its
-    // own thread ends the filters it built before getPipe() returns, and
-    // the endpoint never holds the stack.
+    // A pipe build that is still running when the end starts makes no
+    // further filter and is refused: the builder gets the refusal, its own
+    // thread ends the filters it built before getPipe() returns, and the
+    // endpoint never holds the stack.
     //-----------------------------------------------------------------
     SECTION("a pipe build that the end overtakes is refused and ended") {
         ServiceEndpoint ep = fx.pipe->endpoint;
@@ -497,34 +520,16 @@ TEST_CASE("store::invokeTeardown") {
 
         // The first pipe is busy, so getPipe() builds a stack; the build
         // waits in the begin of rr_test_build
-        fx.state->holdBuild = true;
-        Error built;
-        bool endedBeforeReturn = false;
-        std::thread::id builderId;
-        invoke_teardown::Gate builderDone;
-        std::thread builder([&, ep] {
-            builderId = std::this_thread::get_id();
-            auto got = ep->getPipe();
-            built = got.check();
-            endedBeforeReturn = fx.state->heldEnded.load();
-            builderDone.set();
-        });
-        util::Guard joinBuilder{[&] {
-            fx.state->buildRelease.set();
-            if (builder.joinable())
-                builder.join();
-        }};
+        fx.startBuild();
         REQUIRE(fx.state->buildEntered.wait());
 
         fx.startEnd();
         REQUIRE(invoke_teardown::waitEndStarted(*ep));
-        fx.state->buildRelease.set();
-        REQUIRE(builderDone.wait());
-        builder.join();
+        const auto build = fx.finishBuild();
 
-        REQUIRE_ERROR(built, Ec::PipelineEnded, PipelineEndedMessage);
-        REQUIRE(endedBeforeReturn);
-        REQUIRE(fx.state->heldEndedOn == builderId);
+        REQUIRE_ERROR(build.error, Ec::PipelineEnded, PipelineEndedMessage);
+        REQUIRE(build.endedBeforeReturn);
+        REQUIRE(fx.state->heldEndedOn == build.builderId);
         REQUIRE(fx.state->heldFilter.expired());
         REQUIRE(ep->getPipeCount() == 1);
 
@@ -621,6 +626,247 @@ TEST_CASE("store::invokeTeardown") {
         REQUIRE(fx.state->heldCaller.expired());
         REQUIRE(fx.state->heldHead.expired());
         REQUIRE(ep->getPipeCount() == 1);
+    }
+}
+
+//-----------------------------------------------------------------------------
+// A pipe build reads the endpoint's globals and makes its filters from them.
+// Here a build waits in the begin of rr_test_build while the endpoint ends,
+// and no call is in flight, so the drain has nothing to wait for. The end
+// must still not end the globals while the build runs: it waits for the
+// build, and when the build outlives the drain deadline, the build ends the
+// globals itself when it returns. Either way the build is refused and ends
+// its own stack before the globals are ended.
+//
+// The pipeline is the one of store::invokeTeardown.
+//-----------------------------------------------------------------------------
+TEST_CASE("store::invokeTeardownBuild") {
+    using invoke_teardown::kDeadline;
+    using invoke_teardown::kDeadlineWaited;
+    using invoke_teardown::kEndLimit;
+
+    invoke_teardown::Fixture fx;
+    fx.setup();
+
+    // The first pipe is busy, so this builds a stack; the build waits in the
+    // begin of rr_test_build
+    fx.startBuild();
+    REQUIRE(fx.state->buildEntered.wait());
+
+    //-----------------------------------------------------------------
+    // The test holds the GIL across the end, and the end lets go of it
+    // only while it waits. With no call in flight, its only wait is the
+    // one for the build, so the releaser, which needs the GIL, runs only
+    // during that wait. It lets the build go on while no global has been
+    // ended. The build is refused and ends its own stack; then the end
+    // ends the globals, on this thread.
+    //-----------------------------------------------------------------
+    SECTION("the end waits for a pipe build before it ends the globals") {
+        fx.deadline.set(30s);
+        REQUIRE_FALSE(fx.state->globalEnded.isSet());
+
+        Error ended;
+        bool endWasWaiting = false;
+        std::thread releaser;
+        {
+            engine::python::LockPython gil;
+
+            auto state = fx.state;
+            releaser = std::thread([state] {
+                const auto release = localfcn()->Error {
+                    state->endWaiting.set();
+                    if (!state->globalEnded.isSet())
+                        state->buildRelease.set();
+                    return {};
+                };
+                [[maybe_unused]] const auto ignored = callPython(release);
+            });
+
+            fx.disconnect(ended);
+            endWasWaiting = fx.state->endWaiting.isSet();
+        }
+        releaser.join();
+        REQUIRE(endWasWaiting);
+
+        const auto build = fx.finishBuild();
+        REQUIRE_NO_ERROR(ended);
+        REQUIRE_ERROR(build.error, Ec::PipelineEnded, PipelineEndedMessage);
+        REQUIRE(build.endedBeforeReturn);
+        REQUIRE(fx.state->heldEndedOn == build.builderId);
+
+        // The end ended the globals, after the build had ended its stack
+        REQUIRE(fx.state->globalEnded.isSet());
+        REQUIRE(fx.state->heldEndedBeforeGlobal);
+        REQUIRE(fx.state->globalEndedOn == std::this_thread::get_id());
+        CHECK(fx.logCapture.text().find("pipe build(s) still running") ==
+              std::string::npos);
+    }
+
+    //-----------------------------------------------------------------
+    // The build stays in its begin past the drain deadline. The end waits
+    // for it up to the deadline, says so, and returns without ending the
+    // globals, which the build still reads. Let go after the end, the
+    // build is refused, ends its own stack, and then ends the globals on
+    // its own thread. The test keeps only weak links to the endpoint and
+    // to one global and lets go of everything else, so both must be freed
+    // once the build has returned.
+    //-----------------------------------------------------------------
+    SECTION("a build that outlives the deadline ends the globals itself") {
+        const ServiceEndpointWeak weakEndpoint = fx.pipe->endpoint;
+        const ServiceGlobalWeak weakGlobal = fx.caller->global;
+
+        fx.deadline.set(kDeadline);
+        const auto took = fx.endPipeline();
+        REQUIRE(took >= kDeadlineWaited);
+        REQUIRE(took < kEndLimit);
+        REQUIRE_FALSE(fx.state->globalEnded.isSet());
+        CHECK(fx.logCapture.text().find("pipe build(s) still running after") !=
+              std::string::npos);
+
+        // The end let go of the fixture's endpoint and of the stack's links,
+        // and the test lets go of the stack. From here on only the engine
+        // holds the two: the build, and the globals it still reads
+        fx.dropStack();
+        REQUIRE_FALSE(weakEndpoint.expired());
+        REQUIRE_FALSE(weakGlobal.expired());
+
+        const auto build = fx.finishBuild();
+        REQUIRE_ERROR(build.error, Ec::PipelineEnded, PipelineEndedMessage);
+        REQUIRE(build.endedBeforeReturn);
+        REQUIRE(fx.state->heldEndedOn == build.builderId);
+
+        // The build ended the globals, after its own stack
+        REQUIRE(fx.state->globalEnded.isSet());
+        REQUIRE(fx.state->heldEndedBeforeGlobal);
+        REQUIRE(fx.state->globalEndedOn == build.builderId);
+
+        // Nothing holds the globals or the endpoint once the build has
+        // returned
+        REQUIRE(weakGlobal.expired());
+        REQUIRE(weakEndpoint.expired());
+    }
+}
+
+//-----------------------------------------------------------------------------
+// A pipe build that the end overtakes makes no further filter: a filter below
+// the one the build waits in is never made, so its begin never runs.
+// rr_test_count sits below rr_test_build and counts its begins.
+//
+// The pipeline is [pipe, rr_test_caller, rr_test_target, rr_test_build,
+// rr_test_count, null, bottom].
+//-----------------------------------------------------------------------------
+TEST_CASE("store::invokeTeardownBuildStop") {
+    invoke_teardown::Fixture fx(
+        {"rr_test_caller", "rr_test_target", "rr_test_build", "rr_test_count"});
+    fx.setup();
+    ServiceEndpoint ep = fx.pipe->endpoint;
+    fx.deadline.set(30s);
+
+    // The build of the first pipe began the counter once
+    const auto before = fx.state->countedBegins.load();
+    REQUIRE(before == 1);
+
+    // The first pipe is busy, so this builds a stack; the build waits in the
+    // begin of rr_test_build, above the counter
+    fx.startBuild();
+    REQUIRE(fx.state->buildEntered.wait());
+
+    // The build goes on only once the end has started
+    fx.startEnd();
+    REQUIRE(invoke_teardown::waitEndStarted(*ep));
+    const auto build = fx.finishBuild();
+
+    REQUIRE_ERROR(build.error, Ec::PipelineEnded, PipelineEndedMessage);
+    REQUIRE(fx.state->countedBegins.load() == before);
+    REQUIRE_NO_ERROR(fx.finishEnd());
+}
+
+//-----------------------------------------------------------------------------
+// A pipe task binds itself to its target endpoint, and the endpoint's filters
+// write output and warnings through it. The task is freed soon after the end,
+// while a call that outlived the end can still write. The end lets go of the
+// task as its last step: a global's end still writes to the task, and a write
+// after the end reaches no task. The first write dropped after the end logs
+// one warning for the endpoint, without the written text; a write dropped
+// before the end, with no task bound, logs nothing.
+//-----------------------------------------------------------------------------
+TEST_CASE("store::invokeTeardownTask") {
+    // Declared before the fixture, so it outlives the endpoint
+    invoke_teardown::RecordingTask task;
+    invoke_teardown::Fixture fx;
+    fx.setup();
+
+    // The lines that say a task write was dropped after the end
+    const auto dropLines = [&fx] {
+        const std::string part = "written after the end of endpoint";
+        const auto log = fx.logCapture.text();
+        size_t total = 0;
+        for (auto at = log.find(part); at != std::string::npos;
+             at = log.find(part, at + part.size()))
+            ++total;
+        return total;
+    };
+
+    // Held across the end, as a call that outlives the end holds it
+    ServiceEndpoint ep = fx.pipe->endpoint;
+    const auto entry = fx.filter.getDummyEntry("w.txt"_tv);
+
+    // No task is bound yet: the writes are dropped, and as the end has not
+    // started, nothing is logged
+    REQUIRE_NO_ERROR(ep->taskWriteText(Text("unbound")));
+    REQUIRE_NO_ERROR(ep->taskWriteWarning(entry, APERR(Ec::Failed, "unbound")));
+    REQUIRE(dropLines() == 0);
+
+    REQUIRE_NO_ERROR(ep->bindTask(&task));
+
+    REQUIRE_NO_ERROR(ep->taskWriteText(Text("before")));
+    REQUIRE_NO_ERROR(ep->taskWriteWarning(entry, APERR(Ec::Failed, "before")));
+
+    fx.state->writeOnGlobalEnd = true;
+    fx.endPipeline();
+
+    // The global's end wrote to the task, so the end dropped nothing
+    REQUIRE(dropLines() == 0);
+
+    // The first write after the end logs the drop, the later ones do not.
+    // Each section starts with the other kind of write.
+    const auto lateText = [&] {
+        REQUIRE_NO_ERROR(ep->taskWriteText(Text("late text k7q")));
+    };
+    const auto lateWarning = [&] {
+        REQUIRE_NO_ERROR(
+            ep->taskWriteWarning(entry, APERR(Ec::Failed, "late warning k7q")));
+    };
+
+    // After the late writes: still one line, which names the endpoint and
+    // the kind of the first write and not what was written, and no late
+    // write reached the task
+    const auto checkAfter = [&](const std::string &first) {
+        REQUIRE(dropLines() == 1);
+        const auto log = fx.logCapture.text();
+        CHECK(log.find("Warning: teardown: task " + first +
+                       " written after the end of endpoint null is dropped") !=
+              std::string::npos);
+        CHECK(log.find("k7q") == std::string::npos);
+
+        const std::vector<std::string> expected{"before", "global end"};
+        REQUIRE(task.texts() == expected);
+        REQUIRE(task.warnings() == 1);
+    };
+
+    SECTION("a text first") {
+        lateText();
+        REQUIRE(dropLines() == 1);
+        lateWarning();
+        lateText();
+        checkAfter("text");
+    }
+    SECTION("a warning first") {
+        lateWarning();
+        REQUIRE(dropLines() == 1);
+        lateText();
+        lateWarning();
+        checkAfter("warning");
     }
 }
 
@@ -829,8 +1075,9 @@ TEST_CASE("store::invokeTeardownPython") {
             REQUIRE_NO_ERROR(filter.closeObject(pipe));
         }
 
-        // No strong reference to the node is left on the C++ side, so the end
-        // of the pipeline destroys it
+        // The test holds no strong reference to the node; the endpoint's
+        // stack holds it until the end of the pipeline destroys it
+        REQUIRE_FALSE(weakNode.expired());
         REQUIRE_NO_ERROR(filter.disconnect());
         REQUIRE(weakNode.expired());
 
@@ -870,7 +1117,7 @@ TEST_CASE("store::invokeTeardownPython") {
               std::string::npos);
         CHECK(links.controllerIds.find("pipeline has ended") !=
               std::string::npos);
-        CHECK(getPipeFailure.find("is not open") != std::string::npos);
+        CHECK(getPipeFailure.find("pipeline has ended") != std::string::npos);
         CHECK(borrowedFailure.find("pipeline has ended") != std::string::npos);
 
         // Giving the borrowed pipe back after the end returns without raising

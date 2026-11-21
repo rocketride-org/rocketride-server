@@ -328,15 +328,15 @@ public:
 
     mutable async::Mutex m_stackLock;
 
-    // Set under m_stackLock when endEndpoint() takes its snapshot. From then
-    // on no pipe is handed out and no new stack is published. Never cleared:
-    // no code opens an ended endpoint again (getEndpoint() makes another).
-    bool m_ending = false;
+    // True once endEndpoint() has started. It sets the flag in the hold of
+    // m_stackLock in which it takes its snapshot, so a caller that needs the
+    // snapshot taken reads it under that lock.
+    bool endStarted() const noexcept { return m_ending; }
 
-    // Deadline of the wait for Python calls at teardown; a wait is checked
-    // every 50 ms and can run one check over it. Production code never
-    // writes it; tests set it, shorter for the deadline cases and longer
-    // where a case must not reach it.
+    // Deadline of the waits at teardown, for Python calls and then for pipe
+    // builds; a wait is checked every 50 ms and can run one check over its
+    // share. Production code never writes it; tests set it, shorter for the
+    // deadline cases and longer where a case must not reach it.
     static Atomic<time::Duration> &drainDeadline() noexcept;
 
     //-----------------------------------------------------------------
@@ -472,11 +472,52 @@ private:
     Error generatePipelineStack() noexcept;
     ErrorOr<ServicePipe> buildInstancePipe() noexcept;
     Error endInstanceStack(ServiceInstanceStack &stack, bool drained) noexcept;
+    static Error endGlobalStack(ServiceGlobalStack &globals,
+                                OPEN_MODE openMode) noexcept;
+
+    // Waits (bounded, cancel-aware) while busy() is true; the time spent is
+    // taken off the budget
+    static bool waitWhile(const std::function<bool()> &busy,
+                          time::Duration &budget) noexcept;
 
     // Waits (bounded, cancel-aware) until no Python call runs on the given
     // filters; the time spent is taken off the budget
     bool drainInFlightCalls(const std::vector<ServiceInstance> &filters,
                             time::Duration &budget) noexcept;
+
+    // Reads m_building under the stack lock
+    uint32_t buildsInProgress() noexcept;
+
+    // Lowers m_building for a build that returned; the last build ends the
+    // globals when endEndpoint() stopped waiting for builds
+    void leaveBuild() noexcept;
+
+    // Set under m_stackLock when endEndpoint() takes its snapshot. From then
+    // on no pipe is handed out and no new stack is published. Never cleared:
+    // no code opens an ended endpoint again (getEndpoint() makes another).
+    // Atomic so that a pipe build can stop between two filters, and
+    // getPipe() can refuse, without the lock; the checks that must agree
+    // with the snapshot read it under m_stackLock.
+    std::atomic<bool> m_ending{false};
+
+    // Pipe builds in progress. getPipe() raises it under m_stackLock, in
+    // the same hold as its m_ending check, and lowers it when the build has
+    // returned. A build reads m_globalStack and makes its filters from the
+    // globals, so endEndpoint() ends the globals only while it is zero.
+    uint32_t m_building = 0;
+
+    // Set under m_stackLock when endEndpoint() stopped waiting for pipe
+    // builds: the open mode the globals are ended in. The last build to
+    // leave takes the globals, ends them and clears it.
+    Opt<OPEN_MODE> m_globalsEndMode;
+
+    // Logs the first task write dropped after the end; call under
+    // m_taskLock with no task bound
+    void logDroppedTaskWrite(const char *kind) noexcept;
+
+    // Set under m_taskLock by the task write that logs the drop, so each
+    // endpoint logs it once
+    bool m_droppedTaskWriteLogged = false;
 
 protected:
     //-----------------------------------------------------------------
@@ -520,10 +561,17 @@ protected:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Point to the controlling job so we an interact with it
-    ///		if needed
+    ///		The controlling task, which taskWriteText() and
+    ///		taskWriteWarning() write to. Set by bindTask() and cleared as
+    ///		the last step of endEndpoint(), after the globals were ended or
+    ///		left to a pipe build: the task may be freed once the end
+    ///		returns, while a late call can still write. Read and used only
+    ///		under m_taskLock, so the end waits for a write in progress and
+    ///		no write reaches the task after the end. A write after the end
+    ///		is dropped, and the first one logs a warning.
     //-----------------------------------------------------------------
     task::IPipeTaskBase *m_task = nullptr;
+    mutable async::Mutex m_taskLock;
 
     //-------------------------------------------------------------
     /// @details

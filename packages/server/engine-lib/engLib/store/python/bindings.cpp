@@ -935,8 +935,10 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 // Allow others to run while we are doing this
                 engine::python::UnlockPython unlock;
 
-                // Return the pipe to the endpoint for reuse
-                self.putPipe(guard->pipe);
+                // Return the pipe to the endpoint for reuse. putPipe() takes
+                // a non-const reference, so it gets a copy of the guard's head
+                ServicePipe head = guard->head();
+                self.putPipe(head);
                 return;
             })
 
@@ -1073,7 +1075,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
             [](FilterHandle &h) -> py::object {
                 // The guard keeps the links valid while they are read
                 IServiceFilterInstance::CallGuard guard{h.lock()};
-                ServiceInstance down = guard.self->downLink();
+                ServiceInstance down = guard.filter()->downLink();
                 if (!down)
                     return py::none();
                 return py::cast(std::make_shared<PipeHandle>(down->instance));
@@ -1084,11 +1086,10 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_PROP_READONLY_CUSTOM(
             pipe,
             [](FilterHandle &h) -> py::object {
+                // The guard refuses a filter that has no head
                 IServiceFilterInstance::CallGuard guard{h.lock()};
-                if (!guard.pipe)
-                    return py::none();
                 return py::cast(
-                    std::make_shared<PipeHandle>(guard.pipe->instance));
+                    std::make_shared<PipeHandle>(guard.head()->instance));
             })
         .PYBIND_PROP_READONLY_CUSTOM(
             pyInstance,
@@ -1200,9 +1201,9 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYBIND_PROP_READONLY_CUSTOM(
             currentObject, [](FilterHandle &h) -> py::object {
                 IServiceFilterInstance::CallGuard guard{h.lock()};
-                if (guard.self->currentEntry)
+                if (guard.filter()->currentEntry)
                     // Return a reference
-                    return py::cast(guard.self->currentEntry,
+                    return py::cast(guard.filter()->currentEntry,
                                     py::return_value_policy::reference);
                 else
                     return py::none();

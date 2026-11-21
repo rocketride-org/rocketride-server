@@ -141,8 +141,23 @@ struct State {
     std::atomic<bool> heldEnded{false};
     std::thread::id heldEndedOn;
 
+    /// Set by the first end of a test filter's global, after it has
+    /// recorded the thread it ran on and whether the held rr_test_build
+    /// filter was ended by then. Read the two fields once the gate is set
+    Gate globalEnded;
+    std::atomic<bool> globalEndSeen{false};
+    std::thread::id globalEndedOn;
+    bool heldEndedBeforeGlobal = false;
+
+    /// Set by the test: the next end of a test filter's global writes
+    /// "global end" to the endpoint's task, as indexer's global end does
+    std::atomic<bool> writeOnGlobalEnd{false};
+
     /// Set by the test: every rr_test_build begin fails
     std::atomic<bool> failBuild{false};
+
+    /// The number of rr_test_count begins so far
+    std::atomic<uint32_t> countedBegins{0};
 
     /// Set by the test: the next rr_test_caller begin counts a call on its
     /// filter, as a node's own thread may do from beginInstance. The call
@@ -233,11 +248,13 @@ inline constexpr auto CallerType = "rr_test_caller"_itv;
 inline constexpr auto TargetType = "rr_test_target"_itv;
 inline constexpr auto SlowType = "rr_test_slow"_itv;
 inline constexpr auto BuildType = "rr_test_build"_itv;
+inline constexpr auto CountType = "rr_test_count"_itv;
 inline constexpr auto TestLevel = Lvl::ServiceNull;
 
 //-------------------------------------------------------------------------
 /// @details
-///     The global of every test filter type: it adds nothing to its parent
+///     The global of every test filter type. Its end reports to the active
+///     state and, when the test asks, writes to the endpoint's task
 //-------------------------------------------------------------------------
 class TestGlobal : public IServiceFilterGlobal {
 public:
@@ -250,6 +267,25 @@ public:
     /// The factory that makes this global for the given filter type
     static auto factory(iTextView type) noexcept {
         return Factory::makeFactory<TestGlobal, Parent>(type);
+    }
+
+    /// Records the first end of a test global: on which thread, and
+    /// whether the held build filter had been ended before it
+    virtual Error endFilterGlobal() noexcept override {
+        auto state = activeState();
+        if (!state)
+            return Parent::endFilterGlobal();
+
+        if (state->writeOnGlobalEnd.exchange(false) && endpoint) {
+            endpoint->taskWriteText(Text("global end"));
+        }
+
+        if (!state->globalEndSeen.exchange(true)) {
+            state->globalEndedOn = std::this_thread::get_id();
+            state->heldEndedBeforeGlobal = state->heldEnded.load();
+            state->globalEnded.set();
+        }
+        return Parent::endFilterGlobal();
     }
 };
 
@@ -411,6 +447,30 @@ private:
 
 //-------------------------------------------------------------------------
 /// @details
+///     A filter that counts its begins. Placed below rr_test_build, it
+///     shows whether a pipe build made the filters below the one it waited
+///     in
+//-------------------------------------------------------------------------
+class CountInstance : public IServiceFilterInstance {
+public:
+    using Config = IServiceConfig;
+    using Parent = IServiceFilterInstance;
+    using Parent::Parent;
+
+    _const auto LogLevel = TestLevel;
+    _const auto Factory =
+        Factory::makeFactory<CountInstance, Parent>(CountType);
+
+    /// Counts the begin in the active state
+    virtual Error beginFilterInstance() noexcept override {
+        if (auto state = activeState())
+            ++state->countedBegins;
+        return Parent::beginFilterInstance();
+    }
+};
+
+//-------------------------------------------------------------------------
+/// @details
 ///     A monitor that reports itself as the app monitor, which turns on the
 ///     debugger's ENTER/LEAVE events, and records every "other" event
 //-------------------------------------------------------------------------
@@ -450,6 +510,49 @@ public:
 private:
     std::mutex m_lock;
     std::vector<std::pair<std::string, std::string>> m_events;
+};
+
+//-------------------------------------------------------------------------
+/// @details
+///     A task that records what an endpoint writes to it, bound with
+///     bindTask() as a pipe task binds itself to its target endpoint
+//-------------------------------------------------------------------------
+class RecordingTask : public task::IPipeTaskBase {
+public:
+    RecordingTask()
+        : IPipeTaskBase(task::ITask::FactoryArgs{{}, json::Value()}) {}
+
+    virtual Error writeText(const Text &text) noexcept override {
+        std::lock_guard<std::mutex> guard(m_lock);
+        m_texts.emplace_back(text.data(), text.size());
+        return {};
+    }
+
+    virtual Error writeWarning(const Entry &, const Error &) noexcept override {
+        std::lock_guard<std::mutex> guard(m_lock);
+        ++m_warnings;
+        return {};
+    }
+
+    /// The texts written so far, in order
+    std::vector<std::string> texts() {
+        std::lock_guard<std::mutex> guard(m_lock);
+        return m_texts;
+    }
+
+    /// The number of warnings written so far
+    size_t warnings() {
+        std::lock_guard<std::mutex> guard(m_lock);
+        return m_warnings;
+    }
+
+protected:
+    virtual Error exec() noexcept override { return {}; }
+
+private:
+    std::mutex m_lock;
+    std::vector<std::string> m_texts;
+    size_t m_warnings = 0;
 };
 
 //-------------------------------------------------------------------------
@@ -515,6 +618,7 @@ public:
             TargetInstance::Factory, TestGlobal::factory(TargetType),
             SlowInstance::Factory, TestGlobal::factory(SlowType),
             BuildInstance::Factory, TestGlobal::factory(BuildType),
+            CountInstance::Factory, TestGlobal::factory(CountType),
             CaptureMonitor::Factory);
     }
     ~FactoryScope() {
@@ -523,6 +627,7 @@ public:
             TargetInstance::Factory, TestGlobal::factory(TargetType),
             SlowInstance::Factory, TestGlobal::factory(SlowType),
             BuildInstance::Factory, TestGlobal::factory(BuildType),
+            CountInstance::Factory, TestGlobal::factory(CountType),
             CaptureMonitor::Factory);
     }
     FactoryScope(const FactoryScope &) = delete;
@@ -618,11 +723,11 @@ inline Error writeTextAsPython(const ServiceInstanceWeak &filter) {
 }
 
 /// True once endEndpoint() has taken its snapshot: from then on no pipe is
-/// handed out. Read under the stack lock, which guards it
+/// handed out. Read under the stack lock, so the snapshot is complete
 inline bool endStarted(IServiceEndpoint &ep) {
     util::Guard stackGuard{[&] { ep.m_stackLock.lock(); },
                            [&] { ep.m_stackLock.unlock(); }};
-    return ep.m_ending;
+    return ep.endStarted();
 }
 
 /// Polls until the end of the endpoint has started; false after kTimeout
@@ -688,6 +793,8 @@ public:
             else
                 m_worker.detach();
         }
+        if (m_builder.joinable())
+            m_builder.join();
         if (m_end.joinable())
             m_end.join();
         state->heldCall.reset();
@@ -840,6 +947,46 @@ public:
     /// True once the end started by startEnd() has returned
     bool endReturned() noexcept { return m_endDone.isSet(); }
 
+    /// What the pipe build started by startBuild() returned
+    struct Build {
+        /// What getPipe() returned: empty when it handed out a pipe
+        Error error;
+
+        /// The builder's thread
+        std::thread::id builderId;
+
+        /// True when the held rr_test_build filter was ended before
+        /// getPipe() returned
+        bool endedBeforeReturn = false;
+    };
+
+    /// Starts a pipe build on its own thread, as a node's thread or the
+    /// data plane asks for a pipe. The first pipe is busy, so getPipe()
+    /// builds a stack, and the build waits in the begin of rr_test_build
+    /// until buildRelease is set. The thread holds no reference to the
+    /// endpoint: once buildEntered is set, getPipe() holds it, so the test
+    /// may let go of its own. Call after setup(), and wait for
+    /// buildEntered before the test lets go of the endpoint
+    void startBuild() {
+        state->holdBuild = true;
+        IServiceEndpoint *ep = pipe->endpoint.get();
+        m_builder = std::thread([this, ep] {
+            m_build.builderId = std::this_thread::get_id();
+            auto got = ep->getPipe();
+            m_build.error = got.check();
+            m_build.endedBeforeReturn = state->heldEnded.load();
+            m_buildDone.set();
+        });
+    }
+
+    /// Lets the build go on, waits for it and returns what it returned
+    Build finishBuild() {
+        state->buildRelease.set();
+        REQUIRE(m_buildDone.wait());
+        m_builder.join();
+        return m_build;
+    }
+
     FactoryScope factories;
     MonitorScope monitors;
     LogCapture logCapture;
@@ -858,6 +1005,9 @@ private:
     std::thread m_end;
     Gate m_endDone;
     Error m_endResult;
+    std::thread m_builder;
+    Gate m_buildDone;
+    Build m_build;
 };
 
 //-------------------------------------------------------------------------

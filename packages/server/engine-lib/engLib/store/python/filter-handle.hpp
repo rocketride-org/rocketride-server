@@ -118,7 +118,7 @@ template <typename R, typename... Args>
 auto forwardTo(R (IServiceFilterInstance::*fn)(Args...)) {
     return [fn](FilterHandle &handle, Args... args) -> R {
         IServiceFilterInstance::CallGuard guard{handle.lock()};
-        return ((*guard.self).*fn)(std::forward<Args>(args)...);
+        return ((*guard.filter()).*fn)(std::forward<Args>(args)...);
     };
 }
 }  // namespace engine::store::pythonBase

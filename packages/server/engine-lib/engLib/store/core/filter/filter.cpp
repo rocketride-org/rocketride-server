@@ -44,11 +44,11 @@ IServiceFilterGlobal::~IServiceFilterGlobal() {
 //-------------------------------------------------------------------------
 IServiceFilterInstance::CallGuard::CallGuard(
     ServiceInstance filter) noexcept(false)
-    : self(_mv(filter)) {
-    if (self->hasEnded())
+    : m_filter(_mv(filter)) {
+    if (m_filter->hasEnded())
         throw APERR(Ec::PipelineEnded, PipelineEndedMessage);
 
-    self->m_inFlight.fetch_add(1, std::memory_order_seq_cst);
+    m_filter->m_inFlight.fetch_add(1, std::memory_order_seq_cst);
 
     // Take the head while counted. The lock is for a guard that loses to
     // the teardown: its links may be reset while it copies. A stack that
@@ -56,13 +56,13 @@ IServiceFilterInstance::CallGuard::CallGuard(
     // leave() still reaches the head through the copy.
     bool linked = false;
     {
-        std::lock_guard<std::mutex> lock(self->m_linkLock);
-        pipe = self->pipe;
-        linked = pipe && self->endpoint;
+        std::lock_guard<std::mutex> lock(m_filter->m_linkLock);
+        m_head = m_filter->pipe;
+        linked = m_head && m_filter->endpoint;
     }
 
     // Re-check while counted
-    if (self->hasEnded() || !linked) {
+    if (m_filter->hasEnded() || !linked) {
         leave();
         throw APERR(Ec::PipelineEnded, PipelineEndedMessage);
     }
@@ -87,14 +87,14 @@ IServiceFilterInstance::CallGuard::~CallGuard() noexcept { leave(); }
 ///     every call.
 //-------------------------------------------------------------------------
 void IServiceFilterInstance::CallGuard::leave() noexcept {
-    self->m_inFlight.fetch_sub(1, std::memory_order_seq_cst);
+    m_filter->m_inFlight.fetch_sub(1, std::memory_order_seq_cst);
 
     ServiceEndpoint released;
-    if (pipe)
-        released = pipe->releaseStackIfIdle();
+    if (m_head)
+        released = m_head->releaseStackIfIdle();
 
-    pipe.reset();
-    self.reset();
+    m_head.reset();
+    m_filter.reset();
 }
 
 //-------------------------------------------------------------------------
@@ -110,7 +110,6 @@ ServiceEndpoint IServiceFilterInstance::releaseStackIfIdle() noexcept {
     if (!m_releaseOnIdle.load(std::memory_order_seq_cst))
         return {};
 
-    // Declared before the chain, so it outlives the filters the chain drops
     ServiceEndpoint released;
 
     std::vector<ServiceInstance> chain;
@@ -199,7 +198,9 @@ Error IServiceFilterGlobal::endFilterGlobal() noexcept {
 //-------------------------------------------------------------------------
 /// @brief Destructor for IServiceFilterInstance.
 /// @details
-///     Forces an end instance
+///     Runs the base endFilterInstance(), which closes the gate and releases
+///     every link and buffer, also the links that retainLinksOnEnd() kept,
+///     then drops pyCurrentEntry under the GIL
 //-------------------------------------------------------------------------
 IServiceFilterInstance::~IServiceFilterInstance() {
     LOGPIPE();
@@ -238,7 +239,7 @@ Error IServiceFilterInstance::beginFilterInstance() noexcept { return {}; }
 ///     retainLinksOnEnd() asked to keep them.
 //-------------------------------------------------------------------------
 Error IServiceFilterInstance::endFilterInstance() noexcept {
-    // Refuse new Python callbacks before the links go away
+    // Refuse new Python calls before the links go away
     closeGate();
 
     // A call may still be running on this filter: keep every link and buffer,

@@ -196,7 +196,14 @@ Error IPythonInstanceBase::beginFilterInstance() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Releases the instance data
+///		Calls the node's endInstance if it has one, then marks the node
+///		ended and releases its object, also when endInstance raises.
+///		The parent's endFilterInstance() runs only when endInstance did
+///		not raise (a preventDefault counts as raising). A node that
+///		failed to bind returns its bind error and runs neither
+///	@returns
+///		The bind error, else endInstance's error (none for a
+///		preventDefault), else the parent's
 //-------------------------------------------------------------------------
 Error IPythonInstanceBase::endFilterInstance() noexcept {
     LOGPIPE();

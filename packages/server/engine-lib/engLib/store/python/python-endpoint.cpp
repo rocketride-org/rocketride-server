@@ -162,11 +162,12 @@ Error IPythonEndpointBase::signal(const Text &signal,
 
 //-------------------------------------------------------------------------
 /// @details
-///		End the endpoint operation
-/// @param[in] path
-///		The path to wrap
-/// @param[out] url
-//		Receives the url encoded path
+///		Runs the node's endEndpoint hook (not for a commitScan task) and
+///		releases the node's endpoint object and module, then runs the
+///		engine's teardown, also when the hook raises. A node that failed
+///		to bind returns its bind error and runs neither
+///	@returns
+///		The bind error, else the hook's error, else the teardown's
 //-------------------------------------------------------------------------
 Error IPythonEndpointBase::endEndpoint() noexcept {
     if (m_boundError) return m_boundError;

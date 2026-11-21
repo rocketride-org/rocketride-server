@@ -346,15 +346,14 @@ This is what the engine guarantees, and what it asks of you:
   Python node that has already ended, and that node handles the lane or the
   `invoke`, the engine does not enter that node. Your call raises the same
   error.
-- **`getPipe()` raises while the pipeline is ending.** From the moment the
-  pipeline starts to end until the end has finished, `getPipe()` raises the
-  same error, even when an idle pipe exists. Once the end has finished,
-  `getPipe()` raises an `Exception` whose `code` is the value of
-  `Ec.InvalidCommand` and whose `message` is
-  `'The endpoint is not open during call to getPipe'`. After the end, calls on
-  a pipe you borrowed raise the "pipeline has ended" error. The one exception
-  is `putPipe()`: after the end it does nothing and raises nothing, because
-  no pipe stack is left to take the pipe back. So a `putPipe()` in a `finally`
+- **`getPipe()` raises once the pipeline starts to end.** From the moment the
+  pipeline starts to end, `getPipe()` raises the same error, even when an idle
+  pipe exists. Do not call it on an endpoint object that you kept after the
+  task has ended (see the rule about not keeping the endpoint object for your
+  thread, below). After the end, calls on a pipe
+  you borrowed raise the same error too. The one exception is `putPipe()`:
+  after the end it does nothing and raises nothing, because no pipe stack is
+  left to take the pipe back. So a `putPipe()` in a `finally`
   block keeps the error that you are handling. While the pipeline is alive,
   and while the engine still takes new calls during the end, `putPipe()` gives
   the pipe back as usual.
@@ -365,6 +364,13 @@ This is what the engine guarantees, and what it asks of you:
   every new call and waits for the calls that are still running, for the rest
   of the 10 seconds. So a new call can be refused from about 5 seconds after
   the engine's wait began, or sooner, as soon as no call is running.
+  The same 10 seconds also cover a `getPipe()` that is still building a new
+  pipe when the end begins (the `beginInstance` of the nodes in that pipe runs
+  then). The engine waits for that build before it calls `IGlobal.endGlobal`,
+  and that `getPipe()` raises the "pipeline has ended" error. If the build
+  takes longer, your `endGlobal` runs when the build returns, on the thread
+  that called `getPipe()`. So do not hold a lock that your `endGlobal` takes
+  while you call `getPipe()`.
   A task waits for its source endpoint and then for its target endpoint, so up
   to about 20 seconds in all. The engine does not stop a call that takes
   longer; that call just returns late. If your node has its own `IEndpoint`
@@ -373,8 +379,11 @@ This is what the engine guarantees, and what it asks of you:
   and your `IGlobal.endGlobal` can run while a late call is still running.
   Anything these hooks close (a client, a connection) is closed for your
   thread too. Before it ends the nodes, the engine refuses every new call, so
-  an engine call from `endInstance` raises: use `endInstance` only to release
-  your node's own resources.
+  an engine call from `endInstance` (`self.instance.writeText(...)`,
+  `hasListener(...)`, `invoke(...)`, `currentObject`) raises; if
+  `endInstance` does not catch it, the task ends with that error. Read-only
+  properties such as `pipeType` and `sendSSE` still answer there. Use
+  `endInstance` only to release your node's own resources.
 - **Keeping `self.instance` does not keep the pipeline alive.** `self.instance`
   is an `engLib.IFilterInstanceHandle`: a handle with a weak link to the
   engine's object. A copy in a global, a closure or a thread raises once the

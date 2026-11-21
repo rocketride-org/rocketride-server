@@ -97,13 +97,14 @@ Error IServiceEndpoint::signal(const Text &signal,
 
 //-------------------------------------------------------------------------
 /// @details
-///		The deadline of the wait of endEndpoint(), or of a pipe build that
-///		is not published, for Python calls that are still running on its
-///		filters. A wait is checked every 50 ms, so it can run one check
-///		over the deadline. It equals the value of the engine's
-///		cancel fail-safe, async::globalCancelFailsafe(), and is deliberately
-///		a separate constant: a fail-safe of 0 means "exit at once" and must
-///		not turn the drain into a zero wait.
+///		The deadline of the waits of endEndpoint(), for Python calls that
+///		are still running on its filters and then for pipe builds, all
+///		together; and of the wait of a pipe build that is not published,
+///		for the calls on its filters. A wait is checked every 50 ms, so it
+///		can run one check over its share. It equals the value of the
+///		engine's cancel fail-safe, async::globalCancelFailsafe(), and is
+///		deliberately a separate constant: a fail-safe of 0 means "exit at
+///		once" and must not turn the drain into a zero wait.
 //-------------------------------------------------------------------------
 Atomic<time::Duration> &IServiceEndpoint::drainDeadline() noexcept {
     static Atomic<time::Duration> deadline{10s};
@@ -112,45 +113,34 @@ Atomic<time::Duration> &IServiceEndpoint::drainDeadline() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Waits until no Python call is running on any of the given filters,
-///		for the given budget; the time spent is taken off the budget. It
-///		checks every 50 ms, so it can end one check after the budget ran
-///		out. Whether the call gates are open or closed is up to the
-///		caller. The wait ends early on a cancel.
-///		Neither the stack lock nor a filter link lock is held while waiting.
-///		The GIL is released for the wait when this thread holds it, so the
-///		calls being waited for can finish. Nothing sleeps and the GIL is
-///		not touched when no call is in flight.
-///	@param[in]	filters
-///		The filters to watch
+///		Waits while busy() returns true, for the given budget; the time
+///		spent is taken off the budget. It checks every 50 ms, so it can
+///		end one check after the budget ran out. The wait ends early on a
+///		cancel: the calling thread was cancelled, or the global cancel
+///		flag is set. The GIL is released for the wait when Python is up
+///		and this thread holds it, so the work being waited for can
+///		finish. Nothing sleeps and the GIL is not touched when busy() is
+///		false at the first check.
+///	@param[in]	busy
+///		True while there is work to wait for. It is called with no lock
+///		of this function held, with or without the GIL
 ///	@param[in,out]	budget
 ///		The time left to wait; reduced by the time this call waited
 ///	@returns
-///		true when no call is in flight any more, false when the budget ran
-///		out or the wait was cancelled with calls still running
+///		true when busy() turned false, false when the budget ran out or
+///		the wait was cancelled while busy() was still true
 //-------------------------------------------------------------------------
-bool IServiceEndpoint::drainInFlightCalls(
-    const std::vector<ServiceInstance> &filters,
-    time::Duration &budget) noexcept {
-    const auto inFlight = [&]() noexcept {
-        uint32_t total = 0;
-        for (const auto &filter : filters) total += filter->callsInFlight();
-        return total;
-    };
-
-    // Normal case: nothing running, no wait
-    if (!inFlight())
+bool IServiceEndpoint::waitWhile(const std::function<bool()> &busy,
+                                 time::Duration &budget) noexcept {
+    // Normal case: nothing to wait for, no wait
+    if (!busy())
         return true;
 
     const auto start = time::now();
     {
-        // The calls we wait for need the GIL to finish. Python is up when a
-        // call is in flight; release the GIL only if this thread holds it.
-        std::optional<engine::python::UnlockPython> unlock;
-        if (Py_IsInitialized() && PyGILState_Check())
-            unlock.emplace();
+        engine::python::UnlockPythonIfHeld unlock;
 
-        while (inFlight()) {
+        while (busy()) {
             if (time::now() - start >= budget)
                 break;
             if (async::cancelled())
@@ -164,7 +154,60 @@ bool IServiceEndpoint::drainInFlightCalls(
     budget = spent >= budget ? time::Duration{0s}
                              : time::Duration{budget - spent};
 
-    return !inFlight();
+    return !busy();
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Waits until no Python call is running on any of the given filters,
+///		for the given budget, with waitWhile(). Whether the call gates are
+///		open or closed is up to the caller. Neither the stack lock nor a
+///		filter link lock is held while waiting.
+///	@param[in]	filters
+///		The filters to watch
+///	@param[in,out]	budget
+///		The time left to wait; reduced by the time this call waited
+///	@returns
+///		true when no call is in flight any more, false when the budget ran
+///		out or the wait was cancelled with calls still running
+//-------------------------------------------------------------------------
+bool IServiceEndpoint::drainInFlightCalls(
+    const std::vector<ServiceInstance> &filters,
+    time::Duration &budget) noexcept {
+    const auto inFlight = [&]() noexcept {
+        for (const auto &filter : filters)
+            if (filter->callsInFlight())
+                return true;
+        return false;
+    };
+    return waitWhile(inFlight, budget);
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Ends the given globals, the last one first, and empties the
+///		stack. In a config open mode they are let go without being ended.
+///	@param[in,out]	globals
+///		The globals to end; empty on return
+///	@param[in]	openMode
+///		The open mode the endpoint had when its end started
+///	@returns
+///		Error
+//-------------------------------------------------------------------------
+Error IServiceEndpoint::endGlobalStack(ServiceGlobalStack &globals,
+                                       OPEN_MODE openMode) noexcept {
+    Error ccode;
+    while (!globals.empty()) {
+        // Get the last filter
+        auto filter = _mv(globals.back());
+        globals.pop_back();
+
+        // Close it if we are not in config mode
+        if (openMode != OPEN_MODE::CONFIG &&
+            openMode != OPEN_MODE::PIPELINE_CONFIG)
+            ccode = filter->endFilterGlobal() || ccode;
+    }
+    return ccode;
 }
 
 //-------------------------------------------------------------------------
@@ -232,6 +275,13 @@ Error IServiceEndpoint::endInstanceStack(ServiceInstanceStack &stack,
 ///		     links retained and then the head of each stack is armed; the
 ///		     last call to leave a stack releases it (at once if it is
 ///		     already idle).
+///		  6. Wait, for what the two waits left of the deadline, until no
+///		     pipe build runs: a build reads the globals and makes its
+///		     filters from them. A build that is past the snapshot is
+///		     refused and ends its own stack before it leaves.
+///		  7. End the globals. If a build still runs, they stay in place
+///		     and the last build to leave ends them (leaveBuild()).
+///		Last, the task is let go: it may be freed once this returns.
 ///	@returns
 ///		Error
 //-------------------------------------------------------------------------
@@ -275,7 +325,7 @@ Error IServiceEndpoint::endEndpoint() noexcept {
     // wait did not use.
     for (const auto &filter : filters) filter->closeGate();
     auto budget = deadline - openShare + openBudget;
-    const bool drained = drainInFlightCalls(filters, budget);
+    bool drained = drainInFlightCalls(filters, budget);
 
     if (!drained) {
         // Name the filters whose calls did not return
@@ -289,9 +339,15 @@ Error IServiceEndpoint::endEndpoint() noexcept {
             names += _ts(" ", filter->pipeType.id, "(pipe ", filter->pipeId,
                          ", ", count, ")");
         }
-        // A cancel cuts the drain short; otherwise the whole deadline was
-        // waited
-        if (async::cancelled()) {
+        // A guard that passed its first gate check just before the gate
+        // closed counts itself for an instant and is then refused. With the
+        // gates closed no call can start, so a recount of zero means that
+        // the drain saw only such a guard: no call holds the links.
+        if (!total) {
+            drained = true;
+        } else if (async::cancelled()) {
+            // A cancel cuts the drain short; otherwise the whole deadline
+            // was waited
             LOG(Always, "Warning: teardown:", total,
                 "Python call(s) still in flight (cancel requested, the drain",
                 "was cut short); ending the filters without releasing their",
@@ -326,21 +382,50 @@ Error IServiceEndpoint::endEndpoint() noexcept {
         ccode = endInstanceStack(instanceStack, drained) || ccode;
     }
 
-    // Destroy all the globals, even if we are not open
-    while (!m_globalStack.empty()) {
-        // Get the last filter
-        auto filter = _mv(m_globalStack.back());
-        m_globalStack.pop_back();
+    // A pipe build reads m_globalStack and makes its filters from the
+    // globals, so they are ended only when no build runs. This wait gets
+    // what the two waits above left of the deadline.
+    waitWhile([&] { return buildsInProgress() != 0; }, budget);
 
-        // Close it if we are not in config mode
-        if (config.openMode != OPEN_MODE::CONFIG &&
-            config.openMode != OPEN_MODE::PIPELINE_CONFIG) {
-            ccode = filter->endFilterGlobal() || ccode;
+    // Take the globals out under the stack lock, or leave them to the last
+    // build if one still runs. A second end keeps the first one's mode.
+    ServiceGlobalStack globals;
+    uint32_t building = 0;
+    {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        building = m_building;
+        if (!building) {
+            globals = _mv(m_globalStack);
+            m_globalStack.clear();
+        } else if (!m_globalsEndMode) {
+            m_globalsEndMode = config.openMode;
         }
     }
 
+    if (building) {
+        if (async::cancelled()) {
+            LOG(Always, "Warning: teardown:", building,
+                "pipe build(s) still running (cancel requested, the wait",
+                "was cut short); the last build to return ends the globals");
+        } else {
+            LOG(Always, "Warning: teardown:", building,
+                "pipe build(s) still running after", deadline,
+                "; the last build to return ends the globals");
+        }
+    }
+
+    // End the globals taken out above, even if we are not open
+    ccode = endGlobalStack(globals, config.openMode) || ccode;
+
     // End it
     config.openMode = OPEN_MODE::NONE;
+
+    // Let go of the task last: a global's end may still write to it
+    {
+        std::lock_guard<async::Mutex> lock(m_taskLock);
+        m_task = nullptr;
+    }
     return ccode;
 }
 

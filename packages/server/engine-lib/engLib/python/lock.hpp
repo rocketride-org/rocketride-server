@@ -122,4 +122,22 @@ private:
 
     py::gil_scoped_release m_release;
 };
+
+//-------------------------------------------------------------------------
+/// @details
+///		Releases the GIL for the scope, as UnlockPython does, but only
+///		when Python is up and the calling thread holds the GIL; otherwise
+///		it does nothing. For engine code that may run with or without the
+///		GIL, such as a wait for work that needs the GIL to finish.
+//-------------------------------------------------------------------------
+class UnlockPythonIfHeld {
+public:
+    UnlockPythonIfHeld() {
+        if (Py_IsInitialized() && PyGILState_Check())
+            m_unlock.emplace();
+    }
+
+private:
+    std::optional<UnlockPython> m_unlock;
+};
 }  // namespace engine::python
