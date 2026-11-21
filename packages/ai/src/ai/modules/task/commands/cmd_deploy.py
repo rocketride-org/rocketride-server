@@ -570,13 +570,6 @@ class DeployCommands(_DeployBase):
         # the caller always sees which organization the registry write
         # landed in — cross-org targeting goes through an org switch.
         body: Dict[str, Any] = {'artifact': entry, 'orgId': org_id, 'fullName': full_name}
-        # How the published engine will be shared (plan 4.4): the publisher sees
-        # whether the pipe serves users on one engine or each user on their own
-        from ..task_engine import engine_sharing  # the engine module imports this package: lazy
-
-        sharing = engine_sharing(pipeline)
-        if sharing is not None:
-            body['engineSharing'] = sharing
         await self._notify_deploy_changed(org_id, '', project_id, 'add')
         if args.get('deployTo'):
             # One-step add+deploy — same checks as rrext_deploy_pipe deploy,

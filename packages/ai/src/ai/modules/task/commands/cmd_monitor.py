@@ -443,12 +443,12 @@ class MonitorCommands(DAPConn):
                         continue
 
                     # Get the task status once
-                    status = target.task.get_status()
+                    status = target.status_view()
 
                     # Only include tasks that are "active" (not idle, not completed)
                     # Active states: STARTING(1), INITIALIZING(2), RUNNING(3), STOPPING(4)
                     # Exclude: NONE(0), COMPLETED(5), CANCELLED(6)
-                    if status.state in [
+                    if status.get('state') in [
                         TASK_STATE.STARTING.value,
                         TASK_STATE.INITIALIZING.value,
                         TASK_STATE.RUNNING.value,
@@ -457,7 +457,7 @@ class MonitorCommands(DAPConn):
                         tasks.append(
                             {
                                 'id': target.id,
-                                'name': status.name,
+                                'name': status.get('name'),
                                 'projectId': target.project_id,
                                 'source': target.source,
                                 # Identity stamps (parity with the per-event

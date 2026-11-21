@@ -280,6 +280,7 @@ class TaskMetrics:
         on_update_callback: Optional[Callable[[], None]] = None,
         attribute: Optional[Callable[[int], Optional['TraceUsage']]] = None,
         usage_sink: Optional['UsageSink'] = None,
+        debit_remainder: bool = True,
     ):
         """
         Initialize metrics collector for a process tree.
@@ -298,12 +299,17 @@ class TaskMetrics:
             org_id: Organisation the task belongs to (for per-org billing)
             sample_interval: Seconds between metric samples (default: from constants.CONST_METRICS_SAMPLE_INTERVAL)
             on_update_callback: Optional callback to invoke when metrics are updated
+            debit_remainder: Whether the engine REMAINDER (what the engine
+                used beyond what its callers were attributed) is debited to
+                the identity above. False on a shared engine, which has no
+                single owner to charge (see ``_report_to_billing_system``).
 
         Raises:
             psutil.NoSuchProcess: If process does not exist
         """
         self.pid = pid
         self.task_id = task_id
+        self.debit_remainder = debit_remainder
         # Unique per-run identifier for billing idempotency. task_id is a
         # display ID (e.g. "44568e99.dropper_1") that can repeat across runs
         # with the same token. The billing_run_id ensures each run gets its
@@ -794,7 +800,14 @@ class TaskMetrics:
         # ── Write to ledger via account.apply_debit() ────────────────────
         # The account singleton dispatches to the SaaS implementation (UPSERT
         # into credit_ledger) or the OSS no-op depending on the active edition.
-        if not self.org_id or not token_totals:
+        # A SHARED engine writes NO remainder debit: it has no single owner,
+        # and each caller's cost already rides the per-request usage rows the
+        # sink posts (plan 8.3). Who carries what the engine used beyond its
+        # callers' attribution (split across controls, platform overhead, or
+        # the caller whose request started it) is plan 15 item 21, an OPEN
+        # decision; until it is made the remainder of a shared engine is
+        # charged to nobody.
+        if not self.debit_remainder or not self.org_id or not token_totals:
             return
 
         try:

@@ -409,6 +409,7 @@ def _team_run(address, task_id):
         task=SimpleNamespace(get_status=lambda: status, is_task_complete=lambda: False, shared=False),
         # A private engine's status passes through the projection unchanged
         project_status=lambda body, shared: body,
+        status_view=lambda: {'state': status.state, 'name': status.name},
     )
 
 

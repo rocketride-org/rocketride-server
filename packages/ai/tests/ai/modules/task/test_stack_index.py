@@ -229,10 +229,10 @@ def test_a_stack_row_without_a_component_keeps_its_slot(monkeypatch):
 
 
 def test_engine_content_orders_configs_by_the_engines_stack(stub_binding):
-    """The control's config follows the engine's stack; the content key (the engine key until C.25) is unchanged."""
+    """The control's config follows the engine's stack; the engine key is built on the shape hash, which ignores the ids."""
 
     def facts(provider, stored):
-        return dict(stored), True
+        return dict(stored), ('source', 'webhook')
 
     spec = _pipeline(instructions=['dry'])
     spec['components'].reverse()
@@ -242,10 +242,13 @@ def test_engine_content_orders_configs_by_the_engines_stack(stub_binding):
     assert content.stored_by_index == [{}, {'instructions': ['dry']}]
     assert content.shape_hash == 'shape-webhook-prompt'
 
-    # Renaming every id keeps the shape hash and moves nothing; the content
-    # hash still carries the ids until C.25 switches the key
+    # Renaming every id keeps the shape hash, and with it the engine key, and
+    # moves nothing; only the content hash (the fallback without the binding)
+    # carries the ids
     renamed = engine_content(_renamed(spec), 'hook', facts)
     assert renamed.shape_hash == content.shape_hash
+    assert renamed.key_hash == content.key_hash == content.shape_hash
+    assert renamed.key(rung='public', owner_id='user-b') == content.key(rung='public', owner_id='user-a')
     assert renamed.stored_by_index == content.stored_by_index
     assert renamed.content_hash != content.content_hash
 

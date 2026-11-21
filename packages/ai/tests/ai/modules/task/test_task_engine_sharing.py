@@ -20,16 +20,19 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Named-pipes runtime model: TaskControl / TaskEngine split (plan section 14, Step 3; C.22).
+"""Named-pipes runtime model: TaskControl / TaskEngine split (plan section 14, Step 3; C.22, C.25).
 
-One engine per SHAPE per owner: controls are the callers' views (owner, rung,
+One engine per SHAPE: controls are the callers' views (owner, rung,
 ``project_id``, resolved config, billing, ttl, parameters), handled by a
 control id and identified by their configuration; engines are processes
-keyed by the shape of the spec (providers, wiring, source) qualified by the
-owner on every rung in this PR. Specs of one owner that share a shape share
-an engine whatever their configuration; a spec differing in configuration
-under the same ``project_id`` is another control on that engine; another
-user's identical spec is another engine. Terminate releases a hold; the
+keyed by the shape of the spec (providers, wiring, source), qualified by the
+owner on ``@spec`` and bare on the published rungs, where every caller's
+control of one shape holds one engine (a self-driven source or a RocketRide
+cloud database keeps its owner on every rung). Specs of one owner that share
+a shape share an engine whatever their configuration; a spec differing in
+configuration under the same ``project_id`` is another control on that
+engine; another user's identical spec on ``@spec`` is another engine, on a
+published rung the same one. Terminate releases a hold; the
 engine stops with its last hold; publisher disable releases the
 deployment's holds; an operator, or the owner the key names, may stop an
 engine outright.
@@ -53,6 +56,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import rocketlib
+from rocketride import EVENT_TYPE
 
 from ai.account.models import AccountInfo
 from ai.common import node_config
@@ -61,8 +65,15 @@ from ai.modules.task import deploy_events, task_control, task_engine, task_serve
 from ai.modules.task.commands.cmd_data import DataCommands
 from ai.modules.task.commands.cmd_task import TaskCommands
 from ai.modules.task.task_control import DeploymentRef, TaskControl, TeamContext
-from ai.modules.task.engine_key import engine_content, pipeline_stack, qualified_key, stack_order
-from ai.modules.task.task_engine import MULTITENANT_BIT, TaskEngine, component_facts
+from ai.modules.task.engine_key import (
+    engine_content,
+    key_owner,
+    pipeline_stack,
+    properties_digest,
+    qualified_key,
+    stack_order,
+)
+from ai.modules.task.task_engine import TaskEngine, component_facts
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import EngineState, TaskError
 from ai.modules.task.trace_owner import TraceOwners
@@ -74,13 +85,22 @@ from ai.modules.task.trace_owner import TraceOwners
 
 #: Resolved-config defaults per provider: what the resolver applies to a
 #: stored config. ``local_tool`` is not a catalog node (its path is not under
-#: ``nodes.``), so it can never run on a cross-user engine.
+#: ``nodes.``): it shares by shape like any other node (plan 4.4).
 DEFAULTS: Dict[str, Dict[str, Any]] = {
     'webhook': {'type': 'webhook', 'mode': 'Source', 'hideForm': True},
     'prompt': {'instructions': ['Answer the question.'], 'maxTokens': 1024, 'stream': False, 'label': ''},
     'local_tool': {'depth': 1},
+    'rocketride_sql': {'scope': 'org'},
 }
 PATHS = {'webhook': 'nodes.webhook', 'prompt': 'nodes.prompt', 'local_tool': 'local_nodes.local_tool'}
+#: The catalog's ``classType`` words: the webhook is a DOOR source; a prompt
+#: or a tool as the entry source drives itself (a listener's shape).
+CLASSES = {
+    'webhook': ['source', 'webhook'],
+    'prompt': ['llm'],
+    'local_tool': ['tool'],
+    'rocketride_sql': ['database'],
+}
 #: The keys each provider flags ``param`` (what a pipeline may expose per call).
 PARAMS = {'prompt': ('instructions',)}
 #: The declared type of each leaf, as a leaf descriptor would say it.
@@ -98,6 +118,9 @@ class _View:
 
     def to_dict(self):
         return dict(self._values)
+
+    def get(self, key, default=None):
+        return self._values.get(key, default)
 
     def __iter__(self):
         return iter(self._values)
@@ -125,23 +148,20 @@ class _View:
 
 @pytest.fixture
 def catalog(monkeypatch):
-    """Resolve configs against DEFAULTS; ``certified`` lists the multitenant providers."""
-    certified = {'webhook', 'prompt', 'local_tool'}
+    """Resolve configs against DEFAULTS; the service definitions carry PATHS and CLASSES."""
 
     def resolve(provider, config):
         if provider not in DEFAULTS:
             raise ValueError(f'The service {provider} was not found')
         return _View(provider, config)
 
-    def schema(provider):
-        caps = MULTITENANT_BIT if provider in certified else 0
-        return {'capabilities': caps} if provider in DEFAULTS else None
+    def definition(provider):
+        return {'path': PATHS.get(provider, ''), 'classType': list(CLASSES.get(provider, []))}
 
     monkeypatch.setattr(task_engine, 'resolve_node_config', resolve)
     monkeypatch.setattr(node_config, 'resolve_node_config', resolve)
-    monkeypatch.setattr(task_engine, 'node_schema', schema)
-    monkeypatch.setattr(rocketlib, 'getServiceDefinition', lambda provider: {'path': PATHS.get(provider, '')})
-    return certified
+    monkeypatch.setattr(rocketlib, 'getServiceDefinition', definition)
+    return CLASSES
 
 
 @pytest.fixture
@@ -344,21 +364,21 @@ def test_placeholders_stay_unexpanded_in_the_resolved_config(catalog):
     assert first != task_control.config_hash(other)
 
 
-def test_shareable_needs_a_request_source_certified_nodes_and_the_catalog(catalog):
-    """Cross-user sharing is source-first, then every node certified and from the catalog."""
-    assert engine_content(_pipeline(), 'webhook_1', component_facts).shareable
+def test_a_door_source_shares_and_a_self_driven_source_keeps_its_owner(catalog):
+    """The entry source's catalog classType decides (plan 4.4): a door shares by shape; anything else drives itself."""
+    door = engine_content(_pipeline(), 'webhook_1', component_facts)
+    assert door.source_classes == ('source', 'webhook') and not door.self_driven
+    assert door.key(rung='public', owner_id='user-a') == door.key_hash
 
-    # An uncertified node keeps the engine per owner
-    catalog.discard('prompt')
-    assert not engine_content(_pipeline(), 'webhook_1', component_facts).shareable
-    catalog.add('prompt')
-
-    # A non-catalog node, even certified
+    # A custom (non-catalog) node shares like a catalog one: nothing certifies
     extra = {'id': 'tool_1', 'provider': 'local_tool', 'config': {}}
-    assert not engine_content(_pipeline(extra=extra), 'webhook_1', component_facts).shareable
+    assert not engine_content(_pipeline(extra=extra), 'webhook_1', component_facts).self_driven
 
-    # A listener (not request/response) entry source
-    assert not engine_content(_pipeline(), 'prompt_1', component_facts).shareable
+    # An entry source that is no door (a listener's shape) keeps its owner on every rung
+    listener = engine_content(_pipeline(), 'prompt_1', component_facts)
+    assert listener.self_driven
+    for rung in ('spec', 'me', 'team', 'public'):
+        assert listener.key(rung=rung, owner_id='user-a') == f'{listener.key_hash}:user-a'
 
     # A component the resolver cannot resolve is an ERROR, never a private key
     # over its raw config (audit 2026-11-12): the start refuses the spec
@@ -380,11 +400,30 @@ def test_the_real_resolver_applies_schema_defaults():
     )
 
 
-def test_engine_key_is_the_hash_qualified_by_owner_on_every_rung():
-    """Every rung keys its engine by shape and owner in this PR (C.25 leaves the published rungs bare)."""
-    for rung in ('spec', 'me', 'team', 'public'):
-        assert qualified_key('abc', rung=rung, owner_id='user-a') == 'abc:user-a'
+def test_engine_key_is_owner_qualified_on_spec_only():
+    """Plan 4.4: (shape, owner) on @spec, the bare shape on the published rungs; a private shape keeps its owner."""
+    assert qualified_key('abc', rung='spec', owner_id='user-a') == 'abc:user-a'
+    for rung in ('me', 'team', 'public'):
+        assert qualified_key('abc', rung=rung, owner_id='user-a') == 'abc'
+        assert qualified_key('abc', rung=rung, owner_id='user-a', private=True) == 'abc:user-a'
     assert qualified_key('abc', rung='spec', owner_id='') == 'abc'
+
+
+def test_off_policy_engine_properties_key_their_own_spec_engine():
+    """A @spec call's threads/args departing from policy key an engine of their own; a published rung ignores them."""
+    digest = properties_digest(4, ['--x'])
+    assert digest == properties_digest(4, ['--x']) and digest != properties_digest(4, ['--y'])
+    assert qualified_key('abc', rung='spec', owner_id='user-a', properties=digest) == f'abc+{digest}:user-a'
+    assert qualified_key('abc', rung='public', owner_id='user-a', properties=digest) == 'abc'
+    assert qualified_key('abc', rung='me', owner_id='user-a', private=True, properties=digest) == 'abc:user-a'
+
+
+def test_key_owner_reads_the_owner_a_key_names():
+    """A bare key names nobody; a qualified one its owner, whatever precedes it."""
+    assert key_owner('abc') == ''
+    assert key_owner('abc:user-a') == 'user-a'
+    assert key_owner('abc+0123456789ab:team-1') == 'team-1'
+    assert key_owner('') == ''
 
 
 # =============================================================================
@@ -393,13 +432,13 @@ def test_engine_key_is_the_hash_qualified_by_owner_on_every_rung():
 
 
 @pytest.mark.asyncio
-async def test_two_users_identical_specs_are_two_engines_in_this_pr(catalog, engines):
-    """Engines are owner-qualified on every rung (plan 13 Step 3c PR 1): a second user's identical spec is a second engine."""
+async def test_two_users_identical_specs_on_spec_are_two_engines(catalog, engines):
+    """@spec engines are owner-qualified (plan 4.4): a second user's identical spec is a second engine."""
     ts = _server()
     a = await _start(ts, _pipeline(), user='user-a', team='team-a', org='org-a')
     b = await _start(ts, _pipeline(), user='user-b', team='team-b', org='org-b')
 
-    content = engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
+    content = engine_content(_pipeline(), 'webhook_1', component_facts).key_hash
     assert a is not b and a.task is not b.task
     assert (a.task.engine_key, b.task.engine_key) == (f'{content}:user-a', f'{content}:user-b')
     assert a.task.holds == {a.key} and b.task.holds == {b.key}
@@ -420,7 +459,7 @@ async def test_a_different_configuration_is_another_control_on_the_same_engine(c
     assert a.task.holds == {a.key, b.key}
     assert a.config_hash != b.config_hash
     assert a.index_key == b.index_key and {id(c) for c in ts._task_control.lookup(a.index_key)} == {id(a), id(b)}
-    assert a.task.engine_key == f'{engine_content(_pipeline(), "webhook_1", component_facts).content_hash}:user-a'
+    assert a.task.engine_key == f'{engine_content(_pipeline(), "webhook_1", component_facts).key_hash}:user-a'
 
 
 @pytest.mark.asyncio
@@ -470,9 +509,8 @@ async def test_specs_differing_only_in_parameters_share_one_engine(catalog, engi
 
 
 @pytest.mark.asyncio
-async def test_every_engine_is_the_owners(catalog, engines):
-    """The key is (shape, owner) whatever the catalog certifies: the owner's runs share; another user does not."""
-    catalog.discard('prompt')
+async def test_every_spec_engine_is_the_owners(catalog, engines):
+    """On @spec the key is (shape, owner): the owner's runs share; another user's do not."""
     ts = _server()
 
     mine = await _start(ts, _pipeline(), user='user-a')
@@ -482,7 +520,7 @@ async def test_every_engine_is_the_owners(catalog, engines):
     copy_of_mine = await _start(ts, _copy(), user='user-a')
     theirs = await _start(ts, _pipeline(), user='user-b')
 
-    content = engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
+    content = engine_content(_pipeline(), 'webhook_1', component_facts).key_hash
     assert again is mine
     assert copy_of_mine is not mine and copy_of_mine.task is mine.task
     assert mine.task.engine_key == f'{content}:user-a'
@@ -491,17 +529,252 @@ async def test_every_engine_is_the_owners(catalog, engines):
 
 
 @pytest.mark.asyncio
-async def test_threads_on_a_spec_call_are_the_starters(catalog, engines):
-    """A @spec call may set the thread count; the starter's value holds for the engine's life."""
+async def test_threads_off_policy_on_a_spec_call_key_an_engine_of_their_own(catalog, engines):
+    """A @spec call may set threads/args; off policy they key the owner's own engine, which keeps the starter's values."""
     ts = _server()
     custom = await _start(ts, _pipeline(), user='user-a', threads=4)
-    stock = await _start(ts, _pipeline(), user='user-b')
+    stock = await _start(ts, _copy(), user='user-a')
+    argued = await _start(ts, _pipeline(project_id='docBrainArgs'), user='user-a', args=['--x'])
 
-    content = engine_content(_pipeline(), 'webhook_1', component_facts).content_hash
-    assert custom.task.engine_key == f'{content}:user-a'
+    content = engine_content(_pipeline(), 'webhook_1', component_facts).key_hash
+    assert custom.task.engine_key == f'{content}+{properties_digest(4, [])}:user-a'
     assert custom.task._threads == 4
-    assert stock.task.engine_key == f'{content}:user-b'
+    assert stock.task is not custom.task and stock.task.engine_key == f'{content}:user-a'
     assert stock.task._threads == CONST_DEFAULT_MAX_THREADS
+    assert argued.task.engine_key == f'{content}+{properties_digest(CONST_DEFAULT_MAX_THREADS, ["--x"])}:user-a'
+    assert len({custom.task, stock.task, argued.task}) == 3
+
+
+# =============================================================================
+# SHARED ENGINES ON THE PUBLISHED RUNGS (C.25)
+# =============================================================================
+
+
+async def _publish(ts, pipeline, *, user, rung='public', team='team-1', org='org-1', env_source=None, **arguments):
+    """Start (or attach) ``user``'s own control on a published rung, the way the trusted dispatch does."""
+    request = {'command': 'execute', 'arguments': {'pipeline': copy.deepcopy(pipeline), **arguments}}
+    result = await ts.start_task(
+        request,
+        MagicMock(),
+        client_id=user,
+        user_id=user,
+        team_id=team,
+        org_id=org,
+        env_source=env_source,
+        run_kind='deploy',
+        owner_kind='user',
+        rung=rung,
+        developer_id='acme',
+        deployment=DeploymentRef(org_id=org, team_id=f'user~{user}', project_id=pipeline['project_id']),
+    )
+    return ts._task_control[result['token']]
+
+
+@pytest.mark.asyncio
+async def test_two_users_configs_of_one_published_shape_share_one_engine(catalog, engines):
+    """C.25 exit: two users' different configurations of one published shape are ONE engine and two controls."""
+    ts = _server()
+    a = await _publish(ts, _pipeline(instructions=['Be brief.']), user='user-a', org='org-a')
+    b = await _publish(ts, _pipeline(instructions=['Be thorough.']), user='user-b', org='org-b')
+
+    content = engine_content(_pipeline(), 'webhook_1', component_facts).key_hash
+    assert a is not b and a.task is b.task and len(ts._engines) == 1
+    assert a.task.engine_key == content and a.task.shared
+    assert a.task.holds == {a.key, b.key}
+    # Each control carries its own configuration to the engine on its open
+    assert {'instructions': ['Be brief.']} in a.caller_config()
+    assert {'instructions': ['Be thorough.']} in b.caller_config()
+    assert all(component['config'] == {} for component in a.task._pipeline['components'])
+    # Attribution rides each control: two controls on one engine bill two accounts
+    assert (a.billing.org_id, a.billing.user_id) == ('org-a', 'user-a')
+    assert (b.billing.org_id, b.billing.user_id) == ('org-b', 'user-b')
+
+    # @me shares the same way, on its own engine beside the owner's @spec one
+    mine = await _publish(ts, _pipeline(), user='user-a', rung='me')
+    dev = await _start(ts, _pipeline(), user='user-a')
+    assert mine.task is a.task
+    assert dev.task is not a.task and dev.task.engine_key == f'{content}:user-a'
+
+
+@pytest.mark.asyncio
+async def test_a_self_driven_source_keeps_its_owner_on_every_rung(catalog, engines):
+    """A listener's shape (no door classType on its source) runs one listener per owner: owner-qualified everywhere."""
+    ts = _server()
+    a = await _publish(ts, _pipeline(), user='user-a', source='prompt_1')
+    b = await _publish(ts, _pipeline(), user='user-b', source='prompt_1')
+
+    content = engine_content(_pipeline(), 'prompt_1', component_facts).key_hash
+    assert a.task is not b.task
+    assert (a.task.engine_key, b.task.engine_key) == (f'{content}:user-a', f'{content}:user-b')
+    assert not a.task.shared and a.task.client_id == 'user-a'
+
+
+def _db_pipeline(scope='org', target='', project_id='docDb'):
+    """A webhook -> RocketRide cloud SQL pipeline."""
+    pipeline = _pipeline(project_id=project_id)
+    config = {'scope': scope, **({'target': target} if target else {})}
+    pipeline['components'].append(
+        {
+            'id': 'sql_1',
+            'provider': 'rocketride_sql',
+            'config': config,
+            'input': [{'lane': 'text', 'from': 'webhook_1'}],
+        }
+    )
+    return pipeline
+
+
+@pytest.fixture
+def db_account(monkeypatch):
+    """An account that approves every database and records the run identity each decision was asked for."""
+    import ai.account
+
+    asked: List[tuple] = []
+
+    async def authorize(identity, request):
+        asked.append((identity['user_id'], identity['org_id'], dict(request)))
+        owner = request.get('team_id') or request.get('user_id') or identity['org_id']
+        return SimpleNamespace(allowed=True, reason='', owner_id=owner)
+
+    monkeypatch.setattr(ai.account.account, 'authorize_db_target', authorize, raising=False)
+    return asked
+
+
+@pytest.mark.asyncio
+async def test_a_cloud_database_shape_keeps_its_owner_and_every_control_is_authorized(catalog, engines, db_account):
+    """The DSNs ride the engine process once, so a DB shape is owner-qualified; each control is authorized as itself."""
+    ts = _server()
+    a = await _publish(ts, _db_pipeline(), user='user-a', org='org-a')
+    b = await _publish(ts, _db_pipeline(), user='user-b', org='org-b')
+
+    content = engine_content(_db_pipeline(), 'webhook_1', component_facts).key_hash
+    assert a.task is not b.task
+    assert (a.task.engine_key, b.task.engine_key) == (f'{content}:user-a', f'{content}:user-b')
+    assert [(user, org) for user, org, _ in db_account] == [('user-a', 'org-a'), ('user-b', 'org-b')]
+    assert a.db_approved == {'org': 'org-a'}
+
+
+@pytest.mark.asyncio
+async def test_a_control_attaching_needs_the_databases_its_engine_was_handed(catalog, engines, db_account):
+    """A running engine's process holds the DSNs of its start: a later control asking for another is refused."""
+    ts = _server()
+    first = await _start(ts, _db_pipeline(), user='user-a')
+    # What the engine's own start approved (the fake start does not run it)
+    first.task.db_approved = dict(first.db_approved)
+
+    # The same database: the control attaches
+    same = await _start(ts, _db_pipeline(project_id='docDbCopy'), user='user-a')
+    assert same.task is first.task
+
+    # Another database on the same shape: refused, nothing registered
+    with pytest.raises(TaskError) as refused:
+        await _start(ts, _db_pipeline(scope='team', project_id='docDbTeam'), user='user-a')
+    assert refused.value.code == TaskError.ENGINE_UNAVAILABLE and 'team' in str(refused.value)
+    assert first.task.holds == {first.key, same.key}
+    assert len(ts._task_control) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_shared_engine_carries_no_user_identity_and_no_user_env(catalog, engines, monkeypatch, tmp_path):
+    """Plan 7.2: a shared engine starts as nobody, from the shape alone; env rides each control's open."""
+    monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
+    ts = _server()
+    env_source = AsyncMock(return_value={'ROCKETRIDE_TONE': 'secret-of-a'})
+    spec = _pipeline(instructions=['Be brief.'], parameters={'tone': 'prompt_1.instructions'})
+    control = await _publish(ts, spec, user='user-a', env_source=env_source, pipelineTraceLevel='full')
+    engine = control.task
+
+    assert engine.shared and engine._env_source is not env_source and await engine._env_source() == {}
+    assert (engine.client_id, engine.team_id, engine.org_id, engine.address, engine.project_id) == ('', '', '', '', '')
+    assert 'user-a' not in engine.id and control.address not in engine.id
+    assert engine._pipelineTraceLevel == 'none' and engine._launch_args == {}
+    assert await engine._default_env(spec) == {}
+
+    task = engine._build_task(engine._pipeline, env={'ROCKETRIDE_TONE': 'secret-of-a'})
+    written = task['config']['pipeline']
+    assert task['config']['env'] == {}
+    assert 'identity' not in task and 'storage' not in task
+    assert written['project_id'] == '' and written['name'] is None and written['parameters'] == {}
+    assert all(component['config'] == {} for component in written['components'])
+    assert 'secret-of-a' not in str(task) and 'docBrain' not in str(task) and 'Be brief.' not in str(task)
+
+    # Its own usage names nobody and writes no remainder debit (plan 15 item 21)
+    identity = engine._metrics_identity()
+    assert (identity['client_id'], identity['team_id'], identity['org_id']) == ('', '', '')
+    assert identity['debit_remainder'] is False
+
+    # The control still carries its own environment to the engine on its open
+    env_source.assert_not_awaited()
+    assert control.task is engine and control.address == 'acme.docBrain.webhook_1'
+
+
+@pytest.mark.asyncio
+async def test_a_shared_engines_credit_check_asks_the_callers_org_and_refuses_no_caller(catalog, engines, monkeypatch):
+    """The paying unit is the binding's caller; a binding with no caller on a shared engine has nobody to pay."""
+    import ai.account
+
+    check = AsyncMock(return_value=None)
+    monkeypatch.setattr(ai.account.account, 'check_spend', check, raising=False)
+    ts = _server()
+    engine = (await _publish(ts, _pipeline(), user='user-a', org='org-a')).task
+
+    answered = await task_engine._check_spend(engine, {'caller': {'orgId': 'org-b', 'userId': 'user-b'}}, None)
+    assert answered.body == {'refusal': None}
+    check.assert_awaited_once_with('org-b')
+
+    refused = await task_engine._check_spend(engine, {}, None)
+    assert refused.body == {'refusal': task_engine.CONST_NO_PAYING_UNIT}
+    assert check.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_a_shared_engines_lifecycle_events_name_each_holder_never_another(catalog, engines):
+    """A shared engine's task events reach every holder, each copy naming that holder's own address and project."""
+    ts = _server()
+    a = await _publish(ts, _pipeline(name='Alpha'), user='user-a')
+    b = await _publish(ts, _pipeline(project_id='docBeta', name='Beta'), user='user-b')
+    engine = a.task
+    assert engine is b.task
+    ts.broadcast_task_event = AsyncMock()
+    engine._run_log_failed = set(engine.holds)
+
+    event = engine.build_event('apaevt_task', body={'action': 'begin', 'name': 'x', 'projectId': ''}, id=engine.id)
+    await engine._forward_task_event(EVENT_TYPE.TASK, event)
+
+    sent = {c.kwargs['key']: c.kwargs['event'] for c in ts.broadcast_task_event.await_args_list}
+    assert set(sent) == {a.key, b.key}
+    assert (sent[a.key]['body']['__id'], sent[a.key]['body']['projectId'], sent[a.key]['body']['name']) == (
+        a.id,
+        'docBrain',
+        'Alpha',
+    )
+    assert (sent[b.key]['body']['__id'], sent[b.key]['body']['projectId'], sent[b.key]['body']['name']) == (
+        b.id,
+        'docBeta',
+        'Beta',
+    )
+
+
+@pytest.mark.asyncio
+async def test_task_list_rows_of_a_shared_engine_show_each_control_its_own_status(catalog, engines):
+    """The dashboard and task-list rows read the control's projection, never the shared engine's totals."""
+    from ai.modules.task.commands.cmd_misc import MiscCommands
+
+    ts = _server()
+    a = await _publish(ts, _pipeline(name='Alpha'), user='user-a')
+    b = await _publish(ts, _pipeline(project_id='docBeta', name='Beta'), user='user-b')
+    engine = a.task
+    engine._status.completedCount = 99
+    engine._status.rateCount = 7
+    engine._status.status = 'Processing the-other-callers-file.pdf'
+    a.stats = task_control.ControlStats(totalCount=3, completedCount=2, failedCount=1)
+
+    rows = {row['id']: row for row in MiscCommands._build_task_rows(MagicMock(), [a, b], time.time())}
+
+    assert (rows[a.id]['completedCount'], rows[a.id]['totalCount'], rows[a.id]['name']) == (2, 3, 'Alpha')
+    assert (rows[b.id]['completedCount'], rows[b.id]['name']) == (0, 'Beta')
+    assert all(row['rateCount'] == 0 and not row['status'] for row in rows.values())
+    assert all(row['engineState'] == 'running' for row in rows.values())
 
 
 @pytest.mark.asyncio
@@ -881,6 +1154,24 @@ async def test_a_restart_carries_the_stopped_engines_shape(catalog, engines, clo
 
 
 @pytest.mark.asyncio
+async def test_a_shared_engine_restarted_by_any_holder_is_still_nobodys(catalog, engines, clock):
+    """A dormant holder of a shared engine starts it again under the bare key, with no identity of its own lent."""
+    ts = _server()
+    a = await _publish(ts, _pipeline(), user='user-a', ttl=3600)
+    b = await _publish(ts, _pipeline(), user='user-b', ttl=3600)
+    stopped = a.task
+    await _idle_out(ts, clock)
+    assert a.dormant and b.dormant
+
+    engine = await ts.ensure_engine(b)
+
+    assert engine is not stopped and engine.engine_key == stopped.engine_key and engine.shared
+    assert (engine.client_id, engine.org_id, engine.address) == ('', '', '')
+    # The other holder attaches to the one new engine on its next request
+    assert await ts.ensure_engine(a) is engine and engine.holds == {a.key, b.key}
+
+
+@pytest.mark.asyncio
 async def test_concurrent_requests_after_a_stop_start_one_engine(catalog, engines, clock, monkeypatch):
     """Concurrent restarters, through one control or several, attach to the one new engine."""
     ts = _server()
@@ -1187,12 +1478,10 @@ async def test_status_shows_starting_while_in_the_start_gate(catalog, engines, c
 @pytest.mark.asyncio
 async def test_publisher_disable_releases_the_deployment_holds(catalog, engines):
     """Disable releases every hold that resolved through the deployment; others keep the engine."""
-    catalog.discard('prompt')  # per-owner engine: the owner's dev run and @me deploy share it
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
-    dev = await _start(ts, _pipeline(), user='user-a')
-    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
-    assert dev.task is deployed.task and deployed.rung == 'me'
+    deployed = await _publish(ts, _pipeline(), user='user-a', rung='me')
+    other = await _publish(ts, _pipeline(), user='user-b', rung='me')
+    assert other.task is deployed.task and deployed.rung == 'me'
 
     # Enabling releases nothing
     await deploy_events.release_deployment_holds(ts, 'org-1', 'user~user-a', 'docBrain', 'enabled')
@@ -1200,8 +1489,8 @@ async def test_publisher_disable_releases_the_deployment_holds(catalog, engines)
 
     await deploy_events.release_deployment_holds(ts, 'org-1', 'user~user-a', 'docBrain', 'disabled')
     assert deployed.key not in ts._task_control
-    assert ts._task_control[dev.key] is dev
-    assert dev.task.holds == {dev.key}
+    assert ts._task_control[other.key] is other
+    assert other.task.holds == {other.key}
     assert engines == []
 
 
@@ -1301,9 +1590,8 @@ async def test_a_spec_that_cannot_be_keyed_is_refused_at_start(catalog, engines)
 async def test_a_restart_is_a_successor_with_a_new_id_on_the_same_engine_when_the_shape_holds(catalog, engines):
     """Plan 7.3: Play on an existing run terminates the control and creates its successor; the engine stays when the shape did."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
     dev = await _start(ts, _pipeline(), user='user-a')
-    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    deployed = await _start(ts, _copy(), user='user-a')
     assert dev.task is deployed.task
     engine = dev.task
 
@@ -1376,9 +1664,8 @@ async def test_a_restart_whose_engine_never_confirms_running_leaves_the_predeces
 async def test_a_restart_keeps_the_other_holder_and_the_subscriptions(catalog, engines):
     """The other holder keeps its engine unchanged; the monitors keyed by the project stay for the successor."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
     dev = await _start(ts, _pipeline(), user='user-a')
-    deployed = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
+    deployed = await _start(ts, _copy(), user='user-a')
     old_engine = dev.task
     rewired = _pipeline()
     rewired['components'][1]['input'] = [{'lane': 'text', 'from': 'webhook_1'}]
@@ -1667,7 +1954,7 @@ def _conn(sys_permissions):
 @pytest.mark.asyncio
 @pytest.mark.parametrize('sys_permissions', [[], ['sys.app']])
 async def test_engine_stop_of_a_shared_engine_requires_sys_admin(sys_permissions):
-    """A key without an owner (none exist before C.25) is an operator's only."""
+    """A key without an owner (a shared engine) is an operator's only."""
     conn = _conn(sys_permissions)
     with pytest.raises(PermissionError):
         await TaskCommands.on_rrext_engine_stop(conn, {'arguments': {'engineKey': 'abc'}})
@@ -1864,7 +2151,7 @@ def test_no_engine_names_a_user(monkeypatch, tmp_path):
 
 @pytest.mark.asyncio
 async def test_start_task_builds_an_owner_qualified_engine_with_the_owners_env(catalog, engines):
-    """Every engine of this PR is its owner's: the owner's client id, env source and trace level."""
+    """A @spec engine is its owner's: the owner's client id, env source and trace level."""
     ts = _server()
     env_source = AsyncMock(return_value={'ROCKETRIDE_TONE': 'secret-of-a'})
     request = {'command': 'execute', 'arguments': {'pipeline': _pipeline(), 'pipelineTraceLevel': 'full'}}
@@ -2380,24 +2667,6 @@ async def test_a_crashed_request_response_engine_waits_for_a_request(catalog, en
 
     assert control.dormant and restarts.slept == []
     assert ts._engine_restarts == {}
-
-
-# =============================================================================
-# THE SHARING DECISION AS A WORD (plan 4.4, shown at validate and publish)
-# =============================================================================
-
-
-def test_engine_sharing_names_the_decision(catalog):
-    """A request/response source with certified nodes shares across users; a listener-shaped source per owner;
-    an unkeyable spec has no answer (its start is refused).
-    """
-    from ai.modules.task.task_engine import engine_sharing
-
-    assert engine_sharing(_pipeline()) == 'users'
-    assert engine_sharing(_pipeline(), source='prompt_1') == 'owner'
-    unknown = _pipeline()
-    unknown['components'][1]['provider'] = 'no_such_node'
-    assert engine_sharing(unknown) is None
 
 
 @pytest.mark.asyncio

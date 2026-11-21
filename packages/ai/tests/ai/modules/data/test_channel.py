@@ -127,6 +127,7 @@ def _engine_task(port):
     """The engine-side ``Task`` with what ``_dial`` and the request path consult."""
     t = TaskEngine.__new__(TaskEngine)
     t.id = 'task-1'
+    t.shared = False
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
     t._data_client = None
