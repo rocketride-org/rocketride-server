@@ -366,6 +366,24 @@ function makeContractScriptAction(flag) {
 	});
 }
 
+/**
+ * Action factory for the floor-scoping tests (scripts/contract-floors.test.js):
+ * per-major floor selection and CRLF-proof floor reads. Built-in runner only,
+ * no toolchain, so it runs ahead of the regen it guards.
+ *
+ * @returns {Object} Action with run method.
+ */
+function makeFloorsTestAction() {
+	return {
+		run: async (ctx, task) => {
+			await execCommand('node', ['--test', path.join(__dirname, 'contract-floors.test.js')], {
+				task,
+				cwd: PACKAGE_DIR,
+			});
+		},
+	};
+}
+
 // ============================================================================
 // Module Export
 // ============================================================================
@@ -393,6 +411,7 @@ module.exports = {
 		{ name: 'client-typescript:freeze-run', action: makeContractScriptAction() },
 		{ name: 'client-typescript:check-run', action: makeContractScriptAction('--check') },
 		{ name: 'client-typescript:regen-run', action: makeContractScriptAction('--regen') },
+		{ name: 'client-typescript:floors-test', action: makeFloorsTestAction },
 
 		// Public actions (have descriptions)
 		{
@@ -461,14 +480,15 @@ module.exports = {
 		},
 		{
 			// Regenerate the DERIVED contract artifacts (barrels + conformance
-			// file) from the immutable frozen floors, then verify the floors
-			// hold. Must be a no-op on a clean tree — CI pairs this with
-			// `git diff --exit-code` so a hand-edited floor cannot launder a
-			// breaking change past the tsc floors.
+			// file) from the immutable frozen floors of the package major, then
+			// verify the floors hold. Must be a no-op on a clean tree — CI
+			// pairs this with `git diff --exit-code` so a hand-edited floor
+			// cannot launder a breaking change past the tsc floors. The
+			// floor-scoping tests run first.
 			name: 'client-typescript:regen',
 			action: () => ({
 				description: 'Regenerate derived client SDK contract artifacts from the immutable floors',
-				steps: ['client-typescript:regen-run'],
+				steps: ['client-typescript:floors-test', 'client-typescript:regen-run'],
 			}),
 		},
 		{

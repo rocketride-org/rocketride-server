@@ -142,7 +142,16 @@ node scripts/build.js client-typescript:regen && git diff --exit-code -- \
   packages/client-typescript/contract/latest.ts
 ```
 
-It regen-checks the client-typescript SDK contract floors the same way.
+It regen-checks the client-typescript SDK contract floors the same way, after
+running the floor-scoping tests (`scripts/contract-floors.test.js`). Unlike the
+shell contract, which is not semver and stays append-only forever, the SDK
+floors are held per major: a 2.x surface is checked against the 2.x floors
+only, and the 1.x floors stay in `contract/versions/` as immutable history. A
+major bump is the one place the SDK surface may narrow, and `regen` fails until
+`./builder client-typescript:freeze` has cut the new major's first floor. The
+frozen floors check out with LF line endings on every platform
+(`.gitattributes`), and both freeze scripts compare them with line endings
+normalized.
 
 ### Helm — `helm-lint` (blocking, `deploy/helm/**` PRs only)
 

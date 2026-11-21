@@ -474,10 +474,11 @@ function generateCandidate() {
 	// Strip non-public class members so inlined classes compare structurally,
 	// expand map-generic signatures into per-key overloads so frozen floors
 	// tolerate additive map growth (see expandMapGenerics), then normalize
-	// trailing whitespace so the no-op comparison is stable.
+	// line endings to LF and trailing whitespace so the no-op comparison is
+	// stable.
 	const stripped = stripNonPublicMembers(fs.readFileSync(candidatePath, 'utf8'), ts);
 	const expanded = expandMapGenerics(stripped, ts);
-	return `${expanded.replace(/\s+$/, '')}\n`;
+	return `${expanded.replace(/\r\n?/g, '\n').replace(/\s+$/, '')}\n`;
 }
 
 /**
@@ -497,12 +498,18 @@ function determineVersions() {
 	return { next: max + 1, prev: max };
 }
 
-/** Extract the declaration body between the BEGIN/END markers of a version file. */
+/**
+ * Extract the declaration body between the BEGIN/END markers of a version
+ * file, with LF line endings. A Windows checkout with core.autocrlf=true
+ * writes CRLF into the working tree while the generator emits LF, so the raw
+ * text would read as drift on an unchanged surface.
+ */
 function extractBundleBody(fileContent) {
-	const start = fileContent.indexOf(BEGIN);
-	const end = fileContent.indexOf(END);
+	const text = fileContent.replace(/\r\n?/g, '\n');
+	const start = text.indexOf(BEGIN);
+	const end = text.indexOf(END);
 	if (start === -1 || end === -1) return null;
-	return fileContent.slice(start + BEGIN.length, end).trim();
+	return text.slice(start + BEGIN.length, end).trim();
 }
 
 // NOTE: there is deliberately no compatibility gate here anymore. Backward
