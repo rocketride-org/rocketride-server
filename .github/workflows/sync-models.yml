@@ -71,6 +71,7 @@ jobs:
             [llm_glm]=ROCKETRIDE_GLM_KEY
             [llm_gmi_cloud]=ROCKETRIDE_GMI_CLOUD_KEY
             [llm_nebius]=ROCKETRIDE_NEBIUS_KEY
+            [llm_atlascloud]=ROCKETRIDE_ATLASCLOUD_KEY
             [llm_vision_openai]=ROCKETRIDE_OPENAI_KEY
             [llm_vision_gemini]=ROCKETRIDE_GEMINI_KEY
             [llm_vision_mistral]=ROCKETRIDE_MISTRAL_KEY
@@ -106,6 +107,7 @@ jobs:
           ROCKETRIDE_GLM_KEY: ${{ secrets.ROCKETRIDE_GLM_KEY }}
           ROCKETRIDE_GMI_CLOUD_KEY: ${{ secrets.ROCKETRIDE_GMI_CLOUD_KEY }}
           ROCKETRIDE_NEBIUS_KEY: ${{ secrets.ROCKETRIDE_NEBIUS_KEY }}
+          ROCKETRIDE_ATLASCLOUD_KEY: ${{ secrets.ROCKETRIDE_ATLASCLOUD_KEY }}
 
       # Strict sync: only providers whose API key is configured. Native API
       # discovers and smoke-tests new models. No OpenRouter pollution.
@@ -134,6 +136,7 @@ jobs:
           ROCKETRIDE_GLM_KEY: ${{ secrets.ROCKETRIDE_GLM_KEY }}
           ROCKETRIDE_GMI_CLOUD_KEY: ${{ secrets.ROCKETRIDE_GMI_CLOUD_KEY }}
           ROCKETRIDE_NEBIUS_KEY: ${{ secrets.ROCKETRIDE_NEBIUS_KEY }}
+          ROCKETRIDE_ATLASCLOUD_KEY: ${{ secrets.ROCKETRIDE_ATLASCLOUD_KEY }}
 
       # Fallback sync: providers without an API key. OpenRouter / LiteLLM
       # are permitted as discovery sources for these. Smoke tests are skipped

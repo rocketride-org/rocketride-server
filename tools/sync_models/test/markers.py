@@ -73,3 +73,8 @@ requires_nebius = pytest.mark.skipif(
     not os.environ.get('ROCKETRIDE_NEBIUS_KEY'),
     reason='ROCKETRIDE_NEBIUS_KEY not set',
 )
+
+requires_atlascloud = pytest.mark.skipif(
+    not os.environ.get('ROCKETRIDE_ATLASCLOUD_KEY'),
+    reason='ROCKETRIDE_ATLASCLOUD_KEY not set',
+)

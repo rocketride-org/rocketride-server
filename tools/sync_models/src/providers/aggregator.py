@@ -26,6 +26,10 @@ class AggregatorProvider(CloudProvider):
     """
 
     base_url: str = ''
+    # Model-list fields this host uses for the completion limit, in order of
+    # preference. Empty (the default) means the host reports none, or none that
+    # is trusted, so the sync falls through to its other sources.
+    output_fields: tuple = ()
     smoke_type = 'chat_openai_compat'
 
     def make_client(self, api_key: str) -> object:
@@ -49,6 +53,7 @@ class AggregatorProvider(CloudProvider):
 
         Returns:
             List of model dicts with {"id": str} and optionally {"context_window": int}
+            and {"max_output_tokens": int} (only for hosts that set ``output_fields``)
         """
         response = client.models.list()  # type: ignore[attr-defined]
         result = []
@@ -57,6 +62,9 @@ class AggregatorProvider(CloudProvider):
             context_window = _context_window(m)
             if context_window:
                 entry['context_window'] = context_window
+            max_output = _positive_int(m, self.output_fields)
+            if max_output:
+                entry['max_output_tokens'] = max_output
             result.append(entry)
         return result
 
@@ -120,6 +128,24 @@ class AggregatorProvider(CloudProvider):
         return title[:1].upper() + title[1:]
 
 
+def _positive_int(model: object, names: tuple) -> Optional[int]:
+    """
+    Read the first positive integer among the named fields of a model-list entry.
+
+    Args:
+        model: An SDK model object (extra fields are kept as attributes)
+        names: Field names, in order of preference
+
+    Returns:
+        The first positive integer found, or None
+    """
+    for name in names:
+        value = getattr(model, name, None)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            return value
+    return None
+
+
 def _context_window(model: object) -> Optional[int]:
     """
     Read the context window from a model-list entry, whatever the host calls it.
@@ -130,8 +156,4 @@ def _context_window(model: object) -> Optional[int]:
     Returns:
         The first positive integer found, or None
     """
-    for name in _CONTEXT_FIELDS:
-        value = getattr(model, name, None)
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
-    return None
+    return _positive_int(model, _CONTEXT_FIELDS)
