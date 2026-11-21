@@ -24,9 +24,9 @@
 """
 Google Cloud Storage tool node - global (shared) state.
 
-Reads the bucket, prefix and download cap from the resolved node config,
-authenticates through the shared GCP definitions (gcp.authType) and holds
-the storage client every instance call goes through.
+Authenticates through the shared GCP definitions (gcp.authType) and holds
+the storage client every instance call goes through. The bucket, the prefix
+and the download cap are per-call parameters the instance reads.
 """
 
 from __future__ import annotations
@@ -50,16 +50,12 @@ except ImportError:
     storage = None
 
 _GCS_SCOPES = ['https://www.googleapis.com/auth/devstorage.read_only']
-# Only the most recent download is kept; a new download deletes the previous temp file.
 
 
 class IGlobal(IGlobalBase):
     """Global state for Google Cloud Storage node."""
 
     client: storage.Client | None = None
-    bucket_name: str = ''
-    prefix: str = ''
-    max_download_bytes: int = 52428800
 
     def beginGlobal(self) -> None:
         if storage is None:
@@ -68,13 +64,9 @@ class IGlobal(IGlobalBase):
         # deferred: engine-path import
         from nodes.core.gcp_auth import get_gcp_credentials
 
-        # The resolved config: the active gcp.authType branch flattened beside
-        # the bucket settings, maxDownloadBytes a validated positive integer
+        # The control's credential: the active gcp.authType branch and the project.
+        # The bucket, the prefix and the download cap are per-call parameters.
         cfg = self.config
-
-        self.bucket_name = str(cfg.bucketName or '').strip()
-        self.prefix = str(cfg.prefix or '').strip()
-        self.max_download_bytes = cfg.maxDownloadBytes
 
         # Auth
         try:
@@ -85,32 +77,11 @@ class IGlobal(IGlobalBase):
 
         self.client = storage.Client(project=project_id, credentials=creds)
 
-        # Fail fast connection check
-        try:
-            if self.bucket_name:
-                self.client.get_bucket(self.bucket_name)
-                debug(f'tool_gcs: connected to project {self.client.project}, bucket={self.bucket_name}')
-            else:
-                debug(f'tool_gcs: connected to project {self.client.project} with no specific bucket configured')
-        except Exception as e:
-            warning(f'GCS connection check failed: {e}')
-            raise
+        debug(f'tool_gcs: connected to project {self.client.project}')
 
     def gcs_client(self) -> Any:
         """The shared storage client (an accessor: instances read IGlobal through methods)."""
         return self.client
-
-    def bucket(self) -> str:
-        """The configured bucket name."""
-        return self.bucket_name
-
-    def object_prefix(self) -> str:
-        """The configured object prefix."""
-        return self.prefix
-
-    def download_limit(self) -> int:
-        """The largest object a download may fetch, in bytes."""
-        return self.max_download_bytes
 
     def endGlobal(self) -> None:
 
