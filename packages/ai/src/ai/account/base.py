@@ -77,6 +77,28 @@ class OutOfCreditsError(RuntimeError):
     code = 'OUT_OF_CREDITS'
 
 
+class SubscriptionRequiredError(RuntimeError):
+    """
+    The caller has no subscription to a subscription-priced pipe (plan 3.8, 8.4).
+
+    ``code`` is what clients receive. The body of the error rides as
+    attributes, the way ``TaskError`` carries its fields.
+
+    Attributes:
+        address: The address the caller named.
+        plan: The nickname of the listing's first plan ('' when it names none).
+        storeUrl: Where the caller subscribes.
+    """
+
+    code = 'SUBSCRIPTION_REQUIRED'
+
+    def __init__(self, message: str, *, address: str = '', plan: str = '', store_url: str = ''):
+        super().__init__(message)
+        self.address = address
+        self.plan = plan
+        self.storeUrl = store_url
+
+
 class InventoryUnavailableError(RuntimeError):
     """
     The caller's app inventory could not be assembled (the publish registry
@@ -419,6 +441,25 @@ class AccountBase(ABC):
     async def check_spend(self, org_id: str) -> 'str | None':
         """Why the org may not open a pipe, or None if it may. OSS has no balance, so it always may."""
         return None
+
+    async def has_subscription(self, org_id: str, registry_name: str) -> bool:
+        """
+        Whether the org holds a subscription that grants access to a published name (plan 8.4).
+
+        The access gate of a subscription-priced pipe: the server asks it for
+        a caller outside the publisher's org before a request is served. OSS
+        has no store billing, so every org may call every publication. The
+        SaaS implementation reads ``app_subscriptions`` with the registry
+        name (``developerId.pipeId``) in ``app_id``.
+
+        Args:
+            org_id: The calling org.
+            registry_name: The publication's registry name.
+
+        Returns:
+            True when the org may call the publication.
+        """
+        return True
 
     async def get_transactions(
         self,

@@ -373,6 +373,37 @@ class DeploymentRef:
     project_id: str
 
 
+# ==== Store listing ============================================================
+
+#: The listing mode of a publication that charges no subscription, and of a
+#: publication with no store block at all (plan 8.4, 9).
+LISTING_FREE = 'free'
+
+
+@dataclass(frozen=True)
+class Listing:
+    """
+    The store listing facts of the publication a control serves through (plan 8.4).
+
+    Read once from the version's ``metadata.manifest`` when the control is
+    created: a version is immutable, so its listing never changes under a
+    control. A dev run, and a publication with no store block, is ``free``.
+
+    Attributes:
+        mode: ``'free'``, ``'subscription'`` or ``'paywall'``.
+        plan: The nickname of the listing's first plan ('' when it names
+            none): what a refused caller is told to subscribe to.
+    """
+
+    mode: str = LISTING_FREE
+    plan: str = ''
+
+    @property
+    def paid(self) -> bool:
+        """True when calling the publication needs a subscription (any mode but ``free``)."""
+        return self.mode != LISTING_FREE
+
+
 # ==== Team context =============================================================
 
 #: Why a team is a control's team context (plan 6.2).
@@ -513,6 +544,10 @@ class TaskControl:
             the control unavailable (plan 7.2, the kill switch).
         deployment: The deployment this control resolved through, if any.
         version: The artifact version a published rung started from (None on @spec).
+        listing: The store listing of that version (``free`` on @spec and
+            for a publication with no store block).
+        subscription_allowed_at: Monotonic time the caller's subscription to
+            a paid listing was last confirmed (0.0 = never).
         team_context: The team whose environment this control runs with.
         task: The ONE engine this control holds. It may be an engine that
             stopped on its inactivity timer or crashed after it confirmed
@@ -597,6 +632,10 @@ class TaskControl:
     # trusts an allow for the same window). A refusal is never cached.
     credit_allowed_at: float = 0.0
 
+    # The same window for the subscription to a paid listing (plan 8.4): one
+    # question per control per window, and a refusal is never cached
+    subscription_allowed_at: float = 0.0
+
     # The control's own idle clock and its idle-expiry heap entry: activity
     # through one control never keeps another alive (plan 7.1)
     last_activity: float = field(default_factory=time.monotonic)
@@ -607,6 +646,9 @@ class TaskControl:
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
     version: Optional[int] = None
+
+    # The store listing of that version (plan 8.4); free for a dev run
+    listing: Listing = field(default_factory=Listing)
 
     # The team whose environment applies (plan 6.2); never billing
     team_context: TeamContext = field(default_factory=TeamContext)
@@ -1003,6 +1045,18 @@ class TaskControl:
             True within ``CONST_SPEND_ALLOW_SECONDS`` of the last allow.
         """
         return now - self.credit_allowed_at < CONST_SPEND_ALLOW_SECONDS
+
+    def subscription_allowed(self, now: float) -> bool:
+        """
+        Whether the caller's subscription to this control's paid listing was confirmed recently.
+
+        Args:
+            now: ``time.monotonic()``.
+
+        Returns:
+            True within ``CONST_SPEND_ALLOW_SECONDS`` of the last confirmation.
+        """
+        return now - self.subscription_allowed_at < CONST_SPEND_ALLOW_SECONDS
 
     def begin_request(self) -> None:
         """

@@ -66,7 +66,9 @@ error context, plus `code` and `hint`:
   never started, terminated, replaced, or the engine restarted),
   `TASK_AMBIGUOUS`, `TASK_COMPLETED`, `TASK_STOPPED`; a refused pipe raises
   `PipeException` with `OUT_OF_CREDITS` (the org is out of credit; clears when
-  it tops up). **Classify on `code`, not
+  it tops up), and a published pipe your org has not subscribed to raises with
+  `SUBSCRIPTION_REQUIRED` (the message names the plan and the catalog URL;
+  clears once the org subscribes). **Classify on `code`, not
   on the message text**, which is written for people and may be reworded.
 - `hint` is troubleshooting text the SDK attached for a developer, or `None`.
   It is kept out of `str(e)` so an application can show the message to an end

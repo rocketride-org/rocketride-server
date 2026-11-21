@@ -156,6 +156,33 @@ def test_process_single_result_records_exception_envelope():
     assert results.objectsCompleted == 0
 
 
+@pytest.mark.parametrize('code', ['SUBSCRIPTION_REQUIRED', 'OUT_OF_CREDITS'])
+def test_a_refused_pipe_keeps_its_code_in_the_http_envelope(code):
+    """/webhook and /task/data open through the DAP resolver; the refusal's code reaches the HTTP caller (plan 8.4)."""
+    from rocketride.core.exceptions import PipeException
+
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
+    obj = SimpleNamespace(objectId='oid', size=10)
+    results = DataResult()
+    refused = PipeException({'success': False, 'message': 'acme.docBrain needs a subscription', 'code': code})
+
+    proc._processSingleResult(refused, obj, results, 'body')
+
+    envelope = results.objects['body']
+    assert envelope['status'] == 'Error'
+    assert envelope['error']['code'] == code
+    assert 'needs a subscription' in envelope['error']['message']
+    assert results.objectsCompleted == 0
+
+
+def test_an_uncoded_failure_carries_no_code():
+    """A failure without a code is reported as before."""
+    proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
+    results = DataResult()
+    proc._processSingleResult(RuntimeError('boom'), SimpleNamespace(objectId='oid'), results, 'body')
+    assert 'code' not in results.objects['body']['error']
+
+
 def test_process_single_result_records_ok_dict():
     """A dict result is stored with status='OK' and objectsCompleted is bumped."""
     proc = RequestProcessing(_make_client(), 'acme.docBrain.parsePDF')
