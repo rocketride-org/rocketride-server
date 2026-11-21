@@ -99,7 +99,8 @@ _JOB_BAD = frozenset({'failed', 'cancelled', 'canceled'})
 _LOADS_KEY = 'loads'
 
 #: The most fingerprints the registry keeps (a few hundred bytes each, far
-#: under the state value cap); past it the oldest settled entries go first.
+#: under the state value cap); past it the oldest settled entries go first,
+#: and a pending reservation is never evicted.
 _LOADS_MAX = 512
 
 #: Load modes Hotdata accepts, and the subset that needs key columns.
@@ -516,17 +517,19 @@ def _rows_to_markdown(rows: List[Any], limit: int = 100) -> str:
 
 
 def _bounded_loads(loads: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep the newest ``_LOADS_MAX`` entries of the append registry.
+    """Keep at most ``_LOADS_MAX`` entries of the append registry, evicting settled entries only.
 
     The registry is one state value (state allows a node 16 keys, so the
     fingerprints share one): past the bound the oldest settled entries go
-    first, and a pending reservation is kept while any settled one remains.
+    first. A pending reservation is never evicted, because its load may still
+    be running; ``_seen_load`` refuses a new reservation instead once every
+    slot is pending, so the registry never grows past the bound.
     """
     if len(loads) <= _LOADS_MAX:
         return loads
-    # Oldest first, settled before pending, so an in-flight load keeps its reservation
-    order = sorted(loads, key=lambda fp: (loads[fp][0] == 'pending', loads[fp][1]))
-    for fingerprint in order[: len(loads) - _LOADS_MAX]:
+    # Oldest settled first; pending reservations are not candidates
+    settled = sorted((fp for fp in loads if loads[fp][0] != 'pending'), key=lambda fp: loads[fp][1])
+    for fingerprint in settled[: len(loads) - _LOADS_MAX]:
         del loads[fingerprint]
     return loads
 
@@ -564,23 +567,35 @@ class IInstance(IInstanceBase):
         would duplicate rows. The registry is this node's state: every replica
         of the control reads and writes the one record, and the check and the
         reservation happen under its lock because agents fire tool calls in
-        parallel. A ``pending`` reservation older than twice the call's job
-        timeout is a load whose replica never settled it, and is taken over.
+        parallel. A ``pending`` reservation is never taken over by another
+        call, however old: no one but its own load can say whether that load
+        is still sending rows, and a replica that stopped mid-load left an
+        unknown subset behind, the same as a ``partial`` load. It leaves the
+        registry only when its own load records or releases it, or when the
+        record expires with the control.
 
         Returns:
             None when this payload is new (and is now reserved), otherwise the
             stored outcome: ``pending``, ``complete`` or ``partial``. The caller
             must call ``_release_load`` if the load then fails, or
             ``_record_load`` with the final outcome once it settles.
+
+        Raises:
+            RuntimeError: Every slot of the registry holds a pending
+                reservation, so a new one could only be made by dropping a
+                load that may still be running.
         """
-        now = time.time()
-        stale_after = 2 * float(self.settings['job_timeout_secs'])
         with self.state.lock(_LOADS_KEY):
             loads = self.state.get(_LOADS_KEY) or {}
             existing = loads.get(fingerprint)
-            if existing is not None and not (existing[0] == 'pending' and now - existing[1] > stale_after):
+            if existing is not None:
                 return existing[0]
-            loads[fingerprint] = ['pending', now]
+            if sum(1 for entry in loads.values() if entry[0] == 'pending') >= _LOADS_MAX:
+                raise RuntimeError(
+                    f'db_hotdata: {_LOADS_MAX} appends are already in flight on this node, so this one was not '
+                    'sent. Wait for one of them to finish, then call load_data again.'
+                )
+            loads[fingerprint] = ['pending', time.time()]
             self.state.put(_LOADS_KEY, _bounded_loads(loads))
             return None
 

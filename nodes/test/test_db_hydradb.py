@@ -383,3 +383,20 @@ def test_a_param_read_through_the_global_config_raises(node, key):
     g.glb = SimpleNamespace(logicalType='db_hydradb', connConfig={'api_key': 'k', 'database': 'acme'})
     with pytest.raises(ConfigError):
         g.config[key]
+
+
+@pytest.mark.parametrize(
+    'tool, args',
+    [
+        ('store_memory', {'text': 'x'}),
+        ('recall_memory', {'query': 'q'}),
+        ('query_graph', {}),
+    ],
+)
+def test_a_blank_collection_is_refused_not_replaced_by_default(node, tool, args):
+    client = node.client_mod.HydraDBClient('k', 'acme')
+    inst = _make_instance(node.iinstance_mod, client, collection='   ')
+    calls_before = len(_POST.calls) + len(_GET.calls)
+    with pytest.raises(ValueError, match='collection'):
+        getattr(inst, tool)(args)
+    assert len(_POST.calls) + len(_GET.calls) == calls_before

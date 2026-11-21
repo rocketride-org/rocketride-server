@@ -56,6 +56,7 @@ import types
 from pathlib import Path
 
 import pytest
+import rocketlib as _real_rocketlib
 
 _REPO = Path(__file__).resolve().parents[2]
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
@@ -140,6 +141,15 @@ def _by_version(expected: dict):
     return expected[SERVER_AGE_VERSION]
 
 
+class _StubInstanceBase:
+    """Stand-in for IInstanceBase: ``settings`` is the call's view, which a test sets as ``_settings``."""
+
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them."""
+        return self._settings
+
+
 def _load_from_path(name: str, path: Path, *, is_package: bool = False):
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
@@ -187,8 +197,15 @@ def rr_env(_own_modules_isolated, monkeypatch):
     monkeypatch.setitem(sys.modules, 'depends', depends_mod)
 
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = type('IGlobalBase', (), {})
-    rocketlib.IInstanceBase = type('IInstanceBase', (), {})
+    # The real base and service lookups: IGlobal.config and _resolved() resolve
+    # glb.connConfig through the engine's schema, and the graph base's
+    # converted/unconverted split reads the real definition.
+    rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
+    # IGlobal imports the save-time probe from IValidator, which subclasses this
+    rocketlib.IValidatorBase = _real_rocketlib.IValidatorBase
+    rocketlib.getServiceDefinition = _real_rocketlib.getServiceDefinition
+    rocketlib.getServiceSchema = _real_rocketlib.getServiceSchema
+    rocketlib.IInstanceBase = _StubInstanceBase
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.debug = lambda *a, **kw: None
     rocketlib.error = lambda *a, **kw: None

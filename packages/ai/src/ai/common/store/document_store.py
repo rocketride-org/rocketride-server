@@ -840,12 +840,13 @@ class VectorStoreToolMixin:
         Reads this call's ``allow_write`` setting. A node that does not
         declare the field keeps its IGlobal class default (True for every
         store node but the managed ones). A string value is parsed like a
-        config switch, so ``'false'`` and ``'0'`` are off rather than truthy.
+        config switch, so ``'false'`` and ``'0'`` are off rather than truthy; an empty or
+        unrecognised string falls back to the class default, never to on.
         """
         from ai.common.utils import parse_bool
 
-        default = getattr(getattr(self, 'IGlobal', None), 'allow_write', True)
-        return parse_bool(self._vectordb_setting('allow_write', default), default=True)
+        default = parse_bool(getattr(getattr(self, 'IGlobal', None), 'allow_write', True), default=True)
+        return parse_bool(self._vectordb_setting('allow_write', default), default=default)
 
     def _vectordb_write_refused(self, tool: str) -> Dict[str, Any]:
         """The failure object a write tool returns when writes are off for this node."""
@@ -862,12 +863,13 @@ class VectorStoreToolMixin:
 
         Reads this call's ``expose_tools`` setting. A node that does not
         declare the field keeps its IGlobal class default. Parsed like
-        ``allow_write``, so ``'false'`` and ``'0'`` are off.
+        ``allow_write``, so ``'false'`` and ``'0'`` are off and an empty string
+        keeps the class default.
         """
         from ai.common.utils import parse_bool
 
-        default = getattr(getattr(self, 'IGlobal', None), 'expose_tools', True)
-        return parse_bool(self._vectordb_setting('expose_tools', default), default=True)
+        default = parse_bool(getattr(getattr(self, 'IGlobal', None), 'expose_tools', True), default=True)
+        return parse_bool(self._vectordb_setting('expose_tools', default), default=default)
 
     def _vectordb_tools_refused(self, tool: str) -> Dict[str, Any]:
         """The failure object any tool returns when the node does not expose its tools."""

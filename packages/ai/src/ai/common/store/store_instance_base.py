@@ -131,17 +131,18 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
         def callback(text: str) -> None:
             self.instance.sendText(text)
 
-        # The call's store: its collection
-        store = self._store()
+        # Check it: the control's store cache is open (as before, for every object)
+        if self.IGlobal._stores is None:
+            raise Exception(NO_STORE_MESSAGE)
 
         # If we do not have a vectorize flag, or we have not vectorized
         # it, allow the next driver to render
         if not object.hasVectorBatchId or not object.vectorBatchId:
             return
 
-        # Render the data on this object from the store and
-        # send it to the renderData function
-        store.render(objectId=object.objectId, callback=callback)
+        # Render the data on this object from the call's store (its
+        # collection, opened only now) and send it to the renderData function
+        self._store().render(objectId=object.objectId, callback=callback)
 
         # Stop right here
         self.preventDefault()

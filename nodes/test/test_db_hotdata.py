@@ -2219,18 +2219,22 @@ def test_the_registry_is_one_state_key_shared_by_every_call():
     assert list(g.node_state.get('loads').values())[0][0] == 'complete'
 
 
-def test_an_abandoned_reservation_is_taken_over(monkeypatch):
-    """A pending reservation whose replica died is not "in progress" forever."""
-    g = _global(job_timeout_secs=10)
-    inst = _instance(g)
+def test_a_pending_reservation_is_never_taken_over_by_another_call(monkeypatch):
+    """A long load keeps its reservation: a later call with a short timeout cannot append the same rows."""
+    g = _global(job_timeout_secs=300)
+    owner = _instance(g)
     clock = [1000.0]
     monkeypatch.setattr(iinstance_mod.time, 'time', lambda: clock[0])
+    assert owner._seen_load('fp-1') is None
 
-    assert inst._seen_load('fp-1') is None
-    clock[0] += 15
-    assert inst._seen_load('fp-1') == 'pending', 'still within twice the job timeout'
-    clock[0] += 10
-    assert inst._seen_load('fp-1') is None, 'past twice the job timeout the reservation is taken over'
+    hasty = _instance(g)
+    hasty._settings = dict(g.call, job_timeout_secs=10)
+    clock[0] += 7 * 24 * 3600
+    assert hasty._seen_load('fp-1') == 'pending'
+    assert g.node_state.get('loads')['fp-1'][0] == 'pending'
+
+    owner._record_load('fp-1', 'complete')
+    assert hasty._seen_load('fp-1') == 'complete'
 
 
 def test_the_registry_stays_bounded():
@@ -2243,6 +2247,44 @@ def test_the_registry_stays_bounded():
     loads = g.node_state.get('loads')
     assert len(loads) == iinstance_mod._LOADS_MAX
     assert 'fp-0' not in loads and f'fp-{iinstance_mod._LOADS_MAX + 4}' in loads
+
+
+def test_the_bound_evicts_settled_entries_and_never_a_pending_one(monkeypatch):
+    """Past the bound the oldest settled entries go, even when the oldest entry overall is pending."""
+    g = _global()
+    inst = _instance(g)
+    clock = [1000.0]
+    monkeypatch.setattr(iinstance_mod.time, 'time', lambda: clock[0])
+    assert inst._seen_load('in-flight') is None
+    for i in range(iinstance_mod._LOADS_MAX):
+        clock[0] += 1
+        assert inst._seen_load(f'fp-{i}') is None
+        inst._record_load(f'fp-{i}', 'complete')
+
+    loads = g.node_state.get('loads')
+    assert len(loads) == iinstance_mod._LOADS_MAX
+    assert loads['in-flight'][0] == 'pending'
+    assert 'fp-0' not in loads
+
+
+def test_a_registry_full_of_pending_loads_refuses_a_new_reservation():
+    """When every slot is in flight, a new append is refused and every reservation stays."""
+    g = _global()
+    inst = _instance(g)
+    for i in range(iinstance_mod._LOADS_MAX):
+        assert inst._seen_load(f'fp-{i}') is None
+
+    with pytest.raises(RuntimeError, match='in flight'):
+        inst._seen_load('fp-new')
+
+    loads = g.node_state.get('loads')
+    assert len(loads) == iinstance_mod._LOADS_MAX
+    assert all(entry[0] == 'pending' for entry in loads.values())
+    assert 'fp-new' not in loads
+
+    inst._record_load('fp-0', 'complete')
+    assert inst._seen_load('fp-new') is None
+    assert 'fp-0' not in g.node_state.get('loads')
 
 
 def test_two_calls_on_one_global_carry_their_own_gates_and_tables():

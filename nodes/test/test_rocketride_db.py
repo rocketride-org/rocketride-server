@@ -39,6 +39,7 @@ import asyncio
 import importlib.util
 import json
 import sys
+import threading
 import types
 
 
@@ -732,3 +733,83 @@ class TestRocketrideGraphConnection:
         v.validateConfig()
         assert connects == []
         assert len(warnings) == 1 and 'not a valid team or user id' in warnings[0]
+
+    def test_a_schema_lookup_cannot_commit_an_open_execute(self, monkeypatch):
+        """Two bindings share the connection: a graph check waits for an over-cap EXECUTE to roll back."""
+        glb, _, _, _ = _graph_iglobal(monkeypatch)
+        _deliver(monkeypatch, org=TEST_DSN, **{'team:t-1': 'postgresql://t1'})
+        glb._open_driver(_resolved('rocketride_graph', {'scope': 'team', 'target': 't-1'}))
+        client = _TxnClient()
+        glb.client = client
+        plan = types.SimpleNamespace(
+            statements=['WRITE'], binds=[()], result_index=0, prepared_name=None, read_only=False
+        )
+
+        raised: list[Exception] = []
+
+        def execute():
+            try:
+                glb._execute_plan(plan, max_rows=2)
+            except ValueError as e:
+                raised.append(e)
+
+        writer = threading.Thread(target=execute)
+        writer.start()
+        assert client.started.wait(5), 'the EXECUTE never reached its write'
+        checker = threading.Thread(target=glb._require_graph, args=('rocketride',))
+        checker.start()
+        checker.join(0.2)
+        assert checker.is_alive(), 'the graph check ran inside the open EXECUTE transaction'
+
+        client.release.set()
+        writer.join(5)
+        checker.join(5)
+        assert len(raised) == 1 and 'max_execute_rows' in str(raised[0])
+        assert client.ends == ['rollback', 'commit']
+
+
+class _TxnCursor:
+    """A cursor of ``_TxnClient``: the ``WRITE`` statement holds until the test releases it."""
+
+    description = ('v',)
+
+    def __init__(self, client):
+        self._client = client
+
+    def execute(self, sql, params=None):
+        if sql == 'WRITE':
+            self._client.started.set()
+            self._client.release.wait(5)
+
+    def fetchall(self):
+        # One row over the EXECUTE's cap of two
+        return [(1,), (2,), (3,)]
+
+    def fetchone(self):
+        return (1,)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class _TxnClient:
+    """A shared connection that records how each transaction on it ended, in order."""
+
+    autocommit = False
+
+    def __init__(self):
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.ends: list[str] = []
+
+    def cursor(self):
+        return _TxnCursor(self)
+
+    def commit(self):
+        self.ends.append('commit')
+
+    def rollback(self):
+        self.ends.append('rollback')

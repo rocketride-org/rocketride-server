@@ -48,8 +48,16 @@ class IInstance(IInstanceBase):
         return self.IGlobal.client
 
     def _collection(self) -> str:
-        """Return the collection this call reads and writes: a per-call parameter."""
-        return self.settings['collection'].strip()
+        """Return the collection this call reads and writes: a per-call parameter.
+
+        Raises:
+            ValueError: The call's collection is blank, which the client would
+                silently replace with ``default``.
+        """
+        collection = self.settings['collection'].strip()
+        if not collection:
+            raise ValueError('"collection" must be a non-blank collection name')
+        return collection
 
     # ------------------------------------------------------------------
     # Tool methods

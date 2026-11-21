@@ -298,6 +298,20 @@ def test_render_object_raises_when_store_missing():
     _assert_says_the_store_is_not_open(str(excinfo.value))
 
 
+def test_render_object_opens_no_store_for_an_object_that_was_not_vectorized():
+    """An object without a vector batch goes on to the next renderer; the call's store is never opened."""
+
+    class _NoOpenGlobal(_OneStoreGlobal):
+        def store_for(self, settings):
+            raise AssertionError('renderObject opened a store for an object it does not render')
+
+    inst = _TestableInstance.__new__(_TestableInstance)
+    inst.IGlobal = _NoOpenGlobal(_FakeStore())
+    inst._settings = {}
+    inst.renderObject(SimpleNamespace(hasVectorBatchId=False, vectorBatchId=None, objectId='o'))
+    inst.renderObject(SimpleNamespace(hasVectorBatchId=True, vectorBatchId='', objectId='o'))
+
+
 def test_lane_handlers_delegate_to_store_when_present():
     """With a store present, the three lanes delegate to it."""
     store = _FakeStore()
@@ -350,6 +364,19 @@ def test_a_managed_driver_can_be_opened_up_by_a_call(switch):
     assert getattr(opened, f'_vectordb_{switch}')() is True
     assert getattr(opened, f'_vectordb_{other}')() is False
     assert getattr(_instance_on(managed), f'_vectordb_{switch}')() is False
+
+
+@pytest.mark.parametrize('switch', ['expose_tools', 'allow_write'])
+def test_an_empty_switch_keeps_the_class_default(switch):
+    """An empty value names no choice: a managed driver stays off, a driver whose class default is on stays on."""
+    managed = _make({}, logical_type='rocketride_vector', cls=_ManagedGlobal)
+    managed.beginGlobal()
+    assert getattr(_instance_on(managed, **{switch: ''}), f'_vectordb_{switch}')() is False
+
+    # The same definition (it declares both switches) on a driver whose class default is on
+    g = _make({}, logical_type='rocketride_vector')
+    g.beginGlobal()
+    assert getattr(_instance_on(g, **{switch: ''}), f'_vectordb_{switch}')() is True
 
 
 @pytest.mark.parametrize('switch', ['expose_tools', 'allow_write'])

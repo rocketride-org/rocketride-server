@@ -39,6 +39,10 @@ translated plan carries them). The safe path additionally makes its
 transaction ``READ ONLY`` — server-side write protection, with the base's
 ``is_cypher_safe`` regex and the layer's semantic firewall as defence-in-depth.
 One transaction per call: every path commits or rolls back before it returns.
+Every binding of the control shares the one connection, and a commit ends
+whatever transaction is open on it, so each transaction holds the
+connection lock from its first statement to its commit or rollback: a
+schema lookup can never commit an EXECUTE that is still checking its row cap.
 
 What the control keeps: the tenant connection (``scope`` / ``target``, the
 expensive thing) and the AGE version. The graph name, the row cap, the timeout
@@ -134,6 +138,11 @@ class IGlobal(GraphGlobalBase):
     _schemas: Optional[OrderedDict] = None
     _schema_lock: Optional[threading.Lock] = None
 
+    # Held for the whole of each transaction on the shared connection (its
+    # first statement to its commit or rollback). Taken after _schema_lock,
+    # never before it, and never nested.
+    _conn_lock: Optional[threading.Lock] = None
+
     # ------------------------------------------------------------------
     # Driver lifecycle
     # ------------------------------------------------------------------
@@ -147,6 +156,7 @@ class IGlobal(GraphGlobalBase):
         """
         self._schemas = OrderedDict()
         self._schema_lock = threading.Lock()
+        self._conn_lock = threading.Lock()
 
         # The one RocketRide difference: the delivered DSN, no connection config.
         dsn = resolve_rocketride_dsn(*db_target(config))
@@ -226,14 +236,15 @@ class IGlobal(GraphGlobalBase):
 
     def _require_graph(self, name: str) -> None:
         """Raise when the tenant database has no AGE graph called ``name``."""
-        try:
-            with self.client.cursor() as cur:
-                cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (name,))
-                graph_exists = cur.fetchone() is not None
-            self.client.commit()
-        except Exception:
-            self.client.rollback()
-            raise
+        with self._conn_lock:
+            try:
+                with self.client.cursor() as cur:
+                    cur.execute('SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s', (name,))
+                    graph_exists = cur.fetchone() is not None
+                self.client.commit()
+            except Exception:
+                self.client.rollback()
+                raise
         if not graph_exists:
             # The provisioner creates the default graph in every tenant
             # database. Any other name must already exist: the node never
@@ -315,24 +326,27 @@ class IGlobal(GraphGlobalBase):
         """
         self._require_transactional_client()
         rows: List[Tuple] = []
-        try:
-            with self.client.cursor() as cur:
-                if plan.read_only:
-                    cur.execute('SET TRANSACTION READ ONLY')
-                for i, (stmt, binds) in enumerate(zip(plan.statements, plan.binds)):
-                    if i == plan.result_index and plan.prepared_name:
-                        self._execute_prepared(cur, plan.prepared_name, stmt, binds)
-                    else:
-                        cur.execute(stmt, binds or None)
-                    if i == plan.result_index and cur.description is not None:
-                        rows = cur.fetchmany(fetch_cap) if fetch_cap else cur.fetchall()
-            # Checked after the plan's DEALLOCATE has run, but before commit.
-            if max_rows is not None and len(rows) > max_rows:
-                raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
-            self.client.commit()
-        except Exception:
-            self.client.rollback()
-            raise
+        # The whole transaction under the connection lock: no other binding
+        # may commit or roll it back before the row cap below is checked.
+        with self._conn_lock:
+            try:
+                with self.client.cursor() as cur:
+                    if plan.read_only:
+                        cur.execute('SET TRANSACTION READ ONLY')
+                    for i, (stmt, binds) in enumerate(zip(plan.statements, plan.binds)):
+                        if i == plan.result_index and plan.prepared_name:
+                            self._execute_prepared(cur, plan.prepared_name, stmt, binds)
+                        else:
+                            cur.execute(stmt, binds or None)
+                        if i == plan.result_index and cur.description is not None:
+                            rows = cur.fetchmany(fetch_cap) if fetch_cap else cur.fetchall()
+                # Checked after the plan's DEALLOCATE has run, but before commit.
+                if max_rows is not None and len(rows) > max_rows:
+                    raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
+                self.client.commit()
+            except Exception:
+                self.client.rollback()
+                raise
         return rows
 
     @staticmethod
@@ -423,19 +437,20 @@ class IGlobal(GraphGlobalBase):
             self._require_transactional_client()
         except RuntimeError as e:
             return False, str(e)
-        try:
-            with self.client.cursor() as cur:
-                cur.execute('SET TRANSACTION READ ONLY')
-                for i, (stmt, binds) in enumerate(zip(plan.statements, plan.binds)):
-                    if i == plan.result_index:
-                        cur.execute('EXPLAIN ' + stmt, binds or None)
-                        break
-                    cur.execute(stmt, binds or None)
-            self.client.rollback()
-            return True, ''
-        except Exception as e:
-            self.client.rollback()
-            return False, str(e)
+        with self._conn_lock:
+            try:
+                with self.client.cursor() as cur:
+                    cur.execute('SET TRANSACTION READ ONLY')
+                    for i, (stmt, binds) in enumerate(zip(plan.statements, plan.binds)):
+                        if i == plan.result_index:
+                            cur.execute('EXPLAIN ' + stmt, binds or None)
+                            break
+                        cur.execute(stmt, binds or None)
+                self.client.rollback()
+                return True, ''
+            except Exception as e:
+                self.client.rollback()
+                return False, str(e)
 
     # ------------------------------------------------------------------
     # Schema reflection — AGE catalog + bounded sampling
@@ -452,17 +467,21 @@ class IGlobal(GraphGlobalBase):
             return schema
 
         try:
-            with self.client.cursor() as cur:
-                cur.execute(
-                    'SELECT l.name, l.kind FROM ag_catalog.ag_label l '
-                    'JOIN ag_catalog.ag_graph g ON l.graph = g.graphid '
-                    "WHERE g.name = %s AND l.name NOT LIKE '\\_ag\\_%%'",
-                    (graph,),
-                )
-                labels = cur.fetchall()
-            self.client.commit()
+            with self._conn_lock:
+                try:
+                    with self.client.cursor() as cur:
+                        cur.execute(
+                            'SELECT l.name, l.kind FROM ag_catalog.ag_label l '
+                            'JOIN ag_catalog.ag_graph g ON l.graph = g.graphid '
+                            "WHERE g.name = %s AND l.name NOT LIKE '\\_ag\\_%%'",
+                            (graph,),
+                        )
+                        labels = cur.fetchall()
+                    self.client.commit()
+                except Exception:
+                    self.client.rollback()
+                    raise
         except Exception as e:
-            self.client.rollback()
             warning(f'rocketride_graph: unable to list graph labels: {e}')
             return schema
 
@@ -481,12 +500,16 @@ class IGlobal(GraphGlobalBase):
     def _sample_properties(self, graph: str, label: str) -> List[Tuple[str, str]]:
         """One-row property sample from the label's backing table in ``graph``."""
         try:
-            with self.client.cursor() as cur:
-                cur.execute(sql.SQL('SELECT properties FROM {} LIMIT 1').format(sql.Identifier(graph, label)))
-                row = cur.fetchone()
-            self.client.commit()
+            with self._conn_lock:
+                try:
+                    with self.client.cursor() as cur:
+                        cur.execute(sql.SQL('SELECT properties FROM {} LIMIT 1').format(sql.Identifier(graph, label)))
+                        row = cur.fetchone()
+                    self.client.commit()
+                except Exception:
+                    self.client.rollback()
+                    raise
         except Exception as e:
-            self.client.rollback()
             warning(f'rocketride_graph: unable to sample label {label!r}: {e}')
             return []
         if row is None:
