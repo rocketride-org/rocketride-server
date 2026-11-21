@@ -66,7 +66,14 @@ bitmask, e.g. `36` = `SUMMARY | TASK`):
 | `DASHBOARD` | 128  | Server-level events (connections, monitor changes)                   |
 | `BILLING`   | 256  | Billing ledger events (credits/debits), org-scoped                   |
 | `DEPLOY`    | 512  | Deployment-change invalidations (`apaevt_deploy`: pointer, state, schedule, and run mutations), org-scoped — re-fetch on receipt, the body carries identity only |
-| `ALL`       | 1023 | Everything above                                                     |
+| `ALL`       | 1023 | Everything above (`OPS` excluded)                                    |
+| `OPS`       | 1024 | Engine-level output of a shared engine as `apaevt_ops` (below); `sys.admin` only, on `*` only |
+
+`OPS` and `DASHBOARD` are platform-wide: subscribing either on the `*`
+wildcard requires `sys.admin` and is otherwise refused with a permission
+error, and `OPS` on any other scope is refused for everyone. `ALL` includes
+`DASHBOARD`, so a non-admin subscribing `*` with `ALL` is refused too: name
+the types you want, as in the example above.
 
 ### Subscription scope
 
@@ -174,19 +181,24 @@ component's entry and exit with its lane data and any error.
 
 ```ts
 {
-  id: number,                              // pipe index within the pipeline
+  id: number,                              // the pipe SLOT (reused by the next request once a binding closes)
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                         // current component stack for this pipe
   component?: string,                      // component this op refers to (on "leave", the leaving one) — pair enter/leave by identity, not stack position
+  traceId: string,                         // the request tree (never reused; opaque)
   trace: { lane?: string, data?: object, result?: string, error?: string },
   result?: PIPELINE_RESULT,                // on op === "end", level >= summary
+  controlId: string,                       // the receiving control
+  engineKey: string,                       // the engine that emitted it
   project_id: string,
   source: string
 }
 ```
 
 `trace` is free-form and varies by node and trace level, store it as JSON, don't
-flatten it.
+flatten it. Group frames by `traceId`, not `id`: a slot serves many requests in
+turn. The trace level is per control, so on an engine several controls hold,
+each receives flow only for its own requests and at its own level.
 
 The lifecycle lanes (`open`, `closing`, `close`) are dispatched from the pipe head in
 dependency order — `closing`/`close` upstream-first, `open` downstream-first — so their
@@ -204,9 +216,11 @@ repeats once per invocation, each invocation being its own pass).
 
 ### `apaevt_sse`: node-to-UI messages
 
-Nodes call `monitorSSE(pipe_id, type, data)` to broadcast custom updates
-("thinking", "tool_call", progress, …). The body is `{ pipe_id, type, data }`; the
-schema is intentionally open: interpret it per node type.
+Nodes call `self.instance.sendSSE(type, **data)` to send custom updates
+("thinking", "tool_call", progress, …) to the caller. The body is
+`{ pipeId, traceId, type, data }`, delivered to the control whose request
+produced it and to no other; correlate by `traceId`. The schema of `data` is
+intentionally open: interpret it per node type.
 
 ### `output`: log lines
 
@@ -222,7 +236,20 @@ callback; the engine never emits it on the wire.
 ### `apaevt_dashboard`: admin events
 
 Connection lifecycle and monitor-change audit events, useful if you want to record
-*who* subscribed to which monitors.
+*who* subscribed to which monitors. `sys.admin` only.
+
+### `apaevt_ops`: engine-level output of a shared engine
+
+On an engine shared across users, the engine-level events (counts, errors,
+warnings, downloads, exit codes, plain output, and events for a request tree
+that is unknown or already released) belong to no single caller, so no
+holder receives them. They leave the server as `apaevt_ops` with body
+`{ engineKey, kind, ... }`, where `kind` is the original event name, on the
+`OPS` type of a `*` subscription (`sys.admin` only). Each holder still
+receives the engine's status, projected to its own counts, and the task
+lifecycle. On a private engine the same output reaches the owner's controls
+as the ordinary events. `apaevt_ops` is live only; no run log records it. See
+[where events come from](/connect/websocket#where-events-come-from-the-engines-lines).
 
 ## Related commands
 

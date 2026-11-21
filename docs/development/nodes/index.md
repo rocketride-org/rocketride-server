@@ -319,6 +319,31 @@ standalone catalog nodes.
      `rename`, `delete`, `put_json`/`get_json`, `get_url` (a short expiry by
      default). Plain relative paths only.
 
+   **Where a node's messages go.** An engine can serve many callers, so a
+   node's output takes one of two paths, and they reach different people:
+
+   - *Engine output*: bare `print`, and `rocketlib.debug` / `warning` /
+     `error`, go to the engine log, which names no request. On a private
+     engine (your own run) the engine's own controls receive it. On an
+     engine shared across users it is platform signal: it reaches only the
+     operators' `OPS` stream (`apaevt_ops`, `sys.admin`), never a caller and
+     never the pipe's publisher. Bare print is ops.
+   - *Per-request output*: `self.instance.sendSSE(type, **data)` emits an
+     `apaevt_sse` event tagged with this binding's `pipeId` and `traceId`, so
+     the server delivers it to the control that made the request (its
+     monitors and its run log) and to no other holder of the engine. Anything
+     the caller should see goes this way; so do the `>DBG` flow traces and
+     the data-op results the engine emits for the binding.
+   - *From a worker thread or asyncio task*: take `logger = self.logger()`
+     inside the call and use `logger.sendSSE(...)` from the worker.
+     `self.instance` follows whichever binding is current on the pipe, so a
+     thread that outlives the call would tag the next caller's request; the
+     logger keeps the ids it captured. Its `debug` / `warning` / `error` are
+     the engine log, exactly like the module-level functions.
+
+   Debug a node in your own run, where the engine is private and its engine
+   output reaches you.
+
    The node test framework's two-replica harness (`nodes/test/framework/replicas.py`)
    runs a node's calls alternately on two independent replicas sharing only the
    server's state and files, and checks the answers match a single replica's.
@@ -351,6 +376,36 @@ standalone catalog nodes.
 5. Add `requirements.txt` for dependencies.
 6. Optionally add a `test` section to `services.json` for automated testing (see
    [Node Testing](testing.md)).
+
+---
+
+## Converting a Custom Node from 1.x
+
+A node written for a 1.x server does not load on 4.0 until it follows the
+contract above. In order:
+
+1. **Definition.** Run `rocketride node convert nodes/<node>/services*.json`
+   (no connection needed). It rewrites `preconfig` / `fields` / `shape` into
+   `propertyDefinitions` / `properties` and adds the node's `legacy` block,
+   from which the server converts pipelines saved against the old definition.
+   It prints a warning for everything it cannot carry over.
+2. **Layout.** Move each class into its own file (`IGlobal.py`,
+   `IInstance.py`, `IEndpoint.py`, `IValidator.py`) and leave `__init__.py`
+   with the license header only. The converter does not touch Python files.
+3. **Configuration.** Replace `Config.getNodeConfig(...)` and
+   `getMultiProviderConfig(...)` (both deleted) with `self.config` in
+   `IGlobal` and `self.settings` in `IInstance`. A `param`-flagged key is read
+   from `self.settings`; `self.config` refuses it.
+4. **Validation.** Delete the `OPEN_MODE.CONFIG` guards and move semantic
+   checks into an import-light `IValidator.py`. Heavy imports may move to the
+   top of `IGlobal.py` and `IInstance.py`.
+5. **Lifetime.** An `IInstance` lives for one request (one binding), not for
+   the pipe: `beginInstance` and `endInstance` run per request. Move anything
+   that must outlive a request into `self.state` or `self.files`, and keep
+   only caches (never caller data) on `IGlobal`.
+6. **Output.** Send what the caller should see with `self.instance.sendSSE`,
+   or a `self.logger()` taken in the call when a worker thread sends it (see
+   "Where a node's messages go" above).
 
 ---
 
