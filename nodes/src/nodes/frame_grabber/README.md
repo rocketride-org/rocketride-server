@@ -97,7 +97,10 @@ percentage when a busy video would otherwise produce closely spaced selections.
 **Start time** and **Duration** are available in every profile. Their default
 of `0` starts at the beginning and continues to the end of the video,
 respectively; set them to limit work to a relevant segment. Frame timestamps
-always count from the start of the video, not from the start time. **Maximum
+always count from the start of the video, not from the start time. In interval
+mode the window is cut on the interval's own ticks, rounded to the nearest: with
+a 5 second interval and a start time of 12, the first frame is the one at 10
+seconds (12 is nearer 10 than 15). **Maximum
 number of frames** is available in transition and keyframe modes and defaults
 to `0` for no limit. It counts per video stream; with a scene gap set, it
 counts the frames the gap kept. Set a cap when downstream storage or review

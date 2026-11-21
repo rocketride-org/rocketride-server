@@ -330,6 +330,23 @@ class AVIReader(ABC):
         self.stdout = None
         self.stderr = None
 
+    def end_decoding(self):
+        """
+        End the decoder now, without waiting for it; safe from any thread.
+
+        For a consumer that has all it wants before the input ends, such as a frame
+        cap it applies itself. ffmpeg is terminated, and the stream then winds down
+        as it does when ffmpeg exits on its own after ``-frames:v``: the data thread
+        reads to EOF and reports the end, later writes are dropped, and ``stop()`` at
+        the end of the stream joins the threads. It never waits, so it may be called
+        from the data thread's callback, where ``stop()`` would wait on its own join.
+        """
+        # start() creates the handle; before it there is nothing to end
+        process = getattr(self, '_ffmpeg_process', None)
+        if process is not None and process.poll() is None:
+            debug(f'[Reader] {self._name}: decoding ended early by its consumer')
+            process.terminate()
+
     def stop(self):
         """
         Clean up resources and wait for thread to finish.

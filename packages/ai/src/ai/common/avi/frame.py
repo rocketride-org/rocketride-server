@@ -31,7 +31,9 @@ numbers, and pairs each PNG with the frame number and timestamp ffmpeg's
 
 import re
 import queue
-from typing import Dict, Any, List
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
+from typing import Dict, Any, List, Optional
 from typing import Callable
 
 from rocketlib import warning
@@ -43,9 +45,41 @@ from .reader import AVIReader
 # bound the wait rather than to time real work.
 _FRAME_INFO_TIMEOUT = 5.0
 
-# showinfo prints pts_time with six decimals, so a frame ffmpeg kept at exactly the
-# start time can read back a hair below it.
+# The fallback when showinfo printed no time base (see onInfo): pts_time is compared
+# with the start time, allowing for its printed rounding. ffmpeg 7 prints microseconds.
 _PTS_TOLERANCE = 1e-6
+
+# showinfo's frame line, and the time base it prints once when the filter is configured.
+_FRAME_INFO_RE = re.compile(r'.*n:\s*(\d+)\s+pts:\s*(\d+)\s+pts_time:\s*([0-9.]+)')
+_TIME_BASE_RE = re.compile(r'config in time_base:\s*(\d+)/(\d+)')
+
+# AV_TIME_BASE: ffmpeg reads -ss in microseconds.
+_MICROSECONDS = 1_000_000
+
+
+def start_pts(start_time: str, time_base: Fraction) -> Optional[int]:
+    """
+    The first pts the output seek keeps, as ffmpeg computes it.
+
+    ffmpeg reads ``-ss`` in microseconds, dropping any further digits, and rescales it
+    to the stream's time base rounding to nearest (halves up, ``AV_ROUND_NEAR_INF``);
+    the seek then keeps every frame whose pts is at least that. A frame up to half a
+    time-base tick before the start time therefore survives, which a comparison of
+    seconds would miss.
+
+    Args:
+        start_time: The ``-ss`` value exactly as passed to ffmpeg.
+        time_base: The stream's time base, from showinfo.
+
+    Returns:
+        int: The first kept pts, or None when the value is not a plain number.
+    """
+    try:
+        microseconds = int(Decimal(start_time) * _MICROSECONDS)
+    except (InvalidOperation, ValueError):
+        return None
+    divisor = _MICROSECONDS * time_base.numerator
+    return (microseconds * time_base.denominator + divisor // 2) // divisor
 
 
 def frames_select(frames: List[int]) -> str:
@@ -110,9 +144,16 @@ class VideoFrameExtractor(AVIReader):
         # Get the type
         self._type = config.get('type', 'interval')
 
-        # The start time is where showinfo entries start counting (see onInfo)
+        # The start time is where showinfo entries start counting (see onInfo); the
+        # string is the -ss value ffmpeg is given, so onInfo cuts where ffmpeg cuts
         self._start_time = config.get('start_time', 0.0)
+        self._start_arg = f'{self._start_time}'
         self._duration = config.get('duration', 0.0)
+
+        # The stream's time base and the first pts the seek keeps, from showinfo's
+        # configuration line; None until it arrives, and again for every new stream
+        self._time_base: Optional[Fraction] = None
+        self._start_pts: Optional[int] = None
 
         # The frames mode's list, sorted so the n-th frame select passes is the n-th
         # number in it (onInfo reports the number, not the ordinal)
@@ -131,7 +172,7 @@ class VideoFrameExtractor(AVIReader):
         # start time are dropped after them (onInfo skips their showinfo entries)
         args = [
             '-ss',
-            f'{self._start_time}',
+            self._start_arg,
         ]
 
         # Initialize filters list
@@ -300,7 +341,10 @@ class VideoFrameExtractor(AVIReader):
 
         showinfo sits before the output seek, so it also reports the frames before the
         start time that ffmpeg then drops; their entries are skipped here, or every
-        frame after them would carry an earlier frame's number and time.
+        frame after them would carry an earlier frame's number and time. The cut is
+        ffmpeg's own (``start_pts``): integer pts against the start rescaled to the
+        stream's time base, which showinfo prints once before the first frame. Without
+        that line the printed pts_time is compared with the start time instead.
 
         Args:
             info: One line of ffmpeg's stderr, or None at its end.
@@ -313,18 +357,33 @@ class VideoFrameExtractor(AVIReader):
         if not info.startswith('[Parsed_showinfo_'):
             return
 
+        # Example: [Parsed_showinfo_0 @ 0x55cd1be2b400] config in time_base: 1/25000, frame_rate: 25/1
+        base = _TIME_BASE_RE.search(info)
+        if base:
+            numerator, denominator = int(base.group(1)), int(base.group(2))
+            if numerator > 0 and denominator > 0:
+                self._time_base = Fraction(numerator, denominator)
+                self._start_pts = start_pts(self._start_arg, self._time_base)
+            return
+
         # Example: [Parsed_showinfo_0 @ 0x55cd1be2b400] n:   1 pts: 90000 pts_time: 1.000000
-        match = re.match(r'.*n:\s*(\d+)\s+pts:\s*(\d+)\s+pts_time:\s*([0-9.]+)', info)
+        match = _FRAME_INFO_RE.match(info)
         if not match:
             return
 
-        # n counts the frames the select passed (seek-dropped ones included); pts_time
-        # is from the start of the video
+        # n counts the frames the select passed (seek-dropped ones included); pts and
+        # pts_time count from the start of the video
         frame_number = int(match.group(1))
+        pts = int(match.group(2))
         pts_time = float(match.group(3))
 
-        # A frame before the start time never reaches the output: no PNG will claim it
-        if pts_time < self._start_time - _PTS_TOLERANCE:
+        # A frame before the cut never reaches the output: no PNG will claim it. With
+        # the time base the time is exact, not the printed rounding
+        if self._time_base is not None and self._start_pts is not None:
+            if pts < self._start_pts:
+                return
+            pts_time = float(pts * self._time_base)
+        elif pts_time < self._start_time - _PTS_TOLERANCE:
             return
 
         # In frames mode the n-th selected frame is the n-th listed number
@@ -354,6 +413,11 @@ class VideoFrameExtractor(AVIReader):
                 self._frame_info_queue.get_nowait()
             except queue.Empty:
                 break
+
+        # The next stream's showinfo prints its own time base; until it does, nothing
+        # carries over from this one
+        self._time_base = None
+        self._start_pts = None
 
         # Start extractor process and feed video data to it via stdin
         super().start()

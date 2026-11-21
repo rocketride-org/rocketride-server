@@ -289,6 +289,13 @@ class IInstance(IInstanceBase):
         self._stream_frames += 1
         self._last_time = time_stamp
 
+        # The last frame the cap allows: nothing after it is wanted, so ffmpeg stops
+        # decoding now instead of running to the end of the video (with a scene gap
+        # ffmpeg is not capped itself). end_decoding never waits, so it is safe here
+        # on the reader's data thread
+        if self._max_frames and self._stream_frames >= self._max_frames:
+            self._reader.end_decoding()
+
         # Burn the watermark onto the frame before it is emitted anywhere.
         if self._watermark:
             image = self._apply_watermark(image, format_seconds(time_stamp))

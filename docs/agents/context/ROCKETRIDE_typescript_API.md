@@ -450,7 +450,7 @@ Rewrite a pipeline from the old node-config format to the current path-addressed
 ```typescript
 const result = await client.convert({ pipeline, nameHint: path.basename(file, '.pipe') });
 if (result.touched && result.errors.length === 0) {
-	await fs.writeFile(path, JSON.stringify(result.pipeline, null, 2));
+	await fs.writeFile(file, JSON.stringify(result.pipeline, null, 2));
 }
 ```
 

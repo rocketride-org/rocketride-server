@@ -123,12 +123,25 @@ class _Capture:
         self.docs.extend(documents)
 
 
+class _Reader:
+    """Stand-in for the extractor: counts end_decoding, ignores the stream."""
+
+    def __init__(self):
+        self.ended = 0
+
+    def writeAVI(self, *_args):  # noqa: N802 (engine method name)
+        pass
+
+    def end_decoding(self):
+        self.ended += 1
+
+
 def _wired(min_gap=0.0, max_frames=0):
     """An instance wired to capture documents, with the gap and cap it applies itself."""
     inst = IInstance()
     inst.instance = _Capture()
     inst.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(jobConfig={'nodeId': 'test-node'}))
-    inst._reader = SimpleNamespace(writeAVI=lambda *_args: None)
+    inst._reader = _Reader()
     inst._min_gap = min_gap
     inst._max_frames = max_frames
     inst.open(None)
@@ -327,6 +340,26 @@ def test_the_cap_counts_the_frames_the_gap_kept():
         inst._frame_callback(_png(), 0, seconds)
 
     assert _times(inst) == [0.0, 1.0]
+
+
+def test_reaching_the_cap_ends_decoding_once():
+    """With a gap ffmpeg runs uncapped; the last frame the cap allows stops it there."""
+    inst = _wired(min_gap=1.0, max_frames=2)
+
+    for seconds in (0.0, 0.5, 1.0, 1.5, 2.0, 3.0):
+        inst._frame_callback(_png(), 0, seconds)
+
+    assert _times(inst) == [0.0, 1.0]
+    assert inst._reader.ended == 1, 'once, at the frame that reached the cap'
+
+
+def test_without_a_cap_decoding_runs_to_the_end():
+    inst = _wired(min_gap=1.0)
+
+    for seconds in (0.0, 1.0, 2.0, 3.0):
+        inst._frame_callback(_png(), 0, seconds)
+
+    assert inst._reader.ended == 0
 
 
 def test_the_gap_and_cap_start_again_with_each_video_stream():

@@ -35,7 +35,9 @@ numbers are counted from the start of the video.
 import queue
 import struct
 import zlib
+from fractions import Fraction
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from rocketlib import AVI_ACTION
@@ -78,6 +80,21 @@ def _extractor(calls, **config):
 def _info(n, seconds):
     """A showinfo line as ffmpeg prints it for the n-th selected frame."""
     return f'[Parsed_showinfo_0 @ 0x0] n: {n:3d} pts: {int(seconds * 25000)} pts_time: {seconds:.6f}'
+
+
+def _time_base(time_base):
+    """The configuration line showinfo prints once, before the first frame."""
+    return f'[Parsed_showinfo_0 @ 0x0] config in time_base: {time_base}, frame_rate: 25/1'
+
+
+def _frame(n, pts, pts_time):
+    """A showinfo frame line with an exact pts, as ffmpeg 7 prints it."""
+    return f'[Parsed_showinfo_0 @ 0x0] n: {n:3d} pts: {pts:6d} pts_time:{pts_time}     duration:   1000'
+
+
+def _queued(extractor):
+    """Everything onInfo queued, in order."""
+    return [extractor._frame_info_queue.get_nowait() for _ in range(extractor._frame_info_queue.qsize())]
 
 
 def _vf(extractor):
@@ -129,6 +146,19 @@ def test_start_also_clears_the_buffer_and_done_flag(monkeypatch):
 
     assert extractor._buffer == bytearray()
     assert extractor._done is False
+
+
+def test_start_forgets_the_previous_streams_time_base(monkeypatch):
+    """Each stream's showinfo prints its own time base; the last video's must not cut the next."""
+    monkeypatch.setattr(F.AVIReader, 'start', lambda self: None)
+
+    extractor = _extractor([], start_time=12)
+    extractor.onInfo(_time_base('1/25000'))
+    assert extractor._start_pts == 300000, 'precondition: the cut is known'
+
+    extractor.start()
+
+    assert (extractor._time_base, extractor._start_pts) == (None, None)
 
 
 def test_a_frame_whose_info_never_arrives_does_not_wedge_the_thread(monkeypatch):
@@ -217,19 +247,85 @@ def test_queue_module_error_is_the_one_being_caught():
 # =============================================================================
 
 
-def test_entries_before_the_start_time_are_skipped():
-    """The frames the output seek drops still get showinfo entries; no PNG ever claims them.
+def test_without_a_time_base_entries_before_the_start_time_are_skipped_by_their_time():
+    """The fallback for an ffmpeg that printed no time base: the printed time against the start.
 
-    Queued, they would hand the first real frame (15 s here) the 0 s frame's number and
-    time, and shift every frame after it the same way.
+    The frames the output seek drops still get showinfo entries; no PNG ever claims them.
+    Queued, they would hand the first emitted frame an earlier frame's number and time,
+    and shift every frame after it the same way.
     """
-    extractor = _extractor([], fps=0.2, start_time=12)
-    for n, seconds in enumerate((0.0, 5.0, 10.0, 15.0, 20.0)):
+    extractor = _extractor([], start_time=12)
+    for n, seconds in enumerate((0.0, 5.0, 10.0, 12.0, 15.0)):
         extractor.onInfo(_info(n, seconds))
 
     queued = [extractor._frame_info_queue.get_nowait() for _ in range(extractor._frame_info_queue.qsize())]
 
-    assert queued == [(3, 15.0), (4, 20.0)]
+    assert queued == [(3, 12.0), (4, 15.0)]
+
+
+@pytest.mark.parametrize(
+    'start, time_base, expected',
+    [
+        ('12', Fraction(1, 25000), 300000),
+        ('12.04001', Fraction(1, 25000), 301000),
+        ('12.04003', Fraction(1, 25000), 301001),
+        ('12.0400019', Fraction(1, 25000), 301000),
+        ('100.045', Fraction(1, 30), 3001),
+        ('100.06', Fraction(1, 30), 3002),
+        ('0', Fraction(1, 12800), 0),
+        ('not a number', Fraction(1, 25000), None),
+    ],
+)
+def test_start_pts_cuts_where_ffmpeg_cuts(start, time_base, expected):
+    """Microseconds (further digits dropped), rescaled to the time base rounding to nearest.
+
+    The cases were checked against ffmpeg 7.1 with the extractor's output options: at
+    -ss 12.04001 the 25 fps test video still emits frame 301 (pts 301000, 12.04 s), at
+    12.04003 it does not; at -ss 100.045 a 30 fps source with time base 1/30 still
+    emits the frame at 100.0333 s, at 100.06 it does not.
+    """
+    assert F.start_pts(start, time_base) == expected
+
+
+def test_with_the_time_base_a_frame_the_seek_keeps_just_before_the_start_is_queued():
+    """10 microseconds before the start: ffmpeg keeps the frame, so its entry must be queued.
+
+    Compared in seconds the entry was skipped, and every PNG after it took the next
+    frame's number and time.
+    """
+    extractor = _extractor([], start_time=12.04001)
+    for line in (
+        _time_base('1/25000'),
+        _frame(0, 300000, '12'),
+        _frame(1, 301000, '12.04'),
+        _frame(2, 302000, '12.08'),
+    ):
+        extractor.onInfo(line)
+
+    assert _queued(extractor) == [(1, 12.04), (2, 12.08)]
+
+
+def test_with_the_time_base_a_frame_the_seek_drops_is_skipped():
+    extractor = _extractor([], start_time=12.04003)
+    for line in (
+        _time_base('1/25000'),
+        _frame(0, 300000, '12'),
+        _frame(1, 301000, '12.04'),
+        _frame(2, 302000, '12.08'),
+    ):
+        extractor.onInfo(line)
+
+    assert _queued(extractor) == [(2, 12.08)]
+
+
+def test_with_the_time_base_the_time_is_exact_not_the_printed_rounding():
+    """An older ffmpeg prints six significant digits (100.033); pts and the time base are exact."""
+    extractor = _extractor([], start_time=100)
+    extractor.onInfo(_time_base('1/30'))
+    extractor.onInfo(_frame(0, 3001, '100.033'))
+
+    [(number, seconds)] = _queued(extractor)
+    assert number == 0 and seconds == pytest.approx(3001 / 30, abs=1e-12)
 
 
 # =============================================================================
@@ -273,10 +369,15 @@ def test_frames_mode_reports_the_listed_number_not_the_ordinal():
 
 @pytest.mark.skipif(not _VIDEO.exists(), reason='the test video is not checked out')
 def test_an_interval_after_a_start_time_carries_its_own_times():
-    """5 s interval from 12 s for 10 s: the frames at 15 s and 20 s, stamped 15 s and 20 s."""
+    """5 s interval from 12 s for 10 s: ffmpeg emits the frames at 10 s and 15 s, stamped so.
+
+    The fps filter's time base is 5 s, and ffmpeg cuts in it: 12 s rounds to tick 2
+    (10 s), 22 s to tick 4. Checked by PNG checksum against an unseeked run; compared in
+    seconds the two images were stamped 15 s and 20 s.
+    """
     frames = _run(fps=0.2, start_time=12, duration=10)
 
-    assert [seconds for _number, seconds in frames] == [15.0, 20.0]
+    assert [seconds for _number, seconds in frames] == [10.0, 15.0]
 
 
 @pytest.mark.skipif(not _VIDEO.exists(), reason='the test video is not checked out')
@@ -285,6 +386,52 @@ def test_frames_mode_extracts_the_listed_frames_inside_the_window():
     frames = _run(type='frames', frames=[1000, 300, 0, 400, 300], start_time=12, duration=6)
 
     assert frames == [(300, 12.0), (400, 16.0)]
+
+
+@pytest.mark.skipif(not _VIDEO.exists(), reason='the test video is not checked out')
+def test_end_decoding_from_the_frame_callback_stops_ffmpeg_and_the_stream_still_ends():
+    """A consumer with all it wants ends ffmpeg early; the stream winds down as after -frames:v."""
+    frames = []
+
+    def callback(image, number, seconds):
+        frames.append(image)
+        if image is not None and len(frames) == 1:
+            extractor.end_decoding()  # on the data thread, where stop() would wait on its own join
+
+    extractor = VideoFrameExtractor(callback, name='FrameGrabber', config={'type': 'interval', 'fps': 1.0})
+    data = _VIDEO.read_bytes()
+    extractor.writeAVI(AVI_ACTION.BEGIN, 'video/mp4', b'')
+    for offset in range(0, len(data), 1 << 20):
+        extractor.writeAVI(AVI_ACTION.WRITE, 'video/mp4', data[offset : offset + (1 << 20)])
+    extractor.writeAVI(AVI_ACTION.END, 'video/mp4', b'')
+
+    emitted = [image for image in frames if image is not None]
+    assert 1 <= len(emitted) < 10, 'at 1 fps the whole 74 s video gives 74 frames'
+    assert frames[-1] is None, 'the end of the stream is still reported'
+
+
+def test_end_decoding_terminates_only_a_running_process():
+    """No process yet, or one that already exited: nothing to end."""
+    extractor = _extractor([])
+    terminated = []
+    running = SimpleNamespace(poll=lambda: None, terminate=lambda: terminated.append('running'))
+    exited = SimpleNamespace(poll=lambda: 0, terminate=lambda: terminated.append('exited'))
+
+    extractor.end_decoding()
+    extractor._ffmpeg_process = exited
+    extractor.end_decoding()
+    extractor._ffmpeg_process = running
+    extractor.end_decoding()
+
+    assert terminated == ['running']
+
+
+@pytest.mark.skipif(not _VIDEO.exists(), reason='the test video is not checked out')
+def test_a_frame_the_seek_keeps_just_before_the_start_carries_its_own_number():
+    """At 12.04001 s ffmpeg still emits frame 301 (12.04 s); every frame keeps its own entry."""
+    frames = _run(type='frames', frames=[300, 301, 302], start_time=12.04001, duration=1)
+
+    assert frames == [(301, 12.04), (302, 12.08)]
 
 
 @pytest.mark.skipif(not _VIDEO.exists(), reason='the test video is not checked out')
