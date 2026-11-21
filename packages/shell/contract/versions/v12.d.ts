@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-21T22:22:22.144Z
-// Source commit: da90d7b8901fb37e3b707ef1ecfc75c5041f8589
+// Generated:     2026-11-21T23:18:12.051Z
+// Source commit: 8950a1c35b96b31a415aad5c01caa95fed180487
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1532,7 +1532,9 @@ export interface DeployHistoryEntry {
         `disabled`/`removed`), the review transitions (`request`/`approved`/
         `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime:
         the union names the pipe-rail actions only, because the shell contract
-        (append-only) re-exports this type; compare raw strings for the rest. */
+        (append-only) re-exports this type; compare raw strings for the rest,
+        widening first: `(entry.action as string | undefined) === 'delete'`
+        (a literal outside the union does not compile against it directly). */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
     /** `''` on org-wide rows (publish); the audience on pointer changes. */
     teamId?: string;
@@ -5668,7 +5670,7 @@ export declare class RocketRideClient extends DAPClient {
      *   auth: 'your-api-key',
      *   uri: 'wss://your-server.com',
      *   persist: true,
-     *   onEvent: (event) => console.log('Event:', event)
+     *   onEvent: async (event) => console.log('Event:', event)
      * });
      *
      * // Using custom env dictionary
