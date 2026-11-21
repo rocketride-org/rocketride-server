@@ -244,14 +244,14 @@ class TestRimeDispatch:
         assert spec['label']
 
     def test_synthesize_dispatches_model_scoped_speaker(self, fake_requests):
-        """Shared engine → rime_tts: the model-scoped speaker (held as `_voice`)
+        """Shared engine → rime_tts: the model-scoped speaker (this call's `voice`)
         must reach Rime as `speaker`, and synthesize returns (mp3 bytes, audio/mpeg)
         with no temp file. Guards the old always-`astra` bug at the dispatch layer.
         """
         fake_requests.response = _FakeResponse(content=b'AUDIO')
         g = _ig.IGlobal()
-        g._engine, g._model, g._voice, g._api_key = 'rime', 'mistv3', 'cove', 'k'
-        raw, mime = g.synthesize('speak this')
+        g._engine, g._api_key = 'rime', 'k'
+        raw, mime = g.synthesize('speak this', 'mistv3', 'cove')
         assert (raw, mime) == (b'AUDIO', 'audio/mpeg')
         assert fake_requests.last.json == {'text': 'speak this', 'speaker': 'cove', 'modelId': 'mistv3'}
 
@@ -259,9 +259,9 @@ class TestRimeDispatch:
         """A 200 with an empty body must raise, not hand back a zero-byte clip."""
         fake_requests.response = _FakeResponse(content=b'')
         g = _ig.IGlobal()
-        g._engine, g._model, g._voice, g._api_key = 'rime', 'mistv3', 'cove', 'k'
+        g._engine, g._api_key = 'rime', 'k'
         with pytest.raises(Exception, match='no audio'):
-            g.synthesize('speak this')
+            g.synthesize('speak this', 'mistv3', 'cove')
 
 
 class TestRimeSchema:
@@ -330,46 +330,46 @@ class TestInputLimit:
     """
 
     @staticmethod
-    def _global(engine: str, model: str, voice: str = 'astra'):
+    def _global(engine: str):
         g = _ig.IGlobal()
-        g._engine, g._model, g._voice, g._api_key = engine, model, voice, 'k'
+        g._engine, g._api_key = engine, 'k'
         return g
 
     def test_text_at_the_cap_still_reaches_the_vendor(self, fake_requests):
         fake_requests.response = _FakeResponse(content=b'AUDIO')
-        self._global('rime', 'coda').synthesize('a' * 1000)
+        self._global('rime').synthesize('a' * 1000, 'coda', 'astra')
         assert fake_requests.last is not None, 'a record at the cap must still be sent'
 
     def test_text_over_the_cap_never_reaches_the_vendor(self, fake_requests):
         fake_requests.response = _FakeResponse(content=b'AUDIO')
         with pytest.raises(Exception) as raised:
-            self._global('rime', 'coda').synthesize('a' * 1001)
+            self._global('rime').synthesize('a' * 1001, 'coda', 'astra')
         assert fake_requests.last is None, 'the request must not be sent'
         assert '1000' in str(raised.value) and '1001' in str(raised.value)
 
     def test_the_error_names_the_way_out(self, fake_requests):
         with pytest.raises(Exception) as raised:
-            self._global('rime', 'coda').synthesize('a' * 1001)
+            self._global('rime').synthesize('a' * 1001, 'coda', 'astra')
         message = str(raised.value)
         assert 'chunker' in message, 'say how to split the text'
         assert 'arcana' in message, 'name the model that has no cap'
 
     def test_arcana_is_uncapped(self, fake_requests):
         fake_requests.response = _FakeResponse(content=b'AUDIO')
-        self._global('rime', 'arcana').synthesize('a' * 50000)
+        self._global('rime').synthesize('a' * 50000, 'arcana', 'astra')
         assert fake_requests.last is not None, 'arcana is documented as uncapped'
 
     def test_every_other_rime_model_carries_the_cap(self, fake_requests):
         for model in ('mistv2', 'mistv3'):
             fake_requests.last = None
             with pytest.raises(Exception, match='1000 characters'):
-                self._global('rime', model).synthesize('a' * 1001)
+                self._global('rime').synthesize('a' * 1001, model, 'astra')
             assert fake_requests.last is None
 
     def test_openai_keeps_its_own_cap(self, fake_requests):
         with pytest.raises(Exception, match='4096 characters'):
-            self._global('openai', 'gpt-4o-mini-tts', 'alloy').synthesize('a' * 4097)
+            self._global('openai').synthesize('a' * 4097, 'gpt-4o-mini-tts', 'alloy')
 
     def test_elevenlabs_keeps_its_own_cap(self, fake_requests):
         with pytest.raises(Exception, match='5000 characters'):
-            self._global('elevenlabs', 'eleven_multilingual_v2', 'x').synthesize('a' * 5001)
+            self._global('elevenlabs').synthesize('a' * 5001, 'eleven_multilingual_v2', 'x')

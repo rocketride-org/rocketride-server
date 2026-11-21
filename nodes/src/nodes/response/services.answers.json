@@ -74,6 +74,8 @@
 			"type": "string",
 			"title": "Identifier key within result",
 			"minLength": 1,
+			"param": true,
+			"tool": false,
 			"default": "answers",
 			"maxLength": 32
 		}

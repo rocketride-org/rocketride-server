@@ -27,12 +27,16 @@
 Apify tool node instance.
 
 Exposes ``run_actor`` (run an Actor and return its dataset) and
-``get_dataset_items`` (read an existing dataset) as agent tools.
+``get_dataset_items`` (read an existing dataset) as agent tools. The bounds
+of a run (max items, run timeout, max cost) are this call's
+(``self.settings``); the schema supplies the defaults and the minimums, so the
+values arrive validated.
 """
 
 from __future__ import annotations
 
 from datetime import timedelta
+from decimal import Decimal
 
 from rocketlib import IInstanceBase, tool_function
 
@@ -92,15 +96,15 @@ class IInstance(IInstanceBase):
             raise ValueError('run_actor requires an `actor_id` parameter')
 
         run_input = args.get('run_input') or {}
-        limit = _clamp_limit(args.get('limit'), self.IGlobal.max_items)
+        limit = _clamp_limit(args.get('limit'), self.settings.max_items)
 
         # Bound run time, item count and cost so an agent-chosen Actor can't hang or overspend.
         run = self.IGlobal.client.actor(actor_id).call(
             run_input=run_input,
             max_items=limit,
-            max_total_charge_usd=self.IGlobal.max_cost_usd,
-            run_timeout=timedelta(seconds=self.IGlobal.run_timeout_secs),
-            wait_duration=timedelta(seconds=self.IGlobal.run_timeout_secs),
+            max_total_charge_usd=Decimal(str(self.settings.max_cost_usd)),
+            run_timeout=timedelta(seconds=self.settings.run_timeout_secs),
+            wait_duration=timedelta(seconds=self.settings.run_timeout_secs),
         )
         dataset_id = run.default_dataset_id if run else None
         if not dataset_id:
@@ -139,6 +143,6 @@ class IInstance(IInstanceBase):
         if not dataset_id:
             raise ValueError('get_dataset_items requires a `dataset_id` parameter')
 
-        limit = _clamp_limit(args.get('limit'), self.IGlobal.max_items)
+        limit = _clamp_limit(args.get('limit'), self.settings.max_items)
         items = self.IGlobal.client.dataset(dataset_id).list_items(limit=limit).items
         return {'success': True, 'count': len(items), 'items': items}

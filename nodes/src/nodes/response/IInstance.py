@@ -30,12 +30,10 @@ from ai.common.schema import Doc, Question, Answer
 from ai.common.avi.descriptor import descriptor_from_payload, source_media_detail
 from rocketlib import AVI_ACTION, Entry
 
-from .IGlobal import IGlobal
+from .IValidator import configured_keys, reserved_key_error
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal
-
     text: str = ''
 
     def __init__(self, *args, **kwargs):
@@ -43,6 +41,25 @@ class IInstance(IInstanceBase):
         # Per-lane buffers + descriptors; per-instance, not class-level mutables (shared).
         self._media_buffers = {}
         self._media_descriptors = {}
+        # This call's result keys (see beginInstance)
+        self._lane_name = None
+        self._lanes = {}
+
+    def beginInstance(self):
+        """
+        Read this call's result keys from its settings; refuse a reserved one.
+
+        ``laneName`` is a per-call parameter; the generic service's ``lanes``
+        mapping is the control's. Both are read here, once per binding.
+
+        Raises:
+            ValueError: A key the result object already uses.
+        """
+        settings = self.settings
+        message = reserved_key_error(settings)
+        if message:
+            raise ValueError(message)
+        self._lane_name, self._lanes = configured_keys(settings)
 
     def _getkey(self, type: str):
         # Allow the key to be overriden by
@@ -57,12 +74,12 @@ class IInstance(IInstanceBase):
         #   }
 
         # If we are using the new stye:
-        if self.IGlobal.lane_name() is not None:
+        if self._lane_name is not None:
             # Grab the key name
-            key = self.IGlobal.lane_name()
-        elif self.IGlobal.lane_map():
+            key = self._lane_name
+        elif self._lanes:
             # If we are using the old style, grab the key
-            key = self.IGlobal.lane_map().get(type, type)
+            key = self._lanes.get(type, type)
         else:
             key = type
 

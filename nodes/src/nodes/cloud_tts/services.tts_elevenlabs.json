@@ -83,6 +83,7 @@
 			"type": "string",
 			"title": "Voice",
 			"description": "Premade ElevenLabs voice (voice_id).",
+			"param": true,
 			"default": "EXAVITQu4vr4xnSDxMaL",
 			"enum": [
 				["21m00Tcm4TlvDq8ikWAM", "Rachel"],
@@ -107,6 +108,7 @@
 			"type": "string",
 			"title": "Model",
 			"description": "ElevenLabs model",
+			"param": true,
 			"default": "eleven_multilingual_v2",
 			"enum": {
 				"eleven_multilingual_v2": { "title": "Multilingual v2 - High quality, 29 languages" },

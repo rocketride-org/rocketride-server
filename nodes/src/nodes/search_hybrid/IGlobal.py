@@ -33,19 +33,15 @@ class IGlobal(IGlobalBase):
     """Hold shared hybrid-search state across all node threads."""
 
     engine: HybridSearchEngine | None = None
-    top_k: int = 10
-    rrf_k: int = 60
 
     def beginGlobal(self):
-        """Create the hybrid search engine from the resolved config.
+        """Create the hybrid search engine.
 
-        The schema bounds alpha to [0, 1], top_k to >= 1 and rrf_k to >= 0,
-        so the values are read as they are.
+        Every knob (the profile, alpha, top_k and rrf_k) is a per-call parameter the
+        instance passes to ``search``; the schema bounds alpha to [0, 1], top_k to >= 1
+        and rrf_k to >= 0.
         """
-        config = self.config
-        self.top_k = int(config.top_k)
-        self.rrf_k = int(config.rrf_k)
-        self.engine = HybridSearchEngine(alpha=float(config.alpha))
+        self.engine = HybridSearchEngine()
 
     def search_engine(self):
         """The shared hybrid search engine, or None before beginGlobal."""

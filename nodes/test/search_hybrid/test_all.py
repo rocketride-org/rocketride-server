@@ -862,8 +862,9 @@ class TestIGlobalAlphaClamp:
         ig = IGlobal.__new__(IGlobal)
         ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig=bad_cfg)
 
+        # The control's stored values resolve with its config, whichever door reads it first
         with pytest.raises(ConfigError) as exc:
-            ig.beginGlobal()
+            ig.config
         assert fragment in str(exc.value)
 
     def test_the_mode_sets_alpha_and_an_override_wins(self):
@@ -872,15 +873,19 @@ class TestIGlobalAlphaClamp:
 
         ig = IGlobal.__new__(IGlobal)
         ig.glb = types.SimpleNamespace(logicalType='search_hybrid', connConfig={'profile': 'semantic'})
-        ig.beginGlobal()
-        assert (ig.engine.alpha, ig.top_k, ig.rrf_k) == (0.8, 10, 60)
+        settings = ig.config.overlay(None)
+        assert (settings.alpha, settings.top_k, settings.rrf_k) == (0.8, 10, 60)
 
         ig = IGlobal.__new__(IGlobal)
         ig.glb = types.SimpleNamespace(
             logicalType='search_hybrid', connConfig={'profile': 'semantic', 'semantic': {'alpha': 0.6}, 'top_k': 3}
         )
-        ig.beginGlobal()
-        assert (ig.engine.alpha, ig.top_k) == (0.6, 3)
+        settings = ig.config.overlay(None)
+        assert (settings.alpha, settings.top_k) == (0.6, 3)
+
+        # A call switching the mode gets that mode's alpha, on the same control
+        assert ig.config.overlay({'profile': 'keyword'}).alpha == 0.2
+        assert ig.config.overlay({'profile': 'balanced', 'balanced.alpha': 0.9}).alpha == 0.9
 
 
 # ===========================================================================
@@ -921,7 +926,7 @@ def search_hybrid_pkg():
     """
     import types
 
-    def make_instance(engine, top_k=10, rrf_k=60):
+    def make_instance(engine, top_k=10, rrf_k=60, alpha=0.5):
         """Build an IInstance with a mock IGlobal/engine and a mock pipeline.
 
         The instance reaches the engine through the global's accessor and its
@@ -935,7 +940,7 @@ def search_hybrid_pkg():
         inst.IGlobal = iglobal
         # The settings view is per instance (the base caches it on _settings),
         # so two instances keep their own knobs
-        inst._settings = types.SimpleNamespace(top_k=top_k, rrf_k=rrf_k)
+        inst._settings = types.SimpleNamespace(top_k=top_k, rrf_k=rrf_k, alpha=alpha)
         mock_instance = MagicMock()
         inst.instance = mock_instance
         return inst, mock_instance
@@ -1302,7 +1307,7 @@ class TestIInstanceMissingScores:
         captured: dict = {}
 
         class _SpyEngine:
-            def search(self, query, documents, vector_scores, top_k, rrf_k):
+            def search(self, query, documents, vector_scores, top_k, rrf_k, alpha):
                 captured['vector_scores'] = vector_scores
                 return []
 

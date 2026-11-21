@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import types
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -157,6 +158,10 @@ class _FakeGlobal:
 def _instance(global_state):
     inst = mod.IInstance()
     inst.IGlobal = global_state
+    # The two bounds are this call's settings; the fake carries the values a test asks for
+    inst._settings = types.SimpleNamespace(
+        exec_timeout_secs=global_state.exec_timeout_secs, max_output_chars=global_state.max_output_chars
+    )
     return inst
 
 
