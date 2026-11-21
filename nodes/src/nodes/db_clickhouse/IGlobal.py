@@ -89,7 +89,7 @@ class IGlobal(DatabaseGlobalBase):
     Implements the two abstract methods that carry ClickHouse knowledge:
     how to read connection params from the node config, and how to build a
     clickhouse-sqlalchemy DSN from those params.  Everything else (schema
-    reflection, type inference, session lifecycle) lives in the base.
+    reflection, type inference, the per-table schema cache) lives in the base.
 
     The DSN uses the native TCP interface (``clickhouse+native://``, default
     port 9000) via the ``clickhouse-driver`` backend.  ClickHouse has no
@@ -101,8 +101,9 @@ class IGlobal(DatabaseGlobalBase):
         """Map the resolved node config to a flat ClickHouse connection-params dict.
 
         The resolver has applied the schema defaults (host, user, database,
-        table, tls) and flattened the keys to their short names ('host', not
+        tls) and flattened the keys to their short names ('host', not
         'clickhouse.host'); the password has no default, so an unset one is None.
+        The table is a parameter: the instance reads it per call from settings.
         'tls' is a ClickHouse-specific option (not present on the MySQL/PostgreSQL
         nodes). It is distinct from the "secret" flag on the password property,
         which only marks the value as a masked secret.
@@ -112,7 +113,6 @@ class IGlobal(DatabaseGlobalBase):
             'user': config['user'].strip(),
             'password': config['password'] or '',  # Do not strip: whitespace is valid in passwords
             'database': config['database'].strip(),
-            'table': config['table'].strip(),
             # Normalised to a flag string so the params dict stays Dict[str, str];
             # consumed by _build_connection_url below.
             'tls': 'true' if config['tls'] else '',
@@ -146,14 +146,6 @@ class IGlobal(DatabaseGlobalBase):
         # Plaintext native (e.g. a local server); defaults to port 9000 when the
         # host carries no explicit port. SQLAlchemy handles host:port correctly.
         return f'clickhouse+native://{user}:{password}@{host}/{database}'
-
-    def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        """Return the EXPLAIN-validation retry count; the resolver bounded it to the schema's 1..20."""
-        return config['max_attempts']
-
-    def _db_description(self, config: Dict[str, Any]) -> str:
-        """Return the user-provided database description, always as a string."""
-        return config['db_description'] or ''
 
     def _format_db_error(self, exc: Exception) -> str:
         """Return ``Error <code>: <class>: <sentence>`` for a ClickHouse server error.

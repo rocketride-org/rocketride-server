@@ -43,19 +43,22 @@
 			"type": "string",
 			"title": "Workspace ID",
 			"description": "Hotdata workspace ID.",
-			"required": true
+			"required": true,
+			"env": "ROCKETRIDE_DB_HOTDATA_WORKSPACE_ID"
 		},
 		"hotdata.database_id": {
 			"type": "string",
 			"title": "Existing database ID",
 			"description": "Leave empty to create a fresh ephemeral database per run (the default). Set an existing database ID so agents in separate pipeline runs share one database. An attached database is never deleted by this node, and indexes cannot be built on one.",
-			"default": ""
+			"default": "",
+			"env": "ROCKETRIDE_DB_HOTDATA_DATABASE_ID"
 		},
 		"hotdata.api_url": {
 			"type": "string",
 			"title": "API URL",
 			"description": "Hotdata API base URL. Leave empty for https://api.hotdata.dev.",
-			"default": ""
+			"default": "",
+			"env": "ROCKETRIDE_DB_HOTDATA_API_URL"
 		},
 		"hotdata.ttl": {
 			"type": "string",
@@ -73,13 +76,17 @@
 			"title": "Table",
 			"description": "Table that rows arriving on the answers lane are loaded into. Created on first use.",
 			"default": "pipeline_data",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		},
 		"hotdata.db_description": {
 			"type": "string",
 			"title": "Database description",
 			"description": "Schema and domain hints for natural-language SQL generation.",
-			"default": ""
+			"default": "",
+			"param": true,
+			"tool": false
 		},
 		"hotdata.max_attempts": {
 			"type": "integer",
@@ -87,7 +94,9 @@
 			"description": "Maximum SQL-generation attempts.",
 			"default": 3,
 			"minimum": 1,
-			"maximum": 10
+			"maximum": 10,
+			"param": true,
+			"tool": false
 		},
 		"hotdata.max_execute_rows": {
 			"type": "integer",
@@ -95,19 +104,25 @@
 			"description": "Maximum rows returned by raw SQL execution.",
 			"default": 25000,
 			"minimum": 1,
-			"maximum": 25000
+			"maximum": 25000,
+			"param": true,
+			"tool": false
 		},
 		"hotdata.allow_destructive_load": {
 			"type": "boolean",
 			"title": "Allow destructive loads",
 			"description": "Permit load_data to use replace, update or delete modes, which overwrite or remove existing rows. Off by default: load_data is append/upsert only, so an agent cannot destroy data another pipeline step loaded.",
-			"default": false
+			"default": false,
+			"param": true,
+			"tool": false
 		},
 		"hotdata.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"description": "Permit trusted callers to submit raw read-only SQL.",
-			"default": false
+			"default": false,
+			"param": true,
+			"tool": false
 		},
 		"hotdata.job_timeout_secs": {
 			"type": "integer",
@@ -115,7 +130,9 @@
 			"description": "Maximum time to wait for an asynchronous query.",
 			"default": 300,
 			"minimum": 10,
-			"maximum": 3600
+			"maximum": 3600,
+			"param": true,
+			"tool": false
 		},
 		"hotdata.async_after_ms": {
 			"type": "integer",
@@ -123,7 +140,8 @@
 			"description": "Wait this long before a query continues as an asynchronous job. The API refuses anything below 1000.",
 			"default": 5000,
 			"minimum": 1000,
-			"maximum": 60000
+			"maximum": 60000,
+			"param": true
 		}
 	},
 	//

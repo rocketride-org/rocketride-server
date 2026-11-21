@@ -383,15 +383,17 @@ class TestRocketrideSqlE2E:
         glb.beginGlobal()
         inst = iinstance_cls()
         inst.IGlobal = glb
+        # No caller: the call's settings are the stored values, the table among them
+        inst._settings = glb._resolved()
         return glb, inst
 
     def test_begin_global_connects_and_reflects(self, rr_env, monkeypatch, sql_table):
         glb, _ = self._begin(monkeypatch, {'table': sql_table})
         try:
             assert glb.database == TEST_DB_NAME
-            assert glb.table == sql_table
+            assert 'table' not in vars(glb)  # a per-call param, not the global's
             assert sql_table in glb.db_schema
-            assert 'name' in glb.schema
+            assert glb.table_schemas == {}  # a table is reflected on the first insert into it
             ok, err = glb._validateQuery(f'SELECT * FROM {sql_table}')
             assert ok, err
         finally:

@@ -86,19 +86,22 @@
 			"format": "textarea",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries."
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
+			"param": true
 		},
 		"mysql.host": {
 			"type": "string",
 			"title": "MySQL host",
 			"default": "localhost",
-			"description": "Host name or IP address of the MySQL server"
+			"description": "Host name or IP address of the MySQL server",
+			"env": "ROCKETRIDE_DB_MYSQL_HOST"
 		},
 		"mysql.user": {
 			"type": "string",
 			"title": "User",
 			"default": "root",
-			"description": "User to connect to the MySQL server"
+			"description": "User to connect to the MySQL server",
+			"env": "ROCKETRIDE_DB_MYSQL_USER"
 		},
 		"mysql.password": {
 			"type": "string",
@@ -113,13 +116,16 @@
 			"default": "database",
 			"minLength": 2,
 			"maxLength": 32,
-			"description": "Name of database"
+			"description": "Name of database",
+			"env": "ROCKETRIDE_DB_MYSQL_DATABASE"
 		},
 		"mysql.table": {
 			"type": "string",
 			"title": "Table name",
 			"default": "table",
-			"description": "Name of table"
+			"description": "Name of table",
+			"param": true,
+			"tool": false
 		},
 		"mysql.max_attempts": {
 			"type": "integer",
@@ -127,13 +133,17 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 20,
-			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL",
+			"param": true,
+			"tool": false
 		},
 		"mysql.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
-			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
+			"description": "Permit the execute tool function to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.",
+			"param": true,
+			"tool": false
 		}
 	},
 	//

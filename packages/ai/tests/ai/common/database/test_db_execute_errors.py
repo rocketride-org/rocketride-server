@@ -39,11 +39,13 @@ from __future__ import annotations
 
 import re
 import threading
+from collections import OrderedDict
+from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import MetaData, Table as SQLTable, Text, create_engine, event, insert
 from sqlalchemy.dialects import mysql, postgresql, sqlite
-from sqlalchemy.exc import DBAPIError, NoSuchTableError
+from sqlalchemy.exc import DBAPIError, NoSuchTableError, SAWarning
 from sqlalchemy.pool import StaticPool
 
 import ai.common.database.db_global_base as db_global_base_module
@@ -96,17 +98,20 @@ def _make_instance(engine):
     """
     iglobal = _TestableGlobal.__new__(_TestableGlobal)
     iglobal.engine = engine
-    iglobal.schema = {}
     iglobal.db_schema = {}
     iglobal.database = 'main'
-    iglobal.allow_execute = True
     iglobal.max_execute_rows = 1000
-    # `beginGlobal` gives every node its own reflection lock; the concurrency
-    # tests below depend on two globals NOT sharing one, so build it the same way.
+    # `beginGlobal` gives every node its own reflection lock and its own
+    # per-table schema cache; the concurrency tests below depend on two globals
+    # NOT sharing one, so build them the same way.
     iglobal.reflect_lock = threading.Lock()
+    iglobal._table_schemas_lock = threading.Lock()
+    iglobal.table_schemas = OrderedDict()
 
     inst = _TestableInstance.__new__(_TestableInstance)
     inst.IGlobal = iglobal
+    # The call's parameters, as `settings` serves them: the gate is on here
+    inst._settings = {'table': 'table', 'db_description': '', 'max_attempts': 5, 'allow_execute': True}
     return inst
 
 
@@ -197,7 +202,7 @@ def test_execute_returns_rows_on_success(instance):
 
 def test_execute_still_refuses_when_the_gate_is_off(instance):
     """The allow_execute gate runs before any of this and is untouched."""
-    instance.IGlobal.allow_execute = False
+    instance._settings['allow_execute'] = False
     with pytest.raises(ValueError, match='allow_execute'):
         instance.execute({'sql': 'SELECT 1'})
 
@@ -430,19 +435,21 @@ def test_refresh_schema_names_a_table_dropped_mid_walk(instance, monkeypatch):
 def test_a_failed_refresh_leaves_both_caches_exactly_as_they_were(instance, monkeypatch):
     """Publish all or nothing: a half-walked database must not become the cache.
 
-    The two caches move together or not at all. Clearing ``IGlobal.schema``
+    The two caches move together or not at all. Clearing ``IGlobal.table_schemas``
     while ``db_schema`` kept its old value would leave the node claiming a
     refresh it did not perform, and re-arming the insert lane's lazy rebuild
     against a database that just refused to be reflected.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
     instance.refresh_schema({})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
     db_schema_before = dict(iglobal.db_schema)
-    schema_before = dict(iglobal.schema)
+    schema_before = dict(iglobal._tableSchema('widgets'))
 
     instance.execute({'sql': 'CREATE TABLE gadgets (id INTEGER PRIMARY KEY)'})
     _reflection_that_fails_on(monkeypatch, 'widgets')
@@ -452,7 +459,7 @@ def test_a_failed_refresh_leaves_both_caches_exactly_as_they_were(instance, monk
 
     assert iglobal.db_schema == db_schema_before
     assert 'gadgets' not in iglobal.db_schema
-    assert iglobal.schema == schema_before
+    assert iglobal._tableSchema('widgets') == schema_before
 
 
 def test_refresh_schema_releases_the_lock_when_the_reflection_fails(instance, monkeypatch):
@@ -488,7 +495,7 @@ def test_a_global_that_never_ran_begin_global_names_the_missing_lock(instance):
     ever see.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
     instance.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER)'})
     iglobal.reflect_lock = None
 
@@ -505,7 +512,7 @@ def test_refresh_schema_rebuilds_the_insert_lane_column_map(instance):
     """The answers lane must be as current as the tool's own return value.
 
     ``refresh_schema`` replaces ``IGlobal.db_schema`` (what the LLM path
-    describes) but ``_insertData`` builds every INSERT from ``IGlobal.schema``,
+    describes) but ``_insertData`` builds every INSERT from ``IGlobal.table_schemas``,
     a separate start-up snapshot of the configured table. Leaving that behind
     made the node current on one path and stale on the other: a column added
     by the very DDL that prompted the refresh would still be dropped.
@@ -516,35 +523,76 @@ def test_refresh_schema_rebuilds_the_insert_lane_column_map(instance):
     result instead, in the shape ``_getTableSchema`` publishes.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (label TEXT)'})
     # Start-up state: beginGlobal reflected the one-column table.
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
-    assert set(iglobal.schema) == {'label'}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
+    assert set(iglobal._tableSchema('widgets')) == {'label'}
 
     instance.execute({'sql': 'ALTER TABLE widgets ADD COLUMN size INTEGER'})
     instance.refresh_schema({})
 
     # Rebuilt, not emptied -- and in the shape _getTableSchema publishes.
-    assert iglobal.schema == {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
-    assert set(iglobal.schema) == {'label', 'size'}
+    assert iglobal._tableSchema('widgets') == {
+        name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')
+    }
+    assert set(iglobal._tableSchema('widgets')) == {'label', 'size'}
 
     instance._insertData([{'label': 'a', 'size': 7}])
 
     assert instance.execute({'sql': 'SELECT label, size FROM widgets'})['rows'] == [{'label': 'a', 'size': 7}]
-    assert set(iglobal.schema) == {'label', 'size'}
+    assert set(iglobal._tableSchema('widgets')) == {'label', 'size'}
+
+
+def test_two_tables_on_one_control_share_the_engine_and_cache_one_map_each(shared_instance):
+    """The table is a per-call parameter: two calls of one control write two tables on one engine pool."""
+    iglobal = shared_instance.IGlobal
+    engine = iglobal.engine
+    first = shared_instance
+    second = _TestableInstance.__new__(_TestableInstance)
+    second.IGlobal = iglobal
+    second._settings = dict(first._settings, table='gadgets')
+    first._settings['table'] = 'widgets'
+
+    first._insertData([{'label': 'a'}])
+    second._insertData([{'size': 3}])
+
+    assert iglobal.engine is engine
+    assert set(iglobal.table_schemas) == {'widgets', 'gadgets'}
+    assert set(iglobal._tableSchema('widgets')) == {'label'}
+    assert set(iglobal._tableSchema('gadgets')) == {'size'}
+    assert first.execute({'sql': 'SELECT label FROM widgets'})['rows'] == [{'label': 'a'}]
+    assert first.execute({'sql': 'SELECT size FROM gadgets'})['rows'] == [{'size': 3}]
+
+
+def test_a_table_param_read_through_the_global_config_raises():
+    """The control's config refuses the per-call keys, so no IGlobal can snapshot them."""
+    from rocketlib.config import ConfigError
+
+    import rocketlib
+
+    if not hasattr(rocketlib, 'getServiceSchema'):
+        pytest.skip('needs the engine rocketlib')
+    iglobal = _TestableGlobal.__new__(_TestableGlobal)
+    iglobal.glb = SimpleNamespace(logicalType='db_mysql', connConfig={'table': 'widgets'})
+    for key in ('table', 'db_description', 'max_attempts', 'allow_execute'):
+        with pytest.raises(ConfigError):
+            iglobal.config[key]
+    assert iglobal._resolved()['table'] == 'widgets'
 
 
 def test_an_insert_after_a_refresh_does_not_reflect_the_table_again(instance, monkeypatch):
     """The point of rebuilding instead of emptying: no second round trip.
 
     ``refresh_schema``'s walk has already read the configured table's columns.
-    Emptying ``IGlobal.schema`` made the next ``_insertData`` call
+    Emptying ``IGlobal.table_schemas`` made the next ``_insertData`` call
     ``_getTableSchema`` to read them a second time.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
     instance.refresh_schema({})
@@ -567,10 +615,12 @@ def test_an_insert_after_a_refresh_does_not_reflect_the_table_again(instance, mo
 def test_insert_lane_drops_a_new_column_without_a_refresh(instance):
     """Pins why the rebuild above is needed, not just that it happens."""
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     instance.execute({'sql': 'ALTER TABLE widgets ADD COLUMN size INTEGER'})
     # No refresh_schema call: the stale map still has only `label`.
@@ -582,15 +632,17 @@ def test_insert_lane_drops_a_new_column_without_a_refresh(instance):
 def test_refresh_schema_empties_the_column_map_when_the_table_is_gone(instance):
     """A dropped configured table leaves a falsy map, matching task start."""
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     instance.execute({'sql': 'DROP TABLE widgets'})
     instance.refresh_schema({})
 
-    assert iglobal.schema == {}
+    assert iglobal._tableSchema('widgets') == {}
 
 
 # ---------------------------------------------------------------------------
@@ -651,7 +703,7 @@ def _install_pausing_inspector(monkeypatch, *, entered, release, armed, fail_aft
 def test_a_concurrent_insert_waits_for_the_schema_rebuild(file_instance, monkeypatch):
     """A second insert must never build its row from a half-rebuilt column map.
 
-    An empty ``IGlobal.schema`` -- task start, or a ``refresh_schema`` whose
+    An empty ``IGlobal.table_schemas`` -- task start, or a ``refresh_schema`` whose
     walk did not find the configured table -- makes the next ``_insertData``
     refill it through ``_getTableSchema``, which used to publish the map and
     then grow it column by column. A second insert arriving inside that window
@@ -666,9 +718,9 @@ def test_a_concurrent_insert_waits_for_the_schema_rebuild(file_instance, monkeyp
     """
     inst = file_instance
     iglobal = inst.IGlobal
-    iglobal.table = 'widgets'
+    inst._settings['table'] = 'widgets'
     inst.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER)'})
-    iglobal.schema = {}  # the state refresh_schema leaves behind
+    iglobal._publishTableSchema('widgets', {})  # the state refresh_schema leaves behind
 
     entered, release, armed = threading.Event(), threading.Event(), threading.Event()
     reached_table_check = threading.Event()
@@ -702,7 +754,7 @@ def test_a_concurrent_insert_waits_for_the_schema_rebuild(file_instance, monkeyp
     assert not any(thread.is_alive() for thread in (rebuilder, reader))
     assert errors == []
 
-    assert set(iglobal.schema) == {'label', 'size'}
+    assert set(iglobal._tableSchema('widgets')) == {'label', 'size'}
     rows = inst.execute({'sql': 'SELECT label, size FROM widgets ORDER BY label'})['rows']
     assert rows == [{'label': 'a', 'size': 1}, {'label': 'b', 'size': 2}]
 
@@ -711,9 +763,9 @@ def test_refresh_schema_overlapping_a_rebuild_is_safe(file_instance, monkeypatch
     """refresh_schema arriving during a rebuild must not raise or lose columns."""
     inst = file_instance
     iglobal = inst.IGlobal
-    iglobal.table = 'widgets'
+    inst._settings['table'] = 'widgets'
     inst.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER)'})
-    iglobal.schema = {}
+    iglobal._publishTableSchema('widgets', {})
 
     entered, release, armed = threading.Event(), threading.Event(), threading.Event()
     armed.set()
@@ -749,7 +801,7 @@ def test_refresh_schema_overlapping_a_rebuild_is_safe(file_instance, monkeypatch
 
     # Whichever order the two finished in, the next insert sees every column.
     inst._insertData([{'label': 'b', 'size': 2}])
-    assert set(iglobal.schema) == {'label', 'size'}
+    assert set(iglobal._tableSchema('widgets')) == {'label', 'size'}
     rows = inst.execute({'sql': 'SELECT label, size FROM widgets ORDER BY label'})['rows']
     assert rows == [{'label': 'a', 'size': 1}, {'label': 'b', 'size': 2}]
 
@@ -774,11 +826,11 @@ def test_a_refresh_does_not_block_another_nodes_insert(tmp_path, monkeypatch):
     inst_a = _make_instance(engine_a)
     inst_b = _make_instance(engine_b)
     try:
-        inst_a.IGlobal.table = 'widgets'
-        inst_b.IGlobal.table = 'widgets'
+        inst_a._settings['table'] = 'widgets'
+        inst_b._settings['table'] = 'widgets'
         inst_a.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER)'})
         inst_b.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER)'})
-        inst_b.IGlobal.schema = {}  # force the locked rebuild, the contended path
+        inst_b.IGlobal._publishTableSchema('widgets', {})  # force the locked rebuild, the contended path
 
         entered, release, armed = threading.Event(), threading.Event(), threading.Event()
         armed.set()
@@ -816,7 +868,7 @@ def test_a_refresh_does_not_block_another_nodes_insert(tmp_path, monkeypatch):
         assert insert_finished, "the second node's insert waited for the first node's refresh"
         assert errors == []
 
-        assert set(inst_b.IGlobal.schema) == {'label', 'size'}
+        assert set(inst_b.IGlobal._tableSchema('widgets')) == {'label', 'size'}
         assert inst_b.execute({'sql': 'SELECT label, size FROM widgets'})['rows'] == [{'label': 'b', 'size': 2}]
     finally:
         engine_a.dispose()
@@ -826,15 +878,15 @@ def test_a_refresh_does_not_block_another_nodes_insert(tmp_path, monkeypatch):
 def test_a_failed_rebuild_leaves_no_partial_column_map(file_instance, monkeypatch):
     """A rebuild that dies midway must leave the cache untouched, not half built.
 
-    ``_getTableSchema`` published ``self.schema = {}`` before reading a single
+    ``_getTableSchema`` published an empty map before reading a single
     column, so a reflection that failed partway left a map holding whichever
     columns it had reached. The next insert would have believed it.
     """
     inst = file_instance
     iglobal = inst.IGlobal
-    iglobal.table = 'widgets'
+    inst._settings['table'] = 'widgets'
     inst.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER, colour TEXT)'})
-    iglobal.schema = {}
+    iglobal._publishTableSchema('widgets', {})
 
     entered, release, armed = threading.Event(), threading.Event(), threading.Event()
     armed.set()
@@ -844,7 +896,7 @@ def test_a_failed_rebuild_leaves_no_partial_column_map(file_instance, monkeypatc
     with pytest.raises(RuntimeError, match='schema could not be retrieved'):
         inst._insertData([{'label': 'a', 'size': 1, 'colour': 'red'}])
 
-    assert iglobal.schema == {}
+    assert iglobal._tableSchema('widgets') == {}
 
     # The lock is released on the failure path, not stranded.
     assert iglobal.reflect_lock.acquire(blocking=False)
@@ -854,7 +906,7 @@ def test_a_failed_rebuild_leaves_no_partial_column_map(file_instance, monkeypatc
 def test_a_concurrent_insert_waits_for_the_auto_created_column_map(file_instance, monkeypatch):
     """The auto-create path is the second writer of the map, and it publishes too.
 
-    ``_createTableFromData`` created the table and then filled ``self.schema``
+    ``_createTableFromData`` created the table and then filled the cached map
     column by column, outside ``reflect_lock`` — the same publish-then-fill
     shape ``_getTableSchema`` was fixed for. A second first-batch arriving
     after the CREATE found a truthy one-column map, snapshotted it under the
@@ -865,7 +917,7 @@ def test_a_concurrent_insert_waits_for_the_auto_created_column_map(file_instance
     """
     inst = file_instance
     iglobal = inst.IGlobal
-    iglobal.table = 'widgets'
+    inst._settings['table'] = 'widgets'
 
     entered, release = threading.Event(), threading.Event()
     calls = {'n': 0}
@@ -895,7 +947,7 @@ def test_a_concurrent_insert_waits_for_the_auto_created_column_map(file_instance
     creator.start()
     assert entered.wait(timeout=10), 'the auto-create never reached its fill loop'
     # The table now exists and the map holds exactly one of its three columns.
-    assert set(iglobal.schema) != {'label', 'size', 'colour'}
+    assert set(iglobal._tableSchema('widgets')) != {'label', 'size', 'colour'}
 
     reader = threading.Thread(target=_insert, args=({'label': 'b', 'size': 'two', 'colour': 'blue'},))
     reader.start()
@@ -928,7 +980,7 @@ def test_a_failed_reflection_leaves_the_previous_column_map_in_place(file_instan
     inst.execute({'sql': 'CREATE TABLE widgets (label TEXT, size INTEGER)'})
 
     stale = {'stale_column': ('TEXT', 'from an earlier reflection')}
-    iglobal.schema = dict(stale)
+    iglobal._publishTableSchema('widgets', dict(stale))
 
     entered, release, armed = threading.Event(), threading.Event(), threading.Event()
     armed.set()
@@ -936,16 +988,18 @@ def test_a_failed_reflection_leaves_the_previous_column_map_in_place(file_instan
     _install_pausing_inspector(monkeypatch, entered=entered, release=release, armed=armed, fail_after=True)
 
     assert iglobal._getTableSchema('widgets') is None
-    assert iglobal.schema == stale
+    assert iglobal._tableSchema('widgets') == stale
 
 
 def test_insert_follows_a_column_added_and_then_dropped(instance):
     """Added and dropped columns both reach the insert lane after a refresh."""
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     instance.execute({'sql': 'ALTER TABLE widgets ADD COLUMN size INTEGER'})
     instance.refresh_schema({})
@@ -1073,16 +1127,16 @@ def test_insert_after_refresh_does_not_bind_the_generated_primary_key(instance):
     ``id SERIAL NOT NULL`` Postgres renders for the same column.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'answers'
+    instance._settings['table'] = 'answers'
 
     # Auto-create through the real path, then confirm the curated map.
     instance._insertData([{'q': 'why', 'a': 'because'}])
-    assert set(iglobal.schema) == {'q', 'a'}
+    assert set(iglobal._tableSchema('answers')) == {'q', 'a'}
 
     instance.refresh_schema({})
     # The rebuilt map is a full reflection, primary key included ...
     instance._insertData([{'q': 'how', 'a': 'like this'}])
-    assert set(iglobal.schema) == {'id', 'q', 'a'}
+    assert set(iglobal._tableSchema('answers')) == {'id', 'q', 'a'}
 
     # ... but the INSERT still carries the data columns only.
     columns = _compiled_insert_columns(instance, [{'q': 'when', 'a': 'now'}])
@@ -1098,7 +1152,7 @@ def test_a_supplied_id_is_dropped_before_a_refresh_and_bound_after(instance):
     """Pin the one INSERT that refresh_schema does change, on an auto-created table.
 
     ``_createTableFromData`` prepends an ``id`` primary key and then curates it
-    OUT of ``IGlobal.schema``, so a row that carries its own ``id`` has it
+    OUT of ``IGlobal.table_schemas``, so a row that carries its own ``id`` has it
     silently dropped and the database generates a different one.
     ``refresh_schema`` replaces that curated map with a plain reflection, which
     has ``id`` in it, so the same row now binds the caller's value. Every other
@@ -1116,10 +1170,10 @@ def test_a_supplied_id_is_dropped_before_a_refresh_and_bound_after(instance):
     test exists so the deferral is visible rather than only commented.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'answers'
+    instance._settings['table'] = 'answers'
 
     instance._insertData([{'q': 'why', 'a': 'because'}])
-    assert set(iglobal.schema) == {'q', 'a'}
+    assert set(iglobal._tableSchema('answers')) == {'q', 'a'}
 
     # Before the refresh: the curated map has no `id`, so the supplied one is
     # dropped and the database generates its own.
@@ -1144,11 +1198,13 @@ def test_insert_omits_a_reflected_primary_key_the_rows_do_not_supply(instance):
     that the refresh path would otherwise have widened to auto-created tables.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
-    assert set(iglobal.schema) == {'id', 'label'}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
+    assert set(iglobal._tableSchema('widgets')) == {'id', 'label'}
 
     columns = _compiled_insert_columns(instance, [{'label': 'a'}])
     assert columns == ['label']
@@ -1157,10 +1213,12 @@ def test_insert_omits_a_reflected_primary_key_the_rows_do_not_supply(instance):
 def test_insert_still_binds_a_primary_key_the_rows_do_supply(instance):
     """An explicit key is the caller's to set; the guard must not swallow it."""
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     columns = _compiled_insert_columns(instance, [{'id': 42, 'label': 'a'}])
     assert set(columns) == {'id', 'label'}
@@ -1176,10 +1234,10 @@ def test_insert_into_a_generated_only_table_uses_default_values(instance):
     NULL outright, so the batch that works here would fail there.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'ids'
+    instance._settings['table'] = 'ids'
 
     instance.execute({'sql': 'CREATE TABLE ids (id INTEGER PRIMARY KEY)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('ids')}
+    iglobal._publishTableSchema('ids', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('ids')})
 
     captured = _captured_inserts(instance, [{'label': 'ignored'}])
     assert len(captured) == 1
@@ -1231,10 +1289,10 @@ def test_insert_leaves_a_sole_primary_key_the_database_does_not_generate_to_the_
     whole batch rolls back.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'codes'
+    instance._settings['table'] = 'codes'
 
     instance.execute({'sql': 'CREATE TABLE codes (code TEXT PRIMARY KEY)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')}
+    iglobal._publishTableSchema('codes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')})
 
     captured = _captured_inserts(instance, [{'label': 'ignored'}])
     assert len(captured) == 1
@@ -1257,10 +1315,12 @@ def test_insert_mixes_supplied_and_generated_keys_within_one_batch(instance):
     alias; Postgres rejects the whole batch for a ``SERIAL NOT NULL`` key.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     captured = _captured_inserts(instance, [{'label': 'a'}, {'id': 42, 'label': 'b'}, {'label': 'c'}])
 
@@ -1285,10 +1345,12 @@ def test_insert_leaves_an_explicit_null_generated_key_to_the_database(instance):
     this asserts.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     captured = _captured_inserts(instance, [{'id': None, 'label': 'a'}])
     assert len(captured) == 1
@@ -1316,10 +1378,10 @@ def test_insert_reads_an_explicit_null_on_a_not_null_default_as_omitted(instance
     why the compiled column list, not just the stored row, is asserted.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'notes'
+    instance._settings['table'] = 'notes'
 
     instance.execute({'sql': "CREATE TABLE notes (label TEXT, created_at TEXT NOT NULL DEFAULT 'now')"})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('notes')}
+    iglobal._publishTableSchema('notes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('notes')})
 
     columns = _compiled_insert_columns(instance, [{'label': 'a', 'created_at': None}])
     assert columns == ['label']
@@ -1338,10 +1400,12 @@ def test_insert_reads_an_explicit_null_on_a_nullable_default_as_omitted(instance
     null on a column the database fills in means "you fill it in".
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': "CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT, note TEXT DEFAULT 'unset')"})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     columns = _compiled_insert_columns(instance, [{'label': 'a', 'note': None}])
     assert columns == ['label']
@@ -1356,10 +1420,12 @@ def test_insert_still_binds_an_explicit_null_on_a_column_the_database_does_not_o
     chose, exactly as an omitted column does.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT, note TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     columns = _compiled_insert_columns(instance, [{'label': 'a', 'note': None}])
     assert columns == ['label', 'note']
@@ -1376,10 +1442,10 @@ def test_insert_groups_an_explicit_null_and_an_omission_into_one_run(instance):
     was an artefact of how the sender spelled "no value".
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'notes'
+    instance._settings['table'] = 'notes'
 
     instance.execute({'sql': "CREATE TABLE notes (label TEXT, created_at TEXT NOT NULL DEFAULT 'now')"})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('notes')}
+    iglobal._publishTableSchema('notes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('notes')})
 
     captured = _captured_inserts(
         instance,
@@ -1401,10 +1467,10 @@ def test_insert_leaves_a_new_not_null_default_column_to_the_database(instance):
     the batch that worked before the DDL now vanishes with one log line.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'answers'
+    instance._settings['table'] = 'answers'
 
     instance._insertData([{'q': 'why', 'a': 'because'}])
-    assert set(iglobal.schema) == {'q', 'a'}
+    assert set(iglobal._tableSchema('answers')) == {'q', 'a'}
 
     instance.execute({'sql': "ALTER TABLE answers ADD COLUMN created_at TEXT NOT NULL DEFAULT 'now'"})
     instance.refresh_schema({})
@@ -1419,10 +1485,10 @@ def test_insert_leaves_a_new_not_null_default_column_to_the_database(instance):
 def test_insert_binds_a_supplied_value_over_a_server_default(instance):
     """Leaving a defaulted column alone applies only when the row omits it."""
     iglobal = instance.IGlobal
-    iglobal.table = 'notes'
+    instance._settings['table'] = 'notes'
 
     instance.execute({'sql': "CREATE TABLE notes (label TEXT, created_at TEXT NOT NULL DEFAULT 'now')"})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('notes')}
+    iglobal._publishTableSchema('notes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('notes')})
 
     columns = _compiled_insert_columns(instance, [{'label': 'a', 'created_at': 'yesterday'}])
     assert columns == ['label', 'created_at']
@@ -1438,10 +1504,12 @@ def test_insert_still_binds_null_for_an_omitted_column_without_a_default(instanc
     what makes a batch of ragged rows land with a consistent column set.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (label TEXT, note TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     columns = _compiled_insert_columns(instance, [{'label': 'a'}])
     assert columns == ['label', 'note']
@@ -1457,10 +1525,10 @@ def test_insert_omits_a_composite_primary_key_column_the_row_does_not_carry(inst
     that does not refuses the row and takes the whole batch down with it.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'pairs'
+    instance._settings['table'] = 'pairs'
 
     instance.execute({'sql': 'CREATE TABLE pairs (a INTEGER, b INTEGER, PRIMARY KEY (a, b))'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('pairs')}
+    iglobal._publishTableSchema('pairs', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('pairs')})
 
     captured = _captured_inserts(instance, [{'a': 1, 'b': 2}, {'a': 3}])
     assert [_statement_columns(statement) for statement, _ in captured] == [['a', 'b'], ['a']]
@@ -1483,10 +1551,10 @@ def test_insert_omits_a_text_primary_key_a_trigger_might_fill(instance):
     the INSERT carries ``label`` only and the key is left to the database.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'codes'
+    instance._settings['table'] = 'codes'
 
     instance.execute({'sql': 'CREATE TABLE codes (code TEXT PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')}
+    iglobal._publishTableSchema('codes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')})
 
     assert _compiled_insert_columns(instance, [{'label': 'a'}]) == ['label']
     assert instance.execute({'sql': 'SELECT code, label FROM codes'})['rows'] == [{'code': None, 'label': 'a'}]
@@ -1503,12 +1571,14 @@ def test_insert_surfaces_the_drivers_refusal_of_an_ungenerated_primary_key(insta
     row of the batch survives.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'codes'
+    instance._settings['table'] = 'codes'
 
     instance.execute({'sql': 'CREATE TABLE codes (code TEXT NOT NULL PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')}
+    iglobal._publishTableSchema('codes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')})
 
-    with pytest.raises(RuntimeError) as excinfo:
+    # SQLAlchemy warns before it sends a row with no value for a key nothing
+    # generates; the database's refusal is what follows
+    with pytest.warns(SAWarning, match='codes.code'), pytest.raises(RuntimeError) as excinfo:
         instance._insertData([{'code': 'kept', 'label': 'first'}, {'label': 'second'}])
 
     message = str(excinfo.value)
@@ -1523,10 +1593,12 @@ def test_insert_surfaces_the_drivers_refusal_of_an_ungenerated_primary_key(insta
 def test_insert_still_lets_an_integer_primary_key_generate_itself(instance):
     """The autoincrement case is untouched by the removal of the rejection."""
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT)'})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     assert _compiled_insert_columns(instance, [{'label': 'a'}]) == ['label']
 
@@ -1537,10 +1609,10 @@ def test_insert_still_lets_an_integer_primary_key_generate_itself(instance):
 def test_insert_lets_a_server_default_primary_key_generate_itself(instance):
     """A reflected server_default counts as generated even on a TEXT key."""
     iglobal = instance.IGlobal
-    iglobal.table = 'codes'
+    instance._settings['table'] = 'codes'
 
     instance.execute({'sql': "CREATE TABLE codes (code TEXT PRIMARY KEY DEFAULT 'generated', label TEXT)"})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')}
+    iglobal._publishTableSchema('codes', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('codes')})
 
     columns = _compiled_insert_columns(instance, [{'label': 'a'}])
     assert columns == ['label']
@@ -1555,11 +1627,13 @@ def test_a_failing_run_rolls_back_the_rows_of_every_other_run(instance):
     executemany used to give for free.
     """
     iglobal = instance.IGlobal
-    iglobal.table = 'widgets'
+    instance._settings['table'] = 'widgets'
 
     instance.execute({'sql': 'CREATE TABLE widgets (id INTEGER PRIMARY KEY, label TEXT UNIQUE)'})
     instance.execute({'sql': "INSERT INTO widgets (id, label) VALUES (1, 'taken')"})
-    iglobal.schema = {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    iglobal._publishTableSchema(
+        'widgets', {name: (col_type, '') for name, col_type in iglobal._getTableSchema('widgets')}
+    )
 
     with pytest.raises(Exception):  # noqa: B017 - the driver's IntegrityError, whatever it is called
         instance._insertData([{'label': 'fresh'}, {'id': 9, 'label': 'taken'}])
@@ -1641,8 +1715,8 @@ def test_get_sql_rejection_carries_no_statement_echo(instance, monkeypatch):
     allow_execute is switched OFF here on purpose — get_sql never consults it,
     which is exactly why this text had to stop being the SQLAlchemy repr.
     """
-    instance.IGlobal.allow_execute = False
-    instance.IGlobal.max_validation_attempts = 1
+    instance._settings['allow_execute'] = False
+    instance._settings['max_attempts'] = 1
     monkeypatch.setattr(
         _TestableInstance,
         '_buildSQLQueryOnce',
@@ -1660,8 +1734,8 @@ def test_get_sql_rejection_carries_no_statement_echo(instance, monkeypatch):
 
 def test_get_data_rejection_carries_no_statement_echo(instance, monkeypatch):
     """get_data returns get_sql's dict untouched, so it leaked the same text."""
-    instance.IGlobal.allow_execute = False
-    instance.IGlobal.max_validation_attempts = 1
+    instance._settings['allow_execute'] = False
+    instance._settings['max_attempts'] = 1
     monkeypatch.setattr(
         _TestableInstance,
         '_buildSQLQueryOnce',

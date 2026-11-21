@@ -14,6 +14,7 @@ popped afterwards, so nothing leaks into other nodes' tests under a full
 
 from __future__ import annotations
 
+import contextlib
 import importlib.util
 import json
 import sys
@@ -133,9 +134,53 @@ class _ReadTimeout(_RequestException):
     pass
 
 
+class _StubInstanceBase:
+    """Stand-in for IInstanceBase: the call's ``settings`` and the node's ``state``, as a test sets them."""
+
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them."""
+        return self._settings
+
+    @property
+    def state(self):
+        """The node's state door, as the real IInstanceBase serves it."""
+        return self._state
+
+
+class _FakeState:
+    """The node's ``self.state`` (plan 5.7) in memory: one store every instance of a control shares.
+
+    Values pass through JSON, as the server stores them, and ``lock`` serializes
+    a read-modify-write the way the server's lease does.
+    """
+
+    def __init__(self):
+        self.values = {}
+        self._locks = {}
+        self._guard = threading.Lock()
+
+    def get(self, key):
+        raw = self.values.get(key)
+        return None if raw is None else json.loads(raw)
+
+    def put(self, key, value, ttl=None):
+        self.values[key] = json.dumps(value)
+
+    def delete(self, key):
+        self.values.pop(key, None)
+
+    @contextlib.contextmanager
+    def lock(self, key):
+        with self._guard:
+            held = self._locks.setdefault(key, threading.RLock())
+        with held:
+            yield
+
+
 def _build_import_stubs() -> dict:
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IInstanceBase = object
+    rocketlib.IInstanceBase = _StubInstanceBase
     rocketlib.IGlobalBase = object
     rocketlib.tool_function = lambda *_a, **_k: lambda fn: fn
     rocketlib.warning = _stub_warning
@@ -279,6 +324,19 @@ def _client(outcomes):
     return c, recorder
 
 
+# The node's per-call params at the values these tests assume
+_CALL_DEFAULTS = {
+    'table': 'pipeline_data',
+    'db_description': '',
+    'max_attempts': 3,
+    'max_execute_rows': 25000,
+    'allow_execute': True,
+    'allow_destructive_load': False,
+    'job_timeout_secs': 30,
+    'async_after_ms': 5000,
+}
+
+
 def _global(**overrides):
     g = iglobal_mod.IGlobal()
     g._db_lock = threading.Lock()
@@ -289,18 +347,25 @@ def _global(**overrides):
     g.database_id = ''
     g.attached = False
     g.ttl = '24h'
-    g.max_execute_rows = 25000
-    g.allow_execute = True
-    g.job_timeout_secs = 30
-    g.async_after_ms = 5000
+    # Test input carried beside the global, NOT global state: the settings the
+    # next call carries and the node's state store every call of the control shares
+    g.call = dict(_CALL_DEFAULTS)
+    g.node_state = _FakeState()
     for k, v in overrides.items():
-        setattr(g, k, v)
+        if k in _CALL_DEFAULTS:
+            g.call[k] = v
+        else:
+            setattr(g, k, v)
     return g
 
 
 def _instance(glb):
     inst = iinstance_mod.IInstance()
     inst.IGlobal = glb
+    inst._settings = glb.call
+    inst._state = glb.node_state
+    # The call's client view; the fakes stand in for the whole client
+    inst._client = lambda: glb.client
     return inst
 
 
@@ -808,7 +873,7 @@ def test_dialect_returns_the_full_briefing_not_a_bare_string():
 
 def test_generated_prompt_carries_dialect_and_schema():
     g = _loaded_global()
-    g.db_description = 'Sales data for EMEA'
+    g.call['db_description'] = 'Sales data for EMEA'
     g.client = SimpleNamespace(
         information_schema=lambda **_kw: {
             'tables': [{'name': 'sales', 'columns': [{'name': 'units', 'type': 'Int64'}]}]
@@ -1905,7 +1970,6 @@ def test_get_data_retries_after_a_rejected_write_and_succeeds():
 
 def _load_global(uploads, *, destructive=False):
     g = _global(allow_destructive_load=destructive)
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         upload_bytes=lambda payload, **_kw: uploads.append(payload) or f'upl-{len(uploads)}',
@@ -2042,7 +2106,6 @@ def test_execute_still_blocks_sql_writes_regardless_of_the_load_gate():
 
 def _failing_load_global(calls, fail_times):
     g = _global()
-    g._loaded = {}
     state = {'n': 0}
 
     def _load(**_kw):
@@ -2092,7 +2155,6 @@ def test_result_id_load_failure_propagates_without_nameerror():
     never creates one, so the name must still be bound. This regressed once.
     """
     g = _global()
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -2123,21 +2185,81 @@ def test_retry_after_zero_does_not_spin(monkeypatch):
     assert min(slept) >= client_mod.BASE_BACKOFF_S
 
 
-def test_drop_database_clears_the_dedup_fingerprints():
-    """Fingerprints describe one specific database. Keeping them across a drop
-    would make an identical append to the replacement report deduplicated
-    without loading anything.
+def test_a_replacement_database_is_not_deduplicated_against_the_dropped_one():
+    """Fingerprints name the database they were loaded into. After a drop the
+    replacement database has another id, so an identical append to it loads.
     """
+    uploads = []
+    g = _load_global(uploads)
+    created = iter([{'id': 'db-2', 'default_schema': 'main'}])
+    g.client.create_database = lambda **_kw: next(created)
+    inst = _instance(g)
+    rows = [{'a': 1}]
+
+    inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    g.drop_database(g.database)
+    out = _instance(g).load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+
+    assert not out.get('deduplicated')
+    assert len(uploads) == 2
+
+
+def test_the_registry_is_one_state_key_shared_by_every_call():
+    """Two calls of one control (two instances, as on two replicas) share the record."""
+    uploads = []
+    g = _load_global(uploads)
+    rows = [{'a': 1}]
+
+    _instance(g).load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+    out = _instance(g).load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
+
+    assert out.get('deduplicated') is True
+    assert len(uploads) == 1
+    assert list(g.node_state.values) == ['loads']
+    assert list(g.node_state.get('loads').values())[0][0] == 'complete'
+
+
+def test_an_abandoned_reservation_is_taken_over(monkeypatch):
+    """A pending reservation whose replica died is not "in progress" forever."""
+    g = _global(job_timeout_secs=10)
+    inst = _instance(g)
+    clock = [1000.0]
+    monkeypatch.setattr(iinstance_mod.time, 'time', lambda: clock[0])
+
+    assert inst._seen_load('fp-1') is None
+    clock[0] += 15
+    assert inst._seen_load('fp-1') == 'pending', 'still within twice the job timeout'
+    clock[0] += 10
+    assert inst._seen_load('fp-1') is None, 'past twice the job timeout the reservation is taken over'
+
+
+def test_the_registry_stays_bounded():
     g = _global()
-    handle = {'id': 'db-1'}
-    g.database = handle
-    g._loaded = {}
-    assert g.seen_load('fp-1') is None, 'first sight of a payload reserves it'
-    g.record_load('fp-1', 'complete')
-    assert g.seen_load('fp-1') == 'complete'
-    g.drop_database(handle)
-    assert g.database is None
-    assert g.seen_load('fp-1') is None, 'the fingerprint should not survive the drop'
+    inst = _instance(g)
+    for i in range(iinstance_mod._LOADS_MAX + 5):
+        assert inst._seen_load(f'fp-{i}') is None
+        inst._record_load(f'fp-{i}', 'complete')
+
+    loads = g.node_state.get('loads')
+    assert len(loads) == iinstance_mod._LOADS_MAX
+    assert 'fp-0' not in loads and f'fp-{iinstance_mod._LOADS_MAX + 4}' in loads
+
+
+def test_two_calls_on_one_global_carry_their_own_gates_and_tables():
+    """One control: the destructive-load gate and the target table are each call's own."""
+    uploads = []
+    g = _load_global(uploads)
+    tables = []
+    g.client.load_table = lambda **kw: tables.append(kw['table']) or {'row_count': 1}
+    first = _instance(g)
+    first._settings = dict(g.call, allow_destructive_load=True)
+    second = _instance(g)
+
+    first.load_data({'table': 'orders', 'rows': [{'a': 1}], 'mode': 'replace'})
+    with pytest.raises(Exception, match='allow_destructive_load|destructive'):
+        second.load_data({'table': 'orders', 'rows': [{'a': 1}], 'mode': 'replace'})
+    assert tables == ['orders']
+    assert first.IGlobal is second.IGlobal
 
 
 def test_pending_envelope_is_matched_case_insensitively():
@@ -2158,7 +2280,6 @@ def test_partial_append_keeps_its_reservation_and_warns_against_retry():
     jobs = [{'status': 'partially_succeeded', 'id': 'job-1'}]
     calls = []
     g = _global()
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -2186,7 +2307,6 @@ def test_result_id_load_does_not_claim_zero_rows():
     load that may well have inserted rows.
     """
     g = _global()
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -2275,7 +2395,6 @@ def test_a_repeated_partial_append_keeps_reporting_partial():
     jobs = [{'status': 'partially_succeeded', 'id': 'job-1'}]
     calls = []
     g = _global()
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -2302,7 +2421,7 @@ def test_a_repeated_partial_append_keeps_reporting_partial():
 # ---------------------------------------------------------------------------
 # Reservation states must stay distinct
 #
-# seen_load() returns 'pending' while a load is still in flight. Treating that
+# _seen_load() returns 'pending' while a load is still in flight. Treating that
 # as a completed dedup told a concurrent caller the rows were already present
 # before the original load had finished - and if that original then failed and
 # released the reservation, the rows never landed at all.
@@ -2311,7 +2430,6 @@ def test_a_repeated_partial_append_keeps_reporting_partial():
 
 def _blocking_load_global(gate, calls):
     g = _global()
-    g._loaded = {}
 
     def _load(**_kw):
         calls.append(1)
@@ -2375,7 +2493,6 @@ def test_pending_then_failure_lets_a_retry_through():
         raise RuntimeError('hotdata: POST /loads failed with HTTP 503')
 
     g = _global()
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},
@@ -2389,7 +2506,7 @@ def test_pending_then_failure_lets_a_retry_through():
 
     with pytest.raises(RuntimeError):
         inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
-    assert g._loaded == {}, 'a failed load must not leave a reservation behind'
+    assert g.node_state.get('loads') == {}, 'a failed load must not leave a reservation behind'
 
     with pytest.raises(RuntimeError):
         inst.load_data({'table': 'orders', 'rows': rows, 'mode': 'append'})
@@ -2457,7 +2574,6 @@ def test_all_three_sql_paths_share_one_validator():
 
 def _swappable_db_global(calls):
     g = _global()
-    g._loaded = {}
     g.client = SimpleNamespace(
         create_database=lambda **_kw: {'id': 'db-1', 'default_schema': 'main'},
         create_table=lambda **_kw: {},

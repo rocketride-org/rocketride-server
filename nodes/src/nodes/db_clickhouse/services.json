@@ -84,19 +84,23 @@
 			"format": "textarea",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries."
+			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
+			"param": true,
+			"tool": false
 		},
 		"clickhouse.host": {
 			"type": "string",
 			"title": "ClickHouse host",
 			"default": "localhost",
-			"description": "Host name or IP address of the ClickHouse server, optionally including a native-protocol port (e.g. localhost:9440). Defaults to port 9000 when none is given."
+			"description": "Host name or IP address of the ClickHouse server, optionally including a native-protocol port (e.g. localhost:9440). Defaults to port 9000 when none is given.",
+			"env": "ROCKETRIDE_DB_CLICKHOUSE_HOST"
 		},
 		"clickhouse.user": {
 			"type": "string",
 			"title": "User",
 			"default": "default",
-			"description": "User to connect to the ClickHouse server"
+			"description": "User to connect to the ClickHouse server",
+			"env": "ROCKETRIDE_DB_CLICKHOUSE_USER"
 		},
 		"clickhouse.password": {
 			"type": "string",
@@ -111,7 +115,8 @@
 			"default": "default",
 			"minLength": 1,
 			"maxLength": 63,
-			"description": "Name of database"
+			"description": "Name of database",
+			"env": "ROCKETRIDE_DB_CLICKHOUSE_DATABASE"
 		},
 		"clickhouse.tls": {
 			"type": "boolean",
@@ -123,7 +128,9 @@
 			"type": "string",
 			"title": "Table name",
 			"default": "table",
-			"description": "Name of table"
+			"description": "Name of table",
+			"param": true,
+			"tool": false
 		},
 		"clickhouse.max_attempts": {
 			"type": "integer",
@@ -131,13 +138,17 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 20,
-			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL",
+			"param": true,
+			"tool": false
 		},
 		"clickhouse.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
-			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
+			"description": "Permit the execute tool function to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.",
+			"param": true,
+			"tool": false
 		}
 	},
 	//

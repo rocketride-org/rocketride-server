@@ -42,22 +42,22 @@ class IGlobal(DatabaseGlobalBase):
     Implements the two abstract methods that carry PostgreSQL knowledge:
     how to read connection params from the node config, and how to
     build a psycopg2 DSN from those params.  Everything else (schema
-    reflection, type inference, session lifecycle) lives in the base.
+    reflection, type inference, the per-table schema cache) lives in the base.
     """
 
     def _connection_params(self, config: Dict[str, Any]) -> Dict[str, str]:
         """Map the resolved node config to a flat connection-params dict.
 
-        The resolver has applied the schema defaults (host, user, database,
-        table) and flattened the keys to their short names ('host', not
+        The resolver has applied the schema defaults (host, user, database)
+        and flattened the keys to their short names ('host', not
         'postgresdb.host'); the password has no default, so an unset one is None.
+        The table is a parameter: the instance reads it per call from settings.
         """
         return {
             'host': config['host'].strip(),
             'user': config['user'].strip(),
             'password': config['password'] or '',  # Do not strip: whitespace is valid in passwords
             'database': config['database'].strip(),
-            'table': config['table'].strip(),
         }
 
     def _build_connection_url(self, params: Dict[str, str]) -> str:
@@ -70,11 +70,3 @@ class IGlobal(DatabaseGlobalBase):
         password = urllib.parse.quote_plus(params['password'])
         database = urllib.parse.quote_plus(params['database'])
         return f'postgresql+psycopg2://{user}:{password}@{params["host"]}/{database}'
-
-    def _max_validation_attempts(self, config: Dict[str, Any]) -> int:
-        """Return the EXPLAIN-validation retry count; the resolver bounded it to the schema's 1..20."""
-        return config['max_attempts']
-
-    def _db_description(self, config: Dict[str, Any]) -> str:
-        """Return the user-provided database description (empty string if unset)."""
-        return config['db_description'] or ''

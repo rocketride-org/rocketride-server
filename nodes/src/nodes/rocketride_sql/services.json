@@ -86,13 +86,16 @@
 			"title": "Database description",
 			"default": "",
 			"description": "What is this database used for? Describe its content and purpose, this helps the LLM generate more accurate queries.",
-			"format": "textarea"
+			"format": "textarea",
+			"param": true
 		},
 		"rocketridesql.table": {
 			"type": "string",
 			"title": "Table name",
 			"default": "table",
-			"description": "Name of the table to read from or write to in your RocketRide cloud database"
+			"description": "Name of the table to read from or write to in your RocketRide cloud database",
+			"param": true,
+			"tool": false
 		},
 		"rocketridesql.max_attempts": {
 			"type": "integer",
@@ -100,13 +103,17 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 20,
-			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL"
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated SQL",
+			"param": true,
+			"tool": false
 		},
 		"rocketridesql.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
-			"description": "Permit the execute, begin, commit, and rollback tool functions to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly."
+			"description": "Permit the execute tool function to run raw SQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue SQL directly.",
+			"param": true,
+			"tool": false
 		},
 		"rocketridesql.scope": {
 			"type": "string",

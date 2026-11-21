@@ -3,20 +3,21 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""The ClickHouse node tells agents its sessions are not transactions.
+"""The ClickHouse node tells agents an ``execute`` call is not a transaction.
 
 clickhouse-sqlalchemy's native connector makes ``commit`` and ``rollback``
 no-ops and ClickHouse has no savepoints, so ``IInstance`` overrides the shared
-``_sessionsAreTransactions`` hook. The shared tool descriptions and errors read
-it; their wording is covered by ``packages/ai/tests/database/test_execute_session.py``.
+``_callsAreTransactions`` hook. The shared ``execute`` description reads it;
+its wording is covered by ``packages/ai/tests/database/test_execute_one_transaction.py``.
 This pins that the real node opts out, so an agent reading the ClickHouse
-tools is never told its work can be rolled back.
+tool is never told a failed statement undoes the ones before it.
 """
 
 import importlib
 import sys
 import types
 from pathlib import Path
+
 
 import pytest
 
@@ -54,19 +55,19 @@ def _describe(inst, name):
     return getattr(DatabaseInstanceBase, name).__tool_meta__['description'](inst)
 
 
-def test_clickhouse_sessions_are_not_transactions(IInstance):
-    """The node overrides the hook the shared descriptions read."""
+def test_clickhouse_calls_are_not_transactions(IInstance):
+    """The node overrides the hook the shared description reads."""
     inst = IInstance.__new__(IInstance)
 
-    assert inst._sessionsAreTransactions() is False
+    assert inst._callsAreTransactions() is False
 
 
-def test_clickhouse_tools_promise_no_rollback(IInstance):
-    """``execute``, ``begin``, ``commit`` and ``rollback`` all say what a session really is."""
+def test_clickhouse_execute_promises_no_rollback(IInstance):
+    """``execute`` says a failed statement undoes nothing, and there is no session tool to say otherwise."""
     inst = IInstance.__new__(IInstance)
 
-    assert 'A session on ClickHouse opens no transaction' in _describe(inst, 'execute')
-    assert 'rollback to savepoint' not in _describe(inst, 'execute')
-    assert _describe(inst, 'begin').startswith('Reserve a connection on this ClickHouse database')
-    assert _describe(inst, 'commit').startswith('Close a session.')
-    assert _describe(inst, 'rollback').startswith('Close a session. This undoes nothing')
+    description = _describe(inst, 'execute')
+    assert 'ClickHouse has no transactions' in description
+    assert 'rolls back' not in description
+    for name in ('begin', 'commit', 'rollback'):
+        assert not hasattr(IInstance, name)

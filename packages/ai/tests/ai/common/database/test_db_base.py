@@ -20,7 +20,9 @@ subclass that supplies SQLite-compatible stubs, then exercise:
 
 from __future__ import annotations
 
+import threading
 import time
+from collections import OrderedDict
 from datetime import datetime
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -70,7 +72,9 @@ def base():
     """A DatabaseGlobalBase subclass instance with an in-memory engine attached."""
     instance = _TestableGlobal.__new__(_TestableGlobal)
     instance.engine = create_engine('sqlite:///:memory:')
-    instance.schema = {}
+    # The per-table schema cache and its lock, as beginGlobal creates them
+    instance.table_schemas = OrderedDict()
+    instance._table_schemas_lock = threading.Lock()
     yield instance
     instance.engine.dispose()
 
@@ -694,17 +698,25 @@ class _TestableInstance(DatabaseInstanceBase):
 class _FakeGlobal:
     """Stub IGlobal: every EXPLAIN attempt rejects the query."""
 
-    def __init__(self, max_attempts=2, explain_error='syntax error near FROM'):
-        self.max_validation_attempts = max_attempts
+    def __init__(self, explain_error='syntax error near FROM'):
         self._explain_error = explain_error
 
     def _validateQuery(self, sql):
         return False, self._explain_error
 
 
-def _sql_instance(fake_global):
+def _call_settings(**overrides):
+    """The four per-call parameters, as an instance reads them from ``self.settings``."""
+    settings = {'table': 'table', 'db_description': '', 'max_attempts': 2, 'allow_execute': False}
+    settings.update(overrides)
+    return settings
+
+
+def _sql_instance(fake_global, **settings):
+    """An instance on ``fake_global`` whose call carries ``settings`` over the defaults."""
     inst = _TestableInstance.__new__(_TestableInstance)
     inst.IGlobal = fake_global
+    inst._settings = _call_settings(**settings)
     return inst
 
 
@@ -1375,7 +1387,7 @@ def test_create_table_from_data_handles_widening_int_to_float(base):
     ]
     base._createTableFromData('numbers', sample)
     # The schema map was populated.
-    assert 'value' in base.schema
+    assert 'value' in base._tableSchema('numbers')
 
 
 def test_create_table_from_data_empty_input_returns_false(base):
@@ -1396,21 +1408,21 @@ def test_create_table_from_data_no_engine_returns_false():
 
 
 def test_create_table_from_data_populates_schema_cache(base):
-    """After creating a table, base.schema is filled with column name → (type_str, '') tuples."""
+    """After creating a table, the table's cached column map is filled with column name → (type_str, '') tuples."""
     sample = [{'col_a': 1, 'col_b': 'text'}]
     base._createTableFromData('cache_check', sample)
 
     # Keys: data columns are present, the auto-PK 'id' is not.
-    assert 'col_a' in base.schema
-    assert 'col_b' in base.schema
-    assert 'id' not in base.schema
+    assert 'col_a' in base._tableSchema('cache_check')
+    assert 'col_b' in base._tableSchema('cache_check')
+    assert 'id' not in base._tableSchema('cache_check')
 
     # Values: each entry is (type_str, comment). Verify both the shape and
     # that the inferred SQL type matches the Python type of the sample.
     # Note: the source picks String(255) (rendered VARCHAR(255) on SQLite)
     # for short strings, and only falls back to TEXT for values > 255 chars.
-    type_a, comment_a = base.schema['col_a']
-    type_b, comment_b = base.schema['col_b']
+    type_a, comment_a = base._tableSchema('cache_check')['col_a']
+    type_b, comment_b = base._tableSchema('cache_check')['col_b']
     assert 'INTEGER' in type_a.upper()  # int → Integer → 'INTEGER'
     assert 'VARCHAR' in type_b.upper() or 'TEXT' in type_b.upper()  # short str → VARCHAR(255)
     assert comment_a == ''
@@ -1465,7 +1477,7 @@ def test_question_without_llm_names_the_cause_and_the_raw_sql_path():
 
 
 def test_question_with_llm_reaches_the_llm():
-    inst = _sql_instance(SimpleNamespace(db_schema={}, db_description='', dialect='testdb', max_validation_attempts=1))
+    inst = _sql_instance(SimpleNamespace(db_schema={}, dialect='testdb'), max_attempts=1)
     inst.instance = _InstanceWithLlms(['llm_openai_1'])
 
     with pytest.raises(RuntimeError, match='stop after the LLM call'):
@@ -1487,7 +1499,7 @@ def test_write_questions_without_llm_reports_the_cause_on_the_lanes():
     The clear message must reach text/answers, not only the log, or a chat
     pipeline gets no reply at all.
     """
-    inst = _sql_instance(_FakeGlobal(max_attempts=1))
+    inst = _sql_instance(_FakeGlobal(), max_attempts=1)
     fake_instance = _LaneInstanceWithoutLlm(lanes=['text', 'answers'])
     inst.instance = fake_instance
 
@@ -1507,7 +1519,7 @@ def test_write_questions_without_llm_raises_when_no_lane_carries_the_error(lanes
     A table-only pipeline has no lane for an error message, so the failure goes
     through the engine's error path instead of vanishing into the log.
     """
-    inst = _sql_instance(_FakeGlobal(max_attempts=1))
+    inst = _sql_instance(_FakeGlobal(), max_attempts=1)
     fake_instance = _LaneInstanceWithoutLlm(lanes=lanes)
     inst.instance = fake_instance
 
@@ -1520,7 +1532,7 @@ def test_write_questions_without_llm_raises_when_no_lane_carries_the_error(lanes
 
 
 def test_write_questions_without_llm_does_not_raise_when_text_is_wired():
-    inst = _sql_instance(_FakeGlobal(max_attempts=1))
+    inst = _sql_instance(_FakeGlobal(), max_attempts=1)
     fake_instance = _LaneInstanceWithoutLlm(lanes=['text', 'table'])
     inst.instance = fake_instance
 

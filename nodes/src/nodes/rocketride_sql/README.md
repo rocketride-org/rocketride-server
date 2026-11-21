@@ -41,10 +41,7 @@ unless a function explicitly permits an empty object.
 | get_schema | Returns reflected tables, columns, primary keys, and foreign keys; table is optional. |
 | refresh_schema | Re-reads the schema from the database and returns it with a refreshed_at timestamp. |
 | get_sql | Converts a required question into SQL without executing it. |
-| execute | Runs required raw SQL, with optional positional params and a transaction session_id. |
-| begin | Opens a raw-SQL transaction and returns its session_id. |
-| commit | Commits the required session_id. |
-| rollback | Rolls back the required session_id. |
+| execute | Runs raw SQL in one transaction per call: one statement in sql, or several in statements, with optional positional params. |
 | dialect | Returns {"dialect": "postgres"}. |
 
 get_data returns {valid, rows, sql, row_limit} for a successful query. A
@@ -57,23 +54,23 @@ refresh_schema is what sees DDL run since the last reflection. refresh_schema
 takes no arguments and returns the re-reflected schema in the same {database,
 tables} shape get_schema returns, plus a refreshed_at UTC ISO-8601 timestamp
 recording when that reflection completed. Alongside replacing that
-database-wide cache it rebuilds the configured table's cached column map from
-the same walk, which is how the next answers-lane insert picks up added or
-dropped columns instead of continuing against the start-up shape; no second
-reflection is needed. A configured table the walk did not find leaves that map
-empty, and the next insert reflects the table itself if it has come back. If the database
+database-wide cache it rebuilds the cached column map of every table a call
+has inserted into, and of the calling call's table, from the same walk, which
+is how the next answers-lane insert picks up added or dropped columns instead
+of continuing against the start-up shape; no second reflection is needed. A
+cached table the walk did not find is forgotten, and the next insert reflects
+the table itself if it has come back. If the database
 refuses the reflection — a revoked grant, a lock timeout, a table dropped
 mid-walk — the call fails with Schema refresh failed: followed by the
 database's own message (for a table that disappeared mid-walk, the name of
 that table) and leaves both cached schemas exactly as they were.
 
 get_sql returns {sql, valid: true} only for safe generated SQL; unsafe SQL
-returns {error, sql, valid: false}. execute, begin, commit, and rollback raise
-for invalid input, an unknown or expired transaction, or when direct execution
-is disabled. A successful raw execution returns {rows, affected_rows}; begin
-returns {session_id} and transaction completion returns {ok: true}. A failed
-execute raises "SQL execution failed:" followed by the database's own primary
-message, identically with and without a session_id. What is removed is the
+returns {error, sql, valid: false}. execute raises for invalid input or when
+direct execution is disabled. A successful raw execution returns {rows,
+affected_rows}, or {results} with one per statement when the call sent
+statements. A failed execute raises "SQL execution failed:" followed by the
+database's own primary message. What is removed is the
 tail: SQLAlchemy's [SQL: ...] / [parameters: ...] echo, PostgreSQL's LINE n:
 quotation of the statement, and its DETAIL, HINT and CONTEXT blocks. The
 primary sentence itself is passed through as PostgreSQL wrote it, so it can
@@ -83,15 +80,12 @@ reaching this tool at all requires direct execution to be enabled, and a
 caller who has it can read the same data with a SELECT. The full text stays
 in the server log.
 
-A failed statement rolls nothing back and leaves the session open; the error
-text is the same on both paths and carries no recovery advice, so the policy
-is stated in the execute tool description instead. Recovery is the client's:
-issue rollback to discard the transaction, or rollback to savepoint <name> to
-undo only the failed portion and continue. PostgreSQL aborts the whole
-transaction on any failure, so every later statement on that session fails
-until one of those runs, and a commit is refused rather than allowed to
-degrade into a silent rollback. The idle reaper is the backstop for a session
-abandoned instead.
+One execute call is one transaction: it commits when every statement
+succeeded and rolls back entirely when one fails, and its connection is back
+in the pool before the call answers. No transaction outlives the call, so
+there is no begin, commit or rollback tool and no session_id (one is refused):
+send the statements of one unit of work together in statements (at most 100).
+The execute tool description states this policy.
 
 ## Configuration
 
@@ -148,11 +142,10 @@ only the natural-language path, not raw execute calls.
 
 ### Allow direct query execution
 
-This setting is off by default. When enabled, the execute, begin, commit, and
-rollback tools can run raw SQL without LLM translation or SQL safety checks.
-Enable it only for a trusted application that needs write statements or
-explicit transactions; otherwise keep it off so those tools fail rather than
-executing input. It does not change the questions lane, which only ever runs
+This setting is off by default. When enabled, the execute tool can run raw
+SQL without LLM translation or SQL safety checks, one transaction per call.
+Enable it only for a trusted application that needs write statements;
+otherwise keep it off so the tool fails rather than executing input. It does not change the questions lane, which only ever runs
 LLM-generated, safety-checked SELECT statements, in a read-only transaction
 with a 60-second statement timeout.
 
