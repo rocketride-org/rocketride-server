@@ -54,6 +54,20 @@ class IInstance(LLMBase):
         self._cached_answer = None
         self._cache_from_image = False
 
+    def _describe(self, question):
+        """
+        Ask the control's chat about one image, on this call's model and with this call's system prompt.
+
+        Args:
+            question: The image as its context and the call's prompt as its question.
+
+        Returns:
+            The model's answer.
+        """
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.chat(question, system_prompt=self.settings.systemPrompt or '')
+
     def writeImage(self, action: int, mimeType: str, buffer: bytes):
         """Handle AVI image protocol for streaming image frames."""
         if action == AVI_ACTION.BEGIN:
@@ -86,7 +100,7 @@ class IInstance(LLMBase):
                 question.addQuestion(self.settings.prompt)
 
                 try:
-                    answer = self.IGlobal._chat.chat(question, system_prompt=self.settings.systemPrompt or '')
+                    answer = self._describe(question)
                     answer_text = answer.getText()
                     self._cached_answer = answer_text
                     self._cache_from_image = True
@@ -125,7 +139,7 @@ class IInstance(LLMBase):
                 self._cached_answer = None
                 self._cache_from_image = False
                 try:
-                    answer = self.IGlobal._chat.chat(question, system_prompt=self.settings.systemPrompt or '')
+                    answer = self._describe(question)
                     answer_text = answer.getText()
                 except Exception as e:
                     chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'

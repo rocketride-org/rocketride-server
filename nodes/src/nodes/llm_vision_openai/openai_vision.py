@@ -38,9 +38,14 @@ import openai as openai_sdk
 
 
 class Chat(ChatBase):
-    """OpenAI Vision chat for general-purpose image analysis."""
+    """
+    OpenAI Vision chat for general-purpose image analysis.
 
-    _model: str = ''
+    The model and its context window are the call's (``self.call``, which
+    ``ChatBase.calling`` publishes for the request): one chat serves every
+    call of its control.
+    """
+
     _api_key: str = ''
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -58,11 +63,11 @@ class Chat(ChatBase):
             )
 
         self._api_key = api_key
-        self._modelTotalTokens = config.get('modelTotalTokens', 128000)
 
     def getTotalTokens(self) -> int:
-        """Get the total token limit for the current model."""
-        return self._modelTotalTokens
+        """Get the total token limit of the call's model."""
+        configured = self.call.settings.get('modelTotalTokens')
+        return 128000 if configured is None else configured
 
     def getTokens(self, value: str) -> int:
         """Approximate token count (4 chars per token heuristic)."""
@@ -82,7 +87,7 @@ class Chat(ChatBase):
         if any(p in error_lower for p in ['invalid request', 'bad request', '400']):
             return 'Invalid input. Please check your image format and prompt.'
         if any(p in error_lower for p in ['model not found', 'not found', '404']):
-            return f"Model '{self._model}' not found. Please check the model name."
+            return f"Model '{self.call.model}' not found. Please check the model name."
         if any(p in error_lower for p in ['timeout', 'timed out']):
             return 'Request timed out. Please try again.'
         if any(p in error_lower for p in ['server error', '500', '502', '503', '504']):
@@ -114,6 +119,9 @@ class Chat(ChatBase):
         max_retries = 1
         base_delay = 1.0
         last_error = None
+
+        # The call's model, read on this thread: the request thread below does not see the call
+        model = self.call.model
 
         # Extract image data from context
         image_data = None
@@ -166,7 +174,7 @@ class Chat(ChatBase):
                         messages.append({'role': 'user', 'content': content})
 
                         result[0] = client.chat.completions.create(
-                            model=self._model,
+                            model=model,
                             messages=messages,
                         )
                     except Exception as e:

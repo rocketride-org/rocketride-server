@@ -40,9 +40,14 @@ from google.genai.types import Part, Content
 
 
 class Chat(ChatBase):
-    """Google Gemini Vision chat for general-purpose image analysis."""
+    """
+    Google Gemini Vision chat for general-purpose image analysis.
 
-    _model: str = ''
+    The model and its context window are the call's (``self.call``, which
+    ``ChatBase.calling`` publishes for the request): one chat serves every
+    call of its control.
+    """
+
     _client: genai.Client
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -65,11 +70,10 @@ class Chat(ChatBase):
         except Exception as e:
             raise ValueError(f'Failed to initialize Google AI client: {e!s}') from e
 
-        self._modelTotalTokens = config.get('modelTotalTokens', 1048576)
-
     def getTotalTokens(self) -> int:
-        """Get the total token limit for the current model."""
-        return self._modelTotalTokens
+        """Get the total token limit of the call's model."""
+        configured = self.call.settings.get('modelTotalTokens')
+        return 1048576 if configured is None else configured
 
     def getTokens(self, value: str) -> int:
         """Approximate token count (4 chars per token heuristic)."""
@@ -89,7 +93,7 @@ class Chat(ChatBase):
         if any(p in error_lower for p in ['invalid input', 'bad request', '400']):
             return 'Invalid input. Please check your image format and prompt.'
         if any(p in error_lower for p in ['model not found', 'unavailable', 'not supported']):
-            return f"Model '{self._model}' is currently unavailable. Please try a different model."
+            return f"Model '{self.call.model}' is currently unavailable. Please try a different model."
         if any(p in error_lower for p in ['timeout', 'timed out']):
             return 'Request timed out. Please try again.'
         if any(p in error_lower for p in ['content policy', 'safety', 'blocked']):
@@ -166,6 +170,9 @@ class Chat(ChatBase):
         if system_prompt:
             generate_config['system_instruction'] = system_prompt
 
+        # The call's model, read on this thread: the request thread below does not see the call
+        model = self.call.model
+
         hard_timeout = 30
 
         for attempt in range(max_retries + 1):
@@ -179,7 +186,7 @@ class Chat(ChatBase):
                         # calls from multiple threads don't share a non-thread-safe connection
                         client = genai.Client(api_key=self._api_key)
                         result[0] = client.models.generate_content(
-                            model=self._model,
+                            model=model,
                             contents=contents,
                             config=generate_config if generate_config else None,
                         )

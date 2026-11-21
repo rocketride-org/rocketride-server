@@ -30,7 +30,13 @@ from rocketlib import warning
 
 
 class Chat(ChatBase):
-    """Ollama Vision chat bot using open-source multimodal models."""
+    """
+    Ollama Vision chat bot using open-source multimodal models.
+
+    The model and its output limit are the call's (``self.call``, which
+    ``ChatBase.calling`` publishes for the request): one chat serves every
+    call of its control, and each request builds its client on the call's model.
+    """
 
     _llm: ChatOpenAI
     _serverbase: str = ''
@@ -55,13 +61,13 @@ class Chat(ChatBase):
         ):
             return f'Cannot connect to Ollama server. Is Ollama running? (tried: {self._serverbase})'
         if any(p in error_lower for p in ['model not found', 'no such model', '404']):
-            return f"Model '{self._model}' is not loaded in Ollama. Run: ollama pull {self._model}"
+            return f"Model '{self.call.model}' is not loaded in Ollama. Run: ollama pull {self.call.model}"
         if any(p in error_lower for p in ['rate limit', 'too many requests', '429']):
             return 'Too many requests to Ollama. Please wait a moment and try again.'
         if any(p in error_lower for p in ['internal server error', '500', 'service unavailable']):
             return 'Ollama returned a server error. Please check the Ollama logs.'
         if any(p in error_lower for p in ['timeout', 'timed out']):
-            return f"Vision request timed out. The model '{self._model}' may need more time — please try again."
+            return f"Vision request timed out. The model '{self.call.model}' may need more time — please try again."
         if any(p in error_lower for p in ['image', 'vision', 'multimodal']):
             return (
                 'Image processing error. Please check that your image is in a supported format (JPEG, PNG, GIF, WEBP).'
@@ -109,6 +115,9 @@ class Chat(ChatBase):
             )
         )
 
+        # The call's model and output limit: each attempt builds its client from them
+        call = self.call
+
         # Retry loop with exponential backoff
         max_retries = 1
         base_delay = 1.0
@@ -123,11 +132,11 @@ class Chat(ChatBase):
                 # Fresh client per attempt — avoids exhausting the shared HTTP connection pool
                 # when daemon threads from prior timed-out attempts are still holding connections
                 llm = ChatOpenAI(
-                    model=self._model,
+                    model=call.model,
                     base_url=self._serverbase,
                     api_key='ollama',
                     temperature=0,
-                    max_tokens=self._modelOutputTokens,
+                    max_tokens=call.output_tokens,
                 )
 
                 def _invoke():

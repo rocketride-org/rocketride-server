@@ -27,26 +27,37 @@ The per-call parameters of the vision nodes (plan 5.1, 5.6.4; C.26 vision family
 
 The weights stay on the control (the profile or model selector); the knobs a
 request can change without new weights are params read from ``self.settings``.
-Each node's schema is checked as the engine resolves it, and one control (one
-IGlobal holding a recording stand-in for the model) serves two calls with
-different values. No test loads a model or reaches a provider.
+The vision LLM drivers hold no weights: their model leaves are params too,
+read through the ChatBase per-call seam. Each node's schema is checked as the
+engine resolves it, and one control (one IGlobal holding a recording stand-in
+for the model) serves two calls with different values. No test loads a model
+or reaches a provider.
 """
 
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import io
+import sys
 import threading
+import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 import rocketlib
 from ai.common.avi.descriptor import build_stream_descriptor, descriptor_to_payload
+from ai.common.chat import ChatBase
+from ai.common.schema import Question
 from rocketlib import AVI_ACTION
 
 from .framework.controls import assert_config_refuses, assert_params, bind_call, control_config
 
 # ==== The schemas ================================================================
+
+#: The model leaves of a vision LLM driver: per call, and never an LLM's to choose.
+MODEL_LEAVES = ['model', 'custom.customModel', 'custom.modelTotalTokens', 'custom.modelOutputTokens']
 
 #: logical type -> (every param leaf path, the tool: false ones, the param keys reachable by default)
 SCHEMAS = {
@@ -66,10 +77,26 @@ SCHEMAS = {
     ),
     'caption': (['task'], [], ['task']),
     'face_detection': (['threshold', 'emit_landmarks'], [], ['threshold', 'emit_landmarks']),
-    'image_vision_openai': (['systemPrompt', 'prompt'], ['systemPrompt'], ['systemPrompt', 'prompt']),
-    'image_vision_gemini': (['systemPrompt', 'prompt'], [], ['systemPrompt', 'prompt']),
-    'image_vision_mistral': (['systemPrompt', 'prompt'], [], ['systemPrompt', 'prompt']),
-    'image_vision_ollama': (['systemPrompt', 'prompt'], [], ['systemPrompt', 'prompt']),
+    'image_vision_openai': (
+        [*MODEL_LEAVES, 'systemPrompt', 'prompt'],
+        [*MODEL_LEAVES, 'systemPrompt'],
+        ['model', 'systemPrompt', 'prompt'],
+    ),
+    'image_vision_gemini': (
+        [*MODEL_LEAVES, 'systemPrompt', 'prompt'],
+        MODEL_LEAVES,
+        ['model', 'systemPrompt', 'prompt'],
+    ),
+    'image_vision_mistral': (
+        [*MODEL_LEAVES, 'systemPrompt', 'prompt'],
+        MODEL_LEAVES,
+        ['model', 'systemPrompt', 'prompt'],
+    ),
+    'image_vision_ollama': (
+        [*MODEL_LEAVES, 'systemPrompt', 'prompt'],
+        MODEL_LEAVES,
+        ['model', 'systemPrompt', 'prompt'],
+    ),
 }
 
 #: The services a release engine drops (``debug`` capability): their schema is checked in a debug build only.
@@ -282,26 +309,42 @@ def test_face_detection_formats_landmarks_per_call(monkeypatch):
     glb.endGlobal()
 
 
-# ==== The vision LLM drivers: prompt and system prompt per call ===================
+# ==== The vision LLM drivers: model, prompt and system prompt per call ============
+
+#: node -> (the control's stored config, the schema's default model, another model a call picks)
+DRIVERS = {
+    'llm_vision_openai': ({'apikey': 'sk-test'}, 'gpt-4.1', 'gpt-4o'),
+    'llm_vision_gemini': ({'apikey': 'k1'}, 'models/gemini-2.5-flash', 'models/gemini-2.5-pro'),
+    'llm_vision_mistral': ({'apikey': 'k1'}, 'mistral-large-2512', 'mistral-small-2506'),
+    'llm_vision_ollama': ({}, 'llama3.2-vision:11b', 'llava:7b'),
+}
 
 
-class _Chat:
-    """Stand-in for a vision driver: records the prompt and system prompt of each chat."""
+def _vision_config(node: str):
+    """The control's config of a vision LLM node."""
+    return control_config(node.replace('llm_vision_', 'image_vision_'), DRIVERS[node][0])
 
-    def __init__(self):
+
+class _Chat(ChatBase):
+    """Stand-in for a vision driver over the real per-call seam: records the model and prompts of each chat."""
+
+    def __init__(self, config):
+        """Build the chat from the control's config, as a driver does."""
+        super().__init__('test', config, {})
         self.calls = []
 
     def chat(self, question, system_prompt=''):
-        self.calls.append((question.questions[0].text, system_prompt))
+        """Record what the call sends; answer without a provider."""
+        self.calls.append((self.call.model, question.questions[0].text, system_prompt))
         return SimpleNamespace(getText=lambda: 'an answer')
 
 
-@pytest.mark.parametrize('node', ['llm_vision_openai', 'llm_vision_gemini', 'llm_vision_mistral', 'llm_vision_ollama'])
-def test_a_vision_driver_takes_the_prompts_of_each_call(node):
-    logical_type = node.replace('llm_vision_', 'image_vision_')
-    stored = {} if node == 'llm_vision_ollama' else {'apikey': 'k1'}
-    glb = SimpleNamespace(config=control_config(logical_type, stored), _chat=_Chat())
-    calls = ({}, {'prompt': 'What is on the shelf?', 'systemPrompt': 'Answer in French.'})
+@pytest.mark.parametrize('node', sorted(DRIVERS))
+def test_one_vision_control_serves_each_call_its_own_model_and_prompts(node):
+    _stored, default_model, other_model = DRIVERS[node]
+    config = _vision_config(node)
+    glb = SimpleNamespace(config=config, _chat=_Chat(config))
+    calls = ({}, {'model': other_model, 'prompt': 'What is on the shelf?', 'systemPrompt': 'Answer in French.'})
     for params in calls:
         instance = bind_call(importlib.import_module(f'nodes.{node}.IInstance').IInstance(), glb, params)
         instance.instance = SimpleNamespace(writeText=lambda text: None, hasListener=lambda lane: True)
@@ -311,6 +354,161 @@ def test_a_vision_driver_takes_the_prompts_of_each_call(node):
         instance.writeImage(AVI_ACTION.BEGIN, 'image/png', b'')
         instance.writeImage(AVI_ACTION.WRITE, 'image/png', _png())
         instance.writeImage(AVI_ACTION.END, 'image/png', b'')
-    (first_prompt, _first_system), second = glb._chat.calls
+    # One chat, built once, served both calls, each on its own model and prompts
+    (first_model, first_prompt, _first_system), second = glb._chat.calls
+    assert first_model == default_model
     assert first_prompt and first_prompt != 'What is on the shelf?'
-    assert second == ('What is on the shelf?', 'Answer in French.')
+    assert second == (other_model, 'What is on the shelf?', 'Answer in French.')
+
+
+# ==== The drivers: the call's model reaches the provider ==========================
+
+#: The node packages, for loading a driver module from its file.
+NODES_DIR = Path(__file__).resolve().parent.parent / 'src' / 'nodes'
+
+
+def _module(name: str, **attributes) -> types.ModuleType:
+    """A stand-in module with the given attributes."""
+    module = types.ModuleType(name)
+    for key, value in attributes.items():
+        setattr(module, key, value)
+    return module
+
+
+def _reply(text: str) -> SimpleNamespace:
+    """An OpenAI-shaped completion (OpenAI and Mistral SDKs answer alike)."""
+    return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=text))])
+
+
+def _openai_sdk(sent):
+    """The ``openai`` SDK as openai_vision uses it: one completion per request."""
+
+    class OpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=self)
+
+        def create(self, model, messages):
+            sent.append({'model': model})
+            return _reply('seen')
+
+    errors = {'RateLimitError': type('RateLimitError', (Exception,), {})}
+    errors['APIConnectionError'] = type('APIConnectionError', (Exception,), {})
+    return 'openai_vision', {'openai': _module('openai', OpenAI=OpenAI, **errors)}
+
+
+def _gemini_sdk(sent):
+    """The ``google.genai`` SDK as gemini_vision uses it."""
+
+    class Client:
+        def __init__(self, api_key):
+            self.models = self
+
+        def generate_content(self, model, contents, config=None):
+            sent.append({'model': model})
+            return SimpleNamespace(text='seen')
+
+    parts = SimpleNamespace(from_bytes=lambda **kwargs: kwargs, from_text=lambda **kwargs: kwargs)
+    genai_types = _module('google.genai.types', Part=parts, Content=lambda **kwargs: kwargs)
+    genai = _module('google.genai', Client=Client, types=genai_types)
+    return 'gemini_vision', {
+        'google': _module('google', genai=genai),
+        'google.genai': genai,
+        'google.genai.types': genai_types,
+    }
+
+
+def _mistral_sdk(sent):
+    """The ``mistralai`` SDK, its tokenizer and ``httpx`` as mistral_vision uses them."""
+
+    class Mistral:
+        def __init__(self, api_key, client):
+            self.chat = self
+
+        def complete(self, **request):
+            sent.append({'model': request['model']})
+            return _reply('seen')
+
+    tokenizers = _module('mistral_common.tokens.tokenizers.mistral', MistralTokenizer=object)
+    return 'mistral_vision', {
+        'httpx': _module('httpx', Client=lambda **kwargs: object()),
+        'mistralai': _module('mistralai', Mistral=Mistral),
+        'mistralai.client': _module('mistralai.client', Mistral=Mistral),
+        'mistral_common.tokens.tokenizers.mistral': tokenizers,
+    }
+
+
+def _ollama_sdk(sent):
+    """``langchain_openai.ChatOpenAI`` as ollama_vision uses it: one client per request."""
+
+    class ChatOpenAI:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+        def invoke(self, messages):
+            sent.append({'model': self.kwargs['model'], 'max_tokens': self.kwargs['max_tokens']})
+            return SimpleNamespace(content='seen')
+
+    messages = _module(
+        'langchain_core.messages', HumanMessage=lambda content: content, SystemMessage=lambda content: content
+    )
+    return 'ollama_vision', {
+        'langchain_openai': _module('langchain_openai', ChatOpenAI=ChatOpenAI),
+        'langchain_core.messages': messages,
+    }
+
+
+#: node -> builds (the driver module's name, the stand-in modules it imports) around a list of sent requests
+PROVIDERS = {
+    'llm_vision_openai': _openai_sdk,
+    'llm_vision_gemini': _gemini_sdk,
+    'llm_vision_mistral': _mistral_sdk,
+    'llm_vision_ollama': _ollama_sdk,
+}
+
+
+def _load_driver(monkeypatch, node: str, module: str, fakes) -> types.ModuleType:
+    """Load a driver module from its file over stand-in SDKs; it is never cached in ``sys.modules``."""
+    monkeypatch.setitem(sys.modules, 'depends', SimpleNamespace(depends=lambda _requirements: None))
+    for name, fake in fakes.items():
+        monkeypatch.setitem(sys.modules, name, fake)
+    spec = importlib.util.spec_from_file_location(f'_c26_vision_{module}', NODES_DIR / node / f'{module}.py')
+    driver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(driver)
+    return driver
+
+
+def _image_question() -> Question:
+    """One image as context and a prompt, as the instance builds it."""
+    import base64
+
+    question = Question()
+    question.addContext('data:image/png;base64,' + base64.b64encode(_png()).decode('ascii'))
+    question.addQuestion('Describe this image.')
+    return question
+
+
+@pytest.mark.parametrize('node', sorted(DRIVERS))
+def test_each_call_reaches_the_provider_on_its_own_model(monkeypatch, node):
+    _stored, default_model, other_model = DRIVERS[node]
+    sent = []
+    module, fakes = PROVIDERS[node](sent)
+    driver = _load_driver(monkeypatch, node, module, fakes)
+    config = _vision_config(node)
+    chat = driver.Chat('test', config, {})
+    calls = [chat.resolve_call(config.overlay({'model': model})) for model in (other_model, default_model)]
+    for call in calls:
+        # The request runs on a worker thread in most drivers: the call is read before it
+        with chat.calling(call):
+            assert chat.chat(_image_question(), system_prompt='').getText() == 'seen'
+    assert [request['model'] for request in sent] == [other_model, default_model]
+    if node == 'llm_vision_ollama':
+        assert [request['max_tokens'] for request in sent] == [call.output_tokens for call in calls]
+
+
+def test_a_vision_chat_outside_a_call_refuses_to_guess_its_model(monkeypatch):
+    module, fakes = PROVIDERS['llm_vision_openai']([])
+    chat = _load_driver(monkeypatch, 'llm_vision_openai', module, fakes).Chat(
+        'test', _vision_config('llm_vision_openai'), {}
+    )
+    with pytest.raises(RuntimeError, match='no call is being served'):
+        chat.chat(_image_question())

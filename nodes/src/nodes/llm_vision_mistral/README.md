@@ -24,6 +24,8 @@ the task needs, then set the API key and prompts. Each listed model pins its mod
 and token limit. The default is **Mistral Large 3 - Premier Vision (256k tokens)**
 (`mistral-large-2512`).
 
+The model settings (the selector, a custom model id and its token limits), the system prompt and the prompt are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which keeps one client, sends each request on the call's model and counts tokens with that model's tokenizer (built once per model). The call's output limit is not sent. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

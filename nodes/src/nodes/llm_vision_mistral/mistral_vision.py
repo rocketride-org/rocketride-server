@@ -43,9 +43,15 @@ from mistral_common.tokens.tokenizers.mistral import MistralTokenizer
 
 
 class Chat(ChatBase):
-    """Mistral Vision AI chat bot."""
+    """
+    Mistral Vision AI chat bot.
 
-    _model: str = ''
+    The model and its context window are the call's (``self.call``, which
+    ``ChatBase.calling`` publishes for the request): one chat serves every
+    call of its control. The SDK client is model-agnostic; the tokenizer of
+    each model is built once, in the chat's bounded keyed cache.
+    """
+
     _client: Mistral
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -53,10 +59,6 @@ class Chat(ChatBase):
         super().__init__(provider, connConfig, bag)
         # Get the nodes configuration
         config = self._config
-        try:
-            self._tokenizer = MistralTokenizer.from_model(self._model, strict=True)
-        except Exception:
-            self._tokenizer = MistralTokenizer.v3()
         api_key = config.get('apikey')
         # Get vision-specific configuration
         # API key validation with specific error messages
@@ -76,11 +78,21 @@ class Chat(ChatBase):
             self._client = Mistral(api_key=api_key, client=http_client)
         except Exception as e:
             raise ValueError(f'Failed to initialize Mistral AI client: {str(e)}')
-        # Get model-specific token limit
-        self._modelTotalTokens = self._getModelTokens(config.get('modelTotalTokens', None))
+
+    def _tokenizer(self) -> MistralTokenizer:
+        """Return the tokenizer of the call's model, built once per model."""
+        model = self.call.model
+
+        def build() -> MistralTokenizer:
+            try:
+                return MistralTokenizer.from_model(model, strict=True)
+            except Exception:
+                return MistralTokenizer.v3()
+
+        return self._keyed_handle(('tokenizer', model), build)
 
     def _getModelTokens(self, configured_tokens: int | None) -> int:
-        """Get the maximum token count for the specified vision model."""
+        """Get the maximum token count for this call's vision model."""
         model_tokens = {
             'pixtral-12b-latest': 4096,
             'pixtral-large-latest': 4096,
@@ -89,7 +101,7 @@ class Chat(ChatBase):
         }
         if configured_tokens is not None:
             return configured_tokens
-        return model_tokens.get(self._model, 4096)
+        return model_tokens.get(self.call.model, 4096)
 
     def _getModelTimeout(self, model: str) -> int:
         """Get the appropriate timeout for the specified vision model."""
@@ -137,14 +149,14 @@ class Chat(ChatBase):
         raise ValueError('Invalid image input format. Please provide a valid URL, base64 encoded image, or file path.')
 
     def getTotalTokens(self) -> int:
-        """Get the total token limit for the current vision model."""
-        return self._modelTotalTokens
+        """Get the total token limit of the call's vision model."""
+        return self._getModelTokens(self.call.settings.get('modelTotalTokens'))
 
     def getTokens(self, value: str) -> int:
-        """Count tokens using the official Mistral tokenizer SDK."""
+        """Count tokens using the official Mistral tokenizer SDK, for the call's model."""
         if not value.strip():
             return 0
-        return len(self._tokenizer.encode(value))
+        return len(self._tokenizer().encode(value))
 
     def _format_user_error(self, error_msg: str) -> str:
         """Convert API error messages to user-friendly format."""
@@ -158,7 +170,7 @@ class Chat(ChatBase):
         if any(phrase in error_lower for phrase in ['invalid input', 'bad request', '400']):
             return 'Invalid input provided. Please check your image format and prompt.'
         if any(phrase in error_lower for phrase in ['model not found', 'unavailable']):
-            return f"The vision model '{self._model}' is currently unavailable. Please try a different model."
+            return f"The vision model '{self.call.model}' is currently unavailable. Please try a different model."
         if any(phrase in error_lower for phrase in ['image', 'vision', 'multimodal']):
             return 'Image processing error. Please check that your image is in a supported format (JPEG, PNG, GIF, WEBP) and under 10MB.'
         if any(phrase in error_lower for phrase in ['internal server error', '500', 'service unavailable']):
@@ -166,7 +178,7 @@ class Chat(ChatBase):
         if any(phrase in error_lower for phrase in ['content policy', 'violation', 'inappropriate']):
             return "Image content violates Mistral AI's usage policies. Please use a different image."
         if any(phrase in error_lower for phrase in ['timeout', 'timed out']):
-            return f'Vision request timed out. The {self._model} model may need more time - please try again.'
+            return f'Vision request timed out. The {self.call.model} model may need more time - please try again.'
         if any(phrase in error_lower for phrase in ['connection', 'network', 'unreachable']):
             return 'Network connection issue. Please check your internet connection.'
         return f'Mistral Vision API error: {error_msg}'
@@ -210,8 +222,9 @@ class Chat(ChatBase):
         Returns:
             The model's answer.
         """
-        # Get retry configuration for this model
-        max_retries, base_delay = self._getRetryConfig(self._model)
+        # The call's model and its retry configuration
+        model = self.call.model
+        max_retries, base_delay = self._getRetryConfig(model)
         last_error = None
         # Extract image data from context and prompt from questions
         image_data = None
@@ -239,7 +252,7 @@ class Chat(ChatBase):
                     {'role': 'user', 'content': [{'type': 'text', 'text': prompt_text}, image_content]},
                 ]
                 api_params = {
-                    'model': self._model,
+                    'model': model,
                     'messages': messages,
                     'temperature': 0.0,
                     'max_tokens': None,

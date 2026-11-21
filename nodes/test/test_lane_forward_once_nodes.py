@@ -188,6 +188,14 @@ class _FakeIInstanceBase:
         raise _PreventDefaultRaised()
 
 
+class _FakeLLMBase(_FakeIInstanceBase):
+    """Stand-in for ai.common.llm_base.LLMBase: the call is resolved from the settings by the chat, as the real one does."""
+
+    def _call(self):
+        """Return this call's values, resolved by the control's chat from this call's settings."""
+        return self.IGlobal._chat.resolve_call(self.settings)
+
+
 def _make_stubs():
     """Build the rocketlib and ai.common.* stub modules these nodes import."""
 
@@ -244,7 +252,7 @@ def _make_stubs():
     stubs['ai.common.utils'].normalize_tool_input = lambda args, **kw: args
     stubs['ai.common.utils'].optional_int = lambda args, key, default=None, **kw: default
     stubs['ai.common.utils'].require_str = lambda args, key, **kw: str(args[key])
-    stubs['ai.common.llm_base'].LLMBase = _FakeIInstanceBase
+    stubs['ai.common.llm_base'].LLMBase = _FakeLLMBase
     stubs['ai.common.avi.descriptor'].rename_ext = lambda metadata, ext: metadata
     # memory_persistent's state backend keeps its values within the state store's ceiling
     stubs['ai.constants'].CONST_STATE_MAX_TTL_SECONDS = 7 * 24 * 3600
@@ -621,7 +629,15 @@ def test_llamaparse_table_not_delivered_without_listener():
 
 
 class _StubChat:
-    """Stand-in for the Mistral vision chat backend."""
+    """Stand-in for the Mistral vision chat backend and its per-call seam."""
+
+    def resolve_call(self, settings):
+        """Return the call's values (the settings stand in for them)."""
+        return settings
+
+    def calling(self, call):
+        """Serve the call for the block; nothing to publish here."""
+        return contextlib.nullcontext(call)
 
     def chat(self, question, system_prompt=''):
         """Return a fixed answer without calling any service."""
