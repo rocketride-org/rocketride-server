@@ -1,6 +1,6 @@
 # The Docs Pipeline
 
-How `docs.rocketride.org` is assembled from this repo, and what you have to touch
+How `docs.rocketride.ai` is assembled from this repo, and what you have to touch
 to add, move, or rename a page.
 
 The governing idea: **documentation is co-located with the code it documents**, and
@@ -78,7 +78,7 @@ environment variable, which `docsEnv()` sets alongside `DOCS_VERSION`,
 validation and placeholder generation), so the two can never drift apart.
 
 `routeBasePath` is `/`, so **a doc id *is* the public URL**. `operate/security`
-is `https://docs.rocketride.org/operate/security`. There is no separate route
+is `https://docs.rocketride.ai/operate/security`. There is no separate route
 table to keep in step — and no way to move a page without moving its URL.
 
 Node shapes:
