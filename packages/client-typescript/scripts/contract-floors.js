@@ -28,9 +28,10 @@
 // =============================================================================
 //
 // The pure half of freeze-client-api.js: everything that decides WHICH floors
-// hold the live surface, how a frozen floor's body is read back, and whether a
-// released floor changed against a base revision (git only). It needs
-// no TypeScript toolchain, so its tests run with `node --test` alone:
+// hold the live surface, how a frozen floor's body is read back, how each type
+// pin of the conformance file is named and asserted, and whether a released
+// floor changed against a base revision (git only). It needs no TypeScript
+// toolchain, so its tests run with `node --test` alone:
 //
 //     node --test packages/client-typescript/scripts/contract-floors.test.js
 //
@@ -128,6 +129,30 @@ function floorsOfMajor(keys, key) {
 	return keys.filter((k) => majorOf(k) === major).sort(compareKeys);
 }
 
+/**
+ * The floors newer than the package's own key. A package version moved
+ * behind an existing floor would make a released floor read as the
+ * in-progress one (re-mintable, skipped by the released-floor check), so every
+ * mode of the freeze script refuses to run while this is non-empty.
+ *
+ * @param {string} key - The current package floor key.
+ * @param {Iterable<string>} keys - Floor keys from any source (duplicates allowed).
+ * @returns {string[]} The distinct newer keys, ascending.
+ */
+function floorsNewerThan(key, keys) {
+	return [...new Set(keys)].filter((k) => compareKeys(k, key) > 0).sort(compareKeys);
+}
+
+/**
+ * Identifier-safe form of a floor key ('1.3' -> '1_3') for generated names.
+ *
+ * @param {string} key - The floor key.
+ * @returns {string} The identifier fragment.
+ */
+function idFor(key) {
+	return key.replace('.', '_');
+}
+
 // =============================================================================
 // FROZEN BUNDLE READING
 // =============================================================================
@@ -149,14 +174,88 @@ function normalizeEol(text) {
  * file, with LF line endings, trimmed.
  *
  * @param {string} fileContent - The version file's text.
- * @returns {string|null} The body, or null when a marker is missing.
+ * @returns {string|null} The body, or null when a marker is missing or END precedes BEGIN.
  */
 function extractBundleBody(fileContent) {
 	const text = normalizeEol(fileContent);
+	// Step 1: BEGIN, then the first END after it (an END before BEGIN is no bundle)
 	const start = text.indexOf(BEGIN);
-	const end = text.indexOf(END);
-	if (start === -1 || end === -1) return null;
-	return text.slice(start + BEGIN.length, end).trim();
+	if (start === -1) return null;
+	const bodyStart = start + BEGIN.length;
+	const end = text.indexOf(END, bodyStart);
+	if (end === -1) return null;
+	return text.slice(bodyStart, end).trim();
+}
+
+// =============================================================================
+// CONFORMANCE PINS
+// =============================================================================
+//
+// The per-TYPE half of the generated conformance file. Each frozen exported
+// type is pinned once per floor of the major that declares it; a pin is an
+// import of the frozen type, the live type, and two assertions.
+
+/**
+ * Give every type pin a unique identifier fragment (the part after `Frozen_`,
+ * `_t_` and `_k_`). The earliest declaring floor keeps the bare type name, a
+ * later one adds its key (`Foo__v2_1`). Type names are unique, but a later
+ * pin's fragment can equal another type's bare name (a type literally named
+ * `Foo__v2_1`): such a fragment is numbered (`Foo__v2_1_2`) until it is
+ * unique, so no two pins share an import alias or an assertion name. Bare
+ * names are reserved first, so a collision never renames an existing pin.
+ *
+ * @param {Map<string, {key: string, arity: number}[]>} pins - type -> its declaring floors, ascending.
+ * @returns {Map<string, string[]>} type -> one fragment per pin, in pin order.
+ */
+function assignPinAliases(pins) {
+	// Step 1: every earliest pin keeps its type's bare name
+	const used = new Set(pins.keys());
+	const aliases = new Map();
+	// Step 2: a later pin adds its floor key, numbered while that is taken
+	for (const [name, list] of pins) {
+		aliases.set(
+			name,
+			list.map(({ key }, i) => {
+				if (i === 0) return name;
+				const base = `${name}__v${idFor(key)}`;
+				let alias = base;
+				for (let n = 2; used.has(alias); n += 1) alias = `${base}_${n}`;
+				used.add(alias);
+				return alias;
+			})
+		);
+	}
+	return aliases;
+}
+
+/**
+ * The two assertions of one type pin. Generic floors are applied at the
+ * frozen arity (`<any, …>`): a bare generic is TS2314, and an arity change
+ * surfaces as one here.
+ *
+ *  - `_t_`: the live type must be assignable to the frozen one. This catches
+ *    a removed or narrowed required member, but not a removed OPTIONAL one:
+ *    `{ id: string }` still assigns to `{ id: string; label?: string }`.
+ *  - `_k_`: the live type must keep every key the frozen one declares. Both
+ *    sides map their keys to themselves with optionality removed, so a key
+ *    the live type dropped is a missing required property; keys the live
+ *    type added are extra properties, which assignment allows.
+ *
+ * @param {string} name - The exported type name (the `Current_` import).
+ * @param {string} alias - The pin's fragment from assignPinAliases.
+ * @param {number} arity - The type parameter count the declaring floor froze.
+ * @returns {string[]} The generated lines.
+ */
+function typeFloorLines(name, alias, arity) {
+	const args = arity > 0 ? `<${new Array(arity).fill('any').join(', ')}>` : '';
+	const frozen = `Frozen_${alias}${args}`;
+	const current = `Current_${name}${args}`;
+	return [
+		`const _t_${alias}: ${frozen} = {} as ${current};`,
+		`void _t_${alias};`,
+		`const _k_${alias}: { [K in keyof ${frozen}]-?: K } = {} as { [K in keyof ${current}]-?: K };`,
+		`void _k_${alias};`,
+	];
 }
 
 // =============================================================================
@@ -196,18 +295,25 @@ function readFloorsIn(versionsDir) {
  */
 function readFloorsAt(repoRoot, versionsRel, rev) {
 	const git = (args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
-	// Step 1: the revision must exist (a shallow clone without it is an error, not a pass)
+	// Step 1: the revision must exist (a shallow clone without it is an error,
+	// not a pass). It is resolved ONCE to its tree id, and every read below
+	// names that id: a ref that moves between the listing and the reads would
+	// otherwise mix two commits
+	let tree;
 	try {
-		git(['rev-parse', '--verify', '--quiet', `${rev}^{tree}`]);
+		tree = git(['rev-parse', '--verify', '--quiet', `${rev}^{tree}`]).trim();
 	} catch {
+		tree = '';
+	}
+	if (!tree) {
 		throw new Error(`git cannot resolve '${rev}'; fetch it first (CI: fetch-depth 2 for HEAD^1)`);
 	}
-	// Step 2: the floor files it holds, read as committed
+	// Step 2: the floor files that tree holds, read as committed
 	const floors = new Map();
-	const listing = git(['ls-tree', '--name-only', rev, '--', `${versionsRel}/`]);
+	const listing = git(['ls-tree', '--name-only', tree, '--', `${versionsRel}/`]);
 	for (const file of listing.split('\n').filter(Boolean)) {
 		const m = /\/v(\d+\.\d+)\.d\.ts$/.exec(file);
-		if (m) floors.set(m[1], git(['show', `${rev}:${file}`]));
+		if (m) floors.set(m[1], git(['show', `${tree}:${file}`]));
 	}
 	return floors;
 }
@@ -247,8 +353,12 @@ module.exports = {
 	compareKeys,
 	listFrozenKeys,
 	floorsOfMajor,
+	floorsNewerThan,
+	idFor,
 	normalizeEol,
 	extractBundleBody,
+	assignPinAliases,
+	typeFloorLines,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,

@@ -95,11 +95,14 @@ then the raw bytes, so the frame on the wire is `<json-header>\n<binary-payload>
 }
 ```
 
-This particular request -- opening a data pipe -- carries the control's own
-`token` (the control id returned by `execute`): a pipe is always opened on an
-already-running control, and the slot takes the control id only, never an
-address. Every request on the pipe (`write`, `close`, ...) carries that same
-`token` in `arguments`, for example:
+This particular request -- opening a data pipe -- carries a `token` that is
+either the control id returned by `execute` or an address. An address resolves
+through your rungs the way `submit` does: its live control answers, or a
+published pipe that is not running is started. The open's response returns the
+control the pipe was opened on, as `controlId` (and its `address`). Every later
+request on the pipe (`write`, `close`, ...) carries that control id as its
+`token` in `arguments`, never an address, so a frame cannot land on another
+control the address resolves to by then. For example:
 
 ```json
 {
@@ -126,7 +129,7 @@ whether the command worked; a successful response carries a `body`.
 	"request_seq": 1,
 	"command": "rrext_process",
 	"success": true,
-	"body": { "pipeId": 1, "traceId": "..." }
+	"body": { "pipeId": 1, "traceId": "...", "controlId": "...", "address": "..." }
 }
 ```
 

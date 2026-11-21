@@ -149,7 +149,9 @@ export interface DeployHistoryEntry {
 	    `disabled`/`removed`), the review transitions (`request`/`approved`/
 	    `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime:
 	    the union names the pipe-rail actions only, because the shell contract
-	    (append-only) re-exports this type; compare raw strings for the rest. */
+	    (append-only) re-exports this type; compare raw strings for the rest,
+	    widening first: `(entry.action as string | undefined) === 'delete'`
+	    (a literal outside the union does not compile against it directly). */
 	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
 	/** `''` on org-wide rows (publish); the audience on pointer changes. */
 	teamId?: string;

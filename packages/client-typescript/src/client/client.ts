@@ -568,7 +568,7 @@ export class RocketRideClient extends DAPClient {
 	 *   auth: 'your-api-key',
 	 *   uri: 'wss://your-server.com',
 	 *   persist: true,
-	 *   onEvent: (event) => console.log('Event:', event)
+	 *   onEvent: async (event) => console.log('Event:', event)
 	 * });
 	 *
 	 * // Using custom env dictionary

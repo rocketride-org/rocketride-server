@@ -402,9 +402,14 @@ the task lifecycle. `apaevt_ops` is live only: no run log records it.
 
 ### 5.4 `apaevt_sse`: node-to-UI passthrough (subscribe to `SSE`)
 
-Nodes call `self.instance.sendSSE(type, **data)` (rocketlib), or
-`self.logger().sendSSE(type, **data)` from a worker thread, to send custom
-updates ("thinking", "tool_call", progress, etc.) to the caller. Body shape:
+Nodes call `self.instance.sendSSE(type, **data)` (rocketlib) to send custom
+updates ("thinking", "tool_call", progress, etc.) to the caller. A node that
+sends from a worker thread or asyncio task captures the binding first: it
+calls `logger = self.logger()` inside the originating call, hands `logger` to
+the worker, and the worker calls `logger.sendSSE(type, **data)`. The worker
+never calls `self.logger()` itself: that reads whichever binding is current on
+the pipe when it runs, which after the slot is reused is the next holder's, so
+its events would carry that holder's `pipeId` and `traceId`. Body shape:
 
 ```ts
 {

@@ -502,14 +502,17 @@ function determineVersions() {
  * Extract the declaration body between the BEGIN/END markers of a version
  * file, with LF line endings. A Windows checkout with core.autocrlf=true
  * writes CRLF into the working tree while the generator emits LF, so the raw
- * text would read as drift on an unchanged surface.
+ * text would read as drift on an unchanged surface. Null when a marker is
+ * missing or END precedes BEGIN (the first END after BEGIN closes the body).
  */
 function extractBundleBody(fileContent) {
 	const text = fileContent.replace(/\r\n?/g, '\n');
 	const start = text.indexOf(BEGIN);
-	const end = text.indexOf(END);
-	if (start === -1 || end === -1) return null;
-	return text.slice(start + BEGIN.length, end).trim();
+	if (start === -1) return null;
+	const bodyStart = start + BEGIN.length;
+	const end = text.indexOf(END, bodyStart);
+	if (end === -1) return null;
+	return text.slice(bodyStart, end).trim();
 }
 
 // NOTE: there is deliberately no compatibility gate here anymore. Backward

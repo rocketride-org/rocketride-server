@@ -26,13 +26,19 @@
 // contract-floors tests — per-major floor scoping and line-ending-proof reads
 // =============================================================================
 //
-// Pins the two rules freeze-client-api.js takes from contract-floors.js:
+// Pins the rules freeze-client-api.js takes from contract-floors.js:
 //   1. a surface is held against the floors of its own MAJOR only; floors of
-//      another major are listed (history) but never selected;
+//      another major are listed (history) but never selected, and a package
+//      version behind an existing floor is refused;
 //   2. a frozen floor checked out with CRLF (core.autocrlf=true) reads back
-//      byte-identical to the LF bundle the generator emits.
+//      byte-identical to the LF bundle the generator emits, and a file whose
+//      markers are missing or reversed has no bundle;
+//   3. every type pin of the conformance file has its own name, and its
+//      assertions fail on a dropped member, an optional one included;
+//   4. a released floor may not change or go against a trusted base.
 //
-// Zero-dependency built-in runner:
+// Built-in runner; the type-pin test compiles its fixtures with the package's
+// own typescript devDependency (the one the freeze script uses):
 //     node --test packages/client-typescript/scripts/contract-floors.test.js
 // =============================================================================
 
@@ -52,8 +58,12 @@ const {
 	compareKeys,
 	listFrozenKeys,
 	floorsOfMajor,
+	floorsNewerThan,
+	idFor,
 	normalizeEol,
 	extractBundleBody,
+	assignPinAliases,
+	typeFloorLines,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,
@@ -128,6 +138,20 @@ test('floorsOfMajor: majors 1 and 10 are not confused', () => {
 	assert.deepEqual(floorsOfMajor(['1.0', '10.0', '10.1'], '1.1'), ['1.0']);
 });
 
+test('floorsNewerThan: a package version behind a floor names that floor', () => {
+	// Moved back to 1.6 while v2.0 exists: v1.6 is released, not in progress.
+	assert.deepEqual(floorsNewerThan('1.6', ['1.3', '1.6', '2.0']), ['2.0']);
+	// Keys from the tree and from a base may repeat; each is named once.
+	assert.deepEqual(floorsNewerThan('1.6', ['2.1', '2.0', '1.6', '2.0']), ['2.0', '2.1']);
+	assert.deepEqual(floorsNewerThan('2.0', ['1.3', '1.6', '2.0']), []);
+	assert.deepEqual(floorsNewerThan('1.10', ['1.9', '1.10']), []);
+});
+
+test('idFor makes a floor key identifier-safe', () => {
+	assert.equal(idFor('1.3'), '1_3');
+	assert.equal(idFor('2.10'), '2_10');
+});
+
 test('the decision note points at the per-major decision', () => {
 	assert.match(DECISION_NOTE, /MAJOR\/MINOR decision/);
 	assert.match(DECISION_NOTE, /section 13, Step 7/);
@@ -156,6 +180,16 @@ test('extractBundleBody returns null when a marker is missing', () => {
 	assert.equal(extractBundleBody('export {};\n'), null);
 });
 
+test('extractBundleBody returns null when END comes before BEGIN', () => {
+	// Reversed markers are no bundle, not an empty one.
+	assert.equal(extractBundleBody(['// header', END, 'export {};', BEGIN, ''].join('\n')), null);
+	assert.equal(extractBundleBody(['// header', END, 'export {};', BEGIN, ''].join('\r\n')), null);
+	// A stray END ahead of the bundle does not cut it: the first END after
+	// BEGIN closes it.
+	const body = 'export declare const A: number;';
+	assert.equal(extractBundleBody(['// header', END, BEGIN, body, END, ''].join('\n')), body);
+});
+
 test('the frozen floors in the tree read back with LF only', () => {
 	// The committed floors must parse under the shared reader whatever the
 	// checkout's line endings are. Floors are never deleted, so every one
@@ -171,6 +205,144 @@ test('the frozen floors in the tree read back with LF only', () => {
 		assert.notEqual(body, null, `v${key}.d.ts has its BEGIN/END markers`);
 		assert.equal(body.includes('\r'), false, `v${key}.d.ts body has no CR`);
 	}
+});
+
+// =============================================================================
+// CONFORMANCE PINS
+// =============================================================================
+
+test('assignPinAliases: every pin gets its own name, and bare names never move', () => {
+	// Foo is declared by 2.0 and 2.1; another type is literally named
+	// Foo__v2_1, the fragment Foo's 2.1 pin would take.
+	const pins = new Map([
+		[
+			'Foo',
+			[
+				{ key: '2.0', arity: 0 },
+				{ key: '2.1', arity: 0 },
+			],
+		],
+		['Foo__v2_1', [{ key: '2.1', arity: 0 }]],
+		['Foo__v2_1_2', [{ key: '2.1', arity: 0 }]],
+		[
+			'Bar',
+			[
+				{ key: '2.0', arity: 1 },
+				{ key: '2.1', arity: 1 },
+				{ key: '2.2', arity: 1 },
+			],
+		],
+	]);
+	const aliases = assignPinAliases(pins);
+	assert.deepEqual(aliases.get('Foo'), ['Foo', 'Foo__v2_1_3']);
+	assert.deepEqual(aliases.get('Foo__v2_1'), ['Foo__v2_1']);
+	assert.deepEqual(aliases.get('Foo__v2_1_2'), ['Foo__v2_1_2']);
+	assert.deepEqual(aliases.get('Bar'), ['Bar', 'Bar__v2_1', 'Bar__v2_2']);
+	const all = [...aliases.values()].flat();
+	assert.equal(new Set(all).size, all.length, 'no two pins share a name');
+});
+
+/**
+ * Type-check a throwaway program with the package's own TypeScript and
+ * return its diagnostics as text.
+ *
+ * @param {Record<string, string>} files - file name -> source; `check.ts` is the root.
+ * @returns {string[]} One flattened message per diagnostic.
+ */
+function typeCheck(files) {
+	const ts = require(require.resolve('typescript', { paths: [path.join(__dirname, '..')] }));
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-contract-pins-'));
+	for (const [name, text] of Object.entries(files)) fs.writeFileSync(path.join(dir, name), text);
+	const program = ts.createProgram([path.join(dir, 'check.ts')], {
+		strict: true,
+		noEmit: true,
+		skipLibCheck: true,
+		types: [],
+		lib: ['lib.es2020.d.ts'],
+		target: ts.ScriptTarget.ES2020,
+		module: ts.ModuleKind.CommonJS,
+	});
+	return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+}
+
+// A frozen floor of five shapes: a record with an optional member, a generic,
+// a class, a literal union and a function type.
+const FROZEN_FIXTURE = [
+	'export interface Rec { id: string; label?: string }',
+	'export interface Box<T> { value: T; note?: string }',
+	'export declare class Svc { name: string; port?: number; start(): void }',
+	"export type Kind = 'a' | 'b';",
+	'export type Fn = (x: number) => string;',
+	'',
+].join('\n');
+
+// The pins the generator emits for each fixture type, as in the conformance file.
+const PINNED = [
+	['Rec', 0],
+	['Box', 1],
+	['Svc', 0],
+	['Kind', 0],
+	['Fn', 0],
+];
+
+/**
+ * The conformance program over FROZEN_FIXTURE and a live module.
+ *
+ * @param {string} live - The live module's source.
+ * @param {(lines: string[]) => string[]} [pick] - Which of each pin's lines to keep.
+ * @returns {Record<string, string>} The program's files.
+ */
+function conformanceProgram(live, pick = (lines) => lines) {
+	const check = [];
+	for (const [name] of PINNED) {
+		check.push(`import type { ${name} as Frozen_${name} } from './frozen';`);
+		check.push(`import type { ${name} as Current_${name} } from './live';`);
+	}
+	for (const [name, arity] of PINNED) check.push(...pick(typeFloorLines(name, name, arity)));
+	return { 'frozen.d.ts': FROZEN_FIXTURE, 'live.ts': live, 'check.ts': `${check.join('\n')}\nexport {};\n` };
+}
+
+// The live surface of the fixture: unchanged, plus members and a private.
+const LIVE_GROWN = [
+	'export interface Rec { id: string; label?: string; added?: boolean }',
+	'export interface Box<T> { value: T; note?: string; size: number }',
+	'export class Svc { name = ""; port?: number; extra = 1; private secret = 0; start(): void { void this.secret; } }',
+	"export type Kind = 'a' | 'b';",
+	'export type Fn = (x: number) => string;',
+	'',
+].join('\n');
+
+test('typeFloorLines: the live surface may grow without breaking a pin', () => {
+	assert.deepEqual(typeCheck(conformanceProgram(LIVE_GROWN)), []);
+});
+
+test('typeFloorLines: a dropped optional member fails its pin', () => {
+	const dropped = LIVE_GROWN.replace('label?: string; ', '')
+		.replace('note?: string; ', '')
+		.replace('port?: number; ', '');
+	// The assignment alone lets all three through: this is the gap the key
+	// assertion closes.
+	assert.deepEqual(typeCheck(conformanceProgram(dropped, (lines) => lines.slice(0, 2))), []);
+	const messages = typeCheck(conformanceProgram(dropped)).join('\n');
+	for (const member of ['label', 'note', 'port']) {
+		assert.match(messages, new RegExp(`Property '${member}' is missing`), `dropping ${member} fails`);
+	}
+});
+
+test('typeFloorLines: a dropped required member still fails the assignment', () => {
+	const dropped = LIVE_GROWN.replace('export interface Rec { id: string; ', 'export interface Rec { ');
+	const messages = typeCheck(conformanceProgram(dropped, (lines) => lines.slice(0, 2))).join('\n');
+	assert.match(messages, /Property 'id' is missing/);
+});
+
+test('typeFloorLines: a generic pin is applied at its frozen arity', () => {
+	assert.deepEqual(typeFloorLines('Box', 'Box__v2_1', 1), [
+		'const _t_Box__v2_1: Frozen_Box__v2_1<any> = {} as Current_Box<any>;',
+		'void _t_Box__v2_1;',
+		'const _k_Box__v2_1: { [K in keyof Frozen_Box__v2_1<any>]-?: K } = ' +
+			'{} as { [K in keyof Current_Box<any>]-?: K };',
+		'void _k_Box__v2_1;',
+	]);
 });
 
 // =============================================================================
@@ -264,6 +436,20 @@ test('readFloorsAt reads the floors a revision holds, and a hand-edited released
 	fs.writeFileSync(path.join(versions, 'v1.6.d.ts'), 'one, narrowed\n');
 	fs.writeFileSync(path.join(versions, 'v2.0.d.ts'), 'two, re-cut\n');
 	assert.deepEqual(releasedFloorEdits(base, readFloorsIn(versions), '2.0'), [{ key: '1.6', change: 'changed' }]);
+});
+
+test('readFloorsAt reads a ref name through the tree it names', () => {
+	// A lightweight tag on a tree is a ref like a branch, with no commit
+	// identity needed. Every read names the resolved tree, not the ref.
+	const { root, tree } = gitFixture({ '1.6': 'one\n', '2.0': 'two\n' });
+	execFileSync('git', ['tag', 'base', tree], { cwd: root, stdio: 'ignore' });
+	assert.deepEqual(
+		[...readFloorsAt(root, 'contract/versions', 'base').entries()],
+		[
+			['1.6', 'one\n'],
+			['2.0', 'two\n'],
+		]
+	);
 });
 
 test('readFloorsAt fails on a revision git cannot resolve', () => {

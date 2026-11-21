@@ -77,9 +77,11 @@
 //   --released <rev>
 //              immutability gate — nonzero exit if any floor that <rev> (a
 //              trusted base: CI passes HEAD^1, the base branch of a pull
-//              request's merge commit) holds is changed or missing in the
-//              tree, except the in-progress floor of the package's own
-//              MAJOR.MINOR (no writes, no tsc; reads <rev> through git).
+//              request's merge commit, and a push's pre-push tip) holds is
+//              changed or missing in the tree, except the in-progress floor
+//              of the package's own MAJOR.MINOR, or if the package version
+//              is behind a floor of the tree or of <rev> (no writes, no
+//              tsc; reads <rev> through git).
 // =============================================================================
 
 const path = require('path');
@@ -105,8 +107,9 @@ const CONTRACT_CHECK = path.join(SRC_DIR, 'contract-check.generated.ts');
 const PKG_JSON = path.join(PACKAGE_ROOT, 'package.json');
 const TMP_DIR = path.join(CONTRACT_DIR, '.freeze-tmp');
 
-// Floor keys, per-major scoping and frozen-bundle reading (toolchain-free, so
-// they are tested on their own: scripts/contract-floors.test.js).
+// Floor keys, per-major scoping, frozen-bundle reading and the conformance
+// pins (toolchain-free, so they are tested on their own:
+// scripts/contract-floors.test.js).
 const {
 	BEGIN,
 	END,
@@ -116,8 +119,12 @@ const {
 	compareKeys,
 	listFrozenKeys: listFrozenKeysIn,
 	floorsOfMajor,
+	floorsNewerThan,
+	idFor,
 	normalizeEol,
 	extractBundleBody,
+	assignPinAliases,
+	typeFloorLines,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,
@@ -648,16 +655,6 @@ function listFrozenKeys() {
 	return listFrozenKeysIn(VERSIONS_DIR);
 }
 
-/**
- * Identifier-safe form of a floor key ('1.3' -> '1_3') for generated names.
- *
- * @param {string} key - The floor key.
- * @returns {string} The identifier fragment.
- */
-function idFor(key) {
-	return key.replace('.', '_');
-}
-
 // =============================================================================
 // FREEZE STEPS
 // =============================================================================
@@ -895,33 +892,23 @@ function collectFrozenTypes(keys) {
 }
 
 /**
- * The alias of one type pin in the conformance file: the earliest declaring
- * floor keeps the bare name, a later one adds its key (`Foo__v2_1`).
- *
- * @param {string} name - The exported type name.
- * @param {number} index - The pin's position among the type's declaring floors.
- * @param {string} key - The pin's floor key.
- * @returns {string} The identifier fragment after `Frozen_` / `_t_`.
- */
-function pinAlias(name, index, key) {
-	return index === 0 ? name : `${name}__v${idFor(key)}`;
-}
-
-/**
  * Regenerate the conformance file compiled by the package's own tsc (via
  * tsconfig.contract.json).
  *
  * Each frozen floor gets a VALUE floor over the whole export namespace of
  * src/client/index.ts — `typeof <frozen module>` against `typeof <live
  * module>` — plus per-TYPE floors pinning every individually-exported type
- * against each floor of the major that declares it. Types are drawn from the
- * frozen files (accumulated), never from the live surface, so a removal
- * cannot be erased by re-running.
+ * against each floor of the major that declares it (assignable, and keeping
+ * every frozen key: see typeFloorLines). Types are drawn from the frozen files
+ * (accumulated), never from the live surface, so a removal cannot be erased
+ * by re-running.
  *
  * @param {string[]} keys - Ascending floor keys (must be non-empty).
  */
 function generateConformance(keys) {
-	const names = [...collectFrozenTypes(keys).entries()];
+	const pinsByType = collectFrozenTypes(keys);
+	const names = [...pinsByType.entries()];
+	const aliases = assignPinAliases(pinsByType);
 	const lines = [];
 	lines.push('// =============================================================================');
 	lines.push('// contract-check.generated.ts');
@@ -933,7 +920,8 @@ function generateConformance(keys) {
 	lines.push('//  - a per-version VALUE floor: the live export surface of');
 	lines.push('//    src/client/index.ts must satisfy EACH frozen floor separately.');
 	lines.push('//  - a per-TYPE floor: each exported type, pinned to every floor of this');
-	lines.push('//    major that declares it.');
+	lines.push('//    major that declares it: assignable to it, and keeping every key it');
+	lines.push('//    declares (an optional member too).');
 	lines.push('// Removing or narrowing anything frozen in this major breaks this file.');
 	lines.push('// Floors are derived from the immutable versions/*.d.ts; only the floor');
 	lines.push('// keyed to the in-progress package MAJOR.MINOR may be re-minted');
@@ -947,7 +935,7 @@ function generateConformance(keys) {
 	}
 	for (const [name, pins] of names) {
 		pins.forEach(({ key }, i) => {
-			const alias = pinAlias(name, i, key);
+			const alias = aliases.get(name)[i];
 			lines.push(`import type { ${name} as Frozen_${alias} } from '../contract/versions/v${key}';`);
 		});
 		lines.push(`import type { ${name} as Current_${name} } from './client/index.js';`);
@@ -959,15 +947,14 @@ function generateConformance(keys) {
 		lines.push(`void _floor_v${idFor(key)};`);
 	}
 	lines.push('');
-	lines.push('// TYPE floors — each frozen exported type must still be satisfied.');
+	lines.push('// TYPE floors — each frozen exported type must still be satisfied (_t_)');
+	lines.push('// and keep every key it declares (_k_: optionality removed on both sides,');
+	lines.push('// so a dropped optional member is a missing property).');
 	lines.push('// Generic floors are emitted APPLIED (<any, …> at the frozen arity):');
 	lines.push('// a bare generic is TS2314, and an arity change surfaces as one here.');
 	for (const [name, pins] of names) {
-		pins.forEach(({ key, arity }, i) => {
-			const alias = pinAlias(name, i, key);
-			const args = arity > 0 ? `<${new Array(arity).fill('any').join(', ')}>` : '';
-			lines.push(`const _t_${alias}: Frozen_${alias}${args} = {} as Current_${name}${args};`);
-			lines.push(`void _t_${alias};`);
+		pins.forEach(({ arity }, i) => {
+			lines.push(...typeFloorLines(name, aliases.get(name)[i], arity));
 		});
 	}
 	lines.push('');
@@ -1010,10 +997,10 @@ function regenerateDerived(keys) {
  * checkout would silently rewrite history.
  *
  * @param {string} key - The current floor key.
- * @param {string[]} keys - Existing floor keys (ascending).
+ * @param {Iterable<string>} keys - Existing floor keys (any order, duplicates allowed).
  */
 function guardKeyOrder(key, keys) {
-	const newer = keys.filter((k) => compareKeys(k, key) > 0);
+	const newer = floorsNewerThan(key, keys);
 	if (newer.length > 0) {
 		console.error(
 			`[client-typescript:freeze] package.json version (${key}) is OLDER than existing floor(s): ` +
@@ -1065,7 +1052,11 @@ function main() {
 			console.error(`[client-typescript:freeze --released] ${e.message}`);
 			process.exit(1);
 		}
-		const edits = releasedFloorEdits(baseFloors, readFloorsIn(VERSIONS_DIR), key);
+		// A package version behind a floor of the tree or the base would read a
+		// released floor as the in-progress one and skip it
+		const treeFloors = readFloorsIn(VERSIONS_DIR);
+		guardKeyOrder(key, [...treeFloors.keys(), ...baseFloors.keys()]);
+		const edits = releasedFloorEdits(baseFloors, treeFloors, key);
 		if (edits.length > 0) {
 			for (const { key: k, change } of edits) {
 				console.error(
