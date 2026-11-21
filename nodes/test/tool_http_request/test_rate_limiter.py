@@ -1,215 +1,164 @@
 # =============================================================================
 # MIT License
-# Copyright (c) 2024 RocketRide Inc.
+# Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
-"""Unit tests for the token-bucket rate limiter."""
+"""
+Unit tests for the rate limits tool_http_request counts in ``self.state``.
+
+The limiter runs over a real binding's state door: the two-replica harness's
+server (the real node-door handlers over an in-process state store), so the
+counters move with the store's own atomic ``incr``. The clock the windows are
+named from is a hand-driven stand-in.
+"""
 
 from __future__ import annotations
 
-import threading
-import time
-
 import sys
+import uuid
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
+from rocketlib.doors import NodeState
 
-# Add the node source directory to sys.path so we can import the module
-# without triggering the top-level nodes/__init__.py (which requires the
-# engine runtime).
+from test.framework.replicas import Owner, ReplicaServer
+
+# Add the node source directory to sys.path so the module imports without the
+# package (whose IGlobal imports the engine's rocketlib bases)
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / 'src' / 'nodes' / 'tool_http_request'))
 
 import rate_limiter  # noqa: E402
-from rate_limiter import RateLimiter, RateLimitError  # noqa: E402
+from rate_limiter import RateLimitError, RateLimits, StateRateLimiter  # noqa: E402
+
+ALICE = Owner(orgId='org-a', userId='alice')
+BOB = Owner(orgId='org-a', userId='bob')
 
 
 class _Clock:
     """A hand-driven stand-in for the ``time`` module the rate limiter reads."""
 
     def __init__(self):
-        self.now = 1000.0
+        self.now = 1_000_020.0
 
-    def monotonic(self) -> float:
+    def time(self) -> float:
         """Return the current fake time in seconds."""
         return self.now
 
     def advance(self, seconds: float) -> None:
-        """Move the fake time forward.
-
-        Args:
-            seconds (float): How far to move the clock.
-        """
+        """Move the fake time forward."""
         self.now += seconds
 
 
 @pytest.fixture
 def clock(monkeypatch):
-    """Freeze the rate limiter's clock so token refills happen only when a test advances it."""
+    """Freeze the windows' clock so a window closes only when a test advances it."""
     fake = _Clock()
     monkeypatch.setattr(rate_limiter, 'time', fake)
     return fake
 
 
-class TestAcquireRelease:
-    """Normal acquire / release cycle."""
+@pytest.fixture
+def server():
+    """The server whose state store every binding of a test reaches."""
+    with ReplicaServer() as replica_server:
+        yield replica_server
 
-    def test_single_acquire_release(self):
-        rl = RateLimiter(max_per_second=5, max_per_minute=100, max_concurrent=2)
-        rl.acquire()
-        rl.release()
 
-    def test_multiple_sequential_acquires(self):
-        rl = RateLimiter(max_per_second=3, max_per_minute=100, max_concurrent=3)
+@contextmanager
+def _binding(server, owner=ALICE, engine=None):
+    """One binding's state door, admitted for the duration of the block (on ``engine``, else a new one)."""
+    engine = engine or server.engine()
+    binding = uuid.uuid4().hex
+    server.admit(engine, binding, owner)
+    token = server.serving(engine)
+    try:
+        yield NodeState(binding)
+    finally:
+        server.done(token)
+        server.end(engine, binding)
+
+
+def _limiter(state, per_second=100, per_minute=1000, concurrent=10):
+    """A limiter over ``state`` with the given limits."""
+    return StateRateLimiter(state, RateLimits(per_second, per_minute, concurrent))
+
+
+def test_requests_within_the_limits_are_admitted(server, clock):
+    with _binding(server) as state:
+        limiter = _limiter(state, per_second=3)
         for _ in range(3):
-            rl.acquire()
-        for _ in range(3):
-            rl.release()
+            limiter.acquire()
+            limiter.release()
 
 
-class TestPerSecondEnforcement:
-    """Per-second token bucket rejects once exhausted."""
-
-    def test_exceeds_per_second_limit(self, clock):
-        rl = RateLimiter(max_per_second=2, max_per_minute=100, max_concurrent=10)
-        rl.acquire()
-        rl.acquire()
+def test_the_per_second_window_refuses_until_it_closes(server, clock):
+    with _binding(server) as state:
+        limiter = _limiter(state, per_second=2)
+        for _ in range(2):
+            limiter.acquire()
+            limiter.release()
         with pytest.raises(RateLimitError, match='per second'):
-            rl.acquire()
-        # Clean up
-        rl.release()
-        rl.release()
-
-    def test_per_second_refills_over_time(self):
-        rl = RateLimiter(max_per_second=2, max_per_minute=100, max_concurrent=10)
-        rl.acquire()
-        rl.acquire()
-        rl.release()
-        rl.release()
-        # Wait long enough for tokens to refill
-        time.sleep(1.1)
-        rl.acquire()
-        rl.release()
+            limiter.acquire()
+        clock.advance(1)
+        limiter.acquire()
+        limiter.release()
 
 
-class TestPerMinuteEnforcement:
-    """Per-minute token bucket rejects once exhausted."""
-
-    def test_exceeds_per_minute_limit(self):
-        rl = RateLimiter(max_per_second=100, max_per_minute=3, max_concurrent=10)
-        rl.acquire()
-        rl.acquire()
-        rl.acquire()
+def test_the_per_minute_window_refuses_until_it_closes(server, clock):
+    with _binding(server) as state:
+        limiter = _limiter(state, per_minute=3)
+        for _ in range(3):
+            limiter.acquire()
+            limiter.release()
+            clock.advance(1)
         with pytest.raises(RateLimitError, match='per minute'):
-            rl.acquire()
-        for _ in range(3):
-            rl.release()
+            limiter.acquire()
+        clock.advance(60)
+        limiter.acquire()
+        limiter.release()
 
 
-class TestSemaphoreExhaustion:
-    """Concurrency semaphore rejects when all slots are occupied."""
-
-    def test_exceeds_concurrent_limit(self):
-        rl = RateLimiter(max_per_second=100, max_per_minute=100, max_concurrent=2)
-        rl.acquire()
-        rl.acquire()
+def test_the_in_flight_count_caps_concurrent_requests(server, clock):
+    with _binding(server) as state:
+        limiter = _limiter(state, concurrent=1)
+        limiter.acquire()
         with pytest.raises(RateLimitError, match='concurrent'):
-            rl.acquire()
-        rl.release()
-        rl.release()
-
-    def test_release_frees_slot(self):
-        rl = RateLimiter(max_per_second=100, max_per_minute=100, max_concurrent=1)
-        rl.acquire()
-        rl.release()
-        # Should succeed now that the slot is freed.
-        rl.acquire()
-        rl.release()
+            limiter.acquire()
+        limiter.release()
+        limiter.acquire()
+        limiter.release()
 
 
-class TestTokenRestorationOnSemaphoreRejection:
-    """Tokens must NOT be consumed when the semaphore rejects the request."""
-
-    def test_tokens_preserved_after_semaphore_rejection(self):
-        rl = RateLimiter(max_per_second=2, max_per_minute=100, max_concurrent=1)
-
-        # Use up the only concurrency slot.
-        rl.acquire()
-
-        # This should fail on the semaphore. Tokens must not be consumed.
-        with pytest.raises(RateLimitError, match='concurrent'):
-            rl.acquire()
-
-        # Release the held slot.
-        rl.release()
-
-        # We should still have 1 per-second token left (only 1 was consumed
-        # by the first successful acquire).  If the bug existed (tokens
-        # consumed before semaphore check) this second acquire would fail
-        # with a per-second error.
-        rl.acquire()
-        rl.release()
-
-    def test_semaphore_not_leaked_on_token_rejection(self, clock):
-        """Semaphore slot is released when token-bucket check fails.
-
-        With max_concurrent=2 and max_per_second=2: after two successful
-        acquires exhaust the per-second tokens, a third acquire will pass
-        the semaphore but fail on tokens.  The implementation must release
-        the semaphore slot in that case.  We verify by releasing all held
-        slots, waiting for token refill, then acquiring both concurrent
-        slots again — which would fail if one was leaked.
-        """
-        rl = RateLimiter(max_per_second=2, max_per_minute=100, max_concurrent=2)
-
-        # Exhaust both per-second tokens (each also takes a semaphore slot).
-        rl.acquire()
-        rl.acquire()
-
-        # Release one semaphore slot so the next acquire can get past the
-        # semaphore check and fail on the token bucket instead.
-        rl.release()
-
-        # This acquire gets a semaphore slot but fails on per-second tokens.
-        with pytest.raises(RateLimitError, match='per second'):
-            rl.acquire()
-
-        # Release the remaining held slot.
-        rl.release()
-
-        # Wait for per-second tokens to fully refill (capacity=2).
-        clock.advance(1.2)
-
-        # Both semaphore slots should be free.  If the failed acquire
-        # leaked a slot, the second acquire here would raise a
-        # concurrency error.
-        rl.acquire()
-        rl.acquire()
-        rl.release()
-        rl.release()
+def test_a_refused_request_gives_back_what_it_took(server, clock):
+    with _binding(server) as state:
+        limiter = _limiter(state, per_second=5, per_minute=1, concurrent=1)
+        limiter.acquire()
+        limiter.release()
+        # Refused by the minute: the second window and the in-flight slot are given back
+        with pytest.raises(RateLimitError, match='per minute'):
+            limiter.acquire()
+        assert state.get('inflight') == 0
+        assert state.get(f'second:{int(clock.now)}') == 1
+        clock.advance(60)
+        limiter.acquire()
+        limiter.release()
 
 
-class TestThreadSafety:
-    """Basic smoke test for concurrent usage."""
+def test_every_binding_of_one_owner_counts_against_the_same_limits(server, clock):
+    # Two bindings stand for two replicas serving one control: one count
+    engine = server.engine()
+    with _binding(server, engine=engine) as first, _binding(server, engine=engine) as second:
+        _limiter(first, per_second=2).acquire()
+        _limiter(second, per_second=2).acquire()
+        with pytest.raises(RateLimitError, match='concurrent|per second'):
+            _limiter(first, per_second=2, concurrent=2).acquire()
 
-    def test_concurrent_acquires(self):
-        rl = RateLimiter(max_per_second=50, max_per_minute=500, max_concurrent=5)
-        errors: list[Exception] = []
 
-        def worker():
-            try:
-                rl.acquire()
-                time.sleep(0.01)
-                rl.release()
-            except RateLimitError:
-                pass
-            except Exception as exc:
-                errors.append(exc)
-
-        threads = [threading.Thread(target=worker) for _ in range(20)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=5)
-
-        assert not errors, f'Unexpected errors in threads: {errors}'
+def test_another_owner_has_limits_of_its_own(server, clock):
+    engine = server.engine()
+    with _binding(server, ALICE, engine) as alice, _binding(server, BOB, engine) as bob:
+        _limiter(alice, per_second=1).acquire()
+        with pytest.raises(RateLimitError):
+            _limiter(alice, per_second=1).acquire()
+        _limiter(bob, per_second=1).acquire()

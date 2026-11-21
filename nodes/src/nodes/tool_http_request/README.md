@@ -107,7 +107,7 @@ private-network override: localhost and internal endpoints are intentionally uns
 ### Rate limits
 
 The defaults are 10 requests per second, 100 per minute, and five concurrent requests.
-The token buckets and concurrency limit reject immediately rather than queue, so an agent
+The windows and the concurrency limit reject immediately rather than queue, so an agent
 must retry later after a limit error. Set all three values explicitly to zero to disable
 limiting; otherwise each configured value is clamped to at least one.
 
@@ -160,8 +160,9 @@ Four security guardrails are enforced before every request:
   are blocked. Redirects are returned to the agent as 3xx responses and are not followed
   automatically. There is no private-network override: localhost and internal endpoints are
   intentionally unsupported.
-- **Rate limiting**: token-bucket limits per second and per minute, plus a concurrency
-  cap. On by default (10/s, 100/min, 5 concurrent).
+- **Rate limiting**: per-second and per-minute windows plus a concurrency cap, counted in
+  the node's state so every engine replica serving the pipeline shares them. On by
+  default (10/s, 100/min, 5 concurrent).
 
 A credential configured on the node (bearer, Basic, or API key header; `${ROCKETRIDE_*}`
 placeholders resolve on the engine) is applied to every request. It makes the whitelist
@@ -193,7 +194,7 @@ mandatory and turns per-call credentials into an error.
 | `headerName` | string | Default empty. Name column of a `defaultHeaders` row. |
 | `headerValue` | string | Default empty. Value column of a `defaultHeaders` row. |
 | `defaultHeaders` | array | Headers sent with every request; a per-call header of the same name replaces one. `Authorization`, `Proxy-Authorization`, `Cookie`, `Host`, `Content-Type`, `Content-Length`, and `Transfer-Encoding` are refused. Requires a pinned https whitelist when any row is set. |
-| `rateLimitPerSecond` | number | Default 10. Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. |
+| `rateLimitPerSecond` | number | Default 10. Maximum number of HTTP requests allowed per second. Counted per clock second across every engine replica. |
 | `rateLimitPerMinute` | number | Default 100. Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. |
 | `maxConcurrentRequests` | number | Default 5. Maximum number of HTTP requests that can be in-flight simultaneously. |
 
@@ -302,11 +303,17 @@ serialized and wrapped as raw `application/json` automatically.
 
 ### Rate limiting
 
-Three independent limits are enforced per node (shared across all calls):
+Three independent limits are enforced per node, counted in the node's state (shared
+by every call of the pipeline, on whichever engine replica serves it). They are
+per-call parameters a caller may set and an LLM may not:
 
-- **Per-second**: token bucket, capacity and refill rate equal to `rateLimitPerSecond`.
-- **Per-minute**: token bucket, capacity `rateLimitPerMinute`, refilling continuously.
-- **Concurrency**: semaphore capped at `maxConcurrentRequests` in-flight requests.
+- **Per-second**: at most `rateLimitPerSecond` requests in each clock second.
+- **Per-minute**: at most `rateLimitPerMinute` requests in each clock minute.
+- **Concurrency**: at most `maxConcurrentRequests` requests in flight.
+
+The windows are fixed, not sliding: a burst straddling a window boundary can reach
+twice a limit for an instant. A request refused by one limit gives back what it took
+from the others.
 
 The limiter does **not** queue or block: when a limit is hit the tool call fails
 immediately with an error telling the agent to retry after a short delay (or to wait
@@ -345,7 +352,7 @@ non-zero value is clamped to a minimum of `1`.
 | `http_request.headerValue` | `string` | **Header value** | `""` |
 | `http_request.maxConcurrentRequests` | `number` | **Max concurrent requests**<br/>Maximum number of HTTP requests that can be in-flight simultaneously. | `5` |
 | `http_request.rateLimitPerMinute` | `number` | **Max requests per minute**<br/>Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. | `100` |
-| `http_request.rateLimitPerSecond` | `number` | **Max requests per second**<br/>Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. | `10` |
+| `http_request.rateLimitPerSecond` | `number` | **Max requests per second**<br/>Maximum number of HTTP requests allowed per second. Counted per clock second across every engine replica. | `10` |
 | `http_request.serverName` | `string` | **Server name**<br/>Namespace prefix for the tool: <serverName>.http_request | `"http"` |
 | `http_request.urlWhitelist` | `array` | **URL Whitelist**<br/>Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes, non-string values, and malformed entries fail closed. |  |
 | `http_request.whitelistPattern` | `string` | **URL Pattern (regex)**<br/>Applied with Python regex match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. After matching, a fail-closed source grammar requires a literal HTTP(S) scheme; an exact literal/escaped DNS, IPv4, or bracketed-IPv6 host with an optional exact or [0-9]-based port policy, or a whole-authority [^/] policy; and an explicit path, query, or end boundary. Unsupported or ambiguous authority regex syntax is denied at request time. Example: ^https://api\.example\.com(?::[0-9]+)?(?:/\|$). Scheme-only prefixes are denied; use an empty whitelist to allow all public destinations. Blank placeholder rows are ignored. | `""` |
