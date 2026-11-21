@@ -1,6 +1,6 @@
 name: Docs
 
-# Build and deploy the co-located documentation site to docs.rocketride.org.
+# Build and deploy the co-located documentation site to docs.rocketride.ai.
 # The site is produced by `builder docs:build` (gather -> index -> compile) and
 # emitted to dist/docs.
 

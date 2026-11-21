@@ -97,7 +97,7 @@ otel = [
 
 [project.urls]
 Homepage = "https://github.com/rocketride-org/rocketride-server"
-Documentation = "https://docs.rocketride.org/"
+Documentation = "https://docs.rocketride.ai/"
 Repository = "https://github.com/rocketride-org/rocketride-server"
 "Bug Reports" = "https://github.com/rocketride-org/rocketride-server/issues"
 
