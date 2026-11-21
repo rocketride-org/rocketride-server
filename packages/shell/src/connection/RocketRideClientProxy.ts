@@ -319,8 +319,8 @@ export class RocketRideClientProxy extends RocketRideClient {
 	// ── The one thing request() cannot carry: SSE callbacks ─────────────────
 	//
 	// A pipe opened with `onSSE` registers the callback in a LOCAL
-	// `_ssePipeCallbacks` map keyed by pipeId (`client.ts`, dispatched at
-	// `:1972`) and asks the server for SSE events. Those events arrive as
+	// `_ssePipeCallbacks` map keyed by the request's traceId (`client.ts`,
+	// dispatched in `onEvent`) and asks the server for SSE events. Those events arrive as
 	// EVENTS on the root's socket, dispatched by the ROOT's client — they
 	// never reach this realm's map, so the callback would simply never fire.
 	//

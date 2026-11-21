@@ -26,7 +26,11 @@
 
 import type * as ClientApiV2_0 from './versions/v2.0';
 
-/** Registry mapping each frozen SDK floor key (MAJOR.MINOR) to its value-surface snapshot. */
+/**
+ * Registry mapping each frozen SDK floor key (MAJOR.MINOR) of the package's
+ * CURRENT major to its value-surface snapshot. Floors of an earlier major stay
+ * in versions/ as history, are not listed here and hold nothing.
+ */
 export interface ClientApiVersions {
 	'2.0': typeof ClientApiV2_0;
 }
@@ -34,10 +38,10 @@ export interface ClientApiVersions {
 /**
  * The newest frozen SDK floor — a convenience alias for consumers.
  *
- * Accumulation is NOT an intersection of versions: the "nothing ever frozen
- * can be removed" guarantee is the per-version floors in the package's
+ * Accumulation is NOT an intersection of versions: the "nothing frozen in this
+ * major can be removed" guarantee is the per-version floors in the package's
  * src/contract-check.generated.ts, which assert the live surface still
- * satisfies EACH frozen floor separately.
+ * satisfies EACH frozen floor of the current major separately.
  */
 export type ClientApiLatest = ClientApiVersions['2.0'];
 

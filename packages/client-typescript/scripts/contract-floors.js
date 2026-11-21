@@ -23,11 +23,13 @@
 'use strict';
 
 // =============================================================================
-// contract-floors — floor keys, per-major scoping and frozen-bundle reading
+// contract-floors — floor keys, per-major scoping, frozen-bundle reading and
+// released-floor immutability
 // =============================================================================
 //
 // The pure half of freeze-client-api.js: everything that decides WHICH floors
-// hold the live surface and how a frozen floor's body is read back. It needs
+// hold the live surface, how a frozen floor's body is read back, and whether a
+// released floor changed against a base revision (git only). It needs
 // no TypeScript toolchain, so its tests run with `node --test` alone:
 //
 //     node --test packages/client-typescript/scripts/contract-floors.test.js
@@ -40,6 +42,8 @@
 // =============================================================================
 
 const fs = require('fs');
+const path = require('path');
+const { execFileSync } = require('child_process');
 
 // =============================================================================
 // FROZEN BUNDLE MARKERS
@@ -155,6 +159,85 @@ function extractBundleBody(fileContent) {
 	return text.slice(start + BEGIN.length, end).trim();
 }
 
+// =============================================================================
+// RELEASED-FLOOR IMMUTABILITY
+// =============================================================================
+//
+// The regen check proves the DERIVED files (barrels, conformance file) match
+// the floors in the tree. It cannot see an edit to a floor itself: a floor and
+// the live surface edited together regenerate byte-identical derived files and
+// still pass tsc. Immutability is therefore checked against a trusted base
+// revision: every floor the base holds, except the one keyed to the tree's own
+// package MAJOR.MINOR (the in-progress floor a re-freeze replaces), must be in
+// the tree unchanged.
+
+/**
+ * Read every floor file of a versions directory in the working tree.
+ *
+ * @param {string} versionsDir - The contract/versions directory.
+ * @returns {Map<string, string>} key -> file text.
+ */
+function readFloorsIn(versionsDir) {
+	const floors = new Map();
+	for (const key of listFrozenKeys(versionsDir)) {
+		floors.set(key, fs.readFileSync(path.join(versionsDir, `v${key}.d.ts`), 'utf8'));
+	}
+	return floors;
+}
+
+/**
+ * Read every floor file of a versions directory as a git revision holds it.
+ *
+ * @param {string} repoRoot - The git work tree root.
+ * @param {string} versionsRel - The versions directory relative to repoRoot, '/'-separated.
+ * @param {string} rev - A commit or tree (e.g. 'HEAD^1', 'origin/develop').
+ * @returns {Map<string, string>} key -> file text at that revision (empty when it has no floors).
+ * @throws {Error} When git cannot resolve the revision.
+ */
+function readFloorsAt(repoRoot, versionsRel, rev) {
+	const git = (args) => execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 });
+	// Step 1: the revision must exist (a shallow clone without it is an error, not a pass)
+	try {
+		git(['rev-parse', '--verify', '--quiet', `${rev}^{tree}`]);
+	} catch {
+		throw new Error(`git cannot resolve '${rev}'; fetch it first (CI: fetch-depth 2 for HEAD^1)`);
+	}
+	// Step 2: the floor files it holds, read as committed
+	const floors = new Map();
+	const listing = git(['ls-tree', '--name-only', rev, '--', `${versionsRel}/`]);
+	for (const file of listing.split('\n').filter(Boolean)) {
+		const m = /\/v(\d+\.\d+)\.d\.ts$/.exec(file);
+		if (m) floors.set(m[1], git(['show', `${rev}:${file}`]));
+	}
+	return floors;
+}
+
+/**
+ * The released floors a tree changed or removed, against a trusted base.
+ *
+ * A floor is released once the package version has moved past its minor, so
+ * every floor of the base is checked except the one keyed to the tree's own
+ * package MAJOR.MINOR. A floor the base does not hold is new and not checked.
+ * Text is compared with line endings normalized.
+ *
+ * @param {Map<string, string>} baseFloors - key -> floor text at the base.
+ * @param {Map<string, string>} treeFloors - key -> floor text in the tree.
+ * @param {string} inProgressKey - The tree's package floor key.
+ * @returns {{key: string, change: 'changed'|'removed'}[]} The edited released floors, ascending.
+ */
+function releasedFloorEdits(baseFloors, treeFloors, inProgressKey) {
+	const edits = [];
+	for (const key of [...baseFloors.keys()].sort(compareKeys)) {
+		if (key === inProgressKey) continue;
+		if (!treeFloors.has(key)) {
+			edits.push({ key, change: 'removed' });
+		} else if (normalizeEol(treeFloors.get(key)) !== normalizeEol(baseFloors.get(key))) {
+			edits.push({ key, change: 'changed' });
+		}
+	}
+	return edits;
+}
+
 module.exports = {
 	BEGIN,
 	END,
@@ -166,4 +249,7 @@ module.exports = {
 	floorsOfMajor,
 	normalizeEol,
 	extractBundleBody,
+	readFloorsIn,
+	readFloorsAt,
+	releasedFloorEdits,
 };

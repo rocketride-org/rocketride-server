@@ -482,8 +482,9 @@ module.exports = {
 			// Regenerate the DERIVED contract artifacts (barrels + conformance
 			// file) from the immutable frozen floors of the package major, then
 			// verify the floors hold. Must be a no-op on a clean tree — CI
-			// pairs this with `git diff --exit-code` so a hand-edited floor
-			// cannot launder a breaking change past the tsc floors. The
+			// pairs this with `git diff --exit-code` so a hand-edited check or
+			// barrel line cannot launder a breaking change past the tsc floors
+			// (an edit to a floor itself is `freeze-client-api.js --released`). The
 			// floor-scoping tests run first.
 			name: 'client-typescript:regen',
 			action: () => ({

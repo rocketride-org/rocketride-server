@@ -41,8 +41,8 @@
 // Enforcement is structural, mirroring the shell's contract: the generated
 // src/contract-check.generated.ts holds the live surface against EACH frozen
 // version of the package's current MAJOR (per-version VALUE floors over the
-// module's export namespace) and pins every exported TYPE against the earliest
-// version of that major that froze it. Removing or narrowing anything frozen
+// module's export namespace) and pins every exported TYPE against each version
+// of that major that declares it. Removing or narrowing anything frozen
 // in the current major fails the package's own
 // `tsc --noEmit -p tsconfig.contract.json` — append-only within a major.
 //
@@ -53,24 +53,33 @@
 // freeze of a new major mints its first floor from the live surface as-is.
 // The shell contract is not semver and stays append-only forever.
 //
-// Usage:  node freeze-client-api.js [--check | --regen | --floors]
+// Usage:  node freeze-client-api.js [--check | --regen | --floors | --released <rev>]
 //   (no flag)  full freeze — mints/replaces the floor for the current
 //              MAJOR.MINOR and regenerates the derived artifacts.
 //   --check    CI/publish mode — nonzero exit if the floors fail tsc, if no
 //              floor exists for the current package version, or if the live
 //              surface differs from that floor (no writes).
 //   --regen    regenerate the DERIVED artifacts (contract barrels + check
-//              file) from the immutable versions/*.d.ts and the package
+//              file) from the versions/*.d.ts in the tree and the package
 //              MAJOR, then verify the floors still hold under tsc. Never
 //              bundles the live surface and never touches versions/ — on a
 //              clean tree this is a no-op, which CI pairs with
-//              `git diff --exit-code` so a hand-edited floor or barrel cannot
-//              launder a breaking change past tsc. Fails when the current
-//              major has no floor yet (run the full freeze to cut it).
+//              `git diff --exit-code` so a hand-edited barrel or check file
+//              cannot launder a breaking change past tsc. It checks the
+//              derived files only: a floor edited together with the live
+//              surface regenerates the same derived files, which is what
+//              --released catches. Fails when the current major has no floor
+//              yet (run the full freeze to cut it).
 //   --floors   floors-only gate — run the contract tsc and exit nonzero if
 //              the live surface breaks any frozen floor (no writes). Used by
 //              client-typescript:create-package so a breaking surface cannot
 //              be packaged, while additive work-in-progress still packs.
+//   --released <rev>
+//              immutability gate — nonzero exit if any floor that <rev> (a
+//              trusted base: CI passes HEAD^1, the base branch of a pull
+//              request's merge commit) holds is changed or missing in the
+//              tree, except the in-progress floor of the package's own
+//              MAJOR.MINOR (no writes, no tsc; reads <rev> through git).
 // =============================================================================
 
 const path = require('path');
@@ -109,6 +118,9 @@ const {
 	floorsOfMajor,
 	normalizeEol,
 	extractBundleBody,
+	readFloorsIn,
+	readFloorsAt,
+	releasedFloorEdits,
 } = require('./contract-floors');
 
 // Reusable MIT license header for the hand-shaped generated files.
@@ -789,16 +801,20 @@ function regenerateBarrels(keys) {
 		'',
 		imports,
 		'',
-		'/** Registry mapping each frozen SDK floor key (MAJOR.MINOR) to its value-surface snapshot. */',
+		'/**',
+		" * Registry mapping each frozen SDK floor key (MAJOR.MINOR) of the package's",
+		' * CURRENT major to its value-surface snapshot. Floors of an earlier major stay',
+		' * in versions/ as history, are not listed here and hold nothing.',
+		' */',
 		`export interface ClientApiVersions {\n${mapEntries}\n}`,
 		'',
 		'/**',
 		' * The newest frozen SDK floor — a convenience alias for consumers.',
 		' *',
-		' * Accumulation is NOT an intersection of versions: the "nothing ever frozen',
-		' * can be removed" guarantee is the per-version floors in the package\'s',
+		' * Accumulation is NOT an intersection of versions: the "nothing frozen in this',
+		' * major can be removed" guarantee is the per-version floors in the package\'s',
 		' * src/contract-check.generated.ts, which assert the live surface still',
-		' * satisfies EACH frozen floor separately.',
+		' * satisfies EACH frozen floor of the current major separately.',
 		' */',
 		`export type ClientApiLatest = ClientApiVersions['${newest}'];`,
 		'',
@@ -851,27 +867,44 @@ function parseExportedTypeInfo(bundleBody) {
 }
 
 /**
- * Map each individually-exported named type to the EARLIEST frozen floor that
- * declared it. Derived from the frozen version files (not the live surface),
- * so a type REMOVED from the barrel is still in the map — its `Current_`
- * import in the conformance file then fails, catching the removal. Only the
- * in-progress floor can legitimately drop a type, and only via a re-freeze.
+ * Map each individually-exported named type to EVERY frozen floor that
+ * declares it, earliest first. A later floor may declare more of a type than
+ * the earliest (a required property added in 2.1), and value floors cannot
+ * hold a type-only export, so each declaring floor gets its own pin. Derived
+ * from the frozen version files (not the live surface), so a type REMOVED
+ * from the barrel is still in the map — its `Current_` import in the
+ * conformance file then fails, catching the removal. Only the in-progress
+ * floor can legitimately drop a type, and only via a re-freeze.
  *
  * @param {string[]} keys - Ascending floor keys.
- * @returns {Map<string, {key: string, arity: number}>} type -> earliest floor.
+ * @returns {Map<string, {key: string, arity: number}[]>} type -> its declaring floors, ascending.
  */
 function collectFrozenTypes(keys) {
-	const earliest = new Map();
+	const pins = new Map();
 	for (const key of keys) {
 		const p = path.join(VERSIONS_DIR, `v${key}.d.ts`);
 		if (!fs.existsSync(p)) continue;
 		for (const [name, arity] of parseExportedTypeInfo(fs.readFileSync(p, 'utf8'))) {
 			// Arity travels with the pin: floors for generics must be emitted
-			// APPLIED, using the arity the freezing floor declared.
-			if (!earliest.has(name)) earliest.set(name, { key, arity });
+			// APPLIED, using the arity the declaring floor froze.
+			if (!pins.has(name)) pins.set(name, []);
+			pins.get(name).push({ key, arity });
 		}
 	}
-	return earliest;
+	return pins;
+}
+
+/**
+ * The alias of one type pin in the conformance file: the earliest declaring
+ * floor keeps the bare name, a later one adds its key (`Foo__v2_1`).
+ *
+ * @param {string} name - The exported type name.
+ * @param {number} index - The pin's position among the type's declaring floors.
+ * @param {string} key - The pin's floor key.
+ * @returns {string} The identifier fragment after `Frozen_` / `_t_`.
+ */
+function pinAlias(name, index, key) {
+	return index === 0 ? name : `${name}__v${idFor(key)}`;
 }
 
 /**
@@ -881,9 +914,9 @@ function collectFrozenTypes(keys) {
  * Each frozen floor gets a VALUE floor over the whole export namespace of
  * src/client/index.ts — `typeof <frozen module>` against `typeof <live
  * module>` — plus per-TYPE floors pinning every individually-exported type
- * against the earliest floor that froze it. Types are drawn from the frozen
- * files (accumulated), never from the live surface, so a removal cannot be
- * erased by re-running.
+ * against each floor of the major that declares it. Types are drawn from the
+ * frozen files (accumulated), never from the live surface, so a removal
+ * cannot be erased by re-running.
  *
  * @param {string[]} keys - Ascending floor keys (must be non-empty).
  */
@@ -899,8 +932,8 @@ function generateConformance(keys) {
 	lines.push('// tsc (tsconfig.contract.json), over the floors of the package MAJOR only:');
 	lines.push('//  - a per-version VALUE floor: the live export surface of');
 	lines.push('//    src/client/index.ts must satisfy EACH frozen floor separately.');
-	lines.push('//  - a per-TYPE floor: each exported type, pinned to the earliest floor');
-	lines.push('//    that froze it.');
+	lines.push('//  - a per-TYPE floor: each exported type, pinned to every floor of this');
+	lines.push('//    major that declares it.');
 	lines.push('// Removing or narrowing anything frozen in this major breaks this file.');
 	lines.push('// Floors are derived from the immutable versions/*.d.ts; only the floor');
 	lines.push('// keyed to the in-progress package MAJOR.MINOR may be re-minted');
@@ -912,8 +945,11 @@ function generateConformance(keys) {
 	for (const key of keys) {
 		lines.push(`import type * as ClientApiV${idFor(key)} from '../contract/versions/v${key}';`);
 	}
-	for (const [name, info] of names) {
-		lines.push(`import type { ${name} as Frozen_${name} } from '../contract/versions/v${info.key}';`);
+	for (const [name, pins] of names) {
+		pins.forEach(({ key }, i) => {
+			const alias = pinAlias(name, i, key);
+			lines.push(`import type { ${name} as Frozen_${alias} } from '../contract/versions/v${key}';`);
+		});
 		lines.push(`import type { ${name} as Current_${name} } from './client/index.js';`);
 	}
 	lines.push('');
@@ -926,10 +962,13 @@ function generateConformance(keys) {
 	lines.push('// TYPE floors — each frozen exported type must still be satisfied.');
 	lines.push('// Generic floors are emitted APPLIED (<any, …> at the frozen arity):');
 	lines.push('// a bare generic is TS2314, and an arity change surfaces as one here.');
-	for (const [name, info] of names) {
-		const args = info.arity > 0 ? `<${new Array(info.arity).fill('any').join(', ')}>` : '';
-		lines.push(`const _t_${name}: Frozen_${name}${args} = {} as Current_${name}${args};`);
-		lines.push(`void _t_${name};`);
+	for (const [name, pins] of names) {
+		pins.forEach(({ key, arity }, i) => {
+			const alias = pinAlias(name, i, key);
+			const args = arity > 0 ? `<${new Array(arity).fill('any').join(', ')}>` : '';
+			lines.push(`const _t_${alias}: Frozen_${alias}${args} = {} as Current_${name}${args};`);
+			lines.push(`void _t_${alias};`);
+		});
 	}
 	lines.push('');
 	fs.writeFileSync(CONTRACT_CHECK, lines.join('\n'));
@@ -1006,12 +1045,51 @@ function main() {
 		return;
 	}
 
-	// --regen: rebuild the DERIVED artifacts from the immutable floors of the
-	// package MAJOR, then verify the floors still hold. Reads versions/*.d.ts
-	// and the package version's major only — never the live surface — so on a
-	// clean tree the output is byte-identical and CI's `git diff --exit-code`
-	// proves no floor, barrel or check line was hand-edited to launder a
-	// breaking change.
+	// --released <rev>: the floors <rev> holds must be in the tree unchanged,
+	// except the in-progress floor of the package's own MAJOR.MINOR. The
+	// regen diff below cannot see this: a floor and the live surface edited
+	// together regenerate the same derived files.
+	const releasedAt = process.argv.indexOf('--released');
+	if (releasedAt !== -1) {
+		const rev = process.argv[releasedAt + 1];
+		if (!rev || rev.startsWith('--')) {
+			console.error('[client-typescript:freeze --released] Name the base revision: --released <rev>.');
+			process.exit(1);
+		}
+		const key = currentKey();
+		const versionsRel = path.relative(REPO_ROOT, VERSIONS_DIR).split(path.sep).join('/');
+		let baseFloors;
+		try {
+			baseFloors = readFloorsAt(REPO_ROOT, versionsRel, rev);
+		} catch (e) {
+			console.error(`[client-typescript:freeze --released] ${e.message}`);
+			process.exit(1);
+		}
+		const edits = releasedFloorEdits(baseFloors, readFloorsIn(VERSIONS_DIR), key);
+		if (edits.length > 0) {
+			for (const { key: k, change } of edits) {
+				console.error(
+					`[client-typescript:freeze --released] Released floor v${k}.d.ts was ${change} (against ${rev}).`
+				);
+			}
+			console.error(
+				'[client-typescript:freeze --released] Released floors are immutable: only the in-progress ' +
+					`floor v${key} may be re-minted. Restore the others with ` +
+					`\`git checkout ${rev} -- ${versionsRel}/v<key>.d.ts\`. ${DECISION_NOTE}`
+			);
+			process.exit(1);
+		}
+		log(`Released floors unchanged against ${rev} (in-progress floor v${key} not checked).`);
+		return;
+	}
+
+	// --regen: rebuild the DERIVED artifacts from the floors of the package
+	// MAJOR in the tree, then verify the floors still hold. Reads
+	// versions/*.d.ts and the package version's major only — never the live
+	// surface — so on a clean tree the output is byte-identical and CI's
+	// `git diff --exit-code` proves no barrel or check line was hand-edited
+	// to launder a breaking change. It proves nothing about the floors
+	// themselves: --released compares them with a trusted base.
 	if (regenMode) {
 		const allKeys = listFrozenKeys();
 		const key = currentKey();

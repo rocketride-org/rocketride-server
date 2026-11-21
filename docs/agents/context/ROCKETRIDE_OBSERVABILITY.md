@@ -391,7 +391,10 @@ output reaches the owner's own controls as before.
 What decides the path is the event's `traceId`. A pipe-tagged event (flow,
 SSE, a data-op result) goes to the control whose request carries that
 `traceId`, and to no other holder; an event that carries none, or whose
-request tree is unknown or was released, is engine-level. On a shared engine
+request tree is unknown or was released more than
+`CONST_BINDING_GRACE_SECONDS` (5 seconds) ago, is engine-level. Within those
+5 seconds after its pipe closed, an event still reaches its request's control
+with `late: true` in its body. On a shared engine
 the holders still receive the status (each projected to its own counts) and
 the task lifecycle. `apaevt_ops` is live only: no run log records it.
 
@@ -520,10 +523,14 @@ and `ROCKETRIDE_typescript_API.md`.
 
 The server records each task's events into a per-stream **run log**: an
 append-only continuum of the same typed events described in §5, organized as
-chapters (one per run) over size-sealed segments. Each control writes its own
-continuum: on an engine several controls hold, a holder's run log has its own
-requests' events only, numbered by its own `logSeq`, and engine-level output
-of a shared engine is in no holder's log (§5.3b). If your ingester was offline
+chapters (one per run) over size-sealed segments. A continuum belongs to the
+stream, not to a control: the stream is identified without a control id
+(`stream` in §8.1), so every control that runs it writes into the same
+continuum. A restart mints a new control id and opens the next chapter, and
+`logSeq` continues across runs. Routing into a continuum stays per control:
+on an engine several controls hold, each control writes its own requests'
+events and never another holder's, and engine-level output of a shared
+engine is in no holder's log (§5.3b). If your ingester was offline
 for a window — or you would rather not maintain your own event database at
 all — you can read recorded runs back after the fact instead of (or in
 addition to) ingesting live.

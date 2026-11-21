@@ -7,8 +7,8 @@
 // tsc (tsconfig.contract.json), over the floors of the package MAJOR only:
 //  - a per-version VALUE floor: the live export surface of
 //    src/client/index.ts must satisfy EACH frozen floor separately.
-//  - a per-TYPE floor: each exported type, pinned to the earliest floor
-//    that froze it.
+//  - a per-TYPE floor: each exported type, pinned to every floor of this
+//    major that declares it.
 // Removing or narrowing anything frozen in this major breaks this file.
 // Floors are derived from the immutable versions/*.d.ts; only the floor
 // keyed to the in-progress package MAJOR.MINOR may be re-minted

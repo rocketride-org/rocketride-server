@@ -223,8 +223,15 @@ counts, and the task lifecycle, but counts, errors, warnings, downloads, exit
 codes and plain output leave the server as **`apaevt_ops`**, body
 `{ engineKey, kind, ... }` (`kind` is the original event name), on the `OPS`
 event type (`1 << 10`). Only `sys.admin` may subscribe `OPS`, on the `*`
-wildcard only, and `ALL` does not include it. An event whose request tree is
-unknown or already released goes the same way.
+wildcard only, and `ALL` does not include it.
+
+A request tree is released when its pipe closes. For
+`CONST_BINDING_GRACE_SECONDS` (5 seconds) after that, an event of the tree
+still goes to that request's control, with `late: true` in its body, so a
+consumer waiting for a request's final events reads the request's own stream
+and checks `late`. An event whose tree is unknown, or was released longer ago
+than the grace period, is delivered like an engine-level line: to the
+engine's own controls on a private engine, as `apaevt_ops` on a shared one.
 
 ## A session, end to end
 

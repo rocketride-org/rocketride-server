@@ -133,17 +133,26 @@ floors) and on an added export that was never `shell:freeze`d. The second step
 regenerates the floors from the immutable frozen versions and fails on any diff,
 so a floor cannot be hand-edited to launder a removed export past tsc.
 
-The job runs one more gate:
+The job runs two more gates:
 
 ```bash
 node scripts/build.js client-typescript:regen && git diff --exit-code -- \
   packages/client-typescript/src/contract-check.generated.ts \
   packages/client-typescript/contract/index.ts \
   packages/client-typescript/contract/latest.ts
+node packages/client-typescript/scripts/freeze-client-api.js --released HEAD^1
 ```
 
-It regen-checks the client-typescript SDK contract floors the same way, after
-running the floor-scoping tests (`scripts/contract-floors.test.js`). Unlike the
+The first regen-checks the client-typescript SDK's derived contract files the
+same way, after running the floor-scoping tests
+(`scripts/contract-floors.test.js`). It proves the barrels and the conformance
+file match the floors in the tree, not that a floor itself is untouched: a
+floor edited together with the live surface regenerates the same derived
+files. The second closes that gap: every floor the base revision holds
+(`HEAD^1`, the base branch of a pull request's merge commit; the job checks out
+with `fetch-depth: 2`) must be in the tree unchanged, except the in-progress
+floor keyed to the package's own `MAJOR.MINOR`, which a re-freeze may replace.
+Unlike the
 shell contract, which is not semver and stays append-only forever, the SDK
 floors are held per major: a 2.x surface is checked against the 2.x floors
 only, and the 1.x floors stay in `contract/versions/` as immutable history. A

@@ -199,8 +199,10 @@ export class DataPipe {
 			this._token = controlId;
 		}
 
-		// If an SSE callback was provided, subscribe and register for this pipe
-		if (this._onSSE !== undefined && this._pipeId !== undefined) {
+		// If an SSE callback was provided, subscribe (the server narrows by
+		// slot) and register under the request tree: the slot is reused by the
+		// next binding once this pipe closes, the traceId never is
+		if (this._onSSE !== undefined && this._pipeId !== undefined && this._traceId !== undefined) {
 			try {
 				await this._client.setEvents(this._token, ['SSE'], this._pipeId);
 			} catch (err) {
@@ -215,7 +217,7 @@ export class DataPipe {
 				throw new PipeException({ message: msg });
 			}
 
-			this._client._ssePipeCallbacks.set(this._pipeId, this._onSSE);
+			this._client._ssePipeCallbacks.set(this._traceId, this._onSSE);
 		}
 
 		// Only mark opened after the server-side pipe is fully consistent (including SSE setup).
@@ -354,8 +356,8 @@ export class DataPipe {
 			this._opened = false;
 
 			// Unregister SSE callback and scoped monitor subscription
-			if (this._onSSE !== undefined && this._pipeId !== undefined) {
-				this._client._ssePipeCallbacks.delete(this._pipeId);
+			if (this._onSSE !== undefined && this._pipeId !== undefined && this._traceId !== undefined) {
+				this._client._ssePipeCallbacks.delete(this._traceId);
 				try {
 					await this._client.setEvents(this._token, [], this._pipeId);
 				} catch {
@@ -480,14 +482,13 @@ export class RocketRideClient extends DAPClient {
 	private _dapAttempted = false;
 	private _dapSend?: (event: unknown) => void;
 	private _nextChatId = 1;
-	/** SSE callbacks by the request tree's wire traceId (a pipe slot is reused; a traceId never is). */
 	/**
-	 * SSE callbacks by pipe SLOT. A slot is reused by the next binding once a
-	 * pipe closes, so dispatch by the never-reused `traceId` (which every SSE
-	 * body now carries) is the right key; it lands with the 2.0 surface, since
-	 * this member's type is part of the frozen 1.x class contract.
+	 * SSE callbacks by the request tree's wire `traceId`, which every SSE body
+	 * carries. A pipe slot is reused by the next binding once a pipe closes; a
+	 * traceId never is, so an event that arrives after its pipe closed never
+	 * reaches the next pipe opened on the same slot.
 	 */
-	readonly _ssePipeCallbacks = new Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>();
+	readonly _ssePipeCallbacks = new Map<string, (type: string, data: Record<string, unknown>) => Promise<void>>();
 
 	// Desired state model — replaces old flag soup
 	private _desiredState: 'detached' | 'attached' | 'authenticated' = 'detached';
@@ -2061,10 +2062,17 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @example
 	 * ```typescript
-	 * // Subscribe to upload events
-	 * client.on('apaevt_status_upload', (event) => {
-	 *   console.log(`${event.body.filepath}: ${event.body.bytes_sent}/${event.body.file_size}`);
+	 * // Progress arrives on the client's onEvent callback
+	 * const client = new RocketRideClient({
+	 *   auth: 'your-api-key',
+	 *   uri: 'wss://your-server.com',
+	 *   onEvent: async (event) => {
+	 *     if (event.event !== 'apaevt_status_upload') return;
+	 *     const upload = event.body as unknown as UPLOAD_RESULT;
+	 *     console.log(`${upload.filepath}: ${upload.bytes_sent}/${upload.file_size}`);
+	 *   },
 	 * });
+	 * await client.connect();
 	 *
 	 * // Upload files
 	 * const results = await client.sendFiles(
@@ -2339,11 +2347,12 @@ export class RocketRideClient extends DAPClient {
 			}
 		}
 
-		// Dispatch pipe-scoped SSE events to the registered DataPipe callback
+		// Dispatch pipe-scoped SSE events to the registered DataPipe callback,
+		// by the request tree (never by the slot, which the next pipe reuses)
 		if (eventType === 'apaevt_sse') {
-			const pipeId = (eventBody as Record<string, unknown>)?.pipeId as number | undefined;
-			if (pipeId !== undefined) {
-				const cb = this._ssePipeCallbacks.get(pipeId);
+			const traceId = (eventBody as Record<string, unknown>)?.traceId;
+			if (typeof traceId === 'string') {
+				const cb = this._ssePipeCallbacks.get(traceId);
 				if (cb) {
 					try {
 						const body = eventBody as Record<string, unknown>;
@@ -2351,7 +2360,7 @@ export class RocketRideClient extends DAPClient {
 						const data = (body.data as Record<string, unknown>) ?? {};
 						await cb(type, data);
 					} catch (error) {
-						this.debugMessage(`Error in SSE callback for pipe ${pipeId}: ${error}`);
+						this.debugMessage(`Error in SSE callback for trace ${traceId}: ${error}`);
 					}
 				}
 			}

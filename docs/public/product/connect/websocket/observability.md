@@ -242,8 +242,10 @@ Connection lifecycle and monitor-change audit events, useful if you want to reco
 
 On an engine shared across users, the engine-level events (counts, errors,
 warnings, downloads, exit codes, plain output, and events for a request tree
-that is unknown or already released) belong to no single caller, so no
-holder receives them. They leave the server as `apaevt_ops` with body
+that is unknown or was released more than `CONST_BINDING_GRACE_SECONDS`
+(5 seconds) ago) belong to no single caller, so no holder receives them. An
+event of a tree released within those 5 seconds still reaches its request's
+control, with `late: true` in its body. They leave the server as `apaevt_ops` with body
 `{ engineKey, kind, ... }`, where `kind` is the original event name, on the
 `OPS` type of a `*` subscription (`sys.admin` only). Each holder still
 receives the engine's status, projected to its own counts, and the task

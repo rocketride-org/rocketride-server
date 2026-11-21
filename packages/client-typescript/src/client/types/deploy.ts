@@ -132,14 +132,14 @@ export interface DeployHistoryEntry {
 	seq?: number;
 	/** Unix timestamp (seconds). */
 	at?: number;
-	/** `pause`/`resume` appear only on rows written before the
-	    enable/disable vocabulary (the trail is immutable). NOTE: app rails
-	    additionally carry the review vocabulary (`request`/`approved`/
-	    `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
-	    the union names the pipe-rail actions only and stays as the frozen
-	    v1.3 floor wrote it (widening a returned union would break floor
-	    assignability); compare raw strings for the app-rail extras. */
-	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
+	/** Pipe rails: `publish`, `deploy`, `rollback`, `enable`, `disable`,
+	    `errored`, `remove`, and `delete` when a deployed version's storage is
+	    removed; `pause`/`resume` appear only on rows written before the
+	    enable/disable vocabulary (the trail is immutable). App rails add a
+	    binding's lifecycle as its state (`enabled`/`disabled`/`removed`), the
+	    review transitions (`request`/`approved`/`rejected`/`withdrawn`/
+	    `failed`) and the human `reply` row. */
+	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove' | 'delete' | 'enabled' | 'disabled' | 'removed' | 'request' | 'approved' | 'rejected' | 'withdrawn' | 'failed' | 'reply';
 	/** `''` on org-wide rows (publish); the team id on pointer changes. */
 	teamId?: string;
 	version?: number;

@@ -338,8 +338,15 @@ standalone catalog nodes.
      inside the call and use `logger.sendSSE(...)` from the worker.
      `self.instance` follows whichever binding is current on the pipe, so a
      thread that outlives the call would tag the next caller's request; the
-     logger keeps the ids it captured. Its `debug` / `warning` / `error` are
-     the engine log, exactly like the module-level functions.
+     logger keeps the ids it captured. Keeping the ids does not keep the
+     request alive: send before the request's pipe is returned. For
+     `CONST_BINDING_GRACE_SECONDS` (5 seconds) after that, an event still
+     reaches the caller, marked `late: true`; after the grace window the tree
+     has no owner and the event goes the way of engine output: to the
+     engine's own controls on a private engine, and to the operators' `OPS`
+     stream, never the caller, on an engine shared across users. Its
+     `debug` / `warning` / `error` are the engine log, exactly like the
+     module-level functions.
 
    Debug a node in your own run, where the engine is private and its engine
    output reaches you.

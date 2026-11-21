@@ -41,6 +41,7 @@ const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
 
 const {
 	BEGIN,
@@ -53,7 +54,15 @@ const {
 	floorsOfMajor,
 	normalizeEol,
 	extractBundleBody,
+	readFloorsIn,
+	readFloorsAt,
+	releasedFloorEdits,
 } = require('./contract-floors');
+
+// The git fixtures below build their own repository; a variable inherited
+// from a hook (GIT_DIR, GIT_INDEX_FILE, GIT_WORK_TREE) would point every git
+// call at the outer one.
+for (const name of ['GIT_DIR', 'GIT_INDEX_FILE', 'GIT_WORK_TREE']) delete process.env[name];
 
 /**
  * Create a versions directory holding empty floor files for the given keys,
@@ -149,11 +158,115 @@ test('extractBundleBody returns null when a marker is missing', () => {
 
 test('the frozen floors in the tree read back with LF only', () => {
 	// The committed floors must parse under the shared reader whatever the
-	// checkout's line endings are.
+	// checkout's line endings are. Floors are never deleted, so every one
+	// released so far must be found: a missing directory or a deleted floor
+	// fails here instead of leaving the loop below with nothing to check.
 	const dir = path.join(__dirname, '..', 'contract', 'versions');
-	for (const key of listFrozenKeys(dir)) {
+	const keys = listFrozenKeys(dir);
+	for (const required of ['1.3', '1.5', '1.6', '2.0']) {
+		assert.ok(keys.includes(required), `v${required}.d.ts is in ${dir}`);
+	}
+	for (const key of keys) {
 		const body = extractBundleBody(fs.readFileSync(path.join(dir, `v${key}.d.ts`), 'utf8'));
 		assert.notEqual(body, null, `v${key}.d.ts has its BEGIN/END markers`);
 		assert.equal(body.includes('\r'), false, `v${key}.d.ts body has no CR`);
 	}
+});
+
+// =============================================================================
+// RELEASED-FLOOR IMMUTABILITY
+// =============================================================================
+
+/**
+ * A throwaway git repository with the given floors (and one file that is not
+ * a floor) under contract/versions, staged and written as a TREE object: a
+ * tree is a revision git can read, and needs no commit identity or signing.
+ *
+ * @param {Record<string, string>} floors - key -> floor text.
+ * @returns {{root: string, versions: string, tree: string}} The work tree, its versions directory and the tree id.
+ */
+function gitFixture(floors) {
+	const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-contract-floors-git-'));
+	const git = (...args) =>
+		execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+	git('init', '-q');
+	const versions = path.join(root, 'contract', 'versions');
+	fs.mkdirSync(versions, { recursive: true });
+	for (const [key, text] of Object.entries(floors)) fs.writeFileSync(path.join(versions, `v${key}.d.ts`), text);
+	fs.writeFileSync(path.join(versions, 'README.md'), 'not a floor\n');
+	git('add', '-A');
+	return { root, versions, tree: git('write-tree') };
+}
+
+test('releasedFloorEdits: a released floor may not change or go; the in-progress one may', () => {
+	// The package is at 2.1: v2.1 is in progress, v1.6 and v2.0 are released.
+	const base = new Map([
+		['1.6', 'a\n'],
+		['2.0', 'b\n'],
+		['2.1', 'c\n'],
+	]);
+	const edits = (entries) => releasedFloorEdits(base, new Map(entries), '2.1');
+	// Re-cutting the in-progress 2.1 floor is allowed.
+	assert.deepEqual(
+		edits([
+			['1.6', 'a\n'],
+			['2.0', 'b\n'],
+			['2.1', 'C\n'],
+		]),
+		[]
+	);
+	// Editing the released 2.0 floor is not.
+	assert.deepEqual(
+		edits([
+			['1.6', 'a\n'],
+			['2.0', 'B\n'],
+			['2.1', 'c\n'],
+		]),
+		[{ key: '2.0', change: 'changed' }]
+	);
+	// Nor is deleting the released 1.6 floor.
+	assert.deepEqual(
+		edits([
+			['2.0', 'b\n'],
+			['2.1', 'c\n'],
+		]),
+		[{ key: '1.6', change: 'removed' }]
+	);
+});
+
+test('releasedFloorEdits: moving the package past a minor seals that floor', () => {
+	// The base is at 2.0 (in progress there); the tree bumps to 2.1.
+	const base = new Map([['2.0', 'b\n']]);
+	const bumped = new Map([
+		['2.0', 'B\n'],
+		['2.1', 'c\n'],
+	]);
+	assert.deepEqual(releasedFloorEdits(base, bumped, '2.1'), [{ key: '2.0', change: 'changed' }]);
+	// A floor the base does not hold yet is new, not an edit.
+	assert.deepEqual(releasedFloorEdits(base, new Map([['2.0', 'b\n'], ['2.1', 'c\n']]), '2.1'), []);
+});
+
+test('releasedFloorEdits: a CRLF checkout of an unchanged floor is not an edit', () => {
+	const base = new Map([['1.6', 'a\nb\n']]);
+	assert.deepEqual(releasedFloorEdits(base, new Map([['1.6', 'a\r\nb\r\n']]), '2.0'), []);
+});
+
+test('readFloorsAt reads the floors a revision holds, and a hand-edited released floor is named', () => {
+	const { root, versions, tree } = gitFixture({ '1.6': 'one\n', '2.0': 'two\n' });
+	const base = readFloorsAt(root, 'contract/versions', tree);
+	assert.deepEqual([...base.entries()], [
+		['1.6', 'one\n'],
+		['2.0', 'two\n'],
+	]);
+	assert.deepEqual(releasedFloorEdits(base, readFloorsIn(versions), '2.0'), []);
+
+	// Narrow the released 1.6 floor in the tree, and re-cut the in-progress 2.0.
+	fs.writeFileSync(path.join(versions, 'v1.6.d.ts'), 'one, narrowed\n');
+	fs.writeFileSync(path.join(versions, 'v2.0.d.ts'), 'two, re-cut\n');
+	assert.deepEqual(releasedFloorEdits(base, readFloorsIn(versions), '2.0'), [{ key: '1.6', change: 'changed' }]);
+});
+
+test('readFloorsAt fails on a revision git cannot resolve', () => {
+	const { root } = gitFixture({ '2.0': 'two\n' });
+	assert.throws(() => readFloorsAt(root, 'contract/versions', 'no-such-rev'), /cannot resolve 'no-such-rev'/);
 });
