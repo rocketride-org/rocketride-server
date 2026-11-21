@@ -128,6 +128,8 @@ def _engine_task(port):
     t = TaskEngine.__new__(TaskEngine)
     t.id = 'task-1'
     t.shared = False
+    # No control holds it: a caller-less binding is nobody's (binding_control)
+    t._holds = {}
     t._is_terminating = False
     t._data_lock = asyncio.Lock()
     t._data_client = None
