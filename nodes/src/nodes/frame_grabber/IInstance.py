@@ -21,9 +21,19 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import TYPE_CHECKING
+"""
+Instance handler for the Frame Grabber node.
+
+Every key the node reads is this call's (``self.settings``): the mode, its
+interval, change percentage, scene gap, frame cap or frame list, the
+extraction window and the watermark may differ from one call to the next on
+one control. The instance turns them into the extractor's configuration as
+the binding begins; the extractor starts one ffmpeg process per video stream.
+"""
+
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Optional
 import base64
-from rocketlib import IInstanceBase, AVI_ACTION, Entry, error
+from rocketlib import IInstanceBase, AVI_ACTION, Entry, error, warning
 from .IGlobal import IGlobal
 from ai.common.schema import DocMetadata, Doc
 from ai.common.avi.descriptor import (
@@ -40,7 +50,46 @@ if TYPE_CHECKING:
     from ai.common.avi.frame import VideoFrameExtractor
 
 
+def extractor_config(settings: Mapping[str, Any]) -> Dict[str, Any]:
+    """
+    Build the VideoFrameExtractor configuration from a call's settings.
+
+    The resolver flattened the call's mode to its own leaves beside the shared
+    ones, applied every default and enforced every bound, so a key is present
+    exactly when the mode uses it.
+
+    Args:
+        settings: The call's settings (``self.settings``).
+
+    Returns:
+        dict: ``type`` (the mode), ``start_time``, ``duration``, and the mode's
+        own ``fps``, ``percent``, ``frames`` or ``max_frames``.
+    """
+    # Step 1: every mode carries the window; the extractor reads the mode as 'type'
+    config: Dict[str, Any] = {
+        'type': settings['profile'],
+        'start_time': settings['start_time'],
+        'duration': settings['duration'],
+    }
+
+    # Step 2: the mode's own leaves. The extractor reads a rate, not an interval
+    if 'interval' in settings:
+        config['fps'] = 1.0 / settings['interval']
+    if 'percent' in settings:
+        config['percent'] = settings['percent']
+    if 'list' in settings:
+        config['frames'] = list(settings['list'])
+
+    # Step 3: ffmpeg's own cap counts frames before the scene-gap check drops
+    # any, so with a gap the instance applies the cap itself (_frame_callback)
+    if settings.get('max_frames') and not settings.get('min_scene_gap'):
+        config['max_frames'] = settings['max_frames']
+    return config
+
+
 class IInstance(IInstanceBase):
+    """Instance handler for the Frame Grabber node: one binding, its settings, its extractor."""
+
     IGlobal: IGlobal
 
     _has_document_listener = False
@@ -58,22 +107,40 @@ class IInstance(IInstanceBase):
     # chunk ids come from this rather than from a frame's position in its own video.
     _frame_ordinal: int = 0
 
+    # The scene gap (seconds) and the frame cap of this call; 0 disables either
+    _min_gap: float = 0.0
+    _max_frames: int = 0
+
+    # Per video stream, as ffmpeg's own cap counts: the frames emitted from the
+    # current stream and the timestamp of the last of them
+    _stream_frames: int = 0
+    _last_time: Optional[float] = None
+
     _start_times: list
 
     def beginInstance(self):  # pylint: disable=C0103
         """
         Initialize the frame grabber instance.
 
-        Sets up watermark configuration and creates the video frame extractor.
+        Reads this call's settings: the watermark, the scene gap and frame cap
+        the instance applies itself, and the extractor's configuration.
         """
         from ai.common.avi.frame import VideoFrameExtractor
 
-        # Watermark options (see services.json); absent -> disabled.
-        cfg = self.IGlobal.grab_config
-        self._watermark = cfg.get('watermark', 'no') == 'yes'
-        self._wm_location = cfg.get('watermark_location', 'bottom_right')
-        self._wm_filename = cfg.get('watermark_filename', 'yes') == 'yes'
-        self._wm_timestamp = cfg.get('watermark_timestamp', 'yes') == 'yes'
+        # Step 1: this call's settings. A key outside the call's mode or watermark
+        # branch is absent, so each read falls back to the disabled value
+        settings = self.settings
+        self._watermark = settings['watermark'] == 'yes'
+        self._wm_location = settings.get('watermark_location', 'bottom_right')
+        self._wm_filename = settings.get('watermark_filename', 'yes') == 'yes'
+        self._wm_timestamp = settings.get('watermark_timestamp', 'yes') == 'yes'
+        self._min_gap = settings.get('min_scene_gap', 0) or 0
+        self._max_frames = settings.get('max_frames', 0) or 0
+
+        # Step 2: a frames-mode call with no frame numbers extracts nothing; say so
+        # once rather than leave an empty output unexplained
+        if settings['profile'] == 'frames' and not settings['list']:
+            warning('frame_grabber: specific-frames mode with no frame numbers extracts no frames')
 
         # Full source-video descriptor, parsed from the stream descriptor on BEGIN.
         # Drives both the watermark label and the per-frame source provenance.
@@ -82,9 +149,9 @@ class IInstance(IInstanceBase):
         # This binding's frame start times; open() resets them per object
         self._start_times = []
 
-        # Create the reader
+        # Step 3: the extractor; it starts ffmpeg per video stream, as the stream arrives
         self._reader = VideoFrameExtractor(
-            frame_callback=self._frame_callback, name='FrameGrabber', config=self.IGlobal.grab_config
+            frame_callback=self._frame_callback, name='FrameGrabber', config=extractor_config(settings)
         )
 
     def endInstance(self):  # pylint: disable=C0103
@@ -131,6 +198,11 @@ class IInstance(IInstanceBase):
         if action == AVI_ACTION.BEGIN:
             self._source_descriptor = descriptor_from_payload(buffer)
 
+            # A new video stream: its timestamps start again from 0, and the frame cap
+            # counts per stream as ffmpeg's own does
+            self._stream_frames = 0
+            self._last_time = None
+
         # We will use the easy writer which will handler the starting, locking,
         # writing, stopping and unlocking for us based on the action
         self._reader.writeAVI(action, mimeType, buffer)
@@ -150,6 +222,7 @@ class IInstance(IInstanceBase):
         """
 
         def base(path):
+            """The last segment of a slash- or backslash-separated path; '' for none."""
             return path.replace('\\', '/').rsplit('/', 1)[-1] if path else ''
 
         inner = base(getattr(md, 'resource_name', None))
@@ -196,6 +269,7 @@ class IInstance(IInstanceBase):
 
         # Format seconds into a string
         def format_seconds(seconds: float) -> str:
+            """Seconds as HH:MM:SS.ss."""
             hours = int(seconds // 3600)
             minutes = int((seconds % 3600) // 60)
             secs = seconds % 60
@@ -204,6 +278,16 @@ class IInstance(IInstanceBase):
         # If this is the end of sequence, ignore it
         if image is None:
             return
+
+        # The frame cap and the scene gap, per video stream: a frame past the cap, or
+        # closer than the gap to the last frame emitted, is dropped before any output
+        # sees it, and advances nothing
+        if self._max_frames and self._stream_frames >= self._max_frames:
+            return
+        if self._min_gap and self._last_time is not None and time_stamp - self._last_time < self._min_gap:
+            return
+        self._stream_frames += 1
+        self._last_time = time_stamp
 
         # Burn the watermark onto the frame before it is emitted anywhere.
         if self._watermark:
@@ -292,12 +376,14 @@ class IInstance(IInstanceBase):
             font_size = max(14, round(height * 0.03))
 
             def load_font(size):
+                """DejaVu Sans at ``size``, else Pillow's built-in font at that size."""
                 try:
                     return ImageFont.truetype('DejaVuSans.ttf', size)
                 except Exception:
                     return ImageFont.load_default(size=size)
 
             def measure(font, stroke):
+                """The label's (width, height) in pixels with ``font`` and ``stroke``."""
                 left, top, right, bottom = draw.textbbox((0, 0), text, font=font, stroke_width=stroke)
                 return right - left, bottom - top
 

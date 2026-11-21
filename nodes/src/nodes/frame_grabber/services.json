@@ -48,7 +48,7 @@
 	//		As a pipe component, define what this pipe component takes
 	//		and what it produces
 	//
-	"description": ["A component that extracts frames from video files and outputs them as image data. It ", "supports a variety of video formats and allows users to specify frame extraction ", "intervals (e.g., every 5 seconds or at specific time points). The component processes ", "video content, extracting selected frames as image objects, which can then be passed downstream ", "for further processing, analysis, or display."],
+	"description": ["A component that extracts frames from video files and outputs them as image data. It ", "supports a variety of video formats and allows users to specify frame extraction ", "intervals (e.g., every 5 seconds), scene transitions, keyframes or a list of frame numbers. The component processes ", "video content, extracting selected frames as image objects, which can then be passed downstream ", "for further processing, analysis, or display."],
 	//
 	// Optional:
 	//	  The icon is the icon to display in the UI for this node
@@ -69,15 +69,23 @@
 	//		Local property definitions. The grabber mode is the selector.
 	//		start_time, duration and the watermark block are referenced by
 	//		the identical definition in every mode, so they hoist beside the
-	//		selector; the interval, the transition tunables and max_frames
-	//		stay with the modes that use them. The watermark is itself a
-	//		selector whose "yes" branch carries the placement options.
+	//		selector and keep the bare prefix; a definition one mode owns
+	//		names that mode (grabber.transition.percent), and max_frames,
+	//		shared by two modes, stays with each of them. The watermark is
+	//		itself a selector whose "yes" branch carries the placement
+	//		options.
+	//
+	//		Every key, both selectors included, is a per-call parameter: the
+	//		IGlobal builds nothing from any of them, and the extractor (one
+	//		ffmpeg process per video stream) is built per binding from
+	//		self.settings. max_frames is a work cap, so an LLM may not set it.
 	//
 	"propertyDefinitions": {
-		"grabber.percent": {
+		"grabber.transition.percent": {
 			"type": "number",
 			"title": "Percentage change for frame",
 			"default": 0.4,
+			"param": true,
 			"enum": [
 				[0.1, "10%"],
 				[0.2, "20%"],
@@ -91,35 +99,50 @@
 				[1.0, "100%"]
 			]
 		},
-		"grabber.second.interval": {
+		"grabber.interval.interval": {
 			"type": "number",
 			"title": "Interval (in seconds) between frames",
 			"default": 5,
-			"minimum": 0.01
+			"minimum": 0.01,
+			"param": true
+		},
+		"grabber.frames.list": {
+			"type": "array",
+			"title": "Frame numbers",
+			"description": "The frames to extract, counted from 0 at the start of the video. A frame before the start time, after the duration or past the end of the video is not extracted.",
+			"default": [],
+			"maxItems": 1000,
+			"item": { "name": "frame", "type": "integer", "minimum": 0 },
+			"param": true
 		},
 		"grabber.start_time": {
 			"type": "number",
 			"title": "Start time (in seconds) for frame extraction (0=beginning)",
 			"default": 0,
-			"minimum": 0
+			"minimum": 0,
+			"param": true
 		},
 		"grabber.duration": {
 			"type": "number",
 			"title": "Duration  (in seconds) for frame extraction (0=end of video)",
 			"default": 0,
-			"minimum": 0
+			"minimum": 0,
+			"param": true
 		},
 		"grabber.max_frames": {
 			"type": "integer",
 			"title": "Maximum number of frames to extract (0=unlimited)",
 			"default": 0,
-			"minimum": 0
+			"minimum": 0,
+			"param": true,
+			"tool": false
 		},
-		"grabber.min_scene_gap": {
+		"grabber.transition.min_scene_gap": {
 			"type": "number",
 			"title": "Minimum gap between scenes (seconds)",
 			"description": "Minimum time gap between extracted frames. Helps reduce burst detections in high-motion segments. Set to 0 to disable.",
 			"default": 0,
+			"param": true,
 			"enum": [
 				[0, "Disabled"],
 				[0.5, "0.5 seconds"],
@@ -133,6 +156,7 @@
 			"title": "Watermark position",
 			"type": "string",
 			"default": "bottom_right",
+			"param": true,
 			"enum": [
 				["top_left", "Top left"],
 				["top_right", "Top right"],
@@ -144,6 +168,7 @@
 			"title": "Include file name",
 			"type": "string",
 			"default": "yes",
+			"param": true,
 			"enum": [
 				["yes", "Yes"],
 				["no", "No"]
@@ -153,6 +178,7 @@
 			"title": "Include timestamp",
 			"type": "string",
 			"default": "yes",
+			"param": true,
 			"enum": [
 				["yes", "Yes"],
 				["no", "No"]
@@ -162,6 +188,7 @@
 			"title": "Watermark extracted frames",
 			"type": "string",
 			"default": "no",
+			"param": true,
 			"enum": {
 				"no": { "title": "No watermark" },
 				"yes": {
@@ -181,16 +208,17 @@
 			"type": "string",
 			"title": "Frame grabber mode",
 			"default": "interval",
+			"param": true,
 			"enum": {
 				"interval": {
 					"title": "Extract video frames at intervals",
-					"properties": ["grabber.second.interval", "grabber.start_time", "grabber.duration", "grabber.watermark"]
+					"properties": ["grabber.interval.interval", "grabber.start_time", "grabber.duration", "grabber.watermark"]
 				},
 				"transition": {
 					"title": "Extract video frames at scene transitions",
 					"properties": [
-						"grabber.percent",
-						"grabber.min_scene_gap",
+						"grabber.transition.percent",
+						"grabber.transition.min_scene_gap",
 						"grabber.start_time",
 						"grabber.duration",
 						"grabber.max_frames",
@@ -200,6 +228,10 @@
 				"key": {
 					"title": "Extract video frames at keyframes",
 					"properties": ["grabber.start_time", "grabber.duration", "grabber.max_frames", "grabber.watermark"]
+				},
+				"frames": {
+					"title": "Extract specific video frames",
+					"properties": ["grabber.frames.list", "grabber.start_time", "grabber.duration", "grabber.watermark"]
 				}
 			}
 		}
