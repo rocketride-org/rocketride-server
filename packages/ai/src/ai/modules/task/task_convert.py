@@ -75,8 +75,10 @@ Per component, in order:
 Pipeline level: a string component id must be one dot-free segment (B5);
 deleted providers (``autopipe``, ``remote``, ``vectorizer``) are errors; an
 unknown provider is the engine's structural error and is left alone; missing
-component and pipeline names are filled from the node's title / ``project_id``
-only when a conversion happened, and reported otherwise.
+component and pipeline names are filled only when a conversion happened, and
+reported otherwise. A component takes the node's title; the pipeline takes
+the caller's name hint (the IDE's file name), else its ``project_id``, else
+``Pipeline``, never a GUID: an old pipe's GUID id is no name for a person.
 
 The server returns the converted text only; nothing is written back here. The
 module imports stdlib-only: the engine is imported where it is used, so the
@@ -124,6 +126,13 @@ CONSTANT_TYPE = 'constant'
 #: old model id in this leaf (plan 5.6.8, best effort).
 CUSTOM_BRANCH = 'custom'
 CUSTOM_MODEL_LEAF = 'customModel'
+
+#: A GUID as the editors mint pipeline ids (8-4-4-4-12 hex digits). An id of
+#: this shape is never a pipeline's name (plan 5.6.8).
+GUID_PATTERN = re.compile(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
+
+#: The name a nameless pipeline takes when neither the hint nor its id is a name.
+DEFAULT_PIPELINE_NAME = 'Pipeline'
 
 # ============================================================================
 # Types
@@ -665,13 +674,41 @@ def _note(entries: List[Dict[str, Any]], component_id: Optional[str], message: s
     entries.append(entry)
 
 
-def convert_pipeline(pipeline: Mapping[str, Any], schema_for: Optional[SchemaLookup] = None) -> ConvertResult:
+def pipeline_name_for(name_hint: Any, project_id: Any) -> str:
+    """
+    The name a nameless converted pipeline takes (plan 5.6.8).
+
+    The caller's hint comes first (the IDE passes the file name without its
+    extension), then the ``project_id``; a candidate that is empty, not a string
+    or a GUID is skipped, since a GUID names no pipeline a person would know.
+
+    Args:
+        name_hint: The caller's suggestion, or None.
+        project_id: The pipeline's ``project_id``, as stored.
+
+    Returns:
+        str: The first usable candidate, stripped, else ``Pipeline``.
+    """
+    for candidate in (name_hint, project_id):
+        if not isinstance(candidate, str):
+            continue
+        name = candidate.strip()
+        if name and not GUID_PATTERN.fullmatch(name):
+            return name
+    return DEFAULT_PIPELINE_NAME
+
+
+def convert_pipeline(
+    pipeline: Mapping[str, Any], schema_for: Optional[SchemaLookup] = None, *, name_hint: Optional[str] = None
+) -> ConvertResult:
     """
     Convert ``pipeline`` to the current node-config format (plan 5.6.8).
 
     Args:
         pipeline: The flat pipeline dict (``components``, ``project_id``, ...), as read.
         schema_for: ``provider -> (resolved schema, raw definition)``; the engine's by default.
+        name_hint: The name a nameless pipeline takes when the conversion fills
+            it in (see :func:`pipeline_name_for`); the IDE passes its file name.
 
     Returns:
         ConvertResult: the pipeline to use (a copy; the input is never mutated),
@@ -746,7 +783,7 @@ def convert_pipeline(pipeline: Mapping[str, Any], schema_for: Optional[SchemaLoo
 
     # The names: filled in a converted pipeline, reported otherwise
     if pipeline_nameless:
-        fallback = out.get('project_id') if isinstance(out.get('project_id'), str) and out['project_id'] else 'Pipeline'
+        fallback = pipeline_name_for(name_hint, out.get('project_id'))
         if result.touched:
             out['name'] = fallback
             _note(result.warnings, None, f'the pipeline had no name; named it {fallback!r}')

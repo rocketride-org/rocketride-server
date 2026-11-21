@@ -445,10 +445,10 @@ When the pipeline is in the OLD node-config format (a `profile` key, a profile-n
 
 ### `convert(options): Promise<ConvertResult>`
 
-Rewrite a pipeline from the old node-config format to the current path-addressed one, server-side, from each node's migration data. The server also converts on its own at validate, start and publish, so this call exists to write the converted text back to a file; nothing is stored server-side. Options: `pipeline` (required; flat or in the `.pipe` file envelope). Returns `{ pipeline, warnings, errors, touched }`: the pipeline to use (the input when `touched` is false), what was changed, dropped or filled in per component (`{ message, id? }`), and the components that could not be converted, which keep their original config. A pipeline already in the current format comes back unchanged with `touched` false. Throws when the server refuses the request.
+Rewrite a pipeline from the old node-config format to the current path-addressed one, server-side, from each node's migration data. The server also converts on its own at validate, start and publish, so this call exists to write the converted text back to a file; nothing is stored server-side. Options: `pipeline` (required; flat or in the `.pipe` file envelope) and `nameHint` (optional: the name a nameless pipeline takes when the conversion fills it in; pass the file's name without its extension; without one the server uses the `project_id`, and never a GUID, so an old GUID-id pipeline is then named `Pipeline`). Returns `{ pipeline, warnings, errors, touched }`: the pipeline to use (the input when `touched` is false), what was changed, dropped or filled in per component (`{ message, id? }`), and the components that could not be converted, which keep their original config. A pipeline already in the current format comes back unchanged with `touched` false. Throws when the server refuses the request.
 
 ```typescript
-const result = await client.convert({ pipeline });
+const result = await client.convert({ pipeline, nameHint: path.basename(file, '.pipe') });
 if (result.touched && result.errors.length === 0) {
 	await fs.writeFile(path, JSON.stringify(result.pipeline, null, 2));
 }

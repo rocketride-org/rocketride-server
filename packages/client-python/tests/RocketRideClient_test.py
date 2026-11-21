@@ -1560,6 +1560,36 @@ class TestValidationOperations:
             if client.is_connected():
                 await client.disconnect()
 
+    @pytest.mark.asyncio
+    async def test_should_name_a_converted_guid_pipeline_after_the_hint(self):
+        """A nameless old-shape pipe with a GUID id is named after the hint, never after the GUID."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        try:
+            await client.connect()
+
+            # audio_transcribe's old 'default' profile maps onto a branch (its legacy profileMap)
+            old = {
+                'project_id': 'f1ca1b37-1234-4abc-9def-1234abcd1234',
+                'components': [
+                    {
+                        'id': 'audio_1',
+                        'provider': 'audio_transcribe',
+                        'name': 'Transcribe',
+                        'config': {'profile': 'default'},
+                    }
+                ],
+            }
+
+            named = await client.convert(old, name_hint='invoice-intake')
+            unnamed = await client.convert(old)
+
+            assert named['touched'] and named['errors'] == []
+            assert named['pipeline']['name'] == 'invoice-intake'
+            assert unnamed['pipeline']['name'] == 'Pipeline'
+        finally:
+            if client.is_connected():
+                await client.disconnect()
+
 
 class TestErrorHandling:
     """Test error handling scenarios."""

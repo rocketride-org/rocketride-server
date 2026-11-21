@@ -444,12 +444,12 @@ result = await client.validate(pipeline, source='webhook_1')
 
 When the pipeline is in the OLD node-config format (a `profile` key, a profile-named block, flat keys), the server converts it before validating and the result carries `converted` (the rewritten pipeline) and `conversion` (what changed, per component). A component the converter cannot map is one of the result's `errors`, naming the key.
 
-### `async convert(pipeline: PipelineConfig) -> CONVERT_RESULT`
+### `async convert(pipeline: PipelineConfig, name_hint: Optional[str] = None) -> CONVERT_RESULT`
 
-Rewrite a pipeline from the old node-config format to the current path-addressed one, server-side, from each node's migration data. The server also converts on its own at validate, start and publish, so this call exists to write the converted text back to a file; nothing is stored server-side. Returns `{'pipeline', 'warnings', 'errors', 'touched'}`: the pipeline to use (the input when `touched` is False), what was changed, dropped or filled in per component (`{'message', 'id'}`), and the components that could not be converted, which keep their original config. A pipeline already in the current format comes back unchanged with `touched` False. Raises `RuntimeError` when the server refuses the request.
+Rewrite a pipeline from the old node-config format to the current path-addressed one, server-side, from each node's migration data. The server also converts on its own at validate, start and publish, so this call exists to write the converted text back to a file; nothing is stored server-side. `name_hint` is the name a nameless pipeline takes when the conversion fills it in: pass the file's name without its extension; without one the server uses the `project_id`, and never a GUID (an old GUID-id pipeline is then named `Pipeline`). Returns `{'pipeline', 'warnings', 'errors', 'touched'}`: the pipeline to use (the input when `touched` is False), what was changed, dropped or filled in per component (`{'message', 'id'}`), and the components that could not be converted, which keep their original config. A pipeline already in the current format comes back unchanged with `touched` False. Raises `RuntimeError` when the server refuses the request.
 
 ```python
-result = await client.convert(pipeline)
+result = await client.convert(pipeline, name_hint=path.stem)
 if result['touched'] and not result['errors']:
     path.write_text(json.dumps(result['pipeline'], indent=2))
 ```

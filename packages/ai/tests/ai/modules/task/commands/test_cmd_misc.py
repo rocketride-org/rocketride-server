@@ -23,6 +23,7 @@ import pytest
 
 from ai.modules.task.commands import cmd_misc
 from ai.modules.task.commands.cmd_misc import MiscCommands
+from ai.modules.task.task_convert import ConvertResult
 
 
 # ---------------------------------------------------------------------------
@@ -1910,6 +1911,31 @@ async def test_on_rrext_convert_returns_the_conversion_body():
     assert set(body) == {'pipeline', 'warnings', 'errors', 'touched'}
     assert body['errors'][0]['id'] == 'c.1' and 'B5' in body['errors'][0]['message']
     assert body['touched'] is False and body['pipeline'] == pipeline
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_convert_passes_the_name_hint_to_the_converter(monkeypatch):
+    """`nameHint` reaches convert_pipeline as its name_hint; absent, the converter gets None."""
+    seen = []
+
+    def fake_convert(pipeline, schema_for=None, *, name_hint=None):
+        seen.append(name_hint)
+        return ConvertResult(pipeline=pipeline)
+
+    monkeypatch.setattr(cmd_misc, 'convert_pipeline', fake_convert)
+    conn = _make_conn()
+    pipeline = {'name': 'p', 'components': []}
+    await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': pipeline, 'nameHint': 'invoice-intake'}})
+    await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': pipeline}})
+
+    assert seen == ['invoice-intake', None]
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_convert_refuses_a_name_hint_that_is_not_a_string():
+    conn = _make_conn()
+    with pytest.raises(ValueError, match='nameHint'):
+        await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': {'components': []}, 'nameHint': 7}})
 
 
 @pytest.mark.asyncio

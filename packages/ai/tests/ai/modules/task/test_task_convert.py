@@ -147,6 +147,64 @@ def test_a_converted_pipeline_is_named_from_its_project_id_when_it_has_no_name()
     assert any('had no name' in w['message'] for w in result.warnings)
 
 
+GUID = 'f1ca1b37-1234-4abc-9def-1234abcd1234'
+
+
+def _nameless(project_id):
+    """An old-shape pipeline with no name and the given ``project_id``."""
+    return {'project_id': project_id, 'components': [{'id': 'c1', 'provider': 'chunker', 'name': 'C', 'config': OLD}]}
+
+
+def test_a_converted_pipeline_with_a_guid_id_is_named_from_the_hint():
+    """The IDE's file name names an old GUID pipe; the GUID never becomes its name."""
+    result = convert_pipeline(_nameless(GUID), lookup, name_hint='  invoice-intake ')
+    assert result.touched and result.pipeline['name'] == 'invoice-intake'
+    assert any("named it 'invoice-intake'" in w['message'] for w in result.warnings)
+
+
+def test_a_converted_pipeline_with_a_guid_id_and_no_hint_is_named_pipeline():
+    result = convert_pipeline(_nameless(GUID), lookup)
+    assert result.pipeline['name'] == 'Pipeline'
+
+
+def test_the_hint_names_a_pipeline_whose_id_is_not_a_guid_too():
+    """The file name is the author's own label for the file, so it comes first."""
+    result = convert_pipeline(_nameless('docBrain'), lookup, name_hint='Doc Brain')
+    assert result.pipeline['name'] == 'Doc Brain'
+
+
+def test_a_named_pipeline_keeps_its_name_whatever_the_hint():
+    pipeline = {**_nameless(GUID), 'name': 'Invoices'}
+    result = convert_pipeline(pipeline, lookup, name_hint='other')
+    assert result.touched and result.pipeline['name'] == 'Invoices'
+
+
+def test_a_current_nameless_pipeline_is_not_named_from_the_hint():
+    """A pipeline the converter did not rewrite is never rewritten for its name."""
+    pipeline = {'project_id': GUID, 'components': [{'id': 'c1', 'provider': 'chunker', 'name': 'C', 'config': {}}]}
+    result = convert_pipeline(pipeline, lookup, name_hint='invoice-intake')
+    assert not result.touched and 'name' not in result.pipeline
+
+
+@pytest.mark.parametrize(
+    'hint, project_id, expected',
+    [
+        ('report', 'docBrain', 'report'),
+        (None, 'docBrain', 'docBrain'),
+        ('', 'docBrain', 'docBrain'),
+        ('   ', 'docBrain', 'docBrain'),
+        (GUID, 'docBrain', 'docBrain'),
+        (GUID.upper(), GUID, 'Pipeline'),
+        (None, GUID, 'Pipeline'),
+        (None, None, 'Pipeline'),
+        (7, 12, 'Pipeline'),
+        ('a-guid-shaped-but-not-hex', GUID, 'a-guid-shaped-but-not-hex'),
+    ],
+)
+def test_pipeline_name_for_takes_the_first_candidate_that_is_a_name(hint, project_id, expected):
+    assert task_convert.pipeline_name_for(hint, project_id) == expected
+
+
 def test_a_converted_component_is_named_from_the_node_title_when_it_has_no_name():
     result = convert_pipeline({'name': 'T', 'components': [{'id': 'c1', 'provider': 'chunker', 'config': OLD}]}, lookup)
     assert result.pipeline['components'][0]['name'] == 'Text Chunker'

@@ -1494,6 +1494,9 @@ export class RocketRideClient extends DAPClient {
 	 * writing the converted text back to a file. Nothing is stored server-side.
 	 *
 	 * @param options.pipeline - Pipeline configuration, flat or in the `.pipe` file envelope
+	 * @param options.nameHint - The name a nameless pipeline takes when the
+	 *        conversion fills it in: pass the file's name without its extension.
+	 *        Without one the server uses the `project_id`, never a GUID.
 	 * @returns The pipeline to use (the input when `touched` is false), what
 	 *          changed per component, and the components that could not be
 	 *          converted (they keep their original config)
@@ -1501,7 +1504,7 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * @example
 	 * ```typescript
-	 * const result = await client.convert({ pipeline });
+	 * const result = await client.convert({ pipeline, nameHint: 'docBrain' });
 	 * if (result.touched && result.errors.length === 0) {
 	 *   await save(result.pipeline);
 	 * }
@@ -1509,9 +1512,9 @@ export class RocketRideClient extends DAPClient {
 	 *
 	 * `warnings` and `errors` are ALWAYS arrays.
 	 */
-	async convert(options: { pipeline: PipelineConfig | Record<string, unknown> }): Promise<ConvertResult> {
+	async convert(options: { pipeline: PipelineConfig | Record<string, unknown>; nameHint?: string }): Promise<ConvertResult> {
 		try {
-			const result = await this.call<ConvertResult>('rrext_convert', { pipeline: options.pipeline });
+			const result = await this.call<ConvertResult>('rrext_convert', { pipeline: options.pipeline, ...(options.nameHint !== undefined ? { nameHint: options.nameHint } : {}) });
 			return {
 				pipeline: result?.pipeline ?? (options.pipeline as Record<string, unknown>),
 				warnings: result?.warnings ?? [],
