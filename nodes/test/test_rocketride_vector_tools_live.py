@@ -139,8 +139,8 @@ def tools_env(monkeypatch):
     """Real ``ai`` package, real driver Store on the container, real tool mixin.
 
     Returns ``(make_tools, raw_conn)``: ``make_tools(allow_write, expose_tools=True)``
-    builds a mixin instance whose fake IGlobal carries the store and the two
-    switches, the way StoreGlobalBase leaves them after beginGlobal.
+    builds a mixin instance whose call has the store (``_store``) and the two
+    switches (``settings``), the way StoreInstanceBase serves them.
     """
     _stub_engine(monkeypatch)
     # The engine bundles both packages; a plain venv finds them in the tree.
@@ -174,14 +174,15 @@ def tools_env(monkeypatch):
         def __init__(self, allow_write: bool, expose_tools: bool = True):
             store = store_cls('rocketride_vector', {'collection': TABLE, 'similarity': 'cosine'}, {})
             stores.append(store)
-            self.IGlobal = SimpleNamespace(
-                serverName='rrvector',
-                store=store,
-                embed_query=None,
-                embed_model_name=None,
-                expose_tools=expose_tools,
-                allow_write=allow_write,
-            )
+            self.IGlobal = SimpleNamespace(store=store, embed_query=None, embed_model_name=None)
+            self._settings = {'serverName': 'rrvector', 'expose_tools': expose_tools, 'allow_write': allow_write}
+
+        def _store(self):
+            return self.IGlobal.store
+
+        @property
+        def settings(self):
+            return self._settings
 
     yield _Tools, raw_conn
 
@@ -428,23 +429,25 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
         opened.append(glb)
         inst = object.__new__(iinstance_cls)
         inst.IGlobal = glb
+        # No caller: the call's settings are the control's stored values
+        inst._settings = glb._resolved()
         return glb, inst
 
     try:
         glb, inst = make({'collection': TABLE})
         service_definition.assert_any_call('rocketride_vector')
-        assert glb.expose_tools is False  # the cloud profile's default ships the switch off
-        assert glb.allow_write is False
+        assert inst._vectordb_expose_tools() is False  # the cloud profile's default ships the switch off
+        assert inst._vectordb_allow_write() is False
         if real_collector:
             assert set(inst._collect_tool_methods()) == set()
 
         glb, inst = make({'collection': TABLE, 'expose_tools': True})
-        assert glb.expose_tools is True and glb.allow_write is False
+        assert inst._vectordb_expose_tools() is True and inst._vectordb_allow_write() is False
         if real_collector:
             assert set(inst._collect_tool_methods()) == {'search', 'objdir', 'get', 'stats', 'list_documents'}
 
         glb, inst = make({'collection': TABLE, 'expose_tools': True, 'allow_write': True})
-        assert glb.expose_tools is True and glb.allow_write is True
+        assert inst._vectordb_expose_tools() is True and inst._vectordb_allow_write() is True
         if real_collector:
             assert set(inst._collect_tool_methods()) == {
                 'search',
@@ -459,7 +462,7 @@ def test_the_shipped_profile_resolves_through_the_real_node(tools_env, monkeypat
             }
     finally:
         for glb in opened:
-            store = getattr(glb, 'store', None)
-            if store is not None and getattr(store, 'client', None) is not None:
-                store.client.close()
-                store.client = None
+            for store in list((glb._stores or {}).values()):
+                if getattr(store, 'client', None) is not None:
+                    store.client.close()
+                    store.client = None

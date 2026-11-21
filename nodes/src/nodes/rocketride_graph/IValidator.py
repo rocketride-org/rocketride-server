@@ -96,7 +96,9 @@ class IValidator(IValidatorBase):
         Raises:
             ConfigError: The stored configuration does not fit the schema.
         """
-        config = self.config
+        self.config
         if syntaxOnly:
             return
-        probe_connection(config)
+        # The stored values, the graph name included: it is a per-call
+        # parameter, and the save-time probe checks the one the form holds.
+        probe_connection(self._resolved())

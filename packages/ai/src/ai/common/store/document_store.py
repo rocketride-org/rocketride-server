@@ -654,11 +654,11 @@ class DocumentStoreBase(ABC):
 # with the underlying store so every vectordb node can "morph into a tool"
 # without a separate generic wrapper node. Because the engine dispatches
 # ``invoke`` against the node's ``IInstance`` (not the ``DocumentStoreBase``
-# subclass, which is composed via ``self.IGlobal.store``), the tool methods
+# subclass, which the IInstance reaches as the call's store, ``self._store()``), the tool methods
 # must live on a class that the ``IInstance`` subclasses. This mixin is that
 # class: it lives next to ``DocumentStoreBase`` so the store interface stays
 # together in a single file, and it delegates every call to
-# ``self.IGlobal.store`` (which is a ``DocumentStoreBase`` instance).
+# the call's store (``self._store()``, a ``DocumentStoreBase`` instance).
 #
 # Any vectordb ``IInstance`` that subclasses ``VectorStoreToolMixin`` picks up
 # the ``search``, ``upsert`` and ``delete`` tools automatically via
@@ -739,7 +739,7 @@ class VectorStoreToolMixin:
 
     Any vectordb ``IInstance`` that inherits from this mixin is automatically
     discoverable through the ``tool.*`` control-plane protocol. The mixin
-    delegates all storage operations to ``self.IGlobal.store`` (a
+    delegates all storage operations to the call's store (``self._store()``, a
     :class:`DocumentStoreBase` implementation) so backend-specific code stays
     in the backend driver.
 
@@ -751,13 +751,13 @@ class VectorStoreToolMixin:
     node's pipeline id (``<node id>.search``, ``<node id>.upsert`` and so on;
     see ``ai.common.agent``), so two vectordb nodes in one pipeline never
     collide, and an app calls them by the bare function name and the node id.
-    ``serverName`` (``self.IGlobal.serverName``, configurable in
+    ``serverName`` (a per-call setting, the driver's default on the IGlobal; configurable in
     ``services.json``) only labels the tools' messages, such as a refused
     write naming ``<serverName>.delete``; changing it does not change the
     addresses.
 
-    Two optional ``IGlobal`` switches gate the surface (``StoreGlobalBase``
-    resolves both from the node config). ``expose_tools`` decides whether the
+    Two optional switches gate the surface, read per call from the call's
+    settings (the IGlobal class default when the node declares no such field). ``expose_tools`` decides whether the
     node offers any tool at all: a node that does not define it exposes them,
     a node whose store is shared or managed (``rocketride_vector`` reads and
     writes the team's tenant database) defaults it to off, because ``objdir``
@@ -796,22 +796,35 @@ class VectorStoreToolMixin:
         return max(0.0, min(value, 1.0))
 
     def _vectordb_store(self) -> 'DocumentStoreBase':
-        store = getattr(getattr(self, 'IGlobal', None), 'store', None)
-        if store is None:
-            raise RuntimeError('vectordb tool: store not initialized')
-        return store
+        """Return the store this call reads and writes (``self._store()``: the call's collection)."""
+        try:
+            return self._store()
+        except Exception as exc:
+            raise RuntimeError(f'vectordb tool: store not initialized ({exc})') from exc
+
+    def _vectordb_setting(self, key: str, default: Any) -> Any:
+        """Return this call's ``key`` setting, or ``default`` when the node declares no such field.
+
+        The tool namespace and the two tool switches are parameters: a call
+        sets them, so they are read from the call's settings, never from the
+        IGlobal. A node without the field keeps its IGlobal class default.
+        """
+        settings = self.settings
+        return settings[key] if key in settings else default
 
     def _vectordb_server_name(self) -> str:
         """Return the label this node's tool messages carry (not the tools' address).
 
-        Reads ``self.IGlobal.serverName`` (set from the node config). Falls
-        back to the provider name (``self.IGlobal.config.node.provider``) and
+        Reads this call's ``serverName`` setting, else the driver's default
+        (``self.IGlobal.serverName``). Falls back to the provider name and
         finally to ``'vectordb'`` if neither is available. The returned value
         is stripped of leading/trailing whitespace and ``'.'`` characters to
         guarantee a clean ``<server>.<tool>`` in those messages.
         """
         glb = getattr(self, 'IGlobal', None)
-        name = getattr(glb, 'serverName', None)
+        name = self._vectordb_setting('serverName', getattr(glb, 'serverName', None))
+        if not isinstance(name, str) or not name.strip():
+            name = getattr(glb, 'serverName', None)
         if not name:
             # Fall back to the node's logical type (e.g. 'pinecone').
             inner = getattr(glb, 'glb', None)
@@ -824,16 +837,16 @@ class VectorStoreToolMixin:
     def _vectordb_allow_write(self) -> bool:
         """Whether the write tools (``upsert``, ``delete``, ``soft_delete``, ``restore``) may change the store.
 
-        Reads ``self.IGlobal.allow_write``. A node that does not define the
-        attribute allows writes, which keeps every existing store node as it
-        was; a node that sets it (from its configuration) decides per node.
-        A string value is parsed like a config switch, so ``'false'`` and
-        ``'0'`` are off rather than truthy.
+        Reads this call's ``allow_write`` setting. A node that does not
+        declare the field keeps its IGlobal class default (True for every
+        store node but the managed ones). A string value is parsed like a
+        config switch, so ``'false'`` and ``'0'`` are off rather than truthy; an empty or
+        unrecognised string falls back to the class default, never to on.
         """
         from ai.common.utils import parse_bool
 
-        glb = getattr(self, 'IGlobal', None)
-        return parse_bool(getattr(glb, 'allow_write', True), default=True)
+        default = parse_bool(getattr(getattr(self, 'IGlobal', None), 'allow_write', True), default=True)
+        return parse_bool(self._vectordb_setting('allow_write', default), default=default)
 
     def _vectordb_write_refused(self, tool: str) -> Dict[str, Any]:
         """The failure object a write tool returns when writes are off for this node."""
@@ -848,15 +861,15 @@ class VectorStoreToolMixin:
     def _vectordb_expose_tools(self) -> bool:
         """Whether this node offers its tool functions at all.
 
-        Reads ``self.IGlobal.expose_tools``. A node that does not define the
-        attribute exposes its tools, which keeps every existing store node as
-        it was; a node that sets it (from its configuration) decides per node.
-        Parsed like ``allow_write``, so ``'false'`` and ``'0'`` are off.
+        Reads this call's ``expose_tools`` setting. A node that does not
+        declare the field keeps its IGlobal class default. Parsed like
+        ``allow_write``, so ``'false'`` and ``'0'`` are off and an empty string
+        keeps the class default.
         """
         from ai.common.utils import parse_bool
 
-        glb = getattr(self, 'IGlobal', None)
-        return parse_bool(getattr(glb, 'expose_tools', True), default=True)
+        default = parse_bool(getattr(getattr(self, 'IGlobal', None), 'expose_tools', True), default=True)
+        return parse_bool(self._vectordb_setting('expose_tools', default), default=default)
 
     def _vectordb_tools_refused(self, tool: str) -> Dict[str, Any]:
         """The failure object any tool returns when the node does not expose its tools."""
@@ -874,10 +887,14 @@ class VectorStoreToolMixin:
     def _vectordb_supports_document_listing(self) -> bool:
         """Whether the bound driver implements the optional document listing.
 
-        Read without raising, since discovery may run before a store is bound;
-        only an explicit ``True`` counts, so a stand-in object does not opt in.
+        Read without raising, since discovery may run when the call's store
+        cannot be opened; only an explicit ``True`` counts, so a stand-in
+        object does not opt in.
         """
-        store = getattr(getattr(self, 'IGlobal', None), 'store', None)
+        try:
+            store = self._store()
+        except Exception:
+            return False
         return getattr(store, 'supports_document_listing', False) is True
 
     def _vectordb_listing_unavailable(self, tool: str) -> Dict[str, Any]:

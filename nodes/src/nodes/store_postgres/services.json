@@ -165,7 +165,9 @@
 			"base": "vector.collection",
 			"title": "Table",
 			"description": "Name of the table to store vectors.",
-			"default": "rocketride"
+			"default": "rocketride",
+			"param": true,
+			"tool": false
 		},
 		"postgres.similarity": {
 			"type": "string",
@@ -176,14 +178,17 @@
 				["cosine", "Cosine"],
 				["l2", "L2 (Euclidean)"],
 				["inner_product", "Inner product"]
-			]
+			],
+			"param": true
 		},
 		"postgres.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names postgres.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "postgres",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -197,7 +202,7 @@
 		"postgres.password",
 		"postgres.database",
 		"postgres.collection",
-		"vector.score",
+		{ "base": "vector.score", "param": true },
 		"postgres.similarity",
 		"postgres.serverName"
 	],

@@ -63,6 +63,11 @@ class _StubBase:
     def __init__(self, *args, **kwargs):
         pass
 
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them; a test sets ``_settings``."""
+        return self._settings
+
 
 class _StubTable:
     @staticmethod
@@ -307,25 +312,43 @@ class _FakeClient:
         return ['g1', 'g2']
 
 
+def _settings(**overrides):
+    """One call's settings: the node's params at their schema defaults, overridden per test."""
+    settings = {
+        'db_description': '',
+        'max_attempts': 5,
+        'allow_writes': False,
+        'allow_execute': False,
+        'max_rows': 250,
+        'max_execute_rows': 25000,
+        'query_timeout_ms': 30000,
+    }
+    settings.update(overrides)
+    return settings
+
+
 class _FakeGlobal(_glb_mod.IGlobal):
-    """The real IGlobal with a fake client — exercises select_graph/_run_query for real."""
+    """The real IGlobal with a fake client — exercises select_graph/_run_query for real.
+
+    The global holds the client, the default graph's name and the reflected
+    schema. ``call`` is NOT global state: it is the settings the next call
+    carries (``_instance`` hands it to the instance; a direct hook call passes
+    it as ``settings=``), kept here so a test can set them in one place.
+    """
 
     def __init__(self, graph, *, allow_writes=False, max_rows=250, graph_name='agent', graph_schema=None):
         self.client = _FakeClient(graph)
-        self.allow_writes = allow_writes
-        self.max_rows = max_rows
         self.graph_name = graph_name
-        self.query_timeout_ms = 30000
-        self.max_execute_rows = 25000
-        self.max_validation_attempts = 5
-        self.allow_execute = False
-        self.db_description = ''
+        # The fake server is assumed to hold the default graph
+        self.graph_known = True
         self.graph_schema = graph_schema or {'nodes': {}, 'relationships': []}
+        self.call = _settings(allow_writes=allow_writes, max_rows=max_rows)
 
 
 def _instance(global_state):
     inst = mod.IInstance()
     inst.IGlobal = global_state
+    inst._settings = global_state.call
     return inst
 
 
@@ -443,7 +466,7 @@ def test_allow_writes_accepts_human_typed_strings(raw, expected):
     """allow_writes is human-edited config: 'false' must not read as truthy."""
     graph = _FakeGraph(_FakeResult(result_set=[], header=[]))
     glb = _FakeGlobal(graph)
-    glb.allow_writes = config_utils.parse_bool(raw)
+    glb.call['allow_writes'] = config_utils.parse_bool(raw)
 
     _instance(glb).query({'cypher': 'MATCH (n) RETURN n'})
 
@@ -455,7 +478,7 @@ def test_run_query_uses_server_side_readonly():
     """_run_query must go through ro_query so the server rejects writes."""
     graph = _FakeGraph(_FakeResult(result_set=[['Alice']], header=[[1, 'name']]))
     glb = _FakeGlobal(graph)
-    rows = glb._run_query('MATCH (n) RETURN n.name AS name')
+    rows = glb._run_query('MATCH (n) RETURN n.name AS name', settings=glb.call)
     assert graph.calls[0][0] == 'ro_query'
     assert rows == [{'name': 'Alice'}]
 
@@ -487,7 +510,7 @@ def test_execute_tool_reports_disabled_before_argument_errors(args):
 def test_execute_tool_runs_writes_when_allowed():
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     out = _instance(glb).execute({'query': 'CREATE (n:Person)'})
     assert graph.calls[0][0] == 'query'
     assert out['affected_rows'] == 1
@@ -497,7 +520,7 @@ def test_execute_tool_accepts_sql_key_from_database_query():
     # client.database.query sends the statement as 'sql', not 'query'.
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     out = _instance(glb).execute({'sql': 'CREATE (n:Person)'})
     assert graph.calls[0][0] == 'query'
     assert out['affected_rows'] == 1
@@ -507,7 +530,7 @@ def test_execute_tool_accepts_sql_key_from_database_query():
 def test_execute_tool_treats_empty_params_as_none(params):
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     out = _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
     assert out['affected_rows'] == 1
 
@@ -515,7 +538,7 @@ def test_execute_tool_treats_empty_params_as_none(params):
 def test_execute_tool_binds_params():
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
     assert graph.calls == [('query', 'CREATE (n:Person {name: $n})', {'n': 'Ada'}, 30000)]
 
@@ -524,7 +547,7 @@ def test_execute_tool_passes_multiline_and_nested_params_unchanged():
     # The client encodes values for the CYPHER header; the node must hand them over as they are.
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     params = {'rows': [{'id': 1, 'text': 'line1\nline2\r\n', 'tags': ['a\tb', 'say "hi"', 'C:\\temp']}]}
     _instance(glb).execute(
         {'query': 'UNWIND $rows AS row CREATE (n:Note {id: row.id, text: row.text})', 'params': params}
@@ -536,7 +559,7 @@ def test_execute_tool_refuses_params_the_driver_cannot_bind():
     # A driver whose _run_query_raw takes no params: refuse rather than drop them.
     graph = _FakeGraph()
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     glb.supports_execute_params = False
     with pytest.raises(ValueError, match='not supported'):
         _instance(glb).execute({'query': 'CREATE (n:Person {name: $n})', 'params': {'n': 'Ada'}})
@@ -546,7 +569,7 @@ def test_execute_tool_refuses_params_the_driver_cannot_bind():
 @pytest.mark.parametrize('params', [0, False, '', 'rows', 42])
 def test_execute_tool_refuses_non_object_params(params):
     glb = _FakeGlobal(_FakeGraph())
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     with pytest.raises(ValueError, match='keyed by placeholder name'):
         _instance(glb).execute({'query': 'CREATE (n:Person)', 'params': params})
 
@@ -563,7 +586,7 @@ def test_execute_tool_refuses_sql_only_options(extra, message):
     # no transactions and always return row objects.
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     with pytest.raises(ValueError, match=message):
         _instance(glb).execute({'sql': 'CREATE (n:Person)', **extra})
     assert graph.calls == []
@@ -572,7 +595,7 @@ def test_execute_tool_refuses_sql_only_options(extra, message):
 def test_execute_tool_accepts_object_row_mode():
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     out = _instance(glb).execute({'sql': 'CREATE (n:Person)', 'row_mode': 'object', 'session_id': ''})
     assert out['affected_rows'] == 1
 
@@ -586,14 +609,14 @@ def test_execute_schema_lists_params_only_when_supported():
 
 def test_execute_tool_refuses_positional_params():
     glb = _FakeGlobal(_FakeGraph())
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
     with pytest.raises(ValueError, match='keyed by placeholder name'):
         _instance(glb).execute({'query': 'CREATE (n:Person {name: $1})', 'params': ['Ada']})
 
 
 def test_validate_query_uses_explain():
     graph = _FakeGraph()
-    ok, err = _FakeGlobal(graph)._validate_query('MATCH (n) RETURN n')
+    ok, err = _FakeGlobal(graph)._validate_query('MATCH (n) RETURN n', settings=_settings())
     assert ok is True and err == ''
     assert graph.calls[0][0] == 'explain'
 
@@ -655,7 +678,7 @@ def test_build_query_marks_invalid_after_explain_exhaustion():
     """A query EXPLAIN keeps rejecting must not come back as valid."""
     graph = _FakeGraph(raise_error=mod.RedisError('syntax error'))  # explain always fails
     glb = _FakeGlobal(graph)
-    glb.max_validation_attempts = 2
+    glb.call['max_attempts'] = 2
     inst = _instance(glb)
     # Bypass the LLM: it keeps returning the same (syntactically valid, read-only) query.
     inst._buildQueryOnce = lambda *a, **k: {'isValid': True, 'query': 'MATCH (n) RETURN n'}
@@ -670,7 +693,7 @@ def test_get_query_surfaces_explain_failure_as_error_not_prose():
     """An EXPLAIN-exhausted query must return an error, not the broken query as prose."""
     graph = _FakeGraph(raise_error=mod.RedisError('syntax error'))
     glb = _FakeGlobal(graph)
-    glb.max_validation_attempts = 2
+    glb.call['max_attempts'] = 2
     inst = _instance(glb)
     inst._buildQueryOnce = lambda *a, **k: {'isValid': True, 'query': 'MATCH (n RETURN n'}
 
@@ -712,7 +735,7 @@ def test_write_questions_emits_error_not_broken_cypher_on_explain_exhaustion():
     """Lane-path twin of get_query: broken Cypher must not be emitted as a prose answer."""
     graph = _FakeGraph(raise_error=mod.RedisError('syntax error'))  # explain always fails
     glb = _FakeGlobal(graph)
-    glb.max_validation_attempts = 2
+    glb.call['max_attempts'] = 2
     inst = _instance(glb)
     inst._buildQueryOnce = lambda *a, **k: {'isValid': True, 'query': 'MATCH (n RETURN n'}
     cap = _CapturingInstance({'answers', 'text'})
@@ -769,9 +792,9 @@ def test_affected_rows_counts_all_write_counters():
     """_affected_rows must not undercount vs the query tool's _write_stats."""
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], labels_added=3, properties_removed=2))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
 
-    out = glb._run_query_raw('MATCH (n) REMOVE n:Tmp')
+    out = glb._run_query_raw('MATCH (n) REMOVE n:Tmp', settings=glb.call)
 
     assert out['affected_rows'] == 5  # 3 labels_added + 2 properties_removed
 
@@ -780,9 +803,9 @@ def test_affected_rows_reported_for_write_that_also_returns_rows():
     """CREATE (n) RETURN n writes AND returns rows — affected_rows must not be 0."""
     graph = _FakeGraph(_FakeResult(result_set=[['Alice']], header=[[1, 'n']], nodes_created=1, properties_set=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
 
-    out = glb._run_query_raw('CREATE (n:Person {name: "Alice"}) RETURN n')
+    out = glb._run_query_raw('CREATE (n:Person {name: "Alice"}) RETURN n', settings=glb.call)
 
     assert out['rows']  # the RETURN produced a row
     assert out['affected_rows'] == 2  # ...and the write is still counted
@@ -792,7 +815,7 @@ def test_affected_rows_counts_label_removal_and_index_drop():
     """A write counted as 0 would be taken for a read by the row-cap check."""
     graph = _FakeGraph(_FakeResult(result_set=[], header=[], labels_removed=2, indices_deleted=1))
 
-    out = _FakeGlobal(graph)._run_query_raw('MATCH (n) REMOVE n:Tmp')
+    out = _FakeGlobal(graph)._run_query_raw('MATCH (n) REMOVE n:Tmp', settings=_settings())
 
     assert out['affected_rows'] == 3
 
@@ -814,18 +837,18 @@ def _over_cap_result(**stats):
 
 def test_execute_raw_read_over_the_cap_raises():
     glb = _FakeGlobal(_FakeGraph(_over_cap_result()))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
     with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 @pytest.mark.parametrize('counter', ['nodes_created', 'properties_set', 'labels_removed', 'indices_deleted'])
 def test_execute_raw_write_over_the_cap_returns_truncated_rows(counter):
     # The write is stored already: an error would make the caller retry it and store it twice.
     glb = _FakeGlobal(_FakeGraph(_over_cap_result(**{counter: 5})))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
 
-    out = glb._run_query_raw('UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+    out = glb._run_query_raw('UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id', settings=glb.call)
 
     assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 5, 'truncated': True}
 
@@ -833,17 +856,17 @@ def test_execute_raw_write_over_the_cap_returns_truncated_rows(counter):
 def test_execute_raw_write_within_the_cap_is_not_flagged():
     result = _FakeResult(result_set=[[0], [1], [2]], header=[[1, 'id']], nodes_created=3)
     glb = _FakeGlobal(_FakeGraph(result))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
 
-    out = glb._run_query_raw('UNWIND range(1, 3) AS i CREATE (n:Item {id: i}) RETURN n.id AS id')
+    out = glb._run_query_raw('UNWIND range(1, 3) AS i CREATE (n:Item {id: i}) RETURN n.id AS id', settings=glb.call)
 
     assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 3}
 
 
 def test_execute_tool_reports_a_truncated_write():
     glb = _FakeGlobal(_FakeGraph(_over_cap_result(nodes_created=5)))
-    glb.allow_execute = True
-    glb.max_execute_rows = 3
+    glb.call['allow_execute'] = True
+    glb.call['max_execute_rows'] = 3
 
     out = _instance(glb).execute({'query': 'UNWIND range(1, 5) AS i CREATE (n:Item {id: i}) RETURN n.id AS id'})
 
@@ -853,7 +876,7 @@ def test_execute_tool_reports_a_truncated_write():
 def test_execute_tool_leaves_truncated_out_of_a_complete_result():
     graph = _FakeGraph(_FakeResult(result_set=[[0]], header=[[1, 'id']], nodes_created=1))
     glb = _FakeGlobal(graph)
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
 
     out = _instance(glb).execute({'query': 'CREATE (n:Item {id: 0}) RETURN n.id AS id'})
 
@@ -869,7 +892,7 @@ _BULK_WRITE = 'UNWIND $rows AS row CREATE (n:Item {id: row.id}) RETURN n.id AS i
 def test_execute_raw_result_of_exactly_the_default_cap_is_complete(stats):
     glb = _FakeGlobal(_FakeGraph(_result_of(_DEFAULT_CAP, **stats)))
 
-    out = glb._run_query_raw(_BULK_WRITE)
+    out = glb._run_query_raw(_BULK_WRITE, settings=glb.call)
 
     assert len(out['rows']) == _DEFAULT_CAP
     assert 'truncated' not in out
@@ -879,7 +902,7 @@ def test_execute_raw_result_of_exactly_the_default_cap_is_complete(stats):
 def test_execute_raw_read_over_the_default_cap_raises(over):
     glb = _FakeGlobal(_FakeGraph(_result_of(_DEFAULT_CAP + over)))
     with pytest.raises(ValueError, match=f'max_execute_rows={_DEFAULT_CAP}'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 @pytest.mark.parametrize('over', [1, 35000])
@@ -887,7 +910,7 @@ def test_execute_raw_write_over_the_default_cap_is_cut_to_it(over):
     total = _DEFAULT_CAP + over
     glb = _FakeGlobal(_FakeGraph(_result_of(total, nodes_created=total)))
 
-    out = glb._run_query_raw(_BULK_WRITE)
+    out = glb._run_query_raw(_BULK_WRITE, settings=glb.call)
 
     # The first rows, in order; every stored write is still counted.
     assert len(out['rows']) == _DEFAULT_CAP
@@ -900,7 +923,7 @@ def test_execute_raw_write_over_the_default_cap_is_cut_to_it(over):
 def test_execute_tool_cuts_a_write_over_the_default_cap():
     total = _DEFAULT_CAP + 1
     glb = _FakeGlobal(_FakeGraph(_result_of(total, nodes_created=total)))
-    glb.allow_execute = True
+    glb.call['allow_execute'] = True
 
     out = _instance(glb).execute({'query': _BULK_WRITE, 'params': {'rows': [{'id': 0}]}})
 
@@ -921,46 +944,46 @@ _WRITE = 'UNWIND range(1, 5) AS i MERGE (n:Item {id: i}) RETURN n.id AS id'
 def test_execute_raw_counts_a_change_line_that_has_no_counter():
     # No counter attribute is set, so affected_rows stays 0, but the line still marks a write.
     glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=['Nodes merged: 5', *_V6_READ_STATS])))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
 
-    out = glb._run_query_raw(_WRITE)
+    out = glb._run_query_raw(_WRITE, settings=glb.call)
 
     assert out == {'rows': [{'id': 0}, {'id': 1}, {'id': 2}], 'affected_rows': 0, 'truncated': True}
 
 
 def test_execute_raw_falkordb_6_read_is_not_taken_for_a_write():
     glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=_V6_READ_STATS)))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
     with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 @pytest.mark.parametrize('line', ['Nodes merged', 'Nodes merged: many', b'Nodes created: 5'])
 def test_execute_raw_counts_an_unreadable_or_bytes_line_as_a_write(line):
     glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=[line, *_V6_READ_STATS])))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
 
-    assert glb._run_query_raw(_WRITE)['truncated'] is True
+    assert glb._run_query_raw(_WRITE, settings=glb.call)['truncated'] is True
 
 
 def test_execute_raw_zero_change_lines_mean_a_read():
     stats = ['Nodes created: 0', 'Properties set: 0', *_V6_READ_STATS]
     glb = _FakeGlobal(_FakeGraph(_result_of(5, raw_stats=stats)))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
     with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 def test_execute_raw_without_raw_statistics_uses_the_counters():
     write, read = _result_of(5, nodes_created=5), _result_of(5)
     del write._raw_stats, read._raw_stats  # a client that keeps no raw lines
     glb = _FakeGlobal(_FakeGraph(write))
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
 
-    assert glb._run_query_raw(_WRITE)['truncated'] is True
+    assert glb._run_query_raw(_WRITE, settings=glb.call)['truncated'] is True
     glb.client._graph._result = read
     with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 # ---------------------------------------------------------------------------
@@ -981,7 +1004,7 @@ def test_execute_raw_write_cut_by_the_image_server_limit_is_flagged():
     # A 25,001-row write on a default container: all of it is saved, 10,000 rows come back.
     glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE, nodes_created=25001), _IMAGE_RESULTSET_SIZE)
 
-    out = glb._run_query_raw(_BULK_WRITE)
+    out = glb._run_query_raw(_BULK_WRITE, settings=glb.call)
 
     assert len(out['rows']) == _IMAGE_RESULTSET_SIZE
     assert out['affected_rows'] == 25001
@@ -991,14 +1014,14 @@ def test_execute_raw_write_cut_by_the_image_server_limit_is_flagged():
 def test_execute_raw_read_that_reaches_the_server_limit_raises():
     glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE), _IMAGE_RESULTSET_SIZE)
     with pytest.raises(ValueError, match=f'RESULTSET_SIZE={_IMAGE_RESULTSET_SIZE}'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 @pytest.mark.parametrize('size', [_IMAGE_RESULTSET_SIZE, -1, 0])
 def test_execute_raw_reply_below_the_server_limit_is_complete(size):
     glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE - 1, nodes_created=9999), size)
 
-    out = glb._run_query_raw(_BULK_WRITE)
+    out = glb._run_query_raw(_BULK_WRITE, settings=glb.call)
 
     assert len(out['rows']) == _IMAGE_RESULTSET_SIZE - 1
     assert 'truncated' not in out
@@ -1006,9 +1029,9 @@ def test_execute_raw_reply_below_the_server_limit_is_complete(size):
 
 def test_execute_raw_node_cap_below_the_server_limit_names_the_node_cap():
     glb = _global_with_server_cap(_over_cap_result(), _IMAGE_RESULTSET_SIZE)
-    glb.max_execute_rows = 3
+    glb.call['max_execute_rows'] = 3
     with pytest.raises(ValueError, match='max_execute_rows=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
 
 @pytest.mark.parametrize('answer', [_glb_mod.RedisError('NOPERM no permissions'), None, 'unlimited'])
@@ -1016,7 +1039,7 @@ def test_execute_raw_unreadable_server_limit_leaves_the_node_cap(answer):
     # An ACL may deny GRAPH.CONFIG; the node then checks max_execute_rows alone.
     glb = _global_with_server_cap(_result_of(_IMAGE_RESULTSET_SIZE), answer)
 
-    out = glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+    out = glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
     assert len(out['rows']) == _IMAGE_RESULTSET_SIZE
     assert 'truncated' not in out
@@ -1026,10 +1049,10 @@ def test_execute_raw_reads_the_server_limit_on_every_call():
     # GRAPH.CONFIG SET changes RESULTSET_SIZE while the server runs.
     glb = _global_with_server_cap(_result_of(3), 3)
     with pytest.raises(ValueError, match='RESULTSET_SIZE=3'):
-        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')
+        glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)
 
     glb.client.resultset_size = -1
-    assert len(glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id')['rows']) == 3
+    assert len(glb._run_query_raw('MATCH (n:Item) RETURN n.id AS id', settings=glb.call)['rows']) == 3
     assert glb.client.config_reads == 2
 
 
@@ -1046,8 +1069,8 @@ def _execute_question(statement):
 @pytest.mark.parametrize('count', [5, 3], ids=['cut', 'complete'])
 def test_execute_lane_announces_a_cut_result(count):
     glb = _FakeGlobal(_FakeGraph(_result_of(count, nodes_created=count)))
-    glb.allow_execute = True
-    glb.max_execute_rows = 3
+    glb.call['allow_execute'] = True
+    glb.call['max_execute_rows'] = 3
     inst = _instance(glb)
     cap = _CapturingInstance({'text', 'table', 'answers'})
     inst.instance = cap
@@ -1265,12 +1288,25 @@ def test_resolve_graph_name_falls_back_on_absent_empty_or_blank():
     assert _glb_mod._resolve_graph_name({'graph': 'changeimpact'}) == 'changeimpact'
 
 
-def test_open_driver_raises_when_the_configured_graph_is_missing(graph_listing_client):
+def test_a_read_only_call_raises_when_the_configured_graph_is_missing(graph_listing_client):
     graph_listing_client.graphs_to_list = ['other-graph']
     glb = _FakeGlobal(_FakeGraph())
+    glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'agent'})
 
+    assert glb.graph_known is False
     with pytest.raises(Exception, match='FalkorDB graph "agent" does not exist.*other-graph'):
-        glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'agent'})
+        glb.require_graph(_settings())
+
+
+def test_a_graph_created_after_start_is_found_by_the_next_read_only_call(graph_listing_client):
+    graph_listing_client.graphs_to_list = []
+    glb = _FakeGlobal(_FakeGraph())
+    glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'agent'})
+
+    graph_listing_client.graphs_to_list = ['agent']
+    glb.require_graph(_settings())
+
+    assert glb.graph_known is True
 
 
 def test_open_driver_succeeds_when_the_configured_graph_exists(graph_listing_client):
@@ -1280,19 +1316,25 @@ def test_open_driver_succeeds_when_the_configured_graph_exists(graph_listing_cli
     glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'changeimpact'})
 
     assert glb.graph_name == 'changeimpact'
+    assert glb.graph_known is True
+    glb.require_graph(_settings())
 
 
 @pytest.mark.parametrize('flag', ['allow_writes', 'allow_execute'])
-def test_open_driver_skips_the_graph_check_when_a_write_path_is_enabled(graph_listing_client, flag):
+def test_a_write_capable_call_skips_the_graph_check(graph_listing_client, flag):
     """FalkorDB creates a graph lazily on its first write, so a write-capable
-    node may legitimately target one that does not exist yet.
+    call may legitimately target one that does not exist yet.
     """
     graph_listing_client.graphs_to_list = []  # nothing exists yet
     glb = _FakeGlobal(_FakeGraph())
 
-    glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'brand-new', flag: True})
+    glb._open_driver({'mode': 'manual', 'host': 'localhost', 'graph': 'brand-new'})
+    glb.require_graph(_settings(**{flag: True}))  # did not raise
 
-    assert glb.graph_name == 'brand-new'  # did not raise
+    assert glb.graph_name == 'brand-new'
+    # The gate is the call's: a read-only call on the same control is still refused
+    with pytest.raises(Exception, match='FalkorDB graph "brand-new" does not exist'):
+        glb.require_graph(_settings())
 
 
 def test_probe_warns_when_the_configured_graph_is_missing(monkeypatch, graph_listing_client):
@@ -1355,3 +1397,24 @@ def test_reflect_schema_failure_does_not_break_begin(monkeypatch):
     graph_base.GraphGlobalBase.beginGlobal(glb)
 
     assert glb.graph_schema == {'nodes': {}, 'relationships': []}
+
+
+# ---------------------------------------------------------------------------
+# One control, two calls: the gates and caps are each call's own
+# ---------------------------------------------------------------------------
+
+
+def test_two_calls_on_one_global_carry_their_own_write_gate_and_row_cap():
+    graph = _FakeGraph(_FakeResult(result_set=[[i] for i in range(10)], header=[[1, 'n']]))
+    glb = _FakeGlobal(graph)
+    writer = _instance(glb)
+    writer._settings = _settings(allow_writes=True, max_rows=2)
+    reader = _instance(glb)
+    reader._settings = _settings(allow_writes=False, max_rows=5)
+
+    wrote = writer.query({'cypher': 'MATCH (n) RETURN n'})
+    read = reader.query({'cypher': 'MATCH (n) RETURN n'})
+
+    assert [call[0] for call in graph.calls] == ['query', 'ro_query']
+    assert (wrote['row_count'], read['row_count']) == (2, 5)
+    assert writer.IGlobal is reader.IGlobal

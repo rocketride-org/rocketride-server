@@ -70,7 +70,7 @@ class IInstance(IInstanceBase):
             return 'Error: Firestore client is not connected.'
 
         if not collection:
-            collection = self.IGlobal.collection
+            collection = self.settings['collection'].strip()
 
         try:
             coll_ref = client.collection(collection)
@@ -105,7 +105,7 @@ class IInstance(IInstanceBase):
             return {'error': 'Firestore client is not connected.'}
 
         if not collection:
-            collection = self.IGlobal.collection
+            collection = self.settings['collection'].strip()
 
         try:
             doc = client.collection(collection).document(document_id).get()

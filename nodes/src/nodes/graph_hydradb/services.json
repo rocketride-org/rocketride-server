@@ -66,6 +66,7 @@
 			"type": "string",
 			"title": "Database",
 			"description": "HydraDB database - the space that stores your context. Create one in the HydraDB dashboard.",
+			"env": "ROCKETRIDE_GRAPH_HYDRADB_DATABASE",
 			"required": true
 		},
 		"hydradb.collection": {
@@ -73,7 +74,9 @@
 			"title": "Collection",
 			"default": "default",
 			"minLength": 1,
-			"description": "Collection scope within the database (per-user/workspace partition for memories)."
+			"description": "Collection scope within the database (per-user/workspace partition for memories).",
+			"param": true,
+			"tool": false
 		},
 		"hydradb.max_results": {
 			"type": "integer",
@@ -81,7 +84,8 @@
 			"default": 10,
 			"minimum": 1,
 			"maximum": 100,
-			"description": "Default maximum number of results returned by recall_memory."
+			"description": "Default maximum number of results returned by recall_memory.",
+			"param": true
 		}
 	},
 	//

@@ -97,6 +97,7 @@
 			"title": "Host",
 			"default": "localhost",
 			"minLength": 1,
+			"env": "ROCKETRIDE_GRAPH_FALKORDB_HOST",
 			"description": "FalkorDB host, e.g. localhost or your-instance.falkordb.cloud."
 		},
 		"graph_falkordb.port": {
@@ -105,12 +106,14 @@
 			"default": 6379,
 			"minimum": 1,
 			"maximum": 65535,
+			"env": "ROCKETRIDE_GRAPH_FALKORDB_PORT",
 			"description": "FalkorDB port (Redis protocol). FalkorDB Cloud assigns a per-instance port."
 		},
 		"graph_falkordb.username": {
 			"type": "string",
 			"title": "Username",
 			"default": "",
+			"env": "ROCKETRIDE_GRAPH_FALKORDB_USERNAME",
 			"description": "Username, e.g. \"default\" for FalkorDB Cloud. Leave empty for no auth."
 		},
 		"graph_falkordb.password": {
@@ -140,6 +143,7 @@
 			"title": "Default Graph",
 			"default": "agent",
 			"minLength": 1,
+			"env": "ROCKETRIDE_GRAPH_FALKORDB_GRAPH",
 			"description": "A FalkorDB server hosts many graphs. This is the one queried when the caller does not name another."
 		},
 		"graph_falkordb.db_description": {
@@ -147,18 +151,23 @@
 			"format": "textarea",
 			"title": "Graph Description",
 			"default": "",
+			"param": true,
 			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries."
 		},
 		"graph_falkordb.allow_writes": {
 			"type": "boolean",
 			"title": "Allow Writes",
 			"default": false,
+			"param": true,
+			"tool": false,
 			"description": "Permit CREATE/MERGE/SET/DELETE in the query tool. When off, queries run via GRAPH.RO_QUERY and the server itself rejects write clauses."
 		},
 		"graph_falkordb.allow_execute": {
 			"type": "boolean",
 			"title": "Allow Execute",
 			"default": false,
+			"param": true,
+			"tool": false,
 			"description": "Enable the execute tool, which runs raw Cypher with no LLM translation and no read-only gate. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		},
 		"graph_falkordb.max_attempts": {
@@ -167,6 +176,8 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 10,
+			"param": true,
+			"tool": false,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query."
 		},
 		"graph_falkordb.max_rows": {
@@ -175,6 +186,8 @@
 			"default": 250,
 			"minimum": 1,
 			"maximum": 25000,
+			"param": true,
+			"tool": false,
 			"description": "Upper cap on rows returned per query. Results beyond it are cut and flagged as truncated."
 		},
 		"graph_falkordb.max_execute_rows": {
@@ -183,6 +196,8 @@
 			"default": 25000,
 			"minimum": 1,
 			"maximum": 25000,
+			"param": true,
+			"tool": false,
 			"description": "Upper cap on rows returned by the execute tool. A read over the cap fails. A write over the cap is already saved, so it returns the first rows flagged as truncated."
 		},
 		"graph_falkordb.query_timeout_ms": {
@@ -191,6 +206,8 @@
 			"default": 30000,
 			"minimum": 100,
 			"maximum": 600000,
+			"param": true,
+			"tool": false,
 			"description": "Server-side timeout for a single query."
 		}
 	},
