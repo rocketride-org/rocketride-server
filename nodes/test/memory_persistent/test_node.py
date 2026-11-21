@@ -16,8 +16,10 @@ from __future__ import annotations
 import contextlib
 import math
 import sys
+import contextvars
 import threading
 import time
+import types
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,12 +27,15 @@ import pytest
 from nodes.memory_persistent.IGlobal import IGlobal
 from nodes.memory_persistent.IInstance import IInstance
 from nodes.memory_persistent.memory_store import (
-    InMemoryBackend,
+    MAX_STATE_SESSIONS,
+    StateBackend,
     PersistentMemoryStore,
     RedisBackend,
     _validate_key,
     _validate_session_id,
 )
+
+from ..framework.controls import control_config
 
 
 # =============================================================================
@@ -39,15 +44,15 @@ from nodes.memory_persistent.memory_store import (
 
 
 @pytest.fixture
-def backend() -> InMemoryBackend:
+def backend(state) -> StateBackend:
     """Fresh in-memory backend for each test."""
-    return InMemoryBackend()
+    return StateBackend(state)
 
 
 @pytest.fixture
-def store() -> PersistentMemoryStore:
+def store(state) -> PersistentMemoryStore:
     """Fresh PersistentMemoryStore with in-memory backend."""
-    return PersistentMemoryStore(backend='memory', max_history=10, auto_summarize=True)
+    return PersistentMemoryStore(StateBackend(state), max_history=10, auto_summarize=True)
 
 
 # =============================================================================
@@ -108,37 +113,37 @@ class TestValidation:
 class TestSessionCRUD:
     """Tests for session create, resume, list, and delete."""
 
-    def test_create_session(self, backend: InMemoryBackend):
+    def test_create_session(self, backend: StateBackend):
         result = backend.create_session('sess-1')
         assert result['ok'] is True
         assert result['session_id'] == 'sess-1'
 
-    def test_create_duplicate_session(self, backend: InMemoryBackend):
+    def test_create_duplicate_session(self, backend: StateBackend):
         backend.create_session('sess-1')
         result = backend.create_session('sess-1')
         assert result['ok'] is False
         assert 'already exists' in result['error']
 
-    def test_resume_existing_session(self, backend: InMemoryBackend):
+    def test_resume_existing_session(self, backend: StateBackend):
         backend.create_session('sess-1')
         result = backend.resume_session('sess-1')
         assert result['ok'] is True
         assert result['key_count'] == 0
 
-    def test_resume_nonexistent_session(self, backend: InMemoryBackend):
+    def test_resume_nonexistent_session(self, backend: StateBackend):
         result = backend.resume_session('no-such-session')
         assert result['ok'] is False
         assert 'not found' in result['error']
 
-    def test_list_sessions_empty(self, backend: InMemoryBackend):
+    def test_list_sessions_empty(self, backend: StateBackend):
         assert backend.list_sessions() == []
 
-    def test_list_sessions_multiple(self, backend: InMemoryBackend):
+    def test_list_sessions_multiple(self, backend: StateBackend):
         backend.create_session('b-sess')
         backend.create_session('a-sess')
         assert backend.list_sessions() == ['a-sess', 'b-sess']
 
-    def test_delete_session(self, backend: InMemoryBackend):
+    def test_delete_session(self, backend: StateBackend):
         backend.create_session('sess-1')
         backend.put('sess-1', 'key1', 'val1')
         result = backend.delete_session('sess-1')
@@ -147,7 +152,7 @@ class TestSessionCRUD:
         # Verify session is gone
         assert backend.resume_session('sess-1')['ok'] is False
 
-    def test_delete_nonexistent_session(self, backend: InMemoryBackend):
+    def test_delete_nonexistent_session(self, backend: StateBackend):
         result = backend.delete_session('ghost')
         assert result['ok'] is False
 
@@ -160,40 +165,40 @@ class TestSessionCRUD:
 class TestMemoryOperations:
     """Tests for put, get, list_keys, and clear."""
 
-    def test_put_and_get(self, backend: InMemoryBackend):
+    def test_put_and_get(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'color', 'blue')
         result = backend.get('s1', 'color')
         assert result['ok'] is True
         assert result['value'] == 'blue'
 
-    def test_get_missing_key(self, backend: InMemoryBackend):
+    def test_get_missing_key(self, backend: StateBackend):
         backend.create_session('s1')
         result = backend.get('s1', 'nope')
         assert result['ok'] is False
         assert result['value'] is None
 
-    def test_put_overwrites(self, backend: InMemoryBackend):
+    def test_put_overwrites(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'k', 'v1')
         backend.put('s1', 'k', 'v2')
         assert backend.get('s1', 'k')['value'] == 'v2'
 
-    def test_put_complex_value(self, backend: InMemoryBackend):
+    def test_put_complex_value(self, backend: StateBackend):
         backend.create_session('s1')
         val = {'nested': [1, 2, {'deep': True}]}
         backend.put('s1', 'data', val)
         result = backend.get('s1', 'data')
         assert result['value'] == val
 
-    def test_list_keys(self, backend: InMemoryBackend):
+    def test_list_keys(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'b', 1)
         backend.put('s1', 'a', 2)
         result = backend.list_keys('s1')
         assert result['keys'] == ['a', 'b']
 
-    def test_clear_single_key(self, backend: InMemoryBackend):
+    def test_clear_single_key(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'keep', 1)
         backend.put('s1', 'drop', 2)
@@ -202,7 +207,7 @@ class TestMemoryOperations:
         assert backend.get('s1', 'keep')['ok'] is True
         assert backend.get('s1', 'drop')['ok'] is False
 
-    def test_clear_all_keys(self, backend: InMemoryBackend):
+    def test_clear_all_keys(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'a', 1)
         backend.put('s1', 'b', 2)
@@ -210,12 +215,12 @@ class TestMemoryOperations:
         assert sorted(result['cleared']) == ['a', 'b']
         assert backend.list_keys('s1')['keys'] == []
 
-    def test_clear_nonexistent_key(self, backend: InMemoryBackend):
+    def test_clear_nonexistent_key(self, backend: StateBackend):
         backend.create_session('s1')
         result = backend.clear('s1', 'ghost')
         assert result['cleared'] == []
 
-    def test_operations_on_nonexistent_session(self, backend: InMemoryBackend):
+    def test_operations_on_nonexistent_session(self, backend: StateBackend):
         assert backend.put('nope', 'k', 'v')['ok'] is False
         assert backend.get('nope', 'k')['ok'] is False
         assert backend.list_keys('nope')['ok'] is False
@@ -230,7 +235,7 @@ class TestMemoryOperations:
 class TestSessionIsolation:
     """Verify that sessions cannot see each other's data."""
 
-    def test_session_a_cannot_see_session_b(self, backend: InMemoryBackend):
+    def test_session_a_cannot_see_session_b(self, backend: StateBackend):
         backend.create_session('a')
         backend.create_session('b')
         backend.put('a', 'secret', 'alpha-data')
@@ -239,7 +244,7 @@ class TestSessionIsolation:
         assert backend.get('a', 'secret')['value'] == 'alpha-data'
         assert backend.get('b', 'secret')['value'] == 'beta-data'
 
-    def test_clearing_one_session_leaves_other(self, backend: InMemoryBackend):
+    def test_clearing_one_session_leaves_other(self, backend: StateBackend):
         backend.create_session('a')
         backend.create_session('b')
         backend.put('a', 'data', 1)
@@ -248,7 +253,7 @@ class TestSessionIsolation:
         assert backend.get('a', 'data')['ok'] is False
         assert backend.get('b', 'data')['value'] == 2
 
-    def test_deleting_one_session_leaves_other(self, backend: InMemoryBackend):
+    def test_deleting_one_session_leaves_other(self, backend: StateBackend):
         backend.create_session('a')
         backend.create_session('b')
         backend.put('b', 'key', 'value')
@@ -416,8 +421,8 @@ class TestAutoSummarization:
         # Should have 5 put entries, no summary
         assert all(e['op'] != 'summary' for e in history['entries'])
 
-    def test_summarization_triggers_over_limit(self):
-        store = PersistentMemoryStore(backend='memory', max_history=5, auto_summarize=True)
+    def test_summarization_triggers_over_limit(self, state):
+        store = PersistentMemoryStore(StateBackend(state), max_history=5, auto_summarize=True)
         store.create_session('s1')
         # Add enough entries to trigger summarization
         for i in range(10):
@@ -427,8 +432,8 @@ class TestAutoSummarization:
         # Should have a summary entry as the first entry
         assert entries[0]['op'] == 'summary'
 
-    def test_summarization_preserves_recent_entries(self):
-        store = PersistentMemoryStore(backend='memory', max_history=6, auto_summarize=True)
+    def test_summarization_preserves_recent_entries(self, state):
+        store = PersistentMemoryStore(StateBackend(state), max_history=6, auto_summarize=True)
         store.create_session('s1')
         for i in range(12):
             store.put('s1', f'key{i}', f'val{i}')
@@ -438,8 +443,8 @@ class TestAutoSummarization:
         non_summary = [e for e in entries if e['op'] != 'summary']
         assert len(non_summary) >= 1  # At least some recent entries preserved
 
-    def test_summary_entry_has_correct_fields(self):
-        store = PersistentMemoryStore(backend='memory', max_history=4, auto_summarize=True)
+    def test_summary_entry_has_correct_fields(self, state):
+        store = PersistentMemoryStore(StateBackend(state), max_history=4, auto_summarize=True)
         store.create_session('s1')
         for i in range(8):
             store.put('s1', f'key{i}', f'val{i}')
@@ -450,8 +455,8 @@ class TestAutoSummarization:
         assert 'keys_touched' in summary
         assert 'timestamp' in summary
 
-    def test_no_summarization_when_disabled(self):
-        store = PersistentMemoryStore(backend='memory', max_history=3, auto_summarize=False)
+    def test_no_summarization_when_disabled(self, state):
+        store = PersistentMemoryStore(StateBackend(state), max_history=3, auto_summarize=False)
         store.create_session('s1')
         for i in range(10):
             store.put('s1', f'key{i}', f'val{i}')
@@ -463,8 +468,8 @@ class TestAutoSummarization:
         store.put('s1', 'k', 'v')
         assert store.summarize_if_needed('s1', 100) is False
 
-    def test_summarize_if_needed_returns_true_over_limit(self):
-        store = PersistentMemoryStore(backend='memory', max_history=3, auto_summarize=False)
+    def test_summarize_if_needed_returns_true_over_limit(self, state):
+        store = PersistentMemoryStore(StateBackend(state), max_history=3, auto_summarize=False)
         store.create_session('s1')
         for i in range(5):
             store.put('s1', f'k{i}', f'v{i}')
@@ -479,7 +484,7 @@ class TestAutoSummarization:
 class TestHistoryRetrieval:
     """Tests for get_history with limits."""
 
-    def test_replace_history(self, backend: InMemoryBackend):
+    def test_replace_history(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'k1', 'v1')
         backend.put('s1', 'k2', 'v2')
@@ -489,7 +494,7 @@ class TestHistoryRetrieval:
         assert len(history['entries']) == 1
         assert history['entries'][0]['op'] == 'summary'
 
-    def test_history_records_puts(self, backend: InMemoryBackend):
+    def test_history_records_puts(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'k1', 'v1')
         backend.put('s1', 'k2', 'v2')
@@ -498,7 +503,7 @@ class TestHistoryRetrieval:
         assert len(history['entries']) == 2
         assert history['entries'][0]['op'] == 'put'
 
-    def test_history_records_clears(self, backend: InMemoryBackend):
+    def test_history_records_clears(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'k1', 'v1')
         backend.clear('s1', 'k1')
@@ -506,14 +511,14 @@ class TestHistoryRetrieval:
         ops = [e['op'] for e in history['entries']]
         assert 'clear' in ops
 
-    def test_history_limit(self, backend: InMemoryBackend):
+    def test_history_limit(self, backend: StateBackend):
         backend.create_session('s1')
         for i in range(20):
             backend.put('s1', f'k{i}', f'v{i}')
         history = backend.get_history('s1', limit=5)
         assert len(history['entries']) == 5
 
-    def test_history_returns_most_recent(self, backend: InMemoryBackend):
+    def test_history_returns_most_recent(self, backend: StateBackend):
         backend.create_session('s1')
         for i in range(10):
             backend.put('s1', f'k{i}', f'v{i}')
@@ -522,7 +527,7 @@ class TestHistoryRetrieval:
         keys = [e['key'] for e in history['entries']]
         assert keys == ['k7', 'k8', 'k9']
 
-    def test_history_nonexistent_session(self, backend: InMemoryBackend):
+    def test_history_nonexistent_session(self, backend: StateBackend):
         result = backend.get_history('nope')
         assert result['ok'] is False
 
@@ -535,33 +540,39 @@ class TestHistoryRetrieval:
 class TestTTLEnforcement:
     """Tests for session TTL expiry."""
 
-    def test_expired_session_is_inaccessible(self, backend: InMemoryBackend):
-        backend.create_session('s1', ttl_seconds=1)
-        backend.put('s1', 'k', 'v')
-        # Fast-forward expiry
-        backend._metadata['s1']['expires_at'] = time.time() - 1
-        result = backend.resume_session('s1')
+    def test_expired_session_is_inaccessible(self, backend: StateBackend):
+        now = [time.time()]
+        with patch('nodes.memory_persistent.memory_store.time') as fake_time:
+            fake_time.time = lambda: now[0]
+            backend.create_session('s1', ttl_seconds=1)
+            backend.put('s1', 'k', 'v')
+            # Fast-forward past the session's expiry
+            now[0] += 2
+            result = backend.resume_session('s1')
         assert result['ok'] is False
         assert 'expired' in result['error']
 
-    def test_expired_session_pruned_from_list(self, backend: InMemoryBackend):
-        backend.create_session('keep', ttl_seconds=None)
-        backend.create_session('expire', ttl_seconds=1)
-        backend._metadata['expire']['expires_at'] = time.time() - 1
-        sessions = backend.list_sessions()
+    def test_expired_session_pruned_from_list(self, backend: StateBackend):
+        now = [time.time()]
+        with patch('nodes.memory_persistent.memory_store.time') as fake_time:
+            fake_time.time = lambda: now[0]
+            backend.create_session('keep', ttl_seconds=None)
+            backend.create_session('expire', ttl_seconds=1)
+            now[0] += 2
+            sessions = backend.list_sessions()
         assert 'expire' not in sessions
         assert 'keep' in sessions
 
-    def test_non_expiring_session_persists(self, backend: InMemoryBackend):
+    def test_non_expiring_session_persists(self, backend: StateBackend):
         backend.create_session('forever')
         backend.put('forever', 'k', 'v')
         assert backend.resume_session('forever')['ok'] is True
 
-    def test_ttl_from_store_config_preserves_fractional_seconds(self):
+    def test_ttl_from_store_config_preserves_fractional_seconds(self, state):
         now = [1000.0]
         with patch('nodes.memory_persistent.memory_store.time') as fake_time:
             fake_time.time = lambda: now[0]
-            store = PersistentMemoryStore(backend='memory', session_ttl_hours=0.0001)  # ~0.36 seconds
+            store = PersistentMemoryStore(StateBackend(state), session_ttl_hours=0.0001)  # ~0.36 seconds
             assert math.isclose(store._ttl_seconds, 0.36)
             store.create_session('s1')
             store.put('s1', 'k', 'v')
@@ -581,7 +592,7 @@ class TestTTLEnforcement:
 class TestThreadSafety:
     """Tests that concurrent operations don't corrupt state."""
 
-    def test_concurrent_puts(self, backend: InMemoryBackend):
+    def test_concurrent_puts(self, backend: StateBackend):
         backend.create_session('s1')
         errors = []
 
@@ -595,9 +606,9 @@ class TestThreadSafety:
                 errors.append(str(e))
 
         threads = [
-            threading.Thread(target=writer, args=('a-', 50)),
-            threading.Thread(target=writer, args=('b-', 50)),
-            threading.Thread(target=writer, args=('c-', 50)),
+            threading.Thread(target=contextvars.copy_context().run, args=(writer, 'a-', 50)),
+            threading.Thread(target=contextvars.copy_context().run, args=(writer, 'b-', 50)),
+            threading.Thread(target=contextvars.copy_context().run, args=(writer, 'c-', 50)),
         ]
         for t in threads:
             t.start()
@@ -608,7 +619,7 @@ class TestThreadSafety:
         keys = backend.list_keys('s1')['keys']
         assert len(keys) == 150
 
-    def test_concurrent_session_creation(self, backend: InMemoryBackend):
+    def test_concurrent_session_creation(self, backend: StateBackend):
         results = []
         lock = threading.Lock()
 
@@ -617,16 +628,21 @@ class TestThreadSafety:
             with lock:
                 results.append(r)
 
-        threads = [threading.Thread(target=create, args=(f'sess-{i}',)) for i in range(20)]
+        threads = [
+            threading.Thread(target=contextvars.copy_context().run, args=(create, f'sess-{i}')) for i in range(20)
+        ]
         for t in threads:
             t.start()
         for t in threads:
             t.join()
 
         ok_count = sum(1 for r in results if r['ok'])
-        assert ok_count == 20
+        assert ok_count == MAX_STATE_SESSIONS
+        refused = [r for r in results if not r['ok']]
+        assert all('Maximum sessions' in r['error'] for r in refused)
+        assert sorted(backend.list_sessions()) == sorted(r['session_id'] for r in results if r['ok'])
 
-    def test_concurrent_reads_and_writes(self, backend: InMemoryBackend):
+    def test_concurrent_reads_and_writes(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'shared', 0)
         errors = []
@@ -650,9 +666,9 @@ class TestThreadSafety:
                 errors.append(str(e))
 
         threads = [
-            threading.Thread(target=reader, args=(100,)),
-            threading.Thread(target=writer, args=(100,)),
-            threading.Thread(target=reader, args=(100,)),
+            threading.Thread(target=contextvars.copy_context().run, args=(reader, 100)),
+            threading.Thread(target=contextvars.copy_context().run, args=(writer, 100)),
+            threading.Thread(target=contextvars.copy_context().run, args=(reader, 100)),
         ]
         for t in threads:
             t.start()
@@ -670,7 +686,7 @@ class TestThreadSafety:
 class TestDeepCopyMutationPrevention:
     """Verify that returned values are deep copies — mutations don't leak back."""
 
-    def test_mutating_put_value_does_not_affect_store(self, backend: InMemoryBackend):
+    def test_mutating_put_value_does_not_affect_store(self, backend: StateBackend):
         backend.create_session('s1')
         original = {'items': [1, 2, 3]}
         backend.put('s1', 'data', original)
@@ -680,7 +696,7 @@ class TestDeepCopyMutationPrevention:
         stored = backend.get('s1', 'data')['value']
         assert 999 not in stored['items']
 
-    def test_mutating_get_result_does_not_affect_store(self, backend: InMemoryBackend):
+    def test_mutating_get_result_does_not_affect_store(self, backend: StateBackend):
         backend.create_session('s1')
         backend.put('s1', 'data', {'items': [1, 2, 3]})
         retrieved = backend.get('s1', 'data')['value']
@@ -690,7 +706,7 @@ class TestDeepCopyMutationPrevention:
         fresh = backend.get('s1', 'data')['value']
         assert 999 not in fresh['items']
 
-    def test_deep_nested_mutation_prevention(self, backend: InMemoryBackend):
+    def test_deep_nested_mutation_prevention(self, backend: StateBackend):
         backend.create_session('s1')
         val = {'a': {'b': {'c': [1]}}}
         backend.put('s1', 'deep', val)
@@ -707,12 +723,8 @@ class TestDeepCopyMutationPrevention:
 class TestPersistentMemoryStoreFacade:
     """Tests for the PersistentMemoryStore facade layer."""
 
-    def test_unknown_backend_raises(self):
-        with pytest.raises(ValueError, match='Unknown backend'):
-            PersistentMemoryStore(backend='postgres')
-
-    def test_store_creates_inmemory_backend(self, store: PersistentMemoryStore):
-        assert isinstance(store.backend, InMemoryBackend)
+    def test_store_wraps_the_state_backend(self, store: PersistentMemoryStore):
+        assert isinstance(store.backend, StateBackend)
 
     def test_store_session_lifecycle(self, store: PersistentMemoryStore):
         store.create_session('s1')
@@ -737,7 +749,7 @@ class TestPersistentMemoryStoreFacade:
         assert len(history['entries']) >= 1
 
     def test_close_inmemory_is_noop(self, store: PersistentMemoryStore):
-        """InMemoryBackend.close() should be a safe no-op."""
+        """StateBackend.close() should be a safe no-op."""
         store.backend.close()
         # Store should still function after close (no-op for in-memory)
         store.create_session('after-close')
@@ -745,23 +757,30 @@ class TestPersistentMemoryStoreFacade:
 
 
 # =============================================================================
-# 12. InMemory Backend Bounds Tests
+# 12. State Backend Bounds Tests
 # =============================================================================
 
 
-class TestInMemoryBounds:
-    """Test that InMemory backend enforces session limits."""
+class TestStateBounds:
+    """The state backend keeps within the node's 16 state keys: fifteen sessions and the index."""
 
-    def test_max_sessions_enforced(self):
-        backend = InMemoryBackend()
+    def test_max_sessions_enforced(self, state):
+        backend = StateBackend(state)
         # Create up to the limit
-        for i in range(1000):
+        for i in range(MAX_STATE_SESSIONS):
             result = backend.create_session(f's{i}')
             assert result['ok'] is True, f'Failed at session {i}: {result}'
         # One more should fail
         result = backend.create_session('overflow')
         assert result['ok'] is False
         assert 'Maximum sessions' in result['error']
+
+    def test_a_deleted_session_frees_its_place(self, state):
+        backend = StateBackend(state)
+        for i in range(MAX_STATE_SESSIONS):
+            backend.create_session(f's{i}')
+        assert backend.delete_session('s0')['ok'] is True
+        assert backend.create_session('again')['ok'] is True
 
 
 # =============================================================================
@@ -772,28 +791,32 @@ class TestInMemoryBounds:
 class TestIGlobalLifecycle:
     """Tests for IGlobal initialization and teardown."""
 
-    def test_beginglobal_builds_the_store_from_the_resolved_config(self, monkeypatch):
-        """The in-memory backend (the schema default) is built with the resolved settings."""
-        import sys
-        import types
-
-        monkeypatch.setitem(sys.modules, 'depends', types.SimpleNamespace(depends=lambda *_: None))
+    def test_the_state_branch_holds_nothing_on_the_control(self):
+        """The default backend keeps its sessions in each binding's state: the IGlobal builds nothing."""
         iglobal = IGlobal()
-        iglobal.glb = types.SimpleNamespace(logicalType='memory_persistent', connConfig={'max_history': 7})
+        iglobal._config_restricted = control_config('memory_persistent')
         iglobal.beginGlobal()
-        try:
-            assert isinstance(iglobal.store.backend, InMemoryBackend)
-            assert iglobal.store.max_history == 7
-            assert iglobal.store.session_ttl_hours == 0
-        finally:
-            iglobal.endGlobal()
-        assert iglobal.store is None
-
-    def test_endglobal_clears_store(self):
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.store = MagicMock()
+        assert iglobal.redis is None
         iglobal.endGlobal()
-        assert iglobal.store is None
+        assert iglobal.redis is None
+
+    def test_the_redis_branch_connects_once_per_control(self, monkeypatch):
+        """The redis branch builds the pool from the control's host, port and password."""
+        monkeypatch.setitem(sys.modules, 'depends', types.SimpleNamespace(depends=lambda *_: None))
+        built = []
+        monkeypatch.setattr(
+            'nodes.memory_persistent.IGlobal.RedisBackend', lambda **kwargs: built.append(kwargs) or MagicMock()
+        )
+        iglobal = IGlobal()
+        iglobal._config_restricted = control_config(
+            'memory_persistent', {'backend': 'redis', 'redis': {'redis_host': 'cache', 'redis_port': 6380}}
+        )
+        iglobal.beginGlobal()
+        assert built == [{'host': 'cache', 'port': 6380, 'password': None}]
+        redis = iglobal.redis
+        iglobal.endGlobal()
+        redis.close.assert_called_once()
+        assert iglobal.redis is None
 
 
 # =============================================================================
@@ -804,10 +827,11 @@ class TestIGlobalLifecycle:
 class TestIInstanceLifecycle:
     """Tests for IInstance writeQuestions and writeAnswers."""
 
-    def _make_instance(self, store=None):
+    def _make_instance(self, store):
         inst = IInstance.__new__(IInstance)
         inst.IGlobal = MagicMock()
-        inst.IGlobal.store = store
+        # This call's store (the instance builds it from its settings and its state)
+        inst._store = lambda: store
         inst.instance = MagicMock()
         # The real IInstanceBase.preventDefault() raises APERR by design (it's
         # meant to be caught by the C++ engine); stub it so unit tests can call
@@ -818,22 +842,8 @@ class TestIInstanceLifecycle:
         inst.preventDefault = MagicMock()
         return inst
 
-    def test_write_questions_forwards_without_store(self):
-        inst = self._make_instance(store=None)
-        question = MagicMock()
-        inst.writeQuestions(question)
-        inst.instance.writeQuestions.assert_called_once()
-        inst.preventDefault.assert_called_once_with()
-
-    def test_write_answers_forwards_without_store(self):
-        inst = self._make_instance(store=None)
-        answer = MagicMock()
-        inst.writeAnswers(answer)
-        inst.instance.writeAnswers.assert_called_once()
-        inst.preventDefault.assert_called_once_with()
-
-    def test_write_questions_enriches_with_memory(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_questions_enriches_with_memory(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         store.create_session('test-sess')
         store.put('test-sess', 'context_key', 'context_value')
 
@@ -850,8 +860,8 @@ class TestIInstanceLifecycle:
         assert 'memory_context' in forwarded.metadata
         assert forwarded.metadata['memory_context']['context_key'] == 'context_value'
 
-    def test_write_questions_creates_session_if_missing(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_questions_creates_session_if_missing(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         inst = self._make_instance(store=store)
         question = MagicMock()
         question.metadata = {'session_id': 'new-sess'}
@@ -860,8 +870,8 @@ class TestIInstanceLifecycle:
         # Session should now exist
         assert store.resume_session('new-sess')['ok'] is True
 
-    def test_write_answers_stores_in_session(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_answers_stores_in_session(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         store.create_session('test-sess')
 
         inst = self._make_instance(store=store)
@@ -878,8 +888,8 @@ class TestIInstanceLifecycle:
         assert result['ok'] is True
         assert result['value'] == 'The answer is 42'
 
-    def test_write_answers_uses_session_id_from_previous_question(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_answers_uses_session_id_from_previous_question(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         store.create_session('test-sess')
 
         inst = self._make_instance(store=store)
@@ -899,8 +909,8 @@ class TestIInstanceLifecycle:
         assert store.get('test-sess', 'answer_count')['value'] == 1
         assert inst.preventDefault.call_count == 2
 
-    def test_write_answers_increments_count(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_answers_increments_count(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         store.create_session('test-sess')
 
         inst = self._make_instance(store=store)
@@ -913,8 +923,8 @@ class TestIInstanceLifecycle:
         count = store.get('test-sess', 'answer_count')
         assert count['value'] == 3
 
-    def test_open_clears_current_session_state(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_open_clears_current_session_state(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         store.create_session('test-sess')
 
         inst = self._make_instance(store=store)
@@ -927,8 +937,8 @@ class TestIInstanceLifecycle:
         inst.open(MagicMock())
         assert inst._current_session_id is None
 
-    def test_write_questions_no_session_id(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_questions_no_session_id(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         inst = self._make_instance(store=store)
         question = MagicMock()
         question.metadata = {}
@@ -937,8 +947,8 @@ class TestIInstanceLifecycle:
         inst.instance.writeQuestions.assert_called_once()
         inst.preventDefault.assert_called_once_with()
 
-    def test_write_answers_no_session_id(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_write_answers_no_session_id(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         inst = self._make_instance(store=store)
         answer = MagicMock()
         answer.metadata = {}
@@ -947,9 +957,9 @@ class TestIInstanceLifecycle:
         inst.instance.writeAnswers.assert_called_once()
         inst.preventDefault.assert_called_once_with()
 
-    def test_write_questions_invalid_session_id_forwards_once(self):
+    def test_write_questions_invalid_session_id_forwards_once(self, state):
         """A session_id the store rejects is dropped; the question is forwarded once, unenriched."""
-        store = PersistentMemoryStore(backend='memory')
+        store = PersistentMemoryStore(StateBackend(state))
         inst = self._make_instance(store=store)
         question = MagicMock()
         question.metadata = {'session_id': 'bad id!'}
@@ -962,9 +972,9 @@ class TestIInstanceLifecycle:
         forwarded = inst.instance.writeQuestions.call_args[0][0]
         assert 'memory_context' not in forwarded.metadata
 
-    def test_write_answers_invalid_session_id_forwards_once(self):
+    def test_write_answers_invalid_session_id_forwards_once(self, state):
         """A session_id the store rejects stops before storing; the answer is forwarded once."""
-        store = PersistentMemoryStore(backend='memory')
+        store = PersistentMemoryStore(StateBackend(state))
         inst = self._make_instance(store=store)
         answer = MagicMock()
         answer.metadata = {'session_id': 'bad id!'}
@@ -975,8 +985,8 @@ class TestIInstanceLifecycle:
         inst.instance.writeAnswers.assert_called_once()
         inst.preventDefault.assert_called_once_with()
 
-    def test_deep_copy_prevents_question_mutation(self):
-        store = PersistentMemoryStore(backend='memory')
+    def test_deep_copy_prevents_question_mutation(self, state):
+        store = PersistentMemoryStore(StateBackend(state))
         inst = self._make_instance(store=store)
         question = MagicMock()
         question.metadata = {'key': 'original'}
@@ -1002,12 +1012,10 @@ class TestIGlobalResourceCleanup:
         g = IGlobal.__new__(IGlobal)
         mock_backend = MagicMock()
         mock_backend.close.side_effect = RuntimeError('disconnect failed')
-        mock_store = MagicMock()
-        mock_store.backend = mock_backend
-        g.store = mock_store
+        g.redis = mock_backend
 
         with contextlib.suppress(RuntimeError):
             g.endGlobal()
 
-        assert g.store is None, 'endGlobal must null store in finally block'
+        assert g.redis is None, 'endGlobal must null the pool in finally block'
         mock_backend.close.assert_called_once()

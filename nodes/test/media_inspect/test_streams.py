@@ -27,7 +27,6 @@ import ast
 import builtins
 import importlib
 import json
-import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,11 +106,9 @@ def node(request=None, config=None):
     max_input_bytes = (config or {}).get('max_input_bytes', 16 * 1024**3)
     instance.IGlobal = SimpleNamespace(
         config={**DEFAULTS, 'request': json.dumps(request or {}), **(config or {})},
-        chunk_bytes=65536,
-        max_input_bytes=max_input_bytes,
-        # The instance reads the limit through the accessor (methods-only IGlobal, plan 4.2)
-        input_limit=lambda: max_input_bytes,
     )
+    # The input cap is the call's max_input_mb; a test asks for a byte-sized one
+    instance._max_input_bytes = lambda: max_input_bytes
     # The instance reads its per-call values through settings (plan 5.3): the
     # view the engine would build, resolved by the real resolver over the same
     # stored config (chunk_kb 64 matches the stand-in's 65536-byte chunks;
@@ -332,7 +329,8 @@ def test_editor_validation_has_no_dependency_side_effects(monkeypatch):
     validator = IValidatorBase()
     validator.glb = SimpleNamespace(logicalType=NODE, connConfig={'silence_db': -35})
     validator.validateConfig()
-    assert validator.config['silence_db'] == -35
+    # A param's stored value is the default every call starts from; the control's view refuses it
+    assert validator._resolved()['silence_db'] == -35
 
 
 def test_dependency_errors_propagate(monkeypatch):
@@ -436,14 +434,12 @@ def test_fractional_silence_threshold_is_preserved():
     assert resolveConfig(_schema(), {'silence_db': -37.5})['silence_db'] == -37.5
 
 
-def test_the_global_derives_the_byte_sizes_from_the_resolved_config(monkeypatch):
-    """IGlobal.beginGlobal turns the KB/MiB leaves into the byte counts the instance reads."""
-    monkeypatch.setitem(sys.modules, 'depends', SimpleNamespace(load_depends=lambda *_: None))
-    glb = IGlobal()
-    glb.glb = SimpleNamespace(logicalType=NODE, connConfig={'chunk_kb': 64, 'max_input_mb': 2})
-    glb.beginGlobal()
-    assert (glb.chunk_bytes, glb.max_input_bytes) == (64 * 1024, 2 * 1024 * 1024)
-    assert glb.config['request'] == '{}'
+def test_the_input_cap_is_each_calls_max_input_mb():
+    """The instance turns the call's max_input_mb into its byte cap; two calls, two caps."""
+    for megabytes in (2, 5):
+        instance = IInstance()
+        instance._settings = resolveConfig(_schema(), {'max_input_mb': megabytes})
+        assert instance._max_input_bytes() == megabytes * 1024 * 1024
 
 
 @pytest.mark.parametrize('key, value', [('chunk_kb', 32), ('max_input_mb', 0), ('peak_ms', 5), ('silence_ms', 0)])

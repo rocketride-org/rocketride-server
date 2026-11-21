@@ -62,7 +62,9 @@ def _instance(monkeypatch, *, response='fake response', listeners=('text',)):
     inst = IInstance()
     inst.beginInstance()
     inst.instance = _Capture(listeners)
-    inst.IGlobal = SimpleNamespace(api_key='fake-key', instructions=['Describe this video.'])
+    inst.IGlobal = SimpleNamespace(api_key='fake-key')
+    # The instructions are this call's setting
+    inst._settings = SimpleNamespace(instructions=['Describe this video.'])
     inst.driver_calls = calls
     return inst
 

@@ -141,10 +141,9 @@ def test_list_namespaced_tools_emits_cached_schema_under_camel_case_key():
         'required': ['query'],
     }
     iglobal = IGlobal.__new__(IGlobal)
-    iglobal.serverName = 'cached'
     iglobal._cache_tools([McpToolDef(name='search', description='Search documents', inputSchema=schema)])
 
-    [descriptor] = iglobal.list_namespaced_tools()
+    [descriptor] = iglobal.list_namespaced_tools('cached')
 
     assert descriptor['name'] == 'cached.search'
     assert descriptor['description'] == 'Search documents'
@@ -165,11 +164,11 @@ class _RecordingClient:
 def _instance_with_cached_tool(tool):
     client = _RecordingClient()
     iglobal = IGlobal.__new__(IGlobal)
-    iglobal.serverName = 'cached'
     iglobal._client = client
     iglobal._cache_tools([tool])
     instance = IInstance.__new__(IInstance)
     instance.IGlobal = iglobal
+    instance._settings = types.SimpleNamespace(serverName='cached')
     return instance, client
 
 

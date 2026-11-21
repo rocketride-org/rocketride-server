@@ -50,12 +50,11 @@ load_schema_from_data_url = _base_mod.load_schema_from_data_url
 resolve_api_key = _base_mod.resolve_api_key
 
 
-def _make_extractor(schema=None, strict=False) -> Extractor:
+def _make_extractor(schema=None) -> Extractor:
     """Build an Extractor without running __init__ (which reads engine config)."""
     extractor = Extractor.__new__(Extractor)
     extractor._api_key = 'test-key'
     extractor._region = 'production'
-    extractor._strict = strict
     extractor._schema = schema or {'type': 'object', 'properties': {'summary': {'type': 'string'}}}
     extractor._schema_error = None
     return extractor
@@ -133,17 +132,27 @@ def test_extract_returns_extraction_payload() -> None:
     """extract() should return the response.extraction data."""
     extractor = _make_extractor()
 
-    result = extractor.extract('# Invoice\n\nTotal: $100')
+    result = extractor.extract('# Invoice\n\nTotal: $100', strict=False)
 
     assert result == {'summary': 'mock-extraction'}
+
+
+def test_one_extractor_serves_calls_with_their_own_strict() -> None:
+    """The strict flag is per call: one extractor (one control) sends each call's own value."""
+    extractor = _make_extractor()
+
+    extractor.extract('# one', strict=True)
+    assert LandingAIADE.last_extract_kwargs['strict'] is True
+    extractor.extract('# two', strict=False)
+    assert LandingAIADE.last_extract_kwargs['strict'] is False
 
 
 def test_extract_passes_markdown_string_and_schema() -> None:
     """extract() should hand the SDK the Markdown content directly and the schema/strict."""
     schema = {'type': 'object', 'properties': {'x': {'type': 'string'}}}
-    extractor = _make_extractor(schema=schema, strict=True)
+    extractor = _make_extractor(schema=schema)
 
-    extractor.extract('# md content')
+    extractor.extract('# md content', strict=True)
 
     kwargs = LandingAIADE.last_extract_kwargs
     # ADE Extract takes the Markdown content directly — no temp file/Path.
@@ -159,7 +168,7 @@ def test_extract_passes_markdown_string_and_schema() -> None:
 def test_extract_empty_markdown_returns_empty() -> None:
     """extract() should short-circuit on empty markdown."""
     extractor = _make_extractor()
-    assert extractor.extract('   ') == {}
+    assert extractor.extract('   ', strict=False) == {}
 
 
 def test_extract_reraises_sdk_errors(monkeypatch) -> None:
@@ -175,7 +184,7 @@ def test_extract_reraises_sdk_errors(monkeypatch) -> None:
     monkeypatch.setattr(_extract_mod, 'build_client', lambda *a, **k: _Boom())
 
     with pytest.raises(RuntimeError, match='sdk down'):
-        extractor.extract('# md content')
+        extractor.extract('# md content', strict=False)
 
 
 def test_extract_raises_on_deferred_schema_error() -> None:
@@ -186,7 +195,7 @@ def test_extract_raises_on_deferred_schema_error() -> None:
     extractor._schema_error = 'uploaded schema is not valid JSON'
 
     with pytest.raises(ValueError, match='not valid JSON'):
-        extractor.extract('# md content')
+        extractor.extract('# md content', strict=False)
 
 
 # --- credential resolution ------------------------------------------------

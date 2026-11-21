@@ -276,7 +276,7 @@ class _FakeEngine:
 
 
 def _config(**overrides):
-    """Build IGlobal settings with the node's defaults.
+    """Build one call's settings with the node's defaults.
 
     Args:
         **overrides: Settings to change.
@@ -304,13 +304,15 @@ def build():
         Args:
             listeners: Output lanes the engine reports.
             results: JSON results the LLM returns, in order.
-            **config: IGlobal settings to change.
+            **config: Settings of the call to change.
 
         Returns:
             (inst, engine).
         """
         inst = _load_iinstance_class()()
-        inst.IGlobal = _config(**config)
+        inst.IGlobal = types.SimpleNamespace()
+        # The four counts are this call's settings (the stub base has no settings door)
+        inst.settings = _config(**config)
         inst.instance = _FakeEngine(listeners, results)
         inst.beginInstance()
         inst.open(None)

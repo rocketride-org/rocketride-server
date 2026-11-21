@@ -120,7 +120,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """List the worksheets (tabs) in a workbook. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_excel')
         file = require_str(args, 'file', tool_name='excel_list_worksheets')
-        data = request(self.IGlobal.auth, 'GET', f'{self._wb(file)}/worksheets')
+        data = request(self._auth(), 'GET', f'{self._wb(file)}/worksheets')
         return {'worksheets': [clean_worksheet(w) for w in data.get('value') or []]}
 
     @tool_function(
@@ -148,7 +148,7 @@ class IInstance(MicrosoftToolInstanceBase):
         sheet = require_str(args, 'sheet', tool_name='excel_read_range')
         rng = require_str(args, 'range', tool_name='excel_read_range')
         path = f"{self._wb(file)}/worksheets/{_seg(sheet)}/range(address='{_seg(rng)}')"
-        data = request(self.IGlobal.auth, 'GET', path)
+        data = request(self._auth(), 'GET', path)
         return clean_range(data)
 
     @tool_function(
@@ -175,7 +175,7 @@ class IInstance(MicrosoftToolInstanceBase):
         file = require_str(args, 'file', tool_name='excel_read_used_range')
         sheet = require_str(args, 'sheet', tool_name='excel_read_used_range')
         path = f'{self._wb(file)}/worksheets/{_seg(sheet)}/usedRange'
-        data = request(self.IGlobal.auth, 'GET', path)
+        data = request(self._auth(), 'GET', path)
         return clean_range(data)
 
     # =======================================================================
@@ -208,13 +208,13 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_update_range(self, args: dict) -> dict:
         """Write values into an A1 range (overwrites). Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_update_range')
+        self._access().require_write('excel_update_range')
         file = require_str(args, 'file', tool_name='excel_update_range')
         sheet = require_str(args, 'sheet', tool_name='excel_update_range')
         rng = require_str(args, 'range', tool_name='excel_update_range')
         values = self._values_arg(args, 'values', 'excel_update_range')
         path = f"{self._wb(file)}/worksheets/{_seg(sheet)}/range(address='{_seg(rng)}')"
-        data = request(self.IGlobal.auth, 'PATCH', path, json_body={'values': values})
+        data = request(self._auth(), 'PATCH', path, json_body={'values': values})
         return clean_range(data)
 
     @tool_function(
@@ -235,12 +235,12 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_clear_range(self, args: dict) -> dict:
         """Clear the contents of an A1 range. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_clear_range')
+        self._access().require_write('excel_clear_range')
         file = require_str(args, 'file', tool_name='excel_clear_range')
         sheet = require_str(args, 'sheet', tool_name='excel_clear_range')
         rng = require_str(args, 'range', tool_name='excel_clear_range')
         path = f"{self._wb(file)}/worksheets/{_seg(sheet)}/range(address='{_seg(rng)}')/clear"
-        request(self.IGlobal.auth, 'POST', path, json_body={'applyTo': 'Contents'})
+        request(self._auth(), 'POST', path, json_body={'applyTo': 'Contents'})
         return {'cleared': rng}
 
     # =======================================================================
@@ -264,10 +264,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_add_worksheet(self, args: dict) -> dict:
         """Add a new worksheet (tab) to a workbook. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_add_worksheet')
+        self._access().require_write('excel_add_worksheet')
         file = require_str(args, 'file', tool_name='excel_add_worksheet')
         name = require_str(args, 'name', tool_name='excel_add_worksheet')
-        data = request(self.IGlobal.auth, 'POST', f'{self._wb(file)}/worksheets/add', json_body={'name': name})
+        data = request(self._auth(), 'POST', f'{self._wb(file)}/worksheets/add', json_body={'name': name})
         return clean_worksheet(data)
 
     # =======================================================================
@@ -291,7 +291,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """List the tables in a workbook. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_excel')
         file = require_str(args, 'file', tool_name='excel_list_tables')
-        data = request(self.IGlobal.auth, 'GET', f'{self._wb(file)}/tables')
+        data = request(self._auth(), 'GET', f'{self._wb(file)}/tables')
         return {'tables': [clean_table(t) for t in data.get('value') or []]}
 
     @tool_function(
@@ -319,7 +319,7 @@ class IInstance(MicrosoftToolInstanceBase):
         # ([[a, b, c]]); unwrap it to the documented per-row value-array.
         path = f'{self._wb(file)}/tables/{_seg(table)}/rows'
         while path:
-            data = request(self.IGlobal.auth, 'GET', path)
+            data = request(self._auth(), 'GET', path)
             for row in data.get('value') or []:
                 values = row.get('values')
                 rows.append(values[0] if isinstance(values, list) and len(values) == 1 else values)
@@ -352,13 +352,13 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_add_table(self, args: dict) -> dict:
         """Create a table over an A1 range. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_add_table')
+        self._access().require_write('excel_add_table')
         file = require_str(args, 'file', tool_name='excel_add_table')
         sheet = require_str(args, 'sheet', tool_name='excel_add_table')
         rng = require_str(args, 'range', tool_name='excel_add_table')
         has_headers = optional_bool(args, 'has_headers', default=True, tool_name='excel_add_table')
         path = f'{self._wb(file)}/worksheets/{_seg(sheet)}/tables/add'
-        data = request(self.IGlobal.auth, 'POST', path, json_body={'address': rng, 'hasHeaders': has_headers})
+        data = request(self._auth(), 'POST', path, json_body={'address': rng, 'hasHeaders': has_headers})
         return clean_table(data)
 
     @tool_function(
@@ -383,12 +383,12 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_add_table_rows(self, args: dict) -> dict:
         """Append rows to the end of a table. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_add_table_rows')
+        self._access().require_write('excel_add_table_rows')
         file = require_str(args, 'file', tool_name='excel_add_table_rows')
         table = require_str(args, 'table', tool_name='excel_add_table_rows')
         rows = self._values_arg(args, 'rows', 'excel_add_table_rows')
         path = f'{self._wb(file)}/tables/{_seg(table)}/rows'
-        request(self.IGlobal.auth, 'POST', path, json_body={'values': rows})
+        request(self._auth(), 'POST', path, json_body={'values': rows})
         return {'added': len(rows)}
 
     # =======================================================================
@@ -417,14 +417,14 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_add_chart(self, args: dict) -> dict:
         """Add a chart to a worksheet. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_add_chart')
+        self._access().require_write('excel_add_chart')
         file = require_str(args, 'file', tool_name='excel_add_chart')
         sheet = require_str(args, 'sheet', tool_name='excel_add_chart')
         chart_type = require_str(args, 'chart_type', tool_name='excel_add_chart')
         source_range = require_str(args, 'source_range', tool_name='excel_add_chart')
         path = f'{self._wb(file)}/worksheets/{_seg(sheet)}/charts/add'
         data = request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             path,
             json_body={'type': chart_type, 'sourceData': source_range, 'seriesBy': 'Auto'},
@@ -454,11 +454,9 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_calculate(self, args: dict) -> dict:
         """Recalculate every formula in a workbook. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_calculate')
+        self._access().require_write('excel_calculate')
         file = require_str(args, 'file', tool_name='excel_calculate')
-        request(
-            self.IGlobal.auth, 'POST', f'{self._wb(file)}/application/calculate', json_body={'calculationType': 'Full'}
-        )
+        request(self._auth(), 'POST', f'{self._wb(file)}/application/calculate', json_body={'calculationType': 'Full'})
         return {'calculated': True}
 
     @tool_function(
@@ -480,11 +478,11 @@ class IInstance(MicrosoftToolInstanceBase):
     def excel_create_workbook(self, args: dict) -> dict:
         """Create a new empty workbook at a OneDrive path. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_excel')
-        self.IGlobal.access.require_write('excel_create_workbook')
+        self._access().require_write('excel_create_workbook')
         path_arg = require_str(args, 'path', tool_name='excel_create_workbook')
         upload_path = f'{self._base()}/drive/root:/{urllib.parse.quote(path_arg, safe=chr(47))}:/content'
         data = request(
-            self.IGlobal.auth,
+            self._auth(),
             'PUT',
             upload_path,
             data=EMPTY_XLSX,

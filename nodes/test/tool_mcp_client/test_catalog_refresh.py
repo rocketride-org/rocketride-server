@@ -112,7 +112,6 @@ class _FailingClient(_ScriptedClient):
 def _iglobal(client, *initial):
     """An IGlobal as ``beginGlobal`` leaves it: connected client + cached catalog."""
     g = IGlobal.__new__(IGlobal)
-    g.serverName = 'srv'
     g._client = client
     g._cache_tools(list(initial))
     return g
@@ -151,7 +150,7 @@ class TestLookupMiss:
 
         assert g.get_tool(server_name='srv', tool_name='late').name == 'late'
         assert client.list_calls == 1
-        assert {d['name'] for d in g.list_namespaced_tools()} == {'srv.a', 'srv.late'}
+        assert {d['name'] for d in g.list_namespaced_tools('srv')} == {'srv.a', 'srv.late'}
 
     def test_call_tool_calls_a_tool_added_after_start(self, clock):
         client = _ScriptedClient([_tool('a'), _tool('late')])
@@ -180,6 +179,7 @@ class TestLookupMiss:
         g = _iglobal(client, _tool('a'))
         instance = IInstance.__new__(IInstance)
         instance.IGlobal = g
+        instance._settings = types.SimpleNamespace(serverName='srv')
         clock[0] += REFRESH_MIN_INTERVAL_S
 
         with pytest.raises(ToolUnavailableError):
@@ -229,15 +229,19 @@ class TestLookupMiss:
         client = _ScriptedClient([_tool('a')])
         g = _iglobal(client, _tool('a'))
 
-        assert g.get_tool(server_name='other', tool_name='a') is None
+        # The call's namespace is checked by the instance, before the control is asked
+        instance = IInstance.__new__(IInstance)
+        instance.IGlobal = g
+        instance._settings = types.SimpleNamespace(serverName='srv')
+        with pytest.raises(Exception, match="Unknown MCP serverName 'other'"):
+            instance._tool_invoke_dynamic(tool_name='other.a', input_obj={})
         assert client.list_calls == 0
 
     def test_no_client_means_no_refresh_and_no_crash(self):
         g = IGlobal.__new__(IGlobal)
-        g.serverName = 'srv'
 
         assert g.get_tool(server_name='srv', tool_name='a') is None
-        assert g.list_namespaced_tools() == []
+        assert g.list_namespaced_tools('srv') == []
 
 
 # ---------------------------------------------------------------------------
@@ -251,7 +255,7 @@ class TestCatalogQuery:
         g = _iglobal(client, _tool('a'))
         clock[0] += REFRESH_MIN_INTERVAL_S / 2
 
-        assert {d['name'] for d in g.list_namespaced_tools()} == {'srv.a'}
+        assert {d['name'] for d in g.list_namespaced_tools('srv')} == {'srv.a'}
         assert client.list_calls == 0
 
     def test_query_after_the_interval_re_reads_the_server(self, clock):
@@ -259,17 +263,17 @@ class TestCatalogQuery:
         g = _iglobal(client, _tool('a'))
         clock[0] += REFRESH_MIN_INTERVAL_S
 
-        assert {d['name'] for d in g.list_namespaced_tools()} == {'srv.a', 'srv.late'}
+        assert {d['name'] for d in g.list_namespaced_tools('srv')} == {'srv.a', 'srv.late'}
         assert client.list_calls == 1
         # The refresh restarts the interval: an immediate second query is served from cache.
-        assert {d['name'] for d in g.list_namespaced_tools()} == {'srv.a', 'srv.late'}
+        assert {d['name'] for d in g.list_namespaced_tools('srv')} == {'srv.a', 'srv.late'}
         assert client.list_calls == 1
 
     def test_query_descriptor_shape_is_unchanged(self):
         client = _ScriptedClient([_tool('a')])
         g = _iglobal(client, _tool('a'))
 
-        [descriptor] = g.list_namespaced_tools()
+        [descriptor] = g.list_namespaced_tools('srv')
 
         assert descriptor == {
             'name': 'srv.a',
@@ -290,7 +294,7 @@ class TestRefreshOutcomes:
         clock[0] += REFRESH_MIN_INTERVAL_S
 
         assert g.refresh_tools(reason='test') is False
-        assert {d['name'] for d in g.list_namespaced_tools()} == {'srv.a'}
+        assert {d['name'] for d in g.list_namespaced_tools('srv')} == {'srv.a'}
         assert g.call_tool(server_name='srv', tool_name='a', arguments={})['content'][0]['text'] == 'called a'
         assert any('refresh (test) failed' in w and 'server went away' in w for w in warnings)
 
@@ -351,13 +355,12 @@ class TestRefreshOutcomes:
         client = _ScriptedClient([_tool('a'), _tool('b')])
         g = _iglobal(client, _tool('a'))
         old_by_name = g._tools_by_original
-        old_by_namespaced = g._tools_by_namespaced
 
         g.refresh_tools(reason='test')
 
         # A reader still holding the previous maps sees them unchanged; the
         # new catalog is a fresh object, not an in-place mutation.
-        assert set(old_by_name) == {'a'} and set(old_by_namespaced) == {'srv.a'}
+        assert set(old_by_name) == {'a'}
         assert set(g._tools_by_original) == {'a', 'b'}
         assert g._tools_by_original is not old_by_name
 
@@ -403,20 +406,18 @@ def paged_stub_client(tmp_path, monkeypatch):
 class TestAgainstStubServer:
     def test_tool_on_a_later_page_is_discovered_and_callable_through_iglobal(self, paged_stub_client, clock):
         g = IGlobal.__new__(IGlobal)
-        g.serverName = 'stub'
         g._client = paged_stub_client
         g._cache_tools(paged_stub_client.list_tools())
 
-        assert {t['name'] for t in g.list_namespaced_tools()} == {'stub.tool_0', 'stub.tool_1', 'stub.tool_2'}
+        assert {t['name'] for t in g.list_namespaced_tools('stub')} == {'stub.tool_0', 'stub.tool_1', 'stub.tool_2'}
         result = g.call_tool(server_name='stub', tool_name='tool_2', arguments={'k': 'v'})
         assert result['received_arguments'] == {'k': 'v'}
 
     def test_tool_added_after_start_becomes_callable_and_ghost_is_refused(self, stub_client, live_tools_file, clock):
         g = IGlobal.__new__(IGlobal)
-        g.serverName = 'stub'
         g._client = stub_client
         g._cache_tools(stub_client.list_tools())
-        assert {t['name'] for t in g.list_namespaced_tools()} == {'stub.echo_tool'}
+        assert {t['name'] for t in g.list_namespaced_tools('stub')} == {'stub.echo_tool'}
 
         # The server grows a tool while the engine keeps running.
         live_tools_file.write_text(

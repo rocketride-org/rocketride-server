@@ -185,7 +185,10 @@ def _make(tier='write', results=None):
     """Build an IInstance wired to a FakeSheets and a real resolved GoogleAccess."""
     inst = sheets_iinstance.IInstance()
     access = ga.resolve_google_access({'access': tier}, ga.SHEETS)
-    inst.IGlobal = types.SimpleNamespace(service=FakeSheets(results or {}), access=access)
+    service = FakeSheets(results or {})
+    # The control serves the service of a tier; the binding resolved its access once
+    inst.IGlobal = types.SimpleNamespace(service=service, service_for=lambda tier: service)
+    inst.__dict__['_google_access'] = access
     return inst
 
 
@@ -299,7 +302,7 @@ def test_readonly_tier_allows_reads():
     inst = _make(tier='readonly', results={'get': {'values': [['ok']]}})
     out = inst.values_get({'spreadsheetId': 'ss1', 'range': 'A1'})
     assert out['values'] == [['ok']]
-    assert inst.IGlobal.access.can_write is False
+    assert inst._access().can_write is False
 
 
 def test_default_tier_is_write():
@@ -717,5 +720,6 @@ def test_validate_config_warns_for_malformed_user_token(monkeypatch):
     config = {'authType': 'user', 'userAuth': '{bad json'}
     monkeypatch.setattr(workspace_ivalidator, 'warning', warnings.append)
     monkeypatch.setattr(sheets_ivalidator.IValidator, 'config', property(lambda self: config))
+    monkeypatch.setattr(sheets_ivalidator.IValidator, '_resolved', lambda self: config, raising=False)
     sheets_ivalidator.IValidator().validateConfig()
     assert any('invalid' in message.lower() for message in warnings)

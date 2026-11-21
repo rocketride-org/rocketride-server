@@ -129,7 +129,10 @@ def make_live_inst(access_tier: str = 'modify'):
     access = ga.resolve_google_access({'access': access_tier}, ga.GMAIL)
     svc = gmail_client.build_service('user', {'userAuth': TOKEN_JSON}, access.scopes)
     inst = IInstance.IInstance()
-    inst.IGlobal = types.SimpleNamespace(service=svc, access=access)
+    service = svc
+    # The control serves the service of a tier; the binding resolved its access once
+    inst.IGlobal = types.SimpleNamespace(service=service, service_for=lambda tier: service)
+    inst.__dict__['_google_access'] = access
     return inst
 
 

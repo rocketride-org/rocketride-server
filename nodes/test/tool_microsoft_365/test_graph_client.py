@@ -108,7 +108,7 @@ class TestAppOnlyAuth:
     CFG = {'tenantId': 't1', 'clientId': 'c1', 'clientSecret': 's1', 'userPrincipalName': 'a@b.com'}
 
     def test_acquires_and_caches_token(self):
-        auth = gc.build_auth(SVC, 'service', self.CFG, ['Files.ReadWrite'])
+        auth = gc.build_auth(SVC, 'service', self.CFG)
         with mock.patch.object(gc, '_urlopen', return_value=_resp({'access_token': 'T', 'expires_in': 3600})) as u:
             assert auth.token() == 'T'
             assert auth.token() == 'T'  # cached, no second POST
@@ -118,7 +118,7 @@ class TestAppOnlyAuth:
             assert b'client_credentials' in req.data and b'.default' in req.data
 
     def test_expired_token_reacquired(self):
-        auth = gc.build_auth(SVC, 'service', self.CFG, [])
+        auth = gc.build_auth(SVC, 'service', self.CFG)
         now = 1_700_000_000.0
         with mock.patch.object(gc._time, 'time', return_value=now):
             with mock.patch.object(gc, '_urlopen', return_value=_resp({'access_token': 'T1', 'expires_in': 3600})):
@@ -130,10 +130,10 @@ class TestAppOnlyAuth:
 
     def test_missing_config_fails_loud(self):
         with pytest.raises(ValueError, match='tenantId'):
-            gc.build_auth(SVC, 'service', {'clientId': 'c', 'clientSecret': 's'}, [])
+            gc.build_auth(SVC, 'service', {'clientId': 'c', 'clientSecret': 's'})
 
     def test_token_http_error_response_is_closed(self):
-        auth = gc.build_auth(SVC, 'service', self.CFG, [])
+        auth = gc.build_auth(SVC, 'service', self.CFG)
         body = io.BytesIO(b'rejected')
         err = urllib.error.HTTPError('u', 401, 'nope', {}, body)
         with mock.patch.object(gc, '_urlopen', side_effect=err):
@@ -156,7 +156,7 @@ class TestBrokerUserAuth:
         return {'userAuth': json.dumps(p)}
 
     def test_refresh_posts_refresh_token_to_broker(self):
-        auth = gc.build_auth(SVC, 'user', self._payload(), ['Files.ReadWrite'])
+        auth = gc.build_auth(SVC, 'user', self._payload())
         with mock.patch.object(
             gc, '_urlopen', return_value=_resp({'access_token': 'B', 'expiry_date': int((time.time() + 3600) * 1000)})
         ) as u:
@@ -166,13 +166,13 @@ class TestBrokerUserAuth:
             assert json.loads(req.data) == {'refresh_token': 'R'}
 
     def test_refresh_200_without_token_is_contract_violation(self):
-        auth = gc.build_auth(SVC, 'user', self._payload(), [])
+        auth = gc.build_auth(SVC, 'user', self._payload())
         with mock.patch.object(gc, '_urlopen', return_value=_resp({'ok': True})):
             with pytest.raises(ValueError, match='no access token'):
                 auth.token()
 
     def test_refresh_http_error_is_rejection(self):
-        auth = gc.build_auth(SVC, 'user', self._payload(), [])
+        auth = gc.build_auth(SVC, 'user', self._payload())
         body = io.BytesIO(b'rejected')
         err = urllib.error.HTTPError('u', 401, 'nope', {}, body)
         with mock.patch.object(gc, '_urlopen', side_effect=err):
@@ -183,11 +183,11 @@ class TestBrokerUserAuth:
     def test_expired_without_refresh_path_fails_now(self):
         cfg = self._payload(oauth_server_url=None, refresh_token=None)
         with pytest.raises(ValueError, match='expired'):
-            gc.build_auth(SVC, 'user', cfg, [])
+            gc.build_auth(SVC, 'user', cfg)
 
-    def test_missing_required_scope_fails_at_build(self):
+    def test_a_tier_the_grant_lacks_is_refused_per_call(self):
         with pytest.raises(ValueError, match='Mail.Send'):
-            gc.build_auth(SVC, 'user', self._payload(), ['Mail.Send'])
+            gc.require_token_scopes(SVC, self._payload(), ['Mail.Send'])
 
     def test_scope_report_reads_payload(self):
         granted, ok, missing = gc.token_scope_report(SVC, self._payload(), ['Files.Read'])
@@ -200,7 +200,7 @@ class TestBrokerUserAuth:
         with mock.patch.object(
             gc, '_urlopen', return_value=_resp({'access_token': 'B', 'expiry_date': int((time.time() + 3600) * 1000)})
         ) as u:
-            assert gc.build_auth(SVC, 'user', cfg, []).token() == 'B'
+            assert gc.build_auth(SVC, 'user', cfg).token() == 'B'
             assert u.call_count == 1
 
     def test_numeric_string_expiry_date_is_normalized(self):
@@ -208,13 +208,13 @@ class TestBrokerUserAuth:
         # build_auth must coerce it once so BrokerUserAuth never divides a str.
         cfg = self._payload(expiry_date=str(int((time.time() + 3600) * 1000)))
         with mock.patch.object(gc, '_urlopen') as u:
-            assert gc.build_auth(SVC, 'user', cfg, []).token() == 'A'
+            assert gc.build_auth(SVC, 'user', cfg).token() == 'A'
             assert u.call_count == 0
 
     def test_garbage_expiry_date_raises_readable_error(self):
         cfg = self._payload(expiry_date='not-a-number')
         with pytest.raises(ValueError, match='Excel.*Please disconnect and reconnect your Microsoft account'):
-            gc.build_auth(SVC, 'user', cfg, [])
+            gc.build_auth(SVC, 'user', cfg)
 
 
 class TestRedirectAuthStripping:

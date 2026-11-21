@@ -84,7 +84,7 @@ class IInstance(MicrosoftToolInstanceBase):
     def _chunked_upload(self, path: str, content: bytes) -> dict:
         """Resumable upload: create a session, then PUT CHUNK_SIZE-byte pieces."""
         session = request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             f'{self._base()}/drive/root:/{urllib.parse.quote(path, safe=chr(47))}:/createUploadSession',
             json_body={'item': {'@microsoft.graph.conflictBehavior': 'replace'}},
@@ -96,7 +96,7 @@ class IInstance(MicrosoftToolInstanceBase):
         result: dict = {}
         for start in range(0, total, CHUNK_SIZE):
             end = min(start + CHUNK_SIZE, total) - 1
-            result = upload_chunk(self.IGlobal.auth, upload_url, content[start : end + 1], start, end, total)
+            result = upload_chunk(self._auth(), upload_url, content[start : end + 1], start, end, total)
         return result
 
     def _require_individual_directory_user(self, email: str) -> None:
@@ -110,7 +110,7 @@ class IInstance(MicrosoftToolInstanceBase):
         permission; anything else) refuses the invite rather than guessing.
         """
         try:
-            request(self.IGlobal.auth, 'GET', f'/users/{_seg(email)}', params={'$select': 'id'})
+            request(self._auth(), 'GET', f'/users/{_seg(email)}', params={'$select': 'id'})
         except Exception as exc:
             is_permission_error = isinstance(exc, graph_client.GraphError) and 'access denied' in str(exc)
             hint = (
@@ -167,7 +167,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """List the items directly inside a OneDrive folder (root by default). Read-only."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
         folder = optional_str(args, 'folder', default='', tool_name='onedrive_list_items') or ''
-        data = request(self.IGlobal.auth, 'GET', f'{self._it(folder)}/children')  # '' -> drive root
+        data = request(self._auth(), 'GET', f'{self._it(folder)}/children')  # '' -> drive root
         return {'items': [clean_item(i) for i in data.get('value') or []]}
 
     @tool_function(
@@ -185,7 +185,7 @@ class IInstance(MicrosoftToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_onedrive')
         query = require_str(args, 'query', tool_name='onedrive_search')
         path = f"{self._base()}/drive/root/search(q='{_seg(query)}')"
-        data = request(self.IGlobal.auth, 'GET', path)
+        data = request(self._auth(), 'GET', path)
         return {'items': [clean_item(i) for i in data.get('value') or []]}
 
     @tool_function(
@@ -202,7 +202,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """Get metadata for a OneDrive item. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
         item = require_str(args, 'item', tool_name='onedrive_get_metadata')
-        data = request(self.IGlobal.auth, 'GET', self._it(item))
+        data = request(self._auth(), 'GET', self._it(item))
         return clean_item(data)
 
     @tool_function(
@@ -224,14 +224,14 @@ class IInstance(MicrosoftToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_onedrive')
         item = require_str(args, 'item', tool_name='onedrive_download')
         item_path = self._it(item)
-        meta = request(self.IGlobal.auth, 'GET', item_path)
+        meta = request(self._auth(), 'GET', item_path)
         size = meta.get('size') or 0
         if size > DOWNLOAD_INLINE_LIMIT:
             download_url = meta.get('@microsoft.graph.downloadUrl')
             if not download_url:
                 raise graph_client.GraphError('onedrive_download: item metadata has no @microsoft.graph.downloadUrl')
             return {'downloadUrl': download_url}
-        raw = request(self.IGlobal.auth, 'GET', f'{item_path}/content', binary=True)
+        raw = request(self._auth(), 'GET', f'{item_path}/content', binary=True)
         return {'name': meta.get('name'), 'content_base64': base64.b64encode(raw).decode('ascii')}
 
     # =======================================================================
@@ -256,7 +256,7 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_upload(self, args: dict) -> dict:
         """Upload/overwrite a file at a OneDrive path from base64 content. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_upload')
+        self._access().require_write('onedrive_upload')
         path = require_str(args, 'path', tool_name='onedrive_upload')
         content_b64 = require_str(args, 'content_base64', tool_name='onedrive_upload')
         try:
@@ -265,7 +265,7 @@ class IInstance(MicrosoftToolInstanceBase):
             raise ValueError(f'onedrive_upload: "content_base64" is not valid base64 ({exc})') from exc
         if len(content) <= SIMPLE_UPLOAD_LIMIT:
             data = request(
-                self.IGlobal.auth,
+                self._auth(),
                 'PUT',
                 f'{self._base()}/drive/root:/{urllib.parse.quote(path, safe=chr(47))}:/content',
                 data=content,
@@ -291,11 +291,11 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_create_folder(self, args: dict) -> dict:
         """Create a new folder inside a parent OneDrive folder. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_create_folder')
+        self._access().require_write('onedrive_create_folder')
         parent = require_str(args, 'parent', tool_name='onedrive_create_folder')
         name = require_str(args, 'name', tool_name='onedrive_create_folder')
         data = request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             f'{self._it(parent)}/children',
             json_body={'name': name, 'folder': {}, '@microsoft.graph.conflictBehavior': 'fail'},
@@ -320,14 +320,14 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_copy(self, args: dict) -> dict:
         """Copy an item into another folder, optionally renaming it. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_copy')
+        self._access().require_write('onedrive_copy')
         item = require_str(args, 'item', tool_name='onedrive_copy')
         target_folder = require_str(args, 'target_folder', tool_name='onedrive_copy')
         new_name = optional_str(args, 'new_name', default='', tool_name='onedrive_copy') or ''
         body: dict = {'parentReference': parent_ref(target_folder)}
         if new_name:
             body['name'] = new_name
-        request(self.IGlobal.auth, 'POST', f'{self._it(item)}/copy', json_body=body)
+        request(self._auth(), 'POST', f'{self._it(item)}/copy', json_body=body)
         return {'accepted': True, 'item': item, 'target_folder': target_folder, 'new_name': new_name or None}
 
     @tool_function(
@@ -344,12 +344,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_move(self, args: dict) -> dict:
         """Move an item into another folder. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_move')
+        self._access().require_write('onedrive_move')
         item = require_str(args, 'item', tool_name='onedrive_move')
         target_folder = require_str(args, 'target_folder', tool_name='onedrive_move')
-        data = request(
-            self.IGlobal.auth, 'PATCH', self._it(item), json_body={'parentReference': parent_ref(target_folder)}
-        )
+        data = request(self._auth(), 'PATCH', self._it(item), json_body={'parentReference': parent_ref(target_folder)})
         return clean_item(data)
 
     @tool_function(
@@ -366,10 +364,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_rename(self, args: dict) -> dict:
         """Rename a file or folder in place. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_rename')
+        self._access().require_write('onedrive_rename')
         item = require_str(args, 'item', tool_name='onedrive_rename')
         new_name = require_str(args, 'new_name', tool_name='onedrive_rename')
-        data = request(self.IGlobal.auth, 'PATCH', self._it(item), json_body={'name': new_name})
+        data = request(self._auth(), 'PATCH', self._it(item), json_body={'name': new_name})
         return clean_item(data)
 
     # =======================================================================
@@ -393,9 +391,9 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_trash(self, args: dict) -> dict:
         """Move an item to the recycle bin. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_trash')
+        self._access().require_write('onedrive_trash')
         item = require_str(args, 'item', tool_name='onedrive_trash')
-        request(self.IGlobal.auth, 'DELETE', self._it(item))
+        request(self._auth(), 'DELETE', self._it(item))
         return {'trashed': item}
 
     @tool_function(
@@ -422,7 +420,7 @@ class IInstance(MicrosoftToolInstanceBase):
         error instead, since the account type is not knowable from config.
         """
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_restore')
+        self._access().require_write('onedrive_restore')
         item = require_str(args, 'item', tool_name='onedrive_restore')
         if self._base() != '/me':
             raise graph_client.GraphError(
@@ -430,7 +428,7 @@ class IInstance(MicrosoftToolInstanceBase):
                 '(personal Microsoft accounts); it is unavailable under Entra app (service) authentication. '
                 'Restore the item from the OneDrive recycle bin in the web UI instead.'
             )
-        data = request(self.IGlobal.auth, 'POST', f'{self._base()}/drive/items/{_seg(item)}/restore')
+        data = request(self._auth(), 'POST', f'{self._base()}/drive/items/{_seg(item)}/restore')
         return clean_item(data)
 
     @tool_function(
@@ -449,10 +447,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_permanently_delete(self, args: dict) -> dict:
         """Permanently delete an item, bypassing the recycle bin. Requires write + allowHardDelete."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_permanently_delete')
+        self._access().require_write('onedrive_permanently_delete')
         item = require_str(args, 'item', tool_name='onedrive_permanently_delete')
-        self.IGlobal.access.require_flag('allowHardDelete', 'onedrive_permanently_delete')
-        request(self.IGlobal.auth, 'POST', f'{self._it(item)}/permanentDelete')
+        self._access().require_flag('allowHardDelete', 'onedrive_permanently_delete')
+        request(self._auth(), 'POST', f'{self._it(item)}/permanentDelete')
         return {'permanentlyDeleted': item}
 
     # =======================================================================
@@ -483,14 +481,14 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_create_sharing_link(self, args: dict) -> dict:
         """Create a sharing link for an item. scope='anonymous' requires write + allowPublicSharing."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_create_sharing_link')
+        self._access().require_write('onedrive_create_sharing_link')
         item = require_str(args, 'item', tool_name='onedrive_create_sharing_link')
         link_type = self._enum_arg(args, 'link_type', ('view', 'edit', 'embed'), 'view')
         scope = self._enum_arg(args, 'scope', ('anonymous', 'organization', 'users'), 'organization')
         if scope == 'anonymous':
-            self.IGlobal.access.require_flag('allowPublicSharing', 'onedrive_create_sharing_link (scope=anonymous)')
+            self._access().require_flag('allowPublicSharing', 'onedrive_create_sharing_link (scope=anonymous)')
         data = request(
-            self.IGlobal.auth, 'POST', f'{self._it(item)}/createLink', json_body={'type': link_type, 'scope': scope}
+            self._auth(), 'POST', f'{self._it(item)}/createLink', json_body={'type': link_type, 'scope': scope}
         )
         return {'id': data.get('id'), 'link': data.get('link') or {}}
 
@@ -508,7 +506,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """List the sharing permissions on an item. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
         item = require_str(args, 'item', tool_name='onedrive_list_permissions')
-        data = request(self.IGlobal.auth, 'GET', f'{self._it(item)}/permissions')
+        data = request(self._auth(), 'GET', f'{self._it(item)}/permissions')
         return {'permissions': [clean_permission(p) for p in data.get('value') or []]}
 
     @tool_function(
@@ -539,16 +537,16 @@ class IInstance(MicrosoftToolInstanceBase):
         resolve to an individual directory user. Requires the write tier.
         """
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_invite')
+        self._access().require_write('onedrive_invite')
         item = require_str(args, 'item', tool_name='onedrive_invite')
         emails = require_str_list(args, 'emails', tool_name='onedrive_invite')
         role = self._enum_arg(args, 'role', ('read', 'write'), 'read')
         message = optional_str(args, 'message', default='', tool_name='onedrive_invite') or ''
-        if not self.IGlobal.access.flags.get('allowPublicSharing', False):
+        if not self._access().flags.get('allowPublicSharing', False):
             for email in emails:
                 self._require_individual_directory_user(email)
         data = request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             f'{self._it(item)}/invite',
             json_body={
@@ -575,8 +573,8 @@ class IInstance(MicrosoftToolInstanceBase):
     def onedrive_delete_permission(self, args: dict) -> dict:
         """Revoke a sharing permission from an item. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_onedrive')
-        self.IGlobal.access.require_write('onedrive_delete_permission')
+        self._access().require_write('onedrive_delete_permission')
         item = require_str(args, 'item', tool_name='onedrive_delete_permission')
         permission_id = require_str(args, 'permission_id', tool_name='onedrive_delete_permission')
-        request(self.IGlobal.auth, 'DELETE', f'{self._it(item)}/permissions/{_seg(permission_id)}')
+        request(self._auth(), 'DELETE', f'{self._it(item)}/permissions/{_seg(permission_id)}')
         return {'deleted': permission_id}

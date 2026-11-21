@@ -119,16 +119,17 @@ class IInstance(IInstanceBase):
             }
 
         cfg = self.IGlobal
+        settings = self.settings  # this call's search defaults
 
-        max_results = args.get('max_results', cfg.max_results)
+        max_results = args.get('max_results', settings.maxResults)
         if isinstance(max_results, bool) or not isinstance(max_results, int):
-            max_results = cfg.max_results
-        search_depth = args.get('search_depth', cfg.search_depth)
+            max_results = settings.maxResults
+        search_depth = args.get('search_depth', settings.searchDepth)
         if search_depth not in VALID_SEARCH_DEPTHS:
-            search_depth = cfg.search_depth
-        topic = args.get('topic', cfg.topic)
+            search_depth = settings.searchDepth
+        topic = args.get('topic', settings.topic)
         if topic not in VALID_TOPICS:
-            topic = cfg.topic
+            topic = settings.topic
 
         payload: Dict[str, Any] = {
             'query': query,

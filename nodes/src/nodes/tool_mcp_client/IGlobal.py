@@ -86,16 +86,13 @@ def _headers(cfg, bearer: str) -> Optional[Dict[str, str]]:
 
 
 class IGlobal(IGlobalBase):
-    """Global state for mcp_client."""
-
-    serverName: str = 'mcp'
+    """Global state for mcp_client: the MCP session and its tool catalog, keyed by original tool name."""
 
     def beginGlobal(self) -> None:
-        # The resolved config: the transport branch flattened beside serverName,
-        # the branch's endpoint required by the schema
+        # The resolved config: the transport branch, its endpoint required by the
+        # schema. serverName is the call's namespace over the catalog, not the control's
         cfg = self.config
 
-        self.serverName = cfg.serverName.strip()
         self.transport = cfg.transport
 
         try:
@@ -128,7 +125,6 @@ class IGlobal(IGlobalBase):
         finally:
             self._client = None
             self._tools_by_original = {}
-            self._tools_by_namespaced = {}
 
     # ------------------------------------------------------------------
     # Tool cache + accessors for IInstance hooks
@@ -141,15 +137,12 @@ class IGlobal(IGlobalBase):
         half-filled catalog.
         """
         by_original: Dict[str, McpToolDef] = {}
-        by_namespaced: Dict[str, McpToolDef] = {}
         for t in tools:
             by_original[t.name] = t
-            by_namespaced[f'{self.serverName}.{t.name}'] = t
         self._tools_by_original = by_original
-        self._tools_by_namespaced = by_namespaced
         self._catalog_fetched_at = _monotonic()
 
-    def refresh_tools(self, *, reason: str, min_age_s: float = 0.0) -> bool:
+    def refresh_tools(self, *, reason: str, min_age_s: float = 0.0, label: str = 'mcp') -> bool:
         """Re-read tools/list from the server and swap the cache.
 
         Returns True when the catalog was refreshed, False when there is no
@@ -170,7 +163,7 @@ class IGlobal(IGlobalBase):
             try:
                 tools = client.list_tools()
             except Exception as e:
-                warning(f"mcp_client '{self.serverName}': tool catalog refresh ({reason}) failed: {e}")
+                warning(f"mcp_client '{label}': tool catalog refresh ({reason}) failed: {e}")
                 return False
             before = set((getattr(self, '_tools_by_original', None) or {}).keys())
             self._cache_tools(tools)
@@ -178,24 +171,27 @@ class IGlobal(IGlobalBase):
             added, removed = sorted(after - before), sorted(before - after)
             if added or removed:
                 warning(
-                    f"mcp_client '{self.serverName}': tool catalog changed on refresh ({reason}); "
-                    f'added={added} removed={removed}'
+                    f"mcp_client '{label}': tool catalog changed on refresh ({reason}); added={added} removed={removed}"
                 )
             return True
 
-    def list_namespaced_tools(self) -> List[Dict[str, Any]]:
-        self.refresh_tools(reason='catalog query', min_age_s=REFRESH_MIN_INTERVAL_S)
+    def list_namespaced_tools(self, server_name: str) -> List[Dict[str, Any]]:
+        """The catalog under one call's namespace (``server_name.tool``)."""
+        self.refresh_tools(reason='catalog query', min_age_s=REFRESH_MIN_INTERVAL_S, label=server_name)
         out: List[Dict[str, Any]] = []
-        for namespaced, tool in (getattr(self, '_tools_by_namespaced', None) or {}).items():
-            out.append({'name': namespaced, 'description': tool.description, 'inputSchema': tool.inputSchema})
+        for name, tool in (getattr(self, '_tools_by_original', None) or {}).items():
+            out.append(
+                {'name': f'{server_name}.{name}', 'description': tool.description, 'inputSchema': tool.inputSchema}
+            )
         return out
 
     def get_tool(self, *, server_name: str, tool_name: str) -> Optional[McpToolDef]:
-        if server_name != self.serverName:
-            return None
+        """One tool of the catalog by original name; ``server_name`` (the call's, already checked) labels a refresh."""
         tool = (getattr(self, '_tools_by_original', None) or {}).get(tool_name)
         if tool is None:
-            self.refresh_tools(reason=f'lookup miss for {tool_name!r}', min_age_s=REFRESH_MIN_INTERVAL_S)
+            self.refresh_tools(
+                reason=f'lookup miss for {tool_name!r}', min_age_s=REFRESH_MIN_INTERVAL_S, label=server_name
+            )
             # Re-read whatever the attempt returned: False also means "another
             # thread refreshed inside the rate-limit window", and that refresh
             # may be the one carrying this tool.
@@ -203,8 +199,7 @@ class IGlobal(IGlobalBase):
         return tool
 
     def call_tool(self, *, server_name: str, tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
-        if server_name != self.serverName:
-            raise Exception(f'Unknown MCP serverName {server_name!r} (this node configured as {self.serverName!r})')
+        """Call one tool; ``server_name`` (the call's, already checked) names the server in errors."""
         if getattr(self, '_client', None) is None:
             raise Exception('MCP client is not connected')
         # A tool the catalog does not know is refreshed once, then refused
@@ -213,7 +208,7 @@ class IGlobal(IGlobalBase):
         if self.get_tool(server_name=server_name, tool_name=tool_name) is None:
             known = sorted((getattr(self, '_tools_by_original', None) or {}).keys())
             raise ToolUnavailableError(
-                f"Tool {tool_name!r} is not available on MCP server '{self.serverName}' "
+                f"Tool {tool_name!r} is not available on MCP server '{server_name}' "
                 f'(catalog refreshed; known tools: {known})'
             )
         return self._client.call_tool(name=tool_name, arguments=arguments or {})

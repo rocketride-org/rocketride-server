@@ -6,8 +6,9 @@
 """Engine-glue regression test for currency_convert_explicit's isJson() gate.
 
 Mirrors the extract_facts / schema_validate importlib harness: rocketlib and
-ai.common.* are stubbed, IGlobal.py + IInstance.py are loaded from source, and
-writeAnswers is captured through a fake engine. Guards the fix for the bug where
+ai.common.* are stubbed, IInstance.py is loaded from source (the node has no
+IGlobal: every key is a per-call parameter), and writeAnswers is captured
+through a fake engine. Guards the fix for the bug where
 a plain-text answer whose text merely looks like JSON was upgraded onto the JSON
 lane (see issue: missing isJson() gate).
 """
@@ -19,6 +20,9 @@ import json
 import os
 import sys
 import types
+
+import rocketlib
+from rocketlib.config import NodeInfo, resolveConfig
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _NODE_DIR = os.path.join(_HERE, '..', '..', 'src', 'nodes', 'currency_convert_explicit')
@@ -68,11 +72,11 @@ def _json_answer(value):
 
 
 def _load_classes():
-    """Load the node's IGlobal/IInstance classes from source in isolation.
+    """Load the node's IInstance class from source in isolation.
 
-    ``rocketlib`` is the engine's real one, so the IGlobal reads its config through
+    ``rocketlib`` is the engine's real one, so the instance reads its settings through
     the real resolver. ``ai.common.schema`` is stubbed with ``FakeAnswer`` (the
-    answer surface the test drives), ``convert``/``IGlobal``/``IInstance`` are
+    answer surface the test drives), ``convert``/``IInstance`` are
     loaded from the node dir via ``importlib``, and the original ``sys.modules``
     entries are restored in a ``finally`` block so no stub leaks into other test
     modules.
@@ -104,7 +108,7 @@ def _load_classes():
         pkg_mod = importlib.util.module_from_spec(pkg_spec)
         sys.modules['currency_convert_explicit'] = pkg_mod
 
-        for sub in ('convert', 'IGlobal', 'IInstance'):
+        for sub in ('convert', 'IInstance'):
             spec = importlib.util.spec_from_file_location(
                 f'currency_convert_explicit.{sub}', os.path.join(_NODE_DIR, f'{sub}.py')
             )
@@ -112,10 +116,7 @@ def _load_classes():
             sys.modules[f'currency_convert_explicit.{sub}'] = mod
             spec.loader.exec_module(mod)
 
-        return (
-            sys.modules['currency_convert_explicit.IGlobal'].IGlobal,
-            sys.modules['currency_convert_explicit.IInstance'].IInstance,
-        )
+        return sys.modules['currency_convert_explicit.IInstance'].IInstance
     finally:
         for name in stubs:
             if saved[name] is None:
@@ -129,16 +130,22 @@ def _load_classes():
 
 
 def _build_instance(node_config):
-    IGlobal, IInstance = _load_classes()
-    glob = IGlobal.__new__(IGlobal)
-    glob.glb = types.SimpleNamespace(logicalType='currency_convert_explicit', connConfig=node_config)
-    glob.beginGlobal()
+    IInstance = _load_classes()
+    node = NodeInfo(
+        id='convert_1',
+        name='convert_1',
+        provider='currency_convert_explicit',
+        physicalType='python',
+        capabilities=0,
+        controlId='control-1',
+    )
+    config = resolveConfig(rocketlib.getServiceSchema('currency_convert_explicit'), dict(node_config), node=node)
 
+    # The node has no IGlobal of its own: the control holds its config, and the
+    # call's settings are that config (every key is a param the call may override)
     inst = IInstance.__new__(IInstance)
-    inst.IGlobal = glob
-    # The instance reads the conversion from its settings view (plan 6.2); outside
-    # the engine the resolved config stands in for it
-    inst._settings = glob.config
+    inst.IGlobal = types.SimpleNamespace(config=config)
+    inst._caller = {'params': {'convert_1': {}}}
     captured = types.SimpleNamespace(answers=[])
     inst.instance = types.SimpleNamespace(writeAnswers=lambda a: captured.answers.append(a))
     inst.preventDefault = lambda: None

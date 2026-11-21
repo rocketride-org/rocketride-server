@@ -134,7 +134,10 @@ def _instance(*, tier: str) -> IInstance:
     access = resolve_microsoft_access(cfg, OUTLOOK_CALENDAR)
     auth = mock.MagicMock()
     auth.token.return_value = 'TOK'
-    inst.IGlobal = types.SimpleNamespace(access=access, auth=auth, cfg={'authType': 'user'})
+    inst.IGlobal = types.SimpleNamespace(auth=auth, cfg={'authType': 'user'})
+    # The binding resolved this call's access once and checked its scopes against the grant
+    inst.__dict__['_graph_access'] = access
+    inst.__dict__['_graph_scopes_checked'] = True
     return inst
 
 

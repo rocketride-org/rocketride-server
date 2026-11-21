@@ -45,16 +45,7 @@ class _Inst:
 
 
 class _Glob:
-    """laneName=None + empty lanes -> _getkey falls back to the lane name itself (read through the accessors)."""
-
-    laneName = None
-    lanes = None
-
-    def lane_name(self):
-        return self.laneName
-
-    def lane_map(self):
-        return self.lanes
+    """The control: the instance's call configured no result key, so _getkey falls back to the lane name itself."""
 
 
 def _descriptor_payload(kind, source_mime):

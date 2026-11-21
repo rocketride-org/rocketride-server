@@ -36,6 +36,7 @@
 			"type": "number",
 			"title": "Output frame rate (fps)",
 			"description": "Playback speed of the output video. Should match the upstream frame rate.",
+			"param": true,
 			"default": 1.0,
 			"minimum": 0.01,
 			"maximum": 240
@@ -48,12 +49,14 @@
 			"type": "number",
 			"title": "Quality (CRF)",
 			"description": "Constant Rate Factor for H.264. Lower = better quality, larger file. Range 0-51.",
+			"param": true,
 			"default": 23,
 			"minimum": 0,
 			"maximum": 51
 		},
 		"composer.high.crf": {
 			"base": "composer.crf",
+			"param": true,
 			"default": 18
 		}
 	},
@@ -64,6 +67,7 @@
 			"title": "Output quality",
 			"description": "Video encoding quality preset",
 			"type": "string",
+			"param": true,
 			"default": "standard",
 			"enum": {
 				"standard": {
