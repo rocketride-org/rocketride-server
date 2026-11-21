@@ -206,6 +206,9 @@ class TaskCommands(DAPConn):
             # ... and when the dispatch read the deployment's state (plan 7.2:
             # a disable/remove since then refuses the control)
             deployment_epoch = getattr(self, '_trusted_deployment_epoch', None)
+            # ... and the store listing of that version (plan 8.4); a
+            # client's own run has none and is free
+            listing = getattr(self, '_trusted_listing', None)
             team_context = getattr(self, '_trusted_team_context', None) or TeamContext(
                 home_team(self._account_info) or team_id,
                 'key' if getattr(self._account_info, 'endpoints', None) is not None else 'home',
@@ -249,6 +252,7 @@ class TaskCommands(DAPConn):
                 rung=rung,
                 version=version,
                 team_context=team_context,
+                listing=listing,
             )
 
             # Confirm successful task execution startup

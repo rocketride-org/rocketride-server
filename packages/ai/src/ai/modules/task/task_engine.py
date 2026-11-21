@@ -88,7 +88,7 @@ from ai.constants import (
     CONST_CHANNEL_MAX_INFLIGHT,
     CONST_CHANNEL_REDIAL_DELAY,
 )
-from ai.account.base import OutOfCreditsError
+from ai.account.base import OutOfCreditsError, SubscriptionRequiredError
 from ai import CONST_AI_NODE_SCRIPT
 from ai.common.dap import DAPBase, DAPClient, TransportWebSocket
 from ai.common.node_config import node_schema, resolve_node_config
@@ -494,14 +494,32 @@ async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Opti
     The gate names the binding's CALLER (plan 8.3) when the data path opened
     it: that caller's org is the paying unit, whoever started the engine. A
     binding the engine opens itself (a scan source, a listener) names no
-    caller and is the engine owner's. Subscription pricing joins this answer
-    with the store rung (plan 8.4, Step 6).
+    caller and is the engine owner's.
+
+    The same answer carries the store gate (plan 8.4): a binding whose
+    control serves a subscription-priced publication is refused when the
+    caller's org holds no subscription, with ``code`` naming that refusal.
+    The control is found through the server's own record of the binding
+    (``binding_control``), never through what the subprocess says about it.
     """
     from ai.account import account
 
+    from . import store_gate
+
     caller = (arguments or {}).get('caller') or {}
     org_id = str(caller.get('orgId') or '') or task.org_id
+    # A binding with no caller (a scan, a listener) is the owner control's
+    # where one control holds a private engine (binding_control's fallback),
+    # so a lapsed subscription stops those bindings too
+    control = task.binding_control(caller.get('correlationId') if caller else None)
     try:
+        # Step 1: the subscription to a paid listing, from the control's own
+        # cached verdict (asked once per allow window)
+        if control is not None:
+            unsubscribed = await store_gate.control_refusal(control)
+            if unsubscribed is not None:
+                return ChannelReply(body={'refusal': str(unsubscribed), 'code': unsubscribed.code})
+        # Step 2: credit, on the caller's paying unit
         refusal = await account.check_spend(org_id)
     except Exception as e:
         # The ledger's error stays in the server log; the task gets a fixed one
@@ -1816,6 +1834,8 @@ class TaskEngine(DAPBase):
             message = response.get('message', 'Data request failed')
             if code == OutOfCreditsError.code:
                 raise OutOfCreditsError(message)
+            if code == SubscriptionRequiredError.code:
+                raise SubscriptionRequiredError(message)
             # A coded refusal (a cancelled request, for one) keeps its code
             # across the hop, so the client can classify on it
             if isinstance(code, str) and code:

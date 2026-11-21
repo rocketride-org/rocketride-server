@@ -109,14 +109,16 @@ from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
 from ai.account.base import OutOfCreditsError
 from ai.account.models import AccountInfo, home_team, resolve_run_permissions, resolve_task_permissions
-from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
+from ai.account.pipe_deploy import Pin, listing_of, resolve_pins, teams_to_probe
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .trace_owner import TraceOwners
+from . import store_gate
 from .task_control import (
     RUNGS,
     CallerConfigError,
     DeploymentRef,
+    Listing,
     TaskControl,
     TeamContext,
     config_hash,
@@ -1354,6 +1356,11 @@ class TaskServer(DAPBase):
         ``@team`` control never beats the caller's own ``@me`` deployment.
         A live ``@spec``/``@me`` hit answers without reading publications.
 
+        The rung that answers is also where the store gate stands (plan 0
+        S9/S10, 8.4): a publication whose listing is not free refuses a key
+        scoped to ``endpoints`` and a caller with no subscription, before
+        any engine starts; a live control answers from the verdict it holds.
+
         Args:
             address: ``developerId.pipelineId[.source]``.
             account_info: The request's account (required).
@@ -1366,12 +1373,17 @@ class TaskServer(DAPBase):
 
         Raises:
             TaskError: As ``resolve_control``; TASK_NOT_REGISTERED lists the rungs tried.
-            PermissionError: As ``resolve_control``.
+            PermissionError: As ``resolve_control``, or a scoped key on a
+                publication that is not free (``required='account key'``).
+            SubscriptionRequiredError: The caller has no subscription to a
+                subscription-priced publication.
         """
         parsed, rungs, candidates = await self.resolve_candidates(address, account_info, require, team=team)
         for candidate in candidates:
             if isinstance(candidate, TaskControl):
-                return self._check_engine_available(candidate), False
+                control = self._check_engine_available(candidate)
+                await store_gate.require_access(control, account_info)
+                return control, False
             # A pinned artifact without the named source yields nothing; the
             # next candidate in the order answers
             control, started = await self._start_from_pin(candidate, parsed, account_info, require)
@@ -1668,7 +1680,10 @@ class TaskServer(DAPBase):
             TaskError: TASK_SOURCE_REQUIRED (two-segment address, several
                 sources and no default).
             PermissionError: No permission on the team, no home team for a
-                public run, or outside the key's endpoints scope.
+                public run, outside the key's endpoints scope, or a scoped
+                key on a publication that is not free.
+            SubscriptionRequiredError: The caller's org has no subscription
+                to a subscription-priced publication.
             ValueError: A personal deployment without its billing stamp.
         """
         # Deferred: the account singleton and the facade (which imports
@@ -1732,7 +1747,28 @@ class TaskServer(DAPBase):
         org_id = str(org.get('id') or deployment.org_id)
         key = control_key(pin.rung, owner_id, address)
 
-        # Step 3: one start per index key; a concurrent request attaches
+        # Step 3: the store gate, with the publication in hand and before any
+        # engine starts (plan 0 S9/S10): the listing of the pinned version
+        # refuses a scoped key and a caller with no subscription. The caller's
+        # org is read as the account states it: an account that names none is
+        # never taken for the publisher's
+        listing = await listing_of(account, deployment.org_id, deployment.project_id, pin.version)
+        store_gate.require_account_key(listing, endpoints, address)
+        caller_org = str(org.get('id') or '')
+        asked = store_gate.needs_subscription(listing, pin.rung, caller_org, deployment.org_id)
+        refusal = await store_gate.subscription_refusal(
+            listing,
+            rung=pin.rung,
+            caller_org=caller_org,
+            publisher_org=deployment.org_id,
+            pipe_name=deployment.project_id,
+            address=address,
+        )
+        if refusal is not None:
+            raise refusal
+        confirmed_at = time.monotonic() if asked else 0.0
+
+        # Step 4: one start per index key; a concurrent request attaches
         async with self._engines.control_start_lock(key):
             existing = next((c for c in self._task_control.lookup(key) if c.live), None)
             if existing is not None:
@@ -1753,10 +1789,14 @@ class TaskServer(DAPBase):
                 developer_id=parsed.developer_id,
                 version=pin.version,
                 team_context=context,
+                listing=listing,
             )
 
-        # Step 4: the started control, checked like any other hit
-        return self._verify_control(self.control_by_key(started), account_info, require), True
+        # Step 5: the started control, checked like any other hit; the
+        # subscription just confirmed stands for its allow window
+        control = self._verify_control(self.control_by_key(started), account_info, require)
+        control.subscription_allowed_at = confirmed_at
+        return control, True
 
     def assign_port(self) -> int:
         """
@@ -2498,6 +2538,7 @@ class TaskServer(DAPBase):
         version: Optional[int] = None,
         team_context: Optional[TeamContext] = None,
         deployment_epoch: Optional[float] = None,
+        listing: Optional[Listing] = None,
     ) -> Dict[str, Any]:
         """
         Resolve a spec to a control and acquire its hold on an engine, starting one if needed.
@@ -2540,6 +2581,8 @@ class TaskServer(DAPBase):
                 disable/remove after that moment refuses the control instead
                 of registering it (plan 7.2): the window between the state
                 read and the registration is closed. Default: now.
+            listing: The store listing of the version a published rung
+                started from (trusted dispatch only). Default: free.
 
         Returns:
             Dict[str, Any]: The task's identity; ``token`` carries the CONTROL
@@ -2762,6 +2805,7 @@ class TaskServer(DAPBase):
         control.setup_declared_parameters()
         control.deployment = deployment
         control.version = version
+        control.listing = listing or Listing()
         control.team_context = team_context or TeamContext(
             control.teamId, 'home' if control.run_kind == 'dev' else 'deploying'
         )
@@ -3287,6 +3331,7 @@ class TaskServer(DAPBase):
                     rung='' if control.rung == 'spec' else control.rung,
                     version=control.version,
                     team_context=control.team_context,
+                    listing=control.listing,
                     # The predecessor's state epoch carries over: a deployment
                     # revoked since it registered refuses the successor too
                     deployment_epoch=control.registered_at,

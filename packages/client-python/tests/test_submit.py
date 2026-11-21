@@ -56,6 +56,7 @@ class _Client(ExecutionMixin):
         self.sent_params = []
         self._env = {'ROCKETRIDE_TONE': 'dry', 'OTHER': 'x'}
         self._fail = fail
+        self.fail_code = ''
 
     def build_request(self, command, arguments=None, token=None):
         return {'type': 'request', 'command': command, 'arguments': dict(arguments or {}), 'token': token}
@@ -64,7 +65,7 @@ class _Client(ExecutionMixin):
         self.calls.append((message['command'], message['arguments']))
         self.timeouts.append(timeout)
         if self._fail:
-            return {'success': False, 'message': self._fail}
+            return {'success': False, 'message': self._fail, **({'code': self.fail_code} if self.fail_code else {})}
         arguments = message['arguments']
         return {'success': True, 'body': {**STAMPS, **({'answers': ['inline']} if 'data' in arguments else {})}}
 
@@ -145,6 +146,18 @@ def test_an_old_server_says_submit_is_not_supported():
     client = _Client(fail='Unsupported command: rrext_submit')
     with pytest.raises(RuntimeError, match='does not support submit'):
         _run(client.submit(name='acme.docBrain'))
+
+
+def test_a_refused_submit_raises_a_pipe_exception_with_the_servers_code():
+    """A refusal keeps its code (SUBSCRIPTION_REQUIRED, OUT_OF_CREDITS, TASK_*): classify on code, not message."""
+    from rocketride.core.exceptions import PipeException
+
+    client = _Client(fail="'acme.docBrain' needs a subscription")
+    client.fail_code = 'SUBSCRIPTION_REQUIRED'
+    with pytest.raises(PipeException) as refused:
+        _run(client.submit(name='acme.docBrain'))
+    assert refused.value.code == 'SUBSCRIPTION_REQUIRED'
+    assert isinstance(refused.value, RuntimeError) and 'needs a subscription' in str(refused.value)
 
 
 def test_submit_has_no_timeout_on_either_side():
