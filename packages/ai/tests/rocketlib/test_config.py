@@ -33,12 +33,10 @@ from rocketlib.config import ConfigError, ConfigView, NodeInfo, resolveConfig
 
 from tests.rocketlib.schemas import (
     CAP_GPU,
-    CAP_MULTITENANT,
     DEPTH_ESTIMATE,
     DETECTOR,
     GOOGLE_WORKSPACE,
     QDRANT,
-    multitenant,
 )
 
 # ==== Defaults and selectors =================================================
@@ -296,8 +294,6 @@ class TestConfigView:
         assert view.param_keys == frozenset({'maxEdge'})
         assert view.env_keys == frozenset({'apikey'})
         assert view.capabilities == CAP_GPU
-        assert not view.capabilities & CAP_MULTITENANT
-        assert resolveConfig(multitenant(DEPTH_ESTIMATE), {}).capabilities & CAP_MULTITENANT
 
     def test_restricted_refuses_param_always(self, view):
         restricted = view.restricted(refuse_params=True)

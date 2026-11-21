@@ -47,7 +47,7 @@ from ai.modules.task.task_server import TaskServer
 from ai.modules.task.trace_owner import TraceOwners
 
 from . import test_task_engine_sharing as sharing
-from .test_task_engine_sharing import _caller, _data_conn, _pipeline, _server, _start
+from .test_task_engine_sharing import _caller, _data_conn, _pipeline, _publish, _server, _start
 
 catalog = sharing.catalog
 engines = sharing.engines
@@ -58,15 +58,20 @@ engines = sharing.engines
 
 
 async def _two_holders(ts, *, shared=False):
-    """One owner Plays one shape under two project ids: two controls, ONE engine.
+    """Two controls on ONE engine.
 
-    ``shared`` marks the engine cross-user so the routing rules of a shared
-    engine (plan 7.5; no such engine starts before C.25) are exercised on it.
+    Private: one owner Plays one shape under two project ids. ``shared``: two
+    users' controls on the published rung hold the shape's one bare-keyed
+    engine (plan 7.2), so the routing rules of a shared engine (plan 7.5) are
+    exercised on a real one.
     """
-    a = await _start(ts, _pipeline(), user='user-a')
-    b = await _start(ts, _pipeline(project_id='docBrainCopy'), user='user-a')
-    assert a.task is b.task and not a.task.shared
-    a.task.shared = shared
+    if shared:
+        a = await _publish(ts, _pipeline(), user='user-a')
+        b = await _publish(ts, _pipeline(project_id='docBrainCopy'), user='user-b')
+    else:
+        a = await _start(ts, _pipeline(), user='user-a')
+        b = await _start(ts, _pipeline(project_id='docBrainCopy'), user='user-a')
+    assert a.task is b.task and a.task.shared is shared
     return a, b
 
 

@@ -142,7 +142,6 @@ class PROTOCOL_CAPS:
     GPU: int
     DEPRECATED: int
     EXPERIMENTAL: int
-    MULTITENANT: int
 
     @staticmethod
     def getProtocolCaps(protocol: str) -> int: ...

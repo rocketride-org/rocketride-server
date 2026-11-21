@@ -325,6 +325,8 @@ def _running_control():
     control = _control()
     control.task = MagicMock()
     control.task.get_status = MagicMock(return_value=SimpleNamespace(state=TASK_STATE.RUNNING.value, name='My run'))
+    # The caller's view of it (TaskControl.status_view, the projection every list reads)
+    control.status_view = lambda: vars(control.task.get_status())
     server = MagicMock()
     server._task_control = {'dev.user-1.acme.proj-1.src-1': control}
     return control, server
