@@ -402,8 +402,8 @@ _ATTEMPTED_TYPE = re.compile(r'"type"\s*:\s*"(tool_calls?|final)"')
 #: The digits of a ``\uXXXX`` escape. ``int(x, 16)`` alone also takes a sign, a space and an underscore.
 _HEX4 = re.compile(r'[0-9A-Fa-f]{4}')
 
-#: What follows a member's key: the colon, and the value when it is a plain string (group 1).
-_MEMBER_VALUE = re.compile(r'\s*:(?:\s*"([^"\\]*)")?')
+#: What follows a member's key: the colon, and the value when it is a string (group 1, as written, escapes included).
+_MEMBER_VALUE = re.compile(r'\s*:(?:\s*"((?:[^"\\]|\\.)*)")?')
 
 _ENVELOPE_KINDS = ('tool_call', 'tool_calls', 'final')
 
@@ -433,7 +433,8 @@ def _own_members(text: str) -> Dict[str, Optional[str]]:
     The members an unparsed JSON object carries itself, and not the ones nested in their values.
 
     Walks the first object in `text` as far as it goes and collects each key at its top level, with
-    its value when that is a plain string and None when it is anything else. This is how a reply
+    its value when that is a string and None when it is anything else. Keys and values are
+    unescaped as JSON would unescape them, so ``"tool\\u005fcall"`` is ``tool_call``. This is how a reply
     that does not parse is still read for what it set out to be: its own ``"type"``, or a tool
     call's ``name`` and ``args`` when the type is missing. Escaping that is broken can put the walk
     out of step with the object, so it finds what comes before the break and may miss what follows.
@@ -451,7 +452,11 @@ def _own_members(text: str) -> Dict[str, Optional[str]]:
                 break
             value = _MEMBER_VALUE.match(text, end + 1) if depth == 1 else None
             if value:
-                members.setdefault(text[at + 1 : end], value.group(1))
+                written = value.group(1)
+                members.setdefault(
+                    _unescape_json_string_body(text[at + 1 : end]),
+                    None if written is None else _unescape_json_string_body(written),
+                )
             at = end + 1
             continue
         if ch in '{[':

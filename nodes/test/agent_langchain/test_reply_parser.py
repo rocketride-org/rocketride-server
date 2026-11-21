@@ -266,8 +266,9 @@ class TestSentinel:
         'call',
         [
             'Here is the result:\n{"name":"crm.create","args":{}}',
-            # Bad escaping in the arguments does not make it less of a call.
+            # Bad escaping in the arguments does not make it less of a call, and neither does an escape in its name.
             '{"name":"crm.create","args":{"note":"a "quoted" word"}}',
+            '{"name":"crm.\\u0063reate","args":{"note":"a "quoted" word"}}',
         ],
     )
     def test_a_final_line_stacked_onto_a_tool_call_that_lost_its_type_is_not_delivered(self, call):
@@ -803,6 +804,9 @@ class TestRetryHint:
             ('{"args":{"type":"final","note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}', 'tool_call'),
             ('{"args":[{"type":"final"}],"type":"tool_calls","calls":[{"name":"a "b""}]}', 'tool_calls'),
             ('Sure.\n{"type":"tool_call","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            # Read as JSON would read it, escapes included.
+            ('{"type":"tool\\u005fcall","name":"t","args":{"a":"x "y" z"}}', 'tool_call'),
+            ('{"type":"fin\\u0061l","content":"cut off', 'final'),
             # A type that is no envelope's is none, whatever is nested under it.
             ('{"type":"task","args":{"type":"tool_call","x":"a "b" c"}}', None),
             # No type of its own to read: the text is searched, and a tool call wins.
@@ -819,6 +823,9 @@ class TestRetryHint:
         [
             ('{"name":"crm.create","args":{}}', True),
             ('Sure.\n{"name":"crm.create","args":{"note":"a "quoted" word"}}', True),
+            # A name written with a JSON escape is still a name.
+            ('{"name":"crm.\\u0063reate","args":{"note":"a "quoted" word"}}', True),
+            ('{"n\\u0061me":"crm.create","args":{"note":"a "quoted" word"}}', True),
             # With its type it is an ordinary tool call, and a name alone is not a call.
             ('{"type":"tool_call","name":"crm.create","args":{}}', False),
             ('{"args":{"note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}', False),
