@@ -417,14 +417,15 @@ Examples:
 	const interfacesCmd = deployCmd
 		.command('interfaces <address>')
 		.description("The callable nodes of the publication that answers an address, by classType (no engine started)")
-		.option('--team <teamId>', 'Resolve the @team rung through this one of your teams')
+		.option('--team <team>', 'Resolve the @team rung through this one of your teams (@<team>, =team/<tid>, or an id)')
 		.action(async (address, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				// `--team` is passed through (a team id here; the per-call team
-				// option gives way to a rooted address in C.32); an omitted
-				// override stays omitted (the caller's team order decides)
+				// `--team` is passed through for the server to resolve to one of
+				// your teams, as the sibling verbs' is (the per-call team option
+				// gives way to a rooted address in C.32); an omitted override
+				// stays omitted (the caller's team order decides)
 				const team = options.team ? teamArgOf(String(options.team)) : '';
 				const answer = await client.interfaces(address, team ? { team } : {});
 				if (!out.jsonRequested) {

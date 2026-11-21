@@ -30,7 +30,7 @@ import { mapHistoryRows, mapTeamDeploymentRows, withReviewStates } from './deplo
 import type { DeployTeamRefDTO, DeployVersionCardDTO } from './deployTypes';
 
 describe('mapTeamDeploymentRows', () => {
-	it("draws each row on the server's rung, names a team by the caller's roster, and keeps its audience", () => {
+	it("draws each row on the server's rung, names a team by the caller's roster, and keeps its audience and handle", () => {
 		const teams: DeployTeamRefDTO[] = [{ id: '=team/team-prod', name: 'Production', canControl: true }];
 		const rows = mapTeamDeploymentRows(
 			[
@@ -45,13 +45,13 @@ describe('mapTeamDeploymentRows', () => {
 			teams
 		);
 		assert.deepEqual(
-			rows.map((r) => [r.teamId, r.teamName, r.rung, r.version]),
+			rows.map((r) => [r.teamId, r.teamName, r.handle, r.rung, r.version]),
 			[
-				['=user/u1', '@me', 'me', 5],
-				['=team/team-prod', 'Production', 'team', 4],
-				['@public', '@public', 'public', 3],
-				['=user/u2', 'Personal', 'personal', 2],
-				['=team/team-9', '=team/team-9', 'team', 1],
+				['=user/u1', '@me', '@me', 'me', 5],
+				['=team/team-prod', 'Production', '@Production', 'team', 4],
+				['@public', '@public', '@public', 'public', 3],
+				['=user/u2', 'Personal', 'Personal', 'personal', 2],
+				['=team/team-9', '=team/team-9', '=team/team-9', 'team', 1],
 			]
 		);
 	});

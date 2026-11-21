@@ -1972,7 +1972,7 @@ export class RocketRideClient extends DAPClient {
 	 * equality on the classType word: `chat`, `dropper`, `database`.
 	 *
 	 * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
-	 * @param options.team - Resolve the `@team` rung through this one of your teams.
+	 * @param options.team - Resolve the `@team` rung through this one of your teams (`@<team>` by name in any case, `=team/<tid>` or a team id; the server resolves it).
 	 * @returns The answering rung and version, and the interface map.
 	 * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
 	 *         address is outside a scoped key's endpoints.

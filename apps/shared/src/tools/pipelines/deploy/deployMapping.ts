@@ -97,6 +97,7 @@ const DRAWN_RUNGS: ReadonlySet<string> = new Set<string>(['me', 'personal', 'tea
  * @param registryId - The pipe's registry name (`registryIdOf`), the id every row carries.
  * @param teams - The caller's team refs, whose ids are the teams' audiences:
  *                a team row is named by its ref, any other row by its handle.
+ *                Every row keeps the server's handle for the table to show.
  * @returns The "where live" rows for the lifecycle panel.
  */
 export function mapTeamDeploymentRows(deployments: Deployment[], registryId: string, teams: DeployTeamRefDTO[]): TeamDeploymentRowDTO[] {
@@ -112,6 +113,7 @@ export function mapTeamDeploymentRows(deployments: Deployment[], registryId: str
 				return {
 					teamId: dep.teamId as string,
 					teamName: teams.find((team) => team.id === dep.teamId)?.name ?? (dep.handle || (dep.teamId as string)),
+					handle: dep.handle ?? '',
 					rung: dep.rung as TeamDeploymentRowDTO['rung'],
 					version: dep.version ?? 0,
 					// A record without a state stamp is a live pointer — 'enabled'

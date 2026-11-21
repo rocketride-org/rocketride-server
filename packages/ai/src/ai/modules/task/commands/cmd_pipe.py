@@ -603,7 +603,9 @@ class DeployPipeCommands(_DeployBase):
 
         Arguments: ``address`` (``developerId.pipelineId[.source]``; the
         source segment is accepted and ignored — the map covers the whole
-        pipe), optional ``team`` (the per-call ``@team`` override).
+        pipe), optional ``team`` (the per-call ``@team`` override: one of the
+        caller's teams as ``@<team>`` by name ignoring case, ``=team/<tid>``
+        or a team id, read the way the deploy verbs read ``teamId``).
 
         Body: ``{address, rung, version, teamId?, interfaces}`` where
         ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —
@@ -627,7 +629,7 @@ class DeployPipeCommands(_DeployBase):
         account_info = self._account_info
         if account_info is None:
             raise PermissionError('Not authenticated')
-        team = args.get('team') or None
+        team = self._team_override_of(args.get('team'))
 
         # Step 2: THE decision every name call makes (TaskServer.resolve_candidates,
         # plan 3.2): what answers this address for this caller, in the ladder's
@@ -637,7 +639,7 @@ class DeployPipeCommands(_DeployBase):
         # control's spec stays readable) or a publication's pin (the registry
         # artifact). Nothing has to be running on any rung.
         parsed, _rungs, candidates = await self._server.resolve_candidates(
-            address, account_info, 'task.data', team=str(team) if team else None
+            address, account_info, 'task.data', team=team
         )
         pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
         if not candidates:
@@ -669,6 +671,32 @@ class DeployPipeCommands(_DeployBase):
         if pin.rung == 'team':
             body['teamId'] = deployment.team
         return self.build_response(request, body=body)
+
+    def _team_override_of(self, value: Any) -> Optional[str]:
+        """
+        The team id a per-call ``team`` override names, or None when it is omitted.
+
+        Read through ``_audience_arg``, the deploy verbs' one reader of a
+        typed team, so ``@<team>`` resolves by name ignoring case against the
+        caller's own teams, ``=team/<tid>`` and a bare id pass as that id.
+        Membership is ``teams_to_probe``'s check, made by the resolver.
+
+        Args:
+            value: The ``team`` argument as the client sent it.
+
+        Returns:
+            The team id, or None.
+
+        Raises:
+            ValueError: A form that names no team (``@me``, ``@public``, ``@org``).
+            PermissionError: A team name that names none of the caller's teams.
+        """
+        if not value:
+            return None
+        audience = self._audience_arg({'teamId': str(value)})
+        if audience.kind != 'team':
+            raise ValueError(f'team takes one of your teams (@<team>, =team/<tid> or a team id), not {value!r}')
+        return audience.id
 
     async def _interfaces_of_control(self, control: Any) -> Dict[str, Any]:
         """

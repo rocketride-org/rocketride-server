@@ -1288,6 +1288,30 @@ class TestInterfaces:
         assert decide.await_args.kwargs == {'team': 'team-1'}
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize('typed', ['@development', '@DEVELOPMENT', '=team/team-1', 'team-1'])
+    async def test_the_team_override_takes_every_team_form_as_its_id(self, interfaces_stub, typed):
+        # A team by name ignoring case, its audience or its id: the decision gets the id
+        conn = _make_conn(_data_account())
+        decide = _answers(conn, _pin())
+        await conn.on_rrext_deploy_pipe(
+            {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': typed}}
+        )
+        assert decide.await_args.kwargs == {'team': 'team-1'}
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('typed', 'error'), [('@me', ValueError), ('@public', ValueError), ('@QA', PermissionError)]
+    )
+    async def test_the_team_override_refuses_what_names_none_of_your_teams(self, interfaces_stub, typed, error):
+        conn = _make_conn(_data_account())
+        decide = _answers(conn, _pin())
+        with pytest.raises(error):
+            await conn.on_rrext_deploy_pipe(
+                {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': typed}}
+            )
+        decide.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_the_callers_control_answers_with_the_spec_it_submitted(self, account_stub, interfaces_stub):
         conn = _make_conn(_account_info())
         _answers(conn, _control(), _pin())
