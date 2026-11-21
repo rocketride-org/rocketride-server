@@ -72,7 +72,7 @@ public:
     //-----------------------------------------------------------------
     // Constructor/destructor
     //-----------------------------------------------------------------
-    virtual ~IFilterGlobal() noexcept {};
+    virtual ~IFilterGlobal() noexcept;
     IFilterGlobal(const FactoryArgs &args) noexcept : Parent(args) {};
 
     //-----------------------------------------------------------------

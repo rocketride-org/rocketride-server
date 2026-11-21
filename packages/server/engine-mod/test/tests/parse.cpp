@@ -251,7 +251,7 @@ TEST_CASE("store::parse") {
     }
 
     //-----------------------------------------------------------------
-    // Data that reaches parse after its end fails with Cancelled instead
+    // Data that reaches parse after its end fails with PipelineEnded instead
     // of being dropped: the end completed the buffer, so nothing parses it
     //-----------------------------------------------------------------
     SECTION("write after the end") {
@@ -269,14 +269,14 @@ TEST_CASE("store::parse") {
         REQUIRE_NO_ERROR(filter.endFilters(*pipe));
 
         REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
-                      Ec::Cancelled);
+                      Ec::PipelineEnded, PipelineEndedMessage);
 
         REQUIRE_NO_ERROR(filter.disconnect());
     }
 
     //-----------------------------------------------------------------
     // Opening an object on a pipe whose parse has ended fails with
-    // Cancelled
+    // PipelineEnded
     //-----------------------------------------------------------------
     SECTION("open after the end") {
         ParseFilterTest filter;
@@ -288,14 +288,15 @@ TEST_CASE("store::parse") {
         auto entry = filter.getDummyEntry("test.txt"_tv);
         REQUIRE_NO_ERROR(filter.endFilters(*pipe));
 
-        REQUIRE_ERROR(pipe->open(entry), Ec::Cancelled);
+        REQUIRE_ERROR(pipe->open(entry), Ec::PipelineEnded,
+                      PipelineEndedMessage);
 
         REQUIRE_NO_ERROR(filter.disconnect());
     }
 
     //-----------------------------------------------------------------
     // A data tag after the object was closed, once parse has ended, fails
-    // with Cancelled although parse has no current object
+    // with PipelineEnded although parse has no current object
     //-----------------------------------------------------------------
     SECTION("data after close at the end") {
         ParseFilterTest filter;
@@ -313,7 +314,7 @@ TEST_CASE("store::parse") {
         REQUIRE_NO_ERROR(filter.endFilters(*pipe));
 
         REQUIRE_ERROR(filter.writeTagData(*pipe, strlen(pText), (void *)pText),
-                      Ec::Cancelled);
+                      Ec::PipelineEnded, PipelineEndedMessage);
 
         REQUIRE_NO_ERROR(filter.disconnect());
     }

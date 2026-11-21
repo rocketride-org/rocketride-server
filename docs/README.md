@@ -50,8 +50,8 @@ contributor page has exactly one correct home:
 - **`builder/`** — `reference.md` (run builds: commands, modules, output, CLI flags,
   compiler toolchain), `authoring.md` (write a package's `scripts/tasks.js`),
   `pre-commit-hooks.md`.
-- **`engine/`** — C++ engine internals (`index.md`), `crash-reporting.md`, and
-  `mcp-module.md`.
+- **`engine/`** — C++ engine internals (`index.md`), `crash-reporting.md`,
+  `mcp-module.md`, and `python-call-lifetime.md`.
 - **`nodes/`** — `index.md` (how nodes connect, adding one, local prototyping),
   `services-schema.md` (the `services*.json` contract), `readme-schema.md`
   (the node README contract), `testing.md`.

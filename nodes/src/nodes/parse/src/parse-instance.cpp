@@ -635,8 +635,7 @@ Error IFilterInstance::processObjectStreamData(
     // document
     if (m_tikaStop) {
         m_cutShort = true;
-        return APERR(Ec::Cancelled, "The parse filter ended before",
-                     m_buffer.name(), "was complete");
+        return APERR(Ec::PipelineEnded, PipelineEndedMessage);
     }
 
     // Process text returned by tika
@@ -724,8 +723,7 @@ Error IFilterInstance::open(Entry &object) noexcept {
         m_canParse = false;
         m_parsing = false;
         return m_buffer.setComplete() ||
-               APERR(Ec::Cancelled, "The parse filter ended before",
-                     object.fileName(), "was opened");
+               APERR(Ec::PipelineEnded, PipelineEndedMessage);
     }
 
     // Something went wrong if tika callback queue is not empty
@@ -791,9 +789,7 @@ Error IFilterInstance::closing() noexcept {
                 auto guard = m_tikaCallbackLock.acquire();
                 std::swap(dropped, m_tikaCallbackQueue);
             }
-            ccode =
-                ccode || APERR(Ec::Cancelled, "The parse filter ended before",
-                               m_buffer.name(), "was complete");
+            ccode = ccode || APERR(Ec::PipelineEnded, PipelineEndedMessage);
         } else {
             // Process final tika callbacks
             ccode = pumpTikaCallbacks() || ccode;

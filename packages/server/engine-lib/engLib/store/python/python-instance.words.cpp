@@ -44,7 +44,7 @@ Error IPythonInstanceBase::writeWords(const WordVector &textWords) noexcept {
         for (const auto &word : textWords) pyTextWords.append(py::str(word));
 
         // Call it
-        m_pyInstance.attr("writeWords")(pyTextWords);
+        boundInstance().attr("writeWords")(pyTextWords);
         return {};
     };
 

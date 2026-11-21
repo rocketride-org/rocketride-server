@@ -26,7 +26,7 @@
 namespace ap {
 // Define the error code enum
 APUTIL_DEFINE_ENUM(
-    Ec, 0, 94, NoErr = _begin, AccessDenied, AlreadyOpened, BatchExceeded,
+    Ec, 0, 95, NoErr = _begin, AccessDenied, AlreadyOpened, BatchExceeded,
     BatchThreshold, BlobImmutable, Bug, Cancelled, Cipher, Classify,
     ClassifyContent, ClrError, ClrInit, CoInit, Completed, ElevationRequired,
     Empty, End, Error, Exception, Excluded, Exists, ExpiredAuthentication,
@@ -42,7 +42,8 @@ APUTIL_DEFINE_ENUM(
     Write, HandleInvalid, HandleInvalidSeq, HandleInvalidState,
     HandleOutOfSlots, TagInvalidClass, TagInvalidFileSig, TagInvalidHdr,
     TagInvalidSig, TagInvalidSize, TagInvalidType, PackInvalidSig, PackInvalid,
-    Lz4Inflate, Lz4Deflate, LicenseLimit, InvalidFilename, Crash);
+    Lz4Inflate, Lz4Deflate, LicenseLimit, InvalidFilename, Crash,
+    PipelineEnded);
 
 ROCKETRIDE_CORE_API ErrorCode make_error_code(Ec code) noexcept;
 

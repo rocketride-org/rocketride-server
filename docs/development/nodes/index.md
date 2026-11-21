@@ -299,6 +299,197 @@ standalone catalog nodes.
 
 ---
 
+## Threads and the end of a pipeline
+
+Your node may start its own threads: a worker, a timer, a thread pool. The
+engine does not know about them. It knows only when your handler
+(`writeQuestions`, `open`, `closing`, ...) returns. After that, the pipeline may
+end at any time, even while one of your threads is still inside
+`self.instance.invoke(...)` or another `self.instance.*` call:
+
+1. Your handler starts a thread and returns.
+2. The engine sees that the handler has returned. From now on it may end the
+   pipeline.
+3. Your thread is still inside `self.instance.invoke(...)`. That call can
+   return after the pipeline has ended.
+
+Here "the pipeline has ended" means that the engine has ended the node's
+endpoint, at the end of the task. It does not mean the end of one object or
+request.
+
+This is what the engine guarantees, and what it asks of you:
+
+- **A call that is already running is not cut off.** The engine waits for it
+  (see the 10 seconds below) and keeps the engine objects it uses until it
+  returns, and `invoke()` returns the result of the node it called. When an
+  `invoke()` returns only after the engine has stopped taking new calls, for
+  example because it ran longer than that wait, the engine logs a warning that
+  contains `Warning: invoke returned after the pipeline ended;`.
+  If you called `invoke()` without a `component_id`, and the node that returned
+  that late declined the call (`preventDefault`), `invoke()` raises the error
+  of the next point instead of returning a result: after the end, the engine
+  asks no other node.
+  Each engine call that the running work makes on its way (for example when
+  the node you called calls `invoke()` in turn) is a new call: once the
+  engine has stopped taking new calls, about 5 seconds after its wait began
+  or sooner when no call is running, it raises like any other call after the
+  end. So long work that needs more engine calls must not count on them once
+  the end has begun.
+- **After the end, the next call raises.** Every engine call through
+  `self.instance` (`invoke`, `write*`, `send*`, `open`, `close`, ...) raises a
+  plain `Exception` whose `code` attribute is the value of `Ec.PipelineEnded`.
+  Its `message` attribute is `'The pipeline has ended'`.
+  `sendSSE` and the read-only values `self.instance.pipeId` and
+  `self.instance.pipeType` keep working until the engine frees the node's
+  filter, and then raise the same way.
+- **A running call can be refused further down.** When your call reaches a
+  Python node that has already ended, and that node handles the lane or the
+  `invoke`, the engine does not enter that node. Your call raises the same
+  error.
+- **`getPipe()` raises once the pipeline starts to end.** From the moment the
+  pipeline starts to end, `getPipe()` raises the same error, even when an idle
+  pipe exists. Do not call it on an endpoint object that you kept after the
+  task has ended (see the rule about not keeping the endpoint object for your
+  thread, below). After the end, calls on a pipe
+  you borrowed raise the same error too. The one exception is `putPipe()`:
+  after the end it does nothing and raises nothing, because no pipe stack is
+  left to take the pipe back. So a `putPipe()` in a `finally`
+  block keeps the error that you are handling. While the pipeline is alive,
+  and while the engine still takes new calls during the end, `putPipe()` gives
+  the pipe back as usual.
+- **The engine waits up to about 10 seconds per endpoint.** When the pipeline
+  ends, the engine waits up to about 10 seconds for calls that are still
+  running. The wait has two parts. First the engine still takes new calls, and
+  waits until no call is running, for up to about 5 seconds. Then it refuses
+  every new call and waits for the calls that are still running, for the rest
+  of the 10 seconds. So a new call can be refused from about 5 seconds after
+  the engine's wait began, or sooner, as soon as no call is running.
+  The same 10 seconds also cover a `getPipe()` that is still building a new
+  pipe when the end begins (the `beginInstance` of the nodes in that pipe runs
+  then). The engine waits for that build before it calls `IGlobal.endGlobal`,
+  and that `getPipe()` raises the "pipeline has ended" error. If the build
+  takes longer, your `endGlobal` runs when the build returns, on the thread
+  that called `getPipe()`. So do not hold a lock that your `endGlobal` takes
+  while you call `getPipe()`.
+  A task waits for its source endpoint and then for its target endpoint, so up
+  to about 20 seconds in all. The engine does not stop a call that takes
+  longer; that call just returns late. If your node has its own `IEndpoint`
+  class, its `endEndpoint` runs first, before the engine waits, while your
+  calls may still run. After the wait, teardown goes on: your `endInstance`
+  and your `IGlobal.endGlobal` can run while a late call is still running.
+  Anything these hooks close (a client, a connection) is closed for your
+  thread too. Before it ends the nodes, the engine refuses every new call, so
+  an engine call from `endInstance` (`self.instance.writeText(...)`,
+  `hasListener(...)`, `invoke(...)`, `currentObject`) raises; if
+  `endInstance` does not catch it, the task ends with that error. Read-only
+  properties such as `pipeType` and `sendSSE` still answer there. Use
+  `endInstance` only to release your node's own resources.
+- **Keeping `self.instance` does not keep the pipeline alive.** `self.instance`
+  is an `engLib.IFilterInstanceHandle`: a handle with a weak link to the
+  engine's object. A copy in a global, a closure or a thread raises once the
+  pipeline has ended. The same holds for `self.instance.next`,
+  `self.instance.pipe`, and a pipe you borrow with `getPipe()` (give it back
+  with `putPipe()`). These are `engLib.IServiceFilterPipeHandle` objects. The
+  names `engLib.IFilterInstance`, `engLib.IServiceFilterPipe` and
+  `engLib.IServiceFilterInstance` are aliases of the handle classes.
+- **A thread you start in `beginInstance` makes no engine call before your
+  first handler call.** The engine binds `self.instance` just before it calls
+  your `beginInstance`. A call before that raises the same error. From a thread
+  that you start in `beginInstance`, make no engine call until the engine has
+  called one of your handlers (for example `open`): until then the pipe is not
+  wired yet.
+- **Give your thread plain values, not engine objects.** From a thread of your
+  own, make engine calls through `self.instance` and the pipe handles (a pipe
+  borrowed with `getPipe()`, and the value of `next` or `pipe`). Use other
+  engine objects your node can reach (for example the endpoint object, the
+  global object, or an entry handed to your method or read from
+  `currentObject`) only inside the call that provided them, on the thread that
+  made that call. Do not keep them for a thread of your own, and do not use
+  them after the pipeline has ended. Read `self.instance.targetObjectUrl` and
+  `self.instance.targetObjectPath` only inside a handler too. Read what you
+  need in the handler and give your thread plain values.
+- **Make no engine call from your thread after your handler has returned.**
+  The engine refuses calls only after the pipeline has ended. One pipe serves
+  many objects or requests in turn, so a call that your thread makes after your
+  handler returned belongs to whatever the pipe handles at that moment. Finish
+  or stop your threads before the handler returns its last result. A thread
+  that you cannot stop in time, because it is still inside a call, makes no
+  further engine call, as in the example below.
+- **A thread that never returns keeps the process alive.** When the task
+  process exits, Python waits for every non-daemon thread. Give your thread's
+  work a time limit.
+
+The refusal has its own error code, `Ec.PipelineEnded`. To tell that the
+pipeline has ended, compare `exc.code` with `Ec.PipelineEnded.value`: `code` is
+a plain `int`, and an `Ec` value is never equal to an `int`. `exc.code` holds
+the number only, and an operating-system error that the engine passes to Python
+carries its own number in the same field. So `pipeline_ended()` below checks
+`exc.message` as well. The `message` text is the same in every refusal.
+
+```python
+import threading
+
+from ai.common.schema import Question
+from rocketlib import Ec, IInstanceBase, warning
+from rocketlib.types import IInvokeLLM
+
+
+def pipeline_ended(exc: Exception) -> bool:
+    """Tell whether the engine refused a call because the pipeline has ended.
+
+    Args:
+        exc: The exception that an engine call raised.
+
+    Returns:
+        True when ``exc`` is the engine's refusal after the end of the pipeline,
+        False for any other exception.
+    """
+    return (
+        getattr(exc, 'code', None) == Ec.PipelineEnded.value
+        and getattr(exc, 'message', None) == 'The pipeline has ended'
+    )
+
+
+class IInstance(IInstanceBase):
+    def writeQuestions(self, question: Question) -> None:
+        """Ask the LLM on a thread of this node and write the answer, or go on without it after 30 s.
+
+        Args:
+            question: The question to ask the LLM.
+        """
+        result = {}
+
+        def ask() -> None:
+            """Ask the LLM and keep its answer, or the error it raised, in ``result``."""
+            try:
+                # This call has no time limit of its own. The LLM node must limit
+                # its request, or this thread may never end.
+                result['answer'] = self.instance.invoke(IInvokeLLM.Ask(question=question))
+            except Exception as exc:
+                if pipeline_ended(exc):
+                    return  # too late: the pipeline has ended, nobody waits for this answer
+                result['error'] = exc
+
+        worker = threading.Thread(target=ask)
+        worker.start()
+        worker.join(timeout=30)
+
+        if worker.is_alive():
+            # The call goes on in the thread after this handler returns. The
+            # thread makes no further engine call, so a late answer is dropped.
+            warning('LLM call took longer than 30 s; going on without it')
+            return
+
+        if 'error' in result:
+            raise result['error']
+        self.instance.writeAnswers(result['answer'])
+```
+
+How the engine does this (the handle, the call gate, the teardown wait) is in
+[Python call lifetime](../engine/python-call-lifetime.md).
+
+---
+
 ## Prototyping a Node
 
 Build the node in `nodes/src/nodes/<node>/` and run the engine from this repo.

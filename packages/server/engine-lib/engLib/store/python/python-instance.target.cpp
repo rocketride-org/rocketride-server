@@ -33,7 +33,7 @@ Error IPythonInstanceBase::control(py::object &control) noexcept {
 
     auto python = localfcn() {
         // Call it
-        m_pyInstance.attr("control")(control);
+        boundInstance().attr("control")(control);
     };
 
     // On control, we are not going to check the flag because, most likely
@@ -64,7 +64,7 @@ Error IPythonInstanceBase::open(Entry &object) noexcept {
         auto pyObject = py::cast(&object);
 
         // Call it
-        m_pyInstance.attr("open")(pyObject);
+        boundInstance().attr("open")(pyObject);
     };
 
     // Check if the method is supported by the python endpoint
@@ -91,7 +91,7 @@ Error IPythonInstanceBase::writeTag(const TAG *pTag) noexcept {
         py::object pyTag = py::cast(pTag, py::return_value_policy::reference);
 
         // Call it
-        auto res = m_pyInstance.attr("writeTag")(pyTag);
+        auto res = boundInstance().attr("writeTag")(pyTag);
         if (res == py::none()) return {};
         int value = py::int_(res);
         if (value)
@@ -119,7 +119,7 @@ Error IPythonInstanceBase::closing() noexcept {
     if (!(m_pyMethods & PythonMethod::Closing)) return Parent::closing();
 
     auto python = localfcn()->Error {
-        m_pyInstance.attr("closing")();
+        boundInstance().attr("closing")();
         return {};
     };
 
@@ -142,7 +142,7 @@ Error IPythonInstanceBase::close() noexcept {
     if (!(m_pyMethods & PythonMethod::Close)) return Parent::close();
 
     auto python = localfcn()->Error {
-        m_pyInstance.attr("close")();
+        boundInstance().attr("close")();
         return {};
     };
 

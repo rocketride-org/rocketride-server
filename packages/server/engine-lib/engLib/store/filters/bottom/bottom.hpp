@@ -77,7 +77,6 @@ public:
     // Common operations
     //-----------------------------------------------------------------
     virtual Error beginFilterInstance() noexcept override { return {}; }
-    virtual Error endFilterInstance() noexcept override { return {}; }
     virtual Error ioControl(IOCTRL *pCommand) noexcept override { return {}; }
 
     //-----------------------------------------------------------------

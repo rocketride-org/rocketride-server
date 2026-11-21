@@ -40,10 +40,10 @@
 //  IFilterGlobal
 //		Adds python global specifics
 //
-//	_IFilterInstance
-//		The C++ part of the the class
-//  IFilterInstance
-//		Ads python instance specifics
+//	IFilterHandle
+//		Weak handle to a filter; forwards the filter's methods
+//  IFilterInstanceHandle, IServiceFilterPipeHandle
+//		A node's self.instance, and a borrowed pipe
 //	I
 //=============================================================================
 
@@ -894,7 +894,7 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
 
         .PYBIND_FUNCTION(
             getPipe,
-            [](IServiceEndpoint &self) -> IServiceFilterInstance & {
+            [](IServiceEndpoint &self) -> std::shared_ptr<PipeHandle> {
                 // Keep a refusal from the pipe gate to re-raise it as raised
                 std::optional<py::error_already_set> refusal;
                 pipeRefusal = &refusal;
@@ -911,19 +911,34 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                 // Get the ServicePipe
                 auto pipe = *result;
 
-                // Return a reference to it
-                return *pipe;
-            },
-            py::return_value_policy::reference)
+                // Return a handle that holds only a weak link to it
+                return std::make_shared<PipeHandle>(pipe->instance);
+            })
 
         .PYBIND_FUNCTION(
             putPipe,
-            [](IServiceEndpoint &self, IServiceFilterInstance &pipe) -> void {
+            [](IServiceEndpoint &self, PipeHandle &handle) -> void {
+                // Resolve the pipe before letting others run. The guard
+                // holds the filter and the head of its stack for the call.
+                // After the pipeline has ended no stack is left to take
+                // the pipe back, so the call does nothing: a putPipe in a
+                // finally block must not replace the error being handled.
+                std::optional<IServiceFilterInstance::CallGuard> guard;
+                try {
+                    guard.emplace(handle.lock());
+                } catch (const Error &ccode) {
+                    if (ccode.code() == Ec::PipelineEnded)
+                        return;
+                    throw;
+                }
+
                 // Allow others to run while we are doing this
                 engine::python::UnlockPython unlock;
 
-                // Return the pipe to the endpoint for reuse
-                self.putPipe(pipe.pipe);
+                // Return the pipe to the endpoint for reuse. putPipe() takes
+                // a non-const reference, so it gets a copy of the guard's head
+                ServicePipe head = guard->head();
+                self.putPipe(head);
                 return;
             })
 
@@ -972,144 +987,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                               pipeType.logicalType)
         .PYBIND_PROP_READONLY(IServiceFilterGlobal, std::string, physicalType,
                               pipeType.physicalType);
-
-    //-------------------------------------------------------------
-    /// @details
-    ///		Declare the IServiceFilterInstance
-    ///------------------------------------------------------------
-    py::class_<IServiceFilterInstance>(engLib, "IServiceFilterInstance")
-        .PYBIND_PROP_READONLY(IServiceFilterInstance, uint32_t, pipeId, pipeId)
-        .PYBIND_PROP_READONLY(IServiceFilterInstance, IServiceFilterInstance *,
-                              next, pDown.get())
-        .PYBIND_PROP_READONLY(IServiceFilterInstance, const IPipeType &,
-                              pipeType, pipeType)
-
-        .PYBIND_PROP_READONLY_CUSTOM(
-            pipe,
-            [](IServiceFilterInstance &self) -> ServicePipe {
-                return self.pipe;
-            })
-
-        .PYBIND_PROP_READONLY_CUSTOM(
-            pyInstance,
-            [](IServiceFilterInstance &self) -> py::object {
-                IPythonInstanceBase *pySelf =
-                    _dynCast<IPythonInstanceBase *>(&self);
-                return pySelf ? pySelf->getPythonInstance() : py::none();
-            })
-
-        .PYBIND(sendOpen, &IServiceFilterInstance::cb_sendOpen)
-        .PYBIND(sendTagMetadata, &IServiceFilterInstance::cb_sendTagMetadata)
-        .PYBIND(sendTagBeginObject,
-                &IServiceFilterInstance::cb_sendTagBeginObject)
-        .PYBIND(sendTagBeginStream,
-                &IServiceFilterInstance::cb_sendTagBeginStream)
-        .PYBIND(sendTagData, &IServiceFilterInstance::cb_sendTagData)
-        .PYBIND(sendTagEndStream, &IServiceFilterInstance::cb_sendTagEndStream)
-        .PYBIND(sendTagEndObject, &IServiceFilterInstance::cb_sendTagEndObject)
-        .PYBIND(sendText, &IServiceFilterInstance::cb_sendText)
-        .PYBIND(sendTable, &IServiceFilterInstance::cb_sendTable)
-        .PYBIND(sendJson, &IServiceFilterInstance::cb_sendJson)
-        .PYBIND(sendAudio, &IServiceFilterInstance::cb_sendAudio,
-                py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
-        .PYBIND(sendVideo, &IServiceFilterInstance::cb_sendVideo,
-                py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
-        .PYBIND(sendImage, &IServiceFilterInstance::cb_sendImage,
-                py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
-        .PYBIND(sendQuestions, &IServiceFilterInstance::cb_sendQuestions,
-                py::arg("questions"))
-        .PYBIND(sendAnswers, &IServiceFilterInstance::cb_sendAnswers)
-        .PYBIND(sendDocuments, &IServiceFilterInstance::cb_sendDocuments)
-        .PYBIND(sendClassifications,
-                &IServiceFilterInstance::cb_sendClassifications)
-        .PYBIND(sendClassificationContext,
-                &IServiceFilterInstance::cb_sendClassificationContext)
-        .PYBIND(sendClose, &IServiceFilterInstance::cb_sendClose)
-
-        .PYBIND(addPermissions, &IServiceFilterInstance::cb_addPermissions,
-                py::arg("dict"), py::arg("throw_on_error") = false)
-        .PYBIND(addUserGroupInfo, &IServiceFilterInstance::cb_addUserGroupInfo)
-        .PYBIND(addUserInfo, &IServiceFilterInstance::cb_addUserInfo)
-        .PYBIND(addGroupInfo, &IServiceFilterInstance::cb_addGroupInfo,
-                py::arg("id"), py::arg("authority"), py::arg("name"),
-                py::arg("local"), py::arg("groupMembers") = py::none())
-
-        .PYBIND(hasListener, &IServiceFilterInstance::cb_hasListener)
-        .PYBIND(getListeners, &IServiceFilterInstance::cb_getListeners)
-        .PYBIND(getControllerNodeIds,
-                &IServiceFilterInstance::cb_getControllerNodeIds)
-        .PYBIND(control, &IServiceFilterInstance::cb_control,
-                py::arg("classType"), py::arg("control"),
-                py::arg("nodeId") = "")
-        .PYBIND(open, &IServiceFilterInstance::cb_open)
-        .PYBIND(writeTagBeginObject,
-                &IServiceFilterInstance::cb_writeTagBeginObject)
-        .PYBIND(writeTagBeginStream,
-                &IServiceFilterInstance::cb_writeTagBeginStream)
-        .PYBIND(writeTagData, &IServiceFilterInstance::cb_writeTagData)
-        .PYBIND(writeTag, &IServiceFilterInstance::cb_writeTag)
-        .PYBIND(writeText, &IServiceFilterInstance::cb_writeText)
-        .PYBIND(writeTable, &IServiceFilterInstance::cb_writeTable)
-        .PYBIND(writeJson, &IServiceFilterInstance::cb_writeJson)
-        .PYBIND(writeAudio, &IServiceFilterInstance::cb_writeAudio,
-                py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
-        .PYBIND(writeVideo, &IServiceFilterInstance::cb_writeVideo,
-                py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
-        .PYBIND(writeImage, &IServiceFilterInstance::cb_writeImage,
-                py::arg("action"), py::arg("mimeType"),
-                py::arg("streamData") = py::bytes())
-        .PYBIND(writeQuestions, &IServiceFilterInstance::cb_writeQuestions,
-                py::arg("questions"))
-        .PYBIND(writeAnswers, &IServiceFilterInstance::cb_writeAnswers)
-        .PYBIND(writeDocuments, &IServiceFilterInstance::cb_writeDocuments)
-        .PYBIND(writeClassifications,
-                &IServiceFilterInstance::cb_writeClassifications)
-        .PYBIND(writeClassificationContext,
-                &IServiceFilterInstance::cb_writeClassificationContext)
-        .PYBIND(writeTagEndStream,
-                &IServiceFilterInstance::cb_writeTagEndStream)
-        .PYBIND(writeTagEndObject,
-                &IServiceFilterInstance::cb_writeTagEndObject)
-        .PYBIND(close, &IServiceFilterInstance::cb_close)
-        .PYBIND(closing, &IServiceFilterInstance::cb_closing)
-
-        .PYBIND_PROP_READONLY_CUSTOM(
-            currentObject, [](IServiceFilterInstance &obj) -> py::object {
-                if (obj.currentEntry)
-                    // Return a reference
-                    return py::cast(obj.currentEntry,
-                                    py::return_value_policy::reference);
-                else
-                    return py::none();
-            });
-
-    py::class_<IPythonInstanceBase, IServiceFilterInstance>(engLib,
-                                                            "IFilterInstance")
-        .PYBIND_PROP_READONLY(IPythonInstanceBase, py::object, pyInstance,
-                              getPythonInstance())
-
-        .PYBIND_PROP_READONLY_CUSTOM(
-            targetObjectUrl,
-            [](IPythonInstanceBase &obj) -> py::object {
-                // It is safe to cast this as we provided it
-                if (obj.getTargetObjectUrl().fullpath())
-                    return py::str(_ts(obj.getTargetObjectUrl()));
-                else
-                    return py::none();
-            })
-
-        .PYBIND_PROP_READONLY_CUSTOM(
-            targetObjectPath, [](IPythonInstanceBase &obj) -> py::object {
-                if (obj.getTargetObjectPath())
-                    return py::str(obj.getTargetObjectPath());
-                else
-                    return py::none();
-            });
 
     //-------------------------------------------------------------
     /// @details
@@ -1176,6 +1053,192 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
                          });
 
     //-------------------------------------------------------------
+    /// @details
+    ///		Declare the handles Python holds in place of a filter.
+    ///		A handle owns only a weak link to its filter and checks it on
+    ///		every call, so Python never owns or outlives an engine filter.
+    ///		The filter classes themselves are not registered, so a
+    ///		filter cannot be cast to a Python object.
+    ///		IFilterHandle carries every method and property of the
+    ///		filter; IFilterInstanceHandle is self.instance of a node and
+    ///		IServiceFilterPipeHandle is a borrowed pipe or a filter
+    ///		reached through next/pipe.
+    ///------------------------------------------------------------
+    py::class_<FilterHandle, std::shared_ptr<FilterHandle>>(engLib,
+                                                            "IFilterHandle")
+        .PYBIND_PROP_READONLY_CUSTOM(pipeId,
+                                     [](FilterHandle &h) -> uint32_t {
+                                         return (uint32_t)h.lock()->pipeId;
+                                     })
+        .PYBIND_PROP_READONLY_CUSTOM(
+            next,
+            [](FilterHandle &h) -> py::object {
+                // The guard keeps the links valid while they are read
+                IServiceFilterInstance::CallGuard guard{h.lock()};
+                ServiceInstance down = guard.filter()->downLink();
+                if (!down)
+                    return py::none();
+                return py::cast(std::make_shared<PipeHandle>(down->instance));
+            })
+        .PYBIND_PROP_READONLY_CUSTOM(
+            pipeType,
+            [](FilterHandle &h) -> IPipeType { return h.lock()->pipeType; })
+        .PYBIND_PROP_READONLY_CUSTOM(
+            pipe,
+            [](FilterHandle &h) -> py::object {
+                // The guard refuses a filter that has no head
+                IServiceFilterInstance::CallGuard guard{h.lock()};
+                return py::cast(
+                    std::make_shared<PipeHandle>(guard.head()->instance));
+            })
+        .PYBIND_PROP_READONLY_CUSTOM(
+            pyInstance,
+            [](FilterHandle &h) -> py::object {
+                ServiceInstance self = h.lock();
+                IPythonInstanceBase *pySelf =
+                    _dynCast<IPythonInstanceBase *>(self.get());
+                // An ended or unbound node has no object
+                if (!pySelf || !pySelf->getPythonInstance())
+                    return py::none();
+                return pySelf->getPythonInstance();
+            })
+
+        .PYBIND(sendOpen, forwardTo(&IServiceFilterInstance::cb_sendOpen))
+        .PYBIND(sendTagMetadata,
+                forwardTo(&IServiceFilterInstance::cb_sendTagMetadata))
+        .PYBIND(sendTagBeginObject,
+                forwardTo(&IServiceFilterInstance::cb_sendTagBeginObject))
+        .PYBIND(sendTagBeginStream,
+                forwardTo(&IServiceFilterInstance::cb_sendTagBeginStream))
+        .PYBIND(sendTagData, forwardTo(&IServiceFilterInstance::cb_sendTagData))
+        .PYBIND(sendTagEndStream,
+                forwardTo(&IServiceFilterInstance::cb_sendTagEndStream))
+        .PYBIND(sendTagEndObject,
+                forwardTo(&IServiceFilterInstance::cb_sendTagEndObject))
+        .PYBIND(sendText, forwardTo(&IServiceFilterInstance::cb_sendText))
+        .PYBIND(sendTable, forwardTo(&IServiceFilterInstance::cb_sendTable))
+        .PYBIND(sendJson, forwardTo(&IServiceFilterInstance::cb_sendJson))
+        .PYBIND(sendAudio, forwardTo(&IServiceFilterInstance::cb_sendAudio),
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(sendVideo, forwardTo(&IServiceFilterInstance::cb_sendVideo),
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(sendImage, forwardTo(&IServiceFilterInstance::cb_sendImage),
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(sendQuestions,
+                forwardTo(&IServiceFilterInstance::cb_sendQuestions),
+                py::arg("questions"))
+        .PYBIND(sendAnswers, forwardTo(&IServiceFilterInstance::cb_sendAnswers))
+        .PYBIND(sendDocuments,
+                forwardTo(&IServiceFilterInstance::cb_sendDocuments))
+        .PYBIND(sendClassifications,
+                forwardTo(&IServiceFilterInstance::cb_sendClassifications))
+        .PYBIND(
+            sendClassificationContext,
+            forwardTo(&IServiceFilterInstance::cb_sendClassificationContext))
+        .PYBIND(sendClose, forwardTo(&IServiceFilterInstance::cb_sendClose))
+
+        .PYBIND(addPermissions,
+                forwardTo(&IServiceFilterInstance::cb_addPermissions),
+                py::arg("dict"), py::arg("throw_on_error") = false)
+        .PYBIND(addUserGroupInfo,
+                forwardTo(&IServiceFilterInstance::cb_addUserGroupInfo))
+        .PYBIND(addUserInfo, forwardTo(&IServiceFilterInstance::cb_addUserInfo))
+        .PYBIND(addGroupInfo,
+                forwardTo(&IServiceFilterInstance::cb_addGroupInfo),
+                py::arg("id"), py::arg("authority"), py::arg("name"),
+                py::arg("local"), py::arg("groupMembers") = py::none())
+
+        .PYBIND(hasListener, forwardTo(&IServiceFilterInstance::cb_hasListener))
+        .PYBIND(getListeners,
+                forwardTo(&IServiceFilterInstance::cb_getListeners))
+        .PYBIND(getControllerNodeIds,
+                forwardTo(&IServiceFilterInstance::cb_getControllerNodeIds))
+        .PYBIND(control, forwardTo(&IServiceFilterInstance::cb_control),
+                py::arg("classType"), py::arg("control"),
+                py::arg("nodeId") = "")
+        .PYBIND(open, forwardTo(&IServiceFilterInstance::cb_open))
+        .PYBIND(writeTagBeginObject,
+                forwardTo(&IServiceFilterInstance::cb_writeTagBeginObject))
+        .PYBIND(writeTagBeginStream,
+                forwardTo(&IServiceFilterInstance::cb_writeTagBeginStream))
+        .PYBIND(writeTagData,
+                forwardTo(&IServiceFilterInstance::cb_writeTagData))
+        .PYBIND(writeTag, forwardTo(&IServiceFilterInstance::cb_writeTag))
+        .PYBIND(writeText, forwardTo(&IServiceFilterInstance::cb_writeText))
+        .PYBIND(writeTable, forwardTo(&IServiceFilterInstance::cb_writeTable))
+        .PYBIND(writeJson, forwardTo(&IServiceFilterInstance::cb_writeJson))
+        .PYBIND(writeAudio, forwardTo(&IServiceFilterInstance::cb_writeAudio),
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(writeVideo, forwardTo(&IServiceFilterInstance::cb_writeVideo),
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(writeImage, forwardTo(&IServiceFilterInstance::cb_writeImage),
+                py::arg("action"), py::arg("mimeType"),
+                py::arg("streamData") = py::bytes())
+        .PYBIND(writeQuestions,
+                forwardTo(&IServiceFilterInstance::cb_writeQuestions),
+                py::arg("questions"))
+        .PYBIND(writeAnswers,
+                forwardTo(&IServiceFilterInstance::cb_writeAnswers))
+        .PYBIND(writeDocuments,
+                forwardTo(&IServiceFilterInstance::cb_writeDocuments))
+        .PYBIND(writeClassifications,
+                forwardTo(&IServiceFilterInstance::cb_writeClassifications))
+        .PYBIND(
+            writeClassificationContext,
+            forwardTo(&IServiceFilterInstance::cb_writeClassificationContext))
+        .PYBIND(writeTagEndStream,
+                forwardTo(&IServiceFilterInstance::cb_writeTagEndStream))
+        .PYBIND(writeTagEndObject,
+                forwardTo(&IServiceFilterInstance::cb_writeTagEndObject))
+        .PYBIND(close, forwardTo(&IServiceFilterInstance::cb_close))
+        .PYBIND(closing, forwardTo(&IServiceFilterInstance::cb_closing))
+
+        .PYBIND_PROP_READONLY_CUSTOM(
+            currentObject, [](FilterHandle &h) -> py::object {
+                IServiceFilterInstance::CallGuard guard{h.lock()};
+                if (guard.filter()->currentEntry)
+                    // Return a reference
+                    return py::cast(guard.filter()->currentEntry,
+                                    py::return_value_policy::reference);
+                else
+                    return py::none();
+            });
+
+    py::class_<NodeHandle, FilterHandle, std::shared_ptr<NodeHandle>>(
+        engLib, "IFilterInstanceHandle")
+        .PYBIND_PROP_READONLY_CUSTOM(
+            targetObjectUrl,
+            [](NodeHandle &h) -> py::object {
+                ServiceInstance self = h.lock();
+                auto *pySelf = _dynCast<IPythonInstanceBase *>(self.get());
+                if (pySelf && pySelf->getTargetObjectUrl().fullpath())
+                    return py::str(_ts(pySelf->getTargetObjectUrl()));
+                return py::none();
+            })
+        .PYBIND_PROP_READONLY_CUSTOM(
+            targetObjectPath, [](NodeHandle &h) -> py::object {
+                ServiceInstance self = h.lock();
+                auto *pySelf = _dynCast<IPythonInstanceBase *>(self.get());
+                if (pySelf && pySelf->getTargetObjectPath())
+                    return py::str(pySelf->getTargetObjectPath());
+                return py::none();
+            });
+
+    py::class_<PipeHandle, FilterHandle, std::shared_ptr<PipeHandle>>(
+        engLib, "IServiceFilterPipeHandle");
+
+    // Node code names the filter classes by these names; they are the
+    // handle classes above
+    engLib.attr("IServiceFilterInstance") = engLib.attr("IFilterHandle");
+    engLib.attr("IFilterInstance") = engLib.attr("IFilterInstanceHandle");
+    engLib.attr("IServiceFilterPipe") = engLib.attr("IServiceFilterPipeHandle");
+
+    //-------------------------------------------------------------
     // @details
     //		This is the top level class that python will
     //		instantiate to start the loading process.
@@ -1190,9 +1253,6 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
     //				endpoint.putPipe(pipe)
     //			loader.endLoad()
     //-------------------------------------------------------------
-    py::class_<IServiceFilterInstancePipe, IServiceFilterInstance>(
-        engLib, "IServiceFilterPipe");
-
     py::class_<ILoader>(engLib, "ILoader")
         .PYINIT(py::init<>())
         .PYBIND(beginLoad, &ILoader::beginLoad, py::arg("pipes") = py::dict())
@@ -1411,7 +1471,8 @@ PYBIND11_EMBEDDED_MODULE(engLib, engLib) {
         .PYENUM(Lz4Deflate, Ec::Lz4Deflate)
         .PYENUM(LicenseLimit, Ec::LicenseLimit)
         .PYENUM(InvalidFilename, Ec::InvalidFilename)
-        .PYENUM(Crash, Ec::Crash);
+        .PYENUM(Crash, Ec::Crash)
+        .PYENUM(PipelineEnded, Ec::PipelineEnded);
 
     //-------------------------------------------------------------
     /// @details

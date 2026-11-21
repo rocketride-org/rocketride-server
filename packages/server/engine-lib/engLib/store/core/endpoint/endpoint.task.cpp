@@ -27,42 +27,77 @@ namespace engine::store {
 //-------------------------------------------------------------------------
 /// @details
 ///		Writes a text string to the task output if it has been allowed
-///		to do so
+///		to do so. The task is read and called under m_taskLock: after
+///		endEndpoint() no task is bound, and the text is dropped; the first
+///		write dropped after the end logs a warning.
 ///	@param[in]	text
 ///		The text to write
 ///	@returns
-///		Error
+///		Error, empty when no task is bound
 //-------------------------------------------------------------------------
 Error IServiceEndpoint::taskWriteText(const Text &text) noexcept {
-    if (m_task) return m_task->writeText(text);
+    std::lock_guard<async::Mutex> lock(m_taskLock);
+    if (m_task)
+        return m_task->writeText(text);
+    logDroppedTaskWrite("text");
     return {};
 }
 
 //-------------------------------------------------------------------------
 /// @details
-///		Writes a warning about an object to the monitor
+///		Writes a warning about an object to the monitor. The task is
+///		read and called under m_taskLock: after endEndpoint() no task is
+///		bound, and the warning is dropped; the first write dropped after
+///		the end logs a warning.
 ///	@param[in]	entry
 ///		The entry to log against
 ///	@param[in]	ccode
 ///		The message to log
 ///	@returns
-///		Error
+///		Error, empty when no task is bound
 //-------------------------------------------------------------------------
 Error IServiceEndpoint::taskWriteWarning(const Entry &entry,
                                          const Error &ccode) noexcept {
-    if (m_task) return (m_task->writeWarning)(entry, ccode);
+    std::lock_guard<async::Mutex> lock(m_taskLock);
+    if (m_task)
+        return (m_task->writeWarning)(entry, ccode);
+    logDroppedTaskWrite("warning");
     return {};
 }
 
 //-------------------------------------------------------------------------
 /// @details
-///		Sets the bound callbacks into the task
-///	@param[in]	bindTask
-///		Pointers to the callback functions
+///		Called under m_taskLock by a task write that found no task bound.
+///		Once the end has started, the first such write of this endpoint
+///		logs a warning that names the endpoint and the kind of write; the
+///		later ones are dropped without a line. A write before the end logs
+///		nothing: an endpoint that is not a task's target never has a task
+///		bound. The written text is never logged, as it can carry document
+///		content.
+///	@param[in]	kind
+///		The kind of write: "text" or "warning"
+//-------------------------------------------------------------------------
+void IServiceEndpoint::logDroppedTaskWrite(const char *kind) noexcept {
+    if (!m_ending || m_droppedTaskWriteLogged)
+        return;
+    m_droppedTaskWriteLogged = true;
+    LOG(Always, "Warning: teardown: task", kind,
+        "written after the end of endpoint", config.logicalType,
+        "is dropped; later task writes of this endpoint are dropped",
+        "without a log line");
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Sets the task that taskWriteText() and taskWriteWarning() write
+///		to, under m_taskLock. endEndpoint() clears it.
+///	@param[in]	pTask
+///		The task, or nullptr to let go of the bound one
 ///	@returns
 ///		Error
 //-------------------------------------------------------------------------
 Error IServiceEndpoint::bindTask(task::IPipeTaskBase *pTask) noexcept {
+    std::lock_guard<async::Mutex> lock(m_taskLock);
     m_task = pTask;
     return {};
 }

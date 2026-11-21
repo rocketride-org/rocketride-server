@@ -110,6 +110,7 @@ class Ec:
     Retry: int
     InvalidFilename: int
     Crash: int
+    PipelineEnded: int
 
 class APERR(Exception):
     """Raised when an engine error occurs."""
@@ -590,7 +591,22 @@ class IServiceEndpoint(Protocol):
     def putPipe(self, pipe: 'IServiceFilterPipe') -> None: ...
 
 class IServiceFilterPipe(Protocol):
-    """Full engine filter-pipe interface (source + target combined)."""
+    """Full engine filter-pipe interface (source + target combined).
+
+    Python holds a handle to the filter, not the filter itself. Once the
+    pipeline has ended (the end of the endpoint, not of one request), every
+    engine call (every method except ``sendSSE``) and the properties ``next``,
+    ``pipe`` and ``currentObject`` raise ``Exception`` whose ``code`` is the
+    value of ``Ec.PipelineEnded`` ("The pipeline has ended"). ``pipeId``,
+    ``pipeType``, ``targetObjectUrl``, ``targetObjectPath`` and ``sendSSE``
+    (which reads only ``pipeId``) keep answering while the engine's filter
+    object exists, and raise the same error once it is freed. Read
+    ``targetObjectUrl`` and ``targetObjectPath`` only inside a handler.
+    ``pyInstance`` is ``None`` for a filter that is not a Python node, and once
+    the node has ended. ``targetObjectUrl``, ``targetObjectPath``, ``invoke``
+    and ``sendSSE`` exist only on a node's ``self.instance``, not on a pipe
+    from ``getPipe()``, ``next`` or ``pipe``.
+    """
 
     class IServiceFilterInstance_PipeType(TypedDict):
         id: str

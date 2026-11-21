@@ -69,8 +69,7 @@ std::vector<std::string> IServiceFilterInstance::cb_getControllerNodeIds(
     auto it = this->controller.find(classType);
     if (it != this->controller.end()) {
         for (auto idx : it->second) {
-            auto &filter =
-                this->endpoint->m_instanceStacks[this->pipeId][idx];
+            auto filter = this->stackFilter(idx);
             result.push_back(filter->pipeType.id);
         }
     }
@@ -98,11 +97,26 @@ void IServiceFilterInstance::cb_control(std::string &classType,
     // Get the trace level
     auto traceLevel = endpoint->config.pipelineTraceLevel;
 
+    // A control that returns after either gate has closed is a late return:
+    // it is logged, no leave trace is written, and the result the target
+    // wrote into the control object is still delivered to the caller. A gate
+    // closes when teardown stops taking calls, so this also covers a return
+    // while teardown still waits for this call.
+    const auto returnedAfterEnd = [&](const ServiceInstance &target) -> bool {
+        if (!this->hasEnded() && !target->hasEnded())
+            return false;
+
+        LOG(Always, "Warning: invoke returned after the pipeline ended; pipe",
+            this->pipeId, "caller", this->pipeType.id, "(",
+            this->pipeType.physicalType, ") target", target->pipeType.id, "(",
+            target->pipeType.physicalType, ") control", classType);
+        return true;
+    };
+
     // ---- Targeted dispatch: if nodeId is provided, call that node directly
     if (!nodeId.empty()) {
         for (auto filterId : controls->second) {
-            ServiceInstance filter =
-                this->endpoint->m_instanceStacks[this->pipeId][filterId];
+            ServiceInstance filter = this->stackFilter(filterId);
 
             if (filter->pipeType.id != nodeId) continue;
 
@@ -120,6 +134,12 @@ void IServiceFilterInstance::cb_control(std::string &classType,
             this->pipe->debugger.debugEnter(filter.get(), enterTrace);
 
             ccode = filter->control(control);
+
+            if (returnedAfterEnd(filter)) {
+                if (ccode)
+                    throw ccode;
+                return;
+            }
 
             // Build leave trace
             json::Value leaveTrace;
@@ -149,8 +169,7 @@ void IServiceFilterInstance::cb_control(std::string &classType,
     // ---- Chain dispatch: walk all filters until one succeeds
     for (auto filterId : controls->second) {
         // Get a ptr to the specified filter
-        ServiceInstance filter =
-            this->endpoint->m_instanceStacks[this->pipeId][filterId];
+        ServiceInstance filter = this->stackFilter(filterId);
 
         // Build enter trace if tracing is enabled
         json::Value enterTrace;
@@ -167,6 +186,16 @@ void IServiceFilterInstance::cb_control(std::string &classType,
 
         // Call the control function
         ccode = filter->control(control);
+
+        // After the end there is no next driver to try: hand back the result
+        // that was produced, or the error
+        if (returnedAfterEnd(filter)) {
+            if (!ccode)
+                return;
+            if (ccode.code() == Ec::PreventDefault)
+                throw APERR(Ec::PipelineEnded, PipelineEndedMessage);
+            throw ccode;
+        }
 
         // If we succeeded, we are done
         if (!ccode) {
@@ -695,7 +724,7 @@ void IServiceFilterInstance::cb_close() noexcept(false) {
         // Once object closed, release a python reference
         _block() {
             engine::python::LockPython lock;
-            pyCurrentEntry = py::none();
+            pyCurrentEntry = py::object();
         }
 
         if (ccode) throw ccode;

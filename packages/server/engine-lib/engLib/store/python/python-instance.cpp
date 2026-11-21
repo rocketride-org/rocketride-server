@@ -54,8 +54,10 @@ IPythonInstanceBase::IPythonInstanceBase(const FactoryArgs &args) noexcept
         if (m_global.m_pyGlobal)
             m_pyInstance.attr("IGlobal") = m_global.m_pyGlobal;
 
-        // Save the ptr to our functions
-        m_pyInstance.attr("instance") = this;
+        // Give the python object a handle to our functions. It is bound to
+        // this filter in beginFilterInstance, once the weak self link exists
+        m_handle = std::make_shared<NodeHandle>();
+        m_pyInstance.attr("instance") = m_handle;
 
         // <deprecated>
         //		This is for compatability but it is ambiguous
@@ -144,12 +146,27 @@ IPythonInstanceBase::~IPythonInstanceBase() {
 
 //-------------------------------------------------------------------------
 /// @details
+///		The node's IInstance for an engine entry into the node
+//-------------------------------------------------------------------------
+py::object IPythonInstanceBase::boundInstance() {
+    if (m_pyEnded)
+        throw APERR(Ec::PipelineEnded, PipelineEndedMessage);
+
+    if (!m_pyInstance)
+        throw APERR(Ec::InvalidCommand, "The node instance is not bound",
+                    pipeType.id);
+
+    return m_pyInstance;
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Allocates the instance data. We set up the following on the users
 ///		IInstance object
 ///
 ///			IEndpoint		contains an object of the users IEndpoint class
 ///			IGlobal			contains an object of the users IGlobal class
-///			instance		this IPythonInstanceBase class which allows
+///			instance		a handle to this filter which allows
 ///							access to instance functions
 ///
 ///			endpoint		<deprecated> - use IEndpoint.endpoint
@@ -159,6 +176,10 @@ Error IPythonInstanceBase::beginFilterInstance() noexcept {
     LOGPIPE();
 
     if (m_boundError) return m_boundError;
+
+    // Point the python handle at this filter before python can use it
+    if (m_handle)
+        m_handle->bind(this->instance);
 
     // Calls the begin instance on the python filter
     const auto python = localfcn()->Error {
@@ -175,7 +196,14 @@ Error IPythonInstanceBase::beginFilterInstance() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Releases the instance data
+///		Calls the node's endInstance if it has one, then marks the node
+///		ended and releases its object, also when endInstance raises.
+///		The parent's endFilterInstance() runs only when endInstance did
+///		not raise (a preventDefault counts as raising). A node that
+///		failed to bind returns its bind error and runs neither
+///	@returns
+///		The bind error, else endInstance's error (none for a
+///		preventDefault), else the parent's
 //-------------------------------------------------------------------------
 Error IPythonInstanceBase::endFilterInstance() noexcept {
     LOGPIPE();
@@ -186,12 +214,17 @@ Error IPythonInstanceBase::endFilterInstance() noexcept {
     const auto python = localfcn()->Error {
         // If we have an instance
         if (m_pyInstance) {
+            // Ends the node on the way out, also when endInstance raises.
+            // The flag goes first: releasing the object can run Python
+            // code, which can hand the GIL to another thread
+            util::Guard ended{[&] {
+                m_pyEnded = true;
+                m_pyInstance = {};
+            }};
+
             // If it has an end instance method, call it
             if (m_pyMethods & PythonMethod::EndInstance)
                 m_pyInstance.attr("endInstance")();
-
-            // Clear it
-            m_pyInstance = {};
         }
         return {};
     };

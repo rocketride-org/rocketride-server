@@ -39,6 +39,15 @@ using WordVector = std::vector<StackText>;
 
 //-------------------------------------------------------------------------
 /// @details
+///		The message of the Ec::PipelineEnded error, which refuses an engine
+///		call once its pipeline has ended. Node code compares exc.message
+///		with it, together with the code, so the text is part of the
+///		contract: do not change it.
+//-------------------------------------------------------------------------
+_const auto PipelineEndedMessage = "The pipeline has ended"_tv;
+
+//-------------------------------------------------------------------------
+/// @details
 ///		This is the filter driver which all filters/targets/sources must
 ///		implement
 //-------------------------------------------------------------------------
@@ -378,13 +387,15 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Our endpoint
+    ///		Our endpoint. A link: set when the filter is made, and reset
+    ///		only through releaseLinks(), under m_linkLock
     //-----------------------------------------------------------------
     ServiceEndpoint endpoint;
 
     //-----------------------------------------------------------------
     /// @details
-    ///		Our global data
+    ///		Our global data. A link: set when the filter is made, and
+    ///		reset only through releaseLinks(), under m_linkLock
     //-----------------------------------------------------------------
     ServiceGlobal global;
 
@@ -397,13 +408,17 @@ public:
     //-----------------------------------------------------------------
     /// @details
     ///		This is a ptr to the top pipe::IFilter. We need it to
-    ///     store instance pipe specific event handlers
+    ///     store instance pipe specific event handlers. A link: set
+    ///     when the stack is built, and reset only through
+    ///     releaseLinks(), under m_linkLock
     //-----------------------------------------------------------------
     ServicePipe pipe;
 
     //-----------------------------------------------------------------
     /// @details
-    ///		This is still valid
+    ///		The next filter down the stack; empty for the last one. A
+    ///		link: set when the stack is bound (bindLinkages()), and
+    ///		reset only through releaseLinks(), under m_linkLock
     //-----------------------------------------------------------------
     ServiceInstance pDown;
 
@@ -432,8 +447,10 @@ public:
 
     //-----------------------------------------------------------------
     /// @details
-    ///		The currently opened entry from Python code to keep
-    ///		a python reference and avoid it being garbage collected
+    ///		The entry Python opened on this filter (cb_open), kept so
+    ///		Python does not free it while the object is open. A Python
+    ///		reference: cb_close, the next cb_open and the destructor
+    ///		release it under the GIL
     //-----------------------------------------------------------------
     py::object pyCurrentEntry;
 
@@ -460,7 +477,147 @@ public:
     //-------------------------------------------------------------
     Debugger debugger;
 
+    //-------------------------------------------------------------
+    /// @details
+    ///		Python-call gate.
+    ///
+    ///		Invariant: the links (endpoint, pipe, global, pDown) and
+    ///		the buffers of a stack's filters are released only when no
+    ///		Python call that passed the gate runs on any filter of that
+    ///		stack: right after a full drain, or by the deferred release
+    ///		below. In a stack whose filters were never linked to each
+    ///		other (a pipe build that failed before its bind) this holds
+    ///		per filter: the head is released when no call runs on the
+    ///		head, and every other filter keeps its links until it is
+    ///		freed. Once a filter's gate is closed, every new Python
+    ///		call on it is refused. No filter object is freed while a
+    ///		Python call into the engine runs on it.
+    ///
+    ///		A guard counts one Python call on a filter, or refuses it
+    ///		once the filter's gate is closed. forwardTo()
+    ///		(filter-handle.hpp) creates one before it calls a cb_*
+    ///		callback; the handle members that read a link (next, pipe,
+    ///		currentObject) and putPipe() create their own. The
+    ///		callback and the binder code below it read the links,
+    ///		which the invariant keeps valid while the call is counted.
+    ///
+    ///		Each side writes first and reads second, all seq_cst, so
+    ///		at least one of them sees the other. On entry the guard
+    ///		raises the count and then checks the gate, and teardown
+    ///		closes the gate and then reads the count: either the guard
+    ///		refuses or teardown waits for it. On leaving, the guard
+    ///		drops the count and then reads the head's release flag,
+    ///		and armDeferredRelease() sets the flag and then reads the
+    ///		counts: a stack ended while a call ran is released once it
+    ///		is idle. The guard holds the filter and the head until it
+    ///		has left, so the last guard to leave can release the stack.
+    ///
+    ///		The full protocol:
+    ///		docs/development/engine/python-call-lifetime.md
+    //-------------------------------------------------------------
+    class CallGuard {
+    public:
+        explicit CallGuard(ServiceInstance filter) noexcept(false);
+        ~CallGuard() noexcept;
+
+        CallGuard(const CallGuard &) = delete;
+        CallGuard &operator=(const CallGuard &) = delete;
+
+        /// The filter the call runs on
+        const ServiceInstance &filter() const noexcept { return m_filter; }
+
+        /// The head of the filter's stack, copied when the guard counted
+        /// the call; never empty once the constructor has returned
+        const ServicePipe &head() const noexcept { return m_head; }
+
+    private:
+        /// Drops the count, then releases the stack if it waits for this
+        /// call
+        void leave() noexcept;
+
+        /// Both held until the guard has left: once the count has dropped,
+        /// another thread may release the stack and reset the filter's own
+        /// link to the head
+        ServiceInstance m_filter;
+        ServicePipe m_head;
+    };
+
+    /// True once the gate is closed: by closeGate() (teardown, or a pipe
+    /// build that is not published), or by endFilterInstance(). The links
+    /// may still be valid then.
+    bool hasEnded() const noexcept {
+        return m_ended.load(std::memory_order_seq_cst);
+    }
+
+    /// Refuses every new Python call on this filter from now on.
+    /// endFilterInstance() sets the same flag; setting it twice is harmless.
+    void closeGate() noexcept {
+        m_ended.store(true, std::memory_order_seq_cst);
+    }
+
+    /// Number of Python calls counted by a CallGuard on this filter that
+    /// have not left yet
+    uint32_t callsInFlight() const noexcept {
+        return m_inFlight.load(std::memory_order_seq_cst);
+    }
+
+    /// Makes the next endFilterInstance() run the filter's end hooks but keep
+    /// endpoint, global, pipe and pDown (and the buffers) intact, because a
+    /// Python call may still be running on this filter or on the binder
+    /// chain below it. The links are released by releaseStackIfIdle() once
+    /// no call runs on the stack, or by the destructor; the flag is consumed
+    /// by the first call that sees it.
+    void retainLinksOnEnd() noexcept {
+        m_retainLinks.store(true, std::memory_order_release);
+    }
+
+    /// Arms the head filter for release on idle and releases the stack at once
+    /// if it is already idle. Call after the stack's filters were ended.
+    void armDeferredRelease() noexcept;
+
+    /// Returns the next filter down the chain, copied under the link lock;
+    /// empty if there is none or the links were released
+    ServiceInstance downLink() const noexcept;
+
+private:
+    /// Drops endpoint, global, pipe and pDown and frees the buffers. Safe to
+    /// call more than once.
+    void releaseLinks() noexcept;
+
+    /// On the head filter of a stack that was ended with its links retained:
+    /// once no Python call runs on any filter of the stack, releases the links
+    /// of every filter in it, exactly once. Does nothing when the stack was
+    /// not armed or a call is still running. Returns the endpoint when it
+    /// released the stack: the caller lets it go after the filters, so they
+    /// are freed before their endpoint.
+    ServiceEndpoint releaseStackIfIdle() noexcept;
+
+    /// Returns the filter at the given index of this pipe's instance stack,
+    /// read under the endpoint's stack lock; throws Ec::PipelineEnded if it
+    /// no longer exists
+    ServiceInstance stackFilter(size_t filterId) const noexcept(false);
+
+    /// The gate is closed: set by closeGate() or endFilterInstance(), never
+    /// cleared
+    std::atomic<bool> m_ended{false};
+
+    /// One-shot request that endFilterInstance() keeps the links
+    std::atomic<bool> m_retainLinks{false};
+
+    /// Set on the head filter (index 0) only: the stack is released by
+    /// releaseStackIfIdle() when it becomes idle
+    std::atomic<bool> m_releaseOnIdle{false};
+
+    /// Python calls counted by a CallGuard on this filter that have not left
+    /// yet
+    std::atomic<uint32_t> m_inFlight{0};
+
+    /// Held only while the links (endpoint, global, pipe and pDown) are
+    /// copied or reset, never across a call into Python or a wait
+    mutable std::mutex m_linkLock;
+
 protected:
+
     //-----------------------------------------------------------------
     /// @details
     ///		Built in tag buffer allocated only when needed via the

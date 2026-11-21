@@ -307,7 +307,16 @@ Error IServiceEndpoint::buildGlobalPipe() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
-///		Builds an instance pipe and returns the vector of filters built
+///		Builds an instance stack, begins its filters and publishes it,
+///		marked busy. Called only by getPipe(), which counts the build, so
+///		endEndpoint() does not end the globals this reads while it runs.
+///		A stack that is not published is ended here, after a bounded wait
+///		for the Python calls on it: a filter cannot be created or its
+///		begin fails, teardown has started, or the bind fails. Once
+///		teardown has started, no further filter is made and the build
+///		returns Ec::PipelineEnded.
+///	@returns
+///		The head of the new stack, or the error that stopped the build
 //-------------------------------------------------------------------------
 ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
     Error ccode;
@@ -319,9 +328,30 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
     // Create the pipe ptr
     ServicePipe pipe = nullptr;
 
+    // Ends the filters built here when the stack is not published. The gates
+    // close first and then the calls drain: a node may have started a thread
+    // in beginInstance that already calls its filter.
+    // A stack that was not bound has no down links, so the head's deferred
+    // release covers the head only and every other filter releases its
+    // links when it is freed. A stack whose bind failed is already linked
+    // and is released as a whole.
+    const auto endUnpublished = localfcn() {
+        for (const auto &filter : instanceStack) filter->closeGate();
+        auto budget = drainDeadline().load();
+        const bool drained = drainInFlightCalls(instanceStack, budget);
+        endInstanceStack(instanceStack, drained);
+    };
+
     // Create all the instance filters - call the begin as we go along
     // to allow them to add new drivers along the way
     for (size_t i = 0; i < pipeStack.size(); ++i) {
+        // Teardown has started: the stack cannot be published, and
+        // teardown waits for this build, so make no further filter
+        if (m_ending) {
+            ccode = APERR(Ec::PipelineEnded, PipelineEndedMessage);
+            break;
+        }
+
         // Get the filter we are initalizing
         auto &filter = pipeStack[i];
 
@@ -361,8 +391,10 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
         // Save it into the pipe
         instance->pipe = pipe;
 
-        // Begin the filter
+        // Begin the filter. One that fails is not in the stack that is ended
+        // below, so its gate is closed here
         if (ccode = instance->beginFilterInstance()) {
+            instance->closeGate();
             instance = {};
             break;
         }
@@ -376,10 +408,7 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
     // the parser which hangs on the thread.join if we don't do this
     if (ccode) {
         // Tell the filters to cleanup
-        for (auto &filter : instanceStack) {
-            // If we have a filter, end it
-            if (filter) filter->endFilterInstance();
-        }
+        endUnpublished();
 
         // And done
         return ccode;
@@ -390,11 +419,24 @@ ErrorOr<ServicePipe> IServiceEndpoint::buildInstancePipe() noexcept {
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
 
+        // Teardown has taken its snapshot: a stack published now would be
+        // neither drained nor ended, so it is ended here, outside the lock
+        if (m_ending) {
+            stackGuard.exec();
+            endUnpublished();
+            return APERR(Ec::PipelineEnded, PipelineEndedMessage);
+        }
+
         // Get the index before pushing
         pipeId = m_instanceStacks.size();
 
-        // Bind the filters
-        if (ccode = bindFilters(pipeId, instanceStack)) return ccode;
+        // Bind the filters. A stack that fails to bind is not published, so
+        // it is ended here, outside the lock
+        if (ccode = bindFilters(pipeId, instanceStack)) {
+            stackGuard.exec();
+            endUnpublished();
+            return ccode;
+        }
 
         // Get a reference to the head - should be "pipe"
         ServiceInstance &filter = instanceStack[0];
@@ -428,15 +470,77 @@ int IServiceEndpoint::getPipeCount() noexcept {
 
 //-------------------------------------------------------------------------
 /// @details
+///		Reads the number of pipe builds in progress under the stack lock
+///	@returns
+///		The number of builds that getPipe() counted and that have not
+///		returned yet
+//-------------------------------------------------------------------------
+uint32_t IServiceEndpoint::buildsInProgress() noexcept {
+    util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                           [&] { m_stackLock.unlock(); }};
+    return m_building;
+}
+
+//-------------------------------------------------------------------------
+/// @details
+///		Lowers the count of pipe builds for a build that has returned,
+///		its unpublished stack already ended. When endEndpoint() stopped
+///		waiting for builds and this is the last one, it takes the globals
+///		under the stack lock and ends them outside it, on this thread.
+///		endEndpoint() has returned by then, so an error of that end is
+///		logged, not returned.
+//-------------------------------------------------------------------------
+void IServiceEndpoint::leaveBuild() noexcept {
+    ServiceGlobalStack globals;
+    Opt<OPEN_MODE> openMode;
+    {
+        util::Guard stackGuard{[&] { m_stackLock.lock(); },
+                               [&] { m_stackLock.unlock(); }};
+        --m_building;
+        if (!m_building && m_globalsEndMode) {
+            openMode = m_globalsEndMode;
+            m_globalsEndMode.reset();
+            globals = _mv(m_globalStack);
+            m_globalStack.clear();
+        }
+    }
+
+    if (!openMode)
+        return;
+    if (auto ccode = endGlobalStack(globals, *openMode))
+        LOG(Always, "Warning: teardown: the last pipe build could not end",
+            "the globals:", ccode);
+}
+
+//-------------------------------------------------------------------------
+/// @details
 ///		Gets a pipe for the endpoint - the pipe is a stacked set
 ///		of filters that we can read from/write to. If no pipes
-///		are available, one will be created
+///		are available, one will be created. In the same hold of the
+///		stack lock as the m_ending check, a build takes the endpoint from
+///		its weak self link and is counted; it holds the endpoint and stays
+///		counted until it has returned, so endEndpoint() does not end the
+///		globals under it. No build starts on an endpoint that is being
+///		freed.
 ///	@returns
-///		ErrorOr<ServicePipe>
+///		The pipe, marked busy, or an error: Ec::PipelineEnded once the
+///		end has started, for as long as the endpoint object exists, and
+///		when the endpoint is being freed; Ec::InvalidCommand when the
+///		endpoint is not open and its end has not started; the pipe gate's
+///		error when the gate refuses; or the error that stopped a build
 //-------------------------------------------------------------------------
 ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
+    // Once the end has started no pipe is handed out, also after the end.
+    // The open mode is read before the flag (the fence keeps that order):
+    // the end sets the flag first and clears the mode later, so an end
+    // that finishes between the two reads still gives PipelineEnded
+    const bool open = config.openMode != OPEN_MODE::NONE;
+    std::atomic_thread_fence(std::memory_order_acquire);
+    if (m_ending)
+        return APERR(Ec::PipelineEnded, PipelineEndedMessage);
+
     // If we are not open, stop
-    if (config.openMode == OPEN_MODE::NONE)
+    if (!open)
         return APERR(Ec::InvalidCommand,
                      "The endpoint is not open during call to getPipe");
 
@@ -444,11 +548,20 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
     if (pipeGate)
         if (auto ccode = pipeGate()) return ccode;
 
+    // Holds this endpoint while a build runs: the last build may end the
+    // globals after endEndpoint() returned. Declared first, freed last.
+    ServiceEndpoint self;
+
     // Find a pipe
     _block() {
         // Lock the pipes - we are manipulating the pipe stacks
         util::Guard stackGuard{[&] { m_stackLock.lock(); },
                                [&] { m_stackLock.unlock(); }};
+
+        // Checked again in the hold that counts a build: no pipe, idle or
+        // new, is handed out once the end has taken its snapshot
+        if (m_ending)
+            return APERR(Ec::PipelineEnded, PipelineEndedMessage);
 
         // Loop through them
         for (int i = 0; i < m_instanceStacks.size(); i++) {
@@ -468,7 +581,15 @@ ErrorOr<ServicePipe> IServiceEndpoint::getPipe() noexcept {
             // Return the pipe
             return pipe;
         }
+
+        // A build holds the endpoint and is counted before the lock is
+        // released. No build starts on an endpoint that is being freed.
+        self = endpoint.lock();
+        if (!self)
+            return APERR(Ec::PipelineEnded, PipelineEndedMessage);
+        ++m_building;
     }
+    util::Guard buildGuard{[&] { leaveBuild(); }};
 
     // We don't have any available pipes, create one
     auto result = buildInstancePipe();

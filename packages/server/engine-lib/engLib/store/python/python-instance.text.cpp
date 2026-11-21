@@ -52,7 +52,7 @@ Error IPythonInstanceBase::writeText(const Utf16View &text) noexcept {
         auto pyText = py::str(textU8);
 
         // Call the Python function
-        m_pyInstance.attr("writeText")(pyText);
+        boundInstance().attr("writeText")(pyText);
         return {};
     };
 
@@ -92,7 +92,7 @@ Error IPythonInstanceBase::writeTable(const Utf16View &text) noexcept {
         auto pyText = py::str(textU8);
 
         // Call the Python function
-        m_pyInstance.attr("writeTable")(pyText);
+        boundInstance().attr("writeTable")(pyText);
         return {};
     };
 
