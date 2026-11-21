@@ -34,6 +34,8 @@
 	//
 	"propertyDefinitions": {
 		"agent_description": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Agent description",
@@ -41,6 +43,8 @@
 			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"system_prompt": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "System prompt",
@@ -48,12 +52,16 @@
 			"description": "Instructions that define this agent's role and behaviour. Leave blank to use the default."
 		},
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent. Each line is appended to the system prompt.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"require_tool_call": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,

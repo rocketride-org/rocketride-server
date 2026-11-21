@@ -38,6 +38,8 @@ The input must be an object with a required, non-empty string `query`; it may al
 
 The sole `default` profile supplies the baseline settings. Most uses need an LLM and memory connected first; then use the fields below to describe the specialist, guide its planning, bound the number of planning waves, decide whether an answer must include a real tool invocation, name a tool that checks the work, and limit how long one tool call may run.
 
+Every setting, the wave limit and the check tool included is a per-call parameter: a pipeline can expose any of them in its `parameters` map, and each call then runs with its own values on the same running node, which keeps nothing of them between calls. A caller may set them; an LLM may not, through a tool call.
+
 ### Agent description
 
 This text is included in the registered `run_agent` description only when the node is used as a tool. Set it to a concise account of the specialist's purpose and capabilities when a parent agent must choose whether to delegate to it. Leave it blank when the node is only driven through its `questions` lane or when no additional delegation cue is useful.

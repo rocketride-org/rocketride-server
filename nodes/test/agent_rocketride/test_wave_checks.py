@@ -55,10 +55,31 @@ def _preview(wave, args):
     return wave.executor._with_call({'tool': 't', 'key': 'wave-0.r0'}, 't', args, None)['args']
 
 
-def _context(wave, *tools, memory=None):
-    """A run context with these tools connected, and no memory unless one is given."""
+def _settings(wave, **config):
+    """A call's settings for stored node config ``config``, through the real resolver (``IGlobalBase.config``)."""
+    from rocketlib import IGlobalBase
+
+    iglobal = IGlobalBase()
+    iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
+    # The loop bound and check rule are per-call parameters: a call with no
+    # parameters runs with the stored values
+    return iglobal.config.overlay(None)
+
+
+def _rule(wave, **config):
+    """The run's loop bound and check rule for stored node config ``config``."""
+    return wave.rocketride_agent.WaveSettings.of(_settings(wave, **config))
+
+
+def _invoker(wave, **config):
+    """The invoking instance of a run: its settings are the call's."""
+    return SimpleNamespace(settings=_settings(wave, **config))
+
+
+def _context(wave, *tools, memory=None, **config):
+    """A run context with these tools connected, no memory unless one is given, and the call's settings."""
     return wave.rocketride_agent.AgentContext(
-        invoker=None,
+        invoker=_invoker(wave, **config),
         llm=None,
         tools=SimpleNamespace(list=[{'name': t} for t in tools]),
         memory=memory,
@@ -69,12 +90,12 @@ def _context(wave, *tools, memory=None):
     )
 
 
-def _driver(wave, **config):
-    """Build the driver from node config, through the real resolver (``IGlobalBase.config``)."""
+def _driver(wave):
+    """Build the driver as its IGlobal does; it keeps nothing of the node's config."""
     from rocketlib import IGlobalBase
 
     iglobal = IGlobalBase()
-    iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig=config)
+    iglobal.glb = SimpleNamespace(logicalType='agent_rocketride', connConfig={})
     return wave.rocketride_agent.RocketRideDriver(iglobal)
 
 
@@ -174,31 +195,31 @@ def test_an_argument_preview_is_cut_at_its_cap(wave):
 
 def test_is_check_without_verify_args_matches_the_tool_name(wave):
     calls = [_call(CHECK, target='any'), _call('workspace.write', path='a')]
-    driver = _driver(wave, verify_tool=CHECK)
+    rule = _rule(wave, verify_tool=CHECK)
 
-    assert driver._is_check({'tool': CHECK}, calls, 0)
-    assert not driver._is_check({'tool': 'workspace.write'}, calls, 1)
-    assert not _driver(wave)._is_check({'tool': CHECK}, calls, 0), 'no check tool is set'
+    assert rule.is_check({'tool': CHECK}, calls, 0)
+    assert not rule.is_check({'tool': 'workspace.write'}, calls, 1)
+    assert not _rule(wave).is_check({'tool': CHECK}, calls, 0), 'no check tool is set'
 
 
 def test_is_check_with_verify_args_needs_the_exact_arguments(wave):
     calls = [_call(CHECK, target='app'), _call(CHECK, command="printf '(' > app.py"), _call(CHECK)]
-    driver = _driver(wave, verify_tool=CHECK, verify_args=CHECK_ARGS)
+    rule = _rule(wave, verify_tool=CHECK, verify_args=CHECK_ARGS)
 
-    assert driver._is_check({'tool': CHECK}, calls, 0)
-    assert not driver._is_check({'tool': CHECK}, calls, 1)
-    assert not driver._is_check({'tool': CHECK}, calls, 2)
+    assert rule.is_check({'tool': CHECK}, calls, 0)
+    assert not rule.is_check({'tool': CHECK}, calls, 1)
+    assert not rule.is_check({'tool': CHECK}, calls, 2)
 
 
 def test_not_checked_wants_a_pass_in_a_later_step_than_the_last_change(wave):
     """A check in the same step as the change ran beside it, so it may have missed the change."""
-    driver = _driver(wave, verify_tool=CHECK)
+    rule = _rule(wave, verify_tool=CHECK)
 
-    assert driver._not_checked(last_check=-1, last_change=-1) == '', 'a run that changed nothing may finish'
-    assert driver._not_checked(last_check=2, last_change=1) == ''
-    assert 'call workspace.compile on its own' in driver._not_checked(last_check=1, last_change=1)
-    assert driver._not_checked(last_check=-1, last_change=1), 'a failed check counts as no check'
-    assert _driver(wave)._not_checked(last_check=-1, last_change=3) == '', 'no check tool, no rule'
+    assert rule.not_checked(last_check=-1, last_change=-1) == '', 'a run that changed nothing may finish'
+    assert rule.not_checked(last_check=2, last_change=1) == ''
+    assert 'call workspace.compile on its own' in rule.not_checked(last_check=1, last_change=1)
+    assert rule.not_checked(last_check=-1, last_change=1), 'a failed check counts as no check'
+    assert _rule(wave).not_checked(last_check=-1, last_change=3) == '', 'no check tool, no rule'
 
 
 @pytest.mark.parametrize(
@@ -220,12 +241,12 @@ def test_done_beside_a_call_to_the_check_tool_gives_the_right_refusal(wave, monk
     stored = [{'tool': CHECK, 'key': 'wave-0.r0', 'summary': 'ok: true'}]
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: reply)
     monkeypatch.setattr(wave.rocketride_agent, 'execute_wave', lambda calls, **kw: list(stored))
-    driver = _driver(wave, verify_tool=CHECK, verify_args=CHECK_ARGS)
-    driver._max_waves = 1
+    driver = _driver(wave)
     driver.sendSSE = lambda *a, **kw: None
     driver._synthesize = lambda **kw: 'synthesized'
 
-    answer, trace = driver._run(context=_context(wave, CHECK), question=None)
+    context = _context(wave, CHECK, verify_tool=CHECK, verify_args=CHECK_ARGS, max_waves=1)
+    answer, trace = driver._run(context=context, question=None)
 
     assert answer == 'synthesized', 'the run must not finish on this reply'
     last = trace['waves'][0]['results'][-1]
@@ -237,7 +258,7 @@ def test_done_beside_a_call_to_the_check_tool_gives_the_right_refusal(wave, monk
 def test_verify_args_that_is_not_a_json_object_stops_the_node(wave, value):
     """Ignoring a bad value would quietly let any call to the check tool count as a check."""
     with pytest.raises(ValueError, match='verify_args'):
-        _driver(wave, verify_tool=CHECK, verify_args=value)
+        _rule(wave, verify_tool=CHECK, verify_args=value)
 
 
 def _prompt(wave, **settings):
@@ -288,12 +309,18 @@ def test_a_done_reply_that_is_sent_back_keeps_its_fingerprints(wave, monkeypatch
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: next(replies))
     monkeypatch.setattr(wave.rocketride_agent, 'execute_wave', run)
     driver = _driver(wave)
-    driver._max_waves = 2
     driver.sendSSE = lambda *a, **kw: None
     driver._synthesize = lambda **kw: 'synthesized'
 
     context = wave.rocketride_agent.AgentContext(
-        invoker=None, llm=None, tools=None, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+        invoker=_invoker(wave, max_waves=2),
+        llm=None,
+        tools=None,
+        memory=None,
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
     )
     answer, _ = driver._run(context=context, question=None)
 
@@ -306,11 +333,11 @@ def test_a_check_tool_that_is_not_connected_stops_the_run(wave, monkeypatch):
     monkeypatch.setattr(
         wave.rocketride_agent, 'plan_wave', lambda **kw: pytest.fail('the run must stop before planning')
     )
-    driver = _driver(wave, verify_tool='workspace.compil')
+    driver = _driver(wave)
     driver.sendSSE = lambda *a, **kw: None
 
     with pytest.raises(ValueError, match="verify_tool 'workspace.compil' is not a connected tool"):
-        driver._run(context=_context(wave, CHECK, 'workspace.write'), question=None)
+        driver._run(context=_context(wave, CHECK, 'workspace.write', verify_tool='workspace.compil'), question=None)
 
 
 def test_the_check_rule_sends_done_back_until_a_later_check_passes(wave, monkeypatch):
@@ -328,11 +355,11 @@ def test_the_check_rule_sends_done_back_until_a_later_check_passes(wave, monkeyp
 
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: dict(next(replies), remove=[]))
     monkeypatch.setattr(wave.rocketride_agent, 'execute_wave', run)
-    driver = _driver(wave, verify_tool=CHECK)
-    driver._max_waves = 5
+    driver = _driver(wave)
     driver.sendSSE = lambda *a, **kw: None
 
-    answer, trace = driver._run(context=_context(wave, CHECK, 'workspace.write'), question=None)
+    context = _context(wave, CHECK, 'workspace.write', verify_tool=CHECK, max_waves=5)
+    answer, trace = driver._run(context=context, question=None)
 
     first = trace['waves'][0]['results'][-1]
     assert first['key'] == 'wave-0.done'
@@ -362,12 +389,12 @@ def test_a_checking_agent_whose_run_failed_is_not_a_pass(wave, monkeypatch):
         ]
     )
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: dict(next(replies), remove=[]))
-    driver = _driver(wave, verify_tool=checker)
+    driver = _driver(wave)
     driver.call_tool = lambda context, tool, args: failed_run if tool == checker else {'ok': True}
-    driver._max_waves = 3
     driver.sendSSE = lambda *a, **kw: None
     driver._synthesize = lambda **kw: 'synthesized'
-    context = _context(wave, checker, 'workspace.write', memory=SimpleNamespace(put=lambda key, value: {'ok': True}))
+    memory = SimpleNamespace(put=lambda key, value: {'ok': True})
+    context = _context(wave, checker, 'workspace.write', memory=memory, verify_tool=checker, max_waves=3)
 
     answer, trace = driver._run(context=context, question=None)
 
@@ -402,10 +429,17 @@ def test_a_check_tool_added_after_discovery_is_found(wave, monkeypatch):
     tools = AgentHostServices.Tools(engine)
     engine.tools.append('compile')  # added to the server after the catalog was read
     monkeypatch.setattr(wave.rocketride_agent, 'plan_wave', lambda **kw: _reply_done())
-    driver = _driver(wave, verify_tool=CHECK)
+    driver = _driver(wave)
     driver.sendSSE = lambda *a, **kw: None
     context = wave.rocketride_agent.AgentContext(
-        invoker=None, llm=None, tools=tools, memory=None, run_id='run-1', pipe_id=0, framework='wave', started_at=''
+        invoker=_invoker(wave, verify_tool=CHECK),
+        llm=None,
+        tools=tools,
+        memory=None,
+        run_id='run-1',
+        pipe_id=0,
+        framework='wave',
+        started_at='',
     )
 
     answer, trace = driver._run(context=context, question=None)

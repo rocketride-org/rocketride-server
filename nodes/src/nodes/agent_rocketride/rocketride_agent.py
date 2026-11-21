@@ -85,6 +85,121 @@ def _verify_args(value: Any) -> Optional[Dict[str, Any]]:
     return value
 
 
+@dataclasses.dataclass(frozen=True)
+class WaveSettings:
+    """
+    One run's loop bound and check rule (plan 4.1 rule 4: per-call parameters).
+
+    Read from the invoking instance's settings when the run starts and passed
+    down the run, never kept on the driver, which every run of the control
+    shares.
+
+    Attributes:
+        max_waves: The most planning steps before the synthesis fallback.
+        verify_tool: The tool that checks the work ('' = no check rule).
+        verify_args: The check call's exact arguments, or None (any call to the tool).
+        tool_timeout_s: Seconds one tool call may take (0: no limit); None uses the executor's default.
+    """
+
+    max_waves: int = _DEFAULT_MAX_WAVES
+    verify_tool: str = ''
+    verify_args: Optional[Dict[str, Any]] = None
+    tool_timeout_s: Optional[float] = None
+
+    @classmethod
+    def of(cls, settings: Any) -> 'WaveSettings':
+        """
+        Read a run's settings.
+
+        Args:
+            settings: The invoking instance's ``settings``.
+
+        Raises:
+            ValueError: ``verify_args`` is not a JSON object.
+        """
+        max_waves = settings.get('max_waves')
+        return cls(
+            max_waves=_DEFAULT_MAX_WAVES if max_waves is None else max_waves,
+            # Optional tool that checks the work (e.g. "workspace.compile"). When set,
+            # the planner must run it after its last change before it may finish.
+            verify_tool=safe_str(settings.get('verify_tool') or '').strip(),
+            # Optional exact arguments of that check. A general runner (a command or code
+            # tool) could otherwise make a change through the check tool and have it count
+            # as a passing check; with these set, only this exact call checks the work.
+            verify_args=_verify_args(settings.get('verify_args')),
+            # Seconds one tool call may take (0: no limit); unset uses the executor's default.
+            tool_timeout_s=_tool_timeout(settings.get('tool_timeout')),
+        )
+
+    def require_check_tool(self, context: AgentContext) -> None:
+        """Stop the run at its start when verify_tool names no connected tool.
+
+        No check could pass then, so every done reply would be sent back until the run
+        used up its waves, with nothing to say why. The tool list is known only per run.
+        """
+        if not self.verify_tool:
+            return
+        names = []
+        for td in getattr(context.tools, 'list', None) or []:
+            name = td.get('name', '') if isinstance(td, dict) else safe_str(getattr(td, 'name', ''))
+            if name:
+                names.append(name)
+        if self.verify_tool in names:
+            return
+        # The catalog is read once per tool node. get() re-queries the owning node, in
+        # case it has grown the tool since, and raises when the tool is still unknown.
+        lookup = getattr(context.tools, 'get', None)
+        if callable(lookup):
+            try:
+                lookup(self.verify_tool)
+                return
+            except Exception as exc:
+                debug(f'rocketride wave verify_tool lookup failed: {type(exc).__name__}: {exc}')
+        connected = ', '.join(sorted(names)) or 'none'
+        raise ValueError(f'verify_tool {self.verify_tool!r} is not a connected tool (connected: {connected})')
+
+    def not_checked(self, last_check: int, last_change: int, running: int = 0) -> str:
+        """Return why the run may not finish yet, or '' if it may.
+
+        With a check tool configured, the last change must be followed by a passing
+        check in a later step. A check in the same step ran in parallel with the
+        change, so it may have checked the code before the change landed. And while
+        a call the wave gave up on is still running, no check covers it: it may
+        still write. When it returns it counts as a change (see _run_waves).
+        """
+        if self.verify_tool and running:
+            return (
+                f'Not finished: {running} call(s) that timed out are still running and may still change '
+                f'the work. A check cannot cover them yet; call {self.verify_tool} again after they end.'
+            )
+        if self.verify_tool and last_change >= 0 and last_check <= last_change:
+            return (
+                f'Not finished: call {self.check_call()} on its own, after your last change, '
+                'and fix what it reports before done=true.'
+            )
+        return ''
+
+    def check_call(self) -> str:
+        """The check as the model must call it: the tool, and its exact arguments when the run fixes them."""
+        if self.verify_args is None:
+            return self.verify_tool
+        return f'{self.verify_tool} with exactly {json.dumps(self.verify_args, ensure_ascii=False)}'
+
+    def is_check(self, result: Dict[str, Any], tool_calls: List[Dict[str, Any]], index: int) -> bool:
+        """True when *result* (the one at *index* of a step) came from the check.
+
+        That is the check tool, called with the run's verify_args when it sets
+        them. A step's results come back in the order of its calls, and the calls
+        keep the arguments as the model wrote them.
+        """
+        if not self.verify_tool or result.get('tool') != self.verify_tool:
+            return False
+        if self.verify_args is None:
+            return True
+        call = tool_calls[index] if index < len(tool_calls) else {}
+        return (call.get('args') or {}) == self.verify_args
+
+
 class RocketRideDriver(AgentBase):
     """
     RocketRide Wave framework driver.
@@ -103,27 +218,9 @@ class RocketRideDriver(AgentBase):
     FRAMEWORK = 'wave'
     REQUIRES_MEMORY = True
 
-    # No check tool unless the node config names one (see __init__). A class-level
-    # default keeps a driver built without __init__ (as unit tests do) working.
-    _verify_tool: str = ''
-    _verify_args: Optional[Dict[str, Any]] = None
-    _tool_timeout_s: Optional[float] = None
-
     def __init__(self, iGlobal) -> None:
-        """Initialize the Wave driver and load host services."""
+        """Initialize the Wave driver; the loop bound and check rule are each run's (``WaveSettings``)."""
         super().__init__(iGlobal)
-        # The resolved config AgentBase already read (defaults applied, flat)
-        config = self._config
-        self._max_waves = config.get('max_waves', _DEFAULT_MAX_WAVES)
-        # Optional tool that checks the work (e.g. "workspace.compile"). When set,
-        # the planner must run it after its last change before it may finish.
-        self._verify_tool = safe_str(config.get('verify_tool') or '').strip()
-        # Optional exact arguments of that check. A general runner (a command or code
-        # tool) could otherwise make a change through the check tool and have it count
-        # as a passing check; with these set, only this exact call checks the work.
-        self._verify_args = _verify_args(config.get('verify_args'))
-        # Seconds one tool call may take (0: no limit); unset uses the executor's default.
-        self._tool_timeout_s = _tool_timeout(config.get('tool_timeout'))
 
     # ------------------------------------------------------------------
     # Main driver
@@ -150,11 +247,13 @@ class RocketRideDriver(AgentBase):
         model has already been told it timed out and has answered). Ending the run
         sooner and safely needs the engine to track invokes in flight.
         """
+        # This run's loop bound and check rule, from the invoking instance's settings
+        wave = WaveSettings.of(context.invoker.settings)
         memory = RunMemory(context.memory, context.run_id) if context.memory is not None else None
         run_context = dataclasses.replace(context, memory=memory)
         state = RunState()
         try:
-            return self._run_waves(context=run_context, question=question, state=state)
+            return self._run_waves(context=run_context, question=question, state=state, wave=wave)
         finally:
             running = state.background.running()
             if running:
@@ -174,8 +273,9 @@ class RocketRideDriver(AgentBase):
         context: AgentContext,
         question: Question,
         state: RunState,
+        wave: WaveSettings,
     ) -> AgentRunResult:
-        """Execute the wave-planning loop.
+        """Execute the wave-planning loop under this run's ``wave`` settings.
 
         Each iteration:
           1. Calls plan_wave() which builds the full prompt and fires one LLM call.
@@ -194,7 +294,7 @@ class RocketRideDriver(AgentBase):
         """
         run_id = context.run_id
         debug(f'rocketride wave _run start run_id={run_id}')
-        self._require_check_tool(context)
+        wave.require_check_tool(context)
         self.sendSSE(context, 'thinking', message='Analyzing your request...')
 
         # waves accumulates the full history of every tool call and its result
@@ -204,7 +304,7 @@ class RocketRideDriver(AgentBase):
 
         # The last step whose checks all passed, and the last step that ran any other
         # tool (even one that failed) or saw a timed-out call return. -1 means "not
-        # yet". See _not_checked().
+        # yet". See WaveSettings.not_checked().
         last_check = last_change = -1
         late_returns = 0
 
@@ -218,7 +318,7 @@ class RocketRideDriver(AgentBase):
         # (remembered memory keys, extracted values, intermediate calculations).
         current_scratch = ''
 
-        for wave_num in range(self._max_waves):
+        for wave_num in range(wave.max_waves):
             debug(f'rocketride wave wave_num={wave_num} run_id={run_id}')
             self.sendSSE(context, 'thinking', message=f'Planning step {wave_num + 1}...')
 
@@ -232,8 +332,8 @@ class RocketRideDriver(AgentBase):
                     question=question,
                     waves=waves,
                     current_scratch=current_scratch,
-                    verify_tool=self._verify_tool,
-                    verify_args=self._verify_args,
+                    verify_tool=wave.verify_tool,
+                    verify_args=wave.verify_args,
                 )
             except Exception as exc:
                 error(f'rocketride wave plan failed run_id={run_id}: {exc}')
@@ -276,7 +376,7 @@ class RocketRideDriver(AgentBase):
                 running, returned = state.background.snapshot()
                 if returned != late_returns:
                     late_returns, last_change = returned, wave_num
-                refusal = self._not_checked(last_check, last_change, running)
+                refusal = wave.not_checked(last_check, last_change, running)
                 # Problems in this reply (an unusable "remove") are kept: in the trace
                 # when the run ends here, in the next prompt when it does not.
                 notes = [
@@ -347,9 +447,9 @@ class RocketRideDriver(AgentBase):
                 context=context,
                 wave_name=f'wave-{wave_num}',
                 state=state,
-                timeout=self._tool_timeout_s,
-                check_tool=self._verify_tool,
-                check_args=self._verify_args,
+                timeout=wave.tool_timeout_s,
+                check_tool=wave.verify_tool,
+                check_args=wave.verify_args,
             )
 
             # Calls the planner had to drop from this reply are listed with the
@@ -362,13 +462,13 @@ class RocketRideDriver(AgentBase):
                 else:
                     results.append({'tool': 'reply-check', 'key': key, 'error': f'Skipped: {problem}'})
 
-            checks = [r for i, r in enumerate(results) if self._is_check(r, tool_calls, i)]
+            checks = [r for i, r in enumerate(results) if wave.is_check(r, tool_calls, i)]
             if checks:
                 # The newest check decides: if any check in this step raised or
                 # reported a failure, the work is unchecked again, whatever passed before.
                 last_check = -1 if any(r.get('error') or r.get('failed') for r in checks) else wave_num
             if any(
-                r.get('tool') not in ('memory.peek', 'reply-check') and not self._is_check(r, tool_calls, i)
+                r.get('tool') not in ('memory.peek', 'reply-check') and not wave.is_check(r, tool_calls, i)
                 for i, r in enumerate(results)
             ):
                 # Any other call counts as a change, even one that failed: a write
@@ -393,10 +493,10 @@ class RocketRideDriver(AgentBase):
             if finished and checks:
                 finished = False
                 results.append(
-                    self._refusal(wave_num, f'Not finished: read the result of {self._verify_tool} before done=true.')
+                    self._refusal(wave_num, f'Not finished: read the result of {wave.verify_tool} before done=true.')
                 )
             elif finished:
-                refusal = self._not_checked(last_check, last_change, running)
+                refusal = wave.not_checked(last_check, last_change, running)
                 if refusal:
                     finished = False
                     results.append(self._refusal(wave_num, refusal))
@@ -448,78 +548,6 @@ class RocketRideDriver(AgentBase):
         debug(f'rocketride wave stopping ({trace["stop_reason"]}) run_id={run_id}, synthesizing final answer')
         self.sendSSE(context, 'thinking', message='Synthesizing final answer...', stop_reason=trace['stop_reason'])
         return self._synthesize(question=question, waves=waves, context=context, scratch=current_scratch), trace
-
-    # ------------------------------------------------------------------
-    # Check-tool rule
-    # ------------------------------------------------------------------
-
-    def _require_check_tool(self, context: AgentContext) -> None:
-        """Stop the run at its start when verify_tool names no connected tool.
-
-        No check could pass then, so every done reply would be sent back until the run
-        used up its waves, with nothing to say why. The tool list is known only per run.
-        """
-        if not self._verify_tool:
-            return
-        names = []
-        for td in getattr(context.tools, 'list', None) or []:
-            name = td.get('name', '') if isinstance(td, dict) else safe_str(getattr(td, 'name', ''))
-            if name:
-                names.append(name)
-        if self._verify_tool in names:
-            return
-        # The catalog is read once per tool node. get() re-queries the owning node, in
-        # case it has grown the tool since, and raises when the tool is still unknown.
-        lookup = getattr(context.tools, 'get', None)
-        if callable(lookup):
-            try:
-                lookup(self._verify_tool)
-                return
-            except Exception as exc:
-                debug(f'rocketride wave verify_tool lookup failed: {type(exc).__name__}: {exc}')
-        connected = ', '.join(sorted(names)) or 'none'
-        raise ValueError(f'verify_tool {self._verify_tool!r} is not a connected tool (connected: {connected})')
-
-    def _not_checked(self, last_check: int, last_change: int, running: int = 0) -> str:
-        """Return why the run may not finish yet, or '' if it may.
-
-        With a check tool configured, the last change must be followed by a passing
-        check in a later step. A check in the same step ran in parallel with the
-        change, so it may have checked the code before the change landed. And while
-        a call the wave gave up on is still running, no check covers it: it may
-        still write. When it returns it counts as a change (see _run_waves).
-        """
-        if self._verify_tool and running:
-            return (
-                f'Not finished: {running} call(s) that timed out are still running and may still change '
-                f'the work. A check cannot cover them yet; call {self._verify_tool} again after they end.'
-            )
-        if self._verify_tool and last_change >= 0 and last_check <= last_change:
-            return (
-                f'Not finished: call {self._check_call()} on its own, after your last change, '
-                'and fix what it reports before done=true.'
-            )
-        return ''
-
-    def _check_call(self) -> str:
-        """The check as the model must call it: the tool, and its exact arguments when the node fixes them."""
-        if self._verify_args is None:
-            return self._verify_tool
-        return f'{self._verify_tool} with exactly {json.dumps(self._verify_args, ensure_ascii=False)}'
-
-    def _is_check(self, result: Dict[str, Any], tool_calls: List[Dict[str, Any]], index: int) -> bool:
-        """True when *result* (the one at *index* of a step) came from the check.
-
-        That is the check tool, called with the node's verify_args when it sets
-        them. A step's results come back in the order of its calls, and the calls
-        keep the arguments as the model wrote them.
-        """
-        if not self._verify_tool or result.get('tool') != self._verify_tool:
-            return False
-        if self._verify_args is None:
-            return True
-        call = tool_calls[index] if index < len(tool_calls) else {}
-        return (call.get('args') or {}) == self._verify_args
 
     @staticmethod
     def _refusal(wave_num: int, message: str) -> Dict[str, Any]:

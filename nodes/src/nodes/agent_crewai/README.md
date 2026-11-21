@@ -87,6 +87,8 @@ only after the basic role is clear. Empty advanced text fields fall back to the
 drivers' built-in goal, backstory, and expected-output text where that driver
 uses those fields.
 
+Every setting of the agent, the manager and the subagent is a per-call parameter: a pipeline can expose any of them in its `parameters` map, and each call then runs with its own values on the same running node, which keeps nothing of them between calls. A caller may set them; an LLM may not, through a tool call, except the task description and expected output of the agent and the subagent.
+
 ### Agent description
 
 CrewAI Agent and CrewAI Manager expose this field to parent agents through

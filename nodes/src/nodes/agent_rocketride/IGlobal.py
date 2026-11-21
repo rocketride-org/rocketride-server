@@ -38,8 +38,8 @@ class IGlobal(IGlobalBase):
         import from the ai.common package.  Deferring the import to beginGlobal
         ensures the module graph is fully loaded before the driver is instantiated.
 
-        Configuration (including instructions) is read by
-        ``AgentBase.__init__`` from this global's resolved ``config``, so no
+        The settings (instructions, the loop bound, the check rule) are per-call
+        parameters the driver reads from the invoking instance at run time, so no
         config handling is needed here.
         """
         # Install dependencies
