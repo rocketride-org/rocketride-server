@@ -803,3 +803,41 @@ async def test_a_start_records_its_databases_and_a_restart_clears_then_records_t
     # targets only: ids, no credential
     assert control.task._db_seen == ([('team', 'team-2')], True)  # the webhook source is public
     assert _leaks(SESSION, control.task._db_seen) == []
+
+
+@pytest.mark.asyncio
+async def test_a_reuse_during_start_waits_for_a_db_node_named_in_any_case(logs, restricted_account):
+    """DB nodes are matched in any case, as a start matches them: a mixed-case
+    provider still holds a database, so the reuse waits and is checked.
+    """
+    pipeline = json.loads(json.dumps(DB_PIPELINE))
+    pipeline['components'][1]['provider'] = 'RocketRide_SQL'
+    ts = _server(logs)
+    control = _register_control(ts, owner_conn=_conn(SESSION), pipeline=pipeline)
+    control.task.is_task_complete = lambda: False
+    assert control.task._db_seen is None
+
+    reuse = asyncio.ensure_future(_reuse(ts, control, _conn(SCOPED)))
+    await asyncio.sleep(0.05)
+    assert not reuse.done()  # waiting for the databases, not reused unchecked
+    control.task._db_seen = ([('team', 'team-2')], False)
+
+    with pytest.raises(PermissionError, match='key_scope_not_team_admin'):
+        await asyncio.wait_for(reuse, 2)
+
+
+@pytest.mark.asyncio
+async def test_a_reuse_check_leaves_the_starts_audit_reasons_alone(logs, account):
+    """A reuse issues no DSN: the reasons the start recorded for its "issued"
+    audit lines are not replaced by the reuse's decisions.
+    """
+    ts = _server(logs)
+    control = _live_run(ts, pipeline=NO_DB_PIPELINE)
+    control.task._db_seen = ([('team', 'team-2')], False)  # what the start authorized
+    control.task._db_reasons = {('team', 'team-2'): 'start_decision'}
+
+    result = await _reuse(ts, control, _conn(SESSION))
+
+    assert result['reused'] is True
+    assert len(account['authorize']) == 1  # the reuse was checked
+    assert control.task._db_reasons == {('team', 'team-2'): 'start_decision'}
