@@ -167,7 +167,9 @@ class IValidator(IValidatorBase):
         Raises:
             ConfigError: The stored configuration does not fit the schema.
         """
-        config = self.config
+        # The stored values, parameters included: a save-time check reads what
+        # the form holds (the collection a call may override is one of them)
+        config = self._resolved()
         if syntaxOnly:
             return
         # An unfilled reference is reported as such; the probe must not send the placeholder as the key

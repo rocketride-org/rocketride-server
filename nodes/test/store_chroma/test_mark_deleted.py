@@ -177,9 +177,7 @@ def test_a_missing_collection_matches_nothing(store):
 
 def test_the_trash_tools_work_on_this_driver(store):
     """What an agent reaches: soft_delete and restore through the shared mixin."""
-    from ai.common.store.document_store import VectorStoreToolMixin
-
-    tool = VectorStoreToolMixin()
+    tool = _tool_carrier()
     tool.IGlobal = types.SimpleNamespace(
         serverName='chroma', store=store, embed_query=None, embed_model_name=None, expose_tools=True, allow_write=True
     )
@@ -192,13 +190,11 @@ def test_the_trash_tools_work_on_this_driver(store):
 
 def test_stats_count_asks_the_server_instead_of_reading_every_id(store):
     """The stats count is every record, trashed ones included, from Collection.count rather than one ID per row."""
-    from ai.common.store.document_store import VectorStoreToolMixin
-
     collection = store.collectionObj
     store.markDeleted(['b'])
     collection.get_calls.clear()
     store.modelName, store.vectorSize = 'test-model', 2
-    tool = VectorStoreToolMixin()
+    tool = _tool_carrier()
     tool.IGlobal = types.SimpleNamespace(serverName='chroma', store=store, expose_tools=True)
 
     assert store.count_documents() == 3
@@ -231,3 +227,19 @@ def test_trash_round_trip_filters_paths_before_paging(store):
     store.markActive(['a'])
     assert store.getPaths(parent='/a') == {'/a': 'a'}
     assert store.getPaths() == {'/a': 'a', '/b': 'b'}
+
+
+def _tool_carrier():
+    """The shared tool mixin as an IInstance carries it: the call's store and settings from the stand-in global."""
+    from ai.common.store.document_store import VectorStoreToolMixin
+
+    class _Carrier(VectorStoreToolMixin):
+        def _store(self):
+            return self.IGlobal.store
+
+        @property
+        def settings(self):
+            keys = ('serverName', 'expose_tools', 'allow_write')
+            return {key: getattr(self.IGlobal, key) for key in keys if hasattr(self.IGlobal, key)}
+
+    return _Carrier()
