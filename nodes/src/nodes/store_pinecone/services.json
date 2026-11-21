@@ -145,14 +145,18 @@
 			"type": "string",
 			"title": "Collection",
 			"description": "Enter the name of the collection. Accepted are: Lower case, alphanumeric characters, hyphens",
-			"default": "rocketride"
+			"default": "rocketride",
+			"param": true,
+			"tool": false
 		},
 		"pinecone.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names pinecone.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "pinecone",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -169,11 +173,11 @@
 			"enum": {
 				"serverless-dense": {
 					"title": "Pinecone Serverless Dense Index",
-					"properties": ["pinecone.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
+					"properties": ["pinecone.apikey", { "base": "vector.score", "param": true }, "pinecone.collection", "pinecone.serverName"]
 				},
 				"pod-based": {
 					"title": "Pinecone Pod-Based Index",
-					"properties": ["pinecone.apikey", "vector.score", "pinecone.collection", "pinecone.serverName"]
+					"properties": ["pinecone.apikey", { "base": "vector.score", "param": true }, "pinecone.collection", "pinecone.serverName"]
 				}
 			}
 		}

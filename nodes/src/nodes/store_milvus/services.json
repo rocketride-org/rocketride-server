@@ -161,7 +161,9 @@
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names milvus.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "milvus",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -178,11 +180,11 @@
 			"enum": {
 				"cloud": {
 					"title": "Milvus cloud server",
-					"properties": ["milvus.cloud.host", "milvus.cloud.port", "milvus.apikey", "vector.score", "vector.collection", "milvus.serverName"]
+					"properties": ["milvus.cloud.host", "milvus.cloud.port", "milvus.apikey", { "base": "vector.score", "param": true }, { "base": "vector.collection", "param": true, "tool": false }, "milvus.serverName"]
 				},
 				"local": {
 					"title": "Your own Milvus server",
-					"properties": ["milvus.local.host", "milvus.local.port", "vector.score", "vector.collection", "milvus.serverName"]
+					"properties": ["milvus.local.host", "milvus.local.port", { "base": "vector.score", "param": true }, { "base": "vector.collection", "param": true, "tool": false }, "milvus.serverName"]
 				}
 			}
 		}

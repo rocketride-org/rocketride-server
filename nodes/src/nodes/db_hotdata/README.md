@@ -131,6 +131,7 @@ Hotdata runs **Apache DataFusion 54 behind the PostgreSQL parser dialect**. Trea
 | Unknown function errors                           | A Postgres-only function that DataFusion lacks — check `dialect`                                        |
 | `still shedding load after ...s (HTTP 429)`       | Sustained back-pressure; retry later or reduce concurrency                                              |
 | `still locked by another writer after ...s`       | Too many agents appending to one table for the job timeout; raise `job_timeout_secs` or split the table |
+| `did not finish within ...s and may still be running` | A load or index build outlasted `job_timeout_secs` and may still finish. A load may still land its rows, so an identical append then reports `in_progress` instead of sending them again: query the table to see what landed, and raise `job_timeout_secs` for jobs this large |
 | Empty results from a fresh run                    | The database starts empty every run — `load_data` first                                                 |
 
 ## Upstream docs

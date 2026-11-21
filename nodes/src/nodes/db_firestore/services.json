@@ -24,13 +24,15 @@
 			"title": "Database ID",
 			"default": "(default)",
 			"minLength": 1,
-			"description": "The Firestore database ID. Usually '(default)'."
+			"description": "The Firestore database ID. Usually '(default)'.",
+			"env": "ROCKETRIDE_DB_FIRESTORE_DATABASE"
 		},
 		"firestore.collection": {
 			"type": "string",
 			"title": "Collection",
 			"default": "",
-			"description": "The Firestore collection to query or insert into."
+			"description": "The Firestore collection to query or insert into.",
+			"param": true
 		}
 	},
 	//
@@ -39,7 +41,7 @@
 	//
 	"properties": [
 		"gcp.authType",
-		"gcp.projectId",
+		{ "base": "gcp.projectId", "env": "ROCKETRIDE_DB_FIRESTORE_PROJECTID" },
 		"firestore.database",
 		"firestore.collection"
 	],

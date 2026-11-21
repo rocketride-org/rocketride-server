@@ -82,9 +82,18 @@ def _stub_get(url, *, headers=None, params=None, timeout=None, **_kw):
 _WARNINGS = []
 
 
+class _StubInstanceBase:
+    """Stand-in for IInstanceBase: ``settings`` is the call's view, which a test sets as ``_settings``."""
+
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them."""
+        return self._settings
+
+
 def _install_stubs():
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IInstanceBase = object
+    rocketlib.IInstanceBase = _StubInstanceBase
     # The real base: self.config resolves through the engine's schema.
     rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
     rocketlib.tool_function = lambda *_a, **_k: lambda fn: fn
@@ -169,9 +178,11 @@ def node():
                 sys.modules.pop(name, None)
 
 
-def _make_instance(iinstance_mod, client):
+def _make_instance(iinstance_mod, client, *, iglobal=None, **settings):
+    """An instance on one control's global; ``settings`` are this call's params over the schema defaults."""
     inst = iinstance_mod.IInstance()
-    inst.IGlobal = SimpleNamespace(client=client, max_results=10, database='acme')
+    inst.IGlobal = iglobal if iglobal is not None else SimpleNamespace(client=client, database='acme')
+    inst._settings = {'collection': 'default', 'max_results': 10, **settings}
     return inst
 
 
@@ -294,8 +305,8 @@ def test_iglobal_endglobal_clears_key(node):
 
 
 def test_query_graph_builds_relations_get(node):
-    client = node.client_mod.HydraDBClient('k', 'acme', collection='team')
-    inst = _make_instance(node.iinstance_mod, client)
+    client = node.client_mod.HydraDBClient('k', 'acme')
+    inst = _make_instance(node.iinstance_mod, client, collection='team')
     _GET.return_body = {'data': {'entities': [{'entity_id': 'e1'}], 'relationships': []}}
     out = inst.query_graph({'source_id': 'doc_1'})
 
@@ -342,3 +353,50 @@ def test_query_graph_rejects_bad_source_id(node):
     inst = _make_instance(node.iinstance_mod, node.client_mod.HydraDBClient('k', 'acme'))
     with pytest.raises(ValueError):
         inst.query_graph({'source_id': 123})
+
+
+# ---------------------------------------------------------------------------
+# One control, two calls: the collection and the result count are the call's
+# ---------------------------------------------------------------------------
+
+
+def test_two_calls_on_one_global_use_their_own_collection_and_count(node):
+    client = node.client_mod.HydraDBClient('k', 'acme')
+    iglobal = SimpleNamespace(client=client, database='acme')
+    first = _make_instance(node.iinstance_mod, client, iglobal=iglobal, collection='user_alex', max_results=3)
+    second = _make_instance(node.iinstance_mod, client, iglobal=iglobal, collection='workspace_42', max_results=7)
+    _POST.return_body = {'chunks': []}
+
+    first.recall_memory({'query': 'a'})
+    first_body = _POST.calls[-1]['json']
+    second.recall_memory({'query': 'b'})
+    second_body = _POST.calls[-1]['json']
+
+    assert (first_body['collection'], first_body['max_results']) == ('user_alex', 3)
+    assert (second_body['collection'], second_body['max_results']) == ('workspace_42', 7)
+    assert first.IGlobal is second.IGlobal
+
+
+@pytest.mark.parametrize('key', ['collection', 'max_results'])
+def test_a_param_read_through_the_global_config_raises(node, key):
+    g = node.iglobal_mod.IGlobal()
+    g.glb = SimpleNamespace(logicalType='db_hydradb', connConfig={'api_key': 'k', 'database': 'acme'})
+    with pytest.raises(ConfigError):
+        g.config[key]
+
+
+@pytest.mark.parametrize(
+    'tool, args',
+    [
+        ('store_memory', {'text': 'x'}),
+        ('recall_memory', {'query': 'q'}),
+        ('query_graph', {}),
+    ],
+)
+def test_a_blank_collection_is_refused_not_replaced_by_default(node, tool, args):
+    client = node.client_mod.HydraDBClient('k', 'acme')
+    inst = _make_instance(node.iinstance_mod, client, collection='   ')
+    calls_before = len(_POST.calls) + len(_GET.calls)
+    with pytest.raises(ValueError, match='collection'):
+        getattr(inst, tool)(args)
+    assert len(_POST.calls) + len(_GET.calls) == calls_before

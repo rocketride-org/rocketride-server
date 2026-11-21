@@ -49,7 +49,7 @@ def test_hidden_from_discovery_and_refused_while_writes_are_off(tool, method):
     assert f'rrvector.{tool}' in result['error'] and 'allow_write=true' in result['error']
     getattr(store, method).assert_not_called()
 
-    tools.IGlobal.allow_write = True
+    tools._settings['allow_write'] = True
     assert tool in tools._collect_tool_methods()
     assert getattr(tools, tool)({'object_ids': ['a']})['success'] is True
 

@@ -83,8 +83,11 @@ must query.
 
 ### Graph name and graph description
 
-Graph name defaults to rocketride and must name an existing AGE graph; startup
-fails instead of creating a missing graph. Graph description is empty by
+Graph name defaults to rocketride and must name an existing AGE graph; it is a
+per-call parameter, so a call may name another graph of the tenant database.
+The first call that names a graph checks it exists (a missing one fails that
+call; the node never creates a graph) and reflects its schema into a bounded
+cache by name. Graph description is empty by
 default and becomes LLM context, so describe labels, relationship meaning, and
 domain vocabulary when those are not obvious from reflected schema. Change the
 graph name when the tenant database contains multiple AGE graphs; update the

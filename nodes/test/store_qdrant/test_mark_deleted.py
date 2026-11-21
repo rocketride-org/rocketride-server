@@ -163,7 +163,6 @@ def test_trash_round_trip_preserves_metadata_with_real_qdrant():
 
     import pytest
     from qdrant_client import QdrantClient, models
-    from ai.common.store.document_store import VectorStoreToolMixin
 
     if QdrantClient.__module__ != 'qdrant_client.qdrant_client':
         pytest.skip('requires the real qdrant-client, not the protocol mock')
@@ -186,7 +185,7 @@ def test_trash_round_trip_preserves_metadata_with_real_qdrant():
         )
         store = _make_store()
         store.client = client
-        tools = VectorStoreToolMixin()
+        tools = _tool_carrier()
         tools.IGlobal = SimpleNamespace(store=store, expose_tools=True, allow_write=True)
 
         assert tools.soft_delete({'object_ids': ['a']})['success'] is True
@@ -329,3 +328,19 @@ def test_paths_page_by_offset_on_uuid_point_ids():
         assert store.getPaths(offset=5, limit=2) == {}
     finally:
         client.close()
+
+
+def _tool_carrier():
+    """The shared tool mixin as an IInstance carries it: the call's store and settings from the stand-in global."""
+    from ai.common.store.document_store import VectorStoreToolMixin
+
+    class _Carrier(VectorStoreToolMixin):
+        def _store(self):
+            return self.IGlobal.store
+
+        @property
+        def settings(self):
+            keys = ('serverName', 'expose_tools', 'allow_write')
+            return {key: getattr(self.IGlobal, key) for key in keys if hasattr(self.IGlobal, key)}
+
+    return _Carrier()

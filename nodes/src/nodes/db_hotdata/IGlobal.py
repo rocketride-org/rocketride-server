@@ -27,6 +27,14 @@ Reads config and builds a REST client. The database itself is created lazily on
 the first tool call (creating one costs money and a pipeline may never invoke
 the node) and deleted in ``endGlobal``.
 
+The global keeps what is built once per control: the client (env-bound, no
+network at construction) and the database handle (a billed resource whose
+expiry is fixed at creation, hence ``ttl`` is config). Everything a call
+decides - the table, the description, the gates, the caps and the time
+budgets - is a parameter the instance reads from its settings, and the record
+of appends already loaded is the node's state (``self.state``), which every
+replica of the control shares (plan 4.1 rules 1 and 4, plan 5.7).
+
 Every database carries a TTL. ``endGlobal`` is the real teardown; the TTL is the
 crash net for when it never runs. Hotdata documents expiry as best-effort - the
 database will not be deleted *before* ``expires_at``, but cleanup may lag - so
@@ -53,37 +61,22 @@ class IGlobal(IGlobalBase):
     # unsynchronized check-then-act would create two billed databases and orphan
     # one (the failure tool_daytona hit in production with sandboxes).
     _db_lock: Optional[threading.Lock] = None
-    # Fingerprints of append payloads already loaded this run. Hotdata has no
-    # idempotency key on loads and append duplicates rows, so a retrying agent
-    # would silently double the data without this.
-    #: fingerprint -> outcome: "pending" while in flight, then "complete"
-    #: or "partial". A partial append must keep reporting itself as
-    #: partial, or a repeat call is told the table has all the rows.
-    _loaded: Optional[dict] = None
 
     apikey: str = ''
     workspace_id: str = ''
     database_id: str = ''
     attached: bool = False
     ttl: str = '24h'
-    table: str = 'pipeline_data'
-    db_description: str = ''
-    max_attempts: int = 3
-    max_execute_rows: int = 25000
-    allow_execute: bool = False
-    allow_destructive_load: bool = False
-    job_timeout_secs: int = 300
-    async_after_ms: int = 5000
 
     def beginGlobal(self) -> None:
         """Read the resolved config and build the REST client; the database itself is created lazily.
 
-        The schema marks the API key and workspace required and bounds every
-        numeric setting (async_after_ms at the API's floor of 1000), so the
-        resolver has refused anything this method could not run with.
+        The schema marks the API key and workspace required, so the resolver
+        has refused anything this method could not run with. Only what builds
+        the client and the database is read here: every other setting is a
+        per-call parameter.
         """
         self._db_lock = threading.Lock()
-        self._loaded = {}
         # A reopened global must not inherit the previous run's database handle.
         self.database = None
 
@@ -95,20 +88,13 @@ class IGlobal(IGlobalBase):
         self.attached = False
 
         self.ttl = cfg.ttl
-        self.table = cfg.table.strip()
-        self.db_description = cfg.db_description.strip()
-        self.max_attempts = cfg.max_attempts
-        self.max_execute_rows = cfg.max_execute_rows
-        self.allow_execute = cfg.allow_execute
-        self.allow_destructive_load = cfg.allow_destructive_load
-        self.job_timeout_secs = cfg.job_timeout_secs
-        self.async_after_ms = cfg.async_after_ms
 
+        # The retry budget stays the client's default here; a call's own
+        # budget (its job_timeout_secs) rides a per-call view of this client
         self.client = HotdataClient(
             apikey=self.apikey,
             workspace_id=self.workspace_id,
             base_url=cfg.api_url.strip(),
-            retry_budget_s=float(self.job_timeout_secs),
         )
 
     def get_database(self) -> Dict[str, Any]:
@@ -136,41 +122,6 @@ class IGlobal(IGlobalBase):
                 database = self.database
         return database
 
-    def seen_load(self, fingerprint: str) -> Optional[str]:
-        """Reserve an append payload; return the prior outcome if there was one.
-
-        Append is not idempotent on Hotdata's side, so a repeated identical load
-        would duplicate rows. Checked and recorded atomically because agents fire
-        tool calls in parallel.
-
-        Returns None when this payload is new (and reserves it), otherwise the
-        stored outcome: ``pending``, ``complete`` or ``partial``. The caller must
-        call ``release_load`` if the load then fails, or ``record_load`` with the
-        final outcome once it settles.
-        """
-        if self._loaded is None:
-            self._loaded = {}
-        with self._db_lock:
-            existing = self._loaded.get(fingerprint)
-            if existing is not None:
-                return existing
-            self._loaded[fingerprint] = 'pending'
-            return None
-
-    def record_load(self, fingerprint: str, outcome: str) -> None:
-        """Record how a reserved load finished: 'complete' or 'partial'."""
-        if self._loaded is None:
-            self._loaded = {}
-        with self._db_lock:
-            self._loaded[fingerprint] = outcome
-
-    def release_load(self, fingerprint: str) -> None:
-        """Undo a reservation whose load did not complete, so a retry can run."""
-        if not self._loaded:
-            return
-        with self._db_lock:
-            self._loaded.pop(fingerprint, None)
-
     def drop_database(self, database: Dict[str, Any]) -> None:
         """Forget a database the server reports gone.
 
@@ -181,12 +132,9 @@ class IGlobal(IGlobalBase):
             return
         with self._db_lock:
             if self.database is database:
+                # The append fingerprints in the node's state name the database
+                # id, so the replacement database starts with none of them.
                 self.database = None
-                # The append fingerprints describe the contents of that specific
-                # database. Keeping them would make an identical append to the
-                # replacement database report deduplicated without loading.
-                if self._loaded:
-                    self._loaded.clear()
 
     def endGlobal(self) -> None:
         if self.database is not None and self.client is not None:

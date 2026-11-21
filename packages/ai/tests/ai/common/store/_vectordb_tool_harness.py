@@ -1,7 +1,8 @@
 """Shared stand-ins for the VectorStoreToolMixin unit tests in this directory (#2587).
 
 The mixin is exercised on a bare object, the way an IInstance carries it: a
-MagicMock store behind a fake IGlobal, and a stand-in for the engine base whose
+MagicMock store as the call's store (``_store``), the call's tool-surface
+settings (``settings``), and a stand-in for the engine base whose
 ``_collect_tool_methods`` lists every tool the mixin defines, so the mixin's own
 hiding is what the discovery tests observe.
 """
@@ -25,16 +26,35 @@ class Discoverable:
         return {name: getattr(self, name) for name in EVERY_TOOL_NAME}
 
 
-class Tools(VectorStoreToolMixin, Discoverable):
+class CallCarrier:
+    """What an IInstance gives the mixin: the call's store and the call's settings.
+
+    ``_settings`` holds the call's tool-surface settings (a key left out is a
+    field the node does not declare, so the IGlobal class default applies).
+    """
+
+    def _store(self):
+        """Return the call's store: the stand-in global's one store."""
+        if self.IGlobal.store is None:
+            raise RuntimeError('no store')
+        return self.IGlobal.store
+
+    @property
+    def settings(self):
+        """The call's settings, as IInstanceBase serves them."""
+        return self._settings
+
+
+class Tools(VectorStoreToolMixin, CallCarrier, Discoverable):
     """The mixin on a bare object, the way an IInstance carries it."""
 
     def __init__(self, store, allow_write=None, expose_tools=None):
-        glb = SimpleNamespace(serverName='rrvector', store=store, embed_query=None, embed_model_name=None)
+        self.IGlobal = SimpleNamespace(serverName='rrvector', store=store, embed_query=None, embed_model_name=None)
+        self._settings = {'serverName': 'rrvector'}
         if allow_write is not None:
-            glb.allow_write = allow_write
+            self._settings['allow_write'] = allow_write
         if expose_tools is not None:
-            glb.expose_tools = expose_tools
-        self.IGlobal = glb
+            self._settings['expose_tools'] = expose_tools
 
 
 def make_store(*, lists_documents=False):
