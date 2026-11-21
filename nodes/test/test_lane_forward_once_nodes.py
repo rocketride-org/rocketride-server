@@ -224,6 +224,7 @@ def _make_stubs():
         'ai.common.llm_base': types.ModuleType('ai.common.llm_base'),
         'ai.common.avi': types.ModuleType('ai.common.avi'),
         'ai.common.avi.descriptor': types.ModuleType('ai.common.avi.descriptor'),
+        'ai.constants': types.ModuleType('ai.constants'),
     }
     stubs['rocketlib'].IInstanceBase = _FakeIInstanceBase
     stubs['rocketlib'].Entry = FakeEntry
@@ -245,6 +246,8 @@ def _make_stubs():
     stubs['ai.common.utils'].require_str = lambda args, key, **kw: str(args[key])
     stubs['ai.common.llm_base'].LLMBase = _FakeIInstanceBase
     stubs['ai.common.avi.descriptor'].rename_ext = lambda metadata, ext: metadata
+    # memory_persistent's state backend keeps its values within the state store's ceiling
+    stubs['ai.constants'].CONST_STATE_MAX_TTL_SECONDS = 7 * 24 * 3600
     return stubs
 
 
@@ -620,16 +623,16 @@ def test_llamaparse_table_not_delivered_without_listener():
 class _StubChat:
     """Stand-in for the Mistral vision chat backend."""
 
-    _prompt = 'describe'
-
-    def chat(self, question):
+    def chat(self, question, system_prompt=''):
         """Return a fixed answer without calling any service."""
         return _StubAnswer()
 
 
 def _mistral():
-    """Build a llm_vision_mistral instance with a stub chat backend."""
-    return _build('llm_vision_mistral', types.SimpleNamespace(_chat=_StubChat()))
+    """Build a llm_vision_mistral instance with a stub chat backend and the call's prompts."""
+    inst, fake = _build('llm_vision_mistral', types.SimpleNamespace(_chat=_StubChat()))
+    inst.settings = types.SimpleNamespace(prompt='describe', systemPrompt='')
+    return inst, fake
 
 
 def test_mistral_converted_document_delivered_once():
@@ -892,7 +895,7 @@ def test_tool_n8n_media_stream_delivers_no_chunk(lane):
 
 
 # ============================================================================
-# memory_persistent: every exit forwards (a copy, when a store is set), so every exit must suppress
+# memory_persistent: every exit forwards a copy, so every exit must suppress
 # ============================================================================
 
 
@@ -1017,15 +1020,17 @@ class _SessionAnswer:
 
 
 def _memory(store):
-    """Build a memory_persistent instance with the given store.
+    """Build a memory_persistent instance whose calls read and write the given store.
 
     Args:
-        store: The session store IGlobal exposes, or None when the node is unconfigured.
+        store: The session store of each call (the instance builds one per call
+            from its settings and its state; ``_store`` stands in for that).
 
     Returns:
         (inst, fake_instance).
     """
-    inst, fake = _build('memory_persistent', types.SimpleNamespace(store=store))
+    inst, fake = _build('memory_persistent', types.SimpleNamespace(redis=None))
+    inst._store = lambda: store
     inst.open(None)
     return inst, fake
 
@@ -1048,14 +1053,16 @@ def _deliveries(fake, lane, write, payload):
     return delivered
 
 
-def test_memory_persistent_question_delivered_once_without_store():
-    """With no store the question passes through, once."""
-    inst, fake = _memory(None)
+def test_memory_persistent_question_delivered_once_without_session():
+    """With no session id the question passes through, once, and no session is made."""
+    store = _StubMemoryStore()
+    inst, fake = _memory(store)
     question = FakeQuestion()
 
     delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
 
-    assert delivered == [question], f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert len(delivered) == 1, f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert store.sessions == {}
 
 
 def test_memory_persistent_question_delivered_once_with_invalid_session():
@@ -1086,14 +1093,16 @@ def test_memory_persistent_delivers_only_the_enriched_question():
     assert 'memory_context' not in question.metadata
 
 
-def test_memory_persistent_answer_delivered_once_without_store():
-    """With no store the answer passes through, once."""
-    inst, fake = _memory(None)
+def test_memory_persistent_answer_delivered_once_without_session():
+    """With no session id the answer passes through, once, and nothing is stored."""
+    store = _StubMemoryStore()
+    inst, fake = _memory(store)
     answer = _SessionAnswer({})
 
     delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
 
-    assert delivered == [answer], f'answers lane delivered {len(delivered)} answers, expected 1'
+    assert len(delivered) == 1, f'answers lane delivered {len(delivered)} answers, expected 1'
+    assert store.sessions == {}
 
 
 def test_memory_persistent_answer_delivered_once_with_invalid_session():

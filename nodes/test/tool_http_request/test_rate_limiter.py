@@ -34,6 +34,9 @@ from rate_limiter import RateLimitError, RateLimits, StateRateLimiter  # noqa: E
 ALICE = Owner(orgId='org-a', userId='alice')
 BOB = Owner(orgId='org-a', userId='bob')
 
+#: The component id the pipeline gives the node; the server keys its state by it.
+NODE_ID = 'http_1'
+
 
 class _Clock:
     """A hand-driven stand-in for the ``time`` module the rate limiter reads."""
@@ -67,13 +70,13 @@ def server():
 
 @contextmanager
 def _binding(server, owner=ALICE, engine=None):
-    """One binding's state door, admitted for the duration of the block (on ``engine``, else a new one)."""
+    """One binding's state door for the node, admitted for the duration of the block (on ``engine``, else a new one)."""
     engine = engine or server.engine()
     binding = uuid.uuid4().hex
     server.admit(engine, binding, owner)
     token = server.serving(engine)
     try:
-        yield NodeState(binding)
+        yield NodeState(binding, NODE_ID)
     finally:
         server.done(token)
         server.end(engine, binding)
