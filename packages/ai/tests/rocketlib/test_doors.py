@@ -401,6 +401,25 @@ def test_an_instance_with_no_global_has_no_state(channel):
     assert recorder.requests == []
 
 
+def test_a_state_read_before_the_global_is_assigned_does_not_stick(channel):
+    """The engine assigns IGlobal after the constructor: a door built before it names no node and is not kept."""
+    recorder = channel()
+
+    class _Early(IInstanceBase):
+        def __init__(self):
+            self.instance = SimpleNamespace(traceId=5, caller=None)
+            self._caller = {'correlationId': 'cid-a', 'userId': 'alice'}
+            self.early = self.state
+
+    instance = _Early()
+    with pytest.raises(DoorError, match='needs the node id'):
+        instance.early.get('k')
+    instance.IGlobal = _global('node_1')
+    instance.state.put('k', 1)
+    assert instance.state is instance.state, 'the door that names its node is the one kept'
+    assert [(r[0], r[1]['nodeId']) for r in recorder.requests] == [('state.put', 'node_1')]
+
+
 def test_the_doors_name_the_binding_frozen_at_bind(channel):
     recorder = channel(({'found': False}, None), ({'found': False}, None))
     inst = _Instance({'correlationId': 'cid-a', 'userId': 'alice'})

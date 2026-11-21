@@ -1214,8 +1214,14 @@ class IInstanceBase:
             # The record config.node is filled from; reading it here does not
             # resolve the node's schema
             glb = self.IGlobal
-            door = NodeState(self.caller.correlationId, glb._node_info().id if glb is not None else '')
-            self.__dict__[_STATE_KEY] = door
+            node_id = glb._node_info().id if glb is not None else ''
+            door = NodeState(self.caller.correlationId, node_id)
+            # The engine assigns IGlobal after it constructs the instance: a
+            # read from the node's constructor gets a door that names no node
+            # (it refuses every call), and that door is never kept, so the
+            # first read after the assignment builds the real one
+            if node_id:
+                self.__dict__[_STATE_KEY] = door
         return door
 
     @property

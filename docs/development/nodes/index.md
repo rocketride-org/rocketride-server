@@ -297,7 +297,9 @@ standalone catalog nodes.
      rules bound it:
      - **Keys are per node.** The server also puts the node's id in the key,
        so two nodes of one pipeline that both use `series:cpu` each have their
-       own value. A node cannot read another node's state.
+       own value. The id keeps keys apart; it is not an access boundary:
+       the nodes of one pipeline run for one owner, and the server checks
+       the owner, not which node sent a request.
      - **Every value expires, within 7 days.** A `put` or `incr` without a
        `ttl` takes the pipeline's idle timeout, 7 days at most, and 7 days when
        the pipeline has none; a `ttl` above 7 days is refused. Each write
