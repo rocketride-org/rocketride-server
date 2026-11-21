@@ -10,7 +10,8 @@ Deploy-on-demand models ship without a ``serverbase``: the user pastes the
 endpoint their GMI Cloud console gives them. The schema requires it on exactly
 those branches, so a missing URL is a hard resolver error at save time and at
 pipe start alike, while the host rule (HTTPS on gmi-serving.com) stays a
-semantic check shared by the validator and ``IGlobal``. Drives the real
+semantic check shared by the validator and the chat, which checks the endpoint of
+the call's model when a call first reaches it. Drives the real
 ``IValidator`` and ``IGlobal`` over the engine-resolved schema.
 """
 
@@ -21,7 +22,8 @@ import types
 from pathlib import Path
 
 import pytest
-from rocketlib.config import ConfigError
+import rocketlib
+from rocketlib.config import ConfigError, resolveConfig
 
 NODES_SRC = Path(__file__).resolve().parents[1] / 'src' / 'nodes'
 while str(NODES_SRC) in sys.path:
@@ -172,11 +174,23 @@ class TestPipelineStart:
         assert chats == []
 
     def test_a_foreign_host_is_refused(self, monkeypatch):
-        """The SSRF guard still rejects an endpoint outside gmi-serving.com."""
-        _requests, _warnings, chats = _stubs(monkeypatch)
-        with pytest.raises(ValueError, match='gmi-serving.com'):
-            _global(_config(_ON_DEMAND_MODEL, serverbase='https://evil.example.com/v1')).beginGlobal()
-        assert chats == []
+        """The SSRF guard still rejects an endpoint outside gmi-serving.com, before a client is built for it.
+
+        The endpoint is the call's model branch's, so the chat checks it when a
+        call first reaches that endpoint, not when the control starts.
+        """
+        from llm_gmi_cloud import gmi_cloud
+
+        built: list = []
+        monkeypatch.setattr(gmi_cloud, 'ChatOpenAI', lambda **kwargs: built.append(kwargs))
+        schema = rocketlib.getServiceSchema(_LOGICAL_TYPE)
+        assert schema is not None, f'{_LOGICAL_TYPE} is not registered with the engine'
+        view = resolveConfig(schema, _config(_ON_DEMAND_MODEL, serverbase='https://evil.example.com/v1'))
+        chat = gmi_cloud.Chat(_LOGICAL_TYPE, view.restricted(refuse_params=True), {})
+        with chat.calling(chat.resolve_call(view)):
+            with pytest.raises(ValueError, match='gmi-serving.com'):
+                chat._llm_for()
+        assert built == []
 
     def test_a_configured_endpoint_builds_the_client(self, monkeypatch):
         """The happy path reaches Chat with the endpoint the model pins."""

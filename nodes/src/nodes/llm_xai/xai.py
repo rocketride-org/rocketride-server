@@ -26,7 +26,7 @@ XAI binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_xai import ChatXAI
 
 
@@ -54,8 +54,5 @@ class Chat(ChatBase):
         if not apikey or not apikey.startswith('xai-'):
             raise ValueError('Invalid XAI API key format, please check your API key.')
 
-        # Init the chat base
-        super().__init__(provider, connConfig, bag)
-
-        # Get the llm
-        self._llm = ChatXAI(model=self._model, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens)
+        # Get the llm: one for every call, each request binds its model and max_tokens
+        self._llm = ChatXAI(model=UNBOUND_MODEL, api_key=apikey, temperature=0)

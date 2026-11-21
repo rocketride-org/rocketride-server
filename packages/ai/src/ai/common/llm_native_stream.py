@@ -8,7 +8,7 @@
 
 """Provider-specific streaming handlers that preserve reasoning deltas LangChain drops.
 
-Drivers opt in via ``self._native_stream_provider``; ChatBase dispatches here before
+A chat names the handler of each call (``native_stream_key()``); ChatBase dispatches here before
 the generic stream.
 """
 
@@ -269,21 +269,18 @@ def _open_raw_message_stream(client: Any, payload: dict[str, Any]):
 
 
 def anthropic_extended_thinking_active(chat: Any) -> bool:
-    if getattr(chat, '_extended_thinking', False):
-        return True
-    llm = getattr(chat, '_llm', None)
-    if llm is None:
-        return False
-    if getattr(llm, 'thinking', None):
-        return True
-    mk = getattr(llm, 'model_kwargs', None) or {}
-    return bool(mk.get('thinking'))
+    """Return True when this call of ``chat`` asks for extended thinking (its ``thinking_kwargs()``)."""
+    thinking = getattr(chat, 'thinking_kwargs', None)
+    return bool(thinking()) if callable(thinking) else False
 
 
 class NativeAnthropicAdapter:
     """Bridges the native Anthropic Messages stream to the Event contract.
 
     Same payload + raw create(stream=True) path as before; now yields normalized Events.
+    The request carries the CALL's values: the chat's ``call_kwargs()`` (model,
+    max_tokens) and ``thinking_kwargs()``, over the LangChain object built from
+    the environment.
     """
 
     def __init__(self, chat: Any):
@@ -292,15 +289,23 @@ class NativeAnthropicAdapter:
         self.history: list = []
         self.finish_reason: Optional[str] = None
 
+    def _payload(self, llm: Any, user_text: str, stop: Optional[List[str]]) -> dict[str, Any]:
+        """Build the Messages request for this call: the call's values, then its thinking."""
+        payload: dict[str, Any] = dict(
+            llm._get_request_payload(user_text, stop=stop, stream=True, **self.chat.call_kwargs())
+        )
+        # Thinking is added per call (not baked into the client) so it rides only this native
+        # streaming path — the agent / expectJson path never gets it.
+        payload.update(self.chat.thinking_kwargs())
+        return payload
+
     def stream(self, user_text: str):
         # INVARIANT: consume synchronously within ask() while STOP_SEQUENCES_VAR is still set.
         self.history.append({'role': 'user', 'content': user_text})
-        llm = self.chat._llm
+        llm = self.chat._llm_for()
+        model = str(self.chat.call.model or '')
         stop = STOP_SEQUENCES_VAR.get() or None
-        payload: dict[str, Any] = dict(llm._get_request_payload(user_text, stop=stop, stream=True))
-        # Thinking is added per call (not baked into the client) so it rides only this native
-        # streaming path — the agent / expectJson path never gets it.
-        payload.update(getattr(self.chat, '_thinking_mode_kwargs', None) or {})
+        payload = self._payload(llm, user_text, stop)
         _raw_client = getattr(llm, '_client', None)
         client = _raw_client() if callable(_raw_client) else _raw_client
         if client is None:
@@ -314,8 +319,7 @@ class NativeAnthropicAdapter:
             # Retry only before any chunks reach the UI (create-time 400).
             if stop and is_stop_rejection(e, True):
                 warning(f"LLM rejected 'stop' parameter: {e}. Retrying native stream without stop.")
-                payload = dict(llm._get_request_payload(user_text, stop=None, stream=True))
-                payload.update(getattr(self.chat, '_thinking_mode_kwargs', None) or {})
+                payload = self._payload(llm, user_text, None)
                 raw_stream = _open_raw_message_stream(client, payload)
             else:
                 raise
@@ -366,7 +370,7 @@ class NativeAnthropicAdapter:
             report_llm_tokens(
                 input_tokens,
                 output_tokens,
-                model=str(getattr(self.chat, '_model', '') or ''),
+                model=model,
                 cache_read_tokens=cache_read,
                 cache_creation_tokens=cache_creation,
             )
@@ -415,18 +419,20 @@ def try_openai_compat_reasoning_stream(
     on_reasoning_chunk: Optional[Callable[[str], None]],
 ) -> Optional[str]:
     """Stream via the raw ``openai`` SDK to preserve ``delta.reasoning_content``."""
-    client = getattr(chat, '_raw_openai_client', None)
+    client = chat.raw_openai_client()
+    # The call this stream serves names the model it bills
+    model = str(chat.call.model or '')
     if client is None:
         return None
     kwargs: Dict[str, Any] = {
-        'model': chat._model,
+        'model': model,
         'messages': [{'role': 'user', 'content': prompt}],
         'stream': True,
         # Ask for the usage-bearing final chunk; without this the whole reasoning
         # path (DeepSeek/Qwen/xAI/Ollama on custom base URLs) bills zero tokens.
         # A strict proxy that rejects it raises below and we fall back to non-streaming.
         'stream_options': {'include_usage': True},
-        'max_tokens': chat._modelOutputTokens,
+        'max_tokens': chat.getOutputTokens(),
     }
     kwargs.update(getattr(chat, '_reasoning_kwargs', {}))
     stop = STOP_SEQUENCES_VAR.get() or None
@@ -512,7 +518,7 @@ def try_openai_compat_reasoning_stream(
         report_llm_tokens(
             max(0, int(getattr(usage, 'prompt_tokens', 0) or 0) - cached),
             int(getattr(usage, 'completion_tokens', 0) or 0),
-            model=str(getattr(chat, '_model', '') or ''),
+            model=model,
             cache_read_tokens=cached,
         )
     # A reasoning-only turn (budget spent on reasoning, empty content) is a real completion: it
@@ -552,7 +558,7 @@ def dispatch_native_chat_stream(
     """If a registered handler fully serves the stream, return the answer string."""
     if on_chunk is None:
         return None
-    key = getattr(chat, '_native_stream_provider', None)
+    key = chat.native_stream_key()
     if not key:
         return None
     fn = _NATIVE_STREAM_REGISTRY.get(str(key))

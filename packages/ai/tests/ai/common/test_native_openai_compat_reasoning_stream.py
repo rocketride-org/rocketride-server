@@ -12,6 +12,8 @@ the empty-``choices`` guard skips it, and the ``prompt_tokens - cached_tokens`` 
 field). Plus the retry-without-the-flag path for an endpoint that 400s on it.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from ai.common.llm_native_stream import try_openai_compat_reasoning_stream
@@ -91,8 +93,13 @@ class _Client:
 class _Chat:
     def __init__(self, completions):
         self._raw_openai_client = _Client(completions)
-        self._model = 'deepseek-reasoner'
-        self._modelOutputTokens = 4096
+        self.call = SimpleNamespace(model='deepseek-reasoner')
+
+    def raw_openai_client(self):
+        return self._raw_openai_client
+
+    def getOutputTokens(self):
+        return 4096
 
 
 def _run(chat):

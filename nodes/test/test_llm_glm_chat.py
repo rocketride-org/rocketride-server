@@ -49,12 +49,25 @@ def _stub_client(monkeypatch):
     monkeypatch.setattr(glm, 'ChatOpenAI', _ChatOpenAI)
 
 
-def _chat(**overrides):
-    """Build the node's Chat over the resolved config, ``overrides`` on top of the cloud default."""
+def _view(**overrides):
+    """The resolved config, ``overrides`` on top of the cloud default."""
     config = {'model': 'glm-5.2', 'apikey': 'test-glm-key', **overrides}
     schema = rocketlib.getServiceSchema(_LOGICAL_TYPE)
     assert schema is not None, f'{_LOGICAL_TYPE} is not registered with the engine'
-    return glm.Chat(_LOGICAL_TYPE, resolveConfig(schema, config), {})
+    return resolveConfig(schema, config)
+
+
+def _chat(**overrides):
+    """Build the node's Chat as its IGlobal does: the per-call model leaves refused."""
+    return glm.Chat(_LOGICAL_TYPE, _view(**overrides).restricted(refuse_params=True), {})
+
+
+def _sent_model(**overrides):
+    """The model one call of the resolved config sends."""
+    view = _view(**overrides)
+    chat = glm.Chat(_LOGICAL_TYPE, view.restricted(refuse_params=True), {})
+    with chat.calling(chat.resolve_call(view)):
+        return chat.call_kwargs()['model']
 
 
 def test_cloud_profile_without_key_raises():
@@ -81,13 +94,12 @@ def test_cloud_profile_with_key_builds():
     """The default cloud config with a key constructs against the schema's Z.ai URL."""
     chat = _chat()
 
-    assert chat._llm.kwargs['model'] == 'glm-5.2'
+    assert chat._llm.kwargs['model'] == glm.UNBOUND_MODEL
+    assert _sent_model() == 'glm-5.2'
     assert chat._llm.kwargs['base_url'] == 'https://api.z.ai/api/paas/v4'
     assert chat._llm.kwargs['api_key'] == 'test-glm-key'
 
 
 def test_a_custom_model_sends_its_own_id():
     """The custom branch names the model in customModel; the selector value never reaches the client."""
-    chat = _chat(model='custom', custom={'customModel': 'glm-9-preview'})
-
-    assert chat._llm.kwargs['model'] == 'glm-9-preview'
+    assert _sent_model(model='custom', custom={'customModel': 'glm-9-preview'}) == 'glm-9-preview'

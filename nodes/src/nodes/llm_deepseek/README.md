@@ -33,6 +33,8 @@ cloud models use the DeepSeek API at `https://api.deepseek.com/v1`, so most user
 need to provide a DeepSeek API key. The default is **Cloud Reasoner**
 (`deepseek-reasoner`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call. Each model names its own endpoint, so a call that switches the model reaches that model's server.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

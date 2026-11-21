@@ -20,6 +20,8 @@ When the node config is saved, a minimal validation probe (a single-word prompt)
 
 Choose a model from the **Model** selector to set the model id, context limit, and output limit. Listed models keep those values fixed, while **Custom model** exposes the model id, context limit and output limit for another xAI model. The default is **Grok 3** (`grok-3`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

@@ -119,7 +119,8 @@ def _make_chat(response: _Response):
 
     chat = _node.Chat.__new__(_node.Chat)
     chat._client = type('_Client', (), {'models': _Models()})()
-    chat._model = _MODEL
+    # Built without __init__: its one call, as a node whose model is config has
+    chat._control_call = chat.resolve_call({'model': _MODEL, 'modelTotalTokens': 100000})
     return chat
 
 

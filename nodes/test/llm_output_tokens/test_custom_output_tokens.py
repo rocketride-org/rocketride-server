@@ -43,8 +43,16 @@ from llm_openai import openai_client  # noqa: E402
 
 
 def _uses_output_limit(node_dir: Path) -> bool:
-    """True when the node's driver sends the configured output limit to its provider."""
-    return any('self._modelOutputTokens' in p.read_text(encoding='utf-8') for p in node_dir.glob('*.py'))
+    """True when the node's driver sends the call's output limit to its provider.
+
+    A LangChain driver binds it per request onto the object it builds with
+    ``UNBOUND_MODEL`` (ChatBase.call_kwargs); Bedrock builds one object per
+    model and output window (``call.output_tokens``).
+    """
+    return any(
+        'UNBOUND_MODEL' in text or 'call.output_tokens' in text
+        for text in (p.read_text(encoding='utf-8') for p in node_dir.glob('*.py'))
+    )
 
 
 def _service(service_file: str) -> dict:
@@ -131,19 +139,23 @@ class _RecordingClient:
         self.kwargs = kwargs
 
 
-def _sent_limit(chat) -> int:
-    """The output limit the driver gave the client: max_tokens, or max_completion_tokens for reasoning models."""
-    kwargs = chat._llm.kwargs
-    return kwargs.get('max_tokens') or kwargs.get('model_kwargs', {}).get('max_completion_tokens')
+def _sent(monkeypatch, conn_config: dict) -> tuple:
+    """Run one call of the OpenAI node: (its model, the output limit its request carries).
 
-
-def _start_openai_node(monkeypatch, conn_config: dict):
-    """Start the OpenAI node the way its IGlobal does: resolve the stored config, hand the view to Chat."""
+    The chat is built the way its IGlobal builds it (the stored config resolved,
+    the per-call leaves refused); the call's settings are that config, as for a
+    call that sets no parameter. The limit is max_tokens, or
+    max_completion_tokens for reasoning models.
+    """
     monkeypatch.setattr(openai_client, 'ChatOpenAI', _RecordingClient)
     monkeypatch.setattr(openai_client, 'OpenAI', _RecordingClient)
     schema = rocketlib.getServiceSchema('llm_openai')
     assert schema is not None, 'llm_openai is not registered with the engine'
-    return openai_client.Chat('llm_openai', resolveConfig(schema, conn_config), {})
+    view = resolveConfig(schema, conn_config)
+    chat = openai_client.Chat('llm_openai', view.restricted(refuse_params=True), {})
+    with chat.calling(chat.resolve_call(view)):
+        kwargs = chat.call_kwargs()
+    return kwargs['model'], kwargs.get('max_tokens') or kwargs.get('max_completion_tokens')
 
 
 _CUSTOM = {'customModel': 'my-model', 'modelTotalTokens': 200000}
@@ -160,17 +172,17 @@ def _default_output_limit() -> int:
 
 
 def test_a_value_from_the_form_reaches_the_request(monkeypatch):
-    """Custom OpenAI model, output limit 32,000 typed in the form: the client is built with it."""
-    chat = _start_openai_node(
+    """Custom OpenAI model, output limit 32,000 typed in the form: the request carries it."""
+    _, limit = _sent(
         monkeypatch, {'model': 'custom', 'apikey': 'sk-test', 'custom': {**_CUSTOM, 'modelOutputTokens': 32000}}
     )
-    assert _sent_limit(chat) == 32000
+    assert limit == 32000
 
 
 def test_a_custom_model_without_a_value_keeps_the_default_models_limit(monkeypatch):
     """Nothing set in the form: the default model's limit applies, clamped to the custom window."""
-    chat = _start_openai_node(monkeypatch, {'model': 'custom', 'apikey': 'sk-test', 'custom': dict(_CUSTOM)})
-    assert _sent_limit(chat) == min(_default_output_limit(), _CUSTOM['modelTotalTokens'])
+    _, limit = _sent(monkeypatch, {'model': 'custom', 'apikey': 'sk-test', 'custom': dict(_CUSTOM)})
+    assert limit == min(_default_output_limit(), _CUSTOM['modelTotalTokens'])
 
 
 def test_a_top_level_limit_is_refused_by_name(monkeypatch):
@@ -182,15 +194,15 @@ def test_a_top_level_limit_is_refused_by_name(monkeypatch):
         'custom': {**_CUSTOM, 'modelOutputTokens': 8192},
     }
     with pytest.raises(ConfigError, match='unknown config key "modelOutputTokens"'):
-        _start_openai_node(monkeypatch, conn)
+        _sent(monkeypatch, conn)
 
 
 def test_a_stale_block_of_another_branch_is_not_reported(monkeypatch):
     """Only the selected branch's settings are in play; the custom block is kept for a switch back."""
     service = _service('llm_openai/services.json')
     default_model = _model_selector(service)['default']
-    chat = _start_openai_node(
+    model, limit = _sent(
         monkeypatch, {'model': default_model, 'apikey': 'sk-test', 'custom': {**_CUSTOM, 'modelOutputTokens': 8192}}
     )
-    assert chat._model == default_model
-    assert _sent_limit(chat) == _default_output_limit()
+    assert model == default_model
+    assert limit == _default_output_limit()

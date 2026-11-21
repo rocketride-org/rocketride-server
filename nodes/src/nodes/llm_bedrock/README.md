@@ -40,6 +40,8 @@ available (the region defaults to `us-east-1`). Each listed model pins its model
 and context limit; most pipelines do not need to edit those values. The default is
 **Llama 3.3 70B Instruct** (`meta.llama3-3-70b-instruct-v1:0`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key, secret and region and keeps one model object per model and output limit a call asks for. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

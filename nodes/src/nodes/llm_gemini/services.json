@@ -92,12 +92,16 @@
 			"required": true
 		},
 		"llm_gemini.customModel": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model id",
 			"description": "Model id exactly as the provider names it",
 			"required": true
 		},
 		"llm_gemini.custom.modelTotalTokens": {
+			"param": true,
+			"tool": false,
 			"type": "number",
 			"title": "Total Tokens",
 			"description": "Maximum number of input + output tokens",
@@ -105,6 +109,8 @@
 			"default": 1114112
 		},
 		"llm_gemini.custom.modelOutputTokens": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Maximum number of output tokens",
@@ -119,6 +125,8 @@
 	"properties": [
 		{
 			"name": "model",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"description": "Gemini LLM model",

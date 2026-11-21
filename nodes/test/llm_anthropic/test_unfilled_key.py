@@ -50,8 +50,10 @@ def test_a_key_in_the_wrong_format_still_says_so(monkeypatch):
 
 
 def test_a_well_formed_key_builds_the_client(monkeypatch):
-    """The happy path: the schema-pinned limits reach the chat."""
+    """The happy path: the schema-pinned limits reach the call."""
     chat = _chat(monkeypatch, 'sk-ant-test')
+    settings = chat._config
 
-    assert chat._model == 'claude-sonnet-4-6'
-    assert chat._modelTotalTokens == chat._config['modelTotalTokens'] > 0
+    with chat.calling(chat.resolve_call(settings)):
+        assert chat.call.model == 'claude-sonnet-4-6'
+        assert chat.getTotalTokens() == settings['modelTotalTokens'] > 0

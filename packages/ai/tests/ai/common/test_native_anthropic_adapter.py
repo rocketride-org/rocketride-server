@@ -5,6 +5,8 @@
 
 """Pins NativeAnthropicAdapter: native Messages stream → Events, same payload path."""
 
+from types import SimpleNamespace
+
 import pytest
 
 from ai.common.llm_adapter import Event
@@ -50,19 +52,36 @@ class _LLM:
         self._payload = payload
         self._client = client
 
-    def _get_request_payload(self, prompt, stop=None, stream=False):
-        return {**self._payload, 'messages': [{'role': 'user', 'content': prompt}]}
+    def _get_request_payload(self, prompt, stop=None, stream=False, **kwargs):
+        # The call's values (model, max_tokens) merge over the object's own, as ChatAnthropic's do
+        return {**self._payload, **kwargs, 'messages': [{'role': 'user', 'content': prompt}]}
 
 
 class _Chat:
-    def __init__(self, llm, thinking_mode=None):
+    """The chat surface the adapter reads: the call, its request values, its object, its thinking."""
+
+    def __init__(self, llm, thinking_mode=None, call_kwargs=None):
         self._llm = llm
-        self._extended_thinking = True
-        self._thinking_mode_kwargs = thinking_mode or {}
+        self._thinking = thinking_mode or {}
+        self._call_kwargs = call_kwargs or {}
+        self.call = SimpleNamespace(model=self._call_kwargs.get('model') or llm._payload.get('model'))
+
+    def _llm_for(self):
+        return self._llm
+
+    def call_kwargs(self):
+        return dict(self._call_kwargs)
+
+    def thinking_kwargs(self):
+        return dict(self._thinking)
+
+
+#: A thinking call: the native handler serves only those
+_THINKING = {'thinking': {'type': 'adaptive', 'display': 'summarized'}}
 
 
 def _chat_with(events, payload=None):
-    return _Chat(_LLM(payload or {'model': 'claude-sonnet-4-6', 'max_tokens': 1000}, _Client(events)))
+    return _Chat(_LLM(payload or {'model': 'claude-sonnet-4-6', 'max_tokens': 1000}, _Client(events)), _THINKING)
 
 
 def test_native_adapter_yields_events_and_maps_finish():
@@ -109,6 +128,27 @@ def test_no_thinking_in_payload_when_mode_empty():
     chat = _Chat(_LLM({'model': 'm', 'max_tokens': 10}, client))  # no thinking mode
     list(NativeAnthropicAdapter(chat).stream('q'))
     assert 'thinking' not in client.messages.seen
+
+
+def test_the_request_carries_the_calls_model_and_window():
+    """The object is built from the environment; the model and max_tokens are the call's."""
+    client = _Client([_RawEvent('content_block_delta', _Delta('text_delta', text='ok'))])
+    llm = _LLM({'model': 'model-is-bound-per-call', 'max_tokens': 1024}, client)
+    chat = _Chat(llm, call_kwargs={'model': 'claude-opus-4-1', 'max_tokens': 32000})
+    list(NativeAnthropicAdapter(chat).stream('q'))
+    assert client.messages.seen['model'] == 'claude-opus-4-1'
+    assert client.messages.seen['max_tokens'] == 32000
+
+
+def test_the_handler_declines_a_call_without_thinking():
+    """A call that does not think goes the LangChain way: the native handler returns None."""
+    client = _Client([_RawEvent('content_block_delta', _Delta('text_delta', text='ok'))])
+    chat = _Chat(_LLM({'model': 'm', 'max_tokens': 10}, client))
+    assert (
+        try_anthropic_native_chat_stream(chat, 'q', on_chunk=lambda t: None, on_finish=None, on_reasoning_chunk=None)
+        is None
+    )
+    assert client.messages.seen is None
 
 
 def test_haiku_45_gets_extended_thinking():

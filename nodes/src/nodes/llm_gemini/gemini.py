@@ -171,16 +171,17 @@ class Chat(ChatBase):
             AttributeError: If the model is not properly configured
 
         Note:
-            This method assumes self._model is set by the parent class.
+            The model is the call's (self.call.model), sent per request.
             The model should be a valid Gemini model identifier (e.g., 'gemini-pro').
         """
-        # Generate content using the configured model
-        response = self._client.models.generate_content(model=self._model, contents=prompt)
+        # Generate content using the call's model
+        model = self.call.model
+        response = self._client.models.generate_content(model=model, contents=prompt)
 
         # Before the text check, deliberately: a response that carried no text
         # still burned tokens, and a safety block is exactly the run somebody
         # will be asking about when they look at the bill.
-        _report_gemini_usage(response, self._model)
+        _report_gemini_usage(response, model)
 
         # `.text` is None (not '') when the candidate carried no text parts:
         # safety-blocked, the token budget spent before any visible text (a

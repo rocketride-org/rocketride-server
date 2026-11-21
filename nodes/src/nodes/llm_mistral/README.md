@@ -38,6 +38,8 @@ Choose a model from the **Model** selector to pin the Mistral model id and its d
 context and output limits. Most users only need to select a model and supply an API
 key. The default is **Mistral Large 3** (`mistral-large-2512`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

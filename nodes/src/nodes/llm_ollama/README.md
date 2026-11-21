@@ -20,6 +20,8 @@ limit, so the node's default of 4,096 output tokens applies. Select **Custom mod
 supply another Ollama tag, a context token count, and an output limit; its initial
 context value is 16,385 tokens, and an empty output limit keeps the 4,096 default.
 
+The model settings (the selector, a custom model id and its token limits), the temperature and the reasoning effort are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and server address and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call, though it may set the temperature and the reasoning effort.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

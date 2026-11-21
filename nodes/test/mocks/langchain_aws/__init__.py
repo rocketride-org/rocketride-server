@@ -14,8 +14,15 @@ class ChatBedrock:
     """Mock ChatBedrock - returns fixed stub from invoke()."""
 
     def __init__(self, model_id=None, region_name=None, **kwargs):
-        self.model_id = model_id
+        # ``model`` is the real class's alias of ``model_id``; the boto3 clients may be passed in to share
+        self.model_id = model_id or kwargs.get('model')
         self.region_name = region_name
+        self.client = kwargs.get('client')
+        self.bedrock_client = kwargs.get('bedrock_client')
+
+    def bind(self, **kwargs):
+        """Bind a call's request values (model, max_tokens, ...); the stub answers the same for every call."""
+        return self
 
     def invoke(self, prompt) -> _MockMessage:
         return _MockMessage(MOCK_LLM_RESPONSE)

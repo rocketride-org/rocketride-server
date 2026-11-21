@@ -31,7 +31,6 @@ supporting a wide range of models from large (128K context) to small (32K contex
 import os
 import time
 from depends import depends  # type: ignore
-from rocketlib import debug
 
 # Load the requirements
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
@@ -69,7 +68,6 @@ class Chat(ChatBase):
     Create a Mistral AI chat bot.
     """
 
-    _model: str = ''
     _client: Mistral
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -103,15 +101,8 @@ class Chat(ChatBase):
         except Exception as e:
             raise ValueError(f'Failed to initialize Mistral AI client: {str(e)}')
 
-        # Get model-specific token limit
-        self._modelTotalTokens = self._getModelTokens(config.get('modelTotalTokens', None))
-
-        # Output some debug information
-        debug(f'    Chat model        : {self._model}')
-        debug(f'    Chat total tokens : {self._modelTotalTokens}')
-
     def _getModelTokens(self, configured_tokens: int | None) -> int:
-        """Get the maximum token count for the specified model."""
+        """Get the maximum token count for this call's model."""
         model_tokens = {
             # Premier Models - Latest and Most Capable
             'mistral-large-2411': 131072,  # 128K context
@@ -139,7 +130,7 @@ class Chat(ChatBase):
             return configured_tokens
 
         # Otherwise use model-specific default, falling back to 32K if model unknown
-        return model_tokens.get(self._model, 32768)
+        return model_tokens.get(self.call.model, 32768)
 
     def _getModelTimeout(self, model: str) -> int:
         """
@@ -156,7 +147,7 @@ class Chat(ChatBase):
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""
-        return self._modelTotalTokens
+        return self._getModelTokens(self.call.settings.get('modelTotalTokens'))
 
     def getTokens(self, value: str) -> int:
         """
@@ -215,7 +206,7 @@ class Chat(ChatBase):
 
         # Model availability
         if any(phrase in error_lower for phrase in ['model not found', 'unavailable']):
-            return f"The model '{self._model}' is currently unavailable. Please try a different model."
+            return f"The model '{self.call.model}' is currently unavailable. Please try a different model."
 
         # Server errors
         if any(phrase in error_lower for phrase in ['internal server error', '500', 'service unavailable']):
@@ -227,7 +218,7 @@ class Chat(ChatBase):
 
         # Timeout errors
         if any(phrase in error_lower for phrase in ['timeout', 'timed out']):
-            return f'Request timed out. The {self._model} model may need more time - please try again.'
+            return f'Request timed out. The {self.call.model} model may need more time - please try again.'
 
         # Network errors
         if any(phrase in error_lower for phrase in ['connection', 'network', 'unreachable']):
@@ -268,8 +259,8 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Send a chat message to Mistral AI and get the response."""
-        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
-        max_retries, base_delay = self._getRetryConfig(self._model)
+        prompt = validate_prompt(question.getPrompt(), self.getTotalTokens(), self.getTokens)
+        max_retries, base_delay = self._getRetryConfig(self.call.model)
         last_error = None
 
         for attempt in range(max_retries + 1):
@@ -279,14 +270,14 @@ class Chat(ChatBase):
 
                 # Make the API call
                 chat_response = self._client.chat.complete(
-                    model=self._model,
+                    model=self.call.model,
                     messages=messages,
                     temperature=0.0,  # Using 0 for more deterministic responses
                     max_tokens=None,  # Let model decide based on content
                     random_seed=None,  # No fixed seed for variety
                 )
 
-                _report_mistral_usage(chat_response, self._model)
+                _report_mistral_usage(chat_response, self.call.model)
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)
