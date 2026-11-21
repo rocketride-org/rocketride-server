@@ -33,10 +33,10 @@ def _question(wave):
     return q
 
 
-def _context(wave):
-    """A real AgentContext: the driver copies it for each run with dataclasses.replace."""
+def _context(wave, **settings):
+    """A real AgentContext: the driver copies it for each run with dataclasses.replace; the invoker's settings are the call's."""
     return wave.rocketride_agent.AgentContext(
-        invoker=None,
+        invoker=SimpleNamespace(settings=settings),
         llm=None,
         tools=SimpleNamespace(list=[]),
         memory=None,
@@ -57,8 +57,6 @@ def test_planning_prompt_has_each_instruction_once(wave):
 def test_driver_sends_each_instruction_once(wave):
     """The prompt the model gets on the first step holds the configured instruction once."""
     driver = object.__new__(wave.rocketride_agent.RocketRideDriver)
-    driver._instructions = [RULE]
-    driver._max_waves = 1
     driver.sendSSE = lambda *args, **kwargs: None
     prompts = []
 
@@ -68,7 +66,7 @@ def test_driver_sends_each_instruction_once(wave):
 
     driver.call_llm_json = call_llm_json
 
-    answer, _ = driver._run(context=_context(wave), question=_question(wave))
+    answer, _ = driver._run(context=_context(wave, instructions=[RULE], max_waves=1), question=_question(wave))
 
     assert answer == 'OK'
     assert prompts[0].count(RULE) == 1

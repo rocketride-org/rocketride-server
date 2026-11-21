@@ -203,6 +203,12 @@ def _chat(monkeypatch, model: str = _SONNET):
     return chat
 
 
+def _ask(chat, question, **callbacks):
+    """Ask one question as LLMBase does: inside the call the node's settings resolve to."""
+    with chat.calling(chat.resolve_call(chat._config)):
+        return chat.chat(question, **callbacks)
+
+
 def _agent_question(scratch: str, cache: bool = True, json_reply: bool = True) -> Question:
     q = Question(role='You are a planning agent.', expectJson=json_reply)
     q.cachePrefix = cache
@@ -218,7 +224,7 @@ def test_the_unchanging_start_is_marked_and_the_rest_is_not(monkeypatch, server)
     chat = _chat(monkeypatch)
     question = _agent_question('round 1')
 
-    chat.chat(question)
+    _ask(chat, question)
 
     assert server[0]['action'] == 'invoke'
     content = server[0]['body']['messages'][0]['content']
@@ -233,8 +239,8 @@ def test_the_marked_start_is_identical_across_rounds(monkeypatch, server):
     """Only an identical prefix can be read back from the cache."""
     chat = _chat(monkeypatch)
 
-    chat.chat(_agent_question('round 1'))
-    chat.chat(_agent_question('round 2: read App.css, it is revision 1'))
+    _ask(chat, _agent_question('round 1'))
+    _ask(chat, _agent_question('round 2: read App.css, it is revision 1'))
 
     first, second = (r['body']['messages'][0]['content'] for r in server)
     assert first[0]['text'] == second[0]['text']
@@ -246,7 +252,7 @@ def test_a_streamed_reply_is_marked_too(monkeypatch, server):
     chat = _chat(monkeypatch)
     question = _agent_question('round 1', json_reply=False)
 
-    chat.chat(question, on_chunk=lambda text: None)
+    _ask(chat, question, on_chunk=lambda text: None)
 
     assert server[0]['action'] == 'invoke-with-response-stream'
     content = server[0]['body']['messages'][0]['content']
@@ -259,7 +265,7 @@ def test_without_the_flag_the_request_is_unchanged(monkeypatch, server):
     chat = _chat(monkeypatch)
     question = _agent_question('round 1', cache=False)
 
-    chat.chat(question)
+    _ask(chat, question)
 
     assert server[0]['body']['messages'][0]['content'] == question.getPrompt()
     assert 'cache_control' not in json.dumps(server[0]['body'])
@@ -270,7 +276,7 @@ def test_a_claude_model_without_caching_never_gets_the_marker(monkeypatch, serve
     chat = _chat(monkeypatch, model='anthropic.claude-3-haiku-20240307-v1:0')
     question = _agent_question('round 1')
 
-    chat.chat(question)
+    _ask(chat, question)
 
     assert server[0]['body']['messages'][0]['content'] == question.getPrompt()
 
@@ -299,7 +305,7 @@ def test_which_models_get_the_marker(model, marked):
 
 def _metered(chat, question, **callbacks) -> dict:
     with turn_usage() as read:
-        chat.chat(question, **callbacks)
+        _ask(chat, question, **callbacks)
     return read()
 
 

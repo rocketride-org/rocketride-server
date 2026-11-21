@@ -96,21 +96,20 @@ class _FakeInner:
 
 
 class _FakeIInstance:
-    def __init__(self) -> None:
+    """The invoking instance; ``settings`` is this call's (the guard is a per-call parameter)."""
+
+    def __init__(self, *, require_tool_call: bool = False) -> None:
         self._agent_host = _FakeHost()
         self.instance = _FakeInner()
+        self.settings = {'require_tool_call': require_tool_call}
 
 
-def _driver(plans: List[Dict[str, Any]], *, require_tool_call: bool) -> RocketRideDriver:
+def _driver(plans: List[Dict[str, Any]]) -> RocketRideDriver:
     """A RocketRideDriver with __init__ bypassed and the planner LLM scripted.
 
     ``call_tool`` is left REAL so the invocation counter is genuinely exercised.
     """
     d = RocketRideDriver.__new__(RocketRideDriver)
-    d._instructions = []
-    d._agent_description = ''
-    d._require_tool_call = require_tool_call
-    d._max_waves = 10
     plan_iter = iter(plans)
     # Instance attribute shadows the bound method; planner calls
     # agent_base.call_llm_json(context, wave_prompt) -> returns the next plan.
@@ -132,9 +131,9 @@ def _question() -> Question:
 def test_fabrication_on_wave0_trips_guard():
     # Planner "narrates" a final answer on the first wave without any tool call.
     d = _driver(
-        [{'done': True, 'answer': 'It is sunny in NYC (no tool called).', 'scratch': ''}], require_tool_call=True
+        [{'done': True, 'answer': 'It is sunny in NYC (no tool called).', 'scratch': ''}],
     )
-    ii = _FakeIInstance()
+    ii = _FakeIInstance(require_tool_call=True)
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
 
     assert payload['stack'][0]['kind'] == 'RocketRide.agent.guard.v1'
@@ -148,8 +147,8 @@ def test_grounded_run_passes_guard():
         {'tool_calls': [{'tool': 'weather.get', 'args': {'city': 'NYC'}}], 'thought': 'fetch', 'scratch': ''},
         {'done': True, 'answer': 'Sunny, 72F in NYC.', 'scratch': ''},
     ]
-    d = _driver(plans, require_tool_call=True)
-    ii = _FakeIInstance()
+    d = _driver(plans)
+    ii = _FakeIInstance(require_tool_call=True)
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
 
     assert payload['content'] == 'Sunny, 72F in NYC.'
@@ -159,8 +158,8 @@ def test_grounded_run_passes_guard():
 
 
 def test_guard_off_allows_fabrication_backward_compat():
-    d = _driver([{'done': True, 'answer': 'narrated answer', 'scratch': ''}], require_tool_call=False)
-    ii = _FakeIInstance()
+    d = _driver([{'done': True, 'answer': 'narrated answer', 'scratch': ''}])
+    ii = _FakeIInstance(require_tool_call=False)
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
 
     assert payload['content'] == 'narrated answer'
@@ -179,8 +178,8 @@ def test_memory_peek_only_does_not_satisfy_guard():
         },
         {'done': True, 'answer': 'answer from a peek only', 'scratch': ''},
     ]
-    d = _driver(plans, require_tool_call=True)
-    ii = _FakeIInstance()
+    d = _driver(plans)
+    ii = _FakeIInstance(require_tool_call=True)
     ii._agent_host.memory.store['seed'] = {'value': 42}  # pre-seed so the peek succeeds
 
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
@@ -204,8 +203,8 @@ def test_parallel_tools_in_one_wave_all_counted():
         },
         {'done': True, 'answer': 'Two cities fetched.', 'scratch': ''},
     ]
-    d = _driver(plans, require_tool_call=True)
-    ii = _FakeIInstance()
+    d = _driver(plans)
+    ii = _FakeIInstance(require_tool_call=True)
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
 
     assert payload['meta']['tool_calls'] == 2
@@ -214,8 +213,8 @@ def test_parallel_tools_in_one_wave_all_counted():
 
 
 def test_guard_trip_is_emitted_on_answers_lane():
-    d = _driver([{'done': True, 'answer': 'narrated', 'scratch': ''}], require_tool_call=True)
-    ii = _FakeIInstance()
+    d = _driver([{'done': True, 'answer': 'narrated', 'scratch': ''}])
+    ii = _FakeIInstance(require_tool_call=True)
     d.run_agent(ii, _question(), emit_answers_lane=True)
     assert len(ii.instance.written) == 1
 
@@ -226,13 +225,10 @@ def test_guard_trip_is_emitted_on_answers_lane():
 # ---------------------------------------------------------------------------
 
 
-def _langchain_driver(envelopes: List[str], *, require_tool_call: bool):
+def _langchain_driver(envelopes: List[str]):
     from nodes.agent_langchain.langchain import LangChainDriver
 
     d = LangChainDriver.__new__(LangChainDriver)
-    d._instructions = []
-    d._agent_description = ''
-    d._require_tool_call = require_tool_call
     env_iter = iter(envelopes)
     # The tool-calling chat-model adapter calls agent_base.call_llm(...) each turn;
     # script it to return the raw JSON envelope the driver's parser expects.
@@ -242,8 +238,8 @@ def _langchain_driver(envelopes: List[str], *, require_tool_call: bool):
 
 def test_langchain_fabrication_trips_guard():
     pytest.importorskip('langchain')
-    d = _langchain_driver(['{"type":"final","content":"It is sunny (narrated, no tool)."}'], require_tool_call=True)
-    ii = _FakeIInstance()
+    d = _langchain_driver(['{"type":"final","content":"It is sunny (narrated, no tool)."}'])
+    ii = _FakeIInstance(require_tool_call=True)
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
 
     assert payload['stack'][0]['kind'] == 'RocketRide.agent.guard.v1'
@@ -258,9 +254,8 @@ def test_langchain_grounded_passes_guard():
             '{"type":"tool_call","name":"weather.get","args":{"city":"NYC"}}',
             '{"type":"final","content":"Sunny, 72F in NYC."}',
         ],
-        require_tool_call=True,
     )
-    ii = _FakeIInstance()
+    ii = _FakeIInstance(require_tool_call=True)
     payload = d.run_agent(ii, _question(), emit_answers_lane=False)
 
     assert payload['meta']['tool_calls'] >= 1

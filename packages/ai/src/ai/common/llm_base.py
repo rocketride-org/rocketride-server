@@ -1,9 +1,23 @@
+# =============================================================================
+# MIT License
 # Copyright (c) 2026 Aparavi Software AG
+# =============================================================================
+
+"""
+LLMBase - the shared IInstance of every LLM node.
+
+The chat is the control's; the model, its limits and the tuning leaves are
+this call's (plan 4.1 rule 4): each request resolves them from
+``self.settings`` and serves them on the chat (``ChatBase.calling``), so one
+control answers a call on one model and the next on another without
+rebuilding its IGlobal.
+"""
 
 import inspect
 from typing import Callable, List, Optional
 
 from rocketlib import IInstanceBase, invoke_function, warning
+from ai.common.chat import ChatCall
 from ai.common.schema import Question, Answer
 from ai.common.llm_native_stream import STOP_SEQUENCES_VAR
 from ai.common.llm_adapter import turn_usage
@@ -18,8 +32,13 @@ class LLMBase(IInstanceBase):
     The chat client is the CONTROL's (plan 4.1 rule 1): the node's IGlobal
     builds ``_chat`` once in ``beginGlobal`` from ``self.config``, the
     control's resolved configuration, and every binding of that control
-    reads it through ``self.IGlobal``.
+    reads it through ``self.IGlobal``. The values of a call are this
+    binding's: ``_call`` resolves them from ``self.settings``.
     """
+
+    def _call(self) -> ChatCall:
+        """Return this call's generation values, resolved from ``self.settings``."""
+        return self.IGlobal._chat.resolve_call(self.settings)
 
     def _question(
         self,
@@ -36,19 +55,21 @@ class LLMBase(IInstanceBase):
         # one request never bleeds into the next on a reused chat instance.
         token = STOP_SEQUENCES_VAR.set(stop or None)
         try:
-            # Legacy drivers override chat(self, question) without streaming callbacks.
-            try:
-                accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
-            except (TypeError, ValueError):
-                accepts_stream = True
-            if not accepts_stream:
-                return chat.chat(question)
-            return chat.chat(
-                question,
-                on_chunk=on_chunk,
-                on_finish=on_finish,
-                on_reasoning_chunk=on_reasoning_chunk,
-            )
+            # Every request the chat sends for this question reads this call's values
+            with chat.calling(self._call()):
+                # Legacy drivers override chat(self, question) without streaming callbacks.
+                try:
+                    accepts_stream = 'on_chunk' in inspect.signature(chat.chat).parameters
+                except (TypeError, ValueError):
+                    accepts_stream = True
+                if not accepts_stream:
+                    return chat.chat(question)
+                return chat.chat(
+                    question,
+                    on_chunk=on_chunk,
+                    on_finish=on_finish,
+                    on_reasoning_chunk=on_reasoning_chunk,
+                )
         finally:
             STOP_SEQUENCES_VAR.reset(token)
 
@@ -119,15 +140,29 @@ class LLMBase(IInstanceBase):
 
     @invoke_function
     def getContextLength(self, _param):
-        return self.IGlobal._chat.getTotalTokens()
+        """Return the context window of this call's model."""
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.getTotalTokens()
 
     @invoke_function
     def getOutputLength(self, _param):
-        return self.IGlobal._chat.getOutputTokens()
+        """Return the most tokens one reply of this call's model may hold."""
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.getOutputTokens()
 
     @invoke_function
     def getTokenCounter(self, _param):
-        return self.IGlobal._chat.getTokens
+        """Return a counter of this call's model's tokens; it keeps the call, so it counts the same wherever it runs."""
+        chat = self.IGlobal._chat
+        call = self._call()
+
+        def count(value: str) -> int:
+            with chat.calling(call):
+                return chat.getTokens(value)
+
+        return count
 
     @invoke_function
     def ask(self, param):

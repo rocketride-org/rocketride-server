@@ -95,6 +95,8 @@ Both variants are steered the same way: by default you add **Instructions**,
 and turning on **Advanced Mode** swaps them for direct prompt fields. The
 field-level details:
 
+Every setting of the agent and the subagent is a per-call parameter: a pipeline can expose any of them in its `parameters` map, and each call then runs with its own values on the same running node, which keeps nothing of them between calls. A caller may set them; an LLM may not, through a tool call.
+
 ### Description (Subagent)
 
 The most important field on a sub-agent. The orchestrating Deep Agent reads

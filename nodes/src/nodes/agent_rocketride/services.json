@@ -35,6 +35,8 @@
 	//
 	"propertyDefinitions": {
 		"agent_description": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Agent description",
@@ -42,12 +44,16 @@
 			"description": "What does this agent do? Describe its purpose and capabilities, this helps parent agents select and invoke it correctly."
 		},
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide the agent's planning and responses.",
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		},
 		"max_waves": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Max Waves",
 			"description": "Maximum number of planning iterations before the synthesis fallback fires.",
@@ -56,12 +62,16 @@
 			"maximum": 50
 		},
 		"require_tool_call": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Require tool call",
 			"default": false,
 			"description": "Require the agent to invoke at least one tool before answering. When on, a run that answers without calling any tool fails with a guard error. Use for determinism-critical pipelines where an ungrounded or narrated answer must never be delivered. Off by default."
 		},
 		"tool_timeout": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Tool time limit (seconds)",
 			"default": 300,
@@ -70,12 +80,16 @@
 			"description": "Longest one tool call may run, counted from when it starts. A call that runs longer is reported to the agent as timed out, and the agent goes on without it. Raise it for tools that are meant to run long, such as a Python script with a long timeout or another agent called as a tool. 0 means no limit."
 		},
 		"verify_tool": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Check tool",
 			"default": "",
 			"description": "Name of a connected tool that checks the work, such as a compiler or test runner (e.g. workspace.compile). When set, the agent must call it after its last change and fix what it reports before it may finish. Leave empty when no such tool is connected."
 		},
 		"verify_args": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Check arguments",
 			"default": "",

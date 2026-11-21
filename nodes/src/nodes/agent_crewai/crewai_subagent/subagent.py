@@ -51,47 +51,35 @@ class CrewSubagent(CrewBase):
 
     FRAMEWORK = 'crewai_subagent'
 
-    def __init__(
-        self,
-        iGlobal: Any,
-        *,
-        role: str = 'Specialist',
-        task_description: str = '',
-        goal: str = '',
-        backstory: str = '',
-        expected_output: str = '',
-    ):
-        """Initialise the sub-agent driver with per-node config loaded from connConfig.
+    def __init__(self, iGlobal: Any):
+        """Initialise the sub-agent driver; the persona and task are each call's (``settings``).
 
         No `process` parameter — Subagent never builds its own Crew. The
         Manager that delegates to it builds the Agent + Task using the
         Manager's own Crew assembly.
         """
         super().__init__(iGlobal)
-        self._role = role
-        self._task_description = task_description
-        self._goal = goal
-        self._backstory = backstory
-        self._expected_output = expected_output
 
     def describe(self, pSelf: Any) -> Any:
         """Return a DescribeResponse for describe fan-out.
 
         Called by IInstance.invoke() when the manager fans out describe.
-        Stores the full pSelf IInstance in `invoke` so AgentHostServices(d.invoke)
-        can call d.invoke.instance.* correctly from the manager's per-sub-agent
-        binding loop.
+        The persona and task are the described instance's settings (this
+        call's). Stores the full pSelf IInstance in `invoke` so
+        AgentHostServices(d.invoke) can call d.invoke.instance.* correctly from
+        the manager's per-sub-agent binding loop.
         """
         from rocketlib.types import IInvokeCrew
 
+        settings = pSelf.settings
         node_id = self._iGlobal.config.node.id
         return IInvokeCrew.DescribeResponse(
-            role=self._role,
-            task_description=self._task_description,
-            goal=self._goal,
-            backstory=self._backstory,
-            expected_output=self._expected_output,
-            instructions=list(self._instructions),
+            role=settings.role.strip() or 'Specialist',
+            task_description=settings.task_description.strip(),
+            goal=settings.goal.strip(),
+            backstory=settings.backstory.strip(),
+            expected_output=settings.expected_output.strip(),
+            instructions=self.instructions_of(pSelf),
             node_id=node_id,
             invoke=pSelf,
         )

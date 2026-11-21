@@ -6,9 +6,11 @@
 """
 CrewAI Manager — global state for the hierarchical multi-agent CrewAI node.
 
-Loads the manager-only connConfig fields (`goal`, `backstory`, `planning`), ensures the
-process-wide CrewAI kickoff runner is running, and instantiates the
-`CrewManager` driver held on `self.agent`.
+Ensures the process-wide CrewAI kickoff runner is running and instantiates
+the `CrewManager` driver held on `self.agent`. The manager-only fields
+(`goal`, `backstory`, `planning`) are per-call parameters the driver reads
+from the invoking instance's settings; nothing of the node's configuration
+is kept here.
 
 The Manager has no `role`, `task_description`, or `expected_output` fields —
 those belong to the per-sub-agent `Agent + Task` pairs that the Manager
@@ -25,9 +27,6 @@ from rocketlib import IGlobalBase
 
 class IGlobal(IGlobalBase):
     agent: Any = None
-    goal: str = ''
-    backstory: str = ''
-    planning: bool = False
     _kickoff_runner: Any = None
 
     def beginGlobal(self) -> None:
@@ -41,13 +40,6 @@ class IGlobal(IGlobalBase):
         )
         depends(requirements)
 
-        # The resolved config: defaults applied, every field flat and typed
-        config = self.config
-
-        self.goal = config.goal.strip()
-        self.backstory = config.backstory.strip()
-        self.planning = config.planning
-
         from ..crewai_runner import get_shared_runner
 
         self._kickoff_runner = get_shared_runner()
@@ -58,7 +50,4 @@ class IGlobal(IGlobalBase):
 
     def endGlobal(self) -> None:
         self.agent = None
-        self.goal = ''
-        self.backstory = ''
-        self.planning = False
         self._kickoff_runner = None

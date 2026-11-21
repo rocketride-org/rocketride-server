@@ -91,13 +91,17 @@
 			"required": true
 		},
 		"llm_xai.customModel": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model id",
 			"description": "Model id exactly as the provider names it",
 			"required": true
 		},
-		"llm_xai.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 131072 },
+		"llm_xai.custom.modelTotalTokens": { "param": true, "tool": false, "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 131072 },
 		"llm_xai.custom.modelOutputTokens": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
@@ -112,6 +116,8 @@
 	"properties": [
 		{
 			"name": "model",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"description": "LLM model",

@@ -27,6 +27,8 @@
 	//
 	"propertyDefinitions": {
 		"description": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "Description",
@@ -34,6 +36,8 @@
 			"description": "The orchestrator reads this description to decide when to delegate to this sub-agent. Keep it specific and action-oriented, this is the only signal the orchestrator uses to pick a sub-agent."
 		},
 		"system_prompt": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"format": "textarea",
 			"title": "System prompt",
@@ -41,6 +45,8 @@
 			"description": "Instructions that define this sub-agent's role and behaviour. Leave blank to use the default."
 		},
 		"instructions": {
+			"param": true,
+			"tool": false,
 			"type": "array",
 			"title": "Instructions",
 			"description": "Additional instructions to guide this sub-agent. Each line is appended to the system prompt.",

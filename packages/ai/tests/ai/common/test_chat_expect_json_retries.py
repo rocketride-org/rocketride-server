@@ -56,7 +56,7 @@ def _chat_returning(*responses: str) -> tuple[ChatBase, list[str]]:
     that expects a single call does not accidentally pass on an IndexError.
     """
     prompts: list[str] = []
-    chat = ChatBase.__new__(ChatBase)
+    chat = ChatBase('test', {'model': 'test-model', 'modelOutputTokens': 4096}, {})
 
     def _chat_string(prompt: str, **_kwargs) -> str:
         prompts.append(prompt)
@@ -182,7 +182,6 @@ class TestEmptyReply:
 
     def _chat(self, *responses):
         chat, prompts = _chat_returning(*responses)
-        chat._modelOutputTokens = 4096
         return chat, prompts
 
     @pytest.mark.parametrize('empty', ['', '   \n  '], ids=['empty', 'whitespace'])

@@ -11,6 +11,7 @@ without real API keys (test_should_handle_json_response_questions,
 test_should_handle_chat_workflow_with_multiple_interactions).
 """
 
+import copy
 import json
 
 # Stub response returned by ChatOpenAI.invoke() - mirrors LangChain AIMessage
@@ -88,6 +89,12 @@ class ChatOpenAI:
         self.api_key = api_key
         self.temperature = temperature
         self.base_url = base_url
+
+    def bind(self, **kwargs):
+        """Bind a call's request values (model, max_tokens, ...): a copy naming the call's model, as metering reads it."""
+        bound = copy.copy(self)
+        bound.model = kwargs.get('model', self.model)
+        return bound
 
     def invoke(self, prompt) -> _MockMessage:
         return _MockMessage(MOCK_LLM_RESPONSE)

@@ -24,6 +24,8 @@ models use the Hugging Face model path as their model id and an editable local
 OpenAI-compatible server URL, while **Custom model** exposes the model id, context
 budget, output limit, and server URL for manual configuration.
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call. Each model names its own endpoint, so a call that switches the model reaches that model's server.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |
@@ -58,7 +60,7 @@ OpenAI-compatible server that serves the same model id.
 
 ## Authentication
 
-Cloud models require a MiniMax API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.minimax` (covers both `api.minimax.io` international and `api.minimaxi.com` China) and no key is set, the node raises `MiniMax API key is required for cloud profiles.` at startup.
+Cloud models require a MiniMax API key in `apikey`. The key requirement is enforced by base-URL match: if `serverbase` contains `api.minimax` (covers both `api.minimax.io` international and `api.minimaxi.com` China) and no key is set, the node raises `MiniMax API key is required for cloud profiles.` when a call first reaches that endpoint. The node builds each endpoint's client on first use, so a node starts without checking the key.
 
 Local models (vLLM / SGLang / MLX / Ollama) need no key: leave `apikey` empty and the node passes a dummy key (`sk-local-dummy-key`), which local OpenAI-compatible servers accept.
 

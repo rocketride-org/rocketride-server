@@ -38,7 +38,7 @@ depends(requirements)
 
 from typing import Any, Dict
 from ai.common.schema import Answer, Question
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from ai.common.llm_adapter import report_usage_metadata
 from ai.common.validation import validate_prompt
 from langchain_openai import ChatOpenAI
@@ -49,7 +49,6 @@ class Chat(ChatBase):
     Perplexity AI chat node with search-enhanced language models.
     """
 
-    _model: str = ''
     _llm: ChatOpenAI
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -62,22 +61,25 @@ class Chat(ChatBase):
         # Get the node configuration
         config = self._config
 
-        # Get the model and API key
+        # Get the API key
         apikey = config.get('apikey')
 
-        # Get model-specific timeout
-        timeout = self._getModelTimeout(self._model)
-
-        # Initialize the language model with Perplexity API settings
+        # Initialize the language model with Perplexity API settings: one for
+        # every call, each request binds its model, max_tokens and the timeout
+        # its model needs
         self._llm = ChatOpenAI(
-            model=self._model,
+            model=UNBOUND_MODEL,
             api_key=apikey,
             base_url='https://api.perplexity.ai',
             temperature=0,
-            timeout=timeout,
             max_retries=0,  # We handle retries ourselves
-            max_tokens=self._modelOutputTokens,
         )
+
+    def call_kwargs(self) -> Dict[str, Any]:
+        """Return this call's request values, its model's timeout included (sent per request)."""
+        kwargs = super().call_kwargs()
+        kwargs['timeout'] = self._getModelTimeout(str(kwargs['model']))
+        return kwargs
 
     def _getModelTokens(self, model: str) -> int:
         """
@@ -108,7 +110,7 @@ class Chat(ChatBase):
 
     def getTotalTokens(self) -> int:
         """Get the total token limit for the current model."""
-        return self._getModelTokens(self._model)
+        return self._getModelTokens(self.call.model)
 
     def getTokens(self, value: str) -> int:
         """
@@ -142,9 +144,7 @@ class Chat(ChatBase):
 
         # Model availability
         if any(phrase in error_lower for phrase in ['model not found', 'unavailable', 'not available']):
-            return (
-                f"The model '{self._model}' is currently unavailable. Please try a different model or contact support."
-            )
+            return f"The model '{self.call.model}' is currently unavailable. Please try a different model or contact support."
 
         # Server errors
         if any(phrase in error_lower for phrase in ['internal server error', '500', 'service unavailable', '503']):
@@ -156,7 +156,7 @@ class Chat(ChatBase):
 
         # Timeout errors
         if any(phrase in error_lower for phrase in ['timeout', 'timed out']):
-            return f'Request timed out. The {self._model} model may need more time - please try again or use a faster model.'
+            return f'Request timed out. The {self.call.model} model may need more time - please try again or use a faster model.'
 
         # Network errors
         if any(phrase in error_lower for phrase in ['connection', 'network', 'unreachable']):
@@ -197,18 +197,20 @@ class Chat(ChatBase):
 
     def chat(self, question: Question) -> Answer:
         """Process a question and return an answer with retry logic."""
-        prompt = validate_prompt(question.getPrompt(), self._modelTotalTokens, self.getTokens)
-        max_retries, base_delay = self._getRetryConfig(self._model)
+        prompt = validate_prompt(question.getPrompt(), self.call.total_tokens, self.getTokens)
+        max_retries, base_delay = self._getRetryConfig(self.call.model)
         last_error = None
+        # The call's values, bound once for every attempt
+        llm = self.bound_llm()
 
         for attempt in range(max_retries + 1):  # +1 for initial attempt
             try:
                 # Ask the model
-                results = self._llm.invoke(prompt)
+                results = llm.invoke(prompt)
 
                 # This override bypasses LangChainAdapter.collect(), the capture point that
                 # meters every other provider, so report from here or the call bills zero.
-                report_usage_metadata(getattr(results, 'usage_metadata', None), self._llm)
+                report_usage_metadata(getattr(results, 'usage_metadata', None), llm)
 
                 # Create and return the answer
                 answer = Answer(expectJson=question.expectJson)

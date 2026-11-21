@@ -114,7 +114,9 @@ def test_a_claude_chat_is_sent_without_transformers(monkeypatch, no_transformers
     """Before: ImportError from the token count, and the request never left."""
     chat = _chat(monkeypatch, 'anthropic.claude-sonnet-4-5-20250929-v1:0')
 
-    answer = chat.chat_string('Say hello.')
+    # Inside the call the node's settings resolve to, as LLMBase serves it
+    with chat.calling(chat.resolve_call(chat._config)):
+        answer = chat.chat_string('Say hello.')
 
     assert answer == 'Hello.'
     assert bedrock.calls == 1

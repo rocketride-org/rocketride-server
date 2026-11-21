@@ -19,6 +19,8 @@ most users only need to select a model and provide an API key. The default is
 **GPT-5.2** (`gpt-5.2`). Listed models keep their details fixed, while **Custom model**
 exposes the model id, context limit and output limit for models not listed here.
 
+The model settings (the selector, a custom model id and its token limits) and the temperature are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call, though it may set the temperature.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

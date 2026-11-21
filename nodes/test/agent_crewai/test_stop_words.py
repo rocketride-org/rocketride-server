@@ -248,12 +248,23 @@ def _run_native_capture(ns, stop_value):
     class _FakeLLM:
         _client = object()  # non-None so the client guard passes
 
-        def _get_request_payload(self, prompt, stop=None, stream=None):
+        def _get_request_payload(self, prompt, stop=None, stream=None, **_call):
             captured['stop'] = stop
             return {}
 
     class _FakeChat:
-        _llm = _FakeLLM()
+        """The chat surface the adapter reads: its object, the call, the call's values and thinking."""
+
+        call = types.SimpleNamespace(model='claude-sonnet-4-6')
+
+        def _llm_for(self):
+            return _FakeLLM()
+
+        def call_kwargs(self):
+            return {}
+
+        def thinking_kwargs(self):
+            return {}
 
     ns._open_raw_message_stream = lambda client, payload: iter(())  # no events -> no text
     token = ns.STOP_SEQUENCES_VAR.set(stop_value)
@@ -287,7 +298,7 @@ _LLM_BASE_PATH = Path(__file__).resolve().parents[3] / 'packages' / 'ai' / 'src'
 def _load_llm_base(stop_var):
     saved = {
         k: sys.modules.get(k)
-        for k in ('rocketlib', 'ai', 'ai.common', 'ai.common.schema', 'ai.common.llm_native_stream')
+        for k in ('rocketlib', 'ai', 'ai.common', 'ai.common.chat', 'ai.common.schema', 'ai.common.llm_native_stream')
     }
     rl = types.ModuleType('rocketlib')
     rl.IInstanceBase = object
@@ -296,6 +307,9 @@ def _load_llm_base(stop_var):
     sys.modules['rocketlib'] = rl
     sys.modules['ai'] = types.ModuleType('ai')
     sys.modules['ai.common'] = types.ModuleType('ai.common')
+    chat = types.ModuleType('ai.common.chat')
+    chat.ChatCall = object
+    sys.modules['ai.common.chat'] = chat
     schema = types.ModuleType('ai.common.schema')
     schema.Question = object
     schema.Answer = object
@@ -316,24 +330,35 @@ def _load_llm_base(stop_var):
                 sys.modules[k] = v
 
 
+class _CallingChat:
+    """The per-call surface LLMBase drives: a call resolved from the settings, served around chat()."""
+
+    def resolve_call(self, settings):
+        return settings
+
+    @contextlib.contextmanager
+    def calling(self, call):
+        yield call
+
+
 class TestQuestionContextvar:
-    def _make_self(self, chat):
+    def _make_self(self, LLMBase, chat):
         ig = type('IGlobal', (), {'_chat': chat})()
-        # The per-call client seam (plan 6.2) hands back the one chat under test
-        return type('Node', (), {'IGlobal': ig, '_chat_client': lambda self: chat})()
+        # A node instance of the real base: its settings resolve the call
+        return type('Node', (LLMBase,), {'IGlobal': ig, 'settings': {}})()
 
     def test_question_sets_stop_during_and_resets_after(self):
         var = _load_native_stream().STOP_SEQUENCES_VAR
         LLMBase = _load_llm_base(var)
         seen = {}
 
-        class _Chat:
+        class _Chat(_CallingChat):
             def chat(self, question, on_chunk=None, on_finish=None, on_reasoning_chunk=None):
                 seen['during'] = var.get()
                 return 'answer'
 
         assert var.get() is None
-        LLMBase._question(self._make_self(_Chat()), 'q', stop=REACT_STOP)
+        LLMBase._question(self._make_self(LLMBase, _Chat()), 'q', stop=REACT_STOP)
         assert seen['during'] == REACT_STOP  # published during the call
         assert var.get() is None  # reset afterward
 
@@ -341,12 +366,12 @@ class TestQuestionContextvar:
         var = _load_native_stream().STOP_SEQUENCES_VAR
         LLMBase = _load_llm_base(var)
 
-        class _Chat:
+        class _Chat(_CallingChat):
             def chat(self, question, on_chunk=None, on_finish=None, on_reasoning_chunk=None):
                 raise RuntimeError('boom')
 
         try:
-            LLMBase._question(self._make_self(_Chat()), 'q', stop=REACT_STOP)
+            LLMBase._question(self._make_self(LLMBase, _Chat()), 'q', stop=REACT_STOP)
         except RuntimeError:
             pass
         assert var.get() is None  # reset in finally, no leak onto the next request

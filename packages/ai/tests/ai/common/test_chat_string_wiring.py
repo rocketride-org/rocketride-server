@@ -18,6 +18,12 @@ class _FakeLLM:
     def __init__(self, pieces):
         self._pieces = pieces
         self.kwargs = None
+        self.bound = None
+
+    def bind(self, **kwargs):
+        # The call's values (model, max_tokens); the request kwargs stay in self.kwargs
+        self.bound = kwargs
+        return self
 
     def stream(self, messages, **kwargs):
         self.kwargs = kwargs
@@ -29,22 +35,15 @@ class _FakeLLM:
 
 
 class _Chat(ChatBase):
-    # Bypass the config-driven __init__; wire only what chat_string reads.
+    # A chat whose model is config (a plain dict: no param flags), so its one
+    # call shape is resolved at construction; wire only what chat_string reads.
     def __init__(self, llm):
+        super().__init__('test', {'model': 'test-model', 'modelTotalTokens': 100000, 'modelOutputTokens': 4096}, {})
         self._llm = llm
-        self._model = 'test-model'
-        self._modelTotalTokens = 100000
-        self._modelOutputTokens = 4096
-        self._is_reasoning = False
         self._raw_client = None
-        self._native_stream_provider = ''
-        self._raw_openai_client = None
 
     def getTokens(self, value):
         return len(value)
-
-    def _ensure_openai_compat_reasoning_stream(self):
-        pass
 
 
 def test_streams_text_and_reasoning_via_adapter():
@@ -74,6 +73,8 @@ def test_stop_sequences_reach_the_model():
     finally:
         STOP_SEQUENCES_VAR.reset(token)
     assert llm.kwargs == {'stop': ['\nObservation:']}
+    # The call's model and output window ride on the binding, not on the object
+    assert llm.bound == {'model': 'test-model', 'max_tokens': 4096}
 
 
 def test_chat_nonstreaming_invokes_via_adapter():
