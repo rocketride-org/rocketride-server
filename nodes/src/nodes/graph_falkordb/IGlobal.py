@@ -36,11 +36,11 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from redis.exceptions import RedisError
+from redis.exceptions import ConnectionError as RedisConnectionError, RedisError, TimeoutError as RedisTimeoutError
 
 from rocketlib import OPEN_MODE, debug, warning
 
-from ai.common.graph import GraphGlobalBase
+from ai.common.graph import GraphGlobalBase, GraphUnavailableError
 from ai.common.utils import config_int, parse_bool
 
 from falkordb import FalkorDB
@@ -249,6 +249,11 @@ class IGlobal(GraphGlobalBase):
         try:
             self.select_graph().explain(query)
             return True, ''
+        except (RedisConnectionError, RedisTimeoutError, OSError) as e:
+            # The server is unreachable: not a verdict on the query. Raised so a
+            # lane fails instead of feeding the outage back to the LLM as a rejection.
+            warning(f'Graph database unavailable during EXPLAIN validation: {e}')
+            raise GraphUnavailableError('Graph database is unavailable (details are in the engine log)') from None
         except RedisError as e:
             return False, str(e)
         except Exception as e:

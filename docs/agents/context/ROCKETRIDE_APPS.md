@@ -982,6 +982,39 @@ updateAppState((prev) => ({ ...prev, lastQuery: 'foo' }));
 The Documents system can bind to it for automatic persistence of open
 documents and layout — see [The Documents System](#the-documents-system).
 
+**`appState` is never a fallback for SQL, for shared state, or for anything
+that coordinates more than one run or user** (leases, locks, queues, counters,
+ownership, "who holds this"). It is per user, per app and per server, the last
+save wins, and it is best-effort: the shell debounces writes by about half a
+second, swallows a write that fails, and skips writes entirely while the
+connection is down, so a value an app "saved" while the database was
+unavailable may exist nowhere. Nothing reconciles it back into SQL afterwards,
+and a second user or run never sees it.
+
+When the cloud database is unavailable, do not record the work in `appState`
+instead. Show an honest "database unavailable" state, block the actions that
+need it, and retry with backoff. A DB node's lane, or its `execute` tool, fails
+the step when its statement fails; do not catch that error and carry on as if
+the write had happened. The natural-language tools (`get_sql`, `get_data`,
+`get_query`, `get_aql`) do not raise on an outage or a failed query: they
+return `valid: false` with an `error`. Check `valid` on every result before
+using it; a result with `valid: false` and an `error` is a failed read, not an
+empty one. A result with `valid: false` and an `answer` instead means the
+question was not a database query. Every one of these tools returns `valid`,
+on a successful read as well as on a failure, including the ArangoDB
+`get_data`.
+
+A pipeline's `questions` lane depends on the node family. On the SQL nodes
+(`rocketride_sql`, `db_postgres`, `db_mysql`, `db_clickhouse`), a database that
+cannot be reached, or that drops the connection while the query runs, fails the
+step, while a generated query that a database which is up refuses (a row cast
+failure, a statement timeout) is reported as `Query execution failed` on the
+`text` and `answers` lanes, so an app that reads those lanes must handle that
+error as well as a failed step. The graph nodes (`rocketride_graph`,
+`graph_neo4j`, `graph_falkordb`, `graph_arango`) do not make that distinction:
+any read that fails on the `questions` lane, an outage or a query the database
+refuses, fails the step and writes nothing to the lanes.
+
 ### Data in the RocketRide cloud databases
 
 Tables your app's pipelines write with `rocketride_sql`, `rocketride_vector`

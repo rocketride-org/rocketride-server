@@ -31,6 +31,8 @@ An agent flow: `load_data` the rows, `build_index` on the text column, then `get
 | `questions` | `answers` | Natural-language question, answered and emitted as an answer payload                                                                                        |
 | `answers`   | —         | JSON rows, loaded into the configured table. A fenced or prose-wrapped object is unwrapped; `{"rows": [...]}` becomes N rows; text carrying no JSON raises  |
 
+When the Hotdata service cannot answer a question, the `questions` lane fails the step and writes nothing to `table`, `text` or `answers`. That covers an unreachable API, a 5xx, a rejected key, an exhausted 429 budget, and a query run that was interrupted (after its one re-run), cancelled, or still running when `job_timeout_secs` ran out: no rewrite of the SQL can fix any of them. The node logs the cause and raises a generic error (`HotdataLaneError`), so the log is where to look. A statement the server rejects is still retried with the LLM and, after the last attempt, reported as an error on the `text` and `answers` lanes.
+
 ## As a tool
 
 | Function      | Description                                                                                                 |
