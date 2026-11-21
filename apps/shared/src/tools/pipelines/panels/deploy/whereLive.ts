@@ -23,9 +23,11 @@
  *   it serves now, then the store; the audience already on the version is
  *   not choosable, and the store opens only on an approved version (a
  *   pipe's store needs 'ready' on every server; without a reviewer every
- *   deployed version is born 'ready'). Personal rows carry the raw slot
- *   `user~{uid}` and the store row `~public`, while the dialog addresses
- *   them '@me' and '@public', so audiences match rows by rung.
+ *   deployed version is born 'ready'). Rows carry their audience as the
+ *   server composed it (`=user/<uid>`, `=team/<tid>`, `@public`) and the
+ *   roster's team ids are the same strings, while the dialog addresses the
+ *   caller's own space '@me': the caller's own row and the store's match
+ *   by rung, a team's by its audience.
  */
 
 import { STORE_TARGET_ID, storeTargetOf } from 'shared/components/deploy/reviewRules';
@@ -107,7 +109,7 @@ export function whereLiveRungsOf(rows: readonly TeamDeploymentRow[], teams: read
  * The publication an audience points at now.
  *
  * @param rows - This project's publication rows.
- * @param targetId - The audience as the dialog names it: '@me', '@public', or a team id.
+ * @param targetId - The audience as the dialog names it: '@me', '@public', or a team's audience.
  * @returns The live row, or undefined when the audience has none.
  */
 export function rowOfTarget(rows: readonly TeamDeploymentRow[], targetId: string): TeamDeploymentRow | undefined {

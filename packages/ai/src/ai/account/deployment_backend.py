@@ -60,6 +60,8 @@ from rocketlib import error
 
 from ai.common.list_rows import paginate_rows
 
+from .audience import audience_fields, audience_of_fields, is_audience, normalize_audience
+from .legacy_audience import translate_legacy_audience
 from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
 # How many CAS retries a meta.json read-modify-write attempts before failing.
@@ -79,9 +81,6 @@ _STATES = ('enabled', 'disabled', 'errored', 'removed')
 
 #: The kinds a name can be (plan 2.3): fixed at the first deploy.
 _KINDS = ('pipe', 'app', 'node')
-
-#: The storage key of the public publish (file format; never on the wire).
-_PUBLIC_KEY = '~public'
 
 
 def _safe_id(value: str, what: str) -> str:
@@ -703,7 +702,7 @@ class FileDeploymentBackend:
             The team's deployment record after the move.
         """
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        team_id = normalize_audience(team_id)
         _safe_id(project_id, 'project_id')
         if billing_team_id:
             _safe_id(billing_team_id, 'billing_team_id')
@@ -718,7 +717,7 @@ class FileDeploymentBackend:
                 raise ValueError(f'version {version} is not published for {project_id}')
             now = time.time()
             publishes = self._publishes_of(meta)
-            key = self._slot_key(team_id)
+            key = team_id
             dep = publishes.get(key)
             if dep is None:
                 dep = {
@@ -768,7 +767,7 @@ class FileDeploymentBackend:
         registry keep everything.
         """
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        team_id = normalize_audience(team_id)
         _safe_id(project_id, 'project_id')
         who = _actor_record(actor)
         if state not in _STATES:
@@ -815,7 +814,7 @@ class FileDeploymentBackend:
         this layer just persists what it is given.
         """
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        team_id = normalize_audience(team_id)
         _safe_id(project_id, 'project_id')
         _safe_id(source_id, 'source_id')
         who = _actor_record(actor)
@@ -872,7 +871,7 @@ class FileDeploymentBackend:
         wire semantic). Validity of trace_level is the COMMAND layer's job.
         """
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        team_id = normalize_audience(team_id)
         _safe_id(project_id, 'project_id')
         _safe_id(source_id, 'source_id')
         who = _actor_record(actor)
@@ -909,7 +908,7 @@ class FileDeploymentBackend:
                 has no schedule to pause.
         """
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        team_id = normalize_audience(team_id)
         _safe_id(project_id, 'project_id')
         _safe_id(source_id, 'source_id')
         who = _actor_record(actor)
@@ -935,6 +934,7 @@ class FileDeploymentBackend:
         Best-effort — a lost stamp only ages the "last fired" display.
         """
         try:
+            team_id = normalize_audience(team_id)
 
             async def mutate(meta: Dict[str, Any]) -> None:
                 """Set the fired timestamp when the schedule still exists."""
@@ -953,14 +953,14 @@ class FileDeploymentBackend:
     async def list_team(self, org_id: str, team_id: 'Optional[str]' = None) -> List[Dict[str, Any]]:
         """Non-removed deployments joined with registry info.
 
-        ``team_id`` scopes to one team (or ``user~`` personal space); None
+        ``team_id`` scopes to one audience (a team, a personal space, the store); None
         returns the WHOLE org — every team and every personal space. The
         backend is mechanical: who may see which rows is the COMMAND
         layer's visibility model, which slices this list.
         """
         _safe_id(org_id, 'org_id')
         if team_id is not None:
-            _safe_id(team_id, 'team_id')
+            team_id = normalize_audience(team_id)
         out: List[Dict[str, Any]] = []
         for project_id in await self._project_ids(org_id):
             meta = await self._read_meta(org_id, project_id)
@@ -971,17 +971,17 @@ class FileDeploymentBackend:
             for key, dep in self._publishes_of(meta).items():
                 if dep.get('state') == 'removed':
                     continue
-                if team_id is not None and key != self._slot_key(team_id):
+                if team_id is not None and key != team_id:
                     continue
                 if self._row_kind(meta, dep) != 'pipe':
                     continue
-                out.append(self._joined(meta, project_id, self._slot_of_key(key), dep))
+                out.append(self._joined(meta, project_id, key, dep))
         return out
 
     async def get(self, org_id: str, team_id: str, project_id: str) -> Optional[Dict[str, Any]]:
         """One team deployment (joined with registry info), or None."""
         _safe_id(org_id, 'org_id')
-        _safe_id(team_id, 'team_id')
+        team_id = normalize_audience(team_id)
         _safe_id(project_id, 'project_id')
         meta = await self._read_meta(org_id, project_id)
         if meta is None:
@@ -1013,23 +1013,18 @@ class FileDeploymentBackend:
     # PUBLISHES — audience pointers (PUBLISH = bind a deployment to an audience)
     # =========================================================================
     #
-    # meta['publishes'] = {audience_key: row}; audience_key is the file-format
-    # encoding 'user~<id>' | 'team~<id>' | '~public' (never on the wire — the
-    # contract carries {'type','id'} audience dicts). ONE map for every kind
+    # meta['publishes'] = {audience: row}; the key is the audience string of
+    # plan 2.5 ('=user/<uid>' | '=team/<tid>' | '=org/<oid>' | '@public'),
+    # composed and decoded by audience.py alone. The publish verbs take and
+    # return it as a {'type','id'} pair, the pointer verbs as the string
+    # itself (their ``team_id`` and the rows' ``teamId``). ONE map for every kind
     # (plan 10.1): a pipe's team and personal pointers (schedules and the
     # billing team inline) and an app's audience rows are rows of it alike.
 
     @staticmethod
     def _audience_key(audience: Dict[str, str]) -> str:
-        """The storage key of one audience ({'type','id'} -> file encoding)."""
-        kind = audience.get('type')
-        if kind == 'user':
-            return f'user~{audience.get("id", "")}'
-        if kind == 'team':
-            return f'team~{audience.get("id", "")}'
-        if kind == 'public':
-            return '~public'
-        raise ValueError(f'Unknown audience type: {kind!r}')
+        """The storage key of one audience ({'type','id'} -> the audience string)."""
+        return audience_of_fields(audience)
 
     @staticmethod
     def _publish_row(
@@ -1051,12 +1046,7 @@ class FileDeploymentBackend:
         meta['versions'] so the scope walk can gate serving and mint entry
         URLs without a second registry read.
         """
-        if key == _PUBLIC_KEY:
-            audience = {'type': 'public', 'id': ''}
-        elif key.startswith('user~'):
-            audience = {'type': 'user', 'id': key[len('user~') :]}
-        else:
-            audience = {'type': 'team', 'id': key[len('team~') :]}
+        audience = audience_fields(key)
         return {
             'orgId': org_id,
             # The id under both spellings: 'appId' is the shipped key every
@@ -1118,19 +1108,9 @@ class FileDeploymentBackend:
             return str(kind)
         return str(self._artifact_entry_of(meta, int(row.get('version') or 0)).get('kind') or 'pipe')
 
-    @staticmethod
-    def _slot_key(team_id: str) -> str:
-        """The publish-map key of a pointer slot: 'user~{uid}' and the store's '~public' stay, a team id becomes 'team~{id}'."""
-        return team_id if team_id.startswith('user~') or team_id == _PUBLIC_KEY else f'team~{team_id}'
-
-    @staticmethod
-    def _slot_of_key(key: str) -> str:
-        """The pointer slot of a publish-map key (the inverse of _slot_key; the public key is itself)."""
-        return key[len('team~') :] if key.startswith('team~') else key
-
     def _pointer_of(self, meta: Dict[str, Any], team_id: str) -> Optional[Dict[str, Any]]:
-        """The pointer row of a team or personal slot, or None."""
-        return self._publishes_of(meta).get(self._slot_key(team_id))
+        """The pointer row of an audience (``team_id`` is the normalized audience string), or None."""
+        return self._publishes_of(meta).get(team_id)
 
     def _pins_of(self, meta: Dict[str, Any], version: int) -> List[Dict[str, Any]]:
         """Every live publish row (any audience, any kind) pointing at ``version``.
@@ -1575,6 +1555,7 @@ class FileDeploymentBackend:
             # The DB backend exposes its row id under the same key.
             rows = [{'seq': i, **r} for i, r in enumerate(meta['history'])]
             if team_id is not None:
+                team_id = normalize_audience(team_id)
                 rows = [r for r in rows if r['teamId'] in ('', team_id)]
         return paginate_rows(
             rows,
@@ -1634,7 +1615,7 @@ class FileDeploymentBackend:
                         continue
                     yield {
                         'orgId': org_id,
-                        'teamId': self._slot_of_key(key),
+                        'teamId': key,
                         'projectId': project_id,
                         'version': dep['version'],
                         'state': dep['state'],
@@ -1690,16 +1671,30 @@ class FileDeploymentBackend:
         Before C.17 the file kept team pointers in ``deployments`` (keyed by
         slot) beside the app publishes in ``publishes``; now there is ONE
         map (plan 10.1). A legacy ``deployments`` entry becomes the publish
-        row under its slot key, carrying what the pointer carried (version,
+        row under its audience, carrying what the pointer carried (version,
         state, billing team, schedules); the fold is written back on the
         next mutate. ``kind`` and ``nextVersion`` (the name row) are stamped
         on the first publish after the upgrade.
+
+        A file written before the one audience grammar (plan 2.5) spells its
+        audiences the retired way, as publish-map keys and as the history
+        rows' ``teamId``. They are translated HERE, at read time, by the one
+        function that knows them (``translate_legacy_audience``), and the
+        next mutate writes the file back in the new form.
         """
         meta.setdefault('projectId', project_id)
         meta.setdefault('orgId', org_id)
         meta.setdefault('versions', [])
         meta.setdefault('history', [])
         publishes = self._publishes_of(meta)
+        # Retired audience spellings: re-key the publish map (a row already
+        # under the new key wins) and restamp the history rows
+        for key in [k for k in publishes if not is_audience(k)]:
+            row = publishes.pop(key)
+            publishes.setdefault(translate_legacy_audience(key), row)
+        for event in meta['history']:
+            if isinstance(event, dict) and event.get('teamId') and not is_audience(event['teamId']):
+                event['teamId'] = translate_legacy_audience(event['teamId'])
         # A pre-C.17 publish row carries no kind: stamp the kind of the version
         # it points at, so every reader and every row returned agree
         for row in publishes.values():
@@ -1708,7 +1703,7 @@ class FileDeploymentBackend:
         legacy = meta.pop('deployments', None)
         if isinstance(legacy, dict):
             for team_id, dep in legacy.items():
-                key = self._slot_key(str(team_id))
+                key = translate_legacy_audience(str(team_id))
                 if key in publishes or not isinstance(dep, dict):
                     continue
                 publishes[key] = {
@@ -1789,9 +1784,12 @@ class FileDeploymentBackend:
         entry = next((v for v in meta['versions'] if v['version'] == dep['version']), {})
         return {
             'projectId': project_id,
-            # teamId carries the OWNER-KEY slot on the wire ('user~{uid}' for
-            # a personal publish, the plain team id otherwise).
+            # teamId keeps its wire name and carries the publication's
+            # audience (plan 2.5: '=user/<uid>', '=team/<tid>', '=org/<oid>'
+            # or '@public'); 'audience' is the same string under its own
+            # name. The command layer adds the reader's 'rung' and 'handle'.
             'teamId': team_id,
+            'audience': team_id,
             'version': dep['version'],
             'state': dep['state'],
             # The absolute billing/secrets stamp — runs read this, never

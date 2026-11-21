@@ -15,9 +15,9 @@
 
 import type { Deployment, DeployArtifact, DeployHistoryEntry } from 'rocketride';
 import type { DeployTeamRefDTO, DeployVersionCardDTO, TeamDeploymentRowDTO, DeployHistoryRowDTO, DeployScheduleRowDTO, DeploymentInfoDTO } from './deployTypes';
-// Team resolution (roster, display names, '@me' addressing) is the SDK's —
-// one implementation shared with the `rocketride` CLI and every host.
-import { teamNameOf } from 'rocketride';
+// Rows name their audience themselves (plan 2.5): the server composes each
+// row's `rung` and `handle` for its reader, so nothing here parses a
+// `teamId` — it is shown by its handle and passed back unchanged.
 
 // =============================================================================
 // REGISTRY MAPPERS
@@ -64,20 +64,18 @@ export function withReviewStates(cards: DeployVersionCardDTO[], rail: ReadonlyAr
 }
 
 /**
- * Maps audit-trail rows into history rows with resolved team names.
+ * Maps audit-trail rows into history rows named by the server's handle.
  *
  * @param rows - `client.deploy.history()` rows, newest first.
- * @param teams - The resolved team refs (name lookup).
- * @param ownUserId - The caller's user id (personal-row labeling).
  * @returns History rows for the merged audit grid.
  */
-export function mapHistoryRows(rows: DeployHistoryEntry[], teams: DeployTeamRefDTO[], ownUserId = ''): DeployHistoryRowDTO[] {
+export function mapHistoryRows(rows: DeployHistoryEntry[]): DeployHistoryRowDTO[] {
 	return rows.map((row) => ({
 		seq: row.seq ?? 0,
 		at: row.at ?? 0,
 		action: (row.action ?? 'deploy') as DeployHistoryRowDTO['action'],
 		teamId: row.teamId ?? '',
-		teamName: row.teamId ? teamNameOf(teams, row.teamId, ownUserId) : '',
+		teamName: row.teamId ? row.handle || row.teamId : '',
 		version: row.version ?? 0,
 		actor: row.actor?.display || row.actor?.userId || '',
 	}));
@@ -87,21 +85,8 @@ export function mapHistoryRows(rows: DeployHistoryEntry[], teams: DeployTeamRefD
 // DEPLOYMENT MAPPERS
 // =============================================================================
 
-/**
- * Which rung a publication row's slot is, from the caller's side. Slots
- * follow the one audience grammar (plan 10.1): `user~{uid}` for a personal
- * space, a team id, or `~public` for the store.
- *
- * @param slot - The row's `teamId` (its audience slot).
- * @param ownUserId - The caller's user id ('' when unknown).
- * @returns 'me' (the caller's own space), 'personal' (another user's),
- *          'public', or 'team'.
- */
-export function rungOfSlot(slot: string, ownUserId = ''): TeamDeploymentRowDTO['rung'] {
-	if (slot === '~public') return 'public';
-	if (slot.startsWith('user~')) return ownUserId && slot === `user~${ownUserId}` ? 'me' : 'personal';
-	return 'team';
-}
+/** The rungs the where-live panel draws; the org rung arrives with C.35. */
+const DRAWN_RUNGS: ReadonlySet<string> = new Set<string>(['me', 'personal', 'team', 'public']);
 
 /**
  * Maps deployment rows into the file view's "where live" facts for ONE
@@ -110,23 +95,24 @@ export function rungOfSlot(slot: string, ownUserId = ''): TeamDeploymentRowDTO['
  *
  * @param deployments - `client.deploy.list()` rows (all projects).
  * @param registryId - The pipe's registry name (`registryIdOf`), the id every row carries.
- * @param teams - The resolved team refs (name lookup).
- * @param ownUserId - The caller's user id (personal-row labeling).
+ * @param teams - The caller's team refs, whose ids are the teams' audiences:
+ *                a team row is named by its ref, any other row by its handle.
  * @returns The "where live" rows for the lifecycle panel.
  */
-export function mapTeamDeploymentRows(deployments: Deployment[], registryId: string, teams: DeployTeamRefDTO[], ownUserId = ''): TeamDeploymentRowDTO[] {
+export function mapTeamDeploymentRows(deployments: Deployment[], registryId: string, teams: DeployTeamRefDTO[]): TeamDeploymentRowDTO[] {
 	return (
 		deployments
 			// A row without a teamId has no identity to key or address in the
-			// where-live panel — drop it (same guard resolveDeployTeams applies).
-			.filter((dep) => dep.projectId === registryId && dep.state !== 'removed' && Boolean(dep.teamId))
+			// where-live panel, and one on a rung it does not draw has no place
+			// in it — drop both.
+			.filter((dep) => dep.projectId === registryId && dep.state !== 'removed' && Boolean(dep.teamId) && DRAWN_RUNGS.has(dep.rung ?? ''))
 			.map((dep) => {
 				// Normalize the schedule records (cron string, enabled default).
 				const schedules = (dep.schedules ?? {}) as Record<string, { cron?: string; paused?: boolean; ttl?: number; lastRunAt?: number }>;
 				return {
 					teamId: dep.teamId as string,
-					teamName: teamNameOf(teams, dep.teamId as string, ownUserId),
-					rung: rungOfSlot(dep.teamId as string, ownUserId),
+					teamName: teams.find((team) => team.id === dep.teamId)?.name ?? (dep.handle || (dep.teamId as string)),
+					rung: dep.rung as TeamDeploymentRowDTO['rung'],
 					version: dep.version ?? 0,
 					// A record without a state stamp is a live pointer — 'enabled'
 					// is the only default inside the state vocabulary.

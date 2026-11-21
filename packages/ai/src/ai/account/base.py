@@ -1052,7 +1052,7 @@ class AccountBase(ABC):
     async def deployments_list(self, org_id: str, team_id: 'str | None' = None) -> list:
         """Non-removed deployments joined with registry info.
 
-        ``team_id`` scopes to one team (or a ``user~`` personal space);
+        ``team_id`` scopes to one audience (``=team/<tid>``, ``=user/<uid>``, ``@public``);
         None returns the WHOLE org — every team and every personal space.
         Mechanical by design: visibility slicing is the command layer's.
         """

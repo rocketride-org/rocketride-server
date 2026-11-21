@@ -28,13 +28,13 @@ Given the request's account and an address ``developerId.pipelineId[.source]``
 it finds the publish rows the caller may resolve, in the fixed precedence
 after ``@spec`` (which is a live-control lookup, not a publication):
 
-- ``@me``: the caller's personal deployment, the ``user~{uid}`` audience;
+- ``@me``: the caller's personal deployment, the ``=user/<uid>`` audience;
 - ``@team``: the publication of the FIRST team in the caller's TEAM ORDER
   (``models.team_order``) that holds the name. Teams holding nothing are
   skipped; ``team=`` on the call probes that one team instead; a key with an
   ``endpoints`` scope probes its frozen team only. The order is total, so
   there is no tie rule and no ambiguity error;
-- ``@public``: the store rung, the publisher's ``~public`` publication.
+- ``@public``: the store rung, the publisher's ``@public`` publication.
 
 Every row comes through ONE row source, ``publish_rows``: one read of the
 one publish table (``published_artifacts``, C.17) for the project, filtered
@@ -57,6 +57,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
 
+from ai.account.audience import (
+    PUBLIC_AUDIENCE,
+    audience_fields,
+    audience_of_fields,
+    parse_audience,
+    team_audience,
+    user_audience,
+)
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
 from ai.account.models import team_order
 
@@ -71,9 +79,6 @@ if TYPE_CHECKING:
 #: The published rungs, in resolution order, as ``resolve_pins`` walks them.
 PUBLISHED_RUNGS = ('me', 'team', 'public')
 
-#: The audience slot of the store rung (the publish rows' encoding).
-PUBLIC_AUDIENCE_KEY = '~public'
-
 
 @dataclass(frozen=True)
 class PublishRow:
@@ -84,7 +89,8 @@ class PublishRow:
         kind: The kind of the artifact the row points at (``pipe``, ``app``).
         org_id: The publisher's org.
         project_id: The registry name ``developerId.pipeId`` the row is keyed by.
-        slot: The audience slot: ``user~{uid}``, a team id, or ``~public``.
+        slot: The row's audience (plan 2.5): ``=user/<uid>``, ``=team/<tid>``,
+            ``=org/<oid>`` or ``@public``.
         version: The registry version the row points at.
         state: The binding lifecycle state (``enabled``/``disabled``/...).
         artifact_state: The pointed-at deployment's review state.
@@ -109,10 +115,10 @@ class Pin:
     Attributes:
         rung: ``'me'``, ``'team'`` or ``'public'``.
         deployment: Where the publication lives: the publisher's org, the
-            audience slot (``user~{uid}``, a team id, or ``~public``) and the
+            audience (``=user/<uid>``, ``=team/<tid>`` or ``@public``) and the
             registry name ``developerId.pipeId``. Stamped on the control; disable/remove of this
             publication releases the control's hold. On ``@team`` its
-            ``team_id`` is the ANSWERING team.
+            audience names the ANSWERING team (``DeploymentRef.team``).
         version: The registry version the publication points at.
         billing_team_id: The row's billing stamp ('' on a public publication).
         state: The binding state the caller may see (``'enabled'`` for a pin).
@@ -237,24 +243,40 @@ def _check_scope(endpoints: Optional[List[str]], address: 'Address') -> None:
 # ==== The row source ===========================================================
 
 
-def _audience_of(slot: str) -> Dict[str, str]:
-    """An audience slot as the publish rows' ``{type, id}`` audience."""
-    if slot == PUBLIC_AUDIENCE_KEY:
-        return {'type': 'public', 'id': ''}
-    if slot.startswith('user~'):
-        return {'type': 'user', 'id': slot[len('user~') :]}
-    return {'type': 'team', 'id': slot}
-
-
 def _slot_of(row: Dict[str, Any]) -> str:
-    """The audience slot a publish row serves: ``user~{uid}``, the team id, or the public key."""
-    audience = row.get('audience') or {}
-    kind = audience.get('type')
-    if kind == 'user':
-        return f'user~{audience.get("id") or ""}'
-    if kind == 'team':
-        return str(audience.get('id') or '')
-    return PUBLIC_AUDIENCE_KEY
+    """The audience a publish row serves, from its ``{type, id}`` pair."""
+    return audience_of_fields(row.get('audience') or {})
+
+
+def pointer_run_owner(audience: str) -> Tuple[str, str, str, str]:
+    """
+    Who owns an unattended run of a pipe pointer (a schedule fire, a run-now).
+
+    A personal pointer's run is USER-owned; a team pointer's is owned by the
+    team and bills it unless the pointer carries a stamp; the store pointer's
+    run is team-owned by its billing stamp, on the public rung.
+
+    Args:
+        audience: The pointer's audience.
+
+    Returns:
+        ``(owner_kind, owner_user_id, default_billing_team, rung)``: the
+        billing team a pointer with no stamp falls back to ('' when it has
+        none) and the rung the run is forced onto ('' to derive it).
+
+    Raises:
+        AudienceError: The text is not an audience.
+        ValueError: The audience is an organization: the org rung serves no
+            runs yet.
+    """
+    decoded = parse_audience(audience)
+    if decoded.kind == 'user':
+        return 'user', decoded.id, '', ''
+    if decoded.kind == 'team':
+        return 'team', '', decoded.id, ''
+    if decoded.kind == 'public':
+        return 'team', '', '', 'public'
+    raise ValueError('The org audience serves no runs yet')
 
 
 async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequence[str]) -> List[PublishRow]:
@@ -337,7 +359,7 @@ async def resolve_pins(
 
     ``@me`` and ``@team`` are publications in the caller's own org, so they
     are read only when the address is in the caller's namespace; ``@public``
-    is the publisher's ``~public`` row, found through the org that owns the
+    is the publisher's ``@public`` row, found through the org that owns the
     address namespace. ``@team`` yields at most ONE pin: the first team in
     the probe order (``teams_to_probe``) holding a serving row. A pure read.
 
@@ -375,15 +397,15 @@ async def resolve_pins(
 
     # Step 2: @me, then @team in the probe order: the caller's own org
     if own_namespace:
-        me_slot = f'user~{user_id}' if user_id else ''
-        slots = ([me_slot] if me_slot else []) + probe
+        me_slot = user_audience(user_id) if user_id else ''
+        slots = ([me_slot] if me_slot else []) + [team_audience(team_id) for team_id in probe]
         rows = await publish_rows(account, org_id, pipe_name, slots)
         if me_slot:
             pin = _serving_pin(rows, kind, 'me', me_slot)
             if pin is not None:
                 pins.append(pin)
         for team_id in probe:
-            pin = _serving_pin(rows, kind, 'team', team_id)
+            pin = _serving_pin(rows, kind, 'team', team_audience(team_id))
             if pin is not None:
                 pins.append(pin)
                 break
@@ -391,8 +413,8 @@ async def resolve_pins(
     # Step 3: @public, the publisher's store publication
     publisher_org = org_id if own_namespace else await account.get_org_of_developer_id(parsed.developer_id)
     if publisher_org:
-        rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE_KEY])
-        pin = _serving_pin(rows, kind, 'public', PUBLIC_AUDIENCE_KEY)
+        rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE])
+        pin = _serving_pin(rows, kind, 'public', PUBLIC_AUDIENCE)
         if pin is not None:
             pins.append(pin)
 
@@ -442,8 +464,8 @@ async def resolve_pipe_version(account_info: Optional['AccountInfo'], pipe_name:
     if not publisher_org:
         return None
     pipe_name = build_address(parsed.developer_id, parsed.pipe_id)
-    rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE_KEY])
-    return _serving_pin(rows, 'pipe', 'public', PUBLIC_AUDIENCE_KEY)
+    rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE])
+    return _serving_pin(rows, 'pipe', 'public', PUBLIC_AUDIENCE)
 
 
 # ==== The catalog row ==========================================================
@@ -608,10 +630,12 @@ async def own_pipe_publications(account: Any, account_info: 'AccountInfo') -> Li
     team_names = {str(t.get('id')): str(t.get('name') or '') for t in org.get('teams') or [] if t.get('id')}
 
     # Step 1: the caller's own slots, in the ladder's order, read once
-    slots: List[Tuple[str, str]] = ([('me', f'user~{user_id}')] if user_id else []) + [('team', t) for t in probe]
+    slots: List[Tuple[str, str, str]] = ([('me', user_audience(user_id), '')] if user_id else []) + [
+        ('team', team_audience(t), t) for t in probe
+    ]
     if not slots:
         return []
-    rows = await account.publish_list(org_id, 'pipe', [_audience_of(slot) for _, slot in slots])
+    rows = await account.publish_list(org_id, 'pipe', [audience_fields(slot) for _, slot, _ in slots])
 
     # Step 2: the serving rows of this org, by slot
     by_slot: Dict[str, List[Dict[str, Any]]] = {}
@@ -623,14 +647,14 @@ async def own_pipe_publications(account: Any, account_info: 'AccountInfo') -> Li
     # Step 3: each pipe at the first rung that holds it
     out: List[Dict[str, Any]] = []
     seen: set = set()
-    for rung, slot in slots:
+    for rung, slot, team_id in slots:
         group: List[Dict[str, Any]] = []
         for row in by_slot.get(slot, []):
             pipe_name = _name_of(row)
             if not pipe_name or pipe_name in seen or not _in_scope(endpoints, pipe_name):
                 continue
             seen.add(pipe_name)
-            group.append(_picker_entry(row, rung, team_names.get(slot, '')))
+            group.append(_picker_entry(row, rung, team_names.get(team_id, '')))
         out.extend(sorted(group, key=lambda e: (e['name'].lower(), e['id'])))
     return out
 
@@ -668,7 +692,7 @@ async def search_public_pipes(account: Any, account_info: 'AccountInfo', search:
     endpoints = getattr(account_info, 'endpoints', None)
 
     # Step 1: the store's public pipe rows
-    rows = await account.publish_list(org_id, 'pipe', [_audience_of(PUBLIC_AUDIENCE_KEY)])
+    rows = await account.publish_list(org_id, 'pipe', [audience_fields(PUBLIC_AUDIENCE)])
 
     # Step 2: the serving rows that match, once per pipe
     out: List[Dict[str, Any]] = []

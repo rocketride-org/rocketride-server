@@ -1452,7 +1452,7 @@ class TaskServer(DAPBase):
                 live is not None
                 and not placed
                 and live_rank is not None
-                and live_rank <= _rank(pin.rung, pin.deployment.team_id)
+                and live_rank <= _rank(pin.rung, pin.deployment.team)
             ):
                 candidates.append(live)
                 placed = True
@@ -1708,10 +1708,12 @@ class TaskServer(DAPBase):
         user_id = account_info.userId
         home = home_team(account_info)
         if pin.rung == 'team':
-            owner_kind, owner_id, owner_user = 'team', deployment.team_id, ''
-            billing_team = deployment.team_id
-            context = TeamContext(deployment.team_id, 'key' if endpoints is not None else 'answering')
-            perms = resolve_task_permissions(account_info, deployment.team_id)
+            # The answering team is the id inside the deployment's audience
+            answering = deployment.team
+            owner_kind, owner_id, owner_user = 'team', answering, ''
+            billing_team = answering
+            context = TeamContext(answering, 'key' if endpoints is not None else 'answering')
+            perms = resolve_task_permissions(account_info, answering)
             if not perms or (require and require not in perms):
                 raise PermissionError(f'Permission {require or "task"!r} denied for this task')
         elif pin.rung == 'me':

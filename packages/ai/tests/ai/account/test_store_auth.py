@@ -20,15 +20,17 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-"""Authorization matrix for the storage scope grammar (FileStore + RequestContext).
+"""Authorization matrix for the storage roots (FileStore + RequestContext).
 
 The store is the security boundary: these tests drive REAL FileStore
 operations over a real filesystem backend and assert what each identity may
-resolve — scope grammar (@/Team, @/Org, @/User; ids and names), the system-tree rule
-(.logs / .deployments: internal|sys.admin only), the identity kinds
-(session / internal / engine), sys.admin and org.admin expansion, uniform denial (no existence
-leak), the normalization-bypass fuzz family, and cross-user write-lock
-exclusion on shared team paths.
+resolve — the flat roots of plan 2.5 (``@me/``, ``@<team>/``, ``@org/``,
+``=team/<tid>/``, ``=org/<oid>/``, ``=user/<uid>/``; names and ids), the
+retired ``@/User``, ``@/Team`` and ``@/Org`` spellings refused, the
+system-tree rule (.logs / .deployments: internal|sys.admin only), the identity
+kinds (session / internal / engine), sys.admin and org.admin expansion,
+uniform denial (no existence leak), the normalization-bypass fuzz family, and
+cross-user write-lock exclusion on shared team paths.
 """
 
 import shutil
@@ -40,6 +42,7 @@ import pytest
 from ai.account import file_store
 from ai.account.file_store import parse_scope
 from ai.account.models import RequestContext
+from ai.account.roots import Root
 from ai.account.store import Store, StorageError
 from ai.account.store_providers.filesystem import FilesystemStore
 
@@ -48,6 +51,18 @@ from ai.account.store_providers.filesystem import FilesystemStore
 # of the literal could drift, and a mismatched decode key fails as an opaque
 # 401 instead of a clear error.
 _SIGNING_KEY = 'test-signing-key-of-32-bytes-min!'
+
+# The retired store spellings (plan 11.1 B42): refused for every identity.
+_RETIRED = (
+    '@/User',
+    '@/User/x.txt',
+    '@/User/=user-1/x',
+    '@/Team/Development/x',
+    '@/Team/=team-1/x',
+    '@/Org',
+    '@/Org/x',
+    '@/Org/=org-1/x',
+)
 
 
 # ============================================================================
@@ -98,136 +113,150 @@ def _fs(store, account):
 
 
 # ============================================================================
-# Scope grammar parsing
+# Root parsing (the store's view of the one grammar)
 # ============================================================================
 
 
 class TestParseScope:
-    """parse_scope splits normalized paths into (kind, ref, rest) — the
-    joined-filesystem grammar rooted at @/: Team takes a mandatory
-    reference, User and Org are implicitly "me"/"my org" unless followed
-    by an =id reference. Case-exact, alias-free.
+    """parse_scope reads a normalized path through roots.parse_root and
+    refuses the roots that are no storage places.
     """
 
-    def test_plain_path_is_user_scope(self):
-        assert parse_scope('a/b/c.txt') == ('own', None, 'a/b/c.txt')
+    def test_plain_path_is_the_own_tree(self):
+        assert parse_scope('a/b/c.txt') == Root('none', '', False, 'a/b/c.txt')
+        assert parse_scope('') == Root('none', '', False, '')
 
-    def test_root_is_user_scope(self):
-        assert parse_scope('') == ('own', None, '')
+    def test_me_and_org_take_no_reference(self):
+        assert parse_scope('@me') == Root('me', '', False, '')
+        assert parse_scope('@me/My Files/a.txt') == Root('me', '', False, 'My Files/a.txt')
+        assert parse_scope('@org/policies/hr.md') == Root('org', '', False, 'policies/hr.md')
 
-    def test_team_with_rest(self):
-        assert parse_scope('@/Team/t1/reports/q3.md') == ('team', 't1', 'reports/q3.md')
+    def test_a_team_by_name(self):
+        assert parse_scope('@Development/reports/q3.md') == Root('team', 'Development', False, 'reports/q3.md')
 
-    def test_user_is_implicitly_me(self):
-        # No reference: everything after the sigil is already the path.
-        assert parse_scope('@/User') == ('user', None, '')
-        assert parse_scope('@/User/My Files/a.txt') == ('user', None, 'My Files/a.txt')
+    def test_id_roots(self):
+        assert parse_scope('=team/t1/x') == Root('team', 't1', True, 'x')
+        assert parse_scope('=org/o1/x') == Root('org', 'o1', True, 'x')
+        assert parse_scope('=user/u1/.logs/x') == Root('user', 'u1', True, '.logs/x')
 
-    def test_org_is_implicitly_my_org(self):
-        assert parse_scope('@/Org') == ('org', None, '')
-        assert parse_scope('@/Org/policies/hr.md') == ('org', None, 'policies/hr.md')
+    def test_root_words_ignore_case_and_ids_do_not(self):
+        assert parse_scope('@ME/x') == Root('me', '', False, 'x')
+        assert parse_scope('@Org/x') == Root('org', '', False, 'x')
+        assert parse_scope('=TEAM/T1/x') == Root('team', 'T1', True, 'x')
 
-    def test_explicit_id_references(self):
-        # '=' next segment: cross-boundary reference, not a path.
-        assert parse_scope('@/User/=u1/.logs/x') == ('user', '=u1', '.logs/x')
-        assert parse_scope('@/Org/=o1/x') == ('org', '=o1', 'x')
-
-    def test_bare_at_and_reserved_sigils_rejected(self):
-        # '@' itself is a virtual mount listing owned by cmd_store.
-        for spelling in ('@', '@anything/x'):
-            with pytest.raises(ValueError, match='Reserved'):
+    def test_roots_that_are_no_storage_place_are_refused(self):
+        for spelling in ('@spec/x', '@public/x', '=control/' + '1234abcd' * 4):
+            with pytest.raises(ValueError, match='not a storage place'):
                 parse_scope(spelling)
 
-    def test_team_without_reference_rejected(self):
-        with pytest.raises(ValueError, match='reference segment'):
-            parse_scope('@/Team')
-
-    def test_unknown_and_wrong_case_children_rejected(self):
-        # Case-exact, alias-free: '@/team' is an error, not a spelling.
-        for spelling in ('@/Files/x', '@/team/t1/x', '@/user/x', '@/ORG/x'):
-            with pytest.raises(ValueError, match='Unknown scope'):
+    def test_bare_at_and_unknown_id_kinds_are_refused(self):
+        # '@' itself is a virtual listing owned by cmd_store.
+        for spelling in ('@', '=abc', '=foo/x', '=team', '@team/x', '@user/x'):
+            with pytest.raises(ValueError):
                 parse_scope(spelling)
 
-    def test_top_of_scope_equals_names_reserved(self):
-        # A real '=x' entry would shadow id references — uncreatable.
-        for spelling in ('=abc', '@/User/=u1/=x', '@/Team/t1/=x', '@/Org/=o1/=x'):
-            with pytest.raises(ValueError, match='reserved for id references'):
+    @pytest.mark.parametrize('spelling', _RETIRED)
+    def test_retired_spellings_are_refused(self, spelling):
+        with pytest.raises(ValueError):
+            parse_scope(file_store.normalize_path(spelling))
+
+    def test_first_entry_under_a_root_is_reserved(self):
+        for spelling in ('@me/=x', '@me/@x', '=team/t1/=x', '@org/@x'):
+            with pytest.raises(ValueError, match='reserved'):
                 parse_scope(spelling)
 
-    def test_nested_equals_names_allowed(self):
-        # Only the FIRST segment of a scope is reserved.
-        assert parse_scope('docs/=weird.txt') == ('own', None, 'docs/=weird.txt')
+    def test_nested_sigil_names_allowed(self):
+        # Only the FIRST entry under a root is reserved.
+        assert parse_scope('docs/=weird.txt') == Root('none', '', False, 'docs/=weird.txt')
+        assert parse_scope('@me/docs/@x') == Root('me', '', False, 'docs/@x')
 
 
 # ============================================================================
-# Session identity — team scope
+# Session identity — team roots
 # ============================================================================
 
 
 class TestSessionTeamScope:
-    """A real session resolving @/Team paths."""
+    """A real session resolving @<team>/ and =team/<tid>/ paths."""
 
     @pytest.mark.asyncio
     async def test_team_by_id_resolves_and_writes(self, store):
         fs = _fs(store, _account())
-        await fs.write('@/Team/=team-1/docs/readme.md', b'shared')
+        await fs.write('=team/team-1/docs/readme.md', b'shared')
         # Physical location is the TEAM area, ids on disk.
-        assert fs._full_path('@/Team/=team-1/docs/readme.md') == 'teams/team-1/files/docs/readme.md'
+        assert fs._full_path('=team/team-1/docs/readme.md') == 'teams/team-1/files/docs/readme.md'
 
     @pytest.mark.asyncio
     async def test_team_by_display_name_resolves_to_id(self, store):
         fs = _fs(store, _account())
-        await fs.write('@/Team/Development/docs/readme.md', b'shared')
+        await fs.write('@Development/docs/readme.md', b'shared')
         # Names on the wire, ids on disk — both spellings hit ONE location.
-        assert (await fs.read('@/Team/=team-1/docs/readme.md')) == b'shared'
+        assert (await fs.read('=team/team-1/docs/readme.md')) == b'shared'
+
+    def test_team_names_match_ignoring_case(self, store):
+        fs = _fs(store, _account())
+        for spelling in ('@development/x', '@DEVELOPMENT/x', '@DeVeLoPmEnT/x'):
+            assert fs._full_path(spelling) == 'teams/team-1/files/x'
+
+    def test_team_ids_compare_exactly(self, store):
+        fs = _fs(store, _account())
+        with pytest.raises(PermissionError, match='Access denied for scoped path'):
+            fs._full_path('=team/TEAM-1/x')
 
     @pytest.mark.asyncio
     async def test_two_members_share_one_location(self, store):
         member_a = store._file_store(_ctx(_account(user_id='user-a')))
         member_b = store._file_store(_ctx(_account(user_id='user-b')))
-        await member_a.write('@/Team/=team-1/tmp/x.txt', b'from A')
-        assert (await member_b.read('@/Team/=team-1/tmp/x.txt')) == b'from A'
+        await member_a.write('=team/team-1/tmp/x.txt', b'from A')
+        assert (await member_b.read('@Development/tmp/x.txt')) == b'from A'
 
     def test_foreign_team_denied_uniformly(self, store):
         fs = _fs(store, _account())
-        with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Team/=team-elsewhere/x.txt')
+        for spelling in ('=team/team-elsewhere/x.txt', '@Elsewhere/x.txt'):
+            with pytest.raises(PermissionError, match='Access denied for scoped path'):
+                fs._full_path(spelling)
 
     def test_member_without_task_store_denied_same_message(self, store):
         fs = _fs(store, _account(team_perms=['task.monitor']))
-        with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Team/=team-1/x.txt')
+        for spelling in ('=team/team-1/x.txt', '@Development/x.txt'):
+            with pytest.raises(PermissionError, match='Access denied for scoped path'):
+                fs._full_path(spelling)
 
     def test_ambiguous_name_denied_same_message(self, store):
-        # Two teams sharing a display name: name addressing fails closed with
-        # the SAME message as unknown/foreign (id addressing always works).
-        account = _account(extra_teams=[{'id': 'team-2', 'name': 'Development', 'permissions': ['task.store']}])
+        # Two teams whose names differ only by case (data from before the
+        # name_key rule): name addressing fails closed with the SAME message
+        # as unknown/foreign (id addressing always works).
+        account = _account(extra_teams=[{'id': 'team-2', 'name': 'development', 'permissions': ['task.store']}])
         fs = store._file_store(_ctx(account))
         with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Team/Development/x.txt')
-        assert fs._full_path('@/Team/=team-1/x.txt') == 'teams/team-1/files/x.txt'
+            fs._full_path('@Development/x.txt')
+        assert fs._full_path('=team/team-1/x.txt') == 'teams/team-1/files/x.txt'
 
     def test_names_and_ids_cannot_shadow(self, store):
-        # v2: a bare segment is ONLY a name, '=x' is ONLY an id — a team
-        # NAMED like another team's id resolves by name to its own id.
+        # '@x' is ONLY a name, '=team/x' is ONLY an id — a team NAMED like
+        # another team's id resolves by name to its own id.
         account = _account(extra_teams=[{'id': 'team-x', 'name': 'team-1', 'permissions': ['task.store']}])
         fs = store._file_store(_ctx(account))
-        assert fs._full_path('@/Team/team-1/f').startswith('teams/team-x/')
-        assert fs._full_path('@/Team/=team-1/f').startswith('teams/team-1/')
+        assert fs._full_path('@team-1/f').startswith('teams/team-x/')
+        assert fs._full_path('=team/team-1/f').startswith('teams/team-1/')
 
-    def test_id_reference_traversal_guard(self, store):
-        # '=..' / '=.' / '=' must never embed into the physical path.
+    def test_id_root_traversal_guard(self, store):
+        # '..' never embeds into the physical path, and an id root needs its id.
         fs = _fs(store, _account(sys_perms=['sys.admin']))
-        for evil in ('@/Team/=../x', '@/Team/=./x', '@/Team/=/x', '@/User/=../x'):
-            with pytest.raises(ValueError, match='Invalid id reference|reference segment'):
+        for evil in ('=team/../x', '=user/../x', '=org/..'):
+            with pytest.raises(ValueError, match='traversal'):
+                fs._full_path(evil)
+        for evil in ('=team', '=org/', '=user'):
+            with pytest.raises(ValueError, match='requires an id'):
                 fs._full_path(evil)
 
     def test_no_org_session_denied(self, store):
         account = _account()
         account.organization = None
         fs = store._file_store(_ctx(account))
-        with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Team/=team-1/x')
+        for spelling in ('=team/team-1/x', '@Development/x'):
+            with pytest.raises(PermissionError, match='Access denied for scoped path'):
+                fs._full_path(spelling)
 
     def test_unauthenticated_context_denied(self, store):
         fs = store._file_store(RequestContext(account_info=None), client_id='user-1')
@@ -236,85 +265,88 @@ class TestSessionTeamScope:
 
     def test_sys_admin_bypasses_team_membership(self, store):
         fs = _fs(store, _account(team_perms=[], sys_perms=['sys.admin']))
-        assert fs._full_path('@/Team/=team-1/x') == 'teams/team-1/files/x'
+        assert fs._full_path('=team/team-1/x') == 'teams/team-1/files/x'
+        assert fs._full_path('@Development/x') == 'teams/team-1/files/x'
 
     def test_sys_admin_crosses_boundaries_by_id_only(self, store):
-        # The support capability: foreign teams/orgs/users by =id and ONLY
-        # by =id (names still resolve through the admin's own dictionary).
+        # The support capability: foreign teams/orgs/users by id and ONLY by
+        # id (names still resolve through the admin's own dictionary).
         fs = _fs(store, _account(sys_perms=['sys.admin']))
-        assert fs._full_path('@/Team/=foreign-team/x') == 'teams/foreign-team/files/x'
-        assert fs._full_path('@/Org/=foreign-org/x') == 'orgs/foreign-org/files/x'
-        assert fs._full_path('@/User/=other-user/notes.txt') == 'users/other-user/files/notes.txt'
+        assert fs._full_path('=team/foreign-team/x') == 'teams/foreign-team/files/x'
+        assert fs._full_path('=org/foreign-org/x') == 'orgs/foreign-org/files/x'
+        assert fs._full_path('=user/other-user/notes.txt') == 'users/other-user/files/notes.txt'
         with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Team/TheirTeamName/x')
+            fs._full_path('@TheirTeamName/x')
 
     def test_sys_admin_full_access_to_foreign_system_trees(self, store):
         # sys.admin may do ANYTHING with system trees, anywhere.
         fs = _fs(store, _account(sys_perms=['sys.admin']))
-        assert fs._full_path('@/User/=other-user/.logs/p1/x.jsonl')
-        assert fs._full_path('@/User/=other-user/.deployments/p1.json')
+        assert fs._full_path('=user/other-user/.logs/p1/x.jsonl')
+        assert fs._full_path('=user/other-user/.deployments/p1.json')
 
-    def test_ordinary_session_cannot_use_user_scope(self, store):
+    def test_ordinary_session_cannot_use_a_user_root(self, store):
         fs = _fs(store, _account())
-        with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/User/=user-1/x')  # not even for yourself
+        for spelling in ('=user/user-1/x', '=user/other/x'):
+            with pytest.raises(PermissionError, match='Access denied for scoped path'):
+                fs._full_path(spelling)  # not even for yourself
 
 
 # ============================================================================
-# Session identity — org scope
+# Session identity — org roots
 # ============================================================================
 
 
 class TestSessionOrgScope:
-    """@/Org is implicitly the caller's ONE org — org.admin-only."""
+    """@org/ is the caller's ONE active org; =org/<oid>/ names it by id — org.admin only."""
 
-    def test_org_admin_resolves_implicitly_and_by_id(self, store):
+    def test_org_admin_resolves_by_word_and_by_id(self, store):
         fs = _fs(store, _account(org_perms=['org.admin']))
-        # Implicit spelling: the segment after @/Org is already the path.
-        assert fs._full_path('@/Org/policies/hr.md') == 'orgs/org-1/files/policies/hr.md'
-        # Explicit own-org id reference still resolves to the same tree.
-        assert fs._full_path('@/Org/=org-1/x') == 'orgs/org-1/files/x'
+        assert fs._full_path('@org/policies/hr.md') == 'orgs/org-1/files/policies/hr.md'
+        assert fs._full_path('@ORG/x') == 'orgs/org-1/files/x'
+        # The own org by id resolves to the same tree.
+        assert fs._full_path('=org/org-1/x') == 'orgs/org-1/files/x'
 
     def test_plain_member_denied(self, store):
         fs = _fs(store, _account())
-        for spelling in ('@/Org/x', '@/Org/=org-1/x'):
+        for spelling in ('@org/x', '=org/org-1/x'):
             with pytest.raises(PermissionError, match='Access denied for scoped path'):
                 fs._full_path(spelling)
 
     def test_foreign_org_denied(self, store):
         fs = _fs(store, _account(org_perms=['org.admin']))
         with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Org/=other-org/x')
+            fs._full_path('=org/other-org/x')
 
     def test_no_org_session_denied(self, store):
         account = _account(org_perms=['org.admin'])
         account.organization = None
         fs = _fs(store, account)
         with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Org/x')
+            fs._full_path('@org/x')
 
 
 # ============================================================================
-# Session identity — the @/User joined-mode alias
+# Session identity — @me
 # ============================================================================
 
 
-class TestJoinedUserAlias:
-    """@/User/<rest> is the joined-mode spelling of the caller's OWN tree."""
+class TestMeRoot:
+    """@me/<rest> is the rooted spelling of the caller's OWN tree."""
 
     @pytest.mark.asyncio
     async def test_both_spellings_hit_one_tree(self, store):
         fs = _fs(store, _account())
-        await fs.write('@/User/My Files/a.txt', b'joined')
-        # Simple-mode spelling reads the same physical file.
-        assert (await fs.read('My Files/a.txt')) == b'joined'
-        assert fs._full_path('@/User/My Files/a.txt') == fs._full_path('My Files/a.txt')
+        await fs.write('@me/My Files/a.txt', b'mine')
+        # The plain spelling reads the same physical file.
+        assert (await fs.read('My Files/a.txt')) == b'mine'
+        assert fs._full_path('@me/My Files/a.txt') == fs._full_path('My Files/a.txt')
+        assert fs._full_path('@Me/My Files/a.txt') == fs._full_path('My Files/a.txt')
 
-    def test_alias_is_unconditional_like_plain_paths(self, store):
+    def test_me_is_unconditional_like_plain_paths(self, store):
         # Ownership IS the authorization: the caller's own tree consults no
-        # team- or org-carried permission — alias and plain spelling alike.
+        # team- or org-carried permission — rooted and plain spelling alike.
         fs = _fs(store, _account(team_perms=['task.monitor']))
-        assert fs._full_path('@/User/x.txt') == 'users/user-1/files/x.txt'
+        assert fs._full_path('@me/x.txt') == 'users/user-1/files/x.txt'
 
     def test_own_tree_survives_teamless_org(self, store):
         # The org-switch regression: a user whose ACTIVE org holds none of
@@ -325,12 +357,41 @@ class TestJoinedUserAlias:
         assert store._file_store(_ctx(teamless))._full_path('workspace/f.txt') == 'users/user-1/files/workspace/f.txt'
         orgless = _account()
         orgless.organization = None
-        assert store._file_store(_ctx(orgless))._full_path('workspace/f.txt') == 'users/user-1/files/workspace/f.txt'
+        assert (
+            store._file_store(_ctx(orgless))._full_path('@me/workspace/f.txt') == 'users/user-1/files/workspace/f.txt'
+        )
 
-    def test_alias_system_trees_still_denied(self, store):
+    def test_me_system_trees_still_denied(self, store):
         fs = _fs(store, _account())
         with pytest.raises(PermissionError, match='system-owned'):
-            fs._full_path('@/User/.logs/p1/x.jsonl')
+            fs._full_path('@me/.logs/p1/x.jsonl')
+
+
+# ============================================================================
+# The retired spellings
+# ============================================================================
+
+
+class TestRetiredSpellings:
+    """@/User, @/Team/<ref> and @/Org are gone for every identity (B42)."""
+
+    @pytest.mark.parametrize('spelling', _RETIRED)
+    def test_session_refused(self, store, spelling):
+        fs = _fs(store, _account(org_perms=['org.admin']))
+        with pytest.raises(ValueError):
+            fs._full_path(spelling)
+
+    @pytest.mark.parametrize('spelling', _RETIRED)
+    def test_sys_admin_refused(self, store, spelling):
+        fs = _fs(store, _account(sys_perms=['sys.admin']))
+        with pytest.raises(ValueError):
+            fs._full_path(spelling)
+
+    @pytest.mark.parametrize('spelling', _RETIRED)
+    def test_internal_refused(self, store, spelling):
+        fs = store._file_store(RequestContext.internal('run-log'), client_id='user-1')
+        with pytest.raises(ValueError):
+            fs._full_path(spelling)
 
 
 # ============================================================================
@@ -356,21 +417,25 @@ class TestSystemTrees:
     def test_sessions_fully_denied_team_scope(self, store):
         fs = _fs(store, _account())
         with pytest.raises(PermissionError, match='system-owned'):
-            fs._full_path('@/Team/=team-1/.logs/p1/x.jsonl')
+            fs._full_path('=team/team-1/.logs/p1/x.jsonl')
         with pytest.raises(PermissionError, match='system-owned'):
-            fs._full_path('@/Team/Development/.deployments/p1.json')
+            fs._full_path('@Development/.deployments/p1.json')
 
     def test_sys_admin_may_do_anything(self, store):
         fs = _fs(store, _account(sys_perms=['sys.admin']))
         assert fs._full_path('.logs/p1/x.jsonl') == 'users/user-1/files/.logs/p1/x.jsonl'
-        assert fs._full_path('@/Team/=team-1/.deployments/p1.json') == ('teams/team-1/files/.deployments/p1.json')
+        assert fs._full_path('=team/team-1/.deployments/p1.json') == ('teams/team-1/files/.deployments/p1.json')
 
-    def test_internal_identity_requires_id_references(self, store):
-        # Internal has no name dictionary: bare (name) references deny.
+    def test_internal_identity_requires_id_roots(self, store):
+        # Internal has no name dictionary and no org context: a team name and
+        # @org mean nothing to it and deny; id roots resolve with no checks.
         fs = store._file_store(RequestContext.internal('run-log'), client_id='user-1')
-        with pytest.raises(PermissionError, match='Access denied for scoped path'):
-            fs._full_path('@/Team/Development/x')
-        assert fs._full_path('@/Team/=team-1/x') == 'teams/team-1/files/x'
+        for spelling in ('@Development/x', '@org/x'):
+            with pytest.raises(PermissionError, match='Access denied for scoped path'):
+                fs._full_path(spelling)
+        assert fs._full_path('=team/team-1/x') == 'teams/team-1/files/x'
+        assert fs._full_path('=org/org-9/x') == 'orgs/org-9/files/x'
+        assert fs._full_path('=user/user-9/x') == 'users/user-9/files/x'
 
     @pytest.mark.asyncio
     async def test_internal_identity_writes_logs(self, store):
@@ -379,12 +444,12 @@ class TestSystemTrees:
         # system-tree gate by design — reordering resolve_scope turns this red.
         fs = store._file_store(RequestContext.internal('run-log'), client_id='user-1')
         await fs.write('.logs/p1/seg.jsonl', b'{}')
-        await fs.write('@/Team/=team-1/.logs/p1/seg.jsonl', b'{}')
+        await fs.write('=team/team-1/.logs/p1/seg.jsonl', b'{}')
 
 
 class TestSysAdminCrossingAudit:
-    """sys.admin ``=id`` resolutions are the ONE place resolve_scope crosses
-    the boundary instead of enforcing it — every crossing must leave an audit
+    """sys.admin id resolutions are the ONE place resolve_scope crosses the
+    boundary instead of enforcing it — every crossing must leave an audit
     record, while member resolutions and the wire response stay
     indistinguishable from ordinary resolves.
     """
@@ -401,13 +466,13 @@ class TestSysAdminCrossingAudit:
 
     def test_foreign_team_id_crossing_is_audited(self, store, audited):
         fs = _fs(store, _account(sys_perms=['sys.admin']))
-        assert fs._full_path('@/Team/=team-9/x') == 'teams/team-9/files/x'
+        assert fs._full_path('=team/team-9/x') == 'teams/team-9/files/x'
         assert ('user-1', 'teams/team-9') in audited
 
     def test_foreign_org_and_user_crossings_are_audited(self, store, audited):
         fs = _fs(store, _account(sys_perms=['sys.admin']))
-        fs._full_path('@/Org/=org-9/x')
-        fs._full_path('@/User/=user-9/x')
+        fs._full_path('=org/org-9/x')
+        fs._full_path('=user/user-9/x')
         targets = [t for _, t in audited]
         assert 'orgs/org-9' in targets and 'users/user-9' in targets
 
@@ -415,24 +480,25 @@ class TestSysAdminCrossingAudit:
         # A sys.admin resolving a team they are a MEMBER of crosses nothing —
         # the audit channel records crossings, not routine member access.
         fs = _fs(store, _account(sys_perms=['sys.admin']))
-        assert fs._full_path('@/Team/=team-1/x') == 'teams/team-1/files/x'
+        assert fs._full_path('=team/team-1/x') == 'teams/team-1/files/x'
+        assert fs._full_path('=org/org-1/x') == 'orgs/org-1/files/x'
         assert audited == []
 
 
 # ============================================================================
-# Engine identity — subprocess tool nodes
+# Engine identity — a node's self.files
 # ============================================================================
 
 
 class TestEngineIdentity:
-    """RequestContext.engine: user scope only, reserved subtrees denied."""
+    """RequestContext.engine: plain paths only, reserved subtrees denied."""
 
-    def test_scoped_paths_rejected(self, store):
-        # EVERY sigil spelling is rejected — including @/User, which merely
-        # aliases the own tree for sessions: LLM-generated paths inside the
-        # subprocess must never speak the scope grammar at all.
+    def test_rooted_paths_rejected(self, store):
+        # EVERY root is rejected — including @me, which merely names the own
+        # tree for sessions: LLM-generated paths inside the subprocess must
+        # never speak the root grammar at all.
         fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1')
-        for spelling in ('@/Team/=team-1/x', '@/Org/=org-1/x', '@/Org/x', '@/User/x'):
+        for spelling in ('=team/team-1/x', '=org/org-1/x', '=user/user-1/x', '@org/x', '@me/x', '@Development/x'):
             with pytest.raises(PermissionError, match='engine context'):
                 fs._full_path(spelling)
 
@@ -461,15 +527,15 @@ class TestEngineIdentity:
         await fs.write('out/report.csv', b'rows')
         assert (await fs.read('out/report.csv')) == b'rows'
 
-    def test_storage_anchor_still_rejects_scopes_and_system_trees(self, store):
-        # The anchor widens NOTHING: sigils and system trees stay denied.
+    def test_storage_anchor_still_rejects_roots_and_system_trees(self, store):
+        # The anchor widens NOTHING: roots and system trees stay denied.
         fs = store._file_store(
             RequestContext.engine('user-1'),
             client_id='user-1',
             root='teams/team-1/files/tasks/proj-1',
         )
         with pytest.raises(PermissionError, match='engine context'):
-            fs._full_path('@/Team/=team-2/x')
+            fs._full_path('=team/team-2/x')
         with pytest.raises(PermissionError, match='engine context'):
             fs._full_path('.logs/p/x')
 
@@ -496,7 +562,7 @@ class TestEngineIdentity:
         assert fs._ctx.source == 'engine' and fs._ctx.conn_id == 'engine:7:team-1'
         assert fs._full_path('out/x.csv') == 'teams/team-1/files/tasks/proj-1/out/x.csv'
         with pytest.raises(PermissionError, match='engine context'):
-            fs._full_path('@/Team/=team-2/x')
+            fs._full_path('=team/team-2/x')
 
     def test_file_store_for_caller_anchors_a_user_run_in_the_owners_tree(self, store, monkeypatch):
         monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: store))
@@ -519,6 +585,13 @@ class TestEngineIdentity:
     def test_storage_root_for(self):
         assert file_store.storage_root_for('team', 'u1', 't1', 'p1') == 'teams/t1/files/tasks/p1'
         assert file_store.storage_root_for('user', 'u1', 't1', 'p1') == 'users/u1/files'
+        assert file_store.storage_root_for('org', 'u1', '', 'p1', org_id='o1') == 'orgs/o1/files/tasks/p1'
+
+    def test_storage_root_for_refuses_what_has_no_anchor(self):
+        with pytest.raises(ValueError, match='org_id'):
+            file_store.storage_root_for('org', 'u1', 't1', 'p1')
+        with pytest.raises(ValueError, match='Unknown owner kind'):
+            file_store.storage_root_for('public', 'u1', 't1', 'p1')
 
 
 # ============================================================================
@@ -527,17 +600,20 @@ class TestEngineIdentity:
 
 
 class TestNormalizationBypass:
-    """Every path spelling that NORMALIZES into the @ grammar must be
-    authorized as the @ grammar — never resolved around it.
+    """Every path spelling that NORMALIZES into the root grammar must be
+    authorized as that root — never resolved around it.
     """
 
     BYPASS_SPELLINGS = [
-        '\\@\\Team\\=team-else\\x',
-        '/@/Team/=team-else/x',
-        './@/Team/=team-else/x',
-        '@/Team//=team-else/x',
-        '//@/Team/=team-else/x',
-        '@/Team/./=team-else/x',
+        '\\=team\\team-else\\x',
+        '/=team/team-else/x',
+        './=team/team-else/x',
+        '=team//team-else/x',
+        '//=team/team-else/x',
+        '=team/./team-else/x',
+        '\\@Else\\x',
+        '/@else/x',
+        './@ELSE/x',
     ]
 
     @pytest.mark.parametrize('spelling', BYPASS_SPELLINGS)
@@ -555,7 +631,7 @@ class TestNormalizationBypass:
     def test_traversal_still_rejected(self, store):
         fs = _fs(store, _account())
         with pytest.raises(ValueError, match='traversal'):
-            fs._full_path('@/Team/=team-1/../../users/other/files/x')
+            fs._full_path('=team/team-1/../../users/other/files/x')
 
 
 # ============================================================================
@@ -564,34 +640,35 @@ class TestNormalizationBypass:
 
 
 class TestScopeRootGuards:
-    """Scope roots cannot be deleted, rmdir'd, or renamed."""
+    """Roots cannot be deleted, rmdir'd, or renamed."""
 
     @pytest.mark.asyncio
     async def test_rmdir_scope_root_rejected(self, store):
         fs = _fs(store, _account())
-        with pytest.raises(StorageError, match='scope root'):
-            await fs.rmdir('@/Team/=team-1', recursive=True)
+        for root in ('=team/team-1', '@Development'):
+            with pytest.raises(StorageError, match='scope root'):
+                await fs.rmdir(root, recursive=True)
 
     @pytest.mark.asyncio
     async def test_delete_scope_root_rejected(self, store):
         fs = _fs(store, _account())
         with pytest.raises(StorageError, match='scope root'):
-            await fs.delete('@/Team/=team-1')
+            await fs.delete('=team/team-1')
 
     @pytest.mark.asyncio
     async def test_rename_scope_root_rejected(self, store):
         fs = _fs(store, _account())
         with pytest.raises(StorageError, match='scope root'):
-            await fs.rename('@/Team/=team-1', '@/Team/=team-1/backup')
+            await fs.rename('=team/team-1', '=team/team-1/backup')
 
     @pytest.mark.asyncio
-    async def test_joined_mount_roots_rejected(self, store):
-        # The joined-mode mounts are scope roots too.
+    async def test_me_and_org_roots_rejected(self, store):
+        # @me and @org are roots too.
         fs = _fs(store, _account(org_perms=['org.admin']))
         with pytest.raises(StorageError, match='scope root'):
-            await fs.rmdir('@/User', recursive=True)
+            await fs.rmdir('@me', recursive=True)
         with pytest.raises(StorageError, match='scope root'):
-            await fs.delete('@/Org')
+            await fs.delete('@org')
 
     @pytest.mark.asyncio
     async def test_own_root_rejected(self, store):
@@ -616,23 +693,23 @@ class TestSharedWriteLocks:
         member_a = store._file_store(_ctx(_account(user_id='user-a')))
         member_b = store._file_store(_ctx(_account(user_id='user-b')))
 
-        handle = await member_a.open_write('@/Team/=team-1/shared.bin')
+        handle = await member_a.open_write('=team/team-1/shared.bin')
         with pytest.raises(StorageError, match='already open for writing'):
-            await member_b.open_write('@/Team/=team-1/shared.bin')
+            await member_b.open_write('@Development/shared.bin')
         await member_a.close_write(handle)
 
         # Released — B may now write.
-        handle_b = await member_b.open_write('@/Team/=team-1/shared.bin')
+        handle_b = await member_b.open_write('=team/team-1/shared.bin')
         await member_b.close_write(handle_b)
 
     @pytest.mark.asyncio
     async def test_store_close_all_handles_covers_all_instances(self, store):
         fs = store._file_store(_ctx(_account(user_id='user-a')))
-        await fs.open_write('@/Team/=team-1/dangling.bin')
+        await fs.open_write('=team/team-1/dangling.bin')
         # Disconnect-style cleanup through the Store, not the instance.
         await store.close_all_handles(fs._ctx.conn_id)
         # Lock released — reopening succeeds.
-        handle = await fs.open_write('@/Team/=team-1/dangling.bin')
+        handle = await fs.open_write('=team/team-1/dangling.bin')
         await fs.close_write(handle)
 
 
@@ -646,9 +723,9 @@ class TestSignedFetchUrls:
 
     Regression for PR #1686: the claim used to carry the WIRE spelling, which
     the fetch handler re-resolved under an internal identity — an identity
-    with no name dictionary and no org context, so '@/Team/<name>' and
-    '@/Org' URLs died with an unhandled PermissionError (HTTP 500). The
-    claim now IS the physical path; the handler serves it without resolving.
+    with no name dictionary and no org context, so team-name and org URLs
+    died with an unhandled PermissionError (HTTP 500). The claim now IS the
+    physical path; the handler serves it without resolving.
     """
 
     @staticmethod
@@ -672,9 +749,9 @@ class TestSignedFetchUrls:
             # The reviewer's failure matrix: every wire spelling must sign
             # its RESOLVED location — including the two that used to 500.
             ('reports/q1.csv', 'users/user-1/files/reports/q1.csv'),
-            ('@/User/reports/q1.csv', 'users/user-1/files/reports/q1.csv'),
-            ('@/Team/Development/q1.csv', 'teams/team-1/files/q1.csv'),
-            ('@/Team/=team-1/q1.csv', 'teams/team-1/files/q1.csv'),
+            ('@me/reports/q1.csv', 'users/user-1/files/reports/q1.csv'),
+            ('@Development/q1.csv', 'teams/team-1/files/q1.csv'),
+            ('=team/team-1/q1.csv', 'teams/team-1/files/q1.csv'),
         ],
     )
     async def test_claim_carries_resolved_path(self, store, wire_path, physical):
@@ -684,19 +761,19 @@ class TestSignedFetchUrls:
 
     @pytest.mark.asyncio
     async def test_org_claim_carries_resolved_path(self, store):
-        # '@/Org' needs org.admin — the second spelling that used to 500.
+        # '@org' needs org.admin — the second spelling that used to 500.
         fs = _fs(store, _account(org_perms=('org.admin',)))
-        url = await fs.get_url('@/Org/q1.csv')
+        url = await fs.get_url('@org/q1.csv')
         assert self._claim(url)['path'] == 'orgs/org-1/files/q1.csv'
 
     @pytest.mark.asyncio
     async def test_claim_serves_without_scope_resolution(self, store):
         # The fetch handler's whole job now: backend._get_full_path(claim).
-        # Write through the scope grammar, then locate the file the way the
+        # Write through the root grammar, then locate the file the way the
         # handler does — no FileStore, no identity, no resolve_scope.
         fs = _fs(store, _account())
-        await fs.write('@/Team/Development/q1.csv', b'data')
-        url = await fs.get_url('@/Team/Development/q1.csv')
+        await fs.write('@Development/q1.csv', b'data')
+        url = await fs.get_url('@Development/q1.csv')
         abs_path = store._store._get_full_path(self._claim(url)['path'])
         assert abs_path.is_file()
         assert abs_path.read_bytes() == b'data'
@@ -704,10 +781,10 @@ class TestSignedFetchUrls:
     @pytest.mark.asyncio
     async def test_authorization_still_gates_issuance(self, store):
         # Signing the physical path must not weaken issuance: a session
-        # without org.admin cannot mint an @/Org capability at all.
+        # without org.admin cannot mint an @org capability at all.
         fs = _fs(store, _account())
         with pytest.raises(PermissionError):
-            await fs.get_url('@/Org/q1.csv')
+            await fs.get_url('@org/q1.csv')
 
     @pytest.mark.asyncio
     async def test_claim_states_its_generation(self, store):

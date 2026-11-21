@@ -119,7 +119,7 @@ def _make_conn(account_info, scheduler=None):
 def account_stub(monkeypatch):
     """Stub the account module the handlers call."""
     dep = {
-        'teamId': 'team-1',
+        'teamId': '=team/team-1',
         'projectId': 'proj-1',
         'state': 'enabled',
         'version': 1,
@@ -388,7 +388,8 @@ class TestPublish:
         conn = _make_conn(_account_info())
         resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': 'team-1'})
         account_stub.deployments_deploy.assert_awaited_once()
-        assert resp['body']['deployment']['teamId'] == 'team-1'
+        assert resp['body']['deployment']['teamId'] == '=team/team-1'
+        assert (resp['body']['deployment']['rung'], resp['body']['deployment']['handle']) == ('team', '@Development')
         conn._test_scheduler.sync.assert_called_once()
 
     @pytest.mark.asyncio
@@ -411,13 +412,43 @@ class TestDeploy:
         await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': 'team-1'})
         account_stub.deployments_deploy.assert_awaited_once_with(
             'org-1',
-            'team-1',
+            '=team/team-1',
             'acme.proj-1',
             3,
             {'userId': 'user-1', 'display': 'Rod C', 'email': 'rod@example.com'},
             'team-1',
         )
         conn._test_scheduler.sync.assert_called_once()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('team', ['=team/team-1', '=TEAM/team-1', '@Development', '@development', '@DEVELOPMENT'])
+    async def test_deploy_takes_the_audience_or_the_team_name_ignoring_case(self, account_stub, team):
+        # A row's audience passed back unchanged, or the name a person typed
+        # (the SDKs pass it through, plan 2.5): one team, one stored audience
+        conn = _make_conn(_account_info())
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': team})
+        assert account_stub.deployments_deploy.await_args.args[1] == '=team/team-1'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('team', 'error'),
+        [
+            ('@Elsewhere', PermissionError),
+            ('=team/team-x', PermissionError),
+            ('=user/other', PermissionError),
+            ('@org', ValueError),
+            ('=org/org-1', ValueError),
+            ('@spec', ValueError),
+            ('@team/Development', ValueError),
+            ('@user', ValueError),
+            ('=team/team-1/x', ValueError),
+        ],
+    )
+    async def test_deploy_refuses_what_names_no_target_of_the_caller(self, account_stub, team, error):
+        conn = _make_conn(_account_info())
+        with pytest.raises(error):
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': team})
+        account_stub.deployments_deploy.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_deploy_foreign_team_denied(self, account_stub):
@@ -445,7 +476,13 @@ class TestDeploy:
             EVENT_TYPE.DEPLOY,
             {
                 'event': 'apaevt_deploy',
-                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'acme.proj-1', 'action': 'deploy'},
+                'body': {
+                    'orgId': 'org-1',
+                    'teamId': '=team/team-1',
+                    'audience': '=team/team-1',
+                    'projectId': 'acme.proj-1',
+                    'action': 'deploy',
+                },
             },
             org_id='org-1',
         )
@@ -460,10 +497,10 @@ class TestReads:
     # The org-wide backend snapshot the visibility tests slice: a member
     # team, a foreign team, the caller's personal space, another user's.
     _ORG_ROWS = [
-        {'teamId': 'team-1', 'projectId': 'proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
-        {'teamId': 'team-x', 'projectId': 'proj-2', 'state': 'enabled', 'version': 1, 'schedules': {}},
-        {'teamId': 'user~user-1', 'projectId': 'proj-3', 'state': 'enabled', 'version': 1, 'schedules': {}},
-        {'teamId': 'user~other', 'projectId': 'proj-4', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': '=team/team-1', 'projectId': 'proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': '=team/team-x', 'projectId': 'proj-2', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': '=user/user-1', 'projectId': 'proj-3', 'state': 'enabled', 'version': 1, 'schedules': {}},
+        {'teamId': '=user/other', 'projectId': 'proj-4', 'state': 'enabled', 'version': 1, 'schedules': {}},
     ]
 
     @pytest.mark.asyncio
@@ -477,7 +514,8 @@ class TestReads:
         conn = _make_conn(_account_info(teams=teams))
         result = await conn._deploy_list({}, {})
         assert account_stub.deployments_list.await_args.args == ('org-1', None)
-        assert [r['teamId'] for r in result['body']['rows']] == ['team-1', 'user~user-1']
+        assert [r['teamId'] for r in result['body']['rows']] == ['=team/team-1', '=user/user-1']
+        assert [(r['rung'], r['handle']) for r in result['body']['rows']] == [('team', '@A'), ('me', '@me')]
 
     @pytest.mark.asyncio
     async def test_list_org_admin_sees_everything(self, account_stub):
@@ -498,17 +536,17 @@ class TestReads:
         admin = _make_conn(_account_info())
         admin._account_info.organization['permissions'] = ['org.admin']
         await admin._deploy_list({}, {'teamId': 'team-x'})
-        assert account_stub.deployments_list.await_args.args == ('org-1', 'team-x')
+        assert account_stub.deployments_list.await_args.args == ('org-1', '=team/team-x')
 
     @pytest.mark.asyncio
     async def test_list_other_users_personal_space_is_admin_only(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(PermissionError):
-            await conn._deploy_list({}, {'teamId': 'user~other'})
+            await conn._deploy_list({}, {'teamId': '=user/other'})
         admin = _make_conn(_account_info())
         admin._account_info.organization['permissions'] = ['org.admin']
-        await admin._deploy_list({}, {'teamId': 'user~other'})
-        assert account_stub.deployments_list.await_args.args == ('org-1', 'user~other')
+        await admin._deploy_list({}, {'teamId': '=user/other'})
+        assert account_stub.deployments_list.await_args.args == ('org-1', '=user/other')
 
     @pytest.mark.asyncio
     async def test_get_missing_deployment_is_a_clean_error(self, account_stub):
@@ -611,7 +649,9 @@ class TestReads:
         assert dispatched['rung'] == ''
         # The run names the deployment it resolved through: disabling or
         # removing that deployment releases the run's hold
-        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.proj-1')
+        assert dispatched['deployment'] == DeploymentRef(
+            org_id='org-1', team_id='=team/team-1', project_id='acme.proj-1'
+        )
         assert dispatched['pipeline']['source'] == 'webhook_1'
         # No actor rides the dispatch — the run is owned by the team alone.
         assert 'actor' not in dispatched
@@ -619,11 +659,11 @@ class TestReads:
         assert dispatched['ttl'] is None
         assert dispatched['trace_level'] == 'summary'
         assert dispatched['debug_out'] is True
-        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'team-1', 'acme.proj-1', 'webhook_1')
+        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1')
         # The control KEY lands under the scheduler's overlap guard so the
         # next cron tick sees this run and skips.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
-            'team-1', 'acme.proj-1', 'webhook_1', '=control/c0ffee00c0ffee00c0ffee00c0ffee00'
+            '=team/team-1', 'acme.proj-1', 'webhook_1', '=control/c0ffee00c0ffee00c0ffee00c0ffee00'
         )
 
     @pytest.mark.asyncio
@@ -724,12 +764,12 @@ class TestPersonalDeploy:
     async def test_me_deploy_binds_the_user_audience_without_a_team_check(self, account_stub):
         # '@me' resolves to the caller's owner key and needs NO team GRANT:
         # the membership here carries ZERO permissions, so any permission
-        # path would raise — binding still succeeds into user~{uid}, and the
+        # path would raise — binding still succeeds into =user/<uid>, and the
         # publisher's dev team is STAMPED as the absolute billing team.
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
         await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': '@me', 'version': 1})
         args = account_stub.deployments_deploy.await_args.args
-        assert args[1] == 'user~user-1'
+        assert args[1] == '=user/user-1'
         assert args[5] == 'team-1'  # the pointer-time billing stamp
 
     @pytest.mark.asyncio
@@ -749,7 +789,7 @@ class TestPersonalDeploy:
         conn = _make_conn(_account_info())
         await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'version': 1})
         args = account_stub.deployments_deploy.await_args.args
-        assert args[1] == 'team-1' and args[5] == 'team-1'
+        assert args[1] == '=team/team-1' and args[5] == 'team-1'
 
     @pytest.mark.asyncio
     async def test_me_run_dispatches_user_owned_with_billing_team(self, account_stub, monkeypatch):
@@ -764,7 +804,7 @@ class TestPersonalDeploy:
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         account_stub.deployments_get.return_value = {
-            'teamId': 'user~user-1',
+            'teamId': '=user/user-1',
             'projectId': 'proj-1',
             'state': 'enabled',
             'version': 1,
@@ -788,9 +828,9 @@ class TestPersonalDeploy:
         assert dispatched['team_id'] == 'team-1'
         # Overlap guard + mark_run key on the OWNER key.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
-            'user~user-1', 'acme.proj-1', 's1', '=control/d00dd00dd00dd00dd00dd00dd00dd00d'
+            '=user/user-1', 'acme.proj-1', 's1', '=control/d00dd00dd00dd00dd00dd00dd00dd00d'
         )
-        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', 'user~user-1', 'acme.proj-1', 's1')
+        account_stub.deployments_mark_run.assert_awaited_once_with('org-1', '=user/user-1', 'acme.proj-1', 's1')
 
     @pytest.mark.asyncio
     async def test_me_run_refuses_without_a_billing_stamp(self, account_stub, monkeypatch):
@@ -802,7 +842,7 @@ class TestPersonalDeploy:
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         account_stub.deployments_get.return_value = {
-            'teamId': 'user~user-1',
+            'teamId': '=user/user-1',
             'projectId': 'proj-1',
             'state': 'enabled',
             'version': 1,
@@ -852,7 +892,7 @@ class TestPublicDeploy:
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
         await conn._deploy_deploy({}, dict(self._DEPLOY))
         args = account_stub.deployments_deploy.await_args.args
-        assert (args[1], args[2], args[3]) == ('~public', 'acme.proj-1', 1)
+        assert (args[1], args[2], args[3]) == ('@public', 'acme.proj-1', 1)
         assert args[5] == 'team-1'  # the publisher's dev team, stamped at pointer time
 
     @pytest.mark.asyncio
@@ -864,7 +904,7 @@ class TestPublicDeploy:
         conn = _make_conn(_account_info())
         self._rail(account_stub, 'ready')
         await conn._deploy_deploy({}, dict(self._DEPLOY))
-        assert account_stub.deployments_deploy.await_args.args[1] == '~public'
+        assert account_stub.deployments_deploy.await_args.args[1] == '@public'
         self._rail(account_stub, 'private')
         with pytest.raises(ValueError, match='not ready for the store'):
             await conn._deploy_deploy({}, dict(self._DEPLOY))
@@ -912,22 +952,22 @@ class TestPublicDeploy:
     @pytest.mark.asyncio
     async def test_a_member_sees_the_store_row_and_reads_it_by_its_handle(self, account_stub):
         account_stub.deployments_list.return_value = [
-            {'teamId': 'team-1', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
-            {'teamId': '~public', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
-            {'teamId': 'team-x', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+            {'teamId': '=team/team-1', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+            {'teamId': '@public', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
+            {'teamId': '=team/team-x', 'projectId': 'acme.proj-1', 'state': 'enabled', 'version': 1, 'schedules': {}},
         ]
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'A', 'permissions': []}]))
         result = await conn._deploy_list({}, {})
-        assert sorted(r['teamId'] for r in result['body']['rows']) == ['team-1', '~public']
+        assert sorted(r['teamId'] for r in result['body']['rows']) == ['=team/team-1', '@public']
         await conn._deploy_list({}, {'teamId': '@public'})
-        assert account_stub.deployments_list.await_args.args == ('org-1', '~public')
+        assert account_stub.deployments_list.await_args.args == ('org-1', '@public')
 
     @pytest.mark.asyncio
     async def test_schedules_sit_on_me_and_on_the_store(self, account_stub):
         # Any published pipe can be scheduled: @me and @public take a
         # schedule like a team does, and the scheduler resyncs from the row
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
-        for target, slot in (('@me', 'user~user-1'), ('@public', '~public')):
+        for target, slot in (('@me', '=user/user-1'), ('@public', '@public')):
             await conn._deploy_schedule_set(
                 {}, {'projectId': 'proj-1', 'teamId': target, 'sourceId': 's1', 'schedule': '0 2 * * *'}
             )
@@ -945,7 +985,7 @@ class TestPublicDeploy:
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
         record = {
-            'teamId': '~public',
+            'teamId': '@public',
             'projectId': 'acme.proj-1',
             'state': 'enabled',
             'version': 1,
@@ -961,10 +1001,10 @@ class TestPublicDeploy:
         )
         await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
         assert dispatched['team_id'] == 'team-1'
-        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='~public', project_id='acme.proj-1')
+        assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='@public', project_id='acme.proj-1')
         # The run sits on the public rung, team-owned by the billing team
         assert (dispatched['owner_kind'], dispatched['rung']) == ('team', 'public')
-        # An unstamped store row refuses: it never bills a team named '~public'
+        # An unstamped store row refuses: it never bills a team named '@public'
         account_stub.deployments_get.return_value = {**record, 'billingTeamId': ''}
         with pytest.raises(ValueError, match='billing'):
             await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
@@ -1153,7 +1193,7 @@ class TestPreview:
 # ============================================================================
 
 
-def _pin(rung='team', team_id='team-1', version=2, org='org-1', project='docBrain'):
+def _pin(rung='team', team_id='=team/team-1', version=2, org='org-1', project='docBrain'):
     """One serving pin of docBrain."""
     from ai.account.pipe_deploy import Pin
 
@@ -1289,7 +1329,7 @@ class TestInterfaces:
         conn = _make_conn(_account_info())
         _answers(
             conn,
-            _pin(rung='public', team_id='~public', org='org-9', project='docBrain', version=7),
+            _pin(rung='public', team_id='@public', org='org-9', project='docBrain', version=7),
             address='zeta.docBrain',
         )
         resp = await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'zeta.docBrain'}})

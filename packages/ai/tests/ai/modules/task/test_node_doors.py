@@ -394,8 +394,9 @@ async def test_reads_come_back_in_chunks_with_the_handle_protocol(files):
 
 async def test_scoped_paths_and_system_trees_are_refused(files):
     engine = _Engine({'c1': ALICE})
-    with pytest.raises(RuntimeError, match='engine context'):
-        await _ask(engine, 'fs_get_json', correlationId='c1', path='@/Team/=team-1/x.json')
+    for rooted in ('=team/team-1/x.json', '@Development/x.json', '@me/x.json', '=user/user-1/x.json'):
+        with pytest.raises(RuntimeError, match='engine context'):
+            await _ask(engine, 'fs_get_json', correlationId='c1', path=rooted)
     with pytest.raises(RuntimeError, match='engine context'):
         await _ask(engine, 'fs_put_json', correlationId='c1', path='.logs/x.json', value=1)
 

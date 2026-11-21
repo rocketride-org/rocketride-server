@@ -111,7 +111,7 @@ async def handle_fetch(request: Request):
     # happened at URL ISSUANCE (FileStore.get_url resolved+authorized under
     # the requesting session's identity), and the signed JWT is the
     # capability. Nothing is re-resolved here — scope re-resolution under an
-    # internal identity would deny name-based '@/Team/<name>' and '@/Org'
+    # internal identity would deny name-based '@<team>' and '@org'
     # spellings (no name dictionary, no org context) and 500 the fetch.
     from ai.account import Store
 

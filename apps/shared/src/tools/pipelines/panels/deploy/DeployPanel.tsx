@@ -449,7 +449,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 
 	/** Stage a pointer move for confirmation (deploy and rollback alike). The
 	    audience's current row is found by rung: the caller's own space is
-	    addressed '@me' while its row carries the raw `user~{uid}` slot. */
+	    addressed '@me' while its row carries its audience `=user/<uid>`. */
 	const stageDeploy = (version: number, team: DeployTeamRef): void => {
 		const current = rowOfTarget(liveDeployments, team.id);
 		setPickerVersion(null);

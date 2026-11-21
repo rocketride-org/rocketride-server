@@ -311,8 +311,8 @@ class TestDeploy:
     @pytest.mark.asyncio
     async def test_deploy_points_team_at_version(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        dep = await backend.deploy('org-1', 'team-stag', 'acme.proj-1', 1, ACTOR)
-        assert dep['teamId'] == 'team-stag'
+        dep = await backend.deploy('org-1', '=team/team-stag', 'acme.proj-1', 1, ACTOR)
+        assert dep['teamId'] == dep['audience'] == '=team/team-stag'
         assert dep['version'] == 1
         assert dep['state'] == 'enabled'
         # Mutations return the JOINED record — scheduler.sync() keys off
@@ -327,18 +327,18 @@ class TestDeploy:
         # records from before the field existed).
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        dep = await backend.deploy('org-1', 'user~u1', 'acme.proj-1', 1, ACTOR, 'team-dev')
+        dep = await backend.deploy('org-1', '=user/u1', 'acme.proj-1', 1, ACTOR, 'team-dev')
         assert dep['billingTeamId'] == 'team-dev'
         # deploy() returns the joined record from the mutation path, which does
         # not prove the write landed — read it back from storage to assert both
         # the version pointer AND the billing stamp actually persisted.
-        stored = await backend.get('org-1', 'user~u1', 'acme.proj-1')
+        stored = await backend.get('org-1', '=user/u1', 'acme.proj-1')
         assert stored['version'] == 1
         assert stored['billingTeamId'] == 'team-dev'
         # A pointer move re-decides the stamp.
-        dep = await backend.deploy('org-1', 'user~u1', 'acme.proj-1', 2, ACTOR, 'team-prod')
+        dep = await backend.deploy('org-1', '=user/u1', 'acme.proj-1', 2, ACTOR, 'team-prod')
         assert dep['billingTeamId'] == 'team-prod'
-        stored = await backend.get('org-1', 'user~u1', 'acme.proj-1')
+        stored = await backend.get('org-1', '=user/u1', 'acme.proj-1')
         assert stored['version'] == 2
         assert stored['billingTeamId'] == 'team-prod'
 
@@ -346,28 +346,28 @@ class TestDeploy:
     async def test_unpublished_version_refused(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         with pytest.raises(ValueError, match='not published'):
-            await backend.deploy('org-1', 'team-stag', 'acme.proj-1', 7, ACTOR)
+            await backend.deploy('org-1', '=team/team-stag', 'acme.proj-1', 7, ACTOR)
 
     @pytest.mark.asyncio
     async def test_two_teams_hold_independent_pointers(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-stag', 'acme.proj-1', 2, ACTOR)
-        await backend.deploy('org-1', 'team-prod', 'acme.proj-1', 1, OTHER)
+        await backend.deploy('org-1', '=team/team-stag', 'acme.proj-1', 2, ACTOR)
+        await backend.deploy('org-1', '=team/team-prod', 'acme.proj-1', 1, OTHER)
 
-        stag = await backend.get('org-1', 'team-stag', 'acme.proj-1')
-        prod = await backend.get('org-1', 'team-prod', 'acme.proj-1')
+        stag = await backend.get('org-1', '=team/team-stag', 'acme.proj-1')
+        prod = await backend.get('org-1', '=team/team-prod', 'acme.proj-1')
         assert (stag['version'], prod['version']) == (2, 1)
 
     @pytest.mark.asyncio
     async def test_rollback_is_a_pointer_move_with_an_honest_label(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-prod', 'acme.proj-1', 2, ACTOR)
-        dep = await backend.deploy('org-1', 'team-prod', 'acme.proj-1', 1, OTHER)
+        await backend.deploy('org-1', '=team/team-prod', 'acme.proj-1', 2, ACTOR)
+        dep = await backend.deploy('org-1', '=team/team-prod', 'acme.proj-1', 1, OTHER)
         assert dep['version'] == 1
 
-        history = (await backend.history('org-1', 'acme.proj-1', 'team-prod'))['rows']
+        history = (await backend.history('org-1', 'acme.proj-1', '=team/team-prod'))['rows']
         # Newest first: the downgrade is recorded as 'rollback', by whom.
         assert history[0]['action'] == 'rollback'
         assert history[0]['actor'] == OTHER
@@ -385,10 +385,10 @@ class TestDeploy:
         monkeypatch.setattr(backend_mod.time, 'time', lambda: 1_000_000.0)
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-prod', 'acme.proj-1', 2, ACTOR)
-        await backend.deploy('org-1', 'team-prod', 'acme.proj-1', 1, OTHER)
+        await backend.deploy('org-1', '=team/team-prod', 'acme.proj-1', 2, ACTOR)
+        await backend.deploy('org-1', '=team/team-prod', 'acme.proj-1', 1, OTHER)
 
-        history = (await backend.history('org-1', 'acme.proj-1', 'team-prod'))['rows']
+        history = (await backend.history('org-1', 'acme.proj-1', '=team/team-prod'))['rows']
         # (Org-wide publish rows ride along in a team-filtered view.)
         assert [h['action'] for h in history] == ['rollback', 'deploy', 'publish', 'publish']
 
@@ -398,7 +398,7 @@ class TestDeploy:
         # and returns the standard {rows,total,page,pageSize} envelope.
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         for _ in range(4):
-            await backend.deploy('org-1', 'team-prod', 'acme.proj-1', 1, ACTOR)
+            await backend.deploy('org-1', '=team/team-prod', 'acme.proj-1', 1, ACTOR)
 
         page1 = await backend.history('org-1', 'acme.proj-1', None, {'page': 1, 'page_size': 2})
         page2 = await backend.history('org-1', 'acme.proj-1', None, {'page': 2, 'page_size': 2})
@@ -424,14 +424,14 @@ class TestState:
     @pytest.mark.asyncio
     async def test_disable_enable(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        deployed = await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
+        deployed = await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
         assert deployed['deployedAt'] is not None
 
-        dep = await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'disabled', ACTOR)
+        dep = await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'disabled', ACTOR)
         assert dep['state'] == 'disabled'
         # deployedAt is the POINTER-MOVE stamp — state flips never bump it.
         assert dep['deployedAt'] == deployed['deployedAt']
-        dep = await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'enabled', ACTOR)
+        dep = await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'enabled', ACTOR)
         assert dep['state'] == 'enabled'
 
         # History records the user verbs, not raw states.
@@ -442,35 +442,35 @@ class TestState:
     async def test_old_state_names_are_rejected(self, backend):
         # The pre-0007 vocabulary must not silently round-trip.
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
         with pytest.raises(ValueError, match='invalid state'):
-            await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'paused', ACTOR)
+            await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'paused', ACTOR)
         with pytest.raises(ValueError, match='invalid state'):
-            await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'active', ACTOR)
+            await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'active', ACTOR)
 
     @pytest.mark.asyncio
     async def test_soft_remove_hides_but_retains_everything(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
-        await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'removed', ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'removed', ACTOR)
 
         # Hidden from reads...
-        assert await backend.get('org-1', 'team-1', 'acme.proj-1') is None
-        assert await backend.list_team('org-1', 'team-1') == []
+        assert await backend.get('org-1', '=team/team-1', 'acme.proj-1') is None
+        assert await backend.list_team('org-1', '=team/team-1') == []
         # ...but the registry and the audit trail survive in full.
         assert len(await backend.versions('org-1', 'acme.proj-1')) == 1
         actions = [h['action'] for h in (await backend.history('org-1', 'acme.proj-1'))['rows']]
         assert 'remove' in actions and 'publish' in actions
 
         # And a fresh deploy revives the team's deployment.
-        dep = await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
+        dep = await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
         assert dep['state'] == 'enabled'
 
     @pytest.mark.asyncio
     async def test_state_change_requires_existing_deployment(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         with pytest.raises(StorageError, match='No deployment'):
-            await backend.set_state('org-1', 'team-x', 'acme.proj-1', 'disabled', ACTOR)
+            await backend.set_state('org-1', '=team/team-x', 'acme.proj-1', 'disabled', ACTOR)
 
 
 # ============================================================================
@@ -482,87 +482,89 @@ class TestSchedules:
     @pytest.mark.asyncio
     async def test_set_and_clear_per_source(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
 
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR)
+        dep = await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR)
         assert dep['schedules']['webhook_1']['cron'] == '*/5 * * * *'
         assert dep['schedules']['webhook_1']['paused'] is False
         assert dep['schedules']['webhook_1']['ttl'] is None
 
         # The run window ('fixed window') rides the schedule record.
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR, 1800)
+        dep = await backend.schedule_set(
+            'org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR, 1800
+        )
         assert dep['schedules']['webhook_1']['ttl'] == 1800
 
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', None, ACTOR)
+        dep = await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', None, ACTOR)
         assert 'webhook_1' not in dep['schedules']
 
     @pytest.mark.asyncio
     async def test_pause_resume_one_schedule(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
-        await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR, 900)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR, 900)
 
         # Pause keeps cron/ttl; resume flips it back.
-        dep = await backend.schedule_set_paused('org-1', 'team-1', 'acme.proj-1', 'webhook_1', True, ACTOR)
+        dep = await backend.schedule_set_paused('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', True, ACTOR)
         assert dep['schedules']['webhook_1']['paused'] is True
         assert dep['schedules']['webhook_1']['cron'] == '*/5 * * * *'
         assert dep['schedules']['webhook_1']['ttl'] == 900
-        dep = await backend.schedule_set_paused('org-1', 'team-1', 'acme.proj-1', 'webhook_1', False, ACTOR)
+        dep = await backend.schedule_set_paused('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', False, ACTOR)
         assert dep['schedules']['webhook_1']['paused'] is False
 
     @pytest.mark.asyncio
     async def test_pause_survives_cron_edit(self, backend):
         # Editing cron/ttl must NOT silently unpause a paused schedule.
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
-        await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR)
-        await backend.schedule_set_paused('org-1', 'team-1', 'acme.proj-1', 'webhook_1', True, ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '*/5 * * * *', ACTOR)
+        await backend.schedule_set_paused('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', True, ACTOR)
 
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR, 600)
+        dep = await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR, 600)
         assert dep['schedules']['webhook_1']['paused'] is True
         assert dep['schedules']['webhook_1']['cron'] == '@hourly'
 
     @pytest.mark.asyncio
     async def test_source_config_set_and_survives_schedule_edits(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
 
         # Config on an UNSCHEDULED source creates the row with cron '' —
         # the 'manual' wire semantic, so nothing ever fires from it.
-        dep = await backend.source_config_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', 'none', True, ACTOR)
+        dep = await backend.source_config_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', 'none', True, ACTOR)
         assert dep['schedules']['webhook_1']['traceLevel'] == 'none'
         assert dep['schedules']['webhook_1']['debugOut'] is True
         assert dep['schedules']['webhook_1']['cron'] == ''
 
         # Setting a schedule keeps the config; clearing it keeps the row
         # BECAUSE config is still set (cron returns to '').
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR, 600)
+        dep = await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR, 600)
         assert dep['schedules']['webhook_1']['traceLevel'] == 'none'
         assert dep['schedules']['webhook_1']['debugOut'] is True
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', None, ACTOR)
+        dep = await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', None, ACTOR)
         assert dep['schedules']['webhook_1']['cron'] == ''
         assert dep['schedules']['webhook_1']['traceLevel'] == 'none'
 
         # Clearing the config back to defaults, then the schedule: row gone.
-        await backend.source_config_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', None, False, ACTOR)
-        dep = await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', None, ACTOR)
+        await backend.source_config_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', None, False, ACTOR)
+        dep = await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', None, ACTOR)
         assert 'webhook_1' not in dep['schedules']
 
     @pytest.mark.asyncio
     async def test_pause_requires_existing_schedule(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
         with pytest.raises(StorageError, match='No schedule'):
-            await backend.schedule_set_paused('org-1', 'team-1', 'acme.proj-1', 'ghost_1', True, ACTOR)
+            await backend.schedule_set_paused('org-1', '=team/team-1', 'acme.proj-1', 'ghost_1', True, ACTOR)
 
     @pytest.mark.asyncio
     async def test_mark_run_stamps_last_fired(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR)
-        await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR)
+        await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR)
 
-        await backend.mark_run('org-1', 'team-1', 'acme.proj-1', 'webhook_1')
-        dep = await backend.get('org-1', 'team-1', 'acme.proj-1')
+        await backend.mark_run('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1')
+        dep = await backend.get('org-1', '=team/team-1', 'acme.proj-1')
         assert dep['schedules']['webhook_1']['lastRunAt'] is not None
 
 
@@ -667,10 +669,10 @@ class TestDeleteVersion:
 
         # A pipe's team pointer pins the same way; a soft-removed pointer does not.
         p1 = await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
         with pytest.raises(ValueError, match='@team/team-1'):
             await backend.delete_version('org-1', 'acme.proj-1', 1, ACTOR)
-        await backend.set_state('org-1', 'team-1', 'acme.proj-1', 'removed', ACTOR)
+        await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'removed', ACTOR)
         assert (await backend.delete_version('org-1', 'acme.proj-1', 1, ACTOR))['deleted'] is True
         with pytest.raises(StorageNotFoundError):
             await store.read_file(p1['artifactPath'])
@@ -852,17 +854,17 @@ class TestIterEnabled:
     @pytest.mark.asyncio
     async def test_yields_only_enabled_deployments_across_orgs(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-a', 'acme.proj-1', 1, ACTOR)
-        await backend.deploy('org-1', 'team-b', 'acme.proj-1', 1, ACTOR)
-        await backend.set_state('org-1', 'team-b', 'acme.proj-1', 'disabled', ACTOR)
+        await backend.deploy('org-1', '=team/team-a', 'acme.proj-1', 1, ACTOR)
+        await backend.deploy('org-1', '=team/team-b', 'acme.proj-1', 1, ACTOR)
+        await backend.set_state('org-1', '=team/team-b', 'acme.proj-1', 'disabled', ACTOR)
 
         await backend.publish('org-2', 'other.proj-9', {**PIPE, 'project_id': 'proj-9'}, OTHER)
-        await backend.deploy('org-2', 'team-z', 'other.proj-9', 1, OTHER)
+        await backend.deploy('org-2', '=team/team-z', 'other.proj-9', 1, OTHER)
 
         seen = [(d['orgId'], d['teamId'], d['projectId']) async for d in backend.iter_enabled()]
-        assert ('org-1', 'team-a', 'acme.proj-1') in seen
-        assert ('org-2', 'team-z', 'other.proj-9') in seen
-        assert all(t != 'team-b' for _, t, _p in seen)
+        assert ('org-1', '=team/team-a', 'acme.proj-1') in seen
+        assert ('org-2', '=team/team-z', 'other.proj-9') in seen
+        assert all(t != '=team/team-b' for _, t, _p in seen)
 
     @pytest.mark.asyncio
     async def test_fresh_store_yields_nothing(self, backend):
@@ -883,27 +885,27 @@ class TestStoreSlot:
         # The store is a pipe's audience like any other: the pointer lives in
         # the public slot of the one publish map and carries its stamp.
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        dep = await backend.deploy('org-1', '~public', 'acme.proj-1', 1, ACTOR, 'team-dev')
+        dep = await backend.deploy('org-1', '@public', 'acme.proj-1', 1, ACTOR, 'team-dev')
         assert (dep['teamId'], dep['version'], dep['state'], dep['billingTeamId']) == (
-            '~public',
+            '@public',
             1,
             'enabled',
             'team-dev',
         )
-        stored = await backend.get('org-1', '~public', 'acme.proj-1')
-        assert (stored['teamId'], stored['billingTeamId']) == ('~public', 'team-dev')
-        # The row is THE public publish of the map, not a team named '~public'
+        stored = await backend.get('org-1', '@public', 'acme.proj-1')
+        assert (stored['teamId'], stored['billingTeamId']) == ('@public', 'team-dev')
+        # The row is THE public publish of the map, not a team named '@public'
         rows = await backend.publish_of_app('org-1', 'pipe', 'acme.proj-1')
         assert [r['audience'] for r in rows] == [{'type': 'public', 'id': ''}]
 
     @pytest.mark.asyncio
     async def test_the_list_returns_the_store_row_beside_the_other_slots(self, backend):
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-a', 'acme.proj-1', 1, ACTOR, 'team-a')
-        await backend.deploy('org-1', 'user~u1', 'acme.proj-1', 1, ACTOR, 'team-a')
-        await backend.deploy('org-1', '~public', 'acme.proj-1', 1, ACTOR, 'team-a')
-        assert sorted(d['teamId'] for d in await backend.list_team('org-1')) == ['team-a', 'user~u1', '~public']
-        assert [d['teamId'] for d in await backend.list_team('org-1', '~public')] == ['~public']
+        await backend.deploy('org-1', '=team/team-a', 'acme.proj-1', 1, ACTOR, 'team-a')
+        await backend.deploy('org-1', '=user/u1', 'acme.proj-1', 1, ACTOR, 'team-a')
+        await backend.deploy('org-1', '@public', 'acme.proj-1', 1, ACTOR, 'team-a')
+        assert sorted(d['teamId'] for d in await backend.list_team('org-1')) == ['=team/team-a', '=user/u1', '@public']
+        assert [d['teamId'] for d in await backend.list_team('org-1', '@public')] == ['@public']
         # An app's store publish stays out of the pipe list
         await backend.publish('org-1', 'acme.brandy', {'kind': 'app', 'appId': 'acme.brandy', 'name': 'B'}, ACTOR)
         await backend.publish_set('org-1', 'app', 'acme.brandy', {'type': 'public', 'id': ''}, 1, {}, ACTOR)
@@ -915,16 +917,16 @@ class TestStoreSlot:
         # schedule, the scheduler feed carries it, and the record the fire
         # reads names the billing team stamped when it was published.
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', '~public', 'acme.proj-1', 1, ACTOR, 'team-dev')
-        dep = await backend.schedule_set('org-1', '~public', 'acme.proj-1', 'webhook_1', '0 2 * * *', ACTOR, 3600)
+        await backend.deploy('org-1', '@public', 'acme.proj-1', 1, ACTOR, 'team-dev')
+        dep = await backend.schedule_set('org-1', '@public', 'acme.proj-1', 'webhook_1', '0 2 * * *', ACTOR, 3600)
         assert dep['schedules']['webhook_1']['cron'] == '0 2 * * *'
-        fed = [d async for d in backend.iter_enabled() if d['teamId'] == '~public']
+        fed = [d async for d in backend.iter_enabled() if d['teamId'] == '@public']
         assert [(d['projectId'], d['schedules']['webhook_1']['cron']) for d in fed] == [('acme.proj-1', '0 2 * * *')]
-        fired = await backend.get('org-1', '~public', 'acme.proj-1')
+        fired = await backend.get('org-1', '@public', 'acme.proj-1')
         assert fired['billingTeamId'] == 'team-dev'
         # Unpublishing the store row stops the feed
-        await backend.set_state('org-1', '~public', 'acme.proj-1', 'removed', ACTOR)
-        assert [d async for d in backend.iter_enabled() if d['teamId'] == '~public'] == []
+        await backend.set_state('org-1', '@public', 'acme.proj-1', 'removed', ACTOR)
+        assert [d async for d in backend.iter_enabled() if d['teamId'] == '@public'] == []
 
 
 # ============================================================================
@@ -958,8 +960,8 @@ class TestNameRow:
     async def test_pointer_rows_are_publish_rows(self, backend):
         """A team or personal pointer is a row of the one publish map, read back by kind (plan 10.1)."""
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
-        await backend.deploy('org-1', 'user~user-1', 'acme.proj-1', 1, ACTOR, 'team-home')
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
+        await backend.deploy('org-1', '=user/user-1', 'acme.proj-1', 1, ACTOR, 'team-home')
 
         rows = {r['audience']['type']: r for r in await backend.publish_of_app('org-1', 'pipe', 'acme.proj-1')}
         assert set(rows) == {'team', 'user'}
@@ -979,12 +981,12 @@ class TestNameRow:
         """Repointing a pipe row through publish_set keeps what the pointer verbs stamped."""
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
-        await backend.deploy('org-1', 'team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
-        await backend.schedule_set('org-1', 'team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR)
+        await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
+        await backend.schedule_set('org-1', '=team/team-1', 'acme.proj-1', 'webhook_1', '@hourly', ACTOR)
 
         row = await backend.publish_set('org-1', 'pipe', 'acme.proj-1', AUD_TEAM, 2, {'name': 'Invoice Ingest'}, ACTOR)
         assert (row['version'], row['billingTeamId']) == (2, 'team-1')
-        dep = await backend.get('org-1', 'team-1', 'acme.proj-1')
+        dep = await backend.get('org-1', '=team/team-1', 'acme.proj-1')
         assert dep['version'] == 2 and dep['schedules']['webhook_1']['cron'] == '@hourly'
         # And a version of the wrong kind is refused
         with pytest.raises(ValueError, match='not a app'):
@@ -1015,17 +1017,22 @@ class TestNameRow:
         }
         await store.write_file(path, json.dumps(meta))
 
-        dep = await backend.get('org-1', 'team-a', 'acme.proj-1')
-        assert (dep['teamId'], dep['version'], dep['billingTeamId'], dep['deployedAt']) == ('team-a', 1, 'team-a', 2.0)
+        dep = await backend.get('org-1', '=team/team-a', 'acme.proj-1')
+        assert (dep['teamId'], dep['version'], dep['billingTeamId'], dep['deployedAt']) == (
+            '=team/team-a',
+            1,
+            'team-a',
+            2.0,
+        )
         assert dep['schedules']['webhook_1']['cron'] == '@daily'
         rows = await backend.publish_of_app('org-1', 'pipe', 'acme.proj-1')
         assert [(r['audience']['type'], r['audience']['id']) for r in rows] == [('team', 'team-a')]
         feed = [d async for d in backend.iter_enabled()]
-        assert [(d['teamId'], d['projectId']) for d in feed] == [('team-a', 'acme.proj-1')]
+        assert [(d['teamId'], d['projectId']) for d in feed] == [('=team/team-a', 'acme.proj-1')]
 
-        await backend.set_state('org-1', 'team-a', 'acme.proj-1', 'disabled', ACTOR)
+        await backend.set_state('org-1', '=team/team-a', 'acme.proj-1', 'disabled', ACTOR)
         rewritten = json.loads(await store.read_file(path))
-        assert 'deployments' not in rewritten and rewritten['publishes']['team~team-a']['state'] == 'disabled'
+        assert 'deployments' not in rewritten and rewritten['publishes']['=team/team-a']['state'] == 'disabled'
 
     @pytest.mark.asyncio
     async def test_a_legacy_meta_without_a_kind_still_keeps_its_kind(self, backend, store):
@@ -1057,7 +1064,7 @@ class TestNameRow:
         await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 1, {'name': 'Brandy'}, ACTOR)
         path = backend._meta_path('org-1', 'acme.brandy')
         meta = json.loads(await store.read_file(path))
-        del meta['publishes']['~public']['kind']
+        del meta['publishes']['@public']['kind']
         await store.write_file(path, json.dumps(meta))
 
         row = await backend.publish_get('org-1', 'app', 'acme.brandy', AUD_PUBLIC)
@@ -1083,7 +1090,7 @@ class TestNameRow:
         with pytest.raises(StorageError, match='storage unavailable'):
             await backend.publish_of_app('org-1', 'pipe', 'acme.proj-1')
         with pytest.raises(StorageError, match='storage unavailable'):
-            await backend.get('org-1', 'team-1', 'acme.proj-1')
+            await backend.get('org-1', '=team/team-1', 'acme.proj-1')
         # A publish never treats a broken read as a fresh project
         with pytest.raises(StorageError, match='storage unavailable'):
             await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)

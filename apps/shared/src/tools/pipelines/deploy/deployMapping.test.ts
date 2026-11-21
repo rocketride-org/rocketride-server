@@ -26,40 +26,53 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import type { Deployment } from 'rocketride';
-import { mapTeamDeploymentRows, rungOfSlot, withReviewStates } from './deployMapping';
+import { mapHistoryRows, mapTeamDeploymentRows, withReviewStates } from './deployMapping';
 import type { DeployTeamRefDTO, DeployVersionCardDTO } from './deployTypes';
 
-describe('rungOfSlot', () => {
-	it('reads the one audience grammar from the caller side', () => {
-		assert.equal(rungOfSlot('user~u1', 'u1'), 'me');
-		assert.equal(rungOfSlot('user~u2', 'u1'), 'personal');
-		assert.equal(rungOfSlot('~public', 'u1'), 'public');
-		assert.equal(rungOfSlot('team-prod', 'u1'), 'team');
-	});
-
-	it("never claims a personal space as the caller's own when the caller is unknown", () => {
-		assert.equal(rungOfSlot('user~u1', ''), 'personal');
-	});
-});
-
 describe('mapTeamDeploymentRows', () => {
-	it("stamps each row's rung and names the caller's own space Me", () => {
-		const teams: DeployTeamRefDTO[] = [{ id: 'team-prod', name: 'Production', canControl: true }];
+	it("draws each row on the server's rung, names a team by the caller's roster, and keeps its audience", () => {
+		const teams: DeployTeamRefDTO[] = [{ id: '=team/team-prod', name: 'Production', canControl: true }];
 		const rows = mapTeamDeploymentRows(
 			[
-				{ projectId: 'acme.docBrain', teamId: 'user~u1', version: 5, state: 'enabled' },
-				{ projectId: 'acme.docBrain', teamId: 'team-prod', version: 4, state: 'enabled' },
-				{ projectId: 'acme.other', teamId: 'team-prod', version: 1, state: 'enabled' },
+				{ projectId: 'acme.docBrain', teamId: '=user/u1', rung: 'me', handle: '@me', version: 5, state: 'enabled' },
+				{ projectId: 'acme.docBrain', teamId: '=team/team-prod', rung: 'team', handle: '@Production', version: 4, state: 'enabled' },
+				{ projectId: 'acme.docBrain', teamId: '@public', rung: 'public', handle: '@public', version: 3, state: 'enabled' },
+				{ projectId: 'acme.other', teamId: '=team/team-prod', rung: 'team', handle: '@Production', version: 1, state: 'enabled' },
+				{ projectId: 'acme.docBrain', teamId: '=user/u2', rung: 'personal', handle: 'Personal', version: 2, state: 'enabled' },
+				{ projectId: 'acme.docBrain', teamId: '=team/team-9', rung: 'team', handle: '=team/team-9', version: 1, state: 'enabled' },
 			] as Deployment[],
 			'acme.docBrain',
-			teams,
-			'u1'
+			teams
 		);
 		assert.deepEqual(
 			rows.map((r) => [r.teamId, r.teamName, r.rung, r.version]),
 			[
-				['user~u1', 'Me', 'me', 5],
-				['team-prod', 'Production', 'team', 4],
+				['=user/u1', '@me', 'me', 5],
+				['=team/team-prod', 'Production', 'team', 4],
+				['@public', '@public', 'public', 3],
+				['=user/u2', 'Personal', 'personal', 2],
+				['=team/team-9', '=team/team-9', 'team', 1],
+			]
+		);
+	});
+
+	it('drops a row on a rung the panel does not draw', () => {
+		const rows = mapTeamDeploymentRows([{ projectId: 'acme.docBrain', teamId: '=org/o1', rung: 'org', handle: '@org', version: 1, state: 'enabled' }] as Deployment[], 'acme.docBrain', []);
+		assert.deepEqual(rows, []);
+	});
+});
+
+describe('mapHistoryRows', () => {
+	it("names a pointer change by the row's handle and an org-wide row by nothing", () => {
+		const rows = mapHistoryRows([
+			{ seq: 2, at: 2, action: 'deploy', teamId: '=team/team-prod', handle: '@Production', version: 4, actor: { userId: 'u1', display: 'Rod' } },
+			{ seq: 1, at: 1, action: 'publish', teamId: '', version: 4, actor: { userId: 'u1', display: 'Rod' } },
+		]);
+		assert.deepEqual(
+			rows.map((r) => [r.teamId, r.teamName, r.action]),
+			[
+				['=team/team-prod', '@Production', 'deploy'],
+				['', '', 'publish'],
 			]
 		);
 	});

@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """
 Unit tests for ai.modules.task.commands.cmd_monitor.MonitorCommands.
 
@@ -510,6 +532,37 @@ async def test_on_rrext_monitor_with_unknown_string_in_list_is_ignored():
     await MonitorCommands.on_rrext_monitor(conn, request)
     monitor_value = conn._monitors.get('p.dev.user-1.proj-1.src-1')
     assert monitor_value & EVENT_TYPE.SUMMARY
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('team', 'scope'),
+    [
+        # A deployment row's teamId (its audience, plan 2.5) passed back unchanged
+        ('=team/team-1', ('team-1', 'deploy')),
+        ('=user/user-1', ('', 'deploy')),
+        # A team id, as before
+        ('team-1', ('team-1', '')),
+    ],
+)
+async def test_on_rrext_monitor_reads_a_rows_audience_as_its_deploy_scope(team, scope):
+    conn = _make_conn(account_info=_account_info())
+    conn.set_monitor = AsyncMock()
+    request = {'arguments': {'projectId': 'proj-1', 'source': '*', 'teamId': team, 'types': ['TASK']}}
+    await MonitorCommands.on_rrext_monitor(conn, request)
+    kwargs = conn.set_monitor.await_args.kwargs
+    assert (kwargs['team_id'], kwargs['run_kind']) == scope
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('team', ['=user/other', '@public', '=org/org-1'])
+async def test_on_rrext_monitor_refuses_an_audience_with_no_deploy_scope(team):
+    conn = _make_conn(account_info=_account_info())
+    conn.set_monitor = AsyncMock()
+    request = {'arguments': {'projectId': 'proj-1', 'source': '*', 'teamId': team, 'types': ['TASK']}}
+    with pytest.raises(ValueError):
+        await MonitorCommands.on_rrext_monitor(conn, request)
+    conn.set_monitor.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

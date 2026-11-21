@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2026 Aparavi Software AG
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 """The server side of the pipeline bundle (plan 9, C.17b): the store block, the zip, the manifest, the content."""
 
 import asyncio
@@ -182,7 +204,7 @@ def _fs(monkeypatch, write=None):
 
 
 def test_the_store_home_is_the_versions_content_dir_store_subdir():
-    assert store_home_of('org-1', ENTRY) == f'@/Org/=org-1/.deployments/acme.docBrain/v000003-abcdef12/{PIPE_STORE_DIR}'
+    assert store_home_of('org-1', ENTRY) == f'=org/org-1/.deployments/acme.docBrain/v000003-abcdef12/{PIPE_STORE_DIR}'
     with pytest.raises(ValueError, match='no usable artifactPath'):
         store_home_of('org-1', {'version': 3, 'artifactPath': 'elsewhere/x.json'})
 
