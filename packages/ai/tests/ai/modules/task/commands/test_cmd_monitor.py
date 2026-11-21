@@ -38,7 +38,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from rocketride import EVENT_TYPE, TASK_STATE
-from ai.modules.task.commands.cmd_monitor import MonitorCommands
+from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
 from ai.modules.task.task_control import RESOLVE_ATTACH
 
 
@@ -170,6 +170,7 @@ def _control(
     team_id='team-1',
     run_kind='dev',
     owner_kind='',
+    pinned_version=None,
 ):
     """Build a TaskControl stub for send_task_event tests.
 
@@ -191,6 +192,9 @@ def _control(
         run_kind=run_kind,
         owner_kind=kind,
         owner_id=team_id if kind == 'team' else user_id,
+        owner=f'={kind}/{team_id if kind == "team" else user_id}',
+        caller_id=user_id,
+        pinned_version=pinned_version,
     )
 
 
@@ -235,6 +239,31 @@ async def test_send_task_event_uses_project_key_subscription():
     args, kwargs = conn.send_event.await_args
     assert args[0] == 'status'
     assert kwargs['id'] == 'task-1'
+
+
+def test_a_pinned_runs_monitor_key_carries_its_version():
+    """C.36: ``p.<runKind>.<ownerId>.<projectId>.<source>:<version>``; the published-version run's has none."""
+    assert owner_key('deploy', 'team-1', 'docBrain', 'webhook_1', 12) == 'p.deploy.team-1.docBrain.webhook_1:12'
+    assert owner_key('deploy', 'team-1', 'docBrain', 'webhook_1') == 'p.deploy.team-1.docBrain.webhook_1'
+
+
+@pytest.mark.asyncio
+async def test_a_pinned_run_reaches_its_own_key_and_the_project_wildcard_never_the_published_runs_key():
+    """C.36: the project wildcard matches a pinned run; the published-version run's subscribers never see it."""
+    server = MagicMock()
+    pinned = _control(run_kind='deploy', owner_kind='team', pinned_version=3)
+    server.control_by_key = MagicMock(return_value=pinned)
+    for monitors, delivered in (
+        ({'p.deploy.team-1.proj-1.src-1': EVENT_TYPE.SUMMARY}, False),
+        ({'p.deploy.team-1.proj-1.src-1:3': EVENT_TYPE.SUMMARY}, True),
+        ({'p.deploy.team-1.proj-1.*': EVENT_TYPE.SUMMARY}, True),
+        ({'p.deploy.team-1.proj-1.src-1:3.7': EVENT_TYPE.SSE}, True),
+    ):
+        conn = _make_conn(account_info=_account_info(), server=server, monitors=monitors)
+        event_type = EVENT_TYPE.SSE if any(key.endswith('.7') for key in monitors) else EVENT_TYPE.SUMMARY
+        body = {'pipeId': 7} if event_type == EVENT_TYPE.SSE else {}
+        await MonitorCommands.send_task_event(conn, event_type, KEY, {'event': 'status', 'body': body})
+        assert conn.send_event.await_count == (1 if delivered else 0), monitors
 
 
 @pytest.mark.asyncio
@@ -558,7 +587,7 @@ async def test_on_rrext_monitor_reads_a_rows_audience_as_its_deploy_scope(team, 
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('team', ['=user/other', '@public', '=org/org-1'])
+@pytest.mark.parametrize('team', ['=user/other', '@public'])
 async def test_on_rrext_monitor_refuses_an_audience_with_no_deploy_scope(team):
     conn = _make_conn(account_info=_account_info())
     conn.set_monitor = AsyncMock()
@@ -566,6 +595,26 @@ async def test_on_rrext_monitor_refuses_an_audience_with_no_deploy_scope(team):
     with pytest.raises(ValueError):
         await MonitorCommands.on_rrext_monitor(conn, request)
     conn.set_monitor.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_orgs_admins_watch_its_runs_by_project_and_nobody_else_does():
+    """Plan 8.3: an org-owned run's watchers are the org's admins; the subscription keys on the org."""
+    request = {'arguments': {'projectId': 'proj-1', 'source': '*', 'teamId': '=org/org-1', 'types': ['TASK']}}
+    member = _make_conn(account_info=_account_info())
+    with pytest.raises(PermissionError, match='admins'):
+        await MonitorCommands.on_rrext_monitor(member, request)
+    assert member._monitors == {}
+
+    admin_info = _account_info()
+    admin_info.organization['permissions'] = ['org.admin']
+    admin = _make_conn(account_info=admin_info)
+    admin._server.resolve_target = AsyncMock(side_effect=RuntimeError('not running'))
+    admin._server.broadcast_server_event = AsyncMock()
+    await MonitorCommands.on_rrext_monitor(admin, request)
+    assert list(admin._monitors) == ['p.deploy.org-1.proj-1.*']
+    with pytest.raises(PermissionError, match='admins'):
+        await MonitorCommands.on_rrext_monitor(admin, {'arguments': {**request['arguments'], 'teamId': '=org/org-2'}})
 
 
 # ---------------------------------------------------------------------------

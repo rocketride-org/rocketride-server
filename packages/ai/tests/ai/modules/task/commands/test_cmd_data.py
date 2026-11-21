@@ -412,7 +412,7 @@ async def test_the_stamp_names_the_control_and_its_request(catalog, engines, eng
         'spec',
     )
     assert stamp['controlId'] == control.control_id and is_control_id(stamp['controlId'])
-    assert stamp['teamId'] == control.team_context.team_id
+    assert stamp['teamId'] == control.env_team
     assert stamp['correlationId'] == engine_log[0]['correlationId']
     assert len(stamp['correlationId']) == 32
 
@@ -622,7 +622,7 @@ def test_the_stamp_and_record_cost_microseconds():
     ts = _server()
     control = MagicMock(address='acme.docBrain.webhook_1', rung='spec', orgId='org-1', env={}, trace_level=None)
     control.control_id = '=control/' + 'a' * 32
-    control.team_context.team_id = 'team-1'
+    control.env_team = 'team-1'
     conn = MagicMock(_account_info=_caller(), request_context=None)
     arguments = {'subcommand': 'write', 'pipeId': 1, 'data': b'x' * 65536, '_caller': {'userId': 'x'}}
     rounds = 2000

@@ -380,7 +380,7 @@ async def test_gate_follows_the_connection_through_reauth_and_deauth():
 
 
 def _team_run(address, task_id):
-    """A team-owned deployment run of ``address`` on team-1 (the @team rung)."""
+    """The key owner's control of team-1's publication of ``address`` (the @team rung, plan 8.3: one per caller)."""
     developer_id, project_id, source = address.split('.')
     status = SimpleNamespace(
         state=TASK_STATE.RUNNING.value,
@@ -389,8 +389,8 @@ def _team_run(address, task_id):
     )
     return SimpleNamespace(
         id=task_id,
-        key=f'team.team-1.{address}',
-        index_key=f'team.team-1.{address}',
+        key=f'team.team-1.owner-1.{address}',
+        index_key=f'team.team-1.owner-1.{address}',
         control_id=task_id,
         address=address,
         developer_id=developer_id,
@@ -400,7 +400,12 @@ def _team_run(address, task_id):
         rung='team',
         owner_kind='team',
         owner_id='team-1',
-        userId='',
+        owner='=team/team-1',
+        caller_id='owner-1',
+        restarting=False,
+        last_activity=0.0,
+        pinned_version=None,
+        userId='owner-1',
         teamId='team-1',
         orgId='org-1',
         deployment=None,
@@ -526,8 +531,8 @@ async def test_scoped_wildcard_subscription_still_receives_task_events_in_scope(
     conn = await _wildcard_conn(_scoped_identity(permissions=('task.data', 'task.monitor')))
     status = {'event': 'apaevt_status_update', 'body': {'state': TASK_STATE.RUNNING.value}}
 
-    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'team.team-1.{ADDRESS}', status)
-    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'team.team-1.{OTHER_ADDRESS}', status)
+    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'team.team-1.owner-1.{ADDRESS}', status)
+    await conn.send_task_event(EVENT_TYPE.SUMMARY, f'team.team-1.owner-1.{OTHER_ADDRESS}', status)
 
     assert [m['event'] for m in _sent(conn) if m['type'] == 'event'] == ['apaevt_status_update']
     assert [call.kwargs['id'] for call in conn.build_event.call_args_list] == ['task-in']

@@ -58,6 +58,7 @@ def _control(**overrides):
         'project_id': 'monitor',
         'ttl': 0,
         'owner_type': 'user',
+        'roots': (),
     }
     fields.update(overrides)
     control = SimpleNamespace(**fields)
@@ -395,10 +396,88 @@ async def test_reads_come_back_in_chunks_with_the_handle_protocol(files):
 async def test_scoped_paths_and_system_trees_are_refused(files):
     engine = _Engine({'c1': ALICE})
     for rooted in ('=team/team-1/x.json', '@Development/x.json', '@me/x.json', '=user/user-1/x.json'):
-        with pytest.raises(RuntimeError, match='engine context'):
+        with pytest.raises(RuntimeError, match='not a root this pipeline declares'):
             await _ask(engine, 'fs_get_json', correlationId='c1', path=rooted)
     with pytest.raises(RuntimeError, match='engine context'):
         await _ask(engine, 'fs_put_json', correlationId='c1', path='.logs/x.json', value=1)
+
+
+def _declaring(*roots, owner_kind='user', owner_id='user-1', account=None):
+    """ALICE's control with the roots its pipeline declares, resolved through its owner as start_task does."""
+    from ai.account.file_store import declared_roots
+
+    member = account or SimpleNamespace(
+        userId='user-1',
+        sysPermissions=[],
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'name': 'Development', 'permissions': ['task.store']}],
+        },
+    )
+    resolved = declared_roots(
+        list(roots), owner_kind=owner_kind, owner_id=owner_id, org_id='org-1', account_info=member
+    )
+    return _control(roots=resolved)
+
+
+async def test_a_declared_root_is_reached_and_an_undeclared_one_refused(files):
+    """Plan 2.5: self.files reaches a path under a declared root, as it was declared, and nothing else."""
+    engine = _Engine({'c1': _declaring('@Development/kb')})
+
+    # Under the declared root: by its name in any case, and its own subtree
+    await _ask(engine, 'fs_put_json', correlationId='c1', path='@Development/kb/doc.json', value={'a': 1})
+    body, _ = await _ask(engine, 'fs_get_json', correlationId='c1', path='@development/kb/doc.json')
+    assert body['value'] == {'a': 1}
+    internal = files._file_store(_internal_ctx(), client_id='user-1')
+    assert await internal.get_json('=team/team-1/kb/doc.json') == {'a': 1}
+
+    # The same root by the team's id is the same tree; outside it: another
+    # path of the same team, the org, a user root
+    body, _ = await _ask(engine, 'fs_get_json', correlationId='c1', path='=team/team-1/kb/doc.json')
+    assert body['value'] == {'a': 1}
+    for rooted in ('@Development/other.json', '=team/team-1/other.json', '@org/x.json', '@me/x.json'):
+        with pytest.raises(RuntimeError, match='not a root this pipeline declares'):
+            await _ask(engine, 'fs_get_json', correlationId='c1', path=rooted)
+    # A system tree under a declared team stays refused
+    with pytest.raises(RuntimeError, match='engine context'):
+        await _ask(engine, 'fs_get_json', correlationId='c1', path='@Development/.logs/x.json')
+
+
+def test_a_root_outside_the_owners_reach_refuses_the_start():
+    """The owner must reach every declared root in a session (plan 2.5); otherwise the control never starts."""
+    from ai.account.file_store import declared_roots
+
+    no_store = SimpleNamespace(
+        userId='user-1',
+        sysPermissions=[],
+        organization={
+            'id': 'org-1',
+            'permissions': [],
+            'teams': [{'id': 'team-1', 'name': 'Development', 'permissions': ['task.data']}],
+        },
+    )
+    # A user owner without task.store on the team, or without org.admin on the org
+    with pytest.raises(PermissionError, match='outside'):
+        declared_roots(['@Development/kb'], owner_kind='user', owner_id='user-1', org_id='org-1', account_info=no_store)
+    with pytest.raises(PermissionError, match='outside'):
+        declared_roots(['@org/shared'], owner_kind='user', owner_id='user-1', org_id='org-1', account_info=no_store)
+    # A team owner reaches its own tree only; the org owner the org tree only
+    with pytest.raises(PermissionError, match='outside'):
+        declared_roots(['=team/team-2/kb'], owner_kind='team', owner_id='team-1', org_id='org-1')
+    assert declared_roots(['=team/team-1/kb'], owner_kind='team', owner_id='team-1', org_id='org-1')[0].physical == (
+        'teams/team-1/files'
+    )
+    assert declared_roots(['@org/shared'], owner_kind='org', owner_id='org-1', org_id='org-1')[0].rest == 'shared'
+    with pytest.raises(PermissionError, match='outside'):
+        declared_roots(['=org/org-2/x'], owner_kind='org', owner_id='org-1', org_id='org-1')
+    # A name with no session to resolve it, and the roots no pipeline may declare
+    with pytest.raises(PermissionError, match='outside'):
+        declared_roots(['@Development/kb'], owner_kind='team', owner_id='team-1', org_id='org-1')
+    for bad in (['@me/x'], ['=user/user-1/x'], ['plain/path'], ['@public/x'], 'not-a-list', [3]):
+        with pytest.raises(ValueError):
+            declared_roots(bad, owner_kind='user', owner_id='user-1', org_id='org-1', account_info=no_store)
+    assert declared_roots(None, owner_kind='user', owner_id='user-1', org_id='org-1') == ()
 
 
 async def test_the_root_listing_hides_the_system_trees(files):

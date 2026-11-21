@@ -53,14 +53,14 @@ hub that respects access permissions and client preferences.
 """
 
 import time
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from ai.common.dap import DAPConn, TransportBase
-from ai.account.audience import deploy_scope_of
-from ai.account.models import resolve_run_permissions, resolve_task_permissions
+from ai.account.audience import deploy_scope_of, parse_audience
+from ai.account.models import resolve_org_permissions, resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
 from ai.account.app_deploy import _developer_id_of
-from ai.account.roots import KIND_ME, KIND_SPEC, KIND_TEAM, format_root
+from ai.account.roots import KIND_ME, KIND_ORG, KIND_SPEC, KIND_TEAM, format_root
 from ai.modules.task.address import ENDPOINT_ANY_SOURCE, build_address
 from ai.modules.task.task_control import RESOLVE_ATTACH
 from ai.modules.task.types import TaskError
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 
-def owner_key(run_kind: str, owner_id: str, project_id: str, source: str) -> str:
+def owner_key(run_kind: str, owner_id: str, project_id: str, source: str, version: Optional[int] = None) -> str:
     """
     Build the owner-scoped monitor subscription key for a run.
 
@@ -87,17 +87,25 @@ def owner_key(run_kind: str, owner_id: str, project_id: str, source: str) -> str
     run_kind is a REQUIRED leading argument (mirroring the key layout) so
     a call site can never silently omit it and collapse the continua.
 
+    A PINNED run (a version other than its rung's published one, plan 3.2)
+    appends ``:<version>`` to the source, so its subscribers and the
+    published-version run's never alias; the project wildcard
+    (``owner_wildcard_key``) matches both.
+
     Args:
         run_kind (str): 'dev' | 'deploy' — the run's continuum
-        owner_id (str): The run's owner — teamId for @team deploys, userId
-            for dev runs and @me deploys
+        owner_id (str): The run's owner — teamId for @team deploys, the org
+            id for @org (and unattended @public) runs, userId for dev runs,
+            @me deploys and a caller's @public run
         project_id (str): Project identity of the run
         source (str): Source component id of the run
+        version (Optional[int]): The pinned version, or None
 
     Returns:
-        str: The subscription key ``p.{runKind}.{ownerId}.{projectId}.{source}``
+        str: The subscription key ``p.{runKind}.{ownerId}.{projectId}.{source}[:{version}]``
     """
-    return f'p.{run_kind}.{owner_id}.{project_id}.{source}'
+    pinned = '' if version is None else f':{int(version)}'
+    return f'p.{run_kind}.{owner_id}.{project_id}.{source}{pinned}'
 
 
 def owner_wildcard_key(run_kind: str, owner_id: str, project_id: str) -> str:
@@ -305,7 +313,9 @@ class MonitorCommands(DAPConn):
         # run's OWNER (team for @team deploys, user for dev and @me), so a
         # dev run, an @me deploy, and a @team deploy of the same pipeline
         # never alias in the keyspace.
-        project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+        project_key = owner_key(
+            control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
+        )
 
         # Gather all matching subscription keys and merge their preferences
         # so each subscriber receives the event at most once.
@@ -472,6 +482,11 @@ class MonitorCommands(DAPConn):
                                 # run with no team.
                                 'runKind': target.run_kind,
                                 'teamId': target.teamId if target.run_kind == 'deploy' else '',
+                                # Where the run lives (plan 7.5): the owner a
+                                # log reader passes back unchanged, and the
+                                # pinned version of a pinned run (C.36)
+                                'owner': target.owner,
+                                'version': target.pinned_version,
                             }
                         )
 
@@ -498,6 +513,7 @@ class MonitorCommands(DAPConn):
         type: EVENT_TYPE = EVENT_TYPE.NONE,
         team_id: str = '',
         run_kind: str = '',
+        org_id: str = '',
     ) -> Dict[str, Any]:
         """
         Configure event monitoring subscription for a specific task.
@@ -526,6 +542,8 @@ class MonitorCommands(DAPConn):
                 caller's dev runs; 'deploy' = the caller's personal @me
                 deploy runs. Ignored when team_id is set (a team scope is
                 always the deploy continuum).
+            org_id (str): The active org — subscribe to the org's deploy
+                runs (@org, an unattended @public), its admins only.
 
         Returns:
             Dict[str, Any]: Status information about the subscription change
@@ -574,7 +592,9 @@ class MonitorCommands(DAPConn):
 
             # Build the key from the resolved run's OWNER so subscribe and
             # delivery agree regardless of how the subscription was addressed
-            event_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+            event_key = owner_key(
+                control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
+            )
             event_id = control.id
             filter_name = control.id
 
@@ -589,6 +609,12 @@ class MonitorCommands(DAPConn):
             # synthetic 'local' team grants monitor.)
             if team_id and 'task.monitor' not in resolve_task_permissions(self._account_info, team_id):
                 raise PermissionError('Access denied: no permissions for this team')
+            # The org's runs are watched by its admins (plan 8.3), in the active org only
+            organization = getattr(self._account_info, 'organization', None) or {}
+            if org_id and (
+                str(organization.get('id') or '') != org_id or not resolve_org_permissions(self._account_info)
+            ):
+                raise PermissionError("Access denied: the org's runs are watched by its admins")
 
             # run_kind, when supplied, must name a real continuum — but ONLY on
             # the teamless path. A team scope is always the deploy continuum
@@ -608,8 +634,8 @@ class MonitorCommands(DAPConn):
             # continuum) so an existing team subscription can never be
             # accidentally re-keyed into the dev continuum. The key is
             # derivable without the control so subscribe-before-launch works.
-            owner_id = team_id if team_id else self._account_info.userId
-            key_kind = 'deploy' if team_id else (run_kind or 'dev')
+            owner_id = team_id or org_id or self._account_info.userId
+            key_kind = 'deploy' if (team_id or org_id) else (run_kind or 'dev')
             event_key = owner_key(key_kind, owner_id, project_id, source)
 
             # It is ok if the task doesn't exist at this point in time (a
@@ -631,6 +657,8 @@ class MonitorCommands(DAPConn):
                     raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
                 if team_id:
                     target = format_root(KIND_TEAM, team_id, True, address)
+                elif org_id:
+                    target = format_root(KIND_ORG, org_id, True, address)
                 else:
                     target = format_root(KIND_ME if key_kind == 'deploy' else KIND_SPEC, rest=address)
                 resolution = await self._server.resolve_target(
@@ -790,9 +818,15 @@ class MonitorCommands(DAPConn):
         run_kind = args.get('runKind') or ''
 
         # A deployment row's audience passed back unchanged (plan 2.5): a
-        # team's deploy run, or the caller's own personal one
+        # team's deploy run, the org's (its admins watch it, plan 8.3), or
+        # the caller's own personal one
+        org_id = ''
         if team_id.startswith(('@', '=')):
-            team_id, run_kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
+            audience = parse_audience(team_id)
+            if audience.kind == 'org':
+                org_id, team_id, run_kind = audience.id, '', 'deploy'
+            else:
+                team_id, run_kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
 
         # Determine the desired event subscription level
         types = args.get('types', None)
@@ -821,6 +855,7 @@ class MonitorCommands(DAPConn):
             type=event_type,
             team_id=team_id,
             run_kind=run_kind,
+            org_id=org_id,
         )
 
         # Acknowledge successful subscription setup

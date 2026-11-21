@@ -45,6 +45,8 @@ from ai.account.store_providers.filesystem import FilesystemStore
 # Shared helpers from the writer test module.
 from .test_run_log import (
     CLIENT,
+    OWNER,
+    SCOPE_ID,
     KIND,
     PROJECT,
     SEED,
@@ -89,7 +91,7 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
 
     writer2 = run_log.RunLogWriter(
         make_file_store(istore),
-        CLIENT,
+        OWNER,
         PROJECT,
         SOURCE,
         KIND,
@@ -105,7 +107,7 @@ async def seed_stream(istore, spool_root, monkeypatch, events=30):
 
     return run_log.RunLogReader(
         make_file_store(istore),
-        CLIENT,
+        OWNER,
         PROJECT,
         SOURCE,
         KIND,
@@ -135,7 +137,7 @@ class TestChapters:
     async def test_missing_stream_raises(self, istore, spool_root):
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             'nope',
             SOURCE,
             KIND,
@@ -198,7 +200,7 @@ class TestSegmentRaw:
         await writer.end_run('ok')
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -284,7 +286,7 @@ class TestRead:
         stamp, raise_floor, _ = make_stamp(start=SEED + 10**9)
         writer = run_log.RunLogWriter(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -304,7 +306,7 @@ class TestRead:
     async def test_store_fallback_when_spool_gone(self, istore, spool_root, monkeypatch):
         reader = await seed_stream(istore, spool_root, monkeypatch)
         for name in os.listdir(spool_root):
-            if name.startswith(f'{CLIENT}.{STREAM}.'):
+            if name.startswith(f'{SCOPE_ID}.{STREAM}.'):
                 os.remove(os.path.join(spool_root, name))
         body = await reader.read(from_seq=0)
         assert body['events'], 'store fallback must serve the full range'
@@ -366,7 +368,7 @@ class TestLiveCoordination:
         # the freshest control lives on the writer, not in the store.
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,

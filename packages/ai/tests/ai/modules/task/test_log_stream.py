@@ -48,7 +48,7 @@ from rocketride.log_stream import LogEventStream
 
 # Shared helpers from the writer test module.
 from .test_run_log import (
-    CLIENT,
+    OWNER,
     KIND,
     PROJECT,
     SOURCE,
@@ -154,7 +154,7 @@ async def seed_rich(istore, spool_root, monkeypatch):
     await writer.end_run('ok')
     return run_log.RunLogReader(
         make_file_store(istore),
-        CLIENT,
+        OWNER,
         PROJECT,
         SOURCE,
         KIND,
@@ -378,7 +378,7 @@ class TestSeededReads:
         await writer.end_run('ok')
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -462,7 +462,7 @@ class TestSeededReads:
         writer.append(stamp(flow_op('end', pid=3, component='x')))
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -505,7 +505,7 @@ class TestLiveIngest:
         writer.append(stamp(output_event('boot')))
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -550,7 +550,7 @@ class TestLiveIngest:
         writer.append(stamp(output_event('boot')))
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,

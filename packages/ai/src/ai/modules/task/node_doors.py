@@ -288,14 +288,20 @@ def _files(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'File
         # Handles belong to (engine, root): FileStore authorizes a handle by its
         # connection id, so a handle opened under one project's root is never
         # usable from another's, even for one team on one engine
-        root = storage_root_for(control.owner_type, control.userId, control.teamId, control.project_id or '')
+        root = storage_root_for(
+            control.owner_type, control.userId, control.teamId, control.project_id or '', control.orgId
+        )
         conn_id = f'engine:{task.engine_id}:{root}'
+        # The roots the pipeline declared, resolved through its owner when
+        # the control started (plan 2.5): the only rooted paths admitted
         store = Store.file_store_for_caller(
             owner_kind=control.owner_type,
             user_id=control.userId,
             team_id=control.teamId,
             project_id=control.project_id or '',
             conn_id=conn_id,
+            org_id=control.orgId,
+            declared=control.roots,
         )
     except ValueError as e:
         raise ChannelRefused(f'{command}: {e}') from None

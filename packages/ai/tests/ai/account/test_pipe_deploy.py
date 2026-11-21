@@ -236,6 +236,7 @@ ME = {'type': 'user', 'id': 'u-1'}
 TEAM_A = {'type': 'team', 'id': 'team-a'}
 TEAM_B = {'type': 'team', 'id': 'team-b'}
 PUBLIC = {'type': 'public', 'id': ''}
+ORG = {'type': 'org', 'id': 'org-1'}
 
 
 @pytest.mark.asyncio
@@ -256,7 +257,7 @@ async def test_own_publications_walk_me_then_teams_in_team_order_each_pipe_once(
     entries = await pipe_deploy_mod.own_pipe_publications(account, _caller())
 
     # One read, own slots only: the store is never walked here
-    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [ME, TEAM_B, TEAM_A])
+    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [ME, TEAM_B, TEAM_A, ORG])
     assert [(e['pipe'], e['rung'], e['version']) for e in entries] == [
         ('acme.mine', 'me', 7),
         ('acme.shared', 'me', 9),
@@ -307,7 +308,7 @@ async def test_a_scoped_key_lists_its_frozen_team_and_only_the_pipes_it_may_call
 
     entries = await pipe_deploy_mod.own_pipe_publications(account, caller)
 
-    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [ME, TEAM_A])
+    account.publish_list.assert_awaited_once_with('org-1', 'pipe', [ME, TEAM_A, ORG])
     assert [e['pipe'] for e in entries] == ['acme.allowed']
 
 

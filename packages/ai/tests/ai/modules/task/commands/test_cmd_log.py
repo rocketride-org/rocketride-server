@@ -102,10 +102,11 @@ def reader_stub(monkeypatch):
     calls = {}
 
     class FakeReader:
-        def __init__(self, store, client_id, project_id, source, run_kind, *, team_id=''):
-            calls['args'] = (client_id, project_id, source)
+        def __init__(self, store, owner, project_id, source, run_kind, *, version=None):
+            calls['args'] = (owner, project_id, source)
             calls['run_kind'] = run_kind
-            calls['team_id'] = team_id
+            calls['owner'] = owner
+            calls['version'] = version
             self.chapters = AsyncMock(return_value={'chapters': [], 'completed': True})
             self.read = AsyncMock(return_value={'events': []})
             self.segment_raw = AsyncMock(return_value={'segment': 0, 'data': '', 'final': True})
@@ -113,7 +114,9 @@ def reader_stub(monkeypatch):
 
     monkeypatch.setattr(cmd_mod, 'RunLogReader', FakeReader)
     # The reader's store handle is irrelevant here — stub the singleton hop.
-    monkeypatch.setattr(cmd_mod.Store, 'file_store', classmethod(lambda cls, ctx, client_id=None: MagicMock()))
+    monkeypatch.setattr(
+        cmd_mod.Store, 'file_store', classmethod(lambda cls, ctx, client_id=None, root=None, declared=(): MagicMock())
+    )
     return calls
 
 
@@ -145,7 +148,7 @@ class TestScopeInference:
         conn = _make_conn(_account_info())
         await conn._log_chapters({}, _args(teamId=None))
         conn.verify_permission.assert_called_once_with('task.monitor')
-        assert reader_stub['team_id'] == ''
+        assert reader_stub['owner'] == '=user/user-1'
         assert reader_stub['run_kind'] == 'dev'
 
     @pytest.mark.asyncio
@@ -154,22 +157,67 @@ class TestScopeInference:
         # addresses the team's deploy continuum, gated on that team
         conn = _make_conn(_account_info())
         await conn._log_chapters({}, _args(teamId=f'=team/{TEAM}'))
-        assert (reader_stub['team_id'], reader_stub['run_kind']) == (TEAM, 'deploy')
+        assert (reader_stub['owner'], reader_stub['run_kind']) == (f'=team/{TEAM}', 'deploy')
 
     @pytest.mark.asyncio
     async def test_the_callers_own_audience_is_their_personal_deploy_stream(self, reader_stub):
         conn = _make_conn(_account_info())
         await conn._log_chapters({}, _args(teamId='=user/user-1'))
         conn.verify_permission.assert_called_once_with('task.monitor')
-        assert (reader_stub['team_id'], reader_stub['run_kind']) == ('', 'deploy')
+        assert (reader_stub['owner'], reader_stub['run_kind']) == ('=user/user-1', 'deploy')
 
     @pytest.mark.asyncio
-    @pytest.mark.parametrize('audience', ['=user/other', '@public', '=org/org-1', '@me', '=team/t/x'])
+    @pytest.mark.parametrize('audience', ['=user/other', '@public', '@me', '=team/t/x'])
     async def test_an_audience_this_reader_cannot_address_is_refused(self, reader_stub, audience):
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError):
             await conn._log_chapters({}, _args(teamId=audience))
         assert 'run_kind' not in reader_stub
+
+    @pytest.mark.asyncio
+    async def test_the_orgs_run_logs_are_its_admins(self, reader_stub):
+        # Plan 8.3: an org-owned run (@org, an unattended @public) is watched
+        # by the org's admins; a member is refused like any permission miss
+        with pytest.raises(PermissionError):
+            await _make_conn(_account_info())._log_chapters({}, _args(teamId='=org/org-1'))
+        assert 'run_kind' not in reader_stub
+        admin = _account_info()
+        admin.organization['permissions'] = ['org.admin']
+        await _make_conn(admin)._log_chapters({}, _args(teamId=None, owner='=org/org-1'))
+        assert (reader_stub['owner'], reader_stub['run_kind']) == ('=org/org-1', 'deploy')
+        with pytest.raises(PermissionError):
+            await _make_conn(admin)._log_chapters({}, _args(teamId=None, owner='=org/another'))
+
+    @pytest.mark.asyncio
+    async def test_a_completed_me_run_replays_from_the_owner_its_row_carried(self, reader_stub):
+        # The @me replay bug (plan 7.5): the task row of a personal deploy
+        # names its BILLING team in teamId, its logs live in its owner's
+        # tree. The reader takes the row's owner and reads the user's own
+        # deploy continuum, whatever teamId says.
+        conn = _make_conn(_account_info())
+        await conn._log_read({}, _args(teamId=TEAM, owner='=user/user-1', runKind='deploy'))
+        assert (reader_stub['owner'], reader_stub['run_kind']) == ('=user/user-1', 'deploy')
+        conn.verify_permission.assert_called_once_with('task.monitor')
+
+    @pytest.mark.asyncio
+    async def test_another_users_owner_is_refused_and_a_team_owner_is_its_teams(self, reader_stub):
+        conn = _make_conn(_account_info())
+        with pytest.raises(PermissionError):
+            await conn._log_read({}, _args(teamId=None, owner='=user/user-2'))
+        await conn._log_read({}, _args(teamId=None, owner=f'=team/{TEAM}', runKind='dev'))
+        # A team owner is always the deploy continuum
+        assert (reader_stub['owner'], reader_stub['run_kind']) == (f'=team/{TEAM}', 'deploy')
+        with pytest.raises(ValueError):
+            await conn._log_read({}, _args(teamId=None, owner='user-2'))
+
+    @pytest.mark.asyncio
+    async def test_a_pinned_versions_stream_is_its_own(self, reader_stub):
+        # C.36: the version rides to the reader, which reads '...deploy.v000012'
+        conn = _make_conn(_account_info())
+        await conn._log_read({}, _args(version=12))
+        assert (reader_stub['owner'], reader_stub['version']) == (f'=team/{TEAM}', 12)
+        with pytest.raises(ValueError):
+            await conn._log_read({}, _args(version='12'))
 
     @pytest.mark.asyncio
     async def test_run_kind_is_not_a_wire_argument(self, reader_stub):
@@ -193,17 +241,17 @@ class TestTeamGate:
         conn = _make_conn(_account_info())
         await conn._log_chapters({}, _args())
         conn.verify_permission.assert_not_called()
-        assert reader_stub['team_id'] == TEAM
-        assert reader_stub['args'] == ('user-1', 'proj-1', 'chat_1')
+        assert reader_stub['owner'] == f'=team/{TEAM}'
+        assert reader_stub['args'] == (f'=team/{TEAM}', 'proj-1', 'chat_1')
         assert reader_stub['run_kind'] == 'deploy'
 
     @pytest.mark.asyncio
     async def test_all_read_subcommands_take_the_team_scope(self, reader_stub):
         conn = _make_conn(_account_info())
         await conn._log_read({}, _args())
-        assert reader_stub['team_id'] == TEAM
+        assert reader_stub['owner'] == f'=team/{TEAM}'
         await conn._log_segment({}, _args(segment=0))
-        assert reader_stub['team_id'] == TEAM
+        assert reader_stub['owner'] == f'=team/{TEAM}'
 
     @pytest.mark.asyncio
     async def test_non_member_denied_uniformly(self, reader_stub):
@@ -227,7 +275,7 @@ class TestTeamGate:
         conn = _make_conn(_account_info())
         result = await conn._log_delete({}, _args(all=True))
         assert result['body'] == {'deletedSegments': 1}
-        assert reader_stub['team_id'] == TEAM
+        assert reader_stub['owner'] == f'=team/{TEAM}'
 
 
 # ============================================================================
@@ -249,13 +297,13 @@ class TestEndpointScope:
         # The stream of acme.proj-1.chat_1 is exactly what the key names.
         conn = _make_conn(_scoped_info(['acme.proj-1.chat_1']))
         await conn._log_read({}, _args())
-        assert reader_stub['args'] == ('user-1', 'proj-1', 'chat_1')
+        assert reader_stub['args'] == (f'=team/{TEAM}', 'proj-1', 'chat_1')
 
     @pytest.mark.asyncio
     async def test_a_pipe_wildcard_admits_every_source(self, reader_stub):
         conn = _make_conn(_scoped_info(['acme.proj-1.*']))
         await conn._log_chapters({}, _args(source='webhook_1'))
-        assert reader_stub['args'] == ('user-1', 'proj-1', 'webhook_1')
+        assert reader_stub['args'] == (f'=team/{TEAM}', 'proj-1', 'webhook_1')
 
     @pytest.mark.asyncio
     async def test_a_stream_outside_the_scope_is_denied_on_every_subcommand(self, reader_stub):

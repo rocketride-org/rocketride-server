@@ -173,8 +173,10 @@ class TestStartRun:
         pipeline = dispatch.await_args.args[1]
         # Per-source execution: the schedule's source becomes the entry point.
         assert pipeline['source'] == 'src-1'
-        assert kwargs['org_id'] == 'org-1'
-        assert kwargs['team_id'] == 'team-1'
+        # The unattended row of plan 8.3: the team owns and bills it, no user
+        attribution = kwargs['attribution']
+        assert (attribution.rung, attribution.owner_kind, attribution.owner_id) == ('team', 'team', 'team-1')
+        assert (attribution.org_id, attribution.user_id, attribution.team_id) == ('org-1', '', 'team-1')
         assert kwargs['trigger'] == 'schedule'
         # Execution settings ride the dispatch; unset trace defaults to FULL.
         assert kwargs['trace_level'] == 'full'
@@ -265,33 +267,48 @@ class TestStartRun:
         assert not scheduler._entries
 
     @pytest.mark.asyncio
-    async def test_a_store_schedule_fires_on_the_public_rung_billed_to_its_stamp(
-        self, scheduler, account_stub, dispatch
-    ):
-        # Any published pipe can be scheduled (2026-11-20): the store slot's
-        # run is team-owned by the stamped billing team and sits on the public rung
+    async def test_a_store_schedule_fires_on_the_public_rung_owned_by_the_org(self, scheduler, account_stub, dispatch):
+        # Plan 8.3: an unattended @public run is the org's: no user, no team,
+        # whatever stamp the row carries; it sits on the public rung
         entry = _entry(scheduler, team='@public')
         account_stub.deployments_get.return_value = {**_dep(team='@public'), 'billingTeamId': 'team-dev'}
         await scheduler._start_run(entry)
         kwargs = dispatch.await_args.kwargs
-        assert (kwargs['team_id'], kwargs['owner_kind'], kwargs['rung']) == ('team-dev', 'team', 'public')
+        attribution = kwargs['attribution']
+        assert (attribution.rung, attribution.owner_kind, attribution.owner_id) == ('public', 'org', 'org-1')
+        assert (attribution.user_id, attribution.team_id, attribution.env_team) == ('', '', '')
         assert kwargs['deployment'].team_id == '@public'
-        # A team slot keeps deriving its rung
+        # An unstamped store row fires the same way: the store bills no team
         dispatch.reset_mock()
-        await scheduler._start_run(_entry(scheduler))
-        assert dispatch.await_args.kwargs['rung'] == ''
+        account_stub.deployments_get.return_value = _dep(team='@public')
+        await scheduler._start_run(entry)
+        assert dispatch.await_args.kwargs['attribution'].team_id == ''
+        account_stub.deployments_set_state.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_an_unstamped_store_row_is_errored_never_billed_to_a_team_named_public(
-        self, scheduler, account_stub, dispatch
-    ):
-        # The legacy "bill your own audience" fallback is for team slots only
-        entry = _entry(scheduler, team='@public')
-        account_stub.deployments_get.return_value = _dep(team='@public')
+    async def test_an_org_schedule_bills_the_org_alone(self, scheduler, account_stub, dispatch):
+        # C.35: an @org schedule is the org's: owned and paid by it, no user, no team
+        entry = _entry(scheduler, team='=org/org-1')
+        account_stub.deployments_get.return_value = _dep(team='=org/org-1')
+        await scheduler._start_run(entry)
+        attribution = dispatch.await_args.kwargs['attribution']
+        assert (attribution.rung, attribution.owner_kind, attribution.owner_id, attribution.org_id) == (
+            'org',
+            'org',
+            'org-1',
+            'org-1',
+        )
+        assert (attribution.user_id, attribution.team_id, attribution.env_team) == ('', '', '')
+
+    @pytest.mark.asyncio
+    async def test_an_unstamped_personal_row_is_errored(self, scheduler, account_stub, dispatch):
+        # Billing never guesses: an @me pointer without its stamp is permanent until re-published
+        entry = _entry(scheduler, team='=user/user-1')
+        account_stub.deployments_get.return_value = _dep(team='=user/user-1')
         await scheduler._start_run(entry)
         dispatch.assert_not_awaited()
         account_stub.deployments_set_state.assert_awaited_once()
-        assert account_stub.deployments_set_state.await_args.args[1:4] == ('@public', 'proj-1', 'errored')
+        assert account_stub.deployments_set_state.await_args.args[1:4] == ('=user/user-1', 'proj-1', 'errored')
 
 
 # ============================================================================

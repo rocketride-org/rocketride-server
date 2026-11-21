@@ -1066,6 +1066,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         # Every control carries its owner (plan 1): a dev run -> its user
         owner_kind='user',
         owner_id='user-1',
+        pinned_version=None,
         provider='node-x',
         ttl=600,
         idle_seconds=lambda: 0.0,
@@ -1085,6 +1086,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         run_kind='dev',
         owner_kind='user',
         owner_id='other-user',
+        pinned_version=None,
         provider='node-y',
         task=MagicMock(),
         launch_type=SimpleNamespace(value='EXECUTE'),
@@ -1939,3 +1941,15 @@ async def test_on_rrext_convert_refuses_a_payload_without_components():
     conn = _make_conn()
     with pytest.raises(ValueError):
         await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': {'version': 1, 'component': {}}}})
+
+
+def test_the_monitor_label_names_a_pinned_runs_version():
+    """C.36: the key parser reads ``...source:<version>`` (and a pipe-scoped key after it) as the source plus its version."""
+    from ai.modules.task.commands.cmd_misc import MiscCommands
+
+    names, sources = {'docBrain': 'Doc brain'}, {'docBrain.webhook_1': 'Webhook'}
+    label = MiscCommands._resolve_monitor_label
+    assert label('p.deploy.team-1.docBrain.webhook_1:12', names, sources) == 'Doc brain.Webhook v12'
+    assert label('p.deploy.team-1.docBrain.webhook_1:12.7', names, sources) == 'Doc brain.Webhook v12'
+    assert label('p.deploy.team-1.docBrain.webhook_1', names, sources) == 'Doc brain.Webhook'
+    assert label('p.deploy.team-1.docBrain.*', names, sources) == 'Doc brain.*'

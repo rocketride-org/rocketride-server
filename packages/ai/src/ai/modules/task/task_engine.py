@@ -2837,15 +2837,13 @@ class TaskEngine(DAPBase):
             control = self._server.control_by_key(key)
         except Exception:
             return None
-        owner_is_team = control.owner_kind == 'team'
         try:
             writer = run_log.live_writer(
-                control.run_kind,
-                control.teamId if owner_is_team else control.userId,
-                control.teamId,
-                control.owner_kind or 'user',
+                control.owner,
                 control.project_id or self.project_id,
                 control.source or self.source,
+                control.run_kind,
+                control.pinned_version,
             )
         except (TypeError, ValueError):
             # A control whose identity is not string-shaped names no stream
@@ -2884,28 +2882,25 @@ class TaskEngine(DAPBase):
             from ai.account import RequestContext, Store
 
             control = self._server.control_by_key(key)
-            # The store view anchors at the control's OWNER namespace: the
-            # TEAM for a team-owned (@team) deploy, the USER for a user-owned
-            # run (an interactive .use or a personal @me deploy: private, so
-            # its continuum never lands in the billing team's tree)
-            owner_is_team = control.owner_kind == 'team'
+            # The continuum lives in the control's OWNER tree (plan 7.5,
+            # ``run_log.scope_paths``): the user's for a user-owned run (an
+            # interactive .use, a personal @me deploy, a caller's @public:
+            # private, so it never lands in the ledger team's tree), the
+            # team's for a team-owned one, the org's for an org-owned one. A
+            # pinned version's run is a stream of its own (C.36)
             writer = RunLogWriter(
-                Store.file_store(
-                    RequestContext.internal('run-log'),
-                    client_id=control.teamId if owner_is_team else control.userId,
-                ),
-                control.userId,
+                Store.file_store(RequestContext.internal('run-log'), client_id=control.owner_id),
+                control.owner,
                 control.project_id or self.project_id,
                 control.source or self.source,
                 control.run_kind,
                 self.stamp_log_event,
                 self.raise_log_seq_floor,
-                # team_id is the run's BILLING team (provenance for the control
-                # record) for every owner kind; owner_kind decides where the
-                # logs physically live
+                # team_id is the run's LEDGER team (provenance for the control
+                # record); the owner decides where the logs physically live
                 team_id=control.teamId,
-                owner_kind=control.owner_kind or 'user',
                 org_id=control.orgId,
+                version=control.pinned_version,
                 debug=self.debug_message,
             )
             await writer.open(

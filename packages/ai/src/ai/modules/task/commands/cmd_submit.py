@@ -278,7 +278,7 @@ class SubmitCommands(DAPConn):
                 trace_id,
                 control.key,
                 self._connection_id,
-                billing=control.caller_billing(self._account_info),
+                billing=control.billing,
                 address=control.address,
                 rung=control.rung or '',
                 team=team,

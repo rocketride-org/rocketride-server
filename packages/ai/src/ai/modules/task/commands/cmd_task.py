@@ -53,7 +53,6 @@ The actual task execution and management is delegated to the TaskServer.
 
 from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
-from ai.account import account
 from ai.account.app_deploy import _developer_id_of
 from ai.account.audience import deploy_scope_of
 from ai.account.roots import KIND_ME, KIND_TEAM, format_root
@@ -61,7 +60,7 @@ from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
 from ..engine_key import key_owner
-from ..task_control import RESOLVE_ATTACH, TeamContext
+from ..task_control import RESOLVE_ATTACH
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -139,24 +138,14 @@ class TaskCommands(DAPConn):
             Exception: If task creation or execution startup fails
         """
         try:
-            # The run team is ALWAYS the session's DEV TEAM: the team a
-            # development-mode run is billed to and whose environment layer
-            # applies — the user's profile-assigned team for client
-            # connections, or the deployment's team for the trusted
-            # in-process dispatch (which synthesizes an AccountInfo with
-            # devTeam = the run's team). A client-supplied teamId is
-            # IGNORED, never honored — the caller must not be able to pick
-            # the team a run is billed/authorized/secret-resolved under
-            # (same doctrine as the org IDOR fixes).
             args = request.get('arguments') or {}
-            team_id = self._account_info.devTeam
-            # Billing must never guess: no dev team = no dev run.
-            if not team_id:
-                raise PermissionError(_NO_DEV_TEAM_MESSAGE)
 
-            # Verify task.control on the run team BEFORE any secret handling,
-            # since the env merge below pulls that team's secrets.
-            self.verify_team_permission(team_id, 'task.control')
+            # A deployment run's row of the rung table (plan 8.3) rides ONLY
+            # the trusted in-process dispatch (start_server_task_as_team sets
+            # it on its connection), never DAP arguments, so a remote client
+            # can neither spoof a deploy run nor pick the team, org or user it
+            # is billed under or whose environment it runs with
+            trusted = getattr(self, '_trusted_attribution', None)
 
             # Verify required pipeline plans. The check reads the pipeline
             # object's keys, so anything else (missing, or a .pipe path or list
@@ -167,71 +156,65 @@ class TaskCommands(DAPConn):
                 # Check that the pipeline's required plan is available for this account.
                 self.verify_plans(self._account_info, pipeline)
 
+            if trusted is not None:
+                # The dispatch computed the whole row: owner, payer, ledger
+                # user and team, environment, caller. Nothing of the caller's
+                # own env rides a name call (plan 1)
+                response = await self._server.start_task(
+                    request,
+                    self,
+                    wait_for_running=True,
+                    client_id=trusted.user_id,
+                    user_id=trusted.user_id,
+                    team_id=trusted.team_id,
+                    org_id=trusted.org_id,
+                    developer_id=_developer_id_of(self) or '',
+                    run_kind='deploy',
+                    owner_kind=trusted.owner_kind,
+                    trigger=getattr(self, '_trusted_trigger', '') or '',
+                    deployment=getattr(self, '_trusted_deployment', None),
+                    deployment_epoch=getattr(self, '_trusted_deployment_epoch', None),
+                    rung=trusted.rung,
+                    version=getattr(self, '_trusted_version', None),
+                    pinned=bool(getattr(self, '_trusted_pinned', False)),
+                    caller_id=trusted.caller_id,
+                    env_team=trusted.env_team,
+                    owner_account=getattr(self, '_trusted_caller_account', None),
+                )
+                return self.build_response(request, body=response)
+
+            # A @spec run: the ledger team is the session's HOME team (the
+            # first of its team order, pre-resolved as devTeam; a scoped
+            # key's frozen team). A client-supplied teamId is IGNORED, never
+            # honored — the caller must not be able to pick the team a run is
+            # billed/authorized/secret-resolved under (same doctrine as the
+            # org IDOR fixes). Billing must never guess: no team = no dev run.
+            team_id = self._account_info.devTeam
+            if not team_id:
+                raise PermissionError(_NO_DEV_TEAM_MESSAGE)
+
+            # Verify task.control on the run team BEFORE any secret handling,
+            # since the control's environment pulls that team's secrets.
+            self.verify_team_permission(team_id, 'task.control')
+
             # Resolve the org that owns the TARGET team (same resolution as
             # on_launch): members via their own org, sys.admin/internal via
             # the account backend — the task file must never carry an empty
-            # orgId as trusted identity, and the secret merge below must pull
-            # the TARGET team's real org layer.
+            # orgId as trusted identity, and the environment's org layer must
+            # be the TARGET team's real org.
             org_id = await self.resolve_org_for_team(team_id)
 
-            # Build merged environment for pipeline variable resolution.
-            # Combines .env → org → team → user secrets (SaaS) or just .env (OSS).
-            # Security: only accept ROCKETRIDE_* keys from the caller
+            # The caller's own ROCKETRIDE_* values: the top layer of the
+            # control's environment chain (plan 6.2), which start_task
+            # resolves once for the control and, for its private engine, at
+            # each (re)start: one chain. Placeholders resolve from saved
+            # org/team/user secrets only; the server's own RR_* settings are
+            # never a layer, sys.admin included.
             raw_env = args.get('env', {})
             caller_env = {k: v for k, v in raw_env.items() if k.startswith('ROCKETRIDE_')}
 
-            # Placeholders resolve from saved org/team/user secrets only. The
-            # server's own RR_* settings are never a layer, sys.admin included:
-            # a pipeline an admin runs could otherwise write them into any node
-            # config.
-            # Run classification comes ONLY from the trusted in-process
-            # dispatch (start_server_task_as_team sets these attributes on
-            # its connection) — never from DAP arguments, so remote clients
-            # cannot spoof a deploy run into the team continuum.
-            run_kind = getattr(self, '_trusted_run_kind', 'dev')
-            trigger = getattr(self, '_trusted_trigger', '') or ''
-            # Owner scope rides the same trusted channel: a TEAM-owned deploy
-            # (@team) or a USER-owned run (an interactive .use, or a personal
-            # @me deploy). Defaults from run_kind when the dispatch didn't set
-            # it (an ordinary .use is user-owned).
-            owner_kind = getattr(self, '_trusted_owner_kind', '') or ('team' if run_kind == 'deploy' else 'user')
-            # The deployment a deployment run resolved through rides the same
-            # trusted channel; nothing on the wire can name one
-            deployment = getattr(self, '_trusted_deployment', None)
-            # So does the published rung a submit(name) start answered on
-            rung = getattr(self, '_trusted_rung', '') or ''
-            # ... the artifact version it started from, and the team whose
-            # environment the control runs with (plan 6.2): the trusted
-            # dispatch names it; a client's own run is its home team's (a
-            # scoped key's frozen team)
-            version = getattr(self, '_trusted_version', None)
-            # ... and when the dispatch read the deployment's state (plan 7.2:
-            # a disable/remove since then refuses the control)
-            deployment_epoch = getattr(self, '_trusted_deployment_epoch', None)
-            team_context = getattr(self, '_trusted_team_context', None) or TeamContext(
-                home_team(self._account_info) or team_id,
-                'key' if getattr(self._account_info, 'endpoints', None) is not None else 'home',
-            )
-
-            # Layer org → team → user secrets on top. A TEAM-owned run skips the
-            # USER layer deliberately (a @team deployment's config must not
-            # depend on which human deployed it); a USER-owned run — an
-            # interactive .use OR a personal @me deploy — applies its owner's
-            # user layer.
-            env_user_id = '' if owner_kind == 'team' else self._account_info.userId
-
-            # Loaded by the task at each (re)start rather than here, so the
-            # decrypted values are not kept on the task while it runs
-            async def env_source() -> Dict[str, str]:
-                merged_env: Dict[str, str] = {}
-                merged_env.update(await account.get_merged_env(user_id=env_user_id, org_id=org_id, team_id=team_id))
-                # Caller-supplied env overrides on top
-                merged_env.update(caller_env)
-                return merged_env
-
             # Start the task without debugger attachment. The address namespace
-            # is the session org's developer id (the in-process deploy dispatch
-            # stamps it on its synthetic organization); start_task refuses a run
+            # is the session org's developer id; start_task refuses a run
             # without one.
             response = await self._server.start_task(
                 request,
@@ -242,15 +225,9 @@ class TaskCommands(DAPConn):
                 team_id=team_id,
                 org_id=org_id,
                 developer_id=_developer_id_of(self) or '',
-                env_source=env_source,
-                run_kind=run_kind,
-                owner_kind=owner_kind,
-                trigger=trigger,
-                deployment=deployment,
-                deployment_epoch=deployment_epoch,
-                rung=rung,
-                version=version,
-                team_context=team_context,
+                caller_env=caller_env,
+                env_team=home_team(self._account_info) or team_id,
+                owner_account=self._account_info,
             )
 
             # Confirm successful task execution startup
@@ -270,8 +247,9 @@ class TaskCommands(DAPConn):
         team and its owning org, then delegates to TaskServer.start_task.
 
         Deliberately NOT a wrapper over on_execute — the two differ in three
-        ways that must not converge silently: on_launch resolves no
-        org/team/user secrets, does not wait for the task to reach RUNNING,
+        ways that must not converge silently: on_launch takes no caller env
+        overrides (its control resolves its own chain in start_task), does not
+        wait for the task to reach RUNNING,
         and does not classify the run. See the module history before merging
         them.
 
@@ -320,6 +298,8 @@ class TaskCommands(DAPConn):
                 team_id=team_id,
                 org_id=org_id,
                 developer_id=_developer_id_of(self) or '',
+                env_team=home_team(self._account_info) or team_id,
+                owner_account=self._account_info,
             )
 
             # Send successful launch response with the run's address
@@ -736,6 +716,9 @@ class TaskCommands(DAPConn):
                             # dev run). Clients pass them back unchanged.
                             'owner': control.owner,
                             'audience': control.audience,
+                            # The pinned version of a pinned run (C.36): its
+                            # own monitor key and log stream; None otherwise
+                            'version': control.pinned_version,
                             'pipeline': control.pipeline,
                         }
                     )

@@ -499,8 +499,25 @@ class TestEngineIdentity:
         # never speak the root grammar at all.
         fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1')
         for spelling in ('=team/team-1/x', '=org/org-1/x', '=user/user-1/x', '@org/x', '@me/x', '@Development/x'):
-            with pytest.raises(PermissionError, match='engine context'):
+            with pytest.raises(PermissionError, match='not a root this pipeline declares'):
                 fs._full_path(spelling)
+
+    def test_a_declared_root_is_the_only_root_admitted(self, store):
+        # Plan 2.5: the roots the pipeline declared, resolved through its
+        # owner when the control started; nothing else, and never a system tree
+        from ai.account.file_store import DeclaredRoot
+
+        declared = (DeclaredRoot('team', 'team-1', 'development', 'kb', 'teams/team-1/files', '@Development/kb'),)
+        fs = store._file_store(
+            RequestContext.engine('user-1'), client_id='user-1', root='users/user-1/files', declared=declared
+        )
+        assert fs._full_path('@Development/kb/a.txt') == 'teams/team-1/files/kb/a.txt'
+        assert fs._full_path('=team/team-1/kb') == 'teams/team-1/files/kb'
+        for spelling in ('@Development/kbx/a', '@Development/a', '=team/team-2/kb/a', '@org/kb/a', '@me/kb/a'):
+            with pytest.raises(PermissionError, match='not a root this pipeline declares'):
+                fs._full_path(spelling)
+        with pytest.raises(ValueError, match='engine contexts only'):
+            store._file_store(_ctx(_account()), declared=declared)
 
     def test_reserved_subtrees_rejected(self, store):
         fs = store._file_store(RequestContext.engine('user-1'), client_id='user-1')
@@ -534,7 +551,7 @@ class TestEngineIdentity:
             client_id='user-1',
             root='teams/team-1/files/tasks/proj-1',
         )
-        with pytest.raises(PermissionError, match='engine context'):
+        with pytest.raises(PermissionError, match='not a root this pipeline declares'):
             fs._full_path('=team/team-2/x')
         with pytest.raises(PermissionError, match='engine context'):
             fs._full_path('.logs/p/x')
@@ -561,8 +578,16 @@ class TestEngineIdentity:
         assert fs._client_id == 'user-1'
         assert fs._ctx.source == 'engine' and fs._ctx.conn_id == 'engine:7:team-1'
         assert fs._full_path('out/x.csv') == 'teams/team-1/files/tasks/proj-1/out/x.csv'
-        with pytest.raises(PermissionError, match='engine context'):
+        with pytest.raises(PermissionError, match='not a root this pipeline declares'):
             fs._full_path('=team/team-2/x')
+
+    def test_file_store_for_caller_anchors_an_org_run_in_the_org_tree(self, store, monkeypatch):
+        # C.35: an org-owned run anchors in tasks/<project> inside the org's tree
+        monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: store))
+        fs = Store.file_store_for_caller(
+            owner_kind='org', user_id='', team_id='', project_id='proj-1', conn_id='engine:7:org', org_id='org-1'
+        )
+        assert fs._full_path('out/x.csv') == 'orgs/org-1/files/tasks/proj-1/out/x.csv'
 
     def test_file_store_for_caller_anchors_a_user_run_in_the_owners_tree(self, store, monkeypatch):
         monkeypatch.setattr(Store, 'instance', classmethod(lambda cls: store))

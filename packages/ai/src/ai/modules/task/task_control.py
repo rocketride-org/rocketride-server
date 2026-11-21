@@ -30,19 +30,22 @@ engine. Its HANDLE is the ``control_id``, ``=control/<32 hex>`` minted when the
 control is created, returned to the caller in the ``token`` slot and named by
 every verb after that; it dies with the control and is never written to disk
 (plan 15 item 20). It carries everything that belongs to the caller rather
-than to the running process: the address, the owner (a user or a team, never
-a service identity), the rung that answered, the resolved component config,
-billing attribution, the ``parameters`` admission map, the trace level, the
-idle ttl, and exactly ONE hold on a ``TaskEngine``. The engine is the
+than to the running process: the address, the owner (a user, a team or the
+org, never a service identity), the rung that answered, the resolved
+component config, the run's place in the rung table (payer, ledger user and
+team, environment, plan 8.3), the ``parameters`` admission map, the trace
+level, the idle ttl, and exactly ONE hold on a ``TaskEngine``. The engine is the
 process; many controls may hold one engine (plan section 1, 7.1). A hold
 entitles the control to its engine but does not keep it running: an engine
 that stopped on its own inactivity timer, or crashed after it had confirmed
 running, leaves the control DORMANT, and the next request through it starts
 the engine again under the same key (plan 7.2).
 
-The registry key is the control id. ``control_key(rung, ownerId, address)``
-is the owner-filtered INDEX a name resolves through (several controls of one
-owner may share it: one ``project_id``, several configs). ``control.task``
+The registry key is the control id. ``control_key(rung, ownerId, address,
+callerId, version)`` is the owner-filtered INDEX a name resolves through
+(several controls of one owner may share it on ``@spec``: one ``project_id``,
+several configs; on the team and org rungs every caller has a control of
+their own, so the caller is part of it). ``control.task``
 names the held engine, so the many ``control.task.<...>`` call sites read as
 "the engine this control holds".
 """
@@ -59,6 +62,7 @@ from rocketride.types.task import TASK_METRICS, TASK_STATUS_FLOW, TASK_TOKENS
 from rocketlib.config import ConfigError, _coerce, _type_error
 
 from ai.account.audience import compose_owner, parse_audience
+from ai.account.roots import KIND_ORG, KIND_PUBLIC, KIND_TEAM, KIND_USER
 from ai.common import node_config
 from ai.common.parameters import resolve_call_params
 from ai.constants import CONST_SPEND_ALLOW_SECONDS
@@ -266,9 +270,19 @@ def config_hash(configs: List[Dict[str, Any]]) -> str:
 
 # ==== Rungs ====================================================================
 
-#: The four rungs, in resolution order (plan section 1). ``public`` is
-#: produced only by the published-rung resolver.
-RUNGS = ('spec', 'me', 'team', 'public')
+#: The five rungs, in resolution order (plan section 1, 3.2). ``spec`` is the
+#: caller's own runs; the other four serve publications.
+RUNGS = ('spec', 'me', 'team', 'org', 'public')
+
+#: The rungs whose controls are owned by the team or the org but run for ONE
+#: caller each (plan 8.3): the caller is part of their index key (plan 7.5).
+CALLER_RUNGS = ('team', 'org')
+
+#: The caller segment of an index key on a caller rung for a run with no caller (plan 7.5).
+NO_CALLER = '-'
+
+#: Who may own a run (plan 2.5, 8.3).
+OWNER_KINDS = (KIND_USER, KIND_TEAM, KIND_ORG)
 
 #: ``TaskServer.resolve_target`` acts on the first candidate: a publication starts its control.
 RESOLVE_START = 'start'
@@ -280,60 +294,52 @@ RESOLVE_READ = 'read'
 RESOLVE_ATTACH = 'attach'
 
 
-def rung_of(run_kind: str, owner_kind: str) -> str:
+def control_key(
+    rung: str,
+    owner_id: str,
+    address: str,
+    caller_id: str = '',
+    version: Optional[int] = None,
+) -> str:
     """
-    Map a run classification to its rung.
+    Build the owner-filtered index key a name resolves through (plan 7.5).
 
-    A dev run is ``spec``: the owner's control for the spec they sent. A
-    deployment run owned by a user (a ``=user/<uid>`` audience) is that user's
-    personal deployment, ``me``; owned by a team it is ``team``. Deploy-rail
-    runs (scheduled or manual) are ``team`` runs that keep their trigger.
-
-    Args:
-        run_kind: ``'dev'`` or ``'deploy'``.
-        owner_kind: ``'user'`` or ``'team'`` (empty takes the run_kind default).
-
-    Returns:
-        The rung: ``'spec'``, ``'me'`` or ``'team'``.
-
-    Raises:
-        ValueError: The run classification is outside the closed vocabulary.
-    """
-    if run_kind == 'dev':
-        return 'spec'
-    if run_kind != 'deploy':
-        raise ValueError(f'invalid run_kind: {run_kind!r}')
-    kind = owner_kind or 'team'
-    if kind == 'user':
-        return 'me'
-    if kind == 'team':
-        return 'team'
-    raise ValueError(f'invalid owner_kind: {owner_kind!r}')
-
-
-def control_key(rung: str, owner_id: str, address: str) -> str:
-    """
-    Build the owner-filtered index key ``<rung>.<ownerId>.<address>`` (plan 7.5).
-
-    The registry's primary key is the control id; this is the index a NAME
+    ``<rung>.<ownerId>.<address>`` on ``spec``, ``me`` and ``public``;
+    ``<rung>.<ownerId>.<callerId>.<address>`` on the team and org rungs, where
+    every caller has a control of their own under the one owner (``-`` for a
+    run with no caller); a PINNED version (one other than the rung's
+    published version, plan 3.2) appends ``:<version>``, so a pinned run
+    never shares an identity with the rung's published-version run. The
+    registry's primary key is the control id; this is the index a NAME
     resolves through (several controls of one owner may share it on
     ``spec``: one ``project_id``, several configs). Internal only: clients
     send control ids or addresses, never this.
 
     Args:
         rung: One of :data:`RUNGS`.
-        owner_id: The owning user or team id.
+        owner_id: The owning user, team or org id.
         address: ``developerId.pipelineId.source``.
+        caller_id: The caller on a team or org rung ('' for none); ignored
+            on the other rungs, where the owner is the caller.
+        version: The pinned registry version, or None for the rung's
+            published version (and on ``spec``, which has none).
 
     Returns:
         The index key.
 
     Raises:
-        ValueError: ``rung`` is not one of :data:`RUNGS`.
+        ValueError: ``rung`` is not one of :data:`RUNGS`, or ``spec`` names a version.
     """
     if rung not in RUNGS:
         raise ValueError(f'invalid rung: {rung!r}')
-    return f'{rung}.{owner_id}.{address}'
+    if rung == 'spec' and version is not None:
+        raise ValueError('a spec run has no version')
+    key = (
+        f'{rung}.{owner_id}.{caller_id or NO_CALLER}.{address}'
+        if rung in CALLER_RUNGS
+        else f'{rung}.{owner_id}.{address}'
+    )
+    return key if version is None else f'{key}:{version}'
 
 
 # ==== Billing attribution ======================================================
@@ -342,7 +348,7 @@ def control_key(rung: str, owner_id: str, address: str) -> str:
 @dataclass(frozen=True)
 class BillingAttribution:
     """
-    Who pays for the work done under one control (plan section 8.3).
+    Who pays for the work done under one control, and whom the ledger names (plan section 8.3).
 
     Per control, never per engine: two controls holding one engine are two
     attributions. Metering per binding fills the usage (C.13); this is the
@@ -350,9 +356,11 @@ class BillingAttribution:
 
     Attributes:
         org_id: The paying org.
-        team_id: The billing team (the dev team of a dev run, the billing
-            stamp of a deployment run).
-        user_id: The paying user; empty for a team-owned run.
+        team_id: The ledger team: the team whose publication served (the
+            home team on ``@spec``, the billing stamp on ``@me``, the serving
+            team on a team rung); '' on ``@org`` and ``@public``.
+        user_id: The ledger user: the caller, the publisher of an unattended
+            ``@me`` run; '' for any other run with no caller.
     """
 
     org_id: str = ''
@@ -391,35 +399,138 @@ class DeploymentRef:
         return decoded.id if decoded.kind == 'team' else ''
 
 
-# ==== Team context =============================================================
-
-#: Why a team is a control's team context (plan 6.2).
-TEAM_CONTEXT_KINDS = ('answering', 'key', 'deploying', 'home')
+# ==== The rung table ===========================================================
 
 
 @dataclass(frozen=True)
-class TeamContext:
+class Attribution:
     """
-    The team whose environment a control runs with (plan 6.2, decided 2026-11-12).
+    One run's row of the rung table (plan 8.3): owner, payer, ledger user and team, environment.
 
-    Environment follows the ANSWERING team; attribution follows the caller
-    (plan 8.3) and is not this. Resolved once, when the control is created:
-
-    - ``answering``: the team whose publication answered a ``@team`` call;
-    - ``key``: the frozen team of a key with an ``endpoints`` scope;
-    - ``deploying``: the deploying team of a deploy-rail run;
-    - ``home``: the caller's home team (first in their team order) for
-      ``@spec``, ``@me`` and a ``@public`` call.
-
-    C.10 reads the merged env from it; billing (C.13) does not.
+    The environment's org is the payer, its user layer the ledger user (the
+    two agree on every row of both tables), its team layer ``env_team``.
 
     Attributes:
-        team_id: The team ('' when the caller has none).
-        kind: One of :data:`TEAM_CONTEXT_KINDS`.
+        rung: The rung that serves the run (one of :data:`RUNGS`).
+        owner_kind: ``'user'``, ``'team'`` or ``'org'``: where the run lives.
+        owner_id: The owning user, team or org id.
+        org_id: The paying org.
+        user_id: The ledger user ('' none); the environment's user layer.
+        team_id: The ledger team ('' none).
+        env_team: The environment's team layer ('' none).
+        caller_id: The caller ('' for a run with no caller: a schedule, a
+            run-now, a listener).
     """
 
-    team_id: str = ''
-    kind: str = 'home'
+    rung: str
+    owner_kind: str
+    owner_id: str
+    org_id: str
+    user_id: str
+    team_id: str
+    env_team: str
+    caller_id: str = ''
+
+
+def caller_attribution(
+    rung: str, account_info: Any, *, deployment: Optional[DeploymentRef] = None, billing_stamp: str = ''
+) -> Attribution:
+    """
+    The rung table's row for a run WITH a caller (plan 8.3, the first table).
+
+    | Rung | Owner | Payer | User | Team | Environment |
+    |---|---|---|---|---|---|
+    | ``@spec`` | the caller | the caller's org | the caller | the home team | org, home team, user |
+    | ``@me`` | the caller | the caller's org | the caller | the billing stamp | org, home team, user |
+    | ``@<team>`` | the team | the caller's org | the caller | that team | org, home team, user |
+    | ``@org`` | the org | the org | the caller | none | org, home team, user |
+    | ``@public`` | the caller | the caller's org | the caller | none | org, home team, user |
+
+    The home team is the first of the caller's team order (a scoped key's
+    frozen team stands in for it); the environment is always the caller's,
+    so a user whose keys are only at user level brings them to any pipe.
+
+    Args:
+        rung: The rung that answered.
+        account_info: The caller's account.
+        deployment: The publication that answered (team and org rungs).
+        billing_stamp: The ``@me`` pointer's billing stamp.
+
+    Returns:
+        The attribution.
+
+    Raises:
+        ValueError: An unknown rung, a team rung without its team, or an
+            ``@me`` pointer without its billing stamp.
+    """
+    from ai.account.models import home_team
+
+    caller = str(getattr(account_info, 'userId', '') or '')
+    organization = getattr(account_info, 'organization', None) or {}
+    org_id = str(organization.get('id') or '')
+    home = home_team(account_info)
+    if rung == 'spec':
+        return Attribution(rung, KIND_USER, caller, org_id, caller, home, home, caller)
+    if rung == 'me':
+        if not billing_stamp:
+            raise ValueError('This deployment has no billing team; re-publish it')
+        return Attribution(rung, KIND_USER, caller, org_id, caller, billing_stamp, home, caller)
+    if rung == 'team':
+        team = deployment.team if deployment is not None else ''
+        if not team:
+            raise ValueError('A team rung run needs the team whose publication answered')
+        return Attribution(rung, KIND_TEAM, team, org_id, caller, team, home, caller)
+    if rung == 'org':
+        return Attribution(rung, KIND_ORG, org_id, org_id, caller, '', home, caller)
+    if rung == 'public':
+        return Attribution(rung, KIND_USER, caller, org_id, caller, '', home, caller)
+    raise ValueError(f'invalid rung: {rung!r}')
+
+
+def unattended_attribution(audience: str, *, org_id: str, billing_stamp: str = '') -> Attribution:
+    """
+    The rung table's row for a run with NO caller: a schedule, a run-now, a listener (plan 8.3, the second table).
+
+    | Publication | Owner | Payer | User | Team | Environment |
+    |---|---|---|---|---|---|
+    | ``@me`` | the publisher | the publisher's org | the publisher | the billing stamp | org, the stamp, the publisher |
+    | ``@<team>`` | the team | the org | none | that team | org, that team |
+    | ``@org`` | the org | the org | none | none | org |
+    | ``@public`` | the org | the org | none | none | org |
+
+    A run with no caller never borrows a user layer but the publisher's own
+    on ``@me``. The publisher's home team there is the billing stamp: the
+    publisher's development team written on the pointer at publish and
+    never resolved at fire time (the scheduler holds no session).
+
+    Args:
+        audience: The publication's audience (``=user/<uid>``, ``=team/<tid>``,
+            ``=org/<oid>`` or ``@public``).
+        org_id: The publishing org.
+        billing_stamp: The pointer's billing stamp (``@me`` requires one).
+
+    Returns:
+        The attribution.
+
+    Raises:
+        AudienceError: The text is not an audience.
+        ValueError: An ``@me`` pointer without its billing stamp, or an org
+            audience naming another org.
+    """
+    decoded = parse_audience(audience)
+    if decoded.kind == KIND_USER:
+        if not billing_stamp:
+            raise ValueError('This deployment has no billing team; re-publish it after setting your development team')
+        return Attribution('me', KIND_USER, decoded.id, org_id, decoded.id, billing_stamp, billing_stamp)
+    if decoded.kind == KIND_TEAM:
+        return Attribution('team', KIND_TEAM, decoded.id, org_id, '', decoded.id, decoded.id)
+    if decoded.kind == KIND_ORG:
+        if decoded.id != org_id:
+            raise ValueError(f"{audience!r} is another organization's publication")
+        return Attribution('org', KIND_ORG, org_id, org_id, '', '', '')
+    if decoded.kind == KIND_PUBLIC:
+        return Attribution('public', KIND_ORG, org_id, org_id, '', '', '')
+    raise ValueError(f'{audience!r} is no publication')
 
 
 # ==== Per-control counts ===========================================================
@@ -494,12 +605,24 @@ class TaskControl:
         developer_id: The address namespace.
         address: ``developerId.pipelineId.source``: the public name a NAME
             call resolves through the caller's rungs.
-        userId / teamId / orgId: Identity derived from the account; teamId is
-            billing and permission attribution, not the owner of a dev run.
+        userId / teamId / orgId: The run's row of the rung table (plan 8.3):
+            the ledger user (also the environment's user layer; '' for a run
+            with no caller but the publisher of an unattended ``@me`` run),
+            the ledger team ('' on ``@org`` and ``@public``) and the paying
+            org (also the environment's org). The owner id is one of them:
+            ``owner_id``.
+        caller_id: The caller this control runs for ('' for a run with no
+            caller: a schedule, a run-now, a listener). Every control runs
+            for exactly one caller (plan 8.3); on the team and org rungs it
+            is part of the index key.
+        env_team: The environment's team layer: the caller's home team, the
+            publication's team for a run with no caller ('' for none).
         run_kind: ``'dev'`` or ``'deploy'``: the run-log continuum and the
             storage tree.
-        owner_kind: ``'user'`` or ``'team'``: who owns the run.
-        rung: ``'spec'``, ``'me'``, ``'team'`` or ``'public'``.
+        owner_kind: ``'user'``, ``'team'`` or ``'org'``: who owns the run,
+            where it lives (its log tree, its files) and who watches it.
+        rung: ``'spec'``, ``'me'``, ``'team'``, ``'org'`` or ``'public'``:
+            stamped from the audience that answered, never derived.
         trigger: What fired a deployment run (``''``, ``'manual'``, ``'schedule'``, or
             ``'submit'`` for a name call started from a published artifact).
         launch_owner / launch_type: The connection that launched it and how.
@@ -531,7 +654,13 @@ class TaskControl:
             the control unavailable (plan 7.2, the kill switch).
         deployment: The deployment this control resolved through, if any.
         version: The artifact version a published rung started from (None on @spec).
-        team_context: The team whose environment this control runs with.
+        pinned: True when ``version`` was named by the call (``:<version>``)
+            and is not the rung's published version (plan 3.2): the index
+            key, the monitor key and the run-log stream carry it.
+        roots: The physical roots the pipeline's declared ``roots`` resolved
+            to through the run's OWNER when the control started (plan 2.5,
+            ``file_store.declared_roots``): what ``self.files`` admits beyond
+            the storage anchor.
         task: The ONE engine this control holds. It may be an engine that
             stopped on its inactivity timer or crashed after it confirmed
             running; the next request starts it again under the same key.
@@ -555,19 +684,26 @@ class TaskControl:
     developer_id: str = ''
     address: str = ''
 
-    # User, team, and org identity (derived from AccountInfo after auth)
+    # The run's row of the rung table (plan 8.3): the ledger user, the
+    # ledger team and the paying org; the caller it runs for and the team
+    # layer of its environment
     userId: str = ''
     teamId: str = ''
     orgId: str = ''
+    caller_id: str = ''
+    env_team: str = ''
 
-    # Run classification ('dev' | 'deploy') and owner scope ('user' | 'team').
-    # owner_kind decides the visibility owner independently of run_kind: a
-    # deployed run may be team-owned (@team) or user-owned (@me). Empty falls
-    # back to the run_kind default for a control built before it is stamped.
+    # Run classification ('dev' | 'deploy') and owner scope ('user' | 'team'
+    # | 'org'). owner_kind decides the visibility owner independently of
+    # run_kind: a deployed run may be user-owned (@me, a caller's @public),
+    # team-owned (@team) or org-owned (@org, an unattended @public). Empty
+    # falls back to the run_kind default for a control built before it is
+    # stamped.
     run_kind: str = 'dev'
     owner_kind: str = ''
 
-    # The rung that answered and what fired a deployment run
+    # The rung that answered (stamped from the audience, plan 8.3) and what
+    # fired a deployment run
     rung: str = 'spec'
     trigger: str = ''
 
@@ -593,7 +729,8 @@ class TaskControl:
     ttl: int = 0
 
     # The ROCKETRIDE_* values this control's bindings run with, resolved once
-    # from the team context (plan 6.2; filled by C.10); rides _caller.env
+    # from its environment chain (plan 6.2): org, env_team, the ledger user;
+    # rides _caller.env
     env: Dict[str, str] = field(default_factory=dict)
 
     # The RocketRide cloud databases this control's DB nodes may open, as
@@ -631,9 +768,11 @@ class TaskControl:
     # The deployment this control resolved through, if any, and its version
     deployment: Optional[DeploymentRef] = None
     version: Optional[int] = None
+    pinned: bool = False
 
-    # The team whose environment applies (plan 6.2); never billing
-    team_context: TeamContext = field(default_factory=TeamContext)
+    # The declared roots, resolved through the owner when the control started
+    # (plan 2.5): ``self.files`` reaches them and nothing else beyond its anchor
+    roots: Tuple[Tuple[str, str], ...] = ()
 
     # The ONE engine this control holds
     task: Optional['TaskEngine'] = None
@@ -648,22 +787,34 @@ class TaskControl:
 
     @property
     def owner_type(self) -> str:
-        """``'team'`` or ``'user'``: who owns this control, the run_kind default when unstamped."""
+        """``'user'``, ``'team'`` or ``'org'``: who owns this control, the run_kind default when unstamped."""
         return self.owner_kind or ('team' if self.run_kind == 'deploy' else 'user')
 
     @property
     def owner_id(self) -> str:
         """
-        The identity that OWNS this control: the user of a user-owned run, the
-        team of a team-owned run (never the attribution teamId of a user-owned
-        run). Monitor keys, the registry key and identity lookups scope by it.
+        The identity that OWNS this control (plan 8.3): the user of a
+        user-owned run, the team of a team-owned run (the ledger team there is
+        always that team), the org of an org-owned run (the paying org there
+        is always that org); never the attribution teamId of a user-owned
+        run. Monitor keys, the registry key and identity lookups scope by it.
         """
-        return self.teamId if self.owner_type == 'team' else self.userId
+        kind = self.owner_type
+        if kind == 'team':
+            return self.teamId
+        if kind == 'org':
+            return self.orgId
+        return self.userId
+
+    @property
+    def pinned_version(self) -> Optional[int]:
+        """The version a PINNED run serves (plan 3.2, C.36); None for the rung's published version and on ``@spec``."""
+        return self.version if self.pinned else None
 
     @property
     def index_key(self) -> str:
-        """The owner-filtered index key ``<rung>.<ownerId>.<address>`` a name resolves through (plan 7.5)."""
-        return control_key(self.rung, self.owner_id, self.address)
+        """The owner-filtered index key a name resolves through (plan 7.5; see ``control_key``)."""
+        return control_key(self.rung, self.owner_id, self.address, self.caller_id, self.pinned_version)
 
     @property
     def display_name(self) -> str:
@@ -712,7 +863,7 @@ class TaskControl:
         The config a binding's first frame carries to the engine: ``config`` by stack index, expanded for THIS control (plan 5.3).
 
         The ``${ROCKETRIDE_*}`` placeholders are filled from the control's own
-        env (resolved once from its team context, least privilege), and a
+        env (resolved once from its environment chain, least privilege), and a
         leaf that was one whole placeholder takes its declared scalar type
         (``typed_caller_config``); the engine builds this control's IGlobal
         set from it and keeps nothing it cannot rebuild from the next open.
@@ -743,7 +894,13 @@ class TaskControl:
 
     @property
     def billing(self) -> BillingAttribution:
-        """The paying unit of this control: per control, never per engine."""
+        """
+        The paying unit and the ledger's user and team for this control (plan 8.3).
+
+        Attribution rides the control, never the engine and never the
+        request: every control runs for exactly one caller, so two callers of
+        one team publication are two controls and two attributions.
+        """
         return BillingAttribution(org_id=self.orgId, team_id=self.teamId, user_id=self.userId)
 
     def publication(self) -> Tuple[str, Optional[int]]:
@@ -769,36 +926,9 @@ class TaskControl:
 
     @property
     def owner(self) -> str:
-        """The owner string of this control (``=user/<uid>`` or ``=team/<tid>``); ``''`` when it has no owner id."""
+        """The owner string of this control (``=user/<uid>``, ``=team/<tid>`` or ``=org/<oid>``); ``''`` when it has no owner id."""
         owner_id = self.owner_id
         return compose_owner(self.owner_type, owner_id) if owner_id else ''
-
-    def caller_billing(self, account_info: Any) -> BillingAttribution:
-        """
-        The paying unit of ONE request through this control: the caller (plan 8.3).
-
-        The caller's org balance pays; the row is attributed to the caller
-        and the caller's HOME team (the first of their team order; a scoped
-        key's frozen team), never to the team whose publication answered. On
-        a team-owned control the caller differs from request to request, so
-        this is per request, not per control.
-
-        Args:
-            account_info: The request's account.
-
-        Returns:
-            The attribution for this request's usage.
-        """
-        from ai.account.models import home_team
-
-        organization = getattr(account_info, 'organization', None) or {}
-        org_id = str(organization.get('id') or self.orgId or '')
-        user_id = str(getattr(account_info, 'userId', '') or self.userId or '')
-        # An authenticated caller is attributed to THEIR home team, an empty
-        # one included (a member of no team in this org); the control's team
-        # stands in only when no caller identity came with the request
-        team_id = home_team(account_info) if account_info is not None else self.teamId
-        return BillingAttribution(org_id=org_id, team_id=team_id, user_id=user_id)
 
     # ==== Idle tracking ===========================================================
 

@@ -436,8 +436,9 @@ class TestDeploy:
             ('@Elsewhere', PermissionError),
             ('=team/team-x', PermissionError),
             ('=user/other', PermissionError),
-            ('@org', ValueError),
-            ('=org/org-1', ValueError),
+            ('@org', PermissionError),
+            ('=org/org-1', PermissionError),
+            ('=org/org-2', PermissionError),
             ('@spec', ValueError),
             ('@team/Development', ValueError),
             ('@user', ValueError),
@@ -459,7 +460,6 @@ class TestDeploy:
             ('@team/Development', '@team/ is retired: publish to @<name> or =team/<tid>'),
             ('@team/team-1', '@team/ is retired: publish to @<name> or =team/<tid>'),
             ('@user', '@user is retired: publish to @me'),
-            ('@org', 'Publishing to the org (@org, =org/<oid>) is not yet supported'),
             ('team-1', 'Not a publish target'),
         ],
     )
@@ -469,6 +469,18 @@ class TestDeploy:
             await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': team})
         assert message in str(excinfo.value)
         account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize('target', ['@org', '@ORG', '=org/org-1'])
+    async def test_an_org_admin_publishes_to_the_org_rung(self, account_stub, target):
+        # C.35: the org rung is published by org admins only; its row is the
+        # org's audience, billed to no team (plan 8.3)
+        admin = _account_info()
+        admin.organization['permissions'] = ['org.admin']
+        conn = _make_conn(admin)
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': target})
+        args = account_stub.deployments_deploy.await_args.args
+        assert (args[1], args[-1]) == ('=org/org-1', '')
 
     @pytest.mark.asyncio
     async def test_deploy_foreign_team_denied(self, account_stub):
@@ -608,29 +620,21 @@ class TestReads:
             server,
             pipeline,
             *,
-            org_id,
-            team_id,
+            attribution,
             deployment,
             trigger,
             ttl=None,
             trace_level=None,
             debug_out=False,
-            owner_kind='team',
-            owner_user_id='',
-            rung='',
         ):
             dispatched.update(
                 pipeline=pipeline,
-                org_id=org_id,
-                team_id=team_id,
+                attribution=attribution,
                 deployment=deployment,
                 trigger=trigger,
                 ttl=ttl,
                 trace_level=trace_level,
                 debug_out=debug_out,
-                owner_kind=owner_kind,
-                owner_user_id=owner_user_id,
-                rung=rung,
             )
             return '=control/c0ffee00c0ffee00c0ffee00c0ffee00'
 
@@ -664,9 +668,15 @@ class TestReads:
         }
         conn._server.control_by_key.assert_called_once_with('=control/c0ffee00c0ffee00c0ffee00c0ffee00')
         assert dispatched['trigger'] == 'manual'
-        assert dispatched['team_id'] == 'team-1'
-        # A team slot's run derives its rung from the owner (only the store slot stamps one)
-        assert dispatched['rung'] == ''
+        # The unattended row of plan 8.3: the team owns and bills it, no user
+        attribution = dispatched['attribution']
+        assert (attribution.rung, attribution.owner_kind, attribution.owner_id) == ('team', 'team', 'team-1')
+        assert (attribution.org_id, attribution.user_id, attribution.team_id, attribution.env_team) == (
+            'org-1',
+            '',
+            'team-1',
+            'team-1',
+        )
         # The run names the deployment it resolved through: disabling or
         # removing that deployment releases the run's hold
         assert dispatched['deployment'] == DeploymentRef(
@@ -866,10 +876,11 @@ class TestPersonalDeploy:
             'address': address,
             'version': 1,
         }
-        assert dispatched['owner_kind'] == 'user'
-        assert dispatched['owner_user_id'] == 'user-1'
-        # Billing team is the deployment's ABSOLUTE stamp, not the target.
-        assert dispatched['team_id'] == 'team-1'
+        attribution = dispatched['attribution']
+        assert (attribution.rung, attribution.owner_kind, attribution.owner_id) == ('me', 'user', 'user-1')
+        # Billing team is the deployment's ABSOLUTE stamp, not the target, and
+        # the publisher's own layers are the environment (plan 8.3)
+        assert (attribution.user_id, attribution.team_id, attribution.env_team) == ('user-1', 'team-1', 'team-1')
         # Overlap guard + mark_run key on the OWNER key.
         conn._test_scheduler.register_manual_run.assert_called_once_with(
             '=user/user-1', 'acme.proj-1', 's1', '=control/d00dd00dd00dd00dd00dd00dd00dd00d'
@@ -937,7 +948,7 @@ class TestPublicDeploy:
         await conn._deploy_deploy({}, dict(self._DEPLOY))
         args = account_stub.deployments_deploy.await_args.args
         assert (args[1], args[2], args[3]) == ('@public', 'acme.proj-1', 1)
-        assert args[5] == 'team-1'  # the publisher's dev team, stamped at pointer time
+        assert args[5] == ''  # the store bills no team (plan 8.3): no stamp
 
     @pytest.mark.asyncio
     async def test_a_server_without_a_reviewer_takes_the_ready_version_it_promoted(self, account_stub):
@@ -988,9 +999,21 @@ class TestPublicDeploy:
         info.organization['developerId'] = None
         with pytest.raises(ValueError, match='registered as a developer'):
             _make_conn(info)._require_team({'teamId': '@public'}, 'task.control')
-        # Billing never guesses: without a dev team the store publish refuses
-        with pytest.raises(PermissionError, match='@public needs your development team'):
-            await _make_conn(_account_info(teams=[]))._deploy_deploy({}, dict(self._DEPLOY))
+        # The store bills no team (plan 8.3), so a publisher with no
+        # development team still publishes there; @me still needs one
+        await _make_conn(_account_info(teams=[]))._deploy_deploy({}, dict(self._DEPLOY))
+        assert account_stub.deployments_deploy.await_args.args[5] == ''
+        with pytest.raises(PermissionError, match='@me needs your development team'):
+            await _make_conn(_account_info(teams=[]))._deploy_deploy({}, {**self._DEPLOY, 'teamId': '@me'})
+
+    @pytest.mark.asyncio
+    async def test_a_pipeline_that_declares_roots_is_refused_on_the_store(self, account_stub):
+        # Plan 2.5: declared roots reach the publisher's team or org trees,
+        # and the store serves every org's callers
+        self._rail(account_stub, 'ready')
+        account_stub.deployments_artifact.return_value = {'components': [], 'roots': ['@Development/kb']}
+        with pytest.raises(ValueError, match='declares roots'):
+            await _make_conn(_account_info())._deploy_deploy({}, dict(self._DEPLOY))
         account_stub.deployments_deploy.assert_not_awaited()
 
     @pytest.mark.asyncio
@@ -1009,9 +1032,19 @@ class TestPublicDeploy:
     @pytest.mark.asyncio
     async def test_schedules_sit_on_me_and_on_the_store(self, account_stub):
         # Any published pipe can be scheduled: @me and @public take a
-        # schedule like a team does, and the scheduler resyncs from the row
-        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
-        for target, slot in (('@me', '=user/user-1'), ('@public', '@public')):
+        # schedule like a team does, and the scheduler resyncs from the row.
+        # An unattended @public run is the org's (plan 8.3): its schedule is
+        # an org admin's, as the org rung's is
+        member = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}]))
+        for target in ('@public', '@org'):
+            with pytest.raises(PermissionError, match='org admins'):
+                await member._deploy_schedule_set(
+                    {}, {'projectId': 'proj-1', 'teamId': target, 'sourceId': 's1', 'schedule': '0 2 * * *'}
+                )
+        admin = _account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': []}])
+        admin.organization['permissions'] = ['org.admin']
+        conn = _make_conn(admin)
+        for target, slot in (('@me', '=user/user-1'), ('@public', '@public'), ('@org', '=org/org-1')):
             await conn._deploy_schedule_set(
                 {}, {'projectId': 'proj-1', 'teamId': target, 'sourceId': 's1', 'schedule': '0 2 * * *'}
             )
@@ -1020,7 +1053,7 @@ class TestPublicDeploy:
             conn._test_scheduler.sync.assert_called_with('org-1', account_stub.deployments_schedule_set.return_value)
 
     @pytest.mark.asyncio
-    async def test_a_store_run_bills_the_stamp_and_never_the_slot(self, account_stub, monkeypatch):
+    async def test_an_unattended_store_run_is_the_orgs(self, account_stub, monkeypatch):
         dispatched = {}
 
         async def fake_dispatch(server, pipeline, **kw):
@@ -1037,21 +1070,27 @@ class TestPublicDeploy:
             'billingTeamId': 'team-1',
         }
         account_stub.deployments_get.return_value = record
-        conn = _make_conn(_account_info(teams=[]))
+        member = _make_conn(_account_info(teams=[]))
+        with pytest.raises(PermissionError, match='org admins'):
+            await member._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
+        admin = _account_info(teams=[])
+        admin.organization['permissions'] = ['org.admin']
+        conn = _make_conn(admin)
         conn._server.control_by_key = MagicMock(
             return_value=SimpleNamespace(
                 address='acme.proj-1.s1', control_id='=control/d00dd00dd00dd00dd00dd00dd00dd00d'
             )
         )
         await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
-        assert dispatched['team_id'] == 'team-1'
         assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='@public', project_id='acme.proj-1')
-        # The run sits on the public rung, team-owned by the billing team
-        assert (dispatched['owner_kind'], dispatched['rung']) == ('team', 'public')
-        # An unstamped store row refuses: it never bills a team named '@public'
+        # Plan 8.3: on the public rung, owned and paid by the org, no user,
+        # no team (any stamp the row carries is never read)
+        attribution = dispatched['attribution']
+        assert (attribution.rung, attribution.owner_kind, attribution.owner_id) == ('public', 'org', 'org-1')
+        assert (attribution.user_id, attribution.team_id, attribution.env_team) == ('', '', '')
         account_stub.deployments_get.return_value = {**record, 'billingTeamId': ''}
-        with pytest.raises(ValueError, match='billing'):
-            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
+        await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
+        assert dispatched['attribution'].team_id == ''
 
 
 class TestStateAndSchedules:
