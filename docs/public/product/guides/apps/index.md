@@ -295,8 +295,9 @@ interface PublicPage {
 Rules, enforced when a version is published to the public store rung (the
 publish fails with a message naming the field):
 
-- Only platform apps (ids in the `rocketride` developer namespace) may declare
-  `publicPages`, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
+- Only platform apps (ids in the `rocketride` developer namespace; on OSS
+  that is every app, since every OSS app id is `rocketride.<name>`) may
+  declare `publicPages`, and only a root app (`RR_PUBLIC_ROOT_APPS`, default
   `rocketride.home`) may declare pages. `site` goes with the `/` page: a
   platform app that declares `site` without declaring `/` is refused, and a
   third-party app's `site` is ignored, since it can never take effect.
@@ -404,15 +405,17 @@ nothing for an absent, empty or false value. Sections nest at most 16 deep.
 There is no `{{.}}`: a list item that is not an object adds no names, so a tag
 inside its section reads the enclosing values (`{{b}}` inside `{{#a}}` over
 `["x"]` renders the outer `b`).
-Any other tag renders nothing, as does a tag naming a value the server does
-not provide; a `{{` that does not form a tag stays as text. Escaping makes a
-value safe in HTML text and in quoted attributes that are not URLs; it does not
-make a value safe in a URL attribute (`href`, `src`), an event handler,
-`style`, `<script>` or an unquoted attribute, so only server-derived URLs such
-as `{{assets}}` belong there. `{{assets}}` is the URL of the version's build
-output, `/apps/<appId>/v<N>`, so a snapshot references its images as
-`{{assets}}/seo-assets/logo.svg`, served from the same version it was read
-from. The shell's own document is never treated as a template.
+Any `{{...}}` or `{{{...}}}` on one line, with at most 128 characters and no
+other brace between the braces, is a tag, including inside `<script>` and
+`<style>`; only a `{{` without such a closing `}}` stays as text. A tag of any
+other kind renders nothing, as does a tag naming a value the server does not
+provide. Escaping makes a value safe in HTML text and in quoted attributes that
+are not URLs; it does not make a value safe in a URL attribute (`href`, `src`),
+an event handler, `style`, `<script>` or an unquoted attribute, so only
+server-derived URLs such as `{{assets}}` belong there. `{{assets}}` is the URL
+of the version's build output, `/apps/<appId>/v<N>`, so a snapshot references
+its images as `{{assets}}/seo-assets/logo.svg`, served from the same version it
+was read from. The shell's own document is never treated as a template.
 
 A page's `data` entries add server data to its snapshot, each under its source
 name whatever its argument:
