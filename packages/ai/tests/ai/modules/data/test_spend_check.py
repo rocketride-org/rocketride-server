@@ -7,7 +7,8 @@
 require_credit is the engine's pipe gate on a hosted task.
 
 It asks EaaS ``spend.check`` over the task channel and turns a refusal into
-OutOfCreditsError; an allowed answer stands for CONST_SPEND_ALLOW_SECONDS.
+OutOfCreditsError, or into SubscriptionRequiredError when the answer names
+that code (plan 8.4); an allowed answer stands for CONST_SPEND_ALLOW_SECONDS.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from unittest.mock import MagicMock
 import pytest
 
 import ai.modules.data.data_server as data_server
-from ai.account.base import OutOfCreditsError
+from ai.account.base import OutOfCreditsError, SubscriptionRequiredError
 from ai.constants import CONST_BILLING_UNAVAILABLE
 from ai.modules.data.channel import ChannelError, ChannelReply, ChannelUnavailable
 
@@ -28,10 +29,11 @@ REFUSAL = 'Out of credits'
 
 
 class _Channel:
-    """Answers spend.check with ``refusal``, or raises ``error``."""
+    """Answers spend.check with ``refusal`` (named by ``code`` when set), or raises ``error``."""
 
     def __init__(self):
         self.refusal = None
+        self.code = None
         self.error = None
         self.asked = []
 
@@ -40,7 +42,10 @@ class _Channel:
         self.arguments = arguments
         if self.error:
             raise self.error
-        return ChannelReply(body={'refusal': self.refusal})
+        body = {'refusal': self.refusal}
+        if self.code:
+            body['code'] = self.code
+        return ChannelReply(body=body)
 
 
 @pytest.fixture
@@ -164,13 +169,28 @@ def test_the_gate_names_the_bindings_caller_and_remembers_the_allow_per_paying_u
     """The data path names the caller before getPipe; the question carries it; an allow is per (org, address)."""
     from ai.modules.data.caller_context import set_pending_caller
 
-    caller_a = {'userId': 'u-a', 'orgId': 'org-a', 'address': 'acme.docBrain.chat', 'rung': 'team', 'env': {'x': 1}}
+    caller_a = {
+        'userId': 'u-a',
+        'orgId': 'org-a',
+        'address': 'acme.docBrain.chat',
+        'rung': 'team',
+        'correlationId': 'c' * 32,
+        'env': {'x': 1},
+    }
     caller_b = {'userId': 'u-b', 'orgId': 'org-b', 'address': 'acme.docBrain.chat', 'rung': 'team'}
     try:
         set_pending_caller(caller_a)
         data_server.require_credit()
+        # The binding's request id rides the question (EaaS finds its control
+        # by it, plan 8.4); the environment never does
         assert channel.arguments == {
-            'caller': {'userId': 'u-a', 'orgId': 'org-a', 'address': 'acme.docBrain.chat', 'rung': 'team'}
+            'caller': {
+                'userId': 'u-a',
+                'orgId': 'org-a',
+                'address': 'acme.docBrain.chat',
+                'rung': 'team',
+                'correlationId': 'c' * 32,
+            }
         }
         # The same paying unit within the window: not asked again
         data_server.require_credit()
@@ -185,3 +205,39 @@ def test_the_gate_names_the_bindings_caller_and_remembers_the_allow_per_paying_u
         assert len(channel.asked) == 3 and channel.arguments is None
     finally:
         set_pending_caller(None)
+
+
+# ---------------------------------------------------------------------------
+# The subscription to a paid listing (plan 8.4, the engine-side backstop)
+# ---------------------------------------------------------------------------
+
+
+def test_a_refusal_naming_subscription_required_refuses_the_pipe_with_that_code(channel):
+    """EaaS names the refusal; the gate raises it as itself, never as out of credit."""
+    from ai.modules.data.caller_context import set_pending_caller
+
+    channel.refusal = 'acme.docBrain needs a subscription'
+    channel.code = 'SUBSCRIPTION_REQUIRED'
+    try:
+        set_pending_caller({'userId': 'u-a', 'orgId': 'org-b', 'address': 'acme.docBrain.chat', 'rung': 'public'})
+        with pytest.raises(SubscriptionRequiredError, match='needs a subscription') as refused:
+            data_server.require_credit()
+    finally:
+        set_pending_caller(None)
+
+    assert refused.value.code == 'SUBSCRIPTION_REQUIRED'
+    assert refused.value.address == 'acme.docBrain.chat'
+
+
+def test_a_subscription_refusal_is_asked_again_every_time(channel):
+    """A refusal is never remembered: the caller who subscribes is admitted on the next open."""
+    channel.refusal = 'needs a subscription'
+    channel.code = 'SUBSCRIPTION_REQUIRED'
+    for _ in range(2):
+        with pytest.raises(SubscriptionRequiredError):
+            data_server.require_credit()
+    channel.refusal = None
+    channel.code = None
+    data_server.require_credit()
+
+    assert len(channel.asked) == 3
