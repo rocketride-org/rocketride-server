@@ -147,28 +147,27 @@ public:
     static ErrorOr<Ptr<C>> objectConstructor(Location location,
                                              Args &&...args) noexcept;
 
-    // This constexpr api casted FACTORY structure and automatically
-    // sets and casts an objectFactory method if declared on the
-    // objects type, otherwise the base object types factory is used.
+    // The type of every method stored in FACTORY::method. Interfaces that
+    // share a FactoryType share one root type (InterfaceType::FactoryRoot):
+    // makeFactory stores a method of this type and find calls it as this
+    // type, so the two meet at the root. Only the class that declares
+    // FactoryType names itself FactoryRoot; a derived interface inherits it
+    template <typename InterfaceType>
+    using Method = ErrorOr<Ptr<typename InterfaceType::FactoryRoot>> (*)(
+        Location, typename InterfaceType::FactoryRoot::FactoryArgs &&) noexcept;
+
+    // This constexpr api builds a FACTORY structure that constructs an
+    // ObjectType and returns it as a pointer to the root of InterfaceType.
+    // The static_cast refuses to compile an InterfaceType whose FactoryArgs
+    // differ from the FactoryArgs of its root
     template <typename ObjectType, typename InterfaceType>
     _const auto makeFactory(iTextView name, uint32_t flags = {}) {
         return FACTORY{
             InterfaceType::FactoryType, name, flags,
-            (void *)objectConstructor<ObjectType, InterfaceType,
-                                      typename InterfaceType::FactoryArgs>};
-    }
-
-    // This constexpr api casted FACTORY structure and automatically
-    // sets and casts an objectFactory method if declared on the
-    // objects type, otherwise the base object types factory is used.
-    template <typename ObjectType, typename InterfaceType>
-    _const auto makeFactory(iTextView name,
-                            ErrorOr<Ptr<InterfaceType>> (*objectFactory)(
-                                Location,
-                                typename InterfaceType::FactoryArgs) noexcept,
-                            uint32_t flags = {}) {
-        return FACTORY{InterfaceType::FactoryType, name, flags,
-                       (void *)objectFactory};
+            (void *)static_cast<Method<InterfaceType>>(
+                objectConstructor<ObjectType,
+                                  typename InterfaceType::FactoryRoot,
+                                  typename InterfaceType::FactoryArgs>)};
     }
 
     // Factory client usage, make, open (make + open), find (find + make)
