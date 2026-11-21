@@ -605,10 +605,12 @@ class DeployPipeCommands(_DeployBase):
         an address no rung serves is ``TASK_NOT_REGISTERED``.
 
         Arguments: ``address`` (``[<root>/]developerId.pipelineId[.source]``;
-        the source segment is accepted and ignored — the map covers the
-        whole pipe; a root names the one rung to read, ``@<team>/...`` or
-        ``=team/<tid>/...`` for one team's publication). The retired
-        ``team`` option is refused.
+        the address resolves exactly as ``submit()`` resolves it, a source
+        segment included (on a rung with live controls it is that source's
+        control that answers), so discovery and execution never disagree;
+        the map covers the whole pipe whichever source is named; a root
+        names the one rung to read, ``@<team>/...`` or ``=team/<tid>/...``
+        for one team's publication). The retired ``team`` option is refused.
 
         Body: ``{address, rung, version, teamId?, interfaces}`` where
         ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —

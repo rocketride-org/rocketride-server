@@ -43,7 +43,7 @@ from ai.modules.task.address import (
     parse_target,
     refuse_team_option,
 )
-from ai.modules.task.task_control import RESOLVE_ATTACH, RESOLVE_READ
+from ai.modules.task.task_control import RESOLVE_ATTACH, RESOLVE_READ, RESOLVE_START
 from ai.modules.task.types import TaskError
 
 from . import test_task_engine_sharing as sharing
@@ -354,3 +354,46 @@ async def test_read_answers_the_publication_and_starts_nothing(catalog, engines,
     assert resolution.control is None and resolution.pin.rung == 'team' and resolution.pin.version == 2
     assert resolution.target == parse_target(f'@Team-1/{ADDRESS}')
     assert list(ts._task_control) == []
+
+
+# =============================================================================
+# AN AMBIGUOUS RUNG IS HELD AT ITS PLACE IN THE LADDER
+# =============================================================================
+
+
+def _two_live_team_sources(ts):
+    """Two live team-1 controls of acme.docBrain, one per source: a two-segment address is ambiguous there."""
+    for source in ('webhook_1', 'prompt_1'):
+        _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1', source=source)
+
+
+async def test_an_ambiguous_team_rung_that_answers_first_needs_a_source(catalog, engines, deployments):
+    """Nothing ranks before the team rung (a later @public publication does not count): the refusal stands."""
+    deployments.publish()
+    ts = _server()
+    _two_live_team_sources(ts)
+    for mode in (RESOLVE_READ, RESOLVE_START):
+        with pytest.raises(TaskError) as excinfo:
+            await ts.resolve_target(_caller(), 'acme.docBrain', 'task.data', mode=mode)
+        assert excinfo.value.code == TaskError.SOURCE_REQUIRED, mode
+        assert excinfo.value.sources == ['prompt_1', 'webhook_1']
+
+
+async def test_an_ambiguous_later_rung_never_blocks_an_earlier_publication(catalog, engines, deployments):
+    """A personal publication ranks before the team rung: it answers the read and the start, the team's two
+    live sources notwithstanding (plan 3.2: the ladder's order, a pin before a control of a later rung).
+    """
+    deployments.deploy('=user/user-a')
+    ts = _server()
+    _two_live_team_sources(ts)
+
+    resolution = await ts.resolve_target(_caller(), 'acme.docBrain', 'task.data', mode=RESOLVE_READ)
+    assert resolution.control is None and resolution.pin.rung == 'me'
+
+    control = await _resolve(ts, 'acme.docBrain', _caller(), 'task.data')
+    assert control.rung == 'me' and control.address == ADDRESS
+
+    # A rooted address walks only its rung: the team root is still ambiguous
+    with pytest.raises(TaskError) as excinfo:
+        await ts.resolve_target(_caller(), '=team/team-1/acme.docBrain', 'task.data', mode=RESOLVE_READ)
+    assert excinfo.value.code == TaskError.SOURCE_REQUIRED

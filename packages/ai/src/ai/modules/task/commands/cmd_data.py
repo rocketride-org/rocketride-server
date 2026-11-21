@@ -267,10 +267,13 @@ class DataCommands(DAPConn):
         """
         arguments = request.get('arguments') or {}
         token = arguments.get('token')
-        if subcommand in ('open', 'tool') and pipe_id is None and not is_control_id(token):
+        if subcommand in ('open', 'tool') and pipe_id is None:
+            # The retired team option is refused on every frame that starts a
+            # binding, whichever form its token slot takes
             refuse_team_option(arguments)
-            resolution = await self._server.resolve_target(self._account_info, str(token or ''), 'task.data')
-            return resolution.control
+            if not is_control_id(token):
+                resolution = await self._server.resolve_target(self._account_info, str(token or ''), 'task.data')
+                return resolution.control
         return self.get_control(request, 'task.data')
 
     async def _new_binding(self, control: 'TaskControl', arguments: Dict[str, Any]) -> '_Frame':

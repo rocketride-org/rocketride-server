@@ -265,8 +265,10 @@ class DeployApi:
         Args:
             pipe_path: The ``.pipe`` file.
             comment: Optional "what changed" note kept in the registry.
-            deploy_to: Team id to deploy the new version to immediately
-                (one-step add+deploy).
+            deploy_to: Optional target to deploy the new version to (``'@me'``,
+                ``'@<team>'``, ``'=team/<tid>'``, ``'@public'``) immediately
+                (one-step add+deploy), as :meth:`add` takes it; a bare team
+                id is refused.
 
         Returns:
             The artifact entry, plus the deployment when ``deploy_to`` was given.

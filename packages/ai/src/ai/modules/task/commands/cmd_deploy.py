@@ -570,8 +570,13 @@ class DeployCommands(_DeployBase):
     async def _deploy_add_pipe(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Snapshot the pipeline into the org registry; optionally deploy in one step.
 
-        ``deployTo`` (optional team id) is the OSS/two-man convenience: publish
-        and point that team at the new version in a single call.
+        ``deployTo`` (an optional target, as ``teamId`` takes on ``deploy``:
+        ``@me``, ``@<team>``, ``=team/<tid>``, ``@public``) is the
+        OSS/two-man convenience: publish and point that target at the new
+        version in a single call. The target is read and authorized before
+        anything is written, so a refused target leaves the registry
+        untouched; only the store's gate on ``@public``, which reads the new
+        version's review state, runs after the write.
         """
         # Publishing puts an inert artifact in the org registry — gate it on
         # holding task.control SOMEWHERE (anyone who could deploy it anyway).
@@ -637,6 +642,17 @@ class DeployCommands(_DeployBase):
         full_name = self._registry_id(project_id)
         project_id = full_name
 
+        # The one-step deploy's target, read and authorized BEFORE the
+        # registry write (the same checks as rrext_deploy_pipe deploy, the
+        # pointer-time billing stamp included): a retired or foreign target
+        # must not leave a new version, withdrawn reviews and a change
+        # notification behind. _require_team owns the @me resolution and the
+        # task.control check (it reads teamId off the mapping it is handed)
+        deploy_team = billing_team = ''
+        if args.get('deployTo'):
+            deploy_team = self._require_team({'teamId': str(args['deployTo'])}, 'task.control')
+            billing_team = self._billing_team_of(deploy_team)
+
         org_id = self._org_id()
         caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
         # The listing manifest the publish row snapshots (plan 9): the store
@@ -699,24 +715,18 @@ class DeployCommands(_DeployBase):
         # landed in — cross-org targeting goes through an org switch.
         body: Dict[str, Any] = {'artifact': entry, 'orgId': org_id, 'fullName': full_name}
         await self._notify_deploy_changed(org_id, '', project_id, 'add')
-        if args.get('deployTo'):
-            # One-step add+deploy — same checks as rrext_deploy_pipe deploy,
-            # including the pointer-time billing stamp. _require_team owns the
-            # @me resolution and the task.control check; reusing it keeps the
-            # one authorization rule in a single place (it reads teamId off the
-            # args mapping it is handed).
-            team_id = self._require_team({'teamId': str(args['deployTo'])}, 'task.control')
-            # The store takes its gate on this door too: on a review-ladder
-            # server the version just added is a draft, so it cannot go public
-            if team_id == PUBLIC_AUDIENCE:
+        if deploy_team:
+            # One-step add+deploy onto the target read above. The store takes
+            # its gate on this door too: on a review-ladder server the version
+            # just added is a draft, so it cannot go public
+            if deploy_team == PUBLIC_AUDIENCE:
                 await self._require_store_publishable(org_id, project_id, int(entry['version']))
-            billing_team = self._billing_team_of(team_id)
             dep = await account.deployments_deploy(
-                org_id, team_id, project_id, entry['version'], self._actor(), billing_team
+                org_id, deploy_team, project_id, entry['version'], self._actor(), billing_team
             )
             self._scheduler.sync(org_id, dep)
             body['deployment'] = self._describe(dep)
-            await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
+            await self._notify_deploy_changed(org_id, deploy_team, project_id, 'deploy')
         return self.build_response(request, body=body)
 
     async def _withdraw_stale_submissions(self, org_id: str, project_id: str, new_version: int) -> None:

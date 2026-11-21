@@ -393,11 +393,36 @@ class TestPublish:
         conn._test_scheduler.sync.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_publish_deploy_to_foreign_team_denied(self, account_stub):
+    @pytest.mark.parametrize(
+        ('deploy_to', 'error'),
+        [
+            ('=team/team-foreign', PermissionError),
+            # The retired spellings, the bare team id among them
+            ('team-1', ValueError),
+            ('@team/Development', ValueError),
+            ('@user', ValueError),
+        ],
+    )
+    async def test_a_refused_deploy_to_writes_nothing(self, account_stub, deploy_to, error):
+        """The one-step target is read and authorized before the registry write: no version, no
+        withdrawn review, no change notification is left behind by a refused target.
+        """
         conn = _make_conn(_account_info())
-        with pytest.raises(PermissionError):
-            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '=team/team-foreign'})
+        conn._notify_deploy_changed = AsyncMock()
+        with pytest.raises(error):
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': deploy_to})
+        account_stub.deployments_publish.assert_not_awaited()
+        account_stub.set_artifact_state.assert_not_awaited()
         account_stub.deployments_deploy.assert_not_awaited()
+        conn._notify_deploy_changed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_deploy_to_needing_a_dev_team_writes_nothing(self, account_stub):
+        """The pointer-time billing stamp is checked before the write too: @me without a dev team refuses first."""
+        conn = _make_conn(_account_info(dev_team=''))
+        with pytest.raises(PermissionError, match='development team'):
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '@me'})
+        account_stub.deployments_publish.assert_not_awaited()
 
 
 # ============================================================================

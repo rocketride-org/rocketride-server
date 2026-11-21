@@ -331,6 +331,39 @@ async def test_an_open_by_control_id_is_the_controls_and_answers_with_it(catalog
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('subcommand', ['open', 'tool'])
+@pytest.mark.parametrize('by', ['address', 'control id'])
+async def test_the_retired_team_option_is_refused_on_every_frame_that_starts_a_binding(
+    catalog, engines, engine_log, subcommand, by
+):
+    """``team`` on an open or a standalone tool frame is refused whichever form the token slot takes
+    (plan 11.1 B44): a control id walks no rung, but the option is retired, never silently dropped.
+    """
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    token = control.address if by == 'address' else control.control_id
+    frame = (
+        {'object': {'name': 'x'}, 'mimeType': 'text/plain'}
+        if subcommand == 'open'
+        else {'tool': 'dialect', 'nodeId': 'db_1', 'input': {}}
+    )
+    forwarded = len(engine_log)
+
+    with pytest.raises(TaskError) as excinfo:
+        await _frame(conn, subcommand=subcommand, token=token, team='team-1', **frame)
+
+    assert excinfo.value.field == 'team' and 'rooted address' in str(excinfo.value)
+    ts.resolve_target.assert_not_awaited()
+    conn.get_control.assert_not_called()
+    assert len(engine_log) == forwarded
+
+    # Without the option both forms still start the binding
+    await _frame(conn, subcommand=subcommand, token=token, **frame)
+    assert engine_log[-1]['subcommand'] == subcommand
+
+
+@pytest.mark.asyncio
 async def test_a_frame_on_an_open_pipe_names_a_control_id_never_an_address(catalog, engines, engine_log):
     """Once a pipe is open its frames name the control id the open answered with: an address could resolve to a
     sibling control by then (one project_id, several configurations), so it is refused before anything is forwarded.
