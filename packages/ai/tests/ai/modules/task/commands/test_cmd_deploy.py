@@ -560,6 +560,7 @@ class TestReads:
             owner_kind='team',
             owner_user_id='',
             rung='',
+            listing=None,
         ):
             dispatched.update(
                 pipeline=pipeline,
@@ -573,6 +574,7 @@ class TestReads:
                 owner_kind=owner_kind,
                 owner_user_id=owner_user_id,
                 rung=rung,
+                listing=listing,
             )
             return '=control/c0ffee00c0ffee00c0ffee00c0ffee00'
 
@@ -612,6 +614,8 @@ class TestReads:
         # The run names the deployment it resolved through: disabling or
         # removing that deployment releases the run's hold
         assert dispatched['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.proj-1')
+        # The run carries the listing of the version it starts: free without a store block
+        assert dispatched['listing'] is not None and not dispatched['listing'].paid
         assert dispatched['pipeline']['source'] == 'webhook_1'
         # No actor rides the dispatch — the run is owned by the team alone.
         assert 'actor' not in dispatched

@@ -62,7 +62,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from croniter import croniter
 
 from ai.account import account
-from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY
+from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY, listing_of
 from ai.common.dap import TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -506,6 +506,8 @@ class DeployPipeCommands(_DeployBase):
             # run window: the ttl window belongs to scheduled fires — a run the
             # user started runs until it finishes or the user stops it.
             sched = (dep.get('schedules') or {}).get(source_id) or {}
+            # The store listing of the version this run starts (plan 8.4)
+            listing = await listing_of(account, org_id, project_id, dep['version'])
             key = await start_server_task_as_team(
                 self._server,
                 pipeline,
@@ -521,6 +523,7 @@ class DeployPipeCommands(_DeployBase):
                 # A store pointer's run sits on the public rung (team-owned by
                 # its billing team); every other slot derives its rung
                 rung='public' if team_id == PUBLIC_AUDIENCE_KEY else '',
+                listing=listing,
             )
         except BaseException:
             # The start never completed — free the reservation so a retry (or

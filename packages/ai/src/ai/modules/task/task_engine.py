@@ -486,7 +486,10 @@ async def _check_spend(task: 'TaskEngine', arguments: Dict[str, Any], data: Opti
 
     caller = (arguments or {}).get('caller') or {}
     org_id = str(caller.get('orgId') or '') or task.org_id
-    control = task.binding_control(caller.get('correlationId')) if caller else None
+    # A binding with no caller (a scan, a listener) is the owner control's
+    # where one control holds a private engine (binding_control's fallback),
+    # so a lapsed subscription stops those bindings too
+    control = task.binding_control(caller.get('correlationId') if caller else None)
     try:
         # Step 1: the subscription to a paid listing, from the control's own
         # cached verdict (asked once per allow window)
