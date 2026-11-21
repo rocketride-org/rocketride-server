@@ -317,22 +317,25 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 
 	// --- The canvas gate -------------------------------------------------------
 	// Until a catalog is held the DESIGN view says why instead of drawing a
-	// canvas with no lanes, palette or forms (catalogGate decides).
+	// canvas with no lanes, palette or forms (catalogGate decides). A bridged
+	// realm (the VS Code webview) sees the root's state only as connected or
+	// not, so progress reported while down reads as connecting, and the last
+	// error stands in for the latched failure the root did not record.
 	const connectionStatus = useConnectionStatus();
-	const canvasGate = useMemo(
-		() =>
-			catalogGate(
-				Object.keys(servicesJson).length,
-				{
-					connected: isConnected,
-					connecting: connectionStatus.state === ConnectionState.CONNECTING,
-					hasCredentials: connectionStatus.hasCredentials,
-					...(connectionStatus.lastFailure ? { failure: { kind: connectionStatus.lastFailure.kind, ...(connectionStatus.lastFailure.lastError ? { lastError: connectionStatus.lastFailure.lastError } : {}) } } : {}),
-				},
-				catalogue
-			),
-		[servicesJson, isConnected, connectionStatus, catalogue]
-	);
+	const canvasGate = useMemo(() => {
+		const lastError = connectionStatus.lastFailure?.lastError ?? connectionStatus.lastError;
+		return catalogGate(
+			Object.keys(servicesJson).length,
+			{
+				connected: isConnected,
+				connecting: connectionStatus.state === ConnectionState.CONNECTING || (!isConnected && Boolean(connectionStatus.progressMessage)),
+				hasCredentials: connectionStatus.hasCredentials,
+				authRefused: connectionStatus.state === ConnectionState.AUTH_FAILED || connectionStatus.lastFailure?.kind === 'auth',
+				...(lastError ? { lastError } : {}),
+			},
+			catalogue
+		);
+	}, [servicesJson, isConnected, connectionStatus, catalogue]);
 
 	// --- Env-variable keys (the config widgets' ${...} autocomplete) ----------
 	// Always fetched from the realm client on connect; the host's feed pushes

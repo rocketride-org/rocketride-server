@@ -39,10 +39,10 @@ import type { IGateConnection } from './catalogGate';
 // =============================================================================
 
 /** A connected client with credentials and no failure. */
-const CONNECTED: IGateConnection = { connected: true, connecting: false, hasCredentials: true };
+const CONNECTED: IGateConnection = { connected: true, connecting: false, hasCredentials: true, authRefused: false };
 
 /** A client with credentials that is not connected and not trying. */
-const DOWN: IGateConnection = { connected: false, connecting: false, hasCredentials: true };
+const DOWN: IGateConnection = { connected: false, connecting: false, hasCredentials: true, authRefused: false };
 
 // =============================================================================
 // The canvas shows
@@ -50,7 +50,7 @@ const DOWN: IGateConnection = { connected: false, connecting: false, hasCredenti
 
 test('a held catalog opens the canvas, whatever the connection says', () => {
 	assert.equal(catalogGate(3, CONNECTED, { services: { llm_openai: {} } }), null);
-	assert.equal(catalogGate(3, { ...DOWN, failure: { kind: 'auth', lastError: 'Invalid or revoked API key' } }, null), null);
+	assert.equal(catalogGate(3, { ...DOWN, authRefused: true, lastError: 'Invalid or revoked API key' }, null), null);
 });
 
 // =============================================================================
@@ -58,7 +58,7 @@ test('a held catalog opens the canvas, whatever the connection says', () => {
 // =============================================================================
 
 test('a refused sign-in says so, names the server message and offers Settings', () => {
-	const gate = catalogGate(0, { ...DOWN, failure: { kind: 'auth', lastError: 'Invalid or revoked API key.' } }, { services: {}, servicesError: 'Not connected' });
+	const gate = catalogGate(0, { ...DOWN, authRefused: true, lastError: 'Invalid or revoked API key.' }, { services: {}, servicesError: 'Not connected' });
 
 	assert.equal(gate?.title, 'Sign-in required');
 	assert.match(gate?.description ?? '', /\(Invalid or revoked API key\)\./);
@@ -66,14 +66,24 @@ test('a refused sign-in says so, names the server message and offers Settings', 
 });
 
 test('a refused sign-in wins over a reconnect attempt', () => {
-	const gate = catalogGate(0, { ...DOWN, connecting: true, failure: { kind: 'auth' } }, null);
+	const gate = catalogGate(0, { ...DOWN, connecting: true, authRefused: true }, null);
 
 	assert.equal(gate?.title, 'Sign-in required');
 });
 
+test('a bridged realm that sees only the error still shows it, with Settings', () => {
+	// The VS Code webview: the root's AUTH_FAILED arrives as "not connected"
+	// with the server's message as the last error.
+	const gate = catalogGate(0, { ...DOWN, lastError: 'Invalid or revoked API key' }, null);
+
+	assert.equal(gate?.title, 'Not connected');
+	assert.match(gate?.description ?? '', /The last attempt failed: Invalid or revoked API key\./);
+	assert.equal(gate?.offerSettings, true);
+});
+
 test('a connection attempt under way says it is connecting, with the last failure', () => {
 	const fresh = catalogGate(0, { ...DOWN, connecting: true }, null);
-	const retrying = catalogGate(0, { ...DOWN, connecting: true, failure: { kind: 'network', lastError: 'ECONNREFUSED' } }, null);
+	const retrying = catalogGate(0, { ...DOWN, connecting: true, lastError: 'ECONNREFUSED' }, null);
 
 	assert.equal(fresh?.title, 'Connecting to the server');
 	assert.equal(fresh?.offerSettings, false);
@@ -82,18 +92,18 @@ test('a connection attempt under way says it is connecting, with the last failur
 });
 
 test('no connection set up says so and offers Settings', () => {
-	const gate = catalogGate(0, { connected: false, connecting: false, hasCredentials: false }, null);
+	const gate = catalogGate(0, { connected: false, connecting: false, hasCredentials: false, authRefused: false }, null);
 
 	assert.equal(gate?.title, 'Not connected');
 	assert.match(gate?.description ?? '', /no connection is set up/);
 	assert.equal(gate?.offerSettings, true);
 });
 
-test('a dropped connection names its last error', () => {
-	const gate = catalogGate(0, { ...DOWN, failure: { kind: 'network', lastError: 'socket closed' } }, null);
+test('a dropped connection with no message says only that the canvas needs a server', () => {
+	const gate = catalogGate(0, DOWN, null);
 
 	assert.equal(gate?.title, 'Not connected');
-	assert.match(gate?.description ?? '', /The last attempt failed: socket closed\./);
+	assert.doesNotMatch(gate?.description ?? '', /last attempt/);
 });
 
 // =============================================================================

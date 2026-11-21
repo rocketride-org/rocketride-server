@@ -27,7 +27,12 @@ import type { CataloguePayload } from '../../utils/catalogueDiagnostic';
 // Types
 // =============================================================================
 
-/** The connection facts the gate reads (a slice of the shell's ConnectionStatus). */
+/**
+ * The connection facts the gate reads, taken from the shell's
+ * ConnectionStatus. A bridged realm (the VS Code webview) sees the root's
+ * state only as connected or not, so the editor also passes what survives the
+ * bridge: the last error and whether progress is being reported.
+ */
 export interface IGateConnection {
 	/** A client can reach the server. */
 	connected: boolean;
@@ -35,13 +40,10 @@ export interface IGateConnection {
 	connecting: boolean;
 	/** A connection target and credentials are configured. */
 	hasCredentials: boolean;
-	/** The last unrecovered failure, latched across later transitions. */
-	failure?: {
-		/** `auth`: the credentials were refused or expired; `network`: the transport failed. */
-		kind: 'network' | 'auth';
-		/** The failure's message, when one was given. */
-		lastError?: string;
-	};
+	/** The server refused the credentials (an auth failure the realm can see). */
+	authRefused: boolean;
+	/** The last failure's message, when one was given. */
+	lastError?: string;
 }
 
 /** What the DESIGN view shows instead of the canvas. */
@@ -58,9 +60,9 @@ export interface ICatalogGate {
 // The decision
 // =============================================================================
 
-/** The message a failure carries, trimmed of a trailing period; '' for none. */
-function errorText(failure: IGateConnection['failure']): string {
-	return (failure?.lastError ?? '').trim().replace(/\.+$/, '');
+/** The last error, trimmed of a trailing period; '' for none. */
+function errorText(connection: IGateConnection): string {
+	return (connection.lastError ?? '').trim().replace(/\.+$/, '');
 }
 
 /**
@@ -79,8 +81,9 @@ export function catalogGate(catalogCount: number, connection: IGateConnection, c
 	// Step 2: no server to ask. A refused sign-in first: it is the one failure
 	// a retry never fixes
 	if (!connection.connected) {
-		const error = errorText(connection.failure);
-		if (connection.failure?.kind === 'auth') {
+		const error = errorText(connection);
+		const failed = error ? ` The last attempt failed: ${error}.` : '';
+		if (connection.authRefused) {
 			return {
 				title: 'Sign-in required',
 				description: `The server refused the saved credentials${error ? ` (${error})` : ''}. The canvas opens once you sign in again and the node definitions load.`,
@@ -88,24 +91,12 @@ export function catalogGate(catalogCount: number, connection: IGateConnection, c
 			};
 		}
 		if (connection.connecting) {
-			return {
-				title: 'Connecting to the server',
-				description: `The canvas opens once the node definitions load.${error ? ` The last attempt failed: ${error}.` : ''}`,
-				offerSettings: Boolean(connection.failure),
-			};
+			return { title: 'Connecting to the server', description: `The canvas opens once the node definitions load.${failed}`, offerSettings: Boolean(error) };
 		}
 		if (!connection.hasCredentials) {
-			return {
-				title: 'Not connected',
-				description: 'The canvas needs the node definitions from a RocketRide server, and no connection is set up yet.',
-				offerSettings: true,
-			};
+			return { title: 'Not connected', description: 'The canvas needs the node definitions from a RocketRide server, and no connection is set up yet.', offerSettings: true };
 		}
-		return {
-			title: 'Not connected',
-			description: `The canvas needs the node definitions from a RocketRide server.${error ? ` The last attempt failed: ${error}.` : ''}`,
-			offerSettings: true,
-		};
+		return { title: 'Not connected', description: `The canvas needs the node definitions from a RocketRide server.${failed}`, offerSettings: true };
 	}
 
 	// Step 3: the server answered without a catalog: say what it said
