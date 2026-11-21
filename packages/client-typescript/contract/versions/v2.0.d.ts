@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 8950a1c35b96b31a415aad5c01caa95fed180487
+// Source commit: 17c64db20f46cee2fcb0e399f22a4afb7ef16907
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5564,19 +5564,17 @@ export declare class RocketRideClient extends DAPClient {
     /**
      * SSE callbacks by pipe slot. A slot is reused by the next binding once a
      * pipe closes, so delivery also checks the event's `traceId` against
-     * `_ssePipeTraces` (the member types are part of the append-only shell
+     * `_sseTraceCallbacks` (the member types are part of the append-only shell
      * contract, so the map keeps its key).
      */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
-     * The request tree (wire `traceId`) each SSE slot was registered for.
-     *
-     * The callbacks stay keyed by slot (that member's type is part of the
-     * shell contract, which is append-only); an event is delivered only when
-     * its `traceId` is the one its slot was registered under, so a late event
-     * of a closed pipe never reaches the next pipe opened on the same slot.
+     * SSE callbacks by the request tree's wire `traceId`: the key delivery
+     * uses. A slot number is engine-local and reused, so two open pipes on two
+     * engines can share one; a traceId names its server and launch and is never
+     * reused. `_ssePipeCallbacks` keeps its frozen type and is no longer read.
      */
-    readonly _ssePipeTraces: Map<number, string>;
+    readonly _sseTraceCallbacks: Map<string, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
      * Creates a new RocketRideClient instance.
      *

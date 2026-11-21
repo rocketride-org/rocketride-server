@@ -2362,7 +2362,6 @@ export class RocketRideClient extends DAPClient {
 		// Dispatch pipe-scoped SSE events to the registered DataPipe callback,
 		// by the request tree (never by the slot, which the next pipe reuses)
 		if (eventType === 'apaevt_sse') {
-			const pipeId = (eventBody as Record<string, unknown>)?.pipeId as number | undefined;
 			const traceId = (eventBody as Record<string, unknown>)?.traceId;
 			if (typeof traceId === 'string') {
 				const cb = this._sseTraceCallbacks.get(traceId);
