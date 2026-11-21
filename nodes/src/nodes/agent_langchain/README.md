@@ -119,6 +119,8 @@ and without the parallel `tool_calls` form:
   that was cut off there is retried.
 - A tool call with a `FINAL>>>` line stacked after it is run as the tool call:
   the line is a claim about work not yet done.
+- A `FINAL>>>` line after a broken `final` envelope that may or may not have
+  closed before it is not read either way: the reply is retried.
 
 A reply that is neither a tool call nor an answer is retried twice, each time
 with a hint that says what was wrong and how to send it: a broken tool call is
@@ -126,9 +128,9 @@ asked for again as a tool call, a broken answer after `FINAL>>>`, and a bare
 JSON object (it may be an answer, or a tool call that lost its `type`) either
 way. After the third reply, prose with no envelope is delivered as the answer.
 An empty reply, a `FINAL>>>` with nothing after it, a JSON object that is
-neither shape, and an envelope that never parsed are not answers: the run fails
-with `stop_reason: error`, and its answer says what was wrong with the model's
-last reply. Whitespace around a reply is trimmed before it is read, as it
+neither shape, a tool call that lost its `type`, and an envelope that never
+parsed are not answers: the run fails with `stop_reason: error`, and its answer
+says what was wrong with the model's last reply without quoting it. Whitespace around a reply is trimmed before it is read, as it
 always was.
 
 ## Upstream docs

@@ -382,8 +382,9 @@ _FINAL_ENVELOPE_OPEN = re.compile(r'^\s*(?:```[A-Za-z]*\s*)?\{\s*"type"\s*:\s*"f
 #: The end of a `final` envelope: the quote that closes the content, then the closing brace, then the fence if there was one.
 _FINAL_ENVELOPE_CLOSE = re.compile(r'"\s*\}\s*(?:```\s*)?$')
 
-#: A closing followed straight away by the opening of another envelope: two envelopes, not one.
-_STACKED_ENVELOPE = re.compile(r'"\s*\}\s*(?:```\s*)?\{\s*"type"\s*:')
+#: A closing followed straight away by the opening of another object. When that object names an
+#: envelope type, the reply is two envelopes and not one (``_is_stacked``).
+_STACKED_OBJECT = re.compile(r'"\s*\}\s*(?:```\s*)?\{')
 
 #: A markdown fence that encloses all of a text. Group 1 is what is inside it.
 _ENCLOSING_FENCE = re.compile(r'```[A-Za-z]*[ \t]*\n(.*)```', re.S)
@@ -436,6 +437,21 @@ def _attempted_kind(text: str) -> Optional[str]:
         return kind if kind in ('tool_call', 'tool_calls', 'final') else None
     kinds = [match.group(1) for match in _ATTEMPTED_TYPE.finditer(text)]
     return next((kind for kind in kinds if kind != 'final'), kinds[0] if kinds else None)
+
+
+def _first_named_kind(text: str) -> Optional[str]:
+    """
+    The envelope type a text names first: its own, unless the members come in another order.
+
+    For telling what an unparsed envelope set out to be when the answer to that must not depend on
+    what its content mentions. A cut-off `final` whose content names a tool call is still a `final`.
+    """
+    obj = _extract_first_json_object(text)
+    if isinstance(obj, dict):
+        kind = obj.get('type')
+        return kind if kind in ('tool_call', 'tool_calls', 'final') else None
+    first = _ATTEMPTED_TYPE.search(text)
+    return first.group(1) if first else None
 
 
 def _attempted_tool_call(text: str) -> bool:
@@ -531,7 +547,15 @@ def _unescape_json_string_body(body: str) -> str:
 
 def _is_escaped(text: str, at: int) -> bool:
     """Whether the character at `at` has an odd number of backslashes before it, which makes a quote an escaped one."""
-    return (at - len(text[:at].rstrip('\\'))) % 2 == 1
+    first = at
+    while first > 0 and text[first - 1] == '\\':
+        first -= 1
+    return (at - first) % 2 == 1
+
+
+def _is_stacked(body: str) -> bool:
+    """Whether the text after an envelope's opening holds a closing and then another envelope, in either member order."""
+    return any(_ATTEMPTED_TYPE.search(body, stacked.end() - 1) for stacked in _STACKED_OBJECT.finditer(body))
 
 
 def _salvage_final_content(raw: Any) -> Optional[str]:
@@ -590,7 +614,7 @@ def _salvage_final_content(raw: Any) -> Optional[str]:
         pass
     # A second envelope stacked after this one would otherwise be taken for the
     # end of its content, and the person shown both.
-    if _STACKED_ENVELOPE.search(content):
+    if _is_stacked(body):
         return None
     return _unescape_json_string_body(content)
 
@@ -662,7 +686,7 @@ def _sentinel_answer(text: str) -> Optional[str]:
         obj = None
     if isinstance(obj, dict) and obj.get('type') == 'final':
         return _final_text(obj.get('content', ''))
-    if not (_looks_like_envelope(text) and _attempted_kind(text) == 'final'):
+    if not (_looks_like_envelope(text) and _first_named_kind(text) == 'final'):
         return text
     if isinstance(_extract_first_json_object(text), dict):
         return text
@@ -693,37 +717,44 @@ def _tool_call(entry: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     return {'id': f'call_{uuid.uuid4().hex[:12]}', 'type': 'tool_call', 'name': name, 'args': args}
 
 
-def _inside_final_envelope(raw: str, at: int) -> bool:
+def _envelope_before(raw: str, at: int) -> str:
     """
-    Whether position `at` lies in the content of a `final` envelope that is still open there.
+    How a `final` envelope stands at position `at`, where a ``FINAL>>>`` line starts.
 
-    A ``FINAL>>>`` line there is the answer's own text: the content has literal line breaks and one
-    of its lines starts with the marker. The reply is then read as the envelope it opened as. One
-    that closes at the end of the reply gives its content, and one that never closes was cut off
-    and is retried, whatever the marker line says.
-
-    An envelope that closed before `at` leaves the marker outside, where it is the sentinel.
-    Unescaped content can only be closed by a quote and a brace, so one anywhere before `at` means
-    the envelope may have closed there, and the marker keeps its meaning. The price is content that
-    has its own ``"}`` before a marker line: that line is read as the sentinel.
-
-    An envelope whose content is not a string, or whose members come in another order, has no such
-    closing to look for. An attempt at one that has not parsed by `at` is taken as still open.
+    - ``'open'``: `at` lies in the content of an envelope that has not closed. The line is the
+      answer's own text: the content has literal line breaks and one of its lines starts with the
+      marker. The reply is then read as the envelope it opened as. One that closes at the end of
+      the reply gives its content, and one that never closes was cut off and is retried.
+    - ``'closed'``: an envelope ended before `at`, or there is none. The marker is the sentinel.
+    - ``'unclear'``: a broken envelope that may or may not have ended before `at`. Unescaped
+      content can only be closed by a quote and a brace, and here one is followed by more text, so
+      it is either the envelope's own closing with prose after it, or part of an answer that is
+      still going. Neither reading can be trusted, and the reply is retried.
 
     The envelope is looked for from the first ``{`` before `at`, as the parser looks for it, so a
-    line of prose before it changes nothing. An escaped quote is the answer's own and closes nothing.
+    line of prose before it changes nothing. An escaped quote is the answer's own and closes
+    nothing. An envelope whose content is not a string, or whose members come in another order,
+    has no closing to look for: an attempt at one that has not parsed by `at` is taken as open.
     """
     start = raw.find('{', 0, at)
     if start < 0:
-        return False
+        return 'closed'
     before = raw[start:at]
     if isinstance(_extract_first_json_object(before), dict):
-        return False
+        return 'closed'
     opening = _FINAL_ENVELOPE_OPEN.match(before)
     if opening:
         closings = _FINAL_ENVELOPE_CLOSING.finditer(before, opening.end())
-        return not any(not _is_escaped(before, closing.start()) for closing in closings)
-    return _looks_like_envelope(before) and _attempted_kind(before) == 'final'
+        if not any(not _is_escaped(before, closing.start()) for closing in closings):
+            return 'open'
+        # Closed for certain only when all of the text before the marker is one envelope.
+        return 'closed' if _salvage_final_content(before) is not None else 'unclear'
+    return 'open' if _looks_like_envelope(before) and _attempted_kind(before) == 'final' else 'closed'
+
+
+def _reads_sentinel(text: str, marker: Any) -> bool:
+    """Whether the parser reads the ``FINAL>>>`` line `marker` matched as the sentinel, and not as text of a call or an answer."""
+    return not _attempted_tool_call(text[: marker.start()]) and _envelope_before(text, marker.start()) == 'closed'
 
 
 def _parse_tool_call_envelope(raw: Any) -> Any:
@@ -748,7 +779,8 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
     stacked onto a call, and whether or not prose comes before the call.
 
     Nor is a ``FINAL>>>`` line inside the content of a `final` envelope that is
-    still open there: it is the answer's own text (``_inside_final_envelope``).
+    still open there: it is the answer's own text. When a broken envelope may or
+    may not have closed before the line, the reply is retried (``_envelope_before``).
 
     The ``tool_calls`` form, several calls in one reply, is refused: the prompt
     does not offer it, and the node does not start running calls concurrently
@@ -765,9 +797,13 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
         return None
 
     marker = _SENTINEL_LINE.search(raw)
-    if marker and (_attempted_tool_call(raw[: marker.start()]) or _inside_final_envelope(raw, marker.start())):
-        marker = None
-    if marker:
+    if (
+        marker
+        and not _attempted_tool_call(raw[: marker.start()])
+        and _envelope_before(raw, marker.start()) == 'unclear'
+    ):
+        return None
+    if marker and _reads_sentinel(raw, marker):
         # Delivered as written: only the separator comes off, never the answer's own whitespace.
         answer = _after_sentinel(raw[marker.end() :])
         # A sentinel with nothing after it is not an answer. Returning it would
@@ -794,7 +830,7 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
     return None
 
 
-def _diagnose(raw: Any) -> Tuple[str, str]:
+def _diagnose(raw: Any) -> Tuple[str, str, str]:
     """
     What was wrong with a reply, and what the model should send instead.
 
@@ -806,16 +842,19 @@ def _diagnose(raw: Any) -> Tuple[str, str]:
         raw: The reply that failed to parse.
 
     Returns:
-        ``(problem, remedy)``. The problem completes "Your last output ..." and
-        "The last reply ...". The remedy may be empty.
+        ``(problem, excerpt, remedy)``. The problem completes "Your last output ..."
+        and "The last reply ...". The excerpt quotes the reply around the break and
+        goes to the model only: an error is logged and returned to the caller, and
+        must not carry text of the reply. Excerpt and remedy may be empty.
     """
     text = safe_str(raw).strip()
     if not text:
-        return 'was empty.', ''
+        return 'was empty.', '', ''
     marker = _SENTINEL_LINE.search(text)
-    # A marker stacked onto a tool call is not read by the parser, so it is not what went wrong either.
-    if marker and not _attempted_tool_call(text[: marker.start()]) and not text[marker.end() :].strip():
-        return f'ended at {_FINAL_SENTINEL} with no answer after it.', f'Write the answer after {_FINAL_SENTINEL}.'
+    # A marker the parser does not read as the sentinel (stacked onto a tool call, or a line of an
+    # answer that was cut off) is not what went wrong either.
+    if marker and _reads_sentinel(text, marker) and not text[marker.end() :].strip():
+        return f'ended at {_FINAL_SENTINEL} with no answer after it.', '', f'Write the answer after {_FINAL_SENTINEL}.'
 
     attempted = _attempted_kind(text)
     wanted_a_tool_call = attempted in ('tool_call', 'tool_calls')
@@ -828,26 +867,30 @@ def _diagnose(raw: Any) -> Tuple[str, str]:
     except json.JSONDecodeError as err:
         pos = max(0, err.pos)
         excerpt = candidate[max(0, pos - 60) : pos + 20].replace('\n', ' ')
-        problem = f'was not valid JSON: {err.msg}, at character {pos}. It broke here: ...{excerpt}...'
+        problem = f'was not valid JSON: {err.msg}, at character {pos}.'
+        shown = f' It broke here: ...{excerpt}...'
         if wanted_a_tool_call:
             return (
                 problem,
+                shown,
                 'Send the SAME tool call again as one valid JSON object: repair the JSON, do not answer in prose.',
             )
-        return problem, f'Do not retype it as JSON: send the answer as {_FINAL_SENTINEL} followed by plain text.'
+        return problem, shown, f'Do not retype it as JSON: send the answer as {_FINAL_SENTINEL} followed by plain text.'
     except Exception:  # noqa: BLE001 - any other parse failure gets the same advice
-        return 'could not be parsed.', ''
+        return 'could not be parsed.', '', ''
 
     # Valid JSON that is neither shape: a bare JSON answer, an unknown "type", a
     # tool call with no name, or several calls in one reply.
     problem = 'parsed as JSON, but was not one of the allowed shapes.'
     if attempted == 'tool_calls':
-        return problem, f'Send one tool call per reply, as {_TOOL_CALL_SHAPE}.'
+        return problem, '', f'Send one tool call per reply, as {_TOOL_CALL_SHAPE}.'
     if wanted_a_tool_call:
-        return problem, f'Send the tool call again as {_TOOL_CALL_SHAPE}.'
-    return problem, (
+        return problem, '', f'Send the tool call again as {_TOOL_CALL_SHAPE}.'
+    return (
+        problem,
+        '',
         f'To call a tool, send {_TOOL_CALL_SHAPE}. '
-        f'To give this JSON as your answer, write {_FINAL_SENTINEL} followed by the JSON.'
+        f'To give this JSON as your answer, write {_FINAL_SENTINEL} followed by the JSON.',
     )
 
 
@@ -870,8 +913,14 @@ def _parse_failure_hint(raw: Any) -> str:
     Returns:
         A one-line diagnostic to append to the next prompt.
     """
-    problem, remedy = _diagnose(raw)
-    return f'Your last output {problem} {remedy}'.strip()
+    problem, excerpt, remedy = _diagnose(raw)
+    return f'Your last output {problem}{excerpt} {remedy}'.strip()
+
+
+def _tool_call_without_type(raw: str) -> bool:
+    """Whether the reply's first JSON object has a tool call's members, a name and its arguments, and no ``"type"``."""
+    obj = _extract_first_json_object(raw)
+    return isinstance(obj, dict) and 'type' not in obj and isinstance(obj.get('name'), str) and 'args' in obj
 
 
 def _run_model_turn(ask: Callable[[str], Any]) -> Any:
@@ -884,10 +933,12 @@ def _run_model_turn(ask: Callable[[str], Any]) -> Any:
     - no reply parsed and the last one is prose with no sentinel: that prose is
       the answer, because the model said something readable;
     - no reply parsed and the last one is empty, a sentinel with nothing after
-      it, a JSON object, or an attempt at an envelope anywhere in it: the turn
-      raises, so the run ends as an error instead of delivering the envelope or
-      a sentence about giving up. The error says what was wrong with the last
-      reply and leaves out the instructions written for the model.
+      it, a JSON object, an attempt at an envelope anywhere in it, or a tool
+      call that lost its ``"type"`` after a line of prose: the turn raises, so
+      the run ends as an error instead of delivering the envelope or a sentence
+      about giving up. The error says what was wrong with the last reply. It
+      leaves out the instructions written for the model and quotes nothing of
+      the reply.
 
     Args:
         ask: Sends the turn's prompt with the given text appended, and returns the
@@ -912,8 +963,16 @@ def _run_model_turn(ask: Callable[[str], Any]) -> Any:
     # A sentinel still unparsed here has nothing after it. An envelope that never
     # parsed is a tool call that never ran or an answer that was cut off, and
     # neither is prose to deliver, wherever in the reply it sits.
-    undeliverable = not raw or _looks_like_envelope(raw) or _ATTEMPTED_TYPE.search(raw) or _SENTINEL_LINE.search(raw)
+    lost_its_type = _tool_call_without_type(raw)
+    undeliverable = (
+        not raw
+        or lost_its_type
+        or _looks_like_envelope(raw)
+        or _ATTEMPTED_TYPE.search(raw)
+        or _SENTINEL_LINE.search(raw)
+    )
     if undeliverable:
-        problem, _remedy = _diagnose(raw)
+        # Prose before a tool call that lost its type would otherwise be reported as invalid JSON at character 0.
+        problem = 'named a tool and its arguments with no "type".' if lost_its_type else _diagnose(raw)[0]
         raise ValueError(f'No valid tool call or final answer after {_MAX_ATTEMPTS} attempts. The last reply {problem}')
     return _message(content=raw)

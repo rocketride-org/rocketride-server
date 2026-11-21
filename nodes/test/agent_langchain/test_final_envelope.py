@@ -80,6 +80,10 @@ FAILED = {
     'empty_reply': ('', 'The last reply was empty.'),
     'broken_tool_call_after_a_line_of_prose': ('Sure, let me do that.\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
     'marker_with_no_answer': ('FINAL>>>', 'ended at FINAL>>> with no answer after it'),
+    'tool_call_that_lost_its_type_after_a_line_of_prose': (
+        'Here is the result:\n{"name":"crm.get_deal","args":{"deal_id":42}}',
+        'named a tool and its arguments with no "type"',
+    ),
     'cut_off_envelope_with_a_marker_line_in_it': (
         '{"type":"final","content":"Example:\nFINAL>>> partial',
         'not valid JSON',
@@ -219,6 +223,8 @@ def test_a_run_with_no_answer_ends_as_an_error(run, case):
     # A parent agent reads this text as a tool result: it carries no instructions written for the model.
     assert 'Your last output' not in result.content
     assert 'Send ' not in result.content
+    # Nor does it quote the reply: this text is logged and returned to the caller.
+    assert 'It broke here' not in result.content
     assert result.written == [result.content]
     assert result.payload['stack'][0]['kind'] == 'RocketRide.agent.error.v1'
     assert result.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})

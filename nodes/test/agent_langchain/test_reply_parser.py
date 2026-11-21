@@ -71,10 +71,15 @@ reply = _Adapter()
 @pytest.fixture(scope='module', autouse=True)
 def _loaded_adapter():
     restore = real_langchain_or_skip()
-    _Adapter.module = load_adapter('agent_langchain/langchain.py', '_agent_langchain_reply_parser', LANGCHAIN_SYMBOLS)
-    yield
-    _Adapter.module = None
-    restore()
+    try:
+        _Adapter.module = load_adapter(
+            'agent_langchain/langchain.py', '_agent_langchain_reply_parser', LANGCHAIN_SYMBOLS
+        )
+        yield
+    finally:
+        # Also when the load raised: the next test module must not find the swapped modules.
+        _Adapter.module = None
+        restore()
 
 
 def parse(raw: Any) -> Any:
@@ -197,6 +202,8 @@ class TestSentinel:
             # Cut off inside content that is an object, and with the members the other way round.
             '{"type":"final","content":{"company":"Acme"',
             '{"content":"Acme reported revenue","type":"final"',
+            # A type named inside the content does not make it something else.
+            '{"type":"final","content":{"type":"tool_call","note":"unfinished',
         ],
     )
     def test_an_envelope_that_was_cut_off_after_the_marker_is_not_an_answer(self, after):
@@ -286,6 +293,12 @@ class TestSentinel:
         """Only an attempt at a tool-call envelope before the marker keeps the marker from being read."""
         assert parse(before + '\nFINAL>>> Done.').content == 'Done.'
 
+    def test_an_escaped_quote_before_a_marker_line_does_not_close_the_envelope(self):
+        """The content is escaped as it should be, apart from its line break. Its own quote and brace close nothing."""
+        raw = '{"type":"final","content":"see {\\"k\\":\\"v\\"} and\nFINAL>>> more"}'
+
+        assert parse(raw).content == 'see {"k":"v"} and\nFINAL>>> more'
+
     def test_a_marker_line_inside_a_final_envelope_is_the_answers_own_text(self):
         """
         The content has literal line breaks and one of its lines starts with the marker. The envelope
@@ -329,21 +342,29 @@ class TestSentinel:
             '{"type":"final","content":"an "old" one"}',
             '{"type":"final","content":"old"} Done.',
             '{"type":"final","content":"old","done":true}',
-            '{"type":"final","content":"an "old" one"} Done.',
         ],
     )
     def test_a_marker_after_a_final_envelope_that_already_closed_is_still_the_sentinel(self, before):
-        """Also when the answer after it ends the way an envelope does, and when prose follows a broken envelope."""
+        """Also when the answer after it ends the way an envelope does. A broken envelope counts when it is all there is before the marker."""
         assert parse(before + '\nFINAL>>> {"company":"Acme"}').content == '{"company":"Acme"}'
 
-    def test_a_marker_line_after_a_closing_inside_the_content_is_read_as_the_sentinel(self):
+    @pytest.mark.parametrize(
+        'raw',
+        [
+            # Closed, with a word of prose after it? Or still open, with a quote and a brace of its own?
+            '{"type":"final","content":"an "old" one"} Done.\nFINAL>>> {"company":"Acme"}',
+            '{"type":"final","content":"Example: {"k":"v"} is an object.\nFINAL>>> is the marker"}',
+            '{"type":"final","content":"Example: {"k":"v"} and\nFINAL>>> partial',
+        ],
+    )
+    def test_a_marker_after_a_broken_envelope_that_may_have_closed_is_not_read(self, raw):
         """
-        The limit of the rule above. Unescaped content with its own quote and brace before a marker
-        line cannot be told from an envelope that closed there, so the marker keeps its meaning.
+        Unescaped content cannot say which quote and brace were the envelope's own. Reading the marker
+        delivered the tail of a partial answer. Reading the envelope delivered both parts as one. The
+        reply is retried, and the hint sends the answer to the marker, where nothing is ambiguous.
         """
-        raw = '{"type":"final","content":"Example: {"k":"v"} is an object.\nFINAL>>> is the marker"}'
-
-        assert parse(raw).content == 'is the marker"}'
+        assert parse(raw) is None
+        assert f'send the answer as {FINAL_SENTINEL}' in reply._parse_failure_hint(raw)
 
 
 # ---------------------------------------------------------------------------
@@ -609,12 +630,26 @@ class TestSalvage:
         assert reply._salvage_final_content(raw) is None
         assert parse(raw) is None
 
-    def test_a_second_envelope_stacked_after_a_broken_one_is_not_its_content(self):
+    @pytest.mark.parametrize('second', ['{"type":"final","content":"second"}', '{"content":"second","type":"final"}'])
+    def test_a_second_envelope_stacked_after_a_broken_one_is_not_its_content(self, second):
         """Its closing would otherwise be taken for the first one's, and the person shown both envelopes."""
-        raw = '{"type":"final","content":"a "b" c"}\n{"type":"final","content":"second"}'
+        raw = '{"type":"final","content":"a "b" c"}\n' + second
 
         assert reply._salvage_final_content(raw) is None
         assert parse(raw) is None
+
+    def test_an_object_that_is_no_envelope_after_a_closing_is_part_of_the_answer(self):
+        """Only a second envelope makes a reply two envelopes. An answer may hold one JSON object after another."""
+        raw = '{"type":"final","content":"Before {"a":"b"} {"c":"d"} after "it"."}'
+
+        assert parse(raw).content == 'Before {"a":"b"} {"c":"d"} after "it".'
+
+    @pytest.mark.parametrize(
+        'text, at, escaped',
+        [('a"', 1, False), ('a\\"', 2, True), ('a\\\\"', 3, False), ('\\\\\\"', 3, True), ('"', 0, False)],
+    )
+    def test_a_quote_is_escaped_by_an_odd_number_of_backslashes(self, text, at, escaped):
+        assert reply._is_escaped(text, at) is escaped
 
     def test_a_malformed_tool_call_is_never_salvaged(self):
         """Rescuing one would turn work the agent meant to do into a sentence saying it was done."""
@@ -736,6 +771,14 @@ class TestRetryHint:
         assert 'Send one tool call per reply, as {"type":"tool_call"' in hint
         assert FINAL_SENTINEL not in hint
 
+    def test_a_bare_marker_line_at_the_end_of_a_cut_off_answer_is_not_asked_for_text_after_it(self):
+        """The parser reads that line as part of the answer. Asking for text after it would lose what came before."""
+        hint = reply._parse_failure_hint('{"type":"final","content":"Here is the long answer so far\n' + FINAL_SENTINEL)
+
+        assert 'with no answer after it' not in hint
+        assert 'not valid JSON' in hint
+        assert hint.endswith(f'send the answer as {FINAL_SENTINEL} followed by plain text.')
+
     @pytest.mark.parametrize('raw', [FINAL_SENTINEL, 'Let me think.\n' + FINAL_SENTINEL + '  '])
     def test_a_sentinel_with_nothing_after_it_is_named_as_that(self, raw):
         """Not as invalid JSON at character 0, which tells a model that did write the marker nothing."""
@@ -844,6 +887,8 @@ class TestRunModelTurn:
             ('Sure, let me do that.\n' + BROKEN_TOOL_CALL + STACKED_FINAL, 'not valid JSON'),
             # A cut-off answer is not prose to deliver either, with or without a line before it.
             ('Here is the answer:\n' + CUT_OFF_FINAL, 'Unterminated string'),
+            # A tool call that lost its "type" is work that never ran, also after a line of prose.
+            ('Here is the result:\n{"name":"crm.create","args":{}}', 'named a tool and its arguments with no "type"'),
             # The marker alone is protocol text, not an answer.
             (FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
             ('Let me think.\n' + FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
@@ -867,6 +912,18 @@ class TestRunModelTurn:
         assert 'The last reply ' in message
         for instruction in ('Your last output', 'Send ', 'Do not retype', 'To call a tool', 'Write the answer'):
             assert instruction not in message
+        # It is logged and returned to the caller, so it quotes nothing of the reply either.
+        assert 'It broke here' not in message
+
+    def test_the_text_around_the_break_goes_to_the_model_and_not_into_the_error(self):
+        ask, feedback = scripted('{"type":"final","content":"Card 4111 belongs to Jane Roe, and')
+
+        with pytest.raises(ValueError) as failure:
+            reply._run_model_turn(ask)
+
+        assert 'Card 4111' in feedback[1]
+        assert 'Card 4111' not in str(failure.value)
+        assert 'Unterminated string starting at, at character 26.' in str(failure.value)
 
     def test_the_last_reply_decides_what_an_unparsed_turn_ends_on(self):
         """Readable prose on the earlier attempts does not rescue a turn whose last reply is empty."""
@@ -884,10 +941,19 @@ class TestRunModelTurn:
         assert len(feedback) == 3
 
     def test_a_marker_after_an_envelope_that_closed_costs_one_call(self):
-        ask, feedback = scripted('{"type":"final","content":"an "old" one"} Done.\nFINAL>>> {"company":"Acme"}')
+        ask, feedback = scripted('{"type":"final","content":"an "old" one"}\nFINAL>>> {"company":"Acme"}')
 
         assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
         assert len(feedback) == 1
+
+    def test_a_reply_whose_envelope_may_have_closed_is_answered_on_the_retry(self):
+        ask, feedback = scripted(
+            '{"type":"final","content":"an "old" one"} Done.\nFINAL>>> {"company":"Acme"}',
+            'FINAL>>> {"company":"Acme"}',
+        )
+
+        assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
+        assert len(feedback) == 2
 
     def test_a_cut_off_envelope_after_the_marker_is_retried_and_then_fails(self):
         ask, feedback = scripted('FINAL>>> {"type":"final","content":"Acme reported revenue of 12')
@@ -903,7 +969,17 @@ class TestRunModelTurn:
         assert reply._run_model_turn(ask).tool_calls[0]['name'] == 'crm.create'
         assert len(feedback) == 1
 
-    @pytest.mark.parametrize('text', ['I could not find that organization.', '[' + ANSWER_JSON + ']'])
+    @pytest.mark.parametrize(
+        'text',
+        [
+            'I could not find that organization.',
+            '[' + ANSWER_JSON + ']',
+            # Prose with a JSON object in it or after it is still something a person can read.
+            'Here is the JSON you asked for:\n' + ANSWER_JSON,
+            'The config is {"debug": true} by default, and that is fine.',
+            'The tool is {"name":"crm.create"} and it takes no arguments.',
+        ],
+    )
     def test_prose_that_skipped_the_sentinel_is_still_the_answer(self, text):
         """#3367 cases G and H. The model said something readable, so it is delivered once the retries are spent."""
         ask, feedback = scripted(text)
