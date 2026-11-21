@@ -47,8 +47,6 @@ class Chat(ChatBase):
 
     _model: str = ''
     _client: Mistral
-    _system_prompt: str = ''
-    _prompt: str = ''
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """Initialize the Mistral Vision chat instance."""
@@ -61,8 +59,6 @@ class Chat(ChatBase):
             self._tokenizer = MistralTokenizer.v3()
         api_key = config.get('apikey')
         # Get vision-specific configuration
-        self._system_prompt = config['systemPrompt'] or ''
-        self._prompt = config['prompt']
         # API key validation with specific error messages
         if not api_key:
             raise ValueError('Missing Mistral AI API key. Please check your configuration.')
@@ -203,14 +199,23 @@ class Chat(ChatBase):
         else:
             return (3, 1.0)
 
-    def chat(self, question: Question) -> Answer:
-        """Send a vision request to Mistral AI and get the response."""
+    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+        """Send a vision request to Mistral AI and get the response.
+
+        Args:
+            question: The call's question: its first question is the prompt (the call's
+                ``settings.prompt``), its context carries the image.
+            system_prompt: The call's system prompt (``settings.systemPrompt``); empty for none.
+
+        Returns:
+            The model's answer.
+        """
         # Get retry configuration for this model
         max_retries, base_delay = self._getRetryConfig(self._model)
         last_error = None
         # Extract image data from context and prompt from questions
         image_data = None
-        prompt_text = self._prompt
+        prompt_text = ''
         for context_item in question.context:
             if context_item.startswith('data:image/') or context_item.startswith('data:application/'):
                 image_data = context_item
@@ -230,7 +235,7 @@ class Chat(ChatBase):
                 image_content = self._processImageInput(image_data)
                 # Create the messages with system role, user prompt, and image content
                 messages = [
-                    {'role': 'system', 'content': [{'type': 'text', 'text': self._system_prompt}]},
+                    {'role': 'system', 'content': [{'type': 'text', 'text': system_prompt}]},
                     {'role': 'user', 'content': [{'type': 'text', 'text': prompt_text}, image_content]},
                 ]
                 api_params = {

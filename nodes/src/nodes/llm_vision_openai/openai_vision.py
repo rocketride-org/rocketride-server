@@ -42,8 +42,6 @@ class Chat(ChatBase):
 
     _model: str = ''
     _api_key: str = ''
-    _system_prompt: str = ''
-    _prompt: str = ''
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
         """Initialize the OpenAI Vision chat instance."""
@@ -51,9 +49,6 @@ class Chat(ChatBase):
         config = self._config
 
         api_key = config.get('apikey')
-
-        self._system_prompt = config['systemPrompt'] or ''
-        self._prompt = config['prompt']
 
         if not api_key:
             raise ValueError('Missing OpenAI API key. Get one at https://platform.openai.com/api-keys')
@@ -105,15 +100,24 @@ class Chat(ChatBase):
         retryable = ['timeout', 'timed out', '500', '502', '503', '504', 'server error']
         return any(p in error_msg for p in retryable)
 
-    def chat(self, question: Question) -> Answer:
-        """Send an image to OpenAI Vision and get the response."""
+    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+        """Send an image to OpenAI Vision and get the response.
+
+        Args:
+            question: The call's question: its first question is the prompt (the call's
+                ``settings.prompt``), its context carries the image.
+            system_prompt: The call's system prompt (``settings.systemPrompt``); empty for none.
+
+        Returns:
+            The model's answer.
+        """
         max_retries = 1
         base_delay = 1.0
         last_error = None
 
         # Extract image data from context
         image_data = None
-        prompt_text = self._prompt
+        prompt_text = ''
         for context_item in question.context:
             if context_item.startswith(('data:image/', 'data:application/')):
                 image_data = context_item
@@ -157,8 +161,8 @@ class Chat(ChatBase):
                         ]
 
                         messages = []
-                        if self._system_prompt:
-                            messages.append({'role': 'system', 'content': self._system_prompt})
+                        if system_prompt:
+                            messages.append({'role': 'system', 'content': system_prompt})
                         messages.append({'role': 'user', 'content': content})
 
                         result[0] = client.chat.completions.create(

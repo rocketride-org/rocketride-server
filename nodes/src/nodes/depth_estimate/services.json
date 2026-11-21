@@ -43,7 +43,8 @@
 			"description": "Downscale input so the long edge <= this value before inference; dense output is upsampled back to original. Lower = faster + less VRAM, higher = sharper depth.",
 			"default": 1024,
 			"minimum": 256,
-			"maximum": 4096
+			"maximum": 4096,
+			"param": true
 		}
 	},
 	//

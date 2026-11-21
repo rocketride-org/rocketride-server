@@ -22,6 +22,15 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Global handler for the Pose Estimation node.
+
+The control's model picks the RTMPose size, which is the bundle loaded here
+once per control. The keypoint threshold and the person cap are per-call
+parameters: the instance reads them from its settings and passes them to
+``PoseEstimator.estimate``.
+"""
+
 from rocketlib import IGlobalBase
 
 from ai.common.models.base import make_device_lock
@@ -29,26 +38,19 @@ from ai.common.models.vision.pose import PROFILE_TO_MODE, PoseEstimator
 
 
 class IGlobal(IGlobalBase):
+    """One control's pose estimator: the loaded bundle and the lock that serializes local inference."""
+
     pose_estimator = None
     device_lock = None
-    threshold: float = 0.3
 
     def beginGlobal(self):
-        """Build the shared PoseEstimator facade from the resolved config (model, threshold, max_persons).
+        """Build the shared PoseEstimator facade for the control's model.
 
-        The schema supplies the defaults and the bounds, so the values are
-        read as they are.
+        The facade's own threshold and person cap stay at their defaults:
+        every call passes its own.
         """
-        config = self.config
-        self.threshold = float(config.threshold)
-
         # device=None -> model server when --modelserver is set, else local.
-        self.pose_estimator = PoseEstimator(
-            mode=PROFILE_TO_MODE[config.model],
-            device=None,
-            threshold=self.threshold,
-            max_persons=int(config.max_persons),
-        )
+        self.pose_estimator = PoseEstimator(mode=PROFILE_TO_MODE[self.config.model], device=None)
 
         # Local inference must serialize GPU access
         self.device_lock = make_device_lock()

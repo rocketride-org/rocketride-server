@@ -43,7 +43,8 @@
 			"description": "Minimum per-keypoint confidence (0.0-1.0). Keypoints below this score are skipped when drawing the skeleton.",
 			"default": 0.3,
 			"minimum": 0.0,
-			"maximum": 1.0
+			"maximum": 1.0,
+			"param": true
 		},
 		"pose_estimation.max_persons": {
 			"type": "integer",
@@ -51,7 +52,8 @@
 			"description": "Cap on persons retained per frame (sorted by detection score). Limits memory + compute on crowd scenes.",
 			"default": 20,
 			"minimum": 1,
-			"maximum": 200
+			"maximum": 200,
+			"param": true
 		}
 	},
 	//

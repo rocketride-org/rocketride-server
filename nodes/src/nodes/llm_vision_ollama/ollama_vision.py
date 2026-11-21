@@ -33,8 +33,6 @@ class Chat(ChatBase):
     """Ollama Vision chat bot using open-source multimodal models."""
 
     _llm: ChatOpenAI
-    _system_prompt: str = ''
-    _prompt: str = ''
     _serverbase: str = ''
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -48,9 +46,6 @@ class Chat(ChatBase):
         if not serverbase.rstrip('/').endswith('/v1'):
             serverbase = serverbase.rstrip('/') + '/v1'
         self._serverbase = serverbase
-
-        self._system_prompt = config['systemPrompt'] or ''
-        self._prompt = config['prompt']
 
     def _format_user_error(self, error_msg: str) -> str:
         """Convert API error messages to user-friendly format."""
@@ -73,8 +68,17 @@ class Chat(ChatBase):
             )
         return f'Ollama Vision error: {error_msg}'
 
-    def chat(self, question: Question) -> Answer:
-        """Send a vision request to Ollama and get the response."""
+    def chat(self, question: Question, system_prompt: str = '') -> Answer:
+        """Send a vision request to Ollama and get the response.
+
+        Args:
+            question: The call's question: its first question is the prompt (the call's
+                ``settings.prompt``), its context carries the image.
+            system_prompt: The call's system prompt (``settings.systemPrompt``); empty for none.
+
+        Returns:
+            The model's answer.
+        """
         from langchain_core.messages import HumanMessage, SystemMessage
 
         # Extract image data URL from context
@@ -88,14 +92,14 @@ class Chat(ChatBase):
             raise ValueError('No image data found in question context.')
 
         # Use configured prompt, or fall back to question text
-        prompt_text = self._prompt or (question.questions[0].text if question.questions else None)
+        prompt_text = question.questions[0].text if question.questions else None
         if not prompt_text:
             prompt_text = 'Describe this image.'
 
         # Build multimodal messages
         messages = []
-        if self._system_prompt:
-            messages.append(SystemMessage(content=self._system_prompt))
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
         messages.append(
             HumanMessage(
                 content=[

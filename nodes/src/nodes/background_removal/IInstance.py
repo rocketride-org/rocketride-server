@@ -71,7 +71,7 @@ class IInstance(IInstanceBase):
 
         orig_rgb = image.convert('RGB')
         # Downscale only for inference; the cutout is restored to the original resolution.
-        source_capped, original_size = resize_for_inference(orig_rgb, self.IGlobal.max_edge)
+        source_capped, original_size = resize_for_inference(orig_rgb, self.settings.maxEdge)
 
         t0 = time.perf_counter()
         with self.IGlobal.device_lock:

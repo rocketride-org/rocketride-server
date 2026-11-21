@@ -95,8 +95,11 @@ class IInstance(IInstanceBase):
         elif action == AVI_ACTION.END:
             try:
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
+                # The threshold picks the control's cached detector; the landmark flag shapes the output
+                settings = self.settings
                 with self.IGlobal.device_lock:
-                    faces = self.IGlobal.detector.detect(image)
+                    detector = self.IGlobal.detector_for(settings.threshold)
+                    faces = detector.detect(image, settings.emit_landmarks)
                 self._emit(image, faces, self._chunk_id)
             except Exception as exc:
                 warning(f'face_detection: dropped frame {self._chunk_id}: {exc}')

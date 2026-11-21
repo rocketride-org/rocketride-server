@@ -22,6 +22,15 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Instance handler for the Pose Estimation node.
+
+The keypoint threshold and the person cap are this call's (``self.settings``):
+one control, whose IGlobal holds the loaded bundle, serves calls with
+different thresholds and caps. Both ride into ``PoseEstimator.estimate`` and
+the threshold also decides which keypoints the annotation draws.
+"""
+
 import json
 import time
 from typing import Any, Dict, List
@@ -64,7 +73,7 @@ class IInstance(IInstanceBase):
     def _annotate(self, image, persons: List[Dict[str, Any]]):
         """Draw bbox + skeleton edges + keypoint dots onto a copy of the image.
 
-        Keypoints scoring below the IGlobal threshold are skipped, and any edge
+        Keypoints scoring below this call's threshold are skipped, and any edge
         with either endpoint skipped is dropped.
 
         Args:
@@ -79,7 +88,7 @@ class IInstance(IInstanceBase):
 
         annotated = image.copy()
         draw = ImageDraw.Draw(annotated)
-        threshold = self.IGlobal.threshold
+        threshold = self.settings.threshold
 
         for person in persons:
             b = person['box']
@@ -137,8 +146,12 @@ class IInstance(IInstanceBase):
             try:
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 t0 = time.perf_counter()
+                # The keypoint threshold and the person cap are this call's
+                settings = self.settings
                 with self.IGlobal.device_lock:
-                    persons = self.IGlobal.pose_estimator.estimate(image)
+                    persons = self.IGlobal.pose_estimator.estimate(
+                        image, threshold=settings.threshold, max_persons=settings.max_persons
+                    )
                 debug(f'pose: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
                 self._emit(image, persons)
             except Exception as exc:

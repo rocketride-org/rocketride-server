@@ -94,6 +94,7 @@
 			"format": "textarea",
 			"title": "System prompt",
 			"description": "Instructions that frame how the model describes images.",
+			"param": true,
 			"default": ""
 		},
 		"llm_vision_mistral.prompt": {
@@ -101,6 +102,7 @@
 			"format": "textarea",
 			"title": "Prompt",
 			"description": "The question asked about every image.",
+			"param": true,
 			"default": "Describe this image in detail."
 		},
 		"llm_vision_mistral.customModel": {
