@@ -56,10 +56,11 @@ from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.app_deploy import _developer_id_of
 from ai.account.audience import deploy_scope_of
+from ai.account.roots import KIND_ME, KIND_TEAM, format_root
 from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
-from ..task_control import TeamContext
+from ..task_control import RESOLVE_ATTACH, TeamContext
 
 # Only import for type checking to avoid circular import errors
 if TYPE_CHECKING:
@@ -572,9 +573,12 @@ class TaskCommands(DAPConn):
                 - args (Dict[str, Any]): Additional arguments for the request
                     - projectId (str)): The project id
                     - source (str): The source id
-                    - teamId (str, optional): Resolve through this team of
-                      the caller's (the ``team=`` override of plan 3.2);
-                      absent walks the caller's rungs
+                    - teamId (str, optional): A deployment row's audience
+                      passed back unchanged, or a team id: a team's
+                      audience (or id) roots the lookup at that team's
+                      rung (``=team/<tid>/...``), the caller's own
+                      ``=user/<uid>`` at ``@me/...``; absent walks the
+                      caller's rungs
 
         Returns:
             Dict[str, Any]: DAP response with token
@@ -593,9 +597,11 @@ class TaskCommands(DAPConn):
                 raise ValueError('projectId and source are required')
 
             # A deployment row's audience passed back unchanged (plan 2.5): a
-            # team's run, or (no team) the caller's own rungs
+            # team's run, or the caller's own personal one (the @me rung)
+            root = ''
             if team_id.startswith(('@', '=')):
                 team_id, _kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
+                root = '' if team_id else '@me'
 
             # Verify permission against the requested scope: the named team
             # for a team lookup, the caller's default context otherwise
@@ -606,13 +612,23 @@ class TaskCommands(DAPConn):
                 self.verify_permission('task.monitor')
 
             # ONE resolver (plan 3.2): the address is the caller's developer
-            # id, the short pipe id and the source; the rungs decide whose
-            # control answers, and a key's endpoints scope is enforced inside
+            # id, the short pipe id and the source, rooted at the scope the
+            # row named; the rungs decide whose control answers, registered
+            # controls only, and a key's endpoints scope is enforced inside
             developer_id = _developer_id_of(self)
             if not developer_id:
                 raise ValueError('Your organization has no developer id yet; an address cannot be formed')
             address = build_address(developer_id, project_id, source)
-            control = self._server.resolve_control(address, self._account_info, 'task.monitor', team=team_id or None)
+            if team_id:
+                target = format_root(KIND_TEAM, team_id, True, address)
+            elif root:
+                target = format_root(KIND_ME, rest=address)
+            else:
+                target = address
+            resolution = await self._server.resolve_target(
+                self._account_info, target, 'task.monitor', mode=RESOLVE_ATTACH
+            )
+            control = resolution.control
 
             # Return the control id in the token slot, the address beside it
             return self.build_response(

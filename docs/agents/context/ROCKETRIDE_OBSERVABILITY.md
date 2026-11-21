@@ -134,7 +134,10 @@ Subscriptions are managed with the `rrext_monitor` DAP command. The server keeps
 a per-connection registry keyed by **token** (the control id a `use()`/`submit()`
 result returned; a restart mints a new one, so resubscribe after one) or
 **project+source** directly, optionally narrowed to a `pipe_id` or widened to
-`*` (all your tasks). A control id you do not own is `permission_denied`.
+`*` (all your tasks). A control id you do not own is `permission_denied`. The
+token slot also takes an address, bare or rooted: `@me/acme.docBrain.webhook_1`
+watches only your personal deployment's run, `=team/<tid>/acme.docBrain.webhook_1`
+only that team's; a rooted address never falls through to another rung.
 
 ### 4.1 Request shape
 

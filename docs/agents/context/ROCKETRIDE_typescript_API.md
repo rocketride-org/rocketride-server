@@ -373,14 +373,14 @@ if (token) {
 
 ### `submit(options): Promise<SUBMIT_RESULT>`
 
-One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Options: exactly one of `name`, `pipeline` or `filepath` (Node only), plus `source?`, `params?`, `data?`, `objinfo?`, `mimetype?`, `onSSE?`, `threads?`, `args?`, `ttl?`, `env?`, `pipelineTraceLevel?`, `team?`.
+One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Options: exactly one of `name`, `pipeline` or `filepath` (Node only), plus `source?`, `params?`, `data?`, `objinfo?`, `mimetype?`, `onSSE?`, `threads?`, `args?`, `ttl?`, `env?`, `pipelineTraceLevel?`.
 
-- **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@spec` control (attach only; a name never starts a spec run), your `@me` deployment, the first team in your team order that publishes it (`team` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
+- **`name`** is the address `[<root>/]developerId.pipelineId[.source]`. A bare address resolves through fixed rungs and the first that answers wins: your live `@spec` control (attach only; a name never starts a spec run), your `@me` deployment, the first team in your team order that publishes it (a key scoped to endpoints uses its own team), then `@public`. A rooted address walks only its root's rung and never falls through: `@me/acme.docBrain`, `@spec/...`, `@public/...`, `@Production/...` (a team by name, any case) or `=team/<tid>/...` (by id; a scoped key's frozen team refuses any other); nothing there is `TASK_NOT_REGISTERED` naming that one rung. `=user/<uid>/...` is refused, and `@team/...` and `@user/...` are retired. A `:<version>` suffix (`acme.docBrain:12`) parses and is permission-checked but is refused as not yet supported, and `@org/...` is refused the same way until the org rung serves. The per-call `team` option is retired: write the root instead. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
 - **`pipeline` / `filepath`** address your own `@spec` rung. `project_id` is REQUIRED (`invalid_argument`, `field: 'project_id'`). The control with the same `project_id` and the same resolved configuration is reused (`converged: 'none'`); otherwise one is created (`converged: 'started'`). A different configuration under the same `project_id` is a new control on the same engine; nothing is stopped for anyone.
 - Data up to `SUBMIT_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `onSSE`, streams through a pipe on the control the server answered with. Same result either way.
 - No timeout of its own, on either side: the request runs until the pipeline answers or fails (a request timeout configured on the client still applies, as your own bound). To stop a request, stream it through your own `pipe()` and call `cancel()` on it. The pipeline stays up afterwards and expires on its idle ttl.
 
-Returns the pipe close body plus the stamps `token` (the control id that answered: opaque, transient, valid for the life of the control; never persist it), `address` (the address that answered), `resolved` (`'@spec'`, `'@me'`, `'@team'`, `'@public'`), `team` (on `@team`), `version` (not on `@spec`), `engineKey`, `converged` (`'none'`, `'started'`) and `ignored`.
+Returns the pipe close body plus the stamps `token` (the control id that answered: opaque, transient, valid for the life of the control; never persist it), `address` (the address that answered), `resolved` (`'@spec'`, `'@me'`, `'@team'`, `'@org'`, `'@public'`), `team` (on `@team`), `version` (not on `@spec`), `engineKey`, `converged` (`'none'`, `'started'`) and `ignored`.
 
 ```typescript
 const result = await client.submit({ name: 'acme.docBrain', data: 'What is in this file?' });
@@ -418,9 +418,9 @@ const token = await client.getTaskToken({ projectId: 'proj-123', source: 'webhoo
 
 Return the **unresolved** pipeline configuration for a running task — `${ROCKETRIDE_*}` placeholders are not substituted, so no secrets are included. Returns `undefined` if the task is not found.
 
-### `interfaces(address: string, options?: { team?: string }): Promise<PipeInterfaces>`
+### `interfaces(address: string): Promise<PipeInterfaces>`
 
-What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool({ address, nodeId, tool, input })` — a standalone tool call starts a dormant engine. Your own `@spec` control (Play in the Builder) answers first with the spec it submitted and `version: null`; nothing has to be running on any rung. Throws `TASK_NOT_REGISTERED` when no rung serves you.
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one; a rooted address such as `@Production/acme.docBrain` reads only that rung); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool({ address, nodeId, tool, input })` — a standalone tool call starts a dormant engine. Your own `@spec` control (Play in the Builder) answers first with the spec it submitted and `version: null`; nothing has to be running on any rung. Throws `TASK_NOT_REGISTERED` when no rung serves you.
 
 ```typescript
 const { rung, version, interfaces } = await client.interfaces('acme.docBrain');
@@ -472,7 +472,7 @@ const ocr = await client.getService('ocr');
 
 ### `send(token, data, objinfo?, mimetype?, onSSE?, team?, params?): Promise<PIPELINE_RESULT | undefined>`
 
-Send data directly to a pipeline in one shot (internally: open pipe → write → close). `token` is the control id, or an address (`developerId.pipelineId[.source]`) that the open resolves the way `submit()` resolves a name, starting a published rung when nothing is live; the pipe's later frames name the control id the open answered with.
+Send data directly to a pipeline in one shot (internally: open pipe → write → close). `token` is the control id, or an address (`[<root>/]developerId.pipelineId[.source]`, a root such as `@Production/` naming one rung) that the open resolves the way `submit()` resolves a name, starting a published rung when nothing is live; the pipe's later frames name the control id the open answered with. The positional `team` slot is retired and stays only until 2.0: pass `undefined` (any value throws); a rooted address names the rung.
 
 ```typescript
 send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>)
@@ -507,7 +507,7 @@ const results = await client.sendFiles(
 
 ### `pipe(token, objinfo?, mimeType?, provider?, onSSE?, team?, params?): Promise<DataPipe>`
 
-Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`. `token` takes a control id or an address, as for `send()`.
+Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`. `token` takes a control id or an address (bare or rooted), as for `send()`; the positional `team` slot is retired (pass `undefined`).
 
 ### DataPipe
 
@@ -840,7 +840,7 @@ Deploy an object as the next immutable registry version. Returns `{ artifact, de
 - `options.data?: Uint8Array` — the source zip bytes (kind `'app'`; the server owns the build and never trusts client-produced binaries)
 - `options.metadata?: Record<string, unknown>` — optional metadata (e.g. projectId provenance, `appRoot` for workspace-relative app zips)
 - `options.comment?: string` — "what changed" note kept in the registry
-- `options.deployTo?: string` — team id to deploy the new version to immediately (one-step add+deploy; pipes only)
+- `options.deployTo?: string` — the target to deploy the new version to immediately (`'@me'`, `'@<team>'`, `'=team/<tid>'` or `'@public'`; a bare team id is refused) (one-step add+deploy; pipes only)
 
 ##### `client.deploy.addPipe(pipePath: string, { comment?, deployTo? }): Promise<PublishResult>`
 
@@ -861,7 +861,7 @@ await client.deploy.addPipe(created.pipePath);
 
 ##### `client.deploy.deploy(projectId: string, version: number, teamId: string): Promise<Deployment>`
 
-Point an audience at a published version. Promotion (Staging → Production) and rollback (v3 → v2) are both this call. The audience is always explicit: a team id (requires `task.control` on it), `'@me'` (your own space), or `'@public'` (the store: your organization needs a developer id, and on a server that reviews only an approved `'ready'` version is accepted; a server without a reviewer takes any version that did not fail). A pointer on `'@me'` or `'@public'` is stamped with your development team, which its schedules and run-now bill; every caller of a public pipe pays for their own calls.
+Point an audience at a published version. Promotion (Staging → Production) and rollback (v3 → v2) are both this call. The audience is always explicit: `'@<team>'` (a team by name) or `'=team/<tid>'` (a row's `teamId` passed back; either requires `task.control` on it; a bare team id is refused), `'@me'` (your own space), or `'@public'` (the store: your organization needs a developer id, and on a server that reviews only an approved `'ready'` version is accepted; a server without a reviewer takes any version that did not fail). A pointer on `'@me'` or `'@public'` is stamped with your development team, which its schedules and run-now bill; every caller of a public pipe pays for their own calls.
 
 **Reads** (list envelopes are `{ rows, total, page, pageSize }`; `params` takes `page`, `pageSize`, `search`, `filters`, `sort`):
 
@@ -911,19 +911,19 @@ Cron can only express **when a run starts** — there is no cron syntax for "run
 // Prerequisite: the pipe is deployed to the team
 const { artifact } = await client.deploy.add({ pipeline: { ...pipeline, name: 'Nightly ingest' }, comment: 'v2' });
 if (artifact?.version === undefined) throw new Error('add() returned no artifact version');
-await client.deploy.deploy('proj-123', artifact.version, 'team-prod');
+await client.deploy.deploy('proj-123', artifact.version, '@Production');
 
 // Mon/Wed/Fri at 08:00 → cron '0 8 * * 1,3,5'
 // Stop by 15:00 → ttl = 7 hours = 7 * 3600 = 25200 seconds
-await client.deploy.setSchedule('proj-123', 'webhook_1', '0 8 * * 1,3,5', 'team-prod', { ttl: 25200 });
+await client.deploy.setSchedule('proj-123', 'webhook_1', '0 8 * * 1,3,5', '@Production', { ttl: 25200 });
 
 // Sanity-check what the scheduler will fire:
 const preview = await client.deploy.preview('0 8 * * 1,3,5', 3);
 console.log(preview.valid, preview.next); // next three occurrences (epoch seconds)
 
 // Pause over a holiday week without losing the cron/ttl, then resume:
-await client.deploy.pauseSchedule('proj-123', 'webhook_1', 'team-prod');
-await client.deploy.resumeSchedule('proj-123', 'webhook_1', 'team-prod');
+await client.deploy.pauseSchedule('proj-123', 'webhook_1', '@Production');
+await client.deploy.resumeSchedule('proj-123', 'webhook_1', '@Production');
 ```
 
 Without the `ttl` the run would start at 08:00 and simply run until the pipeline finishes — the cron alone cannot express the 15:00 boundary.
@@ -939,10 +939,10 @@ The automation layer under the App Builder UI: the same scaffold, version rail, 
 - `withdrawApp(appId, registryVersion): Promise<{ artifact }>` — the developer's own cancel: flips `'submit'` → `'private'` (leaves the review queue, back to draft; history records `'withdrawn'`). Only a version in `'submit'` withdraws
 - `replyApp(appId, message, registryVersion?): Promise<{ replied: boolean; appId: string }>` — append a developer message to the app's review thread. It rides the app's deployment history as a `'reply'` row (side `'developer'`), the same stream `client.deploy.history()` reads
 - `buildLog(appId, registryVersion): Promise<{ appId; version; log }>` — one version's durable server build log, the full phase-by-phase output. Long logs serve their tail; `''` means no log exists. Developer-org gated
-- `publishApp(appId, registryVersion, target): Promise<{ publish }>` — bind a deployment to an audience. First publish, update, promote, and rollback are all this one verb ("repoint, never rebuild"). `target` is `'@me'`, `'@team/<name-or-id>'`, or `'@public'`; `'@public'` requires the deployment be `'ready'` (approved), `'@me'`/`'@team'` accept any non-`'failed'` deployment
+- `publishApp(appId, registryVersion, target): Promise<{ publish }>` — bind a deployment to an audience. First publish, update, promote, and rollback are all this one verb ("repoint, never rebuild"). `target` is `'@me'`, `'@<team>'` (a team by name), `'@public'`, or a pin's `audience` (`'=team/<tid>'`) passed back unchanged; the retired `'@team/...'` and `'@user'` are refused naming their replacement, and `'@org'` until the org rung serves. `'@public'` requires the deployment be `'ready'` (approved), `'@me'` and a team accept any non-`'failed'` deployment
 - `removeAppPublish(appId, target): Promise<{ publish }>` — remove an audience binding (the app stops serving there). SOFT: registry versions and audit history survive; publishing again revives it
 - `disableAppPublish(appId, target): Promise<{ publish }>` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it
-- `whereApp(appId): Promise<Array<{ rung, handle, version, appVersion, state, deployedAt? }>>` — the reverse index: which audiences serve which version
+- `whereApp(appId): Promise<Array<{ rung, handle, audience, version, appVersion, state, deployedAt? }>>` — the reverse index: which audiences serve which version (show `handle`; pass `audience` back unchanged as the publish/remove target)
 - `waitForAppBuild(appId, registryVersion, { timeoutMs?, intervalMs?, onStatus? })` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Throws on a failed build, an unknown version, or the timeout
 - Pure helpers exported from `rocketride` (shared with the CLI and the VS Code panels; the Python SDK exports snake_case twins): `parseRegistryVersion(value)`, `pickPublishVersion(rail)` (newest non-failed version), `resolveDeployTeams(client, deployments)`, `teamNameOf(teams, teamId, ownUserId)`, `wireTeamIdOf(teamId, ownUserId)`, `resolveTeamArg(input, teams)` (passes what was typed through: the server resolves '@me', '@public', '@<team>' by name in any case and a row's audience; `teamNameOf` and `wireTeamIdOf` are `@deprecated` pass-throughs, as rows carry their `handle` and every verb takes a row's `teamId` back unchanged), `pipelineNameFromPath(path)`
 - Live preview (Node.js, `rocketride/app-dev`): `new DevSession({ app, workspaceRoot, client })` runs one app's dev loop — `start()` resolves the dev server origin, `stop()` kills the tree and drops your dev overlay; `devPreviewUrl(serverBase, appId)` is the preview to open. The `rocketride app dev` command is this loop in the foreground
@@ -956,7 +956,7 @@ const [latest] = await client.listDeployments('acme.reports');
 if (latest.buildStatus !== 'ok') {
 	console.error((await client.buildLog('acme.reports', latest.registryVersion)).log);
 } else {
-	await client.publishApp('acme.reports', latest.registryVersion, '@team/qa');
+	await client.publishApp('acme.reports', latest.registryVersion, '@QA');
 }
 ```
 

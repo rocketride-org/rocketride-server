@@ -112,6 +112,7 @@ export function mapTeamDeploymentRows(deployments: Deployment[], registryId: str
 				return {
 					teamId: dep.teamId as string,
 					teamName: teams.find((team) => team.id === dep.teamId)?.name ?? (dep.handle || (dep.teamId as string)),
+					handle: dep.handle ?? '',
 					rung: dep.rung as TeamDeploymentRowDTO['rung'],
 					version: dep.version ?? 0,
 					// A record without a state stamp is a live pointer — 'enabled'

@@ -68,6 +68,8 @@ export interface TeamDeploymentScheduleDTO {
 export interface TeamDeploymentRowDTO {
 	teamId: string;
 	teamName: string;
+	/** The row's handle as the server composed it for this reader; display only. */
+	handle: string;
 	/** The rung the row's audience is, from the caller's side, as the server
 	 *  composed it: 'me' (their own personal space), 'personal' (another
 	 *  user's, org admins only), 'team', or 'public' (the store). */

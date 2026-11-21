@@ -636,8 +636,10 @@ def setup_parser() -> argparse.ArgumentParser:
         help='The callable nodes of the publication that answers an address, by classType (no engine started)',
     )
     _add_deploy_connection_args(d_interfaces)
-    d_interfaces.add_argument('address', help='Pipe address: developerId.pipelineId[.source]')
-    d_interfaces.add_argument('--team', default='', help='Resolve the @team rung through this one of your teams')
+    d_interfaces.add_argument(
+        'address',
+        help='Pipe address: [<root>/]developerId.pipelineId[.source]; a root (@<team>/, =team/<tid>/) reads one rung',
+    )
 
     for verb, help_text in (
         ('enable', 'Enable a disabled deployment'),

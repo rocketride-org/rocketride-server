@@ -66,8 +66,10 @@ export interface WireRailEntry {
 export interface WirePin {
 	/** Rung name ('personal' | 'team' | 'public'). */
 	rung: string;
-	/** Wire handle ('@me' | '@team/<name>' | '@public'). */
+	/** The display handle the server composed for this reader ('@me', '@<team>', '=team/<tid>', '@public'). */
 	handle: string;
+	/** The pin's audience ('=user/<uid>', '=team/<tid>', '@public'): the publish/remove target, passed back unchanged. */
+	audience: string;
 	/** Pinned registry version int. */
 	version: number;
 	/** Pinned display semver ('' on legacy rows). */
@@ -159,6 +161,7 @@ export function toRungPins(pins: WirePin[], hasReviewLadder: boolean): RungPin[]
 			rung,
 			label: rung.charAt(0).toUpperCase() + rung.slice(1),
 			handle: p.handle,
+			target: p.audience,
 			registryVersion: p.version,
 			// RAW semver only ('' on legacy rows) — the view composes the
 			// shared v<registry> + semver-pill format itself, so any

@@ -13,8 +13,9 @@ publish them to yourself, your team, or the public store.
 - **deploy** — ship a snapshot of your app's source to the server, where it
   is built and becomes the next immutable registry version.
 - **publish** — bind an already-deployed version to an audience rung
-  (`@me`, `@team/<name>`, `@public`). Publishing moves a pointer; it never
-  rebuilds anything.
+  (`@me`, `@<team>` or `=team/<tid>`, `@public`). Publishing moves a
+  pointer; it never rebuilds anything. The retired `@team/<name>` and `@user`
+  are refused, naming their replacement.
 - **UI component** — a React component (yours, or a stock one from
   `shell`); **pipeline component** — a processing node inside a RocketRide
   pipeline (`ROCKETRIDE_COMPONENT_REFERENCE.md`). This guide always
@@ -1165,6 +1166,13 @@ const token = await client.getTaskToken({ projectId, source: 'webhook_1', teamId
 if (token) await client.send(token, data, undefined, 'text/plain');
 ```
 
+Or send to the team's publication by a rooted address, which pins the rung
+and never falls through (there is no per-call `team` option):
+
+```typescript
+await client.send('=team/<tid>/acme.docBrain.webhook_1', data, undefined, 'text/plain');
+```
+
 - Shared state — one instance serves every caller; anything the pipeline
   accumulates is visible to all of them.
 - Cost and lifecycle — the run bills to the owning team, resolves the
@@ -1853,7 +1861,7 @@ audience:
 | Rung | Handle | Who gets it |
 |---|---|---|
 | Personal | `@me` | Your own desktop — lands there automatically. |
-| Team | `@team/<name>` | Members of that team. |
+| Team | `@<team>` (by name, any case) or `=team/<tid>` | Members of that team. |
 | Public | `@public` | The store — only versions approved by review. |
 
 Choosing a row **is** the action: the audience's pointer moves to that

@@ -31,9 +31,10 @@ after ``@spec`` (which is a live-control lookup, not a publication):
 - ``@me``: the caller's personal deployment, the ``=user/<uid>`` audience;
 - ``@team``: the publication of the FIRST team in the caller's TEAM ORDER
   (``models.team_order``) that holds the name. Teams holding nothing are
-  skipped; ``team=`` on the call probes that one team instead; a key with an
-  ``endpoints`` scope probes its frozen team only. The order is total, so
-  there is no tie rule and no ambiguity error;
+  skipped; a rooted address (``@<team>/...``, ``=team/<tid>/...``) probes
+  that one team instead; a key with an ``endpoints`` scope probes its frozen
+  team only. The order is total, so there is no tie rule and no ambiguity
+  error;
 - ``@public``: the store rung, the publisher's ``@public`` publication.
 
 Every row comes through ONE row source, ``publish_rows``: one read of the
@@ -196,27 +197,30 @@ def teams_to_probe(account_info: 'AccountInfo', team: Optional[str] = None) -> L
     The teams ``@team`` probes for this call, in order (plan 3.2).
 
     Without ``team`` that is the caller's team order (a scoped key's frozen
-    team only). ``team`` overrides it for one call: it must be one of the
-    caller's own teams (for a scoped key, its frozen team).
+    team only). ``team`` is the one team a rooted address names
+    (``@<team>/...``, ``=team/<tid>/...``): it must be one of the caller's
+    own teams, and a scoped key's frozen team refuses any other.
 
     Args:
         account_info: The request's account.
-        team: The per-call override, or None.
+        team: The team id a rooted address names, or None for the ladder.
 
     Returns:
         Team ids in probe order.
 
     Raises:
-        PermissionError: ``team`` is not one of the caller's teams.
+        PermissionError: ``team`` is not one of the caller's teams, or not
+            a scoped key's frozen team.
     """
     order = team_order(account_info)
     if team is None:
         return order
     if getattr(account_info, 'endpoints', None) is not None:
-        allowed = order
-    else:
-        org = getattr(account_info, 'organization', None) or {}
-        allowed = [str(t.get('id')) for t in org.get('teams') or [] if t.get('id')]
+        if team not in order:
+            raise PermissionError(f'This API key is frozen to its own team; =team/{team} names another')
+        return [team]
+    org = getattr(account_info, 'organization', None) or {}
+    allowed = [str(t.get('id')) for t in org.get('teams') or [] if t.get('id')]
     if team not in allowed:
         raise PermissionError(f'You are not a member of team {team!r}')
     return [team]
@@ -352,7 +356,8 @@ async def resolve_pins(
     account_info: 'AccountInfo',
     address: str,
     *,
-    team: Optional[str] = None,
+    rungs: Sequence[str] = PUBLISHED_RUNGS,
+    teams: Optional[Sequence[str]] = None,
 ) -> Pins:
     """
     The published rungs of ``address`` that serve the caller, in precedence order.
@@ -361,21 +366,27 @@ async def resolve_pins(
     are read only when the address is in the caller's namespace; ``@public``
     is the publisher's ``@public`` row, found through the org that owns the
     address namespace. ``@team`` yields at most ONE pin: the first team in
-    the probe order (``teams_to_probe``) holding a serving row. A pure read.
+    the probe order holding a serving row. A rooted address reads only its
+    root's rung (``rungs``) and, on ``@team``, only its one team (``teams``).
+    A pure read.
 
     Args:
         kind: The artifact kind to resolve (``'pipe'``).
         account_info: The request's account (required).
         address: ``developerId.pipelineId[.source]``.
-        team: Per-call ``@team`` override.
+        rungs: The published rungs to read (``me``, ``team``, ``public``),
+            every one by default.
+        teams: The team ids ``@team`` probes, in order, already checked
+            against the caller (``teams_to_probe``); None for the caller's
+            team order.
 
     Returns:
         The pins; ``pins`` is empty when no published rung serves the caller.
 
     Raises:
         TaskError: TASK_INVALID_ARGUMENT (address grammar).
-        PermissionError: Unauthenticated, ``team`` is not the caller's, or
-            the key's ``endpoints`` scope excludes the address.
+        PermissionError: Unauthenticated, or the key's ``endpoints`` scope
+            excludes the address.
     """
     from ai.account import account
     from ai.modules.task.address import build_address, parse_address
@@ -385,7 +396,9 @@ async def resolve_pins(
         raise PermissionError('Not authenticated')
     parsed = parse_address(address)
     _check_scope(getattr(account_info, 'endpoints', None), parsed)
-    probe = teams_to_probe(account_info, team)
+    probe = list(teams) if teams is not None else teams_to_probe(account_info)
+    if 'team' not in rungs:
+        probe = []
     org_id, developer_id = _org_of(account_info)
     user_id = getattr(account_info, 'userId', '') or ''
     # The registry name every publish row is keyed by: the pipe id inside
@@ -396,8 +409,8 @@ async def resolve_pins(
     pins: List[Pin] = []
 
     # Step 2: @me, then @team in the probe order: the caller's own org
-    if own_namespace:
-        me_slot = user_audience(user_id) if user_id else ''
+    if own_namespace and ('me' in rungs or probe):
+        me_slot = user_audience(user_id) if user_id and 'me' in rungs else ''
         slots = ([me_slot] if me_slot else []) + [team_audience(team_id) for team_id in probe]
         rows = await publish_rows(account, org_id, pipe_name, slots)
         if me_slot:
@@ -411,6 +424,8 @@ async def resolve_pins(
                 break
 
     # Step 3: @public, the publisher's store publication
+    if 'public' not in rungs:
+        return Pins(address=parsed, pins=tuple(pins))
     publisher_org = org_id if own_namespace else await account.get_org_of_developer_id(parsed.developer_id)
     if publisher_org:
         rows = await publish_rows(account, publisher_org, pipe_name, [PUBLIC_AUDIENCE])

@@ -50,7 +50,7 @@ from ai.modules.task.address import (
 )
 from ai.modules.task.commands.cmd_misc import MiscCommands
 from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
-from ai.modules.task.task_control import TaskControl, mint_control_id, rung_of
+from ai.modules.task.task_control import RESOLVE_ATTACH, TaskControl, mint_control_id, rung_of
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
 from ai.modules.task.trace_owner import TraceOwners
@@ -105,6 +105,11 @@ def _account(*, user_id='user-a', team_id='team-1', developer_id='acme', endpoin
         },
         endpoints=endpoints,
     )
+
+
+async def _attach(ts: TaskServer, target: str, account: AccountInfo, require=None) -> TaskControl:
+    """The control ``resolve_target`` attaches to for ``target``: registered controls only, nothing starts."""
+    return (await ts.resolve_target(account, target, require, mode=RESOLVE_ATTACH)).control
 
 
 def _control(
@@ -206,20 +211,20 @@ def test_s4_unscoped_lookup_no_longer_exists():
     assert not hasattr(TaskServer, 'get_task_control_by_project')
 
 
-def test_s4_user_b_never_resolves_user_a_dev_control():
+async def test_s4_user_b_never_resolves_user_a_dev_control():
     """B's resolution of A's @spec address walks B's rungs and finds nothing."""
     ts = _server()
     a_control = _control(ts, user_id='user-a')
 
-    resolved = ts.resolve_control(a_control.address, _account(user_id='user-a'), 'task.data')
+    resolved = await _attach(ts, a_control.address, _account(user_id='user-a'), 'task.data')
     assert resolved is a_control
 
     with pytest.raises(TaskError) as denied:
-        ts.resolve_control(a_control.address, _account(user_id='user-b'), 'task.data')
+        await _attach(ts, a_control.address, _account(user_id='user-b'), 'task.data')
     assert denied.value.code == TaskError.NOT_REGISTERED
 
 
-def test_s4_resolution_requires_the_permission_on_every_call():
+async def test_s4_resolution_requires_the_permission_on_every_call():
     """A caller without the required permission is refused even on their own run."""
     ts = _server()
     control = _control(ts)
@@ -229,36 +234,36 @@ def test_s4_resolution_requires_the_permission_on_every_call():
         organization={'id': 'org-1', 'name': '', 'permissions': [], 'teams': [], 'developerId': 'acme'},
     )
     # A user-owned run grants its owner everything by identity ...
-    assert ts.resolve_control(control.address, viewer, 'task.control') is control
+    assert await _attach(ts, control.address, viewer, 'task.control') is control
     # ... but a TEAM-owned run resolves through membership, and the viewer has
     # none: the run is simply not on any rung they can reach (no existence leak).
     team_run = _control(ts, run_kind='deploy', owner_kind='team', user_id='', project_id='nightly')
     with pytest.raises(TaskError) as denied:
-        ts.resolve_control(team_run.address, viewer, 'task.monitor')
+        await _attach(ts, team_run.address, viewer, 'task.monitor')
     assert denied.value.code == TaskError.NOT_REGISTERED
     # A member holding task.monitor on that team reaches it, and only with the
     # permission the request names.
     member = _account(team_id='team-1', developer_id='acme')
-    assert ts.resolve_control(team_run.address, member, 'task.monitor') is team_run
+    assert await _attach(ts, team_run.address, member, 'task.monitor') is team_run
     with pytest.raises(PermissionError):
-        ts.resolve_control(team_run.address, member, 'task.store')
+        await _attach(ts, team_run.address, member, 'task.store')
 
 
-def test_s4_a_foreign_developer_prefix_is_not_the_callers_dev_rung():
+async def test_s4_a_foreign_developer_prefix_is_not_the_callers_dev_rung():
     """The @spec rung matches only when the address prefix is the caller's developer id."""
     ts = _server()
     control = _control(ts, developer_id='acme')
     with pytest.raises(TaskError):
-        ts.resolve_control('globex.docBrain.parsePDF', _account(developer_id='globex'), 'task.data')
-    assert ts.resolve_control(control.address, _account(developer_id='acme'), 'task.data') is control
+        await _attach(ts, 'globex.docBrain.parsePDF', _account(developer_id='globex'), 'task.data')
+    assert await _attach(ts, control.address, _account(developer_id='acme'), 'task.data') is control
 
 
-def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
+async def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
     """The address carries no owner, so two teams can each run it. A member of
     both reaches the run of the FIRST team in their STORED team order that runs
     it (teams joined since follow in membership order); teams running nothing
-    are skipped, ``team=`` overrides the order for one call, and there is no
-    ambiguity error: the order is total.
+    are skipped, a team root (``@<team>/``, ``=team/<tid>/``) names one team
+    for one call, and there is no ambiguity error: the order is total.
     """
     ts = _server()
     run_1 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
@@ -284,18 +289,23 @@ def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_order():
             },
         )
 
-    assert ts.resolve_control(run_1.address, member('team-1'), 'task.monitor') is run_1
-    assert ts.resolve_control(run_2.address, member('team-2'), 'task.monitor') is run_2
+    assert await _attach(ts, run_1.address, member('team-1'), 'task.monitor') is run_1
+    assert await _attach(ts, run_2.address, member('team-2'), 'task.monitor') is run_2
     # team-3 first holds nothing and is skipped: team-1 comes next in membership order
-    assert ts.resolve_control(run_1.address, member('team-3'), 'task.monitor') is run_1
-    assert ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-2') is run_2
+    assert await _attach(ts, run_1.address, member('team-3'), 'task.monitor') is run_1
+    assert await _attach(ts, f'=team/team-2/{run_1.address}', member('team-1'), 'task.monitor') is run_2
+    assert await _attach(ts, f'@two/{run_1.address}', member('team-1'), 'task.monitor') is run_2
     # devTeam and the stored order disagree: the STORED order decides (team-2 first)
-    assert ts.resolve_control(run_1.address, member('team-1', ['team-2', 'team-1']), 'task.monitor') is run_2
+    assert await _attach(ts, run_1.address, member('team-1', ['team-2', 'team-1']), 'task.monitor') is run_2
     with pytest.raises(PermissionError):
-        ts.resolve_control(run_1.address, member('team-1'), 'task.monitor', team='team-9')
+        await _attach(ts, f'=team/team-9/{run_1.address}', member('team-1'), 'task.monitor')
+    # A team root walks only its team: team-3 runs nothing, and nothing falls through
+    with pytest.raises(TaskError) as err:
+        await _attach(ts, f'@Three/{run_1.address}', member('team-1'), 'task.monitor')
+    assert err.value.code == TaskError.NOT_REGISTERED and err.value.rungsTried == ['@Three']
 
 
-def test_s4_a_store_pointers_deploy_rail_run_never_answers_the_team_rung():
+async def test_s4_a_store_pointers_deploy_rail_run_never_answers_the_team_rung():
     """A store schedule or run-now is team-owned by the stamped billing team but sits on the public rung:
     a member of that team calling the address is never served through it on @team (nor on @public, which
     answers only the caller's own control).
@@ -304,27 +314,32 @@ def test_s4_a_store_pointers_deploy_rail_run_never_answers_the_team_rung():
     store = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1', rung='public')
     member = _account(user_id='user-a', team_id='team-1')
     with pytest.raises(TaskError) as err:
-        ts.resolve_control(store.address, member, 'task.monitor')
+        await _attach(ts, store.address, member, 'task.monitor')
     assert err.value.rungsTried == ['@spec', '@me', '@team', '@public']
     # The team's own deploy of the address still answers on @team
     own = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
-    assert ts.resolve_control(own.address, member, 'task.monitor') is own
+    assert await _attach(ts, own.address, member, 'task.monitor') is own
 
 
-def test_the_resolver_can_be_held_to_one_rung():
+async def test_a_root_holds_the_walk_to_one_rung():
     """A subscription keyed to the caller's dev run never reads their personal deploy of the address, nor the
-    reverse: ``rung=`` holds the walk to the continuum the key names (a live @spec would otherwise answer first).
+    reverse: a root holds the walk to the continuum it names (a live @spec would otherwise answer first),
+    and a rooted walk never falls through.
     """
     ts = _server()
     dev = _control(ts, run_kind='dev')
     me = _control(ts, run_kind='deploy', owner_kind='user')
     caller = _account(developer_id='acme')
-    assert ts.resolve_control(dev.address, caller, 'task.monitor') is dev
-    assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='spec') is dev
-    assert ts.resolve_control(dev.address, caller, 'task.monitor', rung='me') is me
+    assert await _attach(ts, dev.address, caller, 'task.monitor') is dev
+    assert await _attach(ts, f'@spec/{dev.address}', caller, 'task.monitor') is dev
+    assert await _attach(ts, f'@me/{dev.address}', caller, 'task.monitor') is me
+    assert await _attach(ts, f'@ME/{dev.address}', caller, 'task.monitor') is me
     with pytest.raises(TaskError) as err:
-        ts.resolve_control(dev.address, caller, 'task.monitor', rung='team')
-    assert err.value.rungsTried == ['@team']
+        await _attach(ts, f'=team/team-1/{dev.address}', caller, 'task.monitor')
+    assert err.value.code == TaskError.NOT_REGISTERED and err.value.rungsTried == ['=team/team-1']
+    with pytest.raises(TaskError) as err:
+        await _attach(ts, f'@public/{dev.address}', caller, 'task.monitor')
+    assert err.value.rungsTried == ['@public']
 
 
 # =============================================================================
@@ -351,29 +366,29 @@ async def test_s4_a_stopped_dev_control_does_not_shadow_a_live_team_control():
     account = _account()
 
     for permission in ('task.control', 'task.data', 'task.monitor'):
-        assert ts.resolve_control(team_run.address, account, permission) is team_run
+        assert await _attach(ts, team_run.address, account, permission) is team_run
 
     # Terminate lands on the team run; the stopped dev run is left alone.
-    await ts.stop_task(ts.resolve_control(team_run.address, account, 'task.control').key)
+    await ts.stop_task((await _attach(ts, team_run.address, account, 'task.control')).key)
     team_run.task.stop_task.assert_awaited_once()
     dev_run.task.stop_task.assert_not_awaited()
 
 
-def test_s4_a_dead_source_never_makes_a_two_segment_address_ambiguous():
+async def test_s4_a_dead_source_never_makes_a_two_segment_address_ambiguous():
     """One finished and one live source: the two-segment address is the live one."""
     ts = _server()
     _finish(_control(ts, source='parsePDF'))
     webhook = _control(ts, source='webhook_1')
 
-    assert ts.resolve_control('acme.docBrain', _account(), 'task.data') is webhook
+    assert await _attach(ts, 'acme.docBrain', _account(), 'task.data') is webhook
 
 
-def test_s4_a_finished_run_stays_readable_when_nothing_live_answers():
+async def test_s4_a_finished_run_stays_readable_when_nothing_live_answers():
     """With no live control on any rung, the finished run answers its address."""
     ts = _server()
     finished = _finish(_control(ts, run_kind='deploy', owner_kind='team', user_id=''))
 
-    assert ts.resolve_control(finished.address, _account(), 'task.monitor') is finished
+    assert await _attach(ts, finished.address, _account(), 'task.monitor') is finished
 
 
 @pytest.mark.asyncio
@@ -493,18 +508,18 @@ async def test_s6_publish_rejects_a_dotted_component_id():
         await backend.publish('org-1', 'acme.docBrain', _pipeline('parsePDF', project_id='acme.docBrain'), {})
 
 
-def test_s6_two_sources_are_two_controls():
+async def test_s6_two_sources_are_two_controls():
     """acme.docBrain.parsePDF and acme.docBrain.webhook_1 are distinct controls."""
     ts = _server()
     parse_pdf = _control(ts, source='parsePDF')
     webhook = _control(ts, source='webhook_1')
     account = _account()
 
-    assert ts.resolve_control('acme.docBrain.parsePDF', account, 'task.data') is parse_pdf
-    assert ts.resolve_control('acme.docBrain.webhook_1', account, 'task.data') is webhook
+    assert await _attach(ts, 'acme.docBrain.parsePDF', account, 'task.data') is parse_pdf
+    assert await _attach(ts, 'acme.docBrain.webhook_1', account, 'task.data') is webhook
     # Two live sources and no source given: the caller must name one.
     with pytest.raises(TaskError) as err:
-        ts.resolve_control('acme.docBrain', account, 'task.data')
+        await _attach(ts, 'acme.docBrain', account, 'task.data')
     assert err.value.code == TaskError.SOURCE_REQUIRED
     assert sorted(err.value.sources) == ['parsePDF', 'webhook_1']
 
@@ -728,7 +743,7 @@ def test_s10_scoped_key_is_bound_to_its_addresses():
         check_endpoint_scope([], 'acme.docBrain.chat')
 
 
-def test_s10_scoped_key_skips_the_dev_rung_and_is_refused_elsewhere():
+async def test_s10_scoped_key_skips_the_dev_rung_and_is_refused_elsewhere():
     """A production webhook key never lands on the owner's Play'd run, and
     cannot reach any address outside its scope.
     """
@@ -737,11 +752,11 @@ def test_s10_scoped_key_skips_the_dev_rung_and_is_refused_elsewhere():
     me_run = _control(ts, run_kind='deploy', owner_kind='user', source='chat', project_id='docBrain')
     scoped = _account(endpoints=['acme.docBrain.chat'])
 
-    assert ts.resolve_control('acme.docBrain.chat', scoped, 'task.data') is me_run
-    assert ts.resolve_control('acme.docBrain.chat', _account(), 'task.data') is dev_run
+    assert await _attach(ts, 'acme.docBrain.chat', scoped, 'task.data') is me_run
+    assert await _attach(ts, 'acme.docBrain.chat', _account(), 'task.data') is dev_run
     _control(ts, run_kind='deploy', owner_kind='user', source='parsePDF')
     with pytest.raises(PermissionError):
-        ts.resolve_control('acme.docBrain.parsePDF', scoped, 'task.data')
+        await _attach(ts, 'acme.docBrain.parsePDF', scoped, 'task.data')
 
 
 def test_s10_scoped_key_lists_only_the_runs_inside_its_scope():

@@ -52,7 +52,6 @@ class _Client(ExecutionMixin):
         self.calls = []
         self.timeouts = []
         self.sent = []
-        self.sent_teams = []
         self.sent_params = []
         self._env = {'ROCKETRIDE_TONE': 'dry', 'OTHER': 'x'}
         self._fail = fail
@@ -72,9 +71,8 @@ class _Client(ExecutionMixin):
     def did_fail(response):
         return not response.get('success')
 
-    async def send(self, token, data, objinfo=None, mimetype=None, on_sse=None, team=None, params=None):
+    async def send(self, token, data, objinfo=None, mimetype=None, on_sse=None, params=None):
         self.sent.append((token, data, on_sse))
-        self.sent_teams.append(team)
         self.sent_params.append(params)
         return {'answers': ['streamed']}
 
@@ -157,11 +155,20 @@ def test_submit_has_no_timeout_on_either_side():
         _run(client.submit(name='acme.docBrain', data=b'x', timeout=30))
 
 
-def test_a_streamed_payload_is_sent_through_the_team_that_answered():
-    """The data path resolves the address again: the stamped team keeps it on the same control."""
+def test_a_streamed_payload_is_sent_on_the_control_that_answered():
+    """A rooted name rides unchanged; the data path names the control id the server answered with."""
     client = _Client()
-    _run(client.submit(name='acme.docBrain', data=b'0' * (SUBMIT_INLINE_MAX + 1)))
-    assert client.sent_teams == [STAMPS.get('team')]
+    _run(client.submit(name='@Development/acme.docBrain', data=b'0' * (SUBMIT_INLINE_MAX + 1)))
+    assert client.calls[0][1]['name'] == '@Development/acme.docBrain'
+    assert [token for token, _data, _on_sse in client.sent] == [STAMPS['token']]
+
+
+def test_the_retired_team_option_is_gone():
+    """A rooted name names the rung (plan 11.1 B44); team= is no parameter of submit()."""
+    client = _Client()
+    with pytest.raises(TypeError):
+        _run(client.submit(name='acme.docBrain', data=b'x', team='team-1'))
+    assert client.calls == []
 
 
 def test_params_ride_the_inline_request_and_the_streamed_send():

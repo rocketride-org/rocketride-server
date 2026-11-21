@@ -255,7 +255,7 @@ const S = {
 		fontWeight: 700,
 		fontSize: 13.5,
 	} as CSSProperties,
-	// The rung's handle beside its label ('@me', '@team/Staging', '@public').
+	// The rung's handle beside its label ('@me', '@Staging', '@public'), as the server composed it.
 	liveHandle: {
 		...commonStyles.fontMono,
 		fontSize: 11,

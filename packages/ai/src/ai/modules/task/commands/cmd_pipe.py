@@ -601,9 +601,11 @@ class DeployPipeCommands(_DeployBase):
         could not call: a scoped key is refused outside its ``endpoints``, and
         an address no rung serves is ``TASK_NOT_REGISTERED``.
 
-        Arguments: ``address`` (``developerId.pipelineId[.source]``; the
-        source segment is accepted and ignored — the map covers the whole
-        pipe), optional ``team`` (the per-call ``@team`` override).
+        Arguments: ``address`` (``[<root>/]developerId.pipelineId[.source]``;
+        the source segment is accepted and ignored — the map covers the
+        whole pipe; a root names the one rung to read, ``@<team>/...`` or
+        ``=team/<tid>/...`` for one team's publication). The retired
+        ``team`` option is refused.
 
         Body: ``{address, rung, version, teamId?, interfaces}`` where
         ``interfaces`` is ``{address: {classType: [{nodeId, name}]}}`` —
@@ -613,12 +615,10 @@ class DeployPipeCommands(_DeployBase):
         ``version`` is None), as it does for ``submit()``; nothing has to be
         running on any rung.
         """
-        from ai.account.pipe_deploy import Pin
-
         from .. import services_catalog
-        from ..address import build_address
+        from ..address import build_address, refuse_team_option
         from ..interfaces import pipe_interfaces
-        from ..types import TaskError
+        from ..task_control import RESOLVE_READ
 
         # Step 1: who asks, for what
         address = args.get('address')
@@ -627,30 +627,22 @@ class DeployPipeCommands(_DeployBase):
         account_info = self._account_info
         if account_info is None:
             raise PermissionError('Not authenticated')
-        team = args.get('team') or None
+        refuse_team_option(args)
 
-        # Step 2: THE decision every name call makes (TaskServer.resolve_candidates,
-        # plan 3.2): what answers this address for this caller, in the ladder's
-        # order — @spec, @me, the teams in team order, @public — without starting
-        # anything. The first candidate is the answer: the caller's registered
-        # control (the spec it submitted; @spec has no publication, and a dormant
-        # control's spec stays readable) or a publication's pin (the registry
-        # artifact). Nothing has to be running on any rung.
-        parsed, _rungs, candidates = await self._server.resolve_candidates(
-            address, account_info, 'task.data', team=str(team) if team else None
-        )
+        # Step 2: THE decision every name call makes (TaskServer.resolve_target
+        # in read mode, plan 3.2): what answers this target for this caller, in
+        # the ladder's order — @spec, @me, the teams in team order, @public, or
+        # the one rung a root names — without starting anything. The answer is
+        # the caller's registered control (the spec it submitted; @spec has no
+        # publication, and a dormant control's spec stays readable) or a
+        # publication's pin (the registry artifact). Nothing has to be running
+        # on any rung; no rung answering is TASK_NOT_REGISTERED.
+        resolution = await self._server.resolve_target(account_info, address, 'task.data', mode=RESOLVE_READ)
+        if resolution.pin is None:
+            return self.build_response(request, body=await self._interfaces_of_control(resolution.control))
+        parsed = resolution.target.address
         pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
-        if not candidates:
-            raise TaskError(
-                TaskError.NOT_REGISTERED,
-                f'No rung of {pipe_address!r} serves you',
-                address=pipe_address,
-                rungsTried=['spec', 'me', 'team', 'public'],
-            )
-        first = candidates[0]
-        if not isinstance(first, Pin):
-            return self.build_response(request, body=await self._interfaces_of_control(first))
-        pin = first
+        pin = resolution.pin
         deployment = pin.deployment
         if pin.rung == 'team':
             # A team publication is read with the same permission a data

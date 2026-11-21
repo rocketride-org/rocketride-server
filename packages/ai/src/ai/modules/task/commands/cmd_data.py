@@ -41,6 +41,7 @@ from ai.account.base import OutOfCreditsError
 from ai.common.dap import DAPConn, TransportBase
 
 from .. import caller_stamp
+from ..address import refuse_team_option
 from ..task_control import OpenPipe, is_control_id
 from .engine_access import engine_for, wait_running
 
@@ -237,11 +238,11 @@ class DataCommands(DAPConn):
         The caller's control for the request's token slot.
 
         A frame that STARTS a binding (an ``open``, or a standalone ``tool``
-        call naming no pipe) takes a CONTROL ID or an ADDRESS: an address
-        resolves through the caller's rungs the way submit() does and starts
-        a publication nobody has called recently (plan section 1: send, pipe
-        and the HTTP door resolve through ``resolve_control_or_start``; plan
-        3.6 for the tool borrow). The open answers with the control id, and
+        call naming no pipe) takes a CONTROL ID or an ADDRESS: an address,
+        bare or rooted, resolves through ``TaskServer.resolve_target`` the
+        way submit() does and starts a publication nobody has called
+        recently (plan section 1: send, pipe and both HTTP doors; plan 3.6
+        for the tool borrow). The open answers with the control id, and
         every later frame of the pipe names that id: a frame on an open pipe
         takes a CONTROL ID only, so it can never land on a sibling control
         the address would resolve to by then. A ``=control/`` value in the
@@ -256,10 +257,17 @@ class DataCommands(DAPConn):
 
         Returns:
             The control.
+
+        Raises:
+            TaskError: TASK_INVALID_ARGUMENT for the retired ``team`` option
+                or a bad target; as ``resolve_target`` otherwise.
         """
-        token = (request.get('arguments') or {}).get('token')
+        arguments = request.get('arguments') or {}
+        token = arguments.get('token')
         if subcommand in ('open', 'tool') and pipe_id is None and not is_control_id(token):
-            return await self.resolve_control_or_start(request, 'task.data')
+            refuse_team_option(arguments)
+            resolution = await self._server.resolve_target(self._account_info, str(token or ''), 'task.data')
+            return resolution.control
         return self.get_control(request, 'task.data')
 
     async def _new_binding(self, control: 'TaskControl', arguments: Dict[str, Any]) -> '_Frame':

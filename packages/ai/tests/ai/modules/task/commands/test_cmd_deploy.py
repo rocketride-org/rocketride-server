@@ -41,7 +41,7 @@ import ai.modules.task.commands.cmd_pipe as pipe_mod
 from ai.modules.task.commands.cmd_deploy import DeployCommands
 from ai.modules.task.commands.cmd_pipe import DeployPipeCommands
 from ai.account.models import resolve_team_permissions
-from ai.modules.task.task_control import DeploymentRef
+from ai.modules.task.task_control import RESOLVE_READ, DeploymentRef
 
 
 # ============================================================================
@@ -386,7 +386,7 @@ class TestPublish:
     @pytest.mark.asyncio
     async def test_publish_and_deploy_in_one_step(self, account_stub):
         conn = _make_conn(_account_info())
-        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': 'team-1'})
+        resp = await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '=team/team-1'})
         account_stub.deployments_deploy.assert_awaited_once()
         assert resp['body']['deployment']['teamId'] == '=team/team-1'
         assert (resp['body']['deployment']['rung'], resp['body']['deployment']['handle']) == ('team', '@Development')
@@ -396,7 +396,7 @@ class TestPublish:
     async def test_publish_deploy_to_foreign_team_denied(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(PermissionError):
-            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': 'team-foreign'})
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '=team/team-foreign'})
         account_stub.deployments_deploy.assert_not_awaited()
 
 
@@ -409,7 +409,7 @@ class TestDeploy:
     @pytest.mark.asyncio
     async def test_deploy_verifies_control_on_target_team(self, account_stub):
         conn = _make_conn(_account_info())
-        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': 'team-1'})
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': '=team/team-1'})
         account_stub.deployments_deploy.assert_awaited_once_with(
             'org-1',
             '=team/team-1',
@@ -442,6 +442,8 @@ class TestDeploy:
             ('@team/Development', ValueError),
             ('@user', ValueError),
             ('=team/team-1/x', ValueError),
+            ('team-1', ValueError),
+            ('Development', ValueError),
         ],
     )
     async def test_deploy_refuses_what_names_no_target_of_the_caller(self, account_stub, team, error):
@@ -451,17 +453,35 @@ class TestDeploy:
         account_stub.deployments_deploy.assert_not_awaited()
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ('team', 'message'),
+        [
+            ('@team/Development', '@team/ is retired: publish to @<name> or =team/<tid>'),
+            ('@team/team-1', '@team/ is retired: publish to @<name> or =team/<tid>'),
+            ('@user', '@user is retired: publish to @me'),
+            ('@org', 'Publishing to the org (@org, =org/<oid>) is not yet supported'),
+            ('team-1', 'Not a publish target'),
+        ],
+    )
+    async def test_a_retired_spelling_and_a_bare_id_are_refused_naming_the_target(self, account_stub, team, message):
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError) as excinfo:
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': team})
+        assert message in str(excinfo.value)
+        account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_deploy_foreign_team_denied(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(PermissionError):
-            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': 'team-x'})
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': '=team/team-x'})
         account_stub.deployments_deploy.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_deploy_requires_integer_version(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='version'):
-            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': '3', 'teamId': 'team-1'})
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': '3', 'teamId': '=team/team-1'})
 
     @pytest.mark.asyncio
     async def test_deploy_broadcasts_the_invalidation_event(self, account_stub):
@@ -471,7 +491,7 @@ class TestDeploy:
         from rocketride import EVENT_TYPE
 
         conn = _make_conn(_account_info())
-        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': 'team-1'})
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': '=team/team-1'})
         conn._server.broadcast_server_event.assert_awaited_once_with(
             EVENT_TYPE.DEPLOY,
             {
@@ -531,11 +551,11 @@ class TestReads:
     async def test_list_foreign_team_denied_for_non_admin(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(PermissionError):
-            await conn._deploy_list({}, {'teamId': 'team-x'})
+            await conn._deploy_list({}, {'teamId': '=team/team-x'})
         # ...but an org admin may address any team in the org.
         admin = _make_conn(_account_info())
         admin._account_info.organization['permissions'] = ['org.admin']
-        await admin._deploy_list({}, {'teamId': 'team-x'})
+        await admin._deploy_list({}, {'teamId': '=team/team-x'})
         assert account_stub.deployments_list.await_args.args == ('org-1', '=team/team-x')
 
     @pytest.mark.asyncio
@@ -553,7 +573,7 @@ class TestReads:
         account_stub.deployments_get.return_value = None
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='No deployment'):
-            await conn._deploy_get({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
+            await conn._deploy_get({}, {'projectId': 'proj-1', 'teamId': '=team/team-1'})
 
     @pytest.mark.asyncio
     async def test_versions_needs_org_membership_only(self, account_stub):
@@ -636,7 +656,7 @@ class TestReads:
                 address='acme.proj-1.webhook_1', control_id='=control/c0ffee00c0ffee00c0ffee00c0ffee00'
             )
         )
-        result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 'webhook_1', 'teamId': 'team-1'})
+        result = await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 'webhook_1', 'teamId': '=team/team-1'})
         assert result['body'] == {
             'token': '=control/c0ffee00c0ffee00c0ffee00c0ffee00',
             'address': 'acme.proj-1.webhook_1',
@@ -678,7 +698,7 @@ class TestReads:
         # A live run holds the slot: the atomic reservation is refused.
         conn._test_scheduler.try_reserve_run.return_value = False
         with pytest.raises(ValueError, match='already active'):
-            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '=team/team-1'})
 
     @pytest.mark.asyncio
     async def test_run_refuses_disabled_and_needs_control(self, account_stub, monkeypatch):
@@ -690,11 +710,11 @@ class TestReads:
         account_stub.deployments_get.return_value = {**account_stub.deployments_get.return_value, 'state': 'disabled'}
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='disabled'):
-            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '=team/team-1'})
         # No task.control on the team: uniform denial.
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
         with pytest.raises(PermissionError):
-            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': 'team-1'})
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '=team/team-1'})
 
     @pytest.mark.asyncio
     async def test_artifact_returns_the_pipeline(self, account_stub):
@@ -751,6 +771,30 @@ class TestReads:
         assert passed[1] == 'acme.proj-1' and passed[3] is args
         assert result['body']['rows'] == [{'action': 'publish', 'seq': 1}]
 
+    @pytest.mark.asyncio
+    async def test_a_publish_rows_audience_reads_with_this_readers_handle(self, account_stub):
+        # Publish rows store the pair and its display name, never a handle; a
+        # handle an older row stored is replaced by the one composed for the
+        # reader (plan 2.5): their own space is @me, a team they know by name
+        # @<name>, one they do not by =team/<tid>
+        account_stub.deployments_history.return_value = {
+            'rows': [
+                {'action': 'publish', 'seq': 3, 'teamId': '', 'data': {'audience': {'type': 'user', 'id': 'user-1'}}},
+                {
+                    'action': 'publish',
+                    'seq': 2,
+                    'teamId': '',
+                    'data': {'audience': {'type': 'team', 'id': 'team-1', 'name': 'Old', 'handle': '@team/Old'}},
+                },
+                {'action': 'disabled', 'seq': 1, 'teamId': '', 'data': {'audience': {'type': 'team', 'id': 'team-9'}}},
+            ],
+            'total': 3,
+        }
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'Development', 'permissions': []}]))
+        result = await conn._deploy_history({}, {'projectId': 'proj-1'})
+        handles = [r['data']['audience']['handle'] for r in result['body']['rows']]
+        assert handles == ['@me', '@Development', '=team/team-9']
+
 
 # ============================================================================
 # state / schedules
@@ -787,7 +831,7 @@ class TestPersonalDeploy:
         # A team audience is unambiguous — it bills itself, stamped at
         # pointer time so every row carries the one absolute answer.
         conn = _make_conn(_account_info())
-        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'version': 1})
+        await conn._deploy_deploy({}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'version': 1})
         args = account_stub.deployments_deploy.await_args.args
         assert args[1] == '=team/team-1' and args[5] == 'team-1'
 
@@ -1014,9 +1058,9 @@ class TestStateAndSchedules:
     @pytest.mark.asyncio
     async def test_disable_enable_remove_map_to_states(self, account_stub):
         conn = _make_conn(_account_info())
-        await conn._deploy_disable({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
-        await conn._deploy_enable({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
-        await conn._deploy_remove({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
+        await conn._deploy_disable({}, {'projectId': 'proj-1', 'teamId': '=team/team-1'})
+        await conn._deploy_enable({}, {'projectId': 'proj-1', 'teamId': '=team/team-1'})
+        await conn._deploy_remove({}, {'projectId': 'proj-1', 'teamId': '=team/team-1'})
         states = [c.args[3] for c in account_stub.deployments_set_state.await_args_list]
         assert states == ['disabled', 'enabled', 'removed']
         # Every mutation resyncs the scheduler.
@@ -1027,11 +1071,11 @@ class TestStateAndSchedules:
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='Invalid schedule'):
             await conn._deploy_schedule_set(
-                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'schedule': 'nope'}
+                {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'schedule': 'nope'}
             )
         # 'manual' means "no schedule row" — persisted as a clear (None).
         await conn._deploy_schedule_set(
-            {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'schedule': 'manual'}
+            {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'schedule': 'manual'}
         )
         assert account_stub.deployments_schedule_set.await_args.args[4] is None
 
@@ -1042,21 +1086,21 @@ class TestStateAndSchedules:
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='not a component'):
             await conn._deploy_schedule_set(
-                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 'ghost', 'schedule': '@hourly'}
+                {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 'ghost', 'schedule': '@hourly'}
             )
         account_stub.deployments_schedule_set.assert_not_awaited()
         # source_config shares the guard (same argument, same failure mode).
         with pytest.raises(ValueError, match='not a component'):
             await conn._deploy_source_config(
-                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 'ghost', 'traceLevel': 'none'}
+                {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 'ghost', 'traceLevel': 'none'}
             )
         account_stub.deployments_source_config_set.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_schedule_pause_resume_flip_the_flag(self, account_stub):
         conn = _make_conn(_account_info())
-        await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1'})
-        await conn._deploy_schedule_resume({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1'})
+        await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1'})
+        await conn._deploy_schedule_resume({}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1'})
         flags = [c.args[4] for c in account_stub.deployments_schedule_set_paused.await_args_list]
         assert flags == [True, False]
         # Both flips resync the scheduler and audit.
@@ -1069,11 +1113,12 @@ class TestStateAndSchedules:
         # An unknown trace level is refused before anything persists.
         with pytest.raises(ValueError, match='traceLevel'):
             await conn._deploy_source_config(
-                {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'traceLevel': 'loud'}
+                {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'traceLevel': 'loud'}
             )
         # Valid config routes with the exact (level, debugOut) pair.
         await conn._deploy_source_config(
-            {}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1', 'traceLevel': 'none', 'debugOut': True}
+            {},
+            {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'traceLevel': 'none', 'debugOut': True},
         )
         passed = account_stub.deployments_source_config_set.await_args.args
         assert passed[3] == 's1' and passed[4] == 'none' and passed[5] is True
@@ -1083,11 +1128,11 @@ class TestStateAndSchedules:
     async def test_schedule_pause_requires_source_and_control(self, account_stub):
         conn = _make_conn(_account_info())
         with pytest.raises(ValueError, match='sourceId'):
-            await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1'})
+            await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': '=team/team-1'})
         # No task.control on the team: uniform denial.
         conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'D', 'permissions': ['task.monitor']}]))
         with pytest.raises(PermissionError):
-            await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': 'team-1', 'sourceId': 's1'})
+            await conn._deploy_schedule_pause({}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1'})
 
 
 # ============================================================================
@@ -1124,10 +1169,10 @@ class TestDelete:
         # The account layer states the reason (pinned / in review / building);
         # the door neither swallows nor rewrites it, and audits nothing.
         account_stub.deployments_delete_version = AsyncMock(
-            side_effect=ValueError('acme.proj-1 v2 is published to @team/Production; unpublish it first')
+            side_effect=ValueError('acme.proj-1 v2 is published to @Production; unpublish it first')
         )
         conn = _make_conn(_account_info())
-        with pytest.raises(ValueError, match='published to @team/Production; unpublish it first'):
+        with pytest.raises(ValueError, match='published to @Production; unpublish it first'):
             await conn._deploy_delete({}, {'projectId': 'proj-1', 'version': 2})
         account_stub.audit.assert_not_awaited()
 
@@ -1206,11 +1251,22 @@ def _control(rung='dev', owner_id='user-1', address='acme.docBrain.chat'):
 
 
 def _answers(conn, *candidates, address='acme.docBrain'):
-    """THE decision stub: ``resolve_candidates`` answers ``candidates`` in order."""
-    from ai.modules.task.address import parse_address
+    """THE decision stub: ``resolve_target`` in read mode answers the first of ``candidates``."""
+    from ai.account.pipe_deploy import Pin
+    from ai.modules.task.address import parse_target
+    from ai.modules.task.task_server import Resolution
+    from ai.modules.task.types import TaskError
 
-    conn._server.resolve_candidates = AsyncMock(return_value=(parse_address(address), ['dev', 'me'], list(candidates)))
-    return conn._server.resolve_candidates
+    if not candidates:
+        refusal = TaskError(TaskError.NOT_REGISTERED, 'nothing answers', rungsTried=['@spec'])
+        conn._server.resolve_target = AsyncMock(side_effect=refusal)
+        return conn._server.resolve_target
+    first = candidates[0]
+    pin = first if isinstance(first, Pin) else None
+    control = None if pin is not None else first
+    resolution = Resolution(parse_target(address), control, pin, False)
+    conn._server.resolve_target = AsyncMock(return_value=resolution)
+    return conn._server.resolve_target
 
 
 CATALOG = {
@@ -1257,10 +1313,10 @@ class TestInterfaces:
             {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain.chat'}}
         )
         body = resp['body']
-        # The one decision every name call makes, asked with the caller's account
+        # The one decision every name call makes, asked with the caller's account, nothing started
         args, kwargs = decide.await_args
-        assert args[0] == 'acme.docBrain.chat' and args[1] is conn._account_info and args[2] == 'task.data'
-        assert kwargs == {'team': None}
+        assert args[0] is conn._account_info and args[1] == 'acme.docBrain.chat' and args[2] == 'task.data'
+        assert kwargs == {'mode': RESOLVE_READ}
         # The pinned version's artifact, read server-side, for the whole pipe
         account_stub.deployments_artifact.assert_awaited_once_with('org-1', 'docBrain', 2)
         assert body['address'] == 'acme.docBrain'
@@ -1279,13 +1335,26 @@ class TestInterfaces:
         conn._test_scheduler.try_reserve_run.assert_not_called()
 
     @pytest.mark.asyncio
-    async def test_the_team_override_rides_the_decision(self, interfaces_stub):
+    async def test_a_rooted_address_rides_the_decision(self, interfaces_stub):
+        conn = _make_conn(_data_account())
+        decide = _answers(conn, _pin(), address='@Development/acme.docBrain')
+        await conn.on_rrext_deploy_pipe(
+            {'arguments': {'subcommand': 'interfaces', 'address': '@Development/acme.docBrain'}}
+        )
+        assert decide.await_args.args[1] == '@Development/acme.docBrain'
+
+    @pytest.mark.asyncio
+    async def test_the_retired_team_option_is_refused(self, interfaces_stub):
+        from ai.modules.task.types import TaskError
+
         conn = _make_conn(_data_account())
         decide = _answers(conn, _pin())
-        await conn.on_rrext_deploy_pipe(
-            {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': 'team-1'}}
-        )
-        assert decide.await_args.kwargs == {'team': 'team-1'}
+        with pytest.raises(TaskError) as excinfo:
+            await conn.on_rrext_deploy_pipe(
+                {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': 'team-1'}}
+            )
+        assert excinfo.value.field == 'team' and 'rooted address' in str(excinfo.value)
+        decide.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_the_callers_control_answers_with_the_spec_it_submitted(self, account_stub, interfaces_stub):

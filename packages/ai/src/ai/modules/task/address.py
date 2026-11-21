@@ -36,6 +36,16 @@ registry key, display id, monitor key and run-log path — never a secret.
 The account API key (``rr_``) is the only credential; a key may carry an
 ``endpoints`` scope that pins it to a list of addresses, checked here.
 
+A TARGET is what an address-taking verb is handed (plan 2.2, 2.5, 3.2):
+``[<root>/]developerId.pipelineId[.source][:<version>]``, or a control id
+``=control/<32 hex>`` as the whole token. A root narrows the walk to one
+rung (``@spec``, ``@me``, ``@<team>``, ``=team/<tid>``, ``@org``,
+``=org/<oid>``, ``@public``); the version pins a registry version. Both are
+selectors stripped at the door: registry rows, the ``endpoints`` scope
+check, monitor keys and run-log paths see the dotted address alone.
+``parse_target`` reads the root through ``roots.parse_root``, the one
+parser of the root grammar.
+
 Boundary validation for identities (userId / teamId) also lives here: an
 id with ``/``, whitespace or ``~`` can never enter a registry key or a
 storage path.
@@ -44,7 +54,18 @@ storage path.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, NamedTuple, Optional
+from typing import Any, Dict, Iterable, Mapping, NamedTuple, Optional
+
+from ai.account.roots import (
+    KIND_CONTROL,
+    KIND_NONE,
+    KIND_TEAM,
+    KIND_USER,
+    RetiredRootError,
+    RootError,
+    format_root,
+    parse_root,
+)
 
 from .types import TaskError
 
@@ -237,6 +258,166 @@ def parse_address(address: Any) -> Address:
         if segment is not None:
             validate_segment(segment, field)
     return Address(developer_id, pipe_id, source)
+
+
+# =============================================================================
+# TARGETS
+# =============================================================================
+
+# A registry version as a target pins it: a positive decimal integer, one
+# spelling (no sign, no leading zero, no letters).
+VERSION_PATTERN = re.compile(r'[1-9][0-9]*')
+
+#: The refusal of the retired per-call ``team`` option (plan 11.1 B44).
+TEAM_OPTION_RETIRED = 'team= is retired: write a rooted address, @<team>/... or =team/<tid>/...'
+
+
+class Target(NamedTuple):
+    """
+    A parsed task target: the root that narrows the walk, the address, the version.
+
+    Attributes:
+        root: The root kind (``roots.KIND_*``): ``none`` (the ladder), ``spec``,
+            ``me``, ``team``, ``org``, ``public`` or ``control``.
+        ref: The team name (``@<team>``) or the id (an ``=`` root); ``''``
+            for a root that carries neither.
+        by_id: True for an ``=`` root.
+        address: The parsed dotted address; ``None`` for a control id.
+        version: The pinned registry version, or ``None``.
+    """
+
+    root: str
+    ref: str
+    by_id: bool
+    address: Optional[Address]
+    version: Optional[int]
+
+    @property
+    def dotted(self) -> str:
+        """The dotted address alone (no root, no version); ``''`` for a control id."""
+        return build_address(*self.address) if self.address is not None else ''
+
+    @property
+    def root_text(self) -> str:
+        """The root as the server writes it (``@me``, ``@Development``, ``=team/<tid>``), ``''`` for none."""
+        if self.root == KIND_NONE:
+            return ''
+        return format_root(self.root, self.ref, self.by_id)
+
+    def with_source(self, source: Optional[str]) -> 'Target':
+        """
+        The same target with its source segment replaced (``submit``'s ``source=``).
+
+        Args:
+            source: The source component id; ``None`` or ``''`` keeps the target's own.
+
+        Returns:
+            The new target.
+
+        Raises:
+            TaskError: ``TASK_INVALID_ARGUMENT`` for a control id or a bad segment.
+        """
+        if not source:
+            return self
+        if self.address is None:
+            raise TaskError(TaskError.INVALID_ARGUMENT, 'A control id names no source', field='source')
+        address = Address(self.address.developer_id, self.address.pipe_id, validate_segment(source, 'source'))
+        return self._replace(address=address)
+
+
+def _refused(message: str, field: str = 'token') -> TaskError:
+    """A grammar refusal of a target."""
+    return TaskError(TaskError.INVALID_ARGUMENT, message, field=field)
+
+
+def parse_target(text: Any) -> Target:
+    """
+    Read a task target: ``[<root>/]developerId.pipelineId[.source][:<version>]`` or a control id.
+
+    The root goes through ``roots.parse_root`` (normalization first, an
+    unknown form raises). The roots a task address takes are ``@spec``,
+    ``@me``, ``@<team>``, ``=team/<tid>``, ``@org``, ``=org/<oid>`` and
+    ``@public``; ``=user/<uid>`` is refused (nobody names another user's
+    control) and the retired ``@team/...`` and ``@user/...`` name their
+    replacement. ``=control/<32 hex>`` is the whole token. Exactly one
+    dotted address follows a root, and ``:<version>`` follows the address.
+
+    Args:
+        text: What the client sent in the address slot.
+
+    Returns:
+        The parsed ``Target``. Deciding who may walk the root, and what
+        serves there, is ``TaskServer.resolve_target``'s work.
+
+    Raises:
+        TaskError: ``TASK_INVALID_ARGUMENT`` (``field='token'``, or
+            ``'version'`` for a bad version) for any other form.
+    """
+    # Step 1: the root, through the one parser of the grammar
+    if not isinstance(text, str) or not text:
+        raise _refused('A task address is required')
+    try:
+        root = parse_root(text)
+    except RetiredRootError as e:
+        if e.word == KIND_TEAM:
+            raise _refused('@team/ is retired: write @<team>/<address> or =team/<tid>/<address>') from e
+        raise _refused('@user is retired: write @me/<address>') from e
+    except RootError as e:
+        raise _refused(f'{text!r} is not a task address: {e}') from e
+
+    # Step 2: the roots a task address cannot take
+    if root.kind == KIND_USER:
+        raise _refused("=user/<uid> is not a task root: nobody can name another user's control; write @me/<address>")
+    if root.kind == KIND_CONTROL:
+        return Target(KIND_CONTROL, root.ref, True, None, None)
+
+    # Step 3: exactly one dotted address after the root, then the version
+    if not root.rest:
+        raise _refused(f'{text!r} names no address: write {text.rstrip("/")}/developerId.pipelineId[.source]')
+    if '/' in root.rest:
+        raise _refused(f'{text!r} is not a task address: one dotted address follows the root')
+    dotted, colon, version_text = root.rest.partition(':')
+    version: Optional[int] = None
+    if colon:
+        if not VERSION_PATTERN.fullmatch(version_text):
+            raise _refused(
+                f'{text!r} has no valid version: write :<n> with n a registry version (1, 2, ...)', field='version'
+            )
+        version = int(version_text)
+    return Target(root.kind, root.ref, root.by_id, parse_address(dotted), version)
+
+
+def format_target(target: Target) -> str:
+    """
+    Write a target back in the one spelling the server uses (the inverse of ``parse_target``).
+
+    Args:
+        target: The target.
+
+    Returns:
+        ``[<root>/]developerId.pipelineId[.source][:<version>]``, or the control id.
+    """
+    if target.root == KIND_CONTROL:
+        return format_root(KIND_CONTROL, target.ref, True)
+    rest = target.dotted + (f':{target.version}' if target.version is not None else '')
+    return format_root(target.root, target.ref, target.by_id, rest)
+
+
+def refuse_team_option(arguments: Optional[Mapping[str, Any]]) -> None:
+    """
+    Refuse the retired per-call ``team`` option (plan 11.1 B44).
+
+    A rooted address names the rung now, so an older client still sending
+    ``team`` is told what to write instead of landing on another rung.
+
+    Args:
+        arguments: The verb's arguments.
+
+    Raises:
+        TaskError: ``TASK_INVALID_ARGUMENT`` (``field='team'``) when ``team`` is present.
+    """
+    if isinstance(arguments, Mapping) and arguments.get('team') not in (None, ''):
+        raise TaskError(TaskError.INVALID_ARGUMENT, TEAM_OPTION_RETIRED, field='team')
 
 
 # =============================================================================

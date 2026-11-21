@@ -86,8 +86,8 @@ _TEAM_ID_PROP = {
     'team_id': {
         'type': 'string',
         'description': (
-            'Team id -- the environment (e.g. Staging, Production): teamId on a deploy_list row, '
-            "or '@me' for your personal space"
+            'The deploy target -- the environment (e.g. Staging, Production): teamId on a deploy_list row, '
+            "'@<team>' (a team by name), or '@me' for your personal space; a bare team id is refused"
         ),
     },
 }
@@ -118,8 +118,8 @@ _DEPLOY_ADD_SCHEMA = {
         'deploy_to': {
             'type': 'string',
             'description': (
-                'Optional team id to point at the new version in the same call '
-                "(same as deploy_to_team; '@me' for your personal space)"
+                'Optional target to point at the new version in the same call '
+                "(same as deploy_to_team: a row's teamId, '@<team>', or '@me' for your personal space)"
             ),
         },
     },

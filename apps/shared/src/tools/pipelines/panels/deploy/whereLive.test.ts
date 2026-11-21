@@ -38,14 +38,14 @@ const TEAMS: DeployTeamRef[] = [
 
 /** One publication row; defaults to the caller's own serving @me row on v5. */
 function row(overrides: Partial<TeamDeploymentRow> = {}): TeamDeploymentRow {
-	return { teamId: '=user/u1', teamName: 'Me', rung: 'me', version: 5, state: 'enabled', deployedAt: 1, sources: [], ...overrides };
+	return { teamId: '=user/u1', teamName: 'Me', handle: '@me', rung: 'me', version: 5, state: 'enabled', deployedAt: 1, sources: [], ...overrides };
 }
 
 const ME = row();
-const STAGING = row({ teamId: '=team/team-staging', teamName: 'Staging', rung: 'team' });
-const PROD = row({ teamId: '=team/team-prod', teamName: 'Production', rung: 'team', version: 4 });
-const STORE = row({ teamId: '@public', teamName: '@public', rung: 'public', version: 4 });
-const OTHER = row({ teamId: '=user/u2', teamName: 'Personal', rung: 'personal', version: 3 });
+const STAGING = row({ teamId: '=team/team-staging', teamName: 'Staging', handle: '@Staging', rung: 'team' });
+const PROD = row({ teamId: '=team/team-prod', teamName: 'Production', handle: '@Production', rung: 'team', version: 4 });
+const STORE = row({ teamId: '@public', teamName: '@public', handle: '@public', rung: 'public', version: 4 });
+const OTHER = row({ teamId: '=user/u2', teamName: 'Personal', handle: 'Personal', rung: 'personal', version: 3 });
 
 describe('whereLiveRungsOf', () => {
 	it('draws one row per rung in rung order: Me, other spaces, teams in roster order, the store', () => {
@@ -63,7 +63,7 @@ describe('whereLiveRungsOf', () => {
 			[
 				['Me', '@me'],
 				['Personal', ''],
-				['Staging', '@team/Staging'],
+				['Staging', '@Staging'],
 				['Store', '@public'],
 			]
 		);

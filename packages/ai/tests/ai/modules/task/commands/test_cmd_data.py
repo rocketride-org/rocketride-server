@@ -207,7 +207,7 @@ async def test_a_standalone_tool_frame_with_an_address_resolves_like_submit(cata
 
     await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.address)
 
-    conn.resolve_control_or_start.assert_awaited_once()
+    ts.resolve_target.assert_awaited_once()
     conn.get_control.assert_not_called()
     assert engine_log[-1]['subcommand'] == 'tool'
 
@@ -270,7 +270,7 @@ async def test_a_standalone_tool_frame_with_a_control_id_is_the_controls(catalog
     await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.control_id)
 
     conn.get_control.assert_called_once()
-    conn.resolve_control_or_start.assert_not_awaited()
+    ts.resolve_target.assert_not_awaited()
     assert engine_log[-1]['_caller']['controlId'] == control.control_id
 
 
@@ -285,7 +285,7 @@ async def test_an_open_by_address_resolves_like_submit_and_answers_with_the_cont
 
     body = await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain', token=control.address)
 
-    conn.resolve_control_or_start.assert_awaited_once()
+    ts.resolve_target.assert_awaited_once()
     conn.get_control.assert_not_called()
     assert body['pipeId'] == 1
     assert body['controlId'] == control.control_id and body['address'] == control.address
@@ -302,7 +302,7 @@ async def test_an_open_by_control_id_is_the_controls_and_answers_with_it(catalog
     body = await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain', token=control.control_id)
 
     conn.get_control.assert_called_once()
-    conn.resolve_control_or_start.assert_not_awaited()
+    ts.resolve_target.assert_not_awaited()
     assert body['controlId'] == control.control_id
 
 
@@ -359,7 +359,7 @@ async def test_a_frame_on_an_open_pipe_attaches_only(catalog, engines, engine_lo
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
     pipe_id = await _opened(ts, conn)
-    conn.resolve_control_or_start.reset_mock()
+    ts.resolve_target.reset_mock()
     conn.get_control.reset_mock()
     arguments: Dict[str, Any] = {'subcommand': subcommand, 'pipeId': pipe_id}
     if subcommand == 'tool':
@@ -367,7 +367,7 @@ async def test_a_frame_on_an_open_pipe_attaches_only(catalog, engines, engine_lo
 
     await _frame(conn, **arguments)
 
-    conn.resolve_control_or_start.assert_not_awaited()
+    ts.resolve_target.assert_not_awaited()
     conn.get_control.assert_called_once()
 
 

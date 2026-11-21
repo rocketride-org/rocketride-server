@@ -197,7 +197,7 @@ class SUBMIT_RESULT(TypedDict, total=False):
 
     token: str  # The control id that answered: opaque, transient, valid for the life of the control; never persist it
     address: str  # The address that answered: developerId.pipelineId.source (the stable identity, beside the id)
-    resolved: Literal['@spec', '@me', '@team', '@public']  # The rung that answered
+    resolved: Literal['@spec', '@me', '@team', '@org', '@public']  # The rung that answered
     team: str  # On '@team': the answering team
     version: int  # The artifact version (absent on '@spec')
     engineKey: str  # The engine the request ran on (shape key, owner-qualified)

@@ -191,10 +191,14 @@ lanes you need (ROCKETRIDE_PIPELINES.md §Lanes).
 When the pipeline starts, the source node's **Endpoint Info** panel (on the canvas node and
 in the DEVELOPMENT panel) shows:
 
-- **Webhook interface URL** — `<server>/webhook/<address>`, the dotted address in ONE
-  path segment: `<developerId>.<pipelineId>.<source>`, e.g.
+- **Webhook interface URL** — `<server>/webhook/<address>`, the dotted address
+  `<developerId>.<pipelineId>.<source>`, e.g.
   `https://api.rocketride.ai/webhook/acme.docBrain.webhook_1`. On a local engine
-  `<server>` defaults to `http://localhost:5565`.
+  `<server>` defaults to `http://localhost:5565`. The path takes the whole address
+  grammar: a root pins one rung and never falls through
+  (`/webhook/@Production/acme.docBrain.webhook_1`, or
+  `/webhook/=team/<tid>/acme.docBrain.webhook_1` for a URL that survives a team
+  rename); `/task/data/<address>` is the same door.
 - **Address** — the same `developerId.pipelineId.source`; what a key is scoped to.
 - **Key for this endpoint** — a **Create API key** button that mints an account key
   scoped to `task.data` on exactly this address, frozen to your home team, shown once.

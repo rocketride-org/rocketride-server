@@ -31,6 +31,7 @@ import pytest
 
 from ai.account.roots import (
     RESERVED_TEAM_NAMES,
+    RetiredRootError,
     Root,
     RootError,
     check_id,
@@ -196,6 +197,15 @@ class TestRefused:
 
     def test_root_error_is_a_value_error(self):
         assert issubclass(RootError, ValueError)
+
+    @pytest.mark.parametrize(
+        ('text', 'word'),
+        [('@team', 'team'), ('@TEAM/Development', 'team'), ('@user', 'user'), ('@User/x', 'user')],
+    )
+    def test_a_retired_word_names_itself_so_each_grammar_names_its_replacement(self, text, word):
+        with pytest.raises(RetiredRootError) as excinfo:
+            parse_root(text)
+        assert excinfo.value.word == word and isinstance(excinfo.value, RootError)
 
     def test_a_nested_sigil_is_a_plain_name(self):
         assert parse_root('docs/=weird').rest == 'docs/=weird'

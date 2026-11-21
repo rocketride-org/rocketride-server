@@ -70,6 +70,7 @@ from urllib.parse import quote
 
 from rocketlib import debug
 
+from ai.account.audience import ORG_TARGET_NOT_YET, AudienceError, audience_of_fields, compose_handle, parse_target
 from ai.account.base import InventoryUnavailableError
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
 from ai.account.models import team_id_of_name
@@ -148,23 +149,32 @@ def _team_ids_of(conn: Any) -> Dict[str, str]:
     return out
 
 
+def _team_names_of(conn: Any) -> Dict[str, str]:
+    """The team names the caller can see, by team id (what ``compose_handle`` names a team by)."""
+    names: Dict[str, str] = {}
+    for ref, tid in _team_ids_of(conn).items():
+        if ref != tid:
+            names[tid] = ref
+    return names
+
+
 def _enrich_audience(conn: Any, audience: Dict[str, str]) -> Dict[str, str]:
-    """Stamps display facts onto a resolved audience dict.
+    """Stamps the display name onto a resolved audience dict.
 
     deployment_history rows are rendered without a second lookup, so the
     audience that reaches the backends — and is stored verbatim into each
-    row's data — carries the dereferenced display name and wire handle
-    beside the raw id. The id stays the storage key (audience keys ignore
-    the extra fields); the display keys are additive payload, resolved
-    HERE because only the session holds the team-name map.
+    row's data — carries the dereferenced display name beside the raw id.
+    The id stays the storage key (audience keys ignore the extra field).
+    No handle is stored: a handle depends on who reads it (``@me`` for the
+    owner, ``Personal`` for an org admin), so every reader's handle is
+    composed when the row is read (``audience.compose_handle``).
     """
     out = dict(audience)
-    out['handle'] = _audience_handle(conn, audience)
     if audience['type'] == 'user':
         out['name'] = _actor_of(conn)['display']
     elif audience['type'] == 'team':
         tid = audience.get('id', '')
-        out['name'] = next((ref for ref, t in _team_ids_of(conn).items() if t == tid and ref != tid), tid)
+        out['name'] = _team_names_of(conn).get(tid, tid)
     else:
         out['name'] = ''
     return out
@@ -172,43 +182,61 @@ def _enrich_audience(conn: Any, audience: Dict[str, str]) -> Dict[str, str]:
 
 def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
     """
-    Resolves a wire target ('@me' | '@team/<name-or-id>' | '@public') to
-    an audience dict ({'type', 'id'} plus the 'name'/'handle' display facts
-    every history row must carry). '@user' is a legacy alias for '@me',
-    accepted on input, never displayed.
+    Resolve a publish target (plan 2.5) to the audience dict the backends store.
 
-    The org rung does not exist: org = the governance container; "org-wide"
-    distribution is an org-admin-maintained team. @public requires the
-    caller's org to hold a registered developer id (SaaS store track).
+    The targets: ``@me`` (the caller's personal space), ``@<team>`` (one of
+    the caller's teams, by name ignoring case), ``@public`` (the store), and
+    any audience a row or the ConnectResult carried, passed back unchanged
+    (``=team/<tid>``, the caller's own ``=user/<uid>``). The retired
+    ``@team/<name-or-id>`` and ``@user`` are refused naming their
+    replacement (``audience.parse_target``). The org rung is not served
+    yet: ``@org`` and ``=org/<oid>`` are refused until it is (C.35).
+    ``@public`` requires the caller's org to hold a registered developer id
+    (SaaS store track).
+
+    Returns:
+        ``{'type', 'id', 'name'}``: the audience and its display name, the
+        form every history row stores.
 
     Raises:
-        ValueError: Unknown/malformed target, a team the caller is not in,
-                    or @public without a registered developer org.
+        ValueError: Not a target, a retired spelling, another user's space,
+            a team the caller is not in, the org rung, or ``@public``
+            without a registered developer org.
     """
-    user_id = conn._account_info.userId
-    if target in ('@user', '@me'):
-        return _enrich_audience(conn, {'type': 'user', 'id': user_id})
-    if target == '@public':
-        org = getattr(conn._account_info, 'organization', None)
+    info = conn._account_info
+    try:
+        decoded = parse_target(str(target or ''))
+    except AudienceError as exc:
+        raise ValueError(str(exc)) from exc
+
+    # Step 1: the caller's own personal space
+    if decoded.kind in ('me', 'user'):
+        if decoded.kind == 'user' and decoded.ref != info.userId:
+            raise ValueError("Another user's personal space is not a publish target")
+        return _enrich_audience(conn, {'type': 'user', 'id': info.userId})
+
+    # Step 2: the store
+    if decoded.kind == 'public':
+        org = getattr(info, 'organization', None)
         developer_id = (
             (org.get('developerId') if isinstance(org, dict) else getattr(org, 'developerId', None)) if org else None
         )
         if not developer_id:
             raise ValueError('Public publishing requires the organization to be registered as a developer')
         return _enrich_audience(conn, {'type': 'public', 'id': ''})
-    if target == '@org':
-        raise ValueError(
-            'The org audience does not exist — publish to a team instead '
-            '(an org-admin-maintained "All members" team covers org-wide distribution)'
-        )
-    if target.startswith('@team/'):
-        ref = target[len('@team/') :]
-        # An id compares exactly; a name ignoring case (plan 2.5)
-        team_id = ref if ref in set(_team_ids_of(conn).values()) else team_id_of_name(conn._account_info, ref)
-        if not team_id:
-            raise ValueError(f'Unknown team: {ref!r} (you are not a member, or it does not exist)')
-        return _enrich_audience(conn, {'type': 'team', 'id': team_id})
-    raise ValueError(f'Unknown publish target: {target!r} (use @me, @team/<name>, or @public)')
+
+    # Step 3: the org rung is not served yet
+    if decoded.kind == 'org':
+        raise ValueError(ORG_TARGET_NOT_YET)
+
+    # Step 4: one of the caller's teams: an id compares exactly, a name ignoring case
+    if decoded.by_id:
+        team_id = decoded.ref if decoded.ref in set(_team_ids_of(conn).values()) else ''
+    else:
+        team_id = team_id_of_name(info, decoded.ref)
+    if not team_id:
+        raise ValueError(f'Unknown team: {target!r} (you are not a member, or it does not exist)')
+    return _enrich_audience(conn, {'type': 'team', 'id': team_id})
 
 
 def _audiences_of(conn: Any) -> List[Dict[str, str]]:
@@ -1283,20 +1311,20 @@ def artifact_file_url(kind: str, artifact_id: str, version: int, path: Any) -> O
 
 
 def _audience_handle(conn: Any, audience: Dict[str, str]) -> str:
-    """The display handle of one audience ('@me' | '@team/<name>' | '@public').
+    """The display handle of one audience dict for this reader (plan 2.5).
 
-    Personal reads back as '@me' — the ONE personal spelling across the
-    platform ('@user' is accepted on input for compatibility, never shown).
+    Composed by ``audience.compose_handle`` from the ``{type, id}`` pair and
+    the reader's facts: ``@me`` (the reader's own space), ``Personal``
+    (another user's), ``@<team>`` (a team the reader can name),
+    ``=team/<tid>`` (one they cannot), ``@public``. A handle stored on an
+    older row is ignored.
     """
-    if audience['type'] == 'user':
-        return '@me'
-    if audience['type'] == 'public':
-        return '@public'
-    # Prefer the team's name spelling when the caller can see it
-    for ref, tid in _team_ids_of(conn).items():
-        if tid == audience.get('id') and ref != tid:
-            return f'@team/{ref}'
-    return f'@team/{audience.get("id", "")}'
+    return compose_handle(
+        audience_of_fields(audience),
+        caller_id=str(conn._account_info.userId or ''),
+        team_names=_team_names_of(conn),
+        org_id=_org_of(conn),
+    )
 
 
 async def _where_of(
@@ -1346,6 +1374,8 @@ async def _where_of(
             {
                 'rung': rung,
                 'handle': _audience_handle(conn, audience),
+                # The pin's audience: the publish/remove target, passed back unchanged
+                'audience': audience_of_fields(audience),
                 'version': row.get('version'),
                 'appVersion': (artifact or {}).get('appVersion') or '',
                 'state': row.get('artifactState') or '',

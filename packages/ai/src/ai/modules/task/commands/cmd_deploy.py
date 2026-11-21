@@ -64,6 +64,7 @@ from rocketlib import debug
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required, publish_block_of
 from ai.account.audience import (
+    ORG_TARGET_NOT_YET,
     PUBLIC_AUDIENCE,
     Audience,
     compose_audience,
@@ -74,7 +75,7 @@ from ai.account.audience import (
     team_audience,
     user_audience,
 )
-from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
+from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, audience_handle
 from ai.account.models import resolve_team_permissions, team_id_of_name
 from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, validate_store_block, write_pipe_content
 from ai.common.dap import DAPConn, TransportBase
@@ -235,17 +236,49 @@ class _DeployBase(DAPConn):
         )
         return {**row, **described}
 
+    def _with_audience_handle(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        A history row whose ``data.audience`` pair carries THIS reader's handle.
+
+        Publish rows store the audience pair and its display name, never a
+        handle (``deployment_backend.audience_display``); a handle an older
+        row stored is replaced, so every reader sees the one the server
+        composes for them (``deployment_backend.audience_handle``).
+
+        Args:
+            row: A history row.
+
+        Returns:
+            The row, with ``data.audience.handle`` composed when it has an
+            audience pair; unchanged otherwise.
+        """
+        data = row.get('data')
+        audience = data.get('audience') if isinstance(data, dict) else None
+        if not isinstance(audience, dict) or not audience.get('type'):
+            return row
+        org = getattr(self._account_info, 'organization', None) or {}
+        org_id = (org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)) or ''
+        try:
+            handle = audience_handle(audience, str(self._account_info.userId or ''), self._team_names(), str(org_id))
+        except ValueError:
+            # A pair no audience decodes (a legacy row): shown without a handle
+            return row
+        return {**row, 'data': {**data, 'audience': {**audience, 'handle': handle}}}
+
     def _audience_arg(self, args: Dict[str, Any]) -> Audience:
         """
         Read the ``teamId`` argument of a deploy verb as the audience it names.
 
-        ``teamId`` takes ``@me`` (the caller's personal space), ``@public``
-        (the store), ``@<team>`` (one of the caller's teams by name,
-        ignoring case: what a person types, passed through by the SDKs), any
-        audience a row or the ConnectResult carried (``=team/<tid>``,
-        ``=user/<uid>``, passed back unchanged), or a team id. This is the
-        ONE place the door reads the argument; everything after it holds a
-        decoded audience.
+        ``teamId`` takes exactly the targets of plan 2.5: ``@me`` (the
+        caller's personal space), ``@public`` (the store), ``@<team>`` (one
+        of the caller's teams by name, ignoring case: what a person types,
+        passed through by the SDKs), or any audience a row or the
+        ConnectResult carried (``=team/<tid>``, ``=user/<uid>``, passed back
+        unchanged). A bare team id is refused like every other bare word, as
+        are the retired ``@team/<...>`` and ``@user`` (each names its
+        replacement); ``@org`` and ``=org/<oid>`` parse and are refused until
+        the org rung serves (C.35). This is the ONE place the door reads the
+        argument; everything after it holds a decoded audience.
 
         Args:
             args: The verb's arguments.
@@ -254,19 +287,15 @@ class _DeployBase(DAPConn):
             The decoded audience (``@me`` and a team name already resolved).
 
         Raises:
-            ValueError: No ``teamId``, a form that is no target, or the org
-                audience.
+            ValueError: No ``teamId``, a form that is no target (a bare team
+                id included), a retired spelling, or the org rung.
             PermissionError: ``@me`` with no authenticated user, or a team
                 name that names none (or more than one) of the caller's teams.
         """
         value = args.get('teamId')
         if not value:
             raise ValueError('teamId is required')
-        value = str(value)
-        # A bare value is a team id; anything rooted is read by the grammar
-        if not value.startswith(('@', '=')):
-            return parse_audience(team_audience(value))
-        target = parse_target(value)
+        target = parse_target(str(value))
         if target.kind == 'me':
             if not self._account_info.userId:
                 raise PermissionError('Personal (@me) deployments require an authenticated user')
@@ -274,10 +303,7 @@ class _DeployBase(DAPConn):
         if target.kind == 'public':
             return parse_audience(PUBLIC_AUDIENCE)
         if target.kind == 'org':
-            raise ValueError(
-                'The org audience does not exist — publish to a team instead '
-                '(an org-admin-maintained "All members" team covers org-wide distribution)'
-            )
+            raise ValueError(ORG_TARGET_NOT_YET)
         if not target.by_id:
             # A team by name: the caller's own membership, ignoring case
             team_id = team_id_of_name(self._account_info, target.ref)
@@ -829,7 +855,9 @@ class DeployCommands(_DeployBase):
         body = await account.deployments_history(self._org_id(), project_id, team_id, args)
 
         # A pointer row names its audience: it carries the reader's rung and
-        # handle like a deployment row; an org-wide row ('' teamId) none
+        # handle like a deployment row; an org-wide row ('' teamId) none. A
+        # publish row's own audience pair gets this reader's handle too
         if isinstance(body, dict) and isinstance(body.get('rows'), list):
-            body = {**body, 'rows': [self._describe(r) if r.get('teamId') else r for r in body['rows']]}
+            rows = [self._describe(r) if r.get('teamId') else r for r in body['rows']]
+            body = {**body, 'rows': [self._with_audience_handle(r) for r in rows]}
         return self.build_response(request, body=body)

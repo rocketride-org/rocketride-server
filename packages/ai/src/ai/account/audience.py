@@ -54,6 +54,7 @@ from .roots import (
     KIND_PUBLIC,
     KIND_TEAM,
     KIND_USER,
+    RetiredRootError,
     RootError,
     format_root,
     parse_root,
@@ -82,6 +83,15 @@ HANDLE_PERSONAL = 'Personal'
 
 #: The longest audience a stored column must hold: ``=team/`` and a 36-character id.
 AUDIENCE_MAX_LENGTH = 48
+
+#: The refusal of the retired ``@team/<name-or-id>`` publish target (plan 11.1 B43).
+TEAM_TARGET_RETIRED = '@team/ is retired: publish to @<name> or =team/<tid>'
+
+#: The refusal of the retired ``@user`` publish target (plan 11.1 B43).
+USER_TARGET_RETIRED = '@user is retired: publish to @me'
+
+#: The refusal of an org target until the org rung serves (C.35): it parses, nothing publishes there yet.
+ORG_TARGET_NOT_YET = 'Publishing to the org (@org, =org/<oid>) is not yet supported: publish to @me, a team or @public'
 
 
 # ==== Errors =====================================================================
@@ -339,6 +349,9 @@ def parse_target(text: str) -> Target:
     """
     try:
         root = parse_root(text)
+    except RetiredRootError as e:
+        # The retired spellings name their replacement (plan 11.1 B43)
+        raise AudienceError(TEAM_TARGET_RETIRED if e.word == KIND_TEAM else USER_TARGET_RETIRED) from e
     except RootError as e:
         raise AudienceError(f'Not a publish target: {text!r} ({e})') from e
     if root.rest:
@@ -512,6 +525,7 @@ __all__ = [
     'Audience',
     'AudienceError',
     'HANDLE_PERSONAL',
+    'ORG_TARGET_NOT_YET',
     'OWNER_KINDS',
     'Owner',
     'PUBLIC_AUDIENCE',
@@ -520,7 +534,9 @@ __all__ = [
     'RUNG_PERSONAL',
     'RUNG_PUBLIC',
     'RUNG_TEAM',
+    'TEAM_TARGET_RETIRED',
     'Target',
+    'USER_TARGET_RETIRED',
     'audience_fields',
     'audience_of_fields',
     'compose_audience',

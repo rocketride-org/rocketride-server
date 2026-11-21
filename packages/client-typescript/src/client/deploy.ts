@@ -119,7 +119,7 @@ export class DeployApi {
 	 * @param options.metadata - Optional metadata blob (e.g. projectId
 	 *   provenance, appRoot for workspace-relative app zips).
 	 * @param options.comment - "What changed" note kept in the registry.
-	 * @param options.deployTo - Team id to deploy the new version to
+	 * @param options.deployTo - The target to deploy the new version to (`'@me'`, `'@<team>'`, `'=team/<tid>'`, `'@public'`)
 	 *   immediately (one-step add+deploy; pipes only).
 	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
 	 */
@@ -211,7 +211,7 @@ export class DeployApi {
 	 *
 	 * @param pipePath - The `.pipe` file.
 	 * @param options.comment - "What changed" note kept in the registry.
-	 * @param options.deployTo - Team id to deploy the new version to
+	 * @param options.deployTo - The target to deploy the new version to (`'@me'`, `'@<team>'`, `'=team/<tid>'`, `'@public'`)
 	 *   immediately (one-step add+deploy).
 	 * @returns The artifact entry, plus the deployment when `deployTo` was given.
 	 */
@@ -325,7 +325,8 @@ export class DeployApi {
 	 *
 	 * @param projectId - The project whose artifact to deploy.
 	 * @param version - The registry version to point the audience at.
-	 * @param teamId - The target audience: a team id, `'@me'` or `'@public'`.
+	 * @param teamId - The target (plan 2.5): `'@me'`, `'@<team>'` (a team by name), `'=team/<tid>'` (or a row's
+	 *   `teamId`, its audience, passed back unchanged) or `'@public'`; a bare team id is refused.
 	 * @returns The updated deployment record, registry-joined.
 	 */
 	async deploy(projectId: string, version: number, teamId: string): Promise<Deployment> {
@@ -557,7 +558,7 @@ export class DeployApi {
 	 * @param sourceId - The pipeline source the schedule fires.
 	 * @param schedule - 5-field cron expression; `null` or `'manual'` clears
 	 *   the schedule.
-	 * @param teamId - The deployment to schedule: a team id, `'@me'` or `'@public'`.
+	 * @param teamId - The deployment to schedule: a target as for `deploy()` (a row's `teamId` passed back unchanged).
 	 * @param options - Optional schedule options.
 	 * @param options.ttl - Run window in seconds ('fixed window'); omitted
 	 *   runs each task until the pipeline finishes.

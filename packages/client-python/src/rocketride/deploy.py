@@ -158,7 +158,8 @@ class DeployApi:
             metadata: Optional metadata blob (e.g. projectId provenance,
                 appRoot for workspace-relative app zips).
             comment: Optional "what changed" note kept in the registry.
-            deploy_to: Optional team id to deploy the new version to
+            deploy_to: Optional target to deploy the new version to (``'@me'``,
+                ``'@<team>'``, ``'=team/<tid>'``, ``'@public'``)
                 immediately (one-step add+deploy; pipes only).
 
         Returns:
@@ -449,7 +450,9 @@ class DeployApi:
         Args:
             project_id: The project whose artifact to deploy.
             version: The registry version to point the audience at.
-            team_id: The target audience: a team id, ``'@me'`` or ``'@public'``.
+            team_id: The target (plan 2.5): ``'@me'``, ``'@<team>'`` (a team by name),
+                ``'=team/<tid>'`` (or a row's ``teamId``, its audience, passed back unchanged)
+                or ``'@public'``; a bare team id is refused.
 
         Returns:
             The updated deployment record, registry-joined.
@@ -716,7 +719,7 @@ class DeployApi:
             source_id: The pipeline source the schedule fires.
             schedule: 5-field cron expression; ``None`` or ``'manual'``
                 clears the schedule.
-            team_id: The deployment to schedule: a team id, ``'@me'`` or ``'@public'``.
+            team_id: The deployment to schedule: a target as for :meth:`deploy`.
             ttl: Run window in seconds ('fixed window'); ``None`` runs each
                 task until the pipeline finishes.
 

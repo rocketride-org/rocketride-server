@@ -353,8 +353,9 @@ everything after that acts on one team's deployment, addressed by
 3. `deploy_set_schedule` for each source that should run on a cron.
 
 `project_id` is the pipeline's `project_id` (`projectId` on `deploy_list`
-rows). `team_id` is `teamId` on a `deploy_list` row, or `"@me"` for your
-personal space. Every tool here returns records as the engine sends them,
+rows). `team_id` is `teamId` on a `deploy_list` row (its audience, passed back
+unchanged), `"@<team>"` (a team of yours by name), or `"@me"` for your personal
+space; a bare team id is refused. Every tool here returns records as the engine sends them,
 with camelCase fields (`projectId`, `teamId`, `version`, `state`, `schedules`).
 
 ### deploy_add
@@ -363,8 +364,9 @@ Register an inline pipeline as the next version of its project.
 
 - **Parameters:** `pipeline` (object, required — must carry `name` and
   `project_id`); `comment` (string, optional — a "what changed" note kept with
-  the version); `deploy_to` (string, optional — a team id to point at the new
-  version in the same call).
+  the version); `deploy_to` (string, optional — a target to point at the new
+  version in the same call: `"@me"`, `"@<team>"`, a row's `teamId`, or `"@public"`;
+  a bare team id is refused).
 - **Returns:** `{ok, artifact}` — `artifact.version` is the new version
   number — plus `deployment` when `deploy_to` was given.
 - **Notable:** every call registers a new version, so it is not idempotent —

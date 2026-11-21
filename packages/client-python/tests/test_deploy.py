@@ -45,8 +45,9 @@ from rocketride import RocketRideClient, registry_id_of
 
 SERVER_URI = os.environ.get('ROCKETRIDE_URI', 'http://127.0.0.1:5565')
 
-# The one team on the OSS test server.
-TEAM = 'local'
+# The one team on the OSS test server, by its audience (a bare team id is no
+# deploy target, plan 2.5).
+TEAM = '=team/local'
 
 
 def make_pipeline(project_id: str) -> dict:

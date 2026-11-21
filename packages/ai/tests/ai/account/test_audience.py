@@ -33,6 +33,8 @@ import pytest
 from ai.account.audience import (
     AUDIENCE_MAX_LENGTH,
     PUBLIC_AUDIENCE,
+    TEAM_TARGET_RETIRED,
+    USER_TARGET_RETIRED,
     Audience,
     AudienceError,
     Owner,
@@ -225,13 +227,31 @@ class TestTarget:
             't1',
             'Development',
             '',
-            '@team/Development',
-            '@user',
         ],
     )
     def test_refuses(self, text):
         with pytest.raises(AudienceError, match='Not a publish target'):
             parse_target(text)
+
+    @pytest.mark.parametrize(
+        ('text', 'message'),
+        [
+            ('@team/Development', TEAM_TARGET_RETIRED),
+            ('@team/t1', TEAM_TARGET_RETIRED),
+            ('@TEAM/Development', TEAM_TARGET_RETIRED),
+            ('@team', TEAM_TARGET_RETIRED),
+            ('@user', USER_TARGET_RETIRED),
+            ('@User', USER_TARGET_RETIRED),
+        ],
+    )
+    def test_the_retired_spellings_name_their_replacement(self, text, message):
+        with pytest.raises(AudienceError) as excinfo:
+            parse_target(text)
+        assert str(excinfo.value) == message
+
+    def test_the_retired_messages_read_as_plan_11_1_b43_says(self):
+        assert TEAM_TARGET_RETIRED == '@team/ is retired: publish to @<name> or =team/<tid>'
+        assert USER_TARGET_RETIRED == '@user is retired: publish to @me'
 
     def test_compose(self):
         assert compose_target('me') == '@me'

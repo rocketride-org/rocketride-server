@@ -123,9 +123,13 @@ export interface RungPin {
 	rung: RungKind;
 	/** Row label ("Personal", "Team", "Org", "Public"). */
 	label: string;
-	/** Mono handle ('@me', '@team/<name>', '@public') — doubles as the
-	 * wire target for publish/remove verbs. */
+	/** Mono handle as the server composed it for this reader ('@me',
+	 * '@<team>', '=team/<tid>', '@public') — display only. */
 	handle: string;
+	/** The pin's audience exactly as the server sent it ('=user/<uid>',
+	 * '=team/<tid>', '@public') — the wire target for publish/remove verbs,
+	 * passed back unchanged and parsed by no one (plan 2.5). */
+	target: string;
 	/** Pinned registry version int (the wire identity). */
 	registryVersion: number;
 	/** Pinned version label. */
@@ -378,20 +382,22 @@ export interface IAppBuilderHost {
 	 * version (DEPLOY = copy code to the server). Binds nothing — that is the
 	 * separate publish step. */
 	deploy?: (message: string) => Promise<void>;
-	/** Publish: bind a version to an audience (@me/@team/@public) — the one
-	 * verb for first publish, update, promote, and rollback. Addressed by the
-	 * REGISTRY version int (display semvers may repeat across deploys). */
+	/** Publish: bind a version to an audience ('@me', '@public', or a team's
+	 * audience as the server sent it) — the one verb for first publish,
+	 * update, promote, and rollback. Addressed by the REGISTRY version int
+	 * (display semvers may repeat across deploys). */
 	publish?: (version: number, target: string) => Promise<void>;
 	/** Remove an audience binding (SOFT — republishing revives it). The
-	 * target is the pin's handle ('@me' | '@team/<name>' | '@public'). */
+	 * target is the pin's audience (`RungPin.target`), passed back unchanged. */
 	removePublish?: (target: string) => Promise<void>;
 	/** Delete one deployed version from the server (HARD — its storage goes,
 	 * the number is never reused). Addressed by the REGISTRY version int. The
 	 * server refuses by name while a rung pins it, it is in review, or its
 	 * build runs; the card offers it only on rows the server marks deletable. */
 	deleteVersion?: (version: number) => Promise<void>;
-	/** The caller's team roster — the publish picker's team rows. */
-	listTeams?: () => Promise<Array<{ id: string; name: string }>>;
+	/** The caller's team roster — the publish picker's team rows; each team's
+	 * `audience` is the server-composed publish target ('=team/<tid>'). */
+	listTeams?: () => Promise<Array<{ id: string; name: string; audience: string }>>;
 	/** The reverse index for the Where-live panel. */
 	getWhereLive?: () => Promise<RungPin[]>;
 	/** One version's durable server build log — the full phase output the

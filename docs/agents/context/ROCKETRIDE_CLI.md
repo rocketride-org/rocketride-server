@@ -275,11 +275,12 @@ required.
   [--verbose] [--workspace <dir>]` — pack the app's source (App Builder
   rules: workspace-rooted layout, `appManifest.include`, gitignore +
   baseline filtering, size caps) and deploy it as the next registry
-  version; the server then builds it. `--publish @me|@team/<name>|@public`
+  version; the server then builds it. `--publish @me|@<team>|=team/<tid>|@public`
   waits for that build and publishes the new version in the same command.
   Without it, deploying activates nothing.
 - `rocketride app publish [app] [version] [--to <target>]` — bind a
-  version to an audience: `@me` (default), `@team/<name>`, or `@public`
+  version to an audience: `@me` (default), `@<team>` (a team by name) or
+  `=team/<tid>`, or `@public`; the retired `@team/<name>` and `@user` are refused
   (`@public` needs an approved version on a reviewing server). Without a
   version, the newest version that has not failed; it waits for that
   version's build first.
@@ -320,29 +321,32 @@ Deployment-target verbs (the `ROCKETRIDE_DEPLOY_*` pair), following the
 platform vocabulary — **deploy** = version to the server's registry,
 **publish** = bind a rung to a version. Every `--team` / `--deploy-to`
 takes `@me` (your personal space), `@public` (the store: a `ready`
-version, which on a server that reviews means approved), a team name, or a
-team id. The exception is `deploy interfaces`: its `--team` names one of
-your teams only, and leaving it out lets your team order decide. Output
-names teams instead of printing raw ids (`--json` keeps `teamId` and adds
-`teamName`). An unnamed pipeline deploys under its file name.
+version, which on a server that reviews means approved), `@<team>` (a team
+by name, in any case), or `=team/<tid>` (a team by id, as a row's `teamId`
+carries it). A bare team id is refused, and so are the retired
+`@team/<name>` and `@user`. `deploy interfaces` takes no `--team`: root the
+address instead (`@Production/acme.docBrain`), or leave it bare to let your
+team order decide. Output names teams instead of printing raw ids (`--json`
+keeps `teamId` and adds `teamName`). An unnamed pipeline deploys under its
+file name.
 
 ```bash
-rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse" [--deploy-to <teamId>]   # next registry version from ONE .pipe: the pipe plus the readme, icon and README-referenced files its store block names; a folder argument is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)
-rocketride deploy publish <projectId> 3 --team <teamId>             # point the team at version 3
+rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse" [--deploy-to <team>]   # next registry version from ONE .pipe: the pipe plus the readme, icon and README-referenced files its store block names; a folder argument is refused (--kind pipe|node; --deploy-to also points a team at it in the same call)
+rocketride deploy publish <projectId> 3 --team <team>             # point the team at version 3
 rocketride deploy list                                              # deployments overview
-rocketride deploy get <projectId> --team <teamId>                   # one deployment's state + schedules
+rocketride deploy get <projectId> --team <team>                   # one deployment's state + schedules
 rocketride deploy versions <projectId>                              # registry versions
 rocketride deploy artifact <projectId> <version>                    # fetch one registry version's artifact JSON
-rocketride deploy interfaces <address> [--team <teamId>]            # the callable nodes of the publication that answers the address, by classType (no engine started)
+rocketride deploy interfaces <address>                              # the callable nodes of the publication that answers the address (a rooted one, @<team>/..., reads one rung), by classType (no engine started)
 rocketride deploy history <projectId>                               # deploy/publish audit trail
-rocketride deploy run <projectId> <sourceId> --team <teamId>        # run now; no run window: ends when the pipeline finishes or is terminated
-rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <teamId> --ttl 32400
-rocketride deploy schedule pause <projectId> <sourceId> --team <teamId>
-rocketride deploy schedule resume <projectId> <sourceId> --team <teamId>
+rocketride deploy run <projectId> <sourceId> --team <team>        # run now; no run window: ends when the pipeline finishes or is terminated
+rocketride deploy schedule set <projectId> <sourceId> "0 9 * * 1-5" --team <team> --ttl 32400
+rocketride deploy schedule pause <projectId> <sourceId> --team <team>
+rocketride deploy schedule resume <projectId> <sourceId> --team <team>
 rocketride deploy schedule preview "0 9 * * 1-5"                    # validate a cron + next firings
-rocketride deploy source-config <projectId> <sourceId> --team <teamId> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value; TypeScript package only
+rocketride deploy source-config <projectId> <sourceId> --team <team> --trace-level summary --debug-out   # per-source run settings (none|metadata|summary|full); a flag left out keeps its current value; TypeScript package only
 rocketride deploy log <appId> <version>                             # read an app version's build log (or: rocketride app log)
-rocketride deploy enable|disable|remove <projectId> --team <teamId>
+rocketride deploy enable|disable|remove <projectId> --team <team>
 rocketride deploy delete <projectId> <version> [--yes]                # delete one deployed version from the server (apps and pipes); refused while a rung pins it, it is in review, or its build runs; confirmed on a terminal, --yes elsewhere; the number is never reused
 ```
 

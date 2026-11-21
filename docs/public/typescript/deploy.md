@@ -20,11 +20,11 @@ rows carry `seq` as the stable append-order identity).
 
 ```typescript
 const result = await client.deploy.add({ pipeline: myPipeline, comment: 'v2 prompt fix' });
-await client.deploy.deploy('proj-1', result.artifact.version, 'team-staging');
-await client.deploy.setSchedule('proj-1', 'webhook_1', '*/15 * * * *', 'team-staging');
+await client.deploy.deploy('proj-1', result.artifact.version, '@Staging');
+await client.deploy.setSchedule('proj-1', 'webhook_1', '*/15 * * * *', '@Staging');
 
 // Promote the same version to Production later — the identical gesture.
-await client.deploy.deploy('proj-1', result.artifact.version, 'team-prod');
+await client.deploy.deploy('proj-1', result.artifact.version, '@Production');
 
 const live = await client.deploy.list();
 for (const dep of live.rows) {
@@ -89,7 +89,9 @@ Typed wrappers over `rrext_deploy_app` — the publish ladder for RocketRide app
 **Deploy** copies code to the server as the next immutable registry version
 (`deploy.add`); a deployment carries the review lifecycle in its own `state`
 (`private` → `submit` → `ready` | `rejected`). **Publish** binds a deployment
-to an audience — `@me`, `@team/<name>`, or `@public` — as a pure pointer (`@user` is a legacy input alias for `@me`, never displayed);
+to an audience — `@me`, `@<team>` (a team by name) or `=team/<tid>`, or `@public` — as a pure pointer
+(a pin's `audience` is a valid target too: pass it back unchanged; the retired `@team/<name>` and
+`@user` are refused, naming their replacement);
 repointing it covers first publish, update, promote, and rollback alike.
 
 The review state lives on the **deployment**, not the binding: an app deploys
