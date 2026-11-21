@@ -61,6 +61,14 @@ export interface LogStreamRef {
 	 * teamId is set (a team scope is always the deploy continuum).
 	 */
 	runKind?: LogRunKind;
+	/**
+	 * The run's owner as its task row carried it (`=user/<uid>`,
+	 * `=team/<tid>`, `=org/<oid>`), passed back unchanged: the tree the
+	 * run's log lives in, whatever team it was billed to. Wins over teamId.
+	 */
+	owner?: string;
+	/** The pinned version of a pinned run (its stream is its own); omitted = the published version's. */
+	version?: number;
 }
 
 /** One chapter (track) — a run inside the continuum. */
@@ -113,8 +121,10 @@ export interface LogStreamEntry extends LogChaptersResult {
 	teamId: string;
 	teamName: string;
 	runKind: LogRunKind;
-	/** Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind. */
-	ownerKind: 'user' | 'team';
+	/** Who owns the runs: 'user' (dev or @me deploy), 'team' or 'org' (an org admin's view). Matches TASK_CONTROL.owner_kind. */
+	ownerKind: 'user' | 'team' | 'org';
+	/** The owner string to pass back as `LogStreamRef.owner`. */
+	owner: string;
 }
 
 /** Response of `client.log.streams()`; never-logged scopes are absent. */

@@ -125,6 +125,8 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
     - ``'@me'`` (the personal space) comes first for any signed-in user.
     - Each team of the roster is addressed by the ``audience`` the server
       stamped on it; a team without one is not addressable and is skipped.
+    - The org rung follows the teams, addressed by the organisation's
+      ``audience``; only org admins (and ``sys.admin``) control it.
     - ``org.admin`` (and ``sys.admin``) implies the full team permission set.
     - Rosterless identities (the OSS single-team server) derive refs from the
       deployment rows the server marked ``rung: 'team'``, named by their
@@ -142,11 +144,14 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
     org = info.get('organization') or {}
     me: List[DeployTeamRef] = [{'id': '@me', 'name': 'Me', 'canControl': True}] if info.get('userId') else []
     is_admin = 'org.admin' in (org.get('permissions') or []) or 'sys.admin' in (info.get('sysPermissions') or [])
+    org_rung: List[DeployTeamRef] = (
+        [{'id': org['audience'], 'name': 'Org', 'canControl': is_admin}] if org.get('audience') else []
+    )
 
     # step: prefer the identity's team roster when one exists
     org_teams = org.get('teams')
     if isinstance(org_teams, list) and org_teams:
-        return me + [
+        roster: List[DeployTeamRef] = [
             {
                 'id': t['audience'],
                 'name': t.get('name') or t['audience'],
@@ -155,6 +160,7 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
             for t in org_teams
             if t.get('audience')
         ]
+        return me + roster + org_rung
 
     # step: rosterless — derive refs from the team rows so hosts still render
     seen: dict = {}
@@ -162,7 +168,7 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
         team_id = dep.get('teamId')
         if team_id and dep.get('rung') == 'team' and team_id not in seen:
             seen[team_id] = {'id': team_id, 'name': dep.get('handle') or team_id, 'canControl': True}
-    return me + list(seen.values())
+    return me + list(seen.values()) + org_rung
 
 
 def team_name_of(teams: List[DeployTeamRef], team_id: str, own_user_id: str = '') -> str:

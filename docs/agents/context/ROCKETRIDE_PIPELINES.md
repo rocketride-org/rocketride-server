@@ -67,6 +67,7 @@ bottom. This is the canonical layout the editor tooling expects and every shippe
 | `source` | optional | — | ID of the entry-point component; see Source Nodes |
 | `name`, `description` | optional | — | Display name (the registry's `pipelineName`; the file stem when absent) and store description |
 | `store` | optional | — | The store listing block; present = the pipeline is listable (see below) |
+| `roots` | optional | — | Storage roots beyond the run's own anchor that its nodes' `self.files` may reach (see below) |
 
 **`project_id`** is the permanent identity of the pipeline (runtime events and deploy history
 key on it): a literal GUID, unique per file, generated with `uuidgen` /
@@ -77,6 +78,28 @@ key on it): a literal GUID, unique per file, generated with `uuidgen` /
 
 **Wrapper note:** some existing files wrap the pipeline as `{ "pipeline": { ... } }`; the
 client unwraps this on load. Author the flat form.
+
+### The `roots` list (files outside the run's anchor)
+
+A node's `self.files` writes plain paths into its run's storage anchor: the
+caller's own tree for a run the caller owns (`@spec`, `@me`, a caller's
+`@public` run), `tasks/<project_id>` inside the team's tree for a team-owned
+run, inside the org's tree for an org-owned one. A pipeline that must read or
+write a team's or the org's files lists those places, and only those:
+
+```json
+"roots": ["@Development/kb", "@org/shared"]
+```
+
+- Each entry is a team root (`@<team>/...` by name, `=team/<tid>/...` by id)
+  or the org root (`@org/...`), with an optional path under it. A node path
+  is admitted only under a declared entry; every other `@`/`=` path is
+  refused, and `@me/` and `=user/` are never declarable.
+- When the run's control starts, every entry is resolved through the run's
+  OWNER: a user reaches the teams where they hold `task.store` and the org
+  with `org.admin`; a team reaches its own tree; the org the org tree. An
+  entry the owner could not reach refuses the start, naming it.
+- A pipeline that declares roots cannot be published to `@public`.
 
 ### The `store` block (store listing)
 

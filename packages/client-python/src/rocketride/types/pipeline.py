@@ -179,6 +179,11 @@ class PipelineConfig(TypedDict, total=False):
     project_id: str  # Project identifier for organization and permissions
     store: PipeStoreBlock  # The store listing; present = listable, absent = deploys unlisted
     parameters: dict[str, str]  # Per-call params: public name -> 'nodeId.configKey'
+    # The storage roots beyond its run's anchor this pipeline's nodes reach
+    # through self.files ('@Development/kb', '=team/<tid>/kb', '@org/shared');
+    # resolved through the run's owner when it starts (a root the owner
+    # cannot reach refuses the start); refused on a @public publish
+    roots: list[str]
     viewport: dict[str, Any]  # UI viewport settings for visual editors
     docRevision: int  # Editor document revision counter for change tracking
     isLocked: bool  # Whether the canvas is locked from editing
@@ -197,7 +202,7 @@ class SUBMIT_RESULT(TypedDict, total=False):
 
     token: str  # The control id that answered: opaque, transient, valid for the life of the control; never persist it
     address: str  # The address that answered: developerId.pipelineId.source (the stable identity, beside the id)
-    resolved: Literal['@spec', '@me', '@team', '@public']  # The rung that answered
+    resolved: Literal['@spec', '@me', '@team', '@org', '@public']  # The rung that answered
     team: str  # On '@team': the answering team
     version: int  # The artifact version (absent on '@spec')
     engineKey: str  # The engine the request ran on (shape key, owner-qualified)

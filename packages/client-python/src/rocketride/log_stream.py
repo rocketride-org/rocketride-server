@@ -137,7 +137,15 @@ class LogEventStream:
     """
 
     def __init__(
-        self, client: RocketRideClient, project_id: str, source: str, *, team_id: str = '', run_kind: str = ''
+        self,
+        client: RocketRideClient,
+        project_id: str,
+        source: str,
+        *,
+        team_id: str = '',
+        run_kind: str = '',
+        owner: str = '',
+        version: Optional[int] = None,
     ) -> None:
         """
         Bind the session to its client and stream identity.
@@ -151,12 +159,18 @@ class LogEventStream:
             run_kind: Teamless-scope selector: ''/'dev' = the caller's dev
                 stream; 'deploy' = the caller's personal (@me) deploy
                 stream. Ignored when team_id is set.
+            owner: The run's owner as its task row carried it, passed back
+                unchanged: the tree its log lives in (reads only; the live
+                subscription keeps team_id / run_kind).
+            version: A pinned run's version (its stream is its own).
         """
         self._client = client
         self._project_id = project_id
         self._source = source
         self._team_id = team_id
         self._run_kind = run_kind
+        self._owner = owner
+        self._version = version
 
         # Timeline (chapters + segment spans) cache.
         self._timeline: Optional[Dict[str, Any]] = None
@@ -217,7 +231,12 @@ class LogEventStream:
         if not force and self._timeline is not None and time.time() - self._timeline_at < _TIMELINE_TTL_S:
             return
         self._timeline = await self._client.log.chapters(
-            self._project_id, self._source, team_id=self._team_id, run_kind=self._run_kind
+            self._project_id,
+            self._source,
+            team_id=self._team_id,
+            run_kind=self._run_kind,
+            owner=self._owner,
+            version=self._version,
         )
         self._timeline_at = time.time()
 
@@ -768,7 +787,14 @@ class LogEventStream:
         offset = seg.next_offset or 0
         while True:
             chunk = await self._client.log.segment(
-                self._project_id, self._source, seg.id, team_id=self._team_id, run_kind=self._run_kind, offset=offset
+                self._project_id,
+                self._source,
+                seg.id,
+                team_id=self._team_id,
+                run_kind=self._run_kind,
+                owner=self._owner,
+                version=self._version,
+                offset=offset,
             )
             data = chunk.get('data') or ''
             for line in data.split('\n'):

@@ -158,6 +158,11 @@ def test_each_connect_result_team_carries_its_audience():
     assert pushed['organization']['teams'][0]['audience'] == '=team/t-1'
 
 
+def test_the_connect_result_org_carries_the_org_rungs_audience():
+    # C.35: the org rung's audience, composed by the server, passed back unchanged as a target
+    assert _named(('t-1', 'Development')).to_connect_result()['organization']['audience'] == '=org/org'
+
+
 def test_a_connect_result_without_an_org_has_no_teams_to_stamp():
     assert AccountInfo(userId='u', auth='rr_k', userToken='rr_k').to_connect_result()['organization'] is None
 

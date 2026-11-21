@@ -265,7 +265,7 @@ export interface ProfilePanelProps {
 // =============================================================================
 
 /** The sentence under the Teams card: what the order decides (B39, §3.2, §6.2, §8.3). */
-const TEAM_ORDER_FOOT = "When you call a pipeline or open an app, the first team in this order that has published it answers, and the run uses that team's environment. Your usage always counts under your home team. Your own unpublished runs use your home team's environment too.";
+const TEAM_ORDER_FOOT = 'When you call a pipeline or open an app, the first team in this order that has published it answers. Every run you make uses the environment of your home team, the first in this order, and its usage counts under the team whose publication served it; your own unpublished runs count under your home team.';
 
 /** Drag payload type for a Teams card row (scoped so a foreign drag is ignored). */
 const TEAM_ORDER_DND_MIME = 'application/x-rocketride-team-order';

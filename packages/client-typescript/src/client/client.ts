@@ -3215,7 +3215,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param registryVersion - Registry version number from the rail
 	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
 	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-	 *                 and '@user' are refused; '@org' is refused until the org rung serves
+	 *                 and '@user' are refused; '@org' (org admins) is the org rung
 	 * @returns The binding row ({audience, version, state, artifactState, ...})
 	 */
 	async publishApp(appId: string, registryVersion: number, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3230,7 +3230,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param appId - App id
 	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
 	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-	 *                 and '@user' are refused; '@org' is refused until the org rung serves
+	 *                 and '@user' are refused; '@org' (org admins) is the org rung
 	 * @returns The final binding row (state 'removed')
 	 */
 	async removeAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3246,7 +3246,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param appId - App id
 	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
 	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-	 *                 and '@user' are refused; '@org' is refused until the org rung serves
+	 *                 and '@user' are refused; '@org' (org admins) is the org rung
 	 * @returns The binding row (state 'disabled')
 	 */
 	async disableAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {

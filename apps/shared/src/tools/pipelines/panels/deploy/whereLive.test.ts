@@ -46,6 +46,8 @@ const STAGING = row({ teamId: '=team/team-staging', teamName: 'Staging', handle:
 const PROD = row({ teamId: '=team/team-prod', teamName: 'Production', handle: '@Production', rung: 'team', version: 4 });
 const STORE = row({ teamId: '@public', teamName: '@public', handle: '@public', rung: 'public', version: 4 });
 const OTHER = row({ teamId: '=user/u2', teamName: 'Personal', handle: 'Personal', rung: 'personal', version: 3 });
+/** The org rung's publication (C.35): the org's audience as its teamId. */
+const ORG = row({ teamId: '=org/org-1', teamName: '', handle: '@org', rung: 'org', version: 2 });
 /** A team the caller cannot name: the server shows it by its audience, and so does its label. */
 const UNNAMED = row({ teamId: '=team/team-9', teamName: '=team/team-9', handle: '=team/team-9', rung: 'team', version: 1 });
 
@@ -55,6 +57,19 @@ describe('whereLiveRungsOf', () => {
 		assert.deepEqual(
 			rungs.map((r) => r.row.teamId),
 			['=user/u1', '=user/u2', '=team/team-staging', '=team/team-prod', '@public']
+		);
+	});
+
+	it('draws the org between the teams and the store, labelled Org', () => {
+		const rungs = whereLiveRungsOf([STORE, ORG, STAGING, ME], TEAMS);
+		assert.deepEqual(
+			rungs.map((r) => [r.row.teamId, r.label, r.handle]),
+			[
+				['=user/u1', 'Me', '@me'],
+				['=team/team-staging', 'Staging', '@Staging'],
+				['=org/org-1', 'Org', '@org'],
+				['@public', 'Store', '@public'],
+			]
 		);
 	});
 
@@ -100,6 +115,11 @@ describe('rowOfTarget', () => {
 		assert.equal(rowOfTarget([ME, STORE], '@public'), STORE);
 		assert.equal(rowOfTarget([OTHER], '@me'), undefined);
 		assert.equal(rowOfTarget([{ ...STAGING, state: 'removed' }], '=team/team-staging'), undefined);
+	});
+
+	it("finds the org's row by the org's audience, never a team's", () => {
+		assert.equal(rowOfTarget([ME, STAGING, ORG], '=org/org-1'), ORG);
+		assert.equal(rowOfTarget([ME, STAGING], '=org/org-1'), undefined);
 	});
 });
 

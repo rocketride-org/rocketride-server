@@ -115,9 +115,10 @@ export function splitAppVersion(app?: string, version?: string): { app?: string;
 
 /**
  * A typed publish target as the wire takes it (plan 2.5): '@me', '@<team>'
- * (a team by name, any case), '=team/<tid>', '@public', or any audience a
- * row carried. The two words 'me' and 'public' may be typed without their
- * '@'; every other value passes through unchanged, for the server to read:
+ * (a team by name, any case), '=team/<tid>', '@org' (the organisation, org
+ * admins only), '@public', or any audience a row carried. The words 'me',
+ * 'org' and 'public' may be typed without their '@'; every other value
+ * passes through unchanged, for the server to read:
  * the server owns the grammar and refuses the retired '@team/...' and
  * '@user' by naming their replacement.
  *
@@ -127,8 +128,8 @@ export function splitAppVersion(app?: string, version?: string): { app?: string;
  */
 export function normalizePublishTarget(target: string): string {
 	const typed = target.trim();
-	if (!typed) throw new Error('A publish target is required: @me, @<team>, =team/<tid> or @public');
-	return typed === 'me' || typed === 'public' ? `@${typed}` : typed;
+	if (!typed) throw new Error('A publish target is required: @me, @<team>, =team/<tid>, @org or @public');
+	return typed === 'me' || typed === 'org' || typed === 'public' ? `@${typed}` : typed;
 }
 
 /**
@@ -185,7 +186,7 @@ async function waitForBuild(client: RocketRideClient, appId: string, registryVer
  * @param client - Connected deploy client.
  * @param appId - App id.
  * @param registryVersion - The version to publish.
- * @param target - Wire target ('@me', '@<team>', '=team/<tid>', '@public').
+ * @param target - Wire target ('@me', '@<team>', '=team/<tid>', '@org', '@public').
  * @param out - Command output.
  * @returns The binding row.
  */

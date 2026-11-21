@@ -19,7 +19,7 @@ import { getAppVersionOverride, applyAppVersionOverride } from '../../util/versi
 import type { DesktopAdapter, DesktopVersionRow } from './types';
 
 /** Rail rung audience types -> the display handles the drop list shows. */
-const RUNG_LABEL: Record<string, string> = { user: '@me', team: '@team', public: '@public' };
+const RUNG_LABEL: Record<string, string> = { user: '@me', team: '@team', org: '@org', public: '@public' };
 
 // The org's developer id, shared by every card — keyed by ORG: the developer
 // id is an org identity and the active org changes at runtime (org switch),

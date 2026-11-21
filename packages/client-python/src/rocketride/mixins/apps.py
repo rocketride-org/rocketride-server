@@ -166,7 +166,7 @@ class AppsMixin(DAPClient):
             target:           '@me', '@<team>' (a team of yours by name), '@public', or an
                               audience a row or the ConnectResult carried ('=team/<tid>'),
                               passed back unchanged. The retired '@team/...' and '@user' are
-                              refused; '@org' is refused until the org rung serves.
+                              refused; '@org' (org admins) is the org rung.
 
         Returns:
             Dict with the ``publish`` binding row ({audience, version, state,

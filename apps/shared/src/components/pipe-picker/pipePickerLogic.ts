@@ -47,7 +47,7 @@ const ADDRESS = /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)?$/;
 // =============================================================================
 
 /** The rung a publication answers the caller on. */
-export type PipeRung = 'me' | 'team' | 'public';
+export type PipeRung = 'me' | 'team' | 'org' | 'public';
 
 /** One pipe publication, as the catalog verb lists it. */
 export interface IPipeEntry {
@@ -288,6 +288,7 @@ export function interfaceNodes(answer: IInterfacesAnswer | null | undefined, cla
 export function rungLabel(entry: Pick<IPipeEntry, 'rung' | 'teamName' | 'teamId' | 'publisher'>): string {
 	if (entry.rung === 'me') return 'Published to you';
 	if (entry.rung === 'team') return `Team ${entry.teamName || entry.teamId || ''}`.trim();
+	if (entry.rung === 'org') return 'Your organization';
 	return entry.publisher ? `Store · ${entry.publisher}` : 'Store';
 }
 

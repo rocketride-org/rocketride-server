@@ -189,6 +189,7 @@ test('the rung reads as yours, a team, or the store', () => {
 	assert.equal(rungLabel({ rung: 'me' }), 'Published to you');
 	assert.equal(rungLabel({ rung: 'team', teamName: 'Research', teamId: 't-1' }), 'Team Research');
 	assert.equal(rungLabel({ rung: 'team', teamId: 't-1' }), 'Team t-1');
+	assert.equal(rungLabel({ rung: 'org' }), 'Your organization');
 	assert.equal(rungLabel({ rung: 'public', publisher: 'zeta' }), 'Store · zeta');
 });
 

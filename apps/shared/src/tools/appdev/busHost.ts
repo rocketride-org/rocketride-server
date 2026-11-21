@@ -196,6 +196,14 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 		// A team without its audience cannot be a publish target: the client composes none
 		listTeams: async () =>
 			(bus.getAccountInfo()?.organization?.teams ?? []).flatMap((t) => (t.audience ? [{ id: t.id, name: t.name, audience: t.audience }] : [])),
+		// The org rung is published by org admins only; the target is the
+		// organisation's audience as the server composed it
+		orgTarget: async () => {
+			const info = bus.getAccountInfo();
+			const org = info?.organization;
+			const admin = (org?.permissions ?? []).includes('org.admin') || (info?.sysPermissions ?? []).includes('sys.admin');
+			return admin ? (org?.audience ?? '') : '';
+		},
 		getWhereLive: async () => (registryId() ? toRungPins((await client().whereApp(registryId())) as WirePin[], hasReviewLadder) : []),
 		loadBuildLog: async (version) => {
 			const body = await client().buildLog(needRegistryId(), version);

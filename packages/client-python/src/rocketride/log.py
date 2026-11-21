@@ -78,7 +78,14 @@ class LogApi:
     # =========================================================================
 
     def open_event_stream(
-        self, project_id: str, source: str, *, team_id: str = '', run_kind: str = ''
+        self,
+        project_id: str,
+        source: str,
+        *,
+        team_id: str = '',
+        run_kind: str = '',
+        owner: str = '',
+        version: Optional[int] = None,
     ) -> LogEventStream:
         """
         Open a DVR session over one source continuum.
@@ -96,14 +103,27 @@ class LogApi:
             run_kind: Teamless-scope selector: ''/'dev' = your dev stream;
                 'deploy' = your personal (@me) deploy stream. Ignored when
                 team_id is set.
+            owner: The run's owner as its task row carried it (``=user/<uid>``,
+                ``=team/<tid>``, ``=org/<oid>``), passed back unchanged: the
+                tree the run's log lives in. Wins over ``team_id``.
+            version: A pinned run's version (its stream is its own).
 
         Returns:
             A new, unpositioned session (call ``seek()`` first).
         """
-        return LogEventStream(self._client, project_id, source, team_id=team_id, run_kind=run_kind)
+        return LogEventStream(
+            self._client, project_id, source, team_id=team_id, run_kind=run_kind, owner=owner, version=version
+        )
 
     async def chapters(
-        self, project_id: str, source: str, *, team_id: str = '', run_kind: str = ''
+        self,
+        project_id: str,
+        source: str,
+        *,
+        team_id: str = '',
+        run_kind: str = '',
+        owner: str = '',
+        version: Optional[int] = None,
     ) -> LogChaptersResult:
         """
         List a stream's chapters (tracks) and activity-bar metadata.
@@ -117,15 +137,18 @@ class LogApi:
             source: Source component id.
             team_id: A team id addresses that team's deploy continuum;
                 omitted = your own dev stream.
+            run_kind: Teamless-scope selector: ''/'dev' = your dev stream;
+                'deploy' = your personal (@me) deploy stream.
+            owner: The run's owner as its task row carried it (``=user/<uid>``,
+                ``=team/<tid>``, ``=org/<oid>``), passed back unchanged: the
+                tree the run's log lives in. Wins over ``team_id``.
+            version: A pinned run's version (its stream is its own).
 
         Returns:
             Chapters, activity spans, and stream timeline metadata.
         """
         kwargs: dict = {'subcommand': 'chapters', 'projectId': project_id, 'source': source}
-        if team_id:
-            kwargs['teamId'] = team_id
-        elif run_kind == 'deploy':
-            kwargs['runKind'] = run_kind
+        kwargs.update(_scope(team_id, run_kind, owner, version))
         return await self._client.call('rrext_log', **kwargs)
 
     async def streams(self, project_id: str, source: str) -> LogStreamsResult:
@@ -152,6 +175,8 @@ class LogApi:
         *,
         team_id: str = '',
         run_kind: str = '',
+        owner: str = '',
+        version: Optional[int] = None,
         from_seq: Optional[int] = None,
         to_seq: Optional[int] = None,
         from_time: Optional[float] = None,
@@ -176,6 +201,12 @@ class LogApi:
             source: Source component id.
             team_id: A team id addresses that team's deploy continuum;
                 omitted = your own dev stream.
+            run_kind: Teamless-scope selector: ''/'dev' = your dev stream;
+                'deploy' = your personal (@me) deploy stream.
+            owner: The run's owner as its task row carried it (``=user/<uid>``,
+                ``=team/<tid>``, ``=org/<oid>``), passed back unchanged: the
+                tree the run's log lives in. Wins over ``team_id``.
+            version: A pinned run's version (its stream is its own).
             from_seq: Inclusive seq lower bound.
             to_seq: Inclusive seq upper bound.
             from_time: Inclusive eventTime lower bound (epoch seconds).
@@ -190,10 +221,7 @@ class LogApi:
             The page of events plus paging/truncation metadata.
         """
         kwargs: dict = {'subcommand': 'read', 'projectId': project_id, 'source': source}
-        if team_id:
-            kwargs['teamId'] = team_id
-        elif run_kind == 'deploy':
-            kwargs['runKind'] = run_kind
+        kwargs.update(_scope(team_id, run_kind, owner, version))
         # Only send provided range/paging options over the wire.
         for key, value in (
             ('fromSeq', from_seq),
@@ -218,6 +246,8 @@ class LogApi:
         *,
         team_id: str = '',
         run_kind: str = '',
+        owner: str = '',
+        version: Optional[int] = None,
         offset: int = 0,
         max_bytes: Optional[int] = None,
     ) -> LogSegmentResult:
@@ -238,6 +268,12 @@ class LogApi:
             segment: Segment id within the stream.
             team_id: A team id addresses that team's deploy continuum;
                 omitted = your own dev stream.
+            run_kind: Teamless-scope selector: ''/'dev' = your dev stream;
+                'deploy' = your personal (@me) deploy stream.
+            owner: The run's owner as its task row carried it (``=user/<uid>``,
+                ``=team/<tid>``, ``=org/<oid>``), passed back unchanged: the
+                tree the run's log lives in. Wins over ``team_id``.
+            version: A pinned run's version (its stream is its own).
             offset: Byte offset to continue from (0 = segment start).
             max_bytes: Chunk ceiling (server clamps; omit for the default).
 
@@ -251,10 +287,7 @@ class LogApi:
             'segment': segment,
             'offset': offset,
         }
-        if team_id:
-            kwargs['teamId'] = team_id
-        elif run_kind == 'deploy':
-            kwargs['runKind'] = run_kind
+        kwargs.update(_scope(team_id, run_kind, owner, version))
         if max_bytes is not None:
             kwargs['maxBytes'] = max_bytes
         return await self._client.call('rrext_log', **kwargs)
@@ -266,6 +299,8 @@ class LogApi:
         *,
         team_id: str = '',
         run_kind: str = '',
+        owner: str = '',
+        version: Optional[int] = None,
         before_time: Optional[float] = None,
         all: bool = False,
     ) -> LogDeleteResult:
@@ -282,6 +317,12 @@ class LogApi:
             team_id: A team id addresses that team's deploy continuum
                 (requires control rights on the team); omitted = your own
                 dev stream.
+            run_kind: Teamless-scope selector: ''/'dev' = your dev stream;
+                'deploy' = your personal (@me) deploy stream.
+            owner: The run's owner as its task row carried it (``=user/<uid>``,
+                ``=team/<tid>``, ``=org/<oid>``), passed back unchanged: the
+                tree the run's log lives in. Wins over ``team_id``.
+            version: A pinned run's version (its stream is its own).
             before_time: Epoch-seconds cutoff (exclusive).
             all: Remove the entire stream.
 
@@ -289,12 +330,36 @@ class LogApi:
             The number of segments deleted.
         """
         kwargs: dict = {'subcommand': 'delete', 'projectId': project_id, 'source': source}
-        if team_id:
-            kwargs['teamId'] = team_id
-        elif run_kind == 'deploy':
-            kwargs['runKind'] = run_kind
+        kwargs.update(_scope(team_id, run_kind, owner, version))
         if before_time is not None:
             kwargs['beforeTime'] = before_time
         if all:
             kwargs['all'] = True
         return await self._client.call('rrext_log', **kwargs)
+
+
+def _scope(team_id: str, run_kind: str, owner: str, version: Optional[int]) -> dict:
+    """
+    The scope arguments of one stream: the owner a task row carried, else a team, else the caller's own run kind.
+
+    Args:
+        team_id: A team id or a deployment's audience.
+        run_kind: ``'deploy'`` for the caller's personal deploy continuum.
+        owner: The owner string a task row carried.
+        version: A pinned run's version.
+
+    Returns:
+        The ``rrext_log`` arguments that name the scope.
+    """
+    args: dict = {}
+    if owner:
+        args['owner'] = owner
+        if run_kind:
+            args['runKind'] = run_kind
+    elif team_id:
+        args['teamId'] = team_id
+    elif run_kind == 'deploy':
+        args['runKind'] = run_kind
+    if version is not None:
+        args['version'] = version
+    return args

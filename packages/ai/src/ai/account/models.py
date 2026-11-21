@@ -42,7 +42,7 @@ from pydantic import BaseModel
 
 from rocketride.types.client import AppManifestEntry
 
-from .audience import AudienceError, team_audience
+from .audience import AudienceError, org_audience, team_audience
 from .roots import team_name_key
 
 
@@ -179,7 +179,8 @@ class AccountInfo(BaseModel):
 
         Each team entry carries its ``audience`` (plan 2.5): the string a
         client passes back unchanged wherever a deploy verb takes ``teamId``,
-        so no client composes or parses one.
+        so no client composes or parses one; the organization carries its
+        own (``=org/<oid>``, the org rung's audience, C.35).
 
         Returns:
             dict: All AccountInfo fields except ``auth``, suitable for sending
@@ -193,6 +194,11 @@ class AccountInfo(BaseModel):
         # the grammar cannot carry gets none: it is addressable by no client.
         org = data.get('organization')
         if isinstance(org, dict):
+            try:
+                if org.get('id'):
+                    org['audience'] = org_audience(str(org['id']))
+            except AudienceError:
+                org.pop('audience', None)
             for team in org.get('teams') or []:
                 if isinstance(team, dict) and team.get('id'):
                     try:

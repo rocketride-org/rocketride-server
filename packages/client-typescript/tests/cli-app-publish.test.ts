@@ -118,9 +118,11 @@ describe('argument helpers', () => {
 		expect(splitAppVersion('clock', '3')).toEqual({ app: 'clock', version: '3' });
 	});
 
-	it('normalizePublishTarget adds the @ to me and public and passes every other target through for the server', () => {
+	it('normalizePublishTarget adds the @ to me, org and public and passes every other target through for the server', () => {
 		expect(normalizePublishTarget('me')).toBe('@me');
 		expect(normalizePublishTarget('public')).toBe('@public');
+		expect(normalizePublishTarget('org')).toBe('@org');
+		expect(normalizePublishTarget('=org/o-1')).toBe('=org/o-1');
 		expect(normalizePublishTarget('@public')).toBe('@public');
 		expect(normalizePublishTarget('@QA')).toBe('@QA');
 		expect(normalizePublishTarget(' =team/t-qa ')).toBe('=team/t-qa');

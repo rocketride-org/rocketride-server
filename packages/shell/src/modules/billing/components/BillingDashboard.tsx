@@ -502,7 +502,7 @@ const UsageLeaderboard: React.FC<{ usageByUser: UsageRollup[]; usageByTeam: Usag
 	// top-consumers-first rollup order.
 	const columns = useMemo<GridColumnDefinition[]>(
 		() => [
-			{ title: mode === 'user' ? 'User' : 'Team', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side: user display name with email fallback, or team name; a run with no caller (a schedule, a run-now, a listener) has no user and pools under "Scheduled and unattended runs"; usage with no team pools under "No team (organization)".', headerSort: true },
+			{ title: mode === 'user' ? 'User' : 'Served by', field: 'name', rrType: 'string', rrDefault: true, rrDescription: 'Consumer display name resolved server-side: user display name with email fallback, or the name of the team whose publication served the usage (your home team for your own runs, a personal publication\'s billing team, the serving team on a team publication); a run with no caller (a schedule, a run-now, a listener) has no user and pools under "Scheduled and unattended runs"; usage with no team (the org rung and the store) pools under "No team (organization)".', headerSort: true },
 			{
 				title: 'Total Tokens',
 				field: 'total',
