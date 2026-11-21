@@ -1,0 +1,126 @@
+[
+  {
+    "bodySha256": "f98ecce90c9bffd67b7f4164957fe412bc823fdbed7c6d663f6bdc99d8a0aebb",
+    "headers": {
+      "accept-ranges": "bytes",
+      "content-length": "35",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
+      "content-type": "text/html; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin-allow-popups",
+      "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
+    },
+    "request": "GET /",
+    "status": 200
+  },
+  {
+    "bodySha256": "0c6acdae616552efde3b090c01580c13ea8595c3ec377a07945f6c02980145ed",
+    "headers": {
+      "accept-ranges": "bytes",
+      "content-length": "37",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
+      "content-type": "text/html; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin-allow-popups",
+      "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
+    },
+    "request": "GET /pricing",
+    "status": 200
+  },
+  {
+    "bodySha256": "f98ecce90c9bffd67b7f4164957fe412bc823fdbed7c6d663f6bdc99d8a0aebb",
+    "headers": {
+      "accept-ranges": "bytes",
+      "content-length": "35",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
+      "content-type": "text/html; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin-allow-popups",
+      "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
+    },
+    "request": "GET /shell/index.html",
+    "status": 200
+  },
+  {
+    "bodySha256": "c88f8026f2354fbc88f01a2427f4c63b92f790828768acd9b47d7da53a7be4fd",
+    "headers": {
+      "accept-ranges": "bytes",
+      "cache-control": "public, max-age=31536000, immutable",
+      "content-length": "20",
+      "content-type": "text/javascript; charset=utf-8",
+      "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
+    },
+    "request": "GET /shell/static/main.abc123.js",
+    "status": 200
+  },
+  {
+    "bodySha256": "f98ecce90c9bffd67b7f4164957fe412bc823fdbed7c6d663f6bdc99d8a0aebb",
+    "headers": {
+      "accept-ranges": "bytes",
+      "content-length": "35",
+      "content-security-policy": "frame-ancestors 'self' vscode-webview: vscode-file:",
+      "content-type": "text/html; charset=utf-8",
+      "cross-origin-opener-policy": "same-origin-allow-popups",
+      "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
+    },
+    "request": "GET /shell/some/client/route",
+    "status": 200
+  },
+  {
+    "bodySha256": "4062edaf750fb8074e7e83e0c9028c94e32468a8b6f1614774328ef045150f93",
+    "headers": {
+      "content-length": "11",
+      "content-type": "application/json",
+      "set-cookie": "rr_apps_token=good-token; HttpOnly; Path=/apps; SameSite=lax"
+    },
+    "request": "POST /apps/session",
+    "status": 200
+  },
+  {
+    "bodySha256": "e4b572418a85d693ef40510ba092e10bda247e70fb738f4ce3d53302ec06d022",
+    "headers": {
+      "cache-control": "no-cache, must-revalidate",
+      "content-length": "129",
+      "content-type": "application/json"
+    },
+    "request": "GET /apps/rocketride.home",
+    "status": 200
+  },
+  {
+    "bodySha256": "36c1a6986ca2ec2ee01d1aa683d96f811366aaf0102766c9f10f3acd79568634",
+    "headers": {
+      "cache-control": "no-cache, must-revalidate",
+      "content-length": "129",
+      "content-type": "application/json"
+    },
+    "request": "GET /apps/acme.thirdparty",
+    "status": 200
+  },
+  {
+    "bodySha256": "ea92735f431512ff92c93547e61cdaa573ca90e53ac063d81d9a44febff9f03d",
+    "headers": {
+      "cache-control": "private, max-age=3600",
+      "content-length": "49",
+      "content-type": "text/javascript; charset=utf-8"
+    },
+    "request": "GET /apps/acme.thirdparty/v2/remoteEntry.js",
+    "status": 200
+  },
+  {
+    "bodySha256": "d8142480624b749b3d42eaa606ac136440bd18bff5bb4c26642adf186982417f",
+    "headers": {
+      "content-length": "22",
+      "content-type": "application/json"
+    },
+    "request": "GET /apps/acme.thirdparty/v3/remoteEntry.js",
+    "status": 404
+  },
+  {
+    "bodySha256": "900fbe934249ad120004bd24adf66aad8817d89586273c0cc50e187bddebb601",
+    "headers": {
+      "accept-ranges": "bytes",
+      "content-length": "41",
+      "content-type": "image/svg+xml",
+      "last-modified": "Tue, 14 Nov 2023 22:13:20 GMT"
+    },
+    "request": "GET /apps/acme.thirdparty/icon.svg",
+    "status": 200
+  }
+]

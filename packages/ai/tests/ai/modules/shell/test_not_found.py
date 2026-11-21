@@ -155,6 +155,22 @@ def test_a_person_gets_the_shell_index_with_status_404(monkeypatch, shell_root):
 
 
 @pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_the_not_found_pages_carry_the_shell_document_headers(monkeypatch, shell_root, ua):
+    # Both the site.notFound snapshot and the shell document answering a person (#1022).
+    resp = _serve(monkeypatch).get('/nope', headers={'User-Agent': ua})
+    assert resp.status_code == 404
+    for name, value in shell_mod.document_headers().items():
+        assert resp.headers[name] == value
+
+
+def test_the_engines_own_not_found_page_carries_the_shell_document_headers(monkeypatch, shell_root):
+    resp = _serve(monkeypatch, not_found=None).get('/nope', headers={'Accept': 'text/html', 'User-Agent': 'curl/8'})
+    assert resp.status_code == 404 and resp.headers['content-type'].startswith('text/html')
+    for name, value in shell_mod.document_headers().items():
+        assert resp.headers[name] == value
+
+
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
 def test_site_not_found_wins_over_the_engines_page_for_a_navigation(monkeypatch, shell_root, ua):
     # Browsers and crawlers send Accept: text/html, which alone would get the engine's
     # not-found page: a declared site.notFound must still answer them.

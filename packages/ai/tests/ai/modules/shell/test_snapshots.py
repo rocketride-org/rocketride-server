@@ -195,6 +195,21 @@ def test_crawler_gets_the_rendered_snapshot_and_people_get_the_shell_document(sh
     assert human.headers['cache-control'] == 'private, no-cache'
 
 
+def test_every_html_a_public_page_serves_carries_the_shell_document_headers(shell_root):
+    # Crawler snapshot and human shell document alike: the framing and opener
+    # protections of shell_static must not be skipped by this serving path (#1022).
+    _seed()
+    _serve(_page())
+    client = _client()
+    want = shell_mod.document_headers()
+    assert want['Content-Security-Policy'].startswith('frame-ancestors') and want['Cross-Origin-Opener-Policy']
+    for ua in (GOOGLEBOT, BROWSER):
+        resp = client.get('/pricing', headers={'User-Agent': ua})
+        assert resp.status_code == 200
+        for name, value in want.items():
+            assert resp.headers[name] == value
+
+
 def test_head_on_a_snapshot_page_answers_like_get(shell_root, monkeypatch):
     # A bound page's max-age counts down on cache hits: keep the clock still.
     monkeypatch.setattr(pages, 'monotonic', lambda: 1000.0)

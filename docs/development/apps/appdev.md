@@ -141,6 +141,58 @@ that loaded a dev bundle — the panel or a plain browser tab — updates on sav
 through rsbuild's own HMR/live-reload client (`ws://localhost:<port>`), so no
 server push is involved.
 
+**Framing (#1022).** The engine serves shell documents (the SPA page,
+prerendered pages and any other HTML under the shell root) with
+`Content-Security-Policy: frame-ancestors 'self' vscode-webview: vscode-file:`
+and `Cross-Origin-Opener-Policy: same-origin-allow-popups`. `/apps/`,
+`/chat/`, `/dropper/` and static assets are unchanged. Only the shell's own
+origin and the desktop VS Code webview can frame the shell. Any VS Code
+extension's webview matches `vscode-webview:`, so any installed extension can
+frame it; the design accepts this. COOP severs the opener: a cross-origin
+page that opens the shell with `window.open` still opens it but gets no
+`window.opener` handle to it. The dev proxy passes these headers through, so
+the preview panel is covered too. Web-hosted VS Code (vscode.dev, github.dev,
+Codespaces, code-server) and any partner page that frames the shell are
+refused by default. Set `RR_SHELL_FRAME_ANCESTORS_EXTRA` in the engine's
+environment before upgrading: space-separated `http(s)://host[:port]` sources
+(a leading `*.` wildcard needs at least two labels after it) or non-web
+schemes such as `vscode-webview:`. The engine reads it once at import, so a
+change needs a restart, and an invalid value stops startup. With #2960 merged,
+web-hosted previews then render but still lose the session: its dev-hook
+sender check accepts only `vscode-webview://` parents and the shell's own
+origin.
+
+**Credentials.** The identity surfaces carry a blank session token:
+`identity.userToken` (the app's `identity` prop), `useAuthUser().userToken`
+(the `ShellIdentityContext` value) and `user.userToken` in the `shell:init`
+and `shell:login` iframe messages are `''`. `useShellApiConfig()` and
+`shell:init` omit `RR_APIKEY` (the `RR_APIKEY` field stays in the frozen
+`ShellApiConfig` type). This is not isolation: app code still runs on the
+shell origin, and exported paths still return credentials until third-party
+apps move off-origin. Among them: `useShellApiKey()` and the `host.apiKey`
+op (the client's connect key), `getClient().getAccountInfo()` and
+`ConnectionManager.getAccountInfo()` (the full `ConnectResult`),
+`ConnectionManager.loadToken()` and the token in web storage, the
+`shell:login` shell event (`useShellEvent`; not the `shell:login` iframe
+message), and the `shell:accountUpdate` event in a brokered realm, which
+re-emits the mirrored `ConnectResult` (the server's own `apaext_account`
+push already blanks the token). The list is not exhaustive: `getClient()`
+and `ConnectionManager` are exported whole.
+
+**Webview documents.** rocket-ui frames a `webview:<url>` document with
+`allow-scripts allow-same-origin` only when the URL passes
+`isAllowedWebviewUrl`. On the shell's own server (the same origin, a
+trailing-dot variant of it, or another loopback name on the shell's port)
+only `/chat/` and `/dropper/` paths are framed. These are first-party engine
+pages and run with the shell's authority. `/apps/` and any `%2e`, `%2f` or
+`%5c` left in the path are refused there. Any other URL must be `https:` or
+`http:` on `localhost`, `127.0.0.1` or `[::1]`. Credentials in the URL,
+non-http schemes, relative and protocol-relative URLs and unparsable strings
+are refused and show the invalid-URI message. A shell without an http(s)
+origin (a VS Code webview, `file://`) cannot tell which server is the
+engine: it frames only `/chat/` and `/dropper/` on any loopback host,
+refuses `/apps/` on every host, and frames other `https:` URLs.
+
 ## `appdev:call` — the app-control message
 
 The webview drives all app lifecycle actions through one correlated message:
