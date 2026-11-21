@@ -76,7 +76,9 @@ class IValidator(IValidatorBase):
             ConfigError: The stored configuration does not fit the schema.
             Exception: A path carries a character the host refuses.
         """
-        config = self.config
+        # exclude is a param, which self.config refuses: its stored value is in the full view
+        self.config
+        config = self._resolved()
         if syntaxOnly or platform != 'win32':
             return
         for value, what in ((config.storePath, 'output path'), (config.exclude, 'exclude path')):

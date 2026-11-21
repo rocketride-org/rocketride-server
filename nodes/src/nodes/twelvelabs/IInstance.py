@@ -107,7 +107,7 @@ class IInstance(IInstanceBase):
             text = twelvelabs_driver.process_video(
                 self.IGlobal.api_key,
                 self._tmp_path,
-                self.IGlobal.instructions,
+                [str(instruction) for instruction in (self.settings.instructions or [])],  # this call's
             )
 
             if self.instance.hasListener('text'):

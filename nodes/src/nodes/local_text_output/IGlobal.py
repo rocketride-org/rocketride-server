@@ -36,10 +36,8 @@ class IGlobal(IGlobalBase):
     """
 
     output_path: str | None = None
-    exclude: str | None = None
 
     def beginGlobal(self):
-        """Read the output path and the exclusion prefix from the resolved config."""
+        """Read the output path from the resolved config; the exclusion prefix is read per call."""
         config = self.config
         self.output_path = config.storePath
-        self.exclude = config.exclude

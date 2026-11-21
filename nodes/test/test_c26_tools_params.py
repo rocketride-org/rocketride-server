@@ -69,6 +69,15 @@ SCHEMAS = {
         ['max_history', 'auto_summarize', 'memory.session_ttl_hours', 'redis.session_ttl_hours'],
         {},
     ),
+    'local-text-output': (['exclude'], ['exclude'], {}),
+    'extract_data': (['fields'], [], {}),
+    'preprocessor_llm': (['numberOfTokens'], [], {}),
+    'twelvelabs': (['instructions'], [], {'apikey': 'k1'}),
+    'tool_crustdata': (['defaultLimit'], [], {'apikey': 'k1'}),
+    'aparavi_aql': (['db_description'], ['db_description'], {'url': 'https://aql.example'}),
+    'tool_pipe': (['tool_description', 'return_type'], ['tool_description', 'return_type'], {}),
+    'mcp_client': (['serverName'], ['serverName'], {'streamable-http': {'endpoint': 'https://mcp.example'}}),
+    'tool_butterbase': (['serverName'], ['serverName'], {'bearer': 'k1'}),
     **{
         f'response_{lane}': (_RESPONSE, _RESPONSE, {})
         for lane in ('answers', 'audio', 'documents', 'hash', 'image', 'json', 'questions', 'table', 'text', 'video')

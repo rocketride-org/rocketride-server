@@ -87,6 +87,8 @@
 			"type": "string",
 			"format": "textarea",
 			"title": "Data description",
+			"param": true,
+			"tool": false,
 			"default": "",
 			"description": "What is this data used for? Describe its content and purpose, this helps the LLM generate more accurate AQL queries."
 		},

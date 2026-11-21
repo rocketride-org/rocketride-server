@@ -41,6 +41,8 @@
 			"type": "string",
 			"title": "Server name",
 			"description": "Namespace prefix for the discovered tools: <serverName>.<toolName> (example: butterbase.init_app).",
+			"param": true,
+			"tool": false,
 			"default": "butterbase",
 			"minLength": 1
 		}

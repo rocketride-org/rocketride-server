@@ -76,7 +76,7 @@ def _aql_safe(aql: str) -> bool:
 
 def _get_description(self: Any) -> str:
     """Build tool description, prepending db_description when configured."""
-    db_desc = (getattr(self.IGlobal, 'db_description', '') or '').strip()
+    db_desc = (self.settings.db_description or '').strip()
     prefix = f'{db_desc} ' if db_desc else ''
     return (
         f'{prefix}'
@@ -309,7 +309,7 @@ class IInstance(IInstanceBase):
         q.addContext(get_schema_prompt_text())
 
         # Inject optional data description from config
-        db_desc = (self.IGlobal.db_description or '').strip()
+        db_desc = (self.settings.db_description or '').strip()
         if db_desc:
             q.addContext(f'Data context: {db_desc}')
 
