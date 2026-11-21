@@ -43,6 +43,23 @@ from .framework.controls import assert_config_refuses, assert_params, control_co
 
 _RESPONSE = ['laneName']
 
+#: The scan_cropper scan types, each with its own detection branch.
+_SCANS = ('album', 'detail', 'loose', 'textured')
+
+#: Every check the custom guardrails profile exposes.
+_GUARDRAILS_CUSTOM = (
+    'policy_mode',
+    'enable_prompt_injection',
+    'enable_content_safety',
+    'enable_pii_detection',
+    'enable_hallucination_check',
+    'max_input_length',
+    'max_tokens_estimate',
+    'expected_format',
+    'blocked_topics',
+    'allowed_topics',
+)
+
 #: logical type -> (every param leaf path, the tool: false ones, the stored config the default view needs)
 SCHEMAS = {
     'tts_elevenlabs': (['model', 'voice'], [], {'apikey': 'k1'}),
@@ -96,6 +113,51 @@ SCHEMAS = {
         ['agent', 'resultMode', 'timeout', 'maxSessions', 'verifyTls'],
         ['maxSessions', 'verifyTls'],
         {'apiKeyId': 'k1', 'apiKeySecret': 'k2', 'owner': 'acme', 'workspace': 'ws'},
+    ),
+    'authoritative-overlay': (['regulator_type', 'cik'], ['regulator_type', 'cik'], {}),
+    'chunker': (
+        ['strategy', 'sentence.chunk_size', 'sentence.chunk_overlap']
+        + ['token.chunk_size', 'token.chunk_overlap', 'token.encoding_name'],
+        [],
+        {},
+    ),
+    'context_optimizer': (
+        ['mode', 'auto.model_name', 'manual.model_name', 'manual.max_context_tokens']
+        + ['system_prompt_budget_pct', 'query_budget_pct', 'document_budget_pct', 'history_budget_pct'],
+        [],
+        {},
+    ),
+    'normalize_facts': (
+        ['label_field', 'value_field', 'default_currency', 'decimal_format', 'label_to_metric'],
+        [],
+        {},
+    ),
+    'schema_validate': (
+        ['amount_field', 'currency_field', 'metric_field', 'category_field']
+        + ['category_metric_map', 'sign', 'require_provenance'],
+        ['require_provenance'],
+        {},
+    ),
+    'preprocessor_code': (['language'], [], {}),
+    'preprocessor_langchain': (
+        ['splitter', 'mode', 'strlen', 'tokens', 'CharacterTextSplitter.separator']
+        + ['RecursiveCharacterTextSplitter.separators', 'SpacyTextSplitter.model'],
+        ['SpacyTextSplitter.model'],
+        {},
+    ),
+    'scan_cropper': (
+        ['profile', 'deskew', 'quality', 'qualityTolerance', 'minArea', 'maxArea', 'maxAspect', 'skew']
+        + ['ratioTolerance']
+        + [f'{scan}.{key}' for scan in _SCANS for key in ('detectSize', 'texture', 'minRelative', 'maxDepth')],
+        [],
+        {},
+    ),
+    'guardrails': (
+        ['profile', 'basic.policy_mode', 'strict.policy_mode', 'strict.max_tokens_estimate', 'strict.expected_format']
+        + [f'custom.{key}' for key in _GUARDRAILS_CUSTOM],
+        ['profile', 'basic.policy_mode', 'strict.policy_mode', 'strict.max_tokens_estimate']
+        + [f'custom.{key}' for key in _GUARDRAILS_CUSTOM if key != 'expected_format'],
+        {},
     ),
     **{
         f'response_{lane}': (_RESPONSE, _RESPONSE, {})

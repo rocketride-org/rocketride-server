@@ -42,10 +42,23 @@ pre-seeded directory to run fully offline.
 """
 
 import re
-from typing import Any, ClassVar, Dict, List, Optional
+from typing import Any, ClassVar, Dict, List, NamedTuple, Optional
 
 from ai.common.utils import config_int
 from rocketlib import warning
+
+
+class ModelCatalog(NamedTuple):
+    """A snapshot of the engine's model context windows (see :meth:`ContextOptimizer.load_catalog`).
+
+    Attributes:
+        windows: Model id -> context window, from every registered schema that publishes one.
+        llm_class_floor: The smallest window a chat-LLM profile publishes, or None.
+    """
+
+    windows: Dict[str, int]
+    llm_class_floor: Optional[int]
+
 
 #: Absolute floor for the unknown-model budget. Only reached if *both* the live
 #: catalog and :attr:`MODEL_LIMITS` are empty; in practice the fallback is the
@@ -169,10 +182,13 @@ class ContextOptimizer:
     # Sentence boundary pattern: split after . ! ? followed by whitespace or end
     _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
-    def __init__(self, config: Dict[str, Any]) -> None:
+    def __init__(self, config: Dict[str, Any], catalog: Optional[ModelCatalog] = None) -> None:
         """Initialize the optimizer from a configuration dict.
 
         Args:
+            catalog: The model-window snapshot to budget against (the node's
+                control loads it once and every call shares it); None reads
+                the engine registry now.
             config: Dictionary with keys:
                 - model_name: str - model identifier for limit lookup (an id published
                   by one of the ``llm_*`` nodes, e.g. ``gpt-5.4``, ``claude-sonnet-4-6``);
@@ -186,7 +202,7 @@ class ContextOptimizer:
         """
         # Validate model_name: the schema declares a string, but nothing between
         # the pipeline JSON and here coerces one, and a null/number would blow up
-        # resolve_model_limit's rsplit() during beginGlobal.
+        # resolve_model_limit's rsplit() when the call begins.
         model_name = config.get('model_name', DEFAULT_MODEL_NAME)
         if not isinstance(model_name, str) or not model_name.strip():
             warning(f'context_optimizer: model_name is not a non-empty string, defaulting to {DEFAULT_MODEL_NAME!r}')
@@ -229,16 +245,16 @@ class ContextOptimizer:
 
         # Same idea for the "un-budgeted prompt sections alone fill the window"
         # warning: it is a property of the pipeline's questions, not of one
-        # question, so it is emitted once per optimizer (i.e. per pipeline run).
+        # question, so it is emitted once per optimizer (i.e. per call).
         self._warned_overhead_over_limit: bool = False
 
-        # Snapshot the live catalog for this optimizer's lifetime (one per
-        # pipeline start, via IGlobal.beginGlobal). Reading it here rather than
-        # caching it on the class means a reloaded engine registry is picked up
-        # by the next pipeline without a process restart.
-        definitions = self._engine_model_definitions()
-        self._catalog: Dict[str, int] = self._load_model_catalog(definitions)
-        self._llm_class_floor: Optional[int] = self._llm_class_min_window(definitions)
+        # The live catalog snapshot: the control's (one per pipeline start, via
+        # IGlobal.beginGlobal), else read now. Never cached on the class, so a
+        # reloaded engine registry is picked up by the next pipeline without a
+        # process restart.
+        catalog = catalog if catalog is not None else self.load_catalog()
+        self._catalog: Dict[str, int] = catalog.windows
+        self._llm_class_floor: Optional[int] = catalog.llm_class_floor
 
         # Resolve the effective token limit.  ``resolve_model_limit`` consults
         # the live catalog first, then MODEL_LIMITS, and warns once when
@@ -468,6 +484,16 @@ class ContextOptimizer:
             for limit in cls._load_model_catalog({logical_type: definition}).values()
         ]
         return min(windows) if windows else None
+
+    @classmethod
+    def load_catalog(cls) -> ModelCatalog:
+        """Snapshot the engine registry's model windows and the chat-LLM floor.
+
+        Returns:
+            The catalog every optimizer of one control budgets against.
+        """
+        definitions = cls._engine_model_definitions()
+        return ModelCatalog(cls._load_model_catalog(definitions), cls._llm_class_min_window(definitions))
 
     @classmethod
     def model_catalog(cls) -> Dict[str, int]:

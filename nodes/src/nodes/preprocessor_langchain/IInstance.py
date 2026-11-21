@@ -38,7 +38,7 @@ class IInstance(IInstanceBase):
         metadata = DocMetadata(self, isTable=isTable)
 
         # Chunk the document
-        textChunks = self.IGlobal.preprocessor.process(text)
+        textChunks = self.IGlobal.preprocessor_for(self.settings).process(text)
 
         # Create the documents
         documents: List[Doc] = []

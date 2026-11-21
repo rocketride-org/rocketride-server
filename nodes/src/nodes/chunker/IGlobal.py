@@ -24,51 +24,55 @@
 # ------------------------------------------------------------------------------
 # This class controls the data shared between all threads for the task
 # ------------------------------------------------------------------------------
+"""
+Global handler for the Text Chunker node.
+
+The strategy, the sizes and the token encoding are per-call parameters the
+instance reads from its settings and builds its own (cheap) strategy from.
+The control keeps only the tokenizers a call has asked for, keyed by encoding
+name: loading a tiktoken encoding reads its BPE ranks, so calls that share an
+encoding share it. The schema offers four encodings, which bounds the cache.
+"""
+
 import os
+import threading
 
 from rocketlib import IGlobalBase
 
-from .chunker_strategies import ChunkingStrategy, SentenceChunker, TokenChunker
-
 
 class IGlobal(IGlobalBase):
-    strategy: ChunkingStrategy | None = None
+    """IGlobal for the Text Chunker node: the tokenizer cache, keyed by encoding name."""
 
     def beginGlobal(self):
-        """Build the configured chunking strategy from the resolved config.
+        """Create the empty tokenizer cache and its lock."""
+        self._lock = threading.Lock()
+        self._encoders = {}
 
-        The resolver has applied the selected strategy's defaults and bounded
-        the sizes; the one cross-field rule (overlap below size) is checked here.
-
-        Raises:
-            ValueError: The overlap is not smaller than the chunk size.
+    def encoder_for(self, encoding_name: str):
         """
-        config = self.config
-        chunk_size = config.chunk_size
-        chunk_overlap = config.chunk_overlap
+        The tiktoken encoding of one name, loaded on first use.
 
-        if chunk_overlap >= chunk_size:
-            raise ValueError(f'chunk_overlap ({chunk_overlap}) must be less than chunk_size ({chunk_size})')
+        Args:
+            encoding_name: The call's tiktoken encoding name (one of the schema's options).
 
-        if config.strategy == 'token':
-            # The tokenizer is a run-path dependency: install it where it is used
-            from depends import depends  # type: ignore
+        Returns:
+            The ``tiktoken.Encoding``.
+        """
+        with self._lock:
+            encoder = self._encoders.get(encoding_name)
+            if encoder is None:
+                # The tokenizer is a run-path dependency: install it where it is first used
+                from depends import depends  # type: ignore
 
-            requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
-            depends(requirements)
+                depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
-            self.strategy = TokenChunker(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-                encoding_name=config.encoding_name,
-            )
-        else:
-            self.strategy = SentenceChunker(
-                chunk_size=chunk_size,
-                chunk_overlap=chunk_overlap,
-            )
+                import tiktoken
+
+                encoder = tiktoken.get_encoding(encoding_name)
+                self._encoders[encoding_name] = encoder
+            return encoder
 
     def endGlobal(self):
-        """Release the configured chunking strategy."""
-        # Release the strategy
-        self.strategy = None
+        """Release the cached tokenizers."""
+        self._encoders = None
+        self._lock = None

@@ -69,27 +69,15 @@
 		"text": ["documents"]
 	},
 	//
-	// Optional:
-	//		Local property definitions. The language is the selector (one value
-	//		per parser, no branch-specific settings); the chunk length is
-	//		shared and stored flat.
-	//
-	"propertyDefinitions": {
-		"code.splitter.strlen": {
-			"type": "integer",
-			"title": "Maximum string length",
-			"description": "Chunk length in characters. The splitter currently emits whole syntax nodes and does not divide them by this length.",
-			"default": 512,
-			"minimum": 1
-		}
-	},
-	//
 	// Required:
-	//		Defines the properties shown in the pipeline builder side panel, in order
+	//		Defines the properties shown in the pipeline builder side panel, in order.
+	//		The language is the one setting, a per-call parameter (one value per
+	//		parser, no branch-specific settings).
 	//
 	"properties": [
 		{
 			"name": "language",
+			"param": true,
 			"type": "string",
 			"title": "Language",
 			"description": "The parser used to split the source. Auto detect recognises the language from the source text itself and emits no chunks when it cannot tell.",
@@ -102,8 +90,7 @@
 				"javascript": { "title": "Javascript source" },
 				"typescript": { "title": "Typescript source" }
 			}
-		},
-		"code.splitter.strlen"
+		}
 	],
 	//
 	//	Test configuration for automated node testing
@@ -151,6 +138,6 @@
 				"strlen": 512
 			}
 		},
-		"dropped": []
+		"dropped": ["strlen"]
 	}
 }

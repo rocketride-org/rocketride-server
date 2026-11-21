@@ -21,25 +21,58 @@
 # SOFTWARE.
 # =============================================================================
 
-from rocketlib import IGlobalBase, debug
+"""
+Global handler for the Authoritative Overlay node.
+
+The regulator and the company CIK are per-call parameters the instance reads
+from its settings. The control keeps only a bounded cache of SEC submission
+metadata, one entry per CIK a call has asked about: fetching a company's
+submission index is a network round trip, so calls for the same CIK reuse it.
+"""
+
+import threading
+from collections import OrderedDict
+
+from rocketlib import IGlobalBase
+
+# ==== Constants ==================================================================
+
+#: The most companies whose submission metadata one control keeps; the least recently used goes first.
+MAX_COMPANIES = 8
 
 
 class IGlobal(IGlobalBase):
-    def __init__(self):
-        super().__init__()
-        self.regulator_type = 'sec'
-        self.cik = ''
-        self.sec_submission_cache = {}
+    """IGlobal for the Authoritative Overlay node: the per-CIK submission metadata cache."""
 
     def beginGlobal(self):
-        """Initialize the global authoritative overlay configuration."""
-        # The resolved config: defaults applied, every value validated
-        config = self.config
-        self.regulator_type = config.regulator_type.strip()
-        cik_raw = config.cik.strip()
-        # Zero-pad only after the emptiness check so a blank CIK stays falsy
-        # (zfill(10) on '' would become '0000000000' and skip query_sec's guard).
-        self.cik = cik_raw.zfill(10) if cik_raw else ''
-        # Reuse mutable SEC submission metadata only within this task run.
-        self.sec_submission_cache = {}
-        debug(f'Initialized Authoritative Overlay with regulator: {self.regulator_type}, CIK: {self.cik}')
+        """Create the empty submission cache and its lock."""
+        self._lock = threading.Lock()
+        self._submissions = OrderedDict()
+
+    def submission_cache_for(self, cik: str) -> dict:
+        """
+        The submission metadata cache of one company, created on first use.
+
+        Args:
+            cik: The company's zero-padded CIK.
+
+        Returns:
+            The dict ``query_sec`` fills with that company's submission index and shards.
+        """
+        with self._lock:
+            cache = self._submissions.get(cik)
+            if cache is not None:
+                self._submissions.move_to_end(cik)
+                return cache
+
+            # A new company: keep its cache, dropping the least recently used past the bound
+            cache = {}
+            self._submissions[cik] = cache
+            while len(self._submissions) > MAX_COMPANIES:
+                self._submissions.popitem(last=False)
+            return cache
+
+    def endGlobal(self):
+        """Drop every cached submission and the lock."""
+        self._submissions = None
+        self._lock = None

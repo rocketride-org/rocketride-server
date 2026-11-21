@@ -30,6 +30,7 @@
 	//
 	"propertyDefinitions": {
 		"normalize_facts.label_field": {
+			"param": true,
 			"type": "string",
 			"title": "Label field",
 			"description": "The fact field holding the free-text metric label (mapped to a standard metric name).",
@@ -38,6 +39,7 @@
 			"maxLength": 128
 		},
 		"normalize_facts.value_field": {
+			"param": true,
 			"type": "string",
 			"title": "Value field",
 			"description": "The fact field holding the raw numeric value to parse.",
@@ -46,6 +48,7 @@
 			"maxLength": 128
 		},
 		"normalize_facts.default_currency": {
+			"param": true,
 			"type": "string",
 			"title": "Default currency",
 			"description": "3-letter ISO 4217 code to tag when none is detected in the label or value (stored upper-case). Leave empty to keep facts untagged.",
@@ -54,6 +57,7 @@
 			"maxLength": 3
 		},
 		"normalize_facts.decimal_format": {
+			"param": true,
 			"type": "string",
 			"title": "Decimal format",
 			"description": "Number format. 'auto'/'us': comma = thousands separator, dot = decimal point. 'eu': dot = thousands separator, comma = decimal point.",
@@ -65,6 +69,7 @@
 			]
 		},
 		"normalize_facts.label_to_metric": {
+			"param": true,
 			"type": "object",
 			"title": "Label→metric overrides",
 			"description": "JSON map of {synonym: metric} merged over the built-in mapping (user entries win). Case-insensitive.",
