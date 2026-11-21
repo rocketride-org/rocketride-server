@@ -78,8 +78,9 @@ async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, proje
     Args:
         server: The DAP server (``broadcast_server_event`` provider).
         org_id: The org whose connections receive the event (the scope).
-        team_id: The mutated deployment's team ('' for registry-only
-            actions such as publish).
+        team_id: The mutated deployment's audience (plan 2.5; '' for
+            registry-only actions such as publish). It rides the event as
+            ``teamId``, the wire's name for it, and again as ``audience``.
         project_id: The mutated deployment's registry name.
         action: What changed ('publish', 'deploy', 'run', 'errored',
             a state name, ...) — advisory; receivers re-fetch either way.
@@ -99,7 +100,13 @@ async def broadcast_deploy_changed(server: Any, org_id: str, team_id: str, proje
             EVENT_TYPE.DEPLOY,
             {
                 'event': 'apaevt_deploy',
-                'body': {'orgId': org_id, 'teamId': team_id, 'projectId': project_id, 'action': action},
+                'body': {
+                    'orgId': org_id,
+                    'teamId': team_id,
+                    'audience': team_id,
+                    'projectId': project_id,
+                    'action': action,
+                },
             },
             org_id=org_id,
         )
@@ -124,7 +131,7 @@ async def release_deployment_holds(server: Any, org_id: str, team_id: str, proje
     Args:
         server: The DAP server (``release_deployment_holds`` provider).
         org_id: The deployment's org.
-        team_id: The deployment's team slot (``user~{uid}`` for a personal one).
+        team_id: The deployment's audience (``=user/<uid>``, ``=team/<tid>``, ``@public``).
         project_id: The deployed pipeline.
         action: The state change ('disabled', 'removed', ...).
     """

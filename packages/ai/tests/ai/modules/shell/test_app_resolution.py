@@ -70,7 +70,7 @@ HOME = {
 }
 
 # The pipe pin the published-rung resolver answers with.
-PIN = SimpleNamespace(version=4, deployment=SimpleNamespace(org_id='org-1', team_id='~public', project_id='acme.doc'))
+PIN = SimpleNamespace(version=4, deployment=SimpleNamespace(org_id='org-1', team_id='@public', project_id='acme.doc'))
 
 
 def _client(monkeypatch, apps=(HOME,), servable=(7,), pin=PIN, pipe_servable=(4,), files=None, capture=None):

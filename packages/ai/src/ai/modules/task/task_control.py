@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Tuple
 from rocketride.types.task import TASK_METRICS, TASK_STATUS_FLOW, TASK_TOKENS
 from rocketlib.config import ConfigError, _coerce, _type_error
 
+from ai.account.audience import compose_owner, parse_audience
 from ai.common import node_config
 from ai.common.parameters import resolve_call_params
 from ai.constants import CONST_SPEND_ALLOW_SECONDS
@@ -275,7 +276,7 @@ def rung_of(run_kind: str, owner_kind: str) -> str:
     Map a run classification to its rung.
 
     A dev run is ``spec``: the owner's control for the spec they sent. A
-    deployment run owned by a user (a ``user~`` team slot) is that user's
+    deployment run owned by a user (a ``=user/<uid>`` audience) is that user's
     personal deployment, ``me``; owned by a team it is ``team``. Deploy-rail
     runs (scheduled or manual) are ``team`` runs that keep their trigger.
 
@@ -364,13 +365,21 @@ class DeploymentRef:
 
     Attributes:
         org_id: The deployment's org.
-        team_id: The deployment's team slot (``user~{uid}`` for a personal one).
+        team_id: The deployment's audience (plan 2.5): ``=user/<uid>``,
+            ``=team/<tid>``, ``=org/<oid>`` or ``@public``. The field keeps
+            the name the wire gives it (``teamId``).
         project_id: The deployed pipeline's short id.
     """
 
     org_id: str
     team_id: str
     project_id: str
+
+    @property
+    def team(self) -> str:
+        """The team id of a team audience; ``''`` for every other audience."""
+        decoded = parse_audience(self.team_id)
+        return decoded.id if decoded.kind == 'team' else ''
 
 
 # ==== Store listing ============================================================
@@ -780,12 +789,22 @@ class TaskControl:
         publication and reports neither part.
 
         Returns:
-            ``(team_slot, version)``: the deployment's audience slot
-            (``user~{uid}``, a team id or ``~public``) or ``''``, and the
-            artifact version or None.
+            ``(audience, version)``: the deployment's audience
+            (``=user/<uid>``, ``=team/<tid>``, ``=org/<oid>`` or ``@public``)
+            or ``''``, and the artifact version or None.
         """
-        team = self.deployment.team_id if self.deployment is not None else ''
-        return team, self.version
+        return self.audience, self.version
+
+    @property
+    def audience(self) -> str:
+        """The audience of the publication this control serves through; ``''`` for a dev run."""
+        return self.deployment.team_id if self.deployment is not None else ''
+
+    @property
+    def owner(self) -> str:
+        """The owner string of this control (``=user/<uid>`` or ``=team/<tid>``); ``''`` when it has no owner id."""
+        owner_id = self.owner_id
+        return compose_owner(self.owner_type, owner_id) if owner_id else ''
 
     def caller_billing(self, account_info: Any) -> BillingAttribution:
         """

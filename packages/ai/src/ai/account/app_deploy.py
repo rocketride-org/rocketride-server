@@ -72,7 +72,9 @@ from rocketlib import debug
 
 from ai.account.base import InventoryUnavailableError
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
+from ai.account.models import team_id_of_name
 from ai.account.pipe_deploy import pipe_serving_block_of
+from ai.account.roots import KIND_ORG, format_root
 
 #: The artifact kinds that walk the store review ladder (plan S8): apps, and
 #: pipes since C.17; nodes join when the node rail publishes to the store.
@@ -201,10 +203,11 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
         )
     if target.startswith('@team/'):
         ref = target[len('@team/') :]
-        teams = _team_ids_of(conn)
-        if ref not in teams:
+        # An id compares exactly; a name ignoring case (plan 2.5)
+        team_id = ref if ref in set(_team_ids_of(conn).values()) else team_id_of_name(conn._account_info, ref)
+        if not team_id:
             raise ValueError(f'Unknown team: {ref!r} (you are not a member, or it does not exist)')
-        return _enrich_audience(conn, {'type': 'team', 'id': teams[ref]})
+        return _enrich_audience(conn, {'type': 'team', 'id': team_id})
     raise ValueError(f'Unknown publish target: {target!r} (use @me, @team/<name>, or @public)')
 
 
@@ -541,7 +544,7 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
     # convention the platform seeder uses for its bundle copies).
     # EVERYTHING goes through the Store interface — authority is carried by
     # the IDENTITY, not by which method was called: the internal identity
-    # passes resolve_scope's internal branch (id references, system trees
+    # passes resolve_scope's internal branch (id roots, system trees
     # included), the same pattern as the run-log writer.
     from ai.account.models import RequestContext
     from ai.account.store import Store
@@ -556,7 +559,7 @@ async def handle_app_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         org_prefix = f'orgs/{org_id}/files/'
         if not content_root.startswith(org_prefix):
             raise ValueError(f'registry entry carries no usable artifactPath ({content_root!r})')
-        home = f'@/Org/={org_id}/{content_root[len(org_prefix) :]}'
+        home = format_root(KIND_ORG, org_id, by_id=True, rest=content_root[len(org_prefix) :])
         path = f'{home}/bundle/{app_id}-v{version:06d}.zip'
         # Record BEFORE the write (same rule as the source loop below): a
         # bundle write that fails partway still leaves bytes on disk, and

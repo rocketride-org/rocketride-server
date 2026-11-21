@@ -109,20 +109,21 @@ export function isDevLiveEvent(event: unknown, projectId: string): boolean {
  * Membership test for a TEAM deployment's live-event feed.
  *
  * The deploy-scope twin of {@link isDevLiveEvent}: true when the event is a
- * stamped task event, belongs to the given project, and is THIS team's
- * deploy run (the stamped body carries the OWNER team for deploy runs).
+ * stamped task event, belongs to the given project, and is THIS deployment's
+ * run (the stamped body carries the audience of the publication the run
+ * serves through, the same string as the deployment row's `teamId`).
  * Hosts feed the deploy record panels from this filter.
  *
  * @param event - Raw event object from the server WebSocket.
  * @param projectId - The deployed project.
- * @param teamId - The deployment's owning team.
+ * @param teamId - The deployment row's `teamId` (its audience).
  * @returns True when the event belongs in the team's deploy live feed.
  */
 export function isTeamLiveEvent(event: unknown, projectId: string, teamId: string): boolean {
 	const msg = event as Record<string, any>;
 	const body = msg?.body;
 	if (!body) return false;
-	if (body.runKind !== 'deploy' || body.teamId !== teamId) return false;
+	if (body.runKind !== 'deploy' || body.audience !== teamId) return false;
 	if (!Number.isFinite(body.eventTime) || !Number.isFinite(body.logSeq)) return false;
 	return body.project_id === projectId;
 }

@@ -47,13 +47,13 @@ import { PIPELINE_PARTITION } from './types';
 import type { TaskEventMessage, TaskEventSession, TaskTimeline } from './panels/development/hooks/useTaskEvents';
 import { DeploymentRecordPanel, TeamDeploymentRecordPanel } from './panels/deploy';
 import type { DeploySnapshot } from './panels/deploy';
-import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions, toWireTeamId } from './deploy/deployOps';
+import { fetchDeployLifecycle as fetchLifecycleOp, fetchDeployment as fetchDeploymentOp, deploymentActions } from './deploy/deployOps';
 import { createLatestGate } from '../../utils/latestGate';
 import { createBusAppBuilderHost } from '../appdev/busHost';
 import { isShortId } from './panels/package/requirements';
 import type { IReviewHost } from '../appdev/views/builder/panels/review/ReviewView';
 import type { DeployTeamRefDTO, TeamDeploymentRowDTO, DeploymentLoadPayload, SchedulePreviewResultDTO } from './deploy/deployTypes';
-import { defaultStoreBlock, registryIdOf, teamNameOf } from 'rocketride';
+import { defaultStoreBlock, registryIdOf } from 'rocketride';
 
 // =============================================================================
 // CONSTANTS
@@ -482,11 +482,11 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 			// lifecycle events schedule a coalesced record re-fetch, and the
 			// team's stamped events feed the record's live report cards.
 			const open = openDeploymentRef.current;
-			const ev = raw as { event?: string; body?: { projectId?: string; teamId?: string; action?: string; runKind?: string } };
+			const ev = raw as { event?: string; body?: { projectId?: string; teamId?: string; audience?: string; action?: string; runKind?: string } };
 			if (open) {
 				if (ev.event === 'apaevt_deploy' && ev.body && ev.body.projectId === registryIdOf(pid, developerId) && (ev.body.teamId === open.teamId || ev.body.action === 'publish')) {
 					scheduleDeploymentRefetch();
-				} else if (ev.event === 'apaevt_task' && ev.body?.runKind === 'deploy' && ev.body.teamId === open.teamId) {
+				} else if (ev.event === 'apaevt_task' && ev.body?.runKind === 'deploy' && ev.body.audience === open.teamId) {
 					scheduleDeploymentRefetch();
 				}
 				if (isTeamLiveEvent(raw, pid, open.teamId)) {
@@ -742,7 +742,8 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 	const openTeamId = openDeployment?.teamId;
 	useEffect(() => {
 		if (!openTeamId) return;
-		const key = { projectId: projectIdRef.current, source: '*', teamId: toWireTeamId(openTeamId) };
+		// The row's teamId (its audience) addresses the deploy run's scope as is
+		const key = { projectId: projectIdRef.current, source: '*', teamId: openTeamId };
 		let armed = false;
 		const client = ConnectionManager.getInstance().getClient();
 		void client?.addMonitor(key, ['task']).then(() => {
@@ -970,7 +971,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 					key={`team:${openDeployment.teamId}`}
 					open
 					onClose={() => setOpenDeployment(null)}
-					fallbackTitle={`${teamNameOf(deployTeams, openDeployment.teamId, ConnectionManager.getInstance().getAccountInfo()?.userId ?? '')} / ${projectId}`}
+					fallbackTitle={`${teamDeployments.find((row) => row.teamId === openDeployment.teamId)?.teamName ?? openDeployment.teamId} / ${projectId}`}
 					{...(deploymentError ? { loadError: deploymentError } : {})}
 					{...(deploymentData
 						? {
@@ -1017,7 +1018,7 @@ export const PipelineEditor: React.FC<IPipelineEditorProps> = ({ project, host }
 					key={`${openDeployment.teamId}:${openDeployment.sourceId}`}
 					open
 					onClose={() => setOpenDeployment(null)}
-					fallbackTitle={`${teamNameOf(deployTeams, openDeployment.teamId, ConnectionManager.getInstance().getAccountInfo()?.userId ?? '')} / ${projectId}`}
+					fallbackTitle={`${teamDeployments.find((row) => row.teamId === openDeployment.teamId)?.teamName ?? openDeployment.teamId} / ${projectId}`}
 					{...(deploymentError ? { loadError: deploymentError } : {})}
 					{...(deploymentData
 						? {

@@ -69,6 +69,7 @@ from ai.constants import (
     CONST_LOG_KF_OPEN_CEILING,
 )
 
+from ai.account.roots import KIND_TEAM, format_root
 from ai.account.store import StorageNotFoundError
 
 if TYPE_CHECKING:
@@ -159,8 +160,8 @@ def scope_paths(run_kind: str, client_id: str, team_id: str) -> 'tuple[str, str]
 
     Dev runs live in the OWNER's user tree ('' prefix: the FileStore's
     client anchor). Deploy runs live in the TEAM tree so teammates can
-    watch/replay — the prefix is the internal-identity scope grammar
-    ('@/Team/=<id>/'), resolved by the store to teams/<id>/files/.
+    watch/replay — the prefix is the team's id root ('=team/<tid>/',
+    plan 2.5), resolved by the store to teams/<id>/files/.
 
     The scope id qualifies SPOOL filenames and the writer registry so the
     same stream name in two scopes (Staging vs Production deploying one
@@ -180,13 +181,11 @@ def scope_paths(run_kind: str, client_id: str, team_id: str) -> 'tuple[str, str]
         # stream name and store path.
         if not team_id:
             return ('', client_id)
-        # team_id is embedded into the store's id-reference grammar below —
-        # reject anything that could escape the '=<id>' segment (same rule
-        # the deployment backend applies to path-segment ids). Upstream
-        # callers validate membership, so this is defense in depth.
-        if '/' in team_id or '\\' in team_id or team_id in ('.', '..') or team_id.startswith(('@', '=', '.')):
-            raise ValueError(f'team_id contains invalid characters: {team_id!r}')
-        return (f'@/Team/={team_id}/', team_id)
+        # The root is composed by the one writer of the grammar, which
+        # refuses an id that could escape its segment (RootError is a
+        # ValueError). Upstream callers validate membership, so this is
+        # defense in depth.
+        return (format_root(KIND_TEAM, team_id, by_id=True) + '/', team_id)
     return ('', client_id)
 
 

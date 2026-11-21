@@ -53,6 +53,7 @@ from typing import Any, Dict, List, Optional
 from rocketlib import debug
 
 from ai.account.deployment_backend import artifact_content_dir
+from ai.account.roots import KIND_ORG, format_root
 
 # ==== Limits ==================================================================
 
@@ -304,7 +305,7 @@ def is_listed(manifest: Any) -> bool:
 
 
 def store_home_of(org_id: str, entry: Dict[str, Any]) -> str:
-    """The Store path of a pipe version's serving dir (``@/Org/=<org>/.../store``).
+    """The Store path of a pipe version's serving dir (``=org/<oid>/.../store``).
 
     Raises:
         ValueError: The entry carries no usable artifact path.
@@ -313,7 +314,7 @@ def store_home_of(org_id: str, entry: Dict[str, Any]) -> str:
     org_prefix = f'orgs/{org_id}/files/'
     if not content_root.startswith(org_prefix):
         raise ValueError(f'registry entry carries no usable artifactPath ({content_root!r})')
-    return f'@/Org/={org_id}/{content_root[len(org_prefix) :]}/{PIPE_STORE_DIR}'
+    return format_root(KIND_ORG, org_id, by_id=True, rest=f'{content_root[len(org_prefix) :]}/{PIPE_STORE_DIR}')
 
 
 async def write_pipe_content(

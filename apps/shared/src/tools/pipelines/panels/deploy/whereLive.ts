@@ -12,8 +12,8 @@
  *   org admin sees them), the teams in the caller's roster order, then the
  *   store (@public). A removed publication has no row.
  * - A row names its rung by label and handle: 'Me @me', 'Staging
- *   @team/Staging', 'Store @public'. A version card's audience chips use
- *   the same labels.
+ *   @Staging', 'Store @public'. The handle is the server's, shown as it
+ *   came; a version card's audience chips use the same labels.
  * - Every rung's sources take a schedule (decided 2026-11-20): any
  *   publication of a pipe can run on a timer, billed to the team stamped
  *   when it was published.
@@ -23,9 +23,11 @@
  *   it serves now, then the store; the audience already on the version is
  *   not choosable, and the store opens only on an approved version (a
  *   pipe's store needs 'ready' on every server; without a reviewer every
- *   deployed version is born 'ready'). Personal rows carry the raw slot
- *   `user~{uid}` and the store row `~public`, while the dialog addresses
- *   them '@me' and '@public', so audiences match rows by rung.
+ *   deployed version is born 'ready'). Rows carry their audience as the
+ *   server composed it (`=user/<uid>`, `=team/<tid>`, `@public`) and the
+ *   roster's team ids are the same strings, while the dialog addresses the
+ *   caller's own space '@me': the caller's own row and the store's match
+ *   by rung, a team's by its audience.
  */
 
 import { STORE_TARGET_ID, storeTargetOf } from 'shared/components/deploy/reviewRules';
@@ -42,7 +44,7 @@ export interface IWhereLiveRung {
 	row: TeamDeploymentRow;
 	/** The rung's label: 'Me', the team's name, 'Store' (another user's space keeps its row name). */
 	label: string;
-	/** The rung's handle: '@me', '@team/<name>', '@public'; '' for another user's space. */
+	/** The rung's handle as the server composed it ('@me', '@<team>', '@public', '=team/<tid>'); '' for another user's space. */
 	handle: string;
 }
 
@@ -77,12 +79,14 @@ function labelOf(row: TeamDeploymentRow): string {
 	return row.teamName;
 }
 
-/** The rung's handle ('@me', '@team/<name>', '@public'; none for another user's space). */
+/**
+ * The rung's handle: the row's own, as the server composed it for the
+ * caller ('@me', '@<team>', '@public', '=team/<tid>' for a team the caller
+ * cannot name). Another user's space shows none: its label already says
+ * 'Personal'.
+ */
 function handleOf(row: TeamDeploymentRow): string {
-	if (row.rung === 'me') return '@me';
-	if (row.rung === 'public') return '@public';
-	if (row.rung === 'team') return `@team/${row.teamName}`;
-	return '';
+	return row.rung === 'personal' ? '' : row.handle;
 }
 
 /**
@@ -107,7 +111,7 @@ export function whereLiveRungsOf(rows: readonly TeamDeploymentRow[], teams: read
  * The publication an audience points at now.
  *
  * @param rows - This project's publication rows.
- * @param targetId - The audience as the dialog names it: '@me', '@public', or a team id.
+ * @param targetId - The audience as the dialog names it: '@me', '@public', or a team's audience.
  * @returns The live row, or undefined when the audience has none.
  */
 export function rowOfTarget(rows: readonly TeamDeploymentRow[], targetId: string): TeamDeploymentRow | undefined {

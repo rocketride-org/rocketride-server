@@ -100,7 +100,18 @@ export interface DeploymentSchedule {
 
 /** One team's deployment of a project, joined with registry info. */
 export interface Deployment {
+	/** The publication's audience, composed by the server: `=user/<uid>`,
+	    `=team/<tid>`, `=org/<oid>` or `@public` (the same string as `audience`;
+	    the wire keeps this name). Pass it back unchanged; never parse it. */
 	teamId?: string;
+	/** The publication's audience (same value as `teamId`). */
+	audience?: string;
+	/** The rung as the reader sees it: `me` (their own personal space),
+	    `personal` (another user's), `team`, `org` or `public`. */
+	rung?: 'me' | 'personal' | 'team' | 'org' | 'public';
+	/** What to show for the audience: `@me`, `@<team>`, `@org`, `@public`,
+	    `=team/<tid>` for a team the reader cannot name, or `Personal`. */
+	handle?: string;
 	projectId?: string;
 	/** The registry version this team currently points at. */
 	version?: number;
@@ -140,8 +151,13 @@ export interface DeployHistoryEntry {
 	    v1.3 floor wrote it (widening a returned union would break floor
 	    assignability); compare raw strings for the app-rail extras. */
 	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
-	/** `''` on org-wide rows (publish); the team id on pointer changes. */
+	/** `''` on org-wide rows (publish); the audience on pointer changes. */
 	teamId?: string;
+	/** On pointer changes: the audience, the reader's rung and the handle to
+	    show, exactly as on a `Deployment` row. */
+	audience?: string;
+	rung?: 'me' | 'personal' | 'team' | 'org' | 'public';
+	handle?: string;
 	version?: number;
 	actor?: DeployActor;
 	/** Row payload — self-describing by contract (rows render without a

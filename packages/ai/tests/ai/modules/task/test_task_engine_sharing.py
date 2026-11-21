@@ -58,6 +58,7 @@ import pytest
 import rocketlib
 from rocketride import EVENT_TYPE
 
+from ai.account.audience import audience_fields
 from ai.account.models import AccountInfo
 from ai.common import node_config
 from ai.constants import CONST_DEFAULT_MAX_THREADS, CONST_ENGINE_IDLE_TTL
@@ -565,7 +566,7 @@ async def _publish(ts, pipeline, *, user, rung='public', team='team-1', org='org
         owner_kind='user',
         rung=rung,
         developer_id='acme',
-        deployment=DeploymentRef(org_id=org, team_id=f'user~{user}', project_id=pipeline['project_id']),
+        deployment=DeploymentRef(org_id=org, team_id=f'=user/{user}', project_id=pipeline['project_id']),
     )
     return ts._task_control[result['token']]
 
@@ -1191,7 +1192,7 @@ def serving(monkeypatch):
 async def test_a_request_on_a_dormant_control_restarts_the_engine_under_the_same_key(catalog, engines, clock, serving):
     """No error, no re-resolve: the request starts a new engine of the same key and the control follows it."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    deployment = DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='docBrain')
     control = await _start(
         ts, _pipeline(), user='', run_kind='deploy', owner_kind='team', deployment=deployment, ttl=3600
     )
@@ -1561,10 +1562,10 @@ async def test_publisher_disable_releases_the_deployment_holds(catalog, engines)
     assert other.task is deployed.task and deployed.rung == 'me'
 
     # Enabling releases nothing
-    await deploy_events.release_deployment_holds(ts, 'org-1', 'user~user-a', 'docBrain', 'enabled')
+    await deploy_events.release_deployment_holds(ts, 'org-1', '=user/user-a', 'docBrain', 'enabled')
     assert deployed.key in ts._task_control
 
-    await deploy_events.release_deployment_holds(ts, 'org-1', 'user~user-a', 'docBrain', 'disabled')
+    await deploy_events.release_deployment_holds(ts, 'org-1', '=user/user-a', 'docBrain', 'disabled')
     assert deployed.key not in ts._task_control
     assert ts._task_control[other.key] is other
     assert other.task.holds == {other.key}
@@ -1575,11 +1576,11 @@ async def test_publisher_disable_releases_the_deployment_holds(catalog, engines)
 async def test_publisher_remove_stops_an_engine_only_the_deployment_held(catalog, engines):
     """With no other holder the kill switch stops the engine: no back door."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    deployment = DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='docBrain')
     run = await _start(ts, _pipeline(), user='', run_kind='deploy', owner_kind='team', deployment=deployment)
     engine = run.task
 
-    await deploy_events.release_deployment_holds(ts, 'org-1', 'team-1', 'docBrain', 'removed')
+    await deploy_events.release_deployment_holds(ts, 'org-1', '=team/team-1', 'docBrain', 'removed')
 
     assert ts._task_control == {}
     assert engines == [(engine, 'unpublished')]
@@ -1590,7 +1591,7 @@ async def test_publisher_remove_stops_an_engine_only_the_deployment_held(catalog
 async def test_a_deployment_revoked_while_its_run_started_is_never_registered(catalog, engines):
     """The dispatch read the deployment enabled, then it was disabled while the artifact loaded: refused."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    deployment = DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='docBrain')
     state_epoch = time.monotonic()
     await asyncio.sleep(0.05)  # the artifact loads (a monotonic tick is 15 ms on Windows)
     await ts.release_deployment_holds(deployment)  # the disable lands after the state read
@@ -1623,7 +1624,7 @@ async def test_a_deployment_revoked_while_its_run_started_is_never_registered(ca
 async def test_a_hold_the_release_pass_could_not_drop_is_refused_on_its_next_request(catalog, engines, monkeypatch):
     """One failed remove never leaves a disabled deployment serving: the pass goes on, reports, and the resolver refuses."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    deployment = DeploymentRef(org_id='org-1', team_id='=user/user-a', project_id='docBrain')
     first = await _start(ts, _pipeline(), run_kind='deploy', owner_kind='user', deployment=deployment)
     second = await _start(
         ts, _pipeline(), run_kind='deploy', owner_kind='user', deployment=deployment, token='docBrain2'
@@ -1778,7 +1779,7 @@ async def test_a_restart_refuses_a_foreign_control_id(catalog, engines):
 async def test_a_restart_carries_the_predecessors_deployment_epoch(catalog, engines):
     """A deployment revoked since the predecessor registered refuses the successor; the predecessor is not restored."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='docBrain')
+    deployment = DeploymentRef(org_id='org-1', team_id='=user/user-a', project_id='docBrain')
     run = await _start(ts, _pipeline(), user='user-a', run_kind='deploy', owner_kind='user', deployment=deployment)
     old_engine = run.task
     resolve_env = ts._resolve_control_env
@@ -1955,12 +1956,12 @@ async def test_the_hosted_policy_holds_for_a_control_attaching_to_a_warm_engine(
 async def test_the_deployment_index_names_the_kill_switch_targets(catalog, engines):
     """for_deployment lists the controls that resolved through a deployment; a removed control leaves it."""
     ts = _server()
-    deployment = DeploymentRef(org_id='org-1', team_id='team-1', project_id='docBrain')
+    deployment = DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='docBrain')
     run = await _start(ts, _pipeline(), user='', run_kind='deploy', owner_kind='team', deployment=deployment)
     dev = await _start(ts, _pipeline(), user='user-a')
 
     assert ts._task_control.for_deployment(deployment) == [run]
-    assert ts._task_control.for_deployment(DeploymentRef(org_id='org-1', team_id='team-2', project_id='x')) == []
+    assert ts._task_control.for_deployment(DeploymentRef(org_id='org-1', team_id='=team/team-2', project_id='x')) == []
     assert dev.deployment is None
 
     await ts.remove_task(run.key)
@@ -2271,8 +2272,9 @@ ADDRESS = 'acme.docBrain.webhook_1'
 
 class _Deployments:
     """
-    The account's deployment surface, in memory: deployments by slot, review
-    states, public publications, artifacts and developer ids.
+    The account's deployment surface, in memory: deployments by audience
+    (``=user/<uid>``, ``=team/<tid>``), review states, public publications,
+    artifacts and developer ids.
     """
 
     def __init__(self) -> None:
@@ -2336,10 +2338,7 @@ class _Deployments:
         for (org, slot, project), dep in self.deployments.items():
             if (org, project) != (org_id, app_id):
                 continue
-            if slot.startswith('user~'):
-                audience = {'type': 'user', 'id': slot[len('user~') :]}
-            else:
-                audience = {'type': 'team', 'id': slot}
+            audience = audience_fields(slot)
             rows.append(
                 {
                     'kind': 'pipe',
@@ -2403,7 +2402,7 @@ def _caller(
 async def test_play_creates_the_dev_control_and_a_name_call_attaches_to_it(catalog, engines, deployments):
     """@spec is attach-only: a name finds the caller's Play'd control and starts nothing."""
     ts = _server()
-    deployments.deploy('user~user-a', billing='team-1')
+    deployments.deploy('=user/user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
 
     resolved = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
@@ -2416,7 +2415,7 @@ async def test_play_creates_the_dev_control_and_a_name_call_attaches_to_it(catal
 async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog, engines, deployments):
     """Stop means gone: the name falls through to @me, which starts from the artifact with trigger='submit'."""
     ts = _server()
-    deployments.deploy('user~user-a', billing='team-1')
+    deployments.deploy('=user/user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
     await ts.stop_task(played.key)
 
@@ -2425,7 +2424,7 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
     assert control.rung == 'me' and control.index_key == f'me.user-a.{ADDRESS}'
     assert (control.run_kind, control.owner_kind, control.owner_id) == ('deploy', 'user', 'user-a')
     assert control.trigger == 'submit'
-    assert control.deployment == DeploymentRef(org_id='org-1', team_id='user~user-a', project_id='acme.docBrain')
+    assert control.deployment == DeploymentRef(org_id='org-1', team_id='=user/user-a', project_id='acme.docBrain')
     assert control.teamId == 'team-1' and control.engine_state == 'running'
 
     # The next name call attaches to it
@@ -2436,13 +2435,13 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
 async def test_without_a_personal_deployment_the_team_answers(catalog, engines, deployments):
     """@team: the deployment of the caller's team, owned by that team."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
 
     control = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
 
     assert control.rung == 'team' and control.index_key == f'team.team-1.{ADDRESS}'
     assert (control.owner_kind, control.owner_id) == ('team', 'team-1')
-    assert control.deployment == DeploymentRef(org_id='org-1', team_id='team-1', project_id='acme.docBrain')
+    assert control.deployment == DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='acme.docBrain')
 
     # A teammate resolves the same team control through the owner index
     assert ts.resolve_control(ADDRESS, _caller('user-b'), 'task.data') is control
@@ -2452,7 +2451,7 @@ async def test_without_a_personal_deployment_the_team_answers(catalog, engines, 
 async def test_a_non_owner_falls_past_the_owners_play_to_the_publication(catalog, engines, deployments):
     """Nobody can name another user's control: user-b reaches the team publication, not user-a's @spec."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
     played = await _start(ts, _pipeline(), user='user-a')
 
     control = await ts.resolve_or_start(ADDRESS, _caller('user-b'), 'task.data')
@@ -2475,7 +2474,7 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
     assert control.address == ADDRESS
     assert (control.owner_kind, control.owner_id, control.userId) == ('user', 'user-z', 'user-z')
     assert (control.orgId, control.teamId) == ('org-2', 'team-z')
-    assert control.deployment == DeploymentRef(org_id='org-1', team_id='~public', project_id='acme.docBrain')
+    assert control.deployment == DeploymentRef(org_id='org-1', team_id='@public', project_id='acme.docBrain')
     assert control.trigger == 'submit'
     assert ts.resolve_control(ADDRESS, stranger, 'task.data') is control
 
@@ -2500,7 +2499,7 @@ async def test_public_needs_ready_and_an_enabled_binding(catalog, engines, deplo
 async def test_a_scoped_key_skips_dev_and_starts_at_me(catalog, engines, deployments):
     """A production webhook key never lands on the owner's Play'd run (@spec is skipped)."""
     ts = _server()
-    deployments.deploy('user~user-a', billing='team-1')
+    deployments.deploy('=user/user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
     scoped = _caller('user-a', endpoints=[ADDRESS])
 
@@ -2537,10 +2536,10 @@ def _order(first, *, endpoints=None, teams=('staging', 'production')):
 
 def _two_environments(deployments):
     """Publish docBrain to Staging v5 and Production v4, and otherPipe to Production v4 only."""
-    deployments.deploy('staging', version=5, billing='staging', pipeline=_pipeline(instructions=['v5']))
-    deployments.deploy('production', version=4, billing='production', pipeline=_pipeline(instructions=['v4']))
+    deployments.deploy('=team/staging', version=5, billing='staging', pipeline=_pipeline(instructions=['v5']))
+    deployments.deploy('=team/production', version=4, billing='production', pipeline=_pipeline(instructions=['v4']))
     deployments.deploy(
-        'production',
+        '=team/production',
         version=4,
         billing='production',
         project='otherPipe',
@@ -2559,7 +2558,7 @@ async def test_team_order_answers_from_the_first_team_holding_the_name(catalog, 
 
     assert (both.rung, both.owner_id, both.version) == ('team', 'staging', 5)
     assert (only.rung, only.owner_id, only.version) == ('team', 'production', 4)
-    assert both.deployment.team_id == 'staging'
+    assert both.deployment.team_id == '=team/staging'
 
 
 @pytest.mark.asyncio
@@ -2637,7 +2636,7 @@ async def test_a_two_segment_address_with_several_live_sources_needs_a_source(ca
 async def test_a_two_segment_name_starts_the_artifacts_default_source(catalog, engines, deployments):
     """With nothing live, a two-segment name starts the pinned artifact's default source."""
     ts = _server()
-    deployments.deploy('team-1')
+    deployments.deploy('=team/team-1')
 
     control = await ts.resolve_or_start('acme.docBrain', _caller('user-a'), 'task.data')
 

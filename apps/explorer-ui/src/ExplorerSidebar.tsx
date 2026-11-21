@@ -347,7 +347,10 @@ async function listRecursive(
 	const entries: ExplorerEntry[] = [];
 
 	for (const item of result.entries ?? []) {
-		const path = dir ? `${dir}/${item.name}` : item.name;
+		// The '@' listing names each root by its whole spelling ('@me',
+		// '@<team>', '@org'; plan 2.5): a root is the first part of a path,
+		// never a child joined under '@'
+		const path = dir && dir !== '@' ? `${dir}/${item.name}` : item.name;
 		entries.push({ path, type: item.type ?? 'file' });
 
 		if (item.type === 'dir') {

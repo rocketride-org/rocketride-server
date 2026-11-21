@@ -33,7 +33,8 @@ task lifecycle.
 """
 
 from typing import TYPE_CHECKING, Dict, Any
-from ai.account.file_store import SYSTEM_TREES, normalize_path
+from ai.account.file_store import SYSTEM_TREES, normalize_path, parse_scope
+from ai.account.roots import KIND_ME, KIND_ORG, KIND_TEAM, RootError, format_root
 from ai.common.dap import DAPConn, TransportBase
 
 if TYPE_CHECKING:
@@ -111,8 +112,9 @@ class StoreCommands(DAPConn):
             # Every path resolution inside the identity-bound FileStore
             # enforces the policy-required permission for the addressed scope
             # (plain paths are the caller's OWN storage tree, authorized by
-            # ownership alone; @/Team/@/Org paths check the addressed
-            # team/org; reserved subtrees like .logs apply their own rules).
+            # ownership alone; @<team>/, =team/<tid>/ and @org/ paths check
+            # the addressed team/org; reserved subtrees like .logs apply their
+            # own rules).
 
             # Extract subcommand
             args = request.get('arguments', {})
@@ -142,7 +144,7 @@ class StoreCommands(DAPConn):
         Returns:
             FileStore whose every path resolution authorizes against THIS
             session (plain paths under the user's namespace as before; the
-            @/Team|@/Org grammar against the addressed scope's permissions).
+            team and org roots against the addressed scope's permissions).
         """
         from ai.account import Store
 
@@ -426,72 +428,65 @@ class StoreCommands(DAPConn):
         return self.build_response(request)
 
     def _virtual_scope_mounts(self) -> list:
-        """The '@' listing: the joined filesystem's scope mounts.
+        """The '@' listing: one entry per root the caller can open (plan 2.5).
 
-        `User/` and `Team/` always appear; `Org/` only for org.admin (or
-        sys.admin) holders — org storage is admin-only, a dead entry would
-        just confuse. Entry names compose by ordinary path joining
-        ('@' + '/' + 'Team' -> '@/Team'). Entries are VIRTUAL — synthesized
-        from the session, never from a physical listing (which would leak
-        other orgs' scopes).
+        ``@me`` always; one ``@<team>`` per team of the caller's membership
+        (the display name, with the id in the entry body); ``@org`` only for
+        org.admin (or sys.admin) holders — org storage is admin-only, a dead
+        entry would just confuse. Each entry's name IS its path: a root is
+        the first part of a path, so a client opens the entry by its name and
+        never joins it under '@'. An ``=`` root is never listed. Entries are
+        VIRTUAL — synthesized from the session, never from a physical listing
+        (which would leak other orgs' scopes).
         """
         org = getattr(self._account_info, 'organization', None) or {}
         sys_perms = getattr(self._account_info, 'sysPermissions', None) or []
-        entries = [
-            {'name': 'User', 'type': 'dir', 'virtual': True},
-            {'name': 'Team', 'type': 'dir', 'virtual': True},
-        ]
+        entries = [{'name': format_root(KIND_ME), 'type': 'dir', 'virtual': True}]
+        for row in org.get('teams') or []:
+            if not row.get('id'):
+                continue
+            # A team whose name the grammar cannot carry has no @ spelling;
+            # it stays reachable by id and is not listed
+            try:
+                name = format_root(KIND_TEAM, row.get('name') or '')
+            except RootError:
+                continue
+            entries.append({'name': name, 'type': 'dir', 'id': row['id'], 'virtual': True})
         if 'org.admin' in (org.get('permissions') or []) or 'sys.admin' in sys_perms:
-            entries.append({'name': 'Org', 'type': 'dir', 'virtual': True})
+            entries.append({'name': format_root(KIND_ORG), 'type': 'dir', 'virtual': True})
         return entries
 
-    def _list_scope_mount(self, mount: str) -> Dict[str, Any]:
-        """Directory listing for the virtual mounts ('@' and '@/Team').
+    def _list_scope_mount(self) -> Dict[str, Any]:
+        """Directory listing for the virtual mount '@': the roots themselves.
 
-        '@' lists the scope mounts themselves; '@/Team' lists the caller's
-        teams by DISPLAY NAME with the id in the entry body, so the file
-        browser can show names while scripts address ids. ('@/User' and
-        '@/Org' are REAL trees — the store lists them.)
+        Every root's tree (``@me``, ``@<team>``, ``@org``) is a REAL tree —
+        the store lists it.
         """
-        if mount == '@':
-            entries = self._virtual_scope_mounts()
-            return {'entries': entries, 'count': len(entries)}
-        org = getattr(self._account_info, 'organization', None) or {}
-        entries = [
-            {'name': row.get('name') or row['id'], 'type': 'dir', 'id': row['id'], 'virtual': True}
-            for row in (org.get('teams') or [])
-            if row.get('id')
-        ]
+        entries = self._virtual_scope_mounts()
         return {'entries': entries, 'count': len(entries)}
 
     @staticmethod
     def _is_scope_root(path: str) -> bool:
-        """True when ``path`` lists the TOP of a user/team/org tree.
+        """True when ``path`` (NORMALIZED) lists the TOP of a user/team/org tree.
 
         Scope roots are where the system trees live and where reserved
-        names get filtered: '' and '@/User' (own root), '@/Org' (own org
-        root), '@/Team/<ref>' (a team root), and the cross-boundary
-        '@/User/=<uid>' / '@/Org/=<oid>' spellings.
+        names get filtered: '' and '@me' (own root), '@org' and '=org/<oid>'
+        (an org root), '@<team>' and '=team/<tid>' (a team root), and the
+        support spelling '=user/<uid>'. The decision is the store's own
+        parser's, so the filter and the resolver can never disagree.
         """
-        if not path:
-            return True
-        segments = path.split('/')
-        if segments[0] != '@' or len(segments) < 2:
-            return False
-        if segments[1] in ('User', 'Org'):
-            return len(segments) == 2 or (len(segments) == 3 and segments[2].startswith('='))
-        return segments[1] == 'Team' and len(segments) == 3
+        return not parse_scope(path).rest
 
     async def _store_fs_list_dir(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """
         List directory contents of the joined filesystem.
 
         Plain paths list the caller's own tree (simple mode). '@' lists the
-        scope mounts and '@/Team' the caller's memberships — both virtual.
-        Everything else ('@/User/...', '@/Team/<ref>/...', '@/Org/...') is
-        a real store listing. Scope-root listings hide the system trees
-        from non-sys.admin callers and drop reserved '@'/'='-prefixed
-        physical names (unaddressable legacy artifacts).
+        roots the caller can open — virtual. Everything else ('@me/...',
+        '@<team>/...', '=team/<tid>/...', '@org/...') is a real store
+        listing. Scope-root listings hide the system trees from
+        non-sys.admin callers and drop reserved '@'/'='-prefixed physical
+        names (unaddressable artifacts from before the grammar).
 
         Args:
             request: Original DAP request.
@@ -502,13 +497,13 @@ class StoreCommands(DAPConn):
         """
         # ONE normalization (the store's own) drives BOTH the scope-root
         # filter decision and the store resolution below — deciding on a raw
-        # spelling while resolving the normalized one would let '@//User'-
+        # spelling while resolving the normalized one would let '@me//'-
         # style paths reach the user root with the system trees unfiltered.
         path = normalize_path(args.get('path', '') or '')
 
-        # The virtual mounts list from the session, not storage.
-        if path in ('@', '@/Team'):
-            return self.build_response(request, body=self._list_scope_mount(path))
+        # The virtual mount lists from the session, not storage.
+        if path == '@':
+            return self.build_response(request, body=self._list_scope_mount())
 
         result = await self._get_file_store().list_dir(path)
 
@@ -577,15 +572,15 @@ class StoreCommands(DAPConn):
         Returns:
             DAP response with metadata (size, modified time, type, etc.).
         """
-        # The scope mounts stat as directories: '@' and '@/Team' have no
-        # physical existence at all, and '@/User'/'@/Org' roots always
-        # exist conceptually (access control applies on ENTRY, not on the
-        # mount). Same rule as _store_fs_list_dir: ONE normalization (the
-        # store's own) drives BOTH the mount decision and the store
-        # resolution below — and it rejects traversal outright instead of
-        # letting a raw spelling slide through to the resolver.
+        # The mount and the roots stat as directories: '@' has no physical
+        # existence at all, and '@me' and '@org' always exist conceptually
+        # (access control applies on ENTRY, not on the root). Same rule as
+        # _store_fs_list_dir: ONE normalization (the store's own) drives
+        # BOTH the mount decision and the store resolution below — and it
+        # rejects traversal outright instead of letting a raw spelling slide
+        # through to the resolver.
         path = normalize_path(args.get('path') or '')
-        if path in ('@', '@/User', '@/Team', '@/Org'):
+        if path == '@' or path.casefold() in (format_root(KIND_ME), format_root(KIND_ORG)):
             return self.build_response(request, body={'exists': True, 'type': 'dir', 'virtual': True})
 
         result = await self._get_file_store().stat(path)

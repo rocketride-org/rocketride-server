@@ -255,7 +255,7 @@ const S = {
 		fontWeight: 700,
 		fontSize: 13.5,
 	} as CSSProperties,
-	// The rung's handle beside its label ('@me', '@team/Staging', '@public').
+	// The rung's handle beside its label, as the server composed it ('@me', '@Staging', '@public').
 	liveHandle: {
 		...commonStyles.fontMono,
 		fontSize: 11,
@@ -449,7 +449,7 @@ export const DeployPanel: React.FC<IDeployPanelProps> = ({ fetchLifecycle, deplo
 
 	/** Stage a pointer move for confirmation (deploy and rollback alike). The
 	    audience's current row is found by rung: the caller's own space is
-	    addressed '@me' while its row carries the raw `user~{uid}` slot. */
+	    addressed '@me' while its row carries its audience `=user/<uid>`. */
 	const stageDeploy = (version: number, team: DeployTeamRef): void => {
 		const current = rowOfTarget(liveDeployments, team.id);
 		setPickerVersion(null);

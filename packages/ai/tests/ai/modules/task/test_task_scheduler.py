@@ -52,7 +52,7 @@ from ai.modules.task.task_server import ControlRegistry
 
 def _dep(
     *,
-    team='team-1',
+    team='=team/team-1',
     project='proj-1',
     state='enabled',
     version=1,
@@ -123,9 +123,9 @@ class TestSync:
                 }
             ),
         )
-        assert ('team-1', 'proj-1', 'src-a') in scheduler._entries
-        assert ('team-1', 'proj-1', 'src-b') in scheduler._entries
-        assert ('team-1', 'proj-1', 'src-off') not in scheduler._entries
+        assert ('=team/team-1', 'proj-1', 'src-a') in scheduler._entries
+        assert ('=team/team-1', 'proj-1', 'src-b') in scheduler._entries
+        assert ('=team/team-1', 'proj-1', 'src-off') not in scheduler._entries
 
     def test_disabled_or_removed_drops_all_entries(self, scheduler):
         scheduler.sync('org-1', _dep())
@@ -135,17 +135,17 @@ class TestSync:
 
     def test_resync_replaces_prior_entries(self, scheduler):
         scheduler.sync('org-1', _dep())
-        first = scheduler._entries[('team-1', 'proj-1', 'src-1')]
+        first = scheduler._entries[('=team/team-1', 'proj-1', 'src-1')]
         scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': '@daily', 'paused': False}}))
-        second = scheduler._entries[('team-1', 'proj-1', 'src-1')]
+        second = scheduler._entries[('=team/team-1', 'proj-1', 'src-1')]
         assert first.cancelled is True
         assert second.cron == '@daily'
 
     def test_same_project_two_teams_coexist(self, scheduler):
-        scheduler.sync('org-1', _dep(team='team-stag'))
-        scheduler.sync('org-1', _dep(team='team-prod'))
-        assert ('team-stag', 'proj-1', 'src-1') in scheduler._entries
-        assert ('team-prod', 'proj-1', 'src-1') in scheduler._entries
+        scheduler.sync('org-1', _dep(team='=team/team-stag'))
+        scheduler.sync('org-1', _dep(team='=team/team-prod'))
+        assert ('=team/team-stag', 'proj-1', 'src-1') in scheduler._entries
+        assert ('=team/team-prod', 'proj-1', 'src-1') in scheduler._entries
 
     def test_bad_cron_is_skipped_not_fatal(self, scheduler):
         scheduler.sync('org-1', _dep(schedules={'src-1': {'cron': 'not a cron', 'paused': False}}))
@@ -157,7 +157,7 @@ class TestSync:
 # ============================================================================
 
 
-def _entry(scheduler, org='org-1', team='team-1', project='proj-1', source='src-1'):
+def _entry(scheduler, org='org-1', team='=team/team-1', project='proj-1', source='src-1'):
     """A due entry as the loop would pop it."""
     scheduler.sync(org, _dep(team=team, project=project, schedules={source: {'cron': '* * * * *', 'paused': False}}))
     return scheduler._entries[(team, project, source)]
@@ -194,7 +194,13 @@ class TestStartRun:
             EVENT_TYPE.DEPLOY,
             {
                 'event': 'apaevt_deploy',
-                'body': {'orgId': 'org-1', 'teamId': 'team-1', 'projectId': 'proj-1', 'action': 'run'},
+                'body': {
+                    'orgId': 'org-1',
+                    'teamId': '=team/team-1',
+                    'audience': '=team/team-1',
+                    'projectId': 'proj-1',
+                    'action': 'run',
+                },
             },
             org_id='org-1',
         )
@@ -265,12 +271,12 @@ class TestStartRun:
     ):
         # Any published pipe can be scheduled (2026-11-20): the store slot's
         # run is team-owned by the stamped billing team and sits on the public rung
-        entry = _entry(scheduler, team='~public')
-        account_stub.deployments_get.return_value = {**_dep(team='~public'), 'billingTeamId': 'team-dev'}
+        entry = _entry(scheduler, team='@public')
+        account_stub.deployments_get.return_value = {**_dep(team='@public'), 'billingTeamId': 'team-dev'}
         await scheduler._start_run(entry)
         kwargs = dispatch.await_args.kwargs
         assert (kwargs['team_id'], kwargs['owner_kind'], kwargs['rung']) == ('team-dev', 'team', 'public')
-        assert kwargs['deployment'].team_id == '~public'
+        assert kwargs['deployment'].team_id == '@public'
         # A team slot keeps deriving its rung
         dispatch.reset_mock()
         await scheduler._start_run(_entry(scheduler))
@@ -281,12 +287,12 @@ class TestStartRun:
         self, scheduler, account_stub, dispatch
     ):
         # The legacy "bill your own audience" fallback is for team slots only
-        entry = _entry(scheduler, team='~public')
-        account_stub.deployments_get.return_value = _dep(team='~public')
+        entry = _entry(scheduler, team='@public')
+        account_stub.deployments_get.return_value = _dep(team='@public')
         await scheduler._start_run(entry)
         dispatch.assert_not_awaited()
         account_stub.deployments_set_state.assert_awaited_once()
-        assert account_stub.deployments_set_state.await_args.args[1:4] == ('~public', 'proj-1', 'errored')
+        assert account_stub.deployments_set_state.await_args.args[1:4] == ('@public', 'proj-1', 'errored')
 
 
 # ============================================================================
@@ -317,7 +323,7 @@ class TestOverlapGuard:
     async def test_inflight_dispatch_closes_the_guard(self, scheduler):
         # The tick loop marks the key BEFORE the dispatch task exists; the
         # guard must already be closed in that window.
-        key = ('team-1', 'proj-1', 'src-1')
+        key = ('=team/team-1', 'proj-1', 'src-1')
         scheduler._active_tokens[key] = sched_mod._DISPATCHING
         assert scheduler._is_previous_run_active(key)
 
@@ -327,8 +333,8 @@ class TestOverlapGuard:
         running = MagicMock()
         running.task.is_task_complete.return_value = False
         scheduler._server._task_control['tk_manual'] = running
-        scheduler.register_manual_run('team-1', 'proj-1', 'src-1', 'tk_manual')
-        assert scheduler.is_run_active('team-1', 'proj-1', 'src-1')
+        scheduler.register_manual_run('=team/team-1', 'proj-1', 'src-1', 'tk_manual')
+        assert scheduler.is_run_active('=team/team-1', 'proj-1', 'src-1')
 
 
 # ============================================================================
@@ -341,7 +347,7 @@ class TestOverlapGuard:
 
 
 class TestSkipVisibility:
-    KEY = ('team-1', 'proj-1', 'src-1')
+    KEY = ('=team/team-1', 'proj-1', 'src-1')
 
     def test_sync_drops_skip_counts_when_disabled(self, scheduler):
         """Disabling/removing a deployment drops its skip counts, not just its schedule entries."""
@@ -376,8 +382,8 @@ class TestSkipVisibility:
                 }
             ),
         )
-        key1 = ('team-1', 'proj-1', 'src-1')
-        key2 = ('team-1', 'proj-1', 'src-2')
+        key1 = ('=team/team-1', 'proj-1', 'src-1')
+        key2 = ('=team/team-1', 'proj-1', 'src-2')
         scheduler._skip_counts[key1] = 5
         scheduler._skip_counts[key2] = 7
 

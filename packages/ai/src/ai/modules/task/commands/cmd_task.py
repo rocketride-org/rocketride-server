@@ -55,6 +55,7 @@ from typing import TYPE_CHECKING, Dict, Any
 from ai.common.dap import DAPConn, TransportBase
 from ai.account import account
 from ai.account.app_deploy import _developer_id_of
+from ai.account.audience import deploy_scope_of
 from ai.modules.task.address import build_address
 from ai.account.models import home_team, resolve_run_permissions
 from ..address import in_endpoint_scope
@@ -594,9 +595,14 @@ class TaskCommands(DAPConn):
             args = request.get('arguments', {})
             project_id = args.get('projectId', None)
             source = args.get('source', None)
-            team_id = args.get('teamId') or ''
+            team_id = str(args.get('teamId') or '')
             if not project_id or not source:
                 raise ValueError('projectId and source are required')
+
+            # A deployment row's audience passed back unchanged (plan 2.5): a
+            # team's run, or (no team) the caller's own rungs
+            if team_id.startswith(('@', '=')):
+                team_id, _kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
 
             # Verify permission against the requested scope: the named team
             # for a team lookup, the caller's default context otherwise
@@ -712,6 +718,12 @@ class TaskCommands(DAPConn):
                             # + ownerId, never by the billing team.
                             'ownerKind': control.owner_kind or ('team' if control.run_kind == 'deploy' else 'user'),
                             'ownerId': control.owner_id,
+                            # The same two facts as the server composes them
+                            # (plan 2.5): who owns the run, and the audience
+                            # of the publication it serves through ('' for a
+                            # dev run). Clients pass them back unchanged.
+                            'owner': control.owner,
+                            'audience': control.audience,
                             'pipeline': control.pipeline,
                         }
                     )

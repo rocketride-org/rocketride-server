@@ -347,7 +347,7 @@ export class DeployApi {
 	 * @param params - Optional team scope + list-API params.
 	 * @param params.teamId - Restrict to one team, `'@me'` or `'@public'`;
 	 *   omitted = the visibility model: the caller's member teams, their own
-	 *   personal space and the organization's store rows (`teamId: '~public'`),
+	 *   personal space and the organization's store rows (`teamId: '@public'`),
 	 *   and the whole org for an org admin.
 	 * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
 	 */

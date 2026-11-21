@@ -106,7 +106,9 @@ class DeployTeamRef(TypedDict):
     One deploy target the caller can address.
 
     Attributes:
-        id: Team id, or ``'@me'`` for the caller's personal space.
+        id: What a deploy verb's ``team_id`` takes for this target, passed
+            unchanged: ``'@me'`` for the caller's personal space, or the
+            team's audience as the server composed it (``=team/<tid>``).
         name: Display name.
         canControl: The caller holds ``task.control`` on this team.
     """
@@ -121,10 +123,13 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
     Resolve the caller's deploy targets (names + control rights) from the authenticated identity.
 
     - ``'@me'`` (the personal space) comes first for any signed-in user.
+    - Each team of the roster is addressed by the ``audience`` the server
+      stamped on it; a team without one is not addressable and is skipped.
     - ``org.admin`` (and ``sys.admin``) implies the full team permission set.
     - Rosterless identities (the OSS single-team server) derive refs from the
-      deployment rows with control assumed — the server enforces the real
-      permission on every call. Personal (``user~``) rows never become targets.
+      deployment rows the server marked ``rung: 'team'``, named by their
+      ``handle``, with control assumed — the server enforces the real
+      permission on every call. No audience string is parsed here.
 
     Args:
         client: A connected client (its cached login result is read), or None.
@@ -143,97 +148,77 @@ def resolve_deploy_teams(client: Any, deployments: Iterable[dict]) -> List[Deplo
     if isinstance(org_teams, list) and org_teams:
         return me + [
             {
-                'id': t['id'],
-                'name': t.get('name') or t['id'],
+                'id': t['audience'],
+                'name': t.get('name') or t['audience'],
                 'canControl': is_admin or 'task.control' in (t.get('permissions') or []),
             }
             for t in org_teams
-            if t.get('id')
+            if t.get('audience')
         ]
 
-    # step: rosterless — derive refs from the rows so hosts still render
+    # step: rosterless — derive refs from the team rows so hosts still render
     seen: dict = {}
     for dep in deployments:
         team_id = dep.get('teamId')
-        if team_id and not team_id.startswith('user~') and team_id not in seen:
-            seen[team_id] = {'id': team_id, 'name': team_id, 'canControl': True}
+        if team_id and dep.get('rung') == 'team' and team_id not in seen:
+            seen[team_id] = {'id': team_id, 'name': dep.get('handle') or team_id, 'canControl': True}
     return me + list(seen.values())
-
-
-#: The owner key of the store slot: a publication's ``@public`` row carries it as its ``teamId``.
-_STORE_SLOT = '~public'
 
 
 def team_name_of(teams: List[DeployTeamRef], team_id: str, own_user_id: str = '') -> str:
     """
-    Resolve a team id to its display name, falling back to the id.
+    The name of the team ref whose ``id`` is ``team_id``, else ``team_id`` unchanged.
 
-    Personal (``user~``) owner keys render as "Me" for the caller's own space
-    and "Personal" for another user's — the raw guid never reaches a label.
-    The store slot (``~public``, or ``@public`` as the wire addresses it)
-    renders as "Store".
+    .. deprecated::
+        Show a row's ``handle`` instead: the server composes it for the
+        reader (plan 2.5). Kept for the frozen contract; it parses nothing.
 
     Args:
         teams: The resolved team refs.
-        team_id: The team id (or owner key) to resolve.
-        own_user_id: The caller's user id ('' when unknown).
+        team_id: A ref id or a row's ``teamId``, matched exactly.
+        own_user_id: Unused; kept for the frozen signature.
 
     Returns:
-        The display name, or the id when unknown.
+        The matching ref's name, or ``team_id``.
     """
-    if team_id.startswith('user~'):
-        return 'Me' if own_user_id and team_id == f'user~{own_user_id}' else 'Personal'
-    if team_id in (_STORE_SLOT, '@public'):
-        return 'Store'
     return next((t['name'] for t in teams if t['id'] == team_id), team_id)
 
 
 def wire_team_id_of(team_id: str, own_user_id: str) -> str:
     """
-    Translate a row's owner key into the addressable team ref for API calls.
+    The value to put on the wire for a row's ``teamId``: the value itself.
 
-    The caller's own ``user~{uid}`` row is addressed as ``'@me'`` and the
-    store row (``~public``) as ``'@public'`` (the server never accepts raw
-    owner keys); everything else passes through.
+    .. deprecated::
+        A row's ``teamId`` is its audience and every deploy verb takes it
+        back unchanged (plan 2.5); there is nothing to translate. Kept for
+        the frozen contract.
 
     Args:
-        team_id: The row's team id / owner key.
-        own_user_id: The caller's user id ('' when unknown).
+        team_id: The row's ``teamId``.
+        own_user_id: Unused; kept for the frozen signature.
 
     Returns:
-        The team id to put on the wire.
+        ``team_id``, unchanged.
     """
-    if team_id == _STORE_SLOT:
-        return '@public'
-    return '@me' if own_user_id and team_id == f'user~{own_user_id}' else team_id
+    return team_id
 
 
 def resolve_team_arg(value: str, teams: List[DeployTeamRef]) -> str:
     """
-    Resolve what a person typed as a team — ``'@me'``, ``'@public'``, a team id, or a display name — to the id to send.
+    What a person typed as a team, passed through for the server to resolve.
 
-    Names match case-insensitively. ``'@public'`` is the store. An unknown
-    value passes through unchanged (the server validates it; an admin may
-    address a team outside their own roster).
+    The server reads every spelling (``@me``, ``@public``, ``@<team>`` by
+    name ignoring case, ``=team/<tid>``, a row's audience) and refuses an
+    unknown one; the SDK matches nothing (plan 2.5).
 
     Args:
         value: The typed team ('' = unscoped/default).
-        teams: The caller's resolved team refs.
+        teams: Unused; kept for the frozen signature.
 
     Returns:
-        The team id to put on the wire.
-
-    Raises:
-        ValueError: When a name matches more than one team.
+        The typed value, trimmed.
     """
-    typed = value.strip()
-    if not typed or typed in ('@me', '@public') or any(t['id'] == typed for t in teams):
-        return typed
-    by_name = [t for t in teams if t['name'].lower() == typed.lower()]
-    if len(by_name) > 1:
-        ids = ', '.join(t['id'] for t in by_name)
-        raise ValueError(f'Team name "{typed}" is ambiguous — use one of the ids: {ids}')
-    return by_name[0]['id'] if by_name else typed
+    return value.strip()
 
 
 # =============================================================================

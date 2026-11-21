@@ -63,10 +63,20 @@ from rocketlib import debug
 
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required, publish_block_of
+from ai.account.audience import (
+    PUBLIC_AUDIENCE,
+    Audience,
+    compose_audience,
+    compose_handle,
+    describe,
+    parse_audience,
+    parse_target,
+    team_audience,
+    user_audience,
+)
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
-from ai.account.models import resolve_team_permissions
+from ai.account.models import resolve_team_permissions, team_id_of_name
 from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, validate_store_block, write_pipe_content
-from ai.account.pipe_deploy import PUBLIC_AUDIENCE_KEY
 from ai.common.dap import DAPConn, TransportBase
 from ai.common.list_rows import paginate_rows
 
@@ -187,6 +197,95 @@ class _DeployBase(DAPConn):
                 out.append(team_id)
         return out
 
+    def _team_names(self) -> Dict[str, str]:
+        """The caller's team names by team id (what a handle may name)."""
+        org = getattr(self._account_info, 'organization', None) or {}
+        teams = org.get('teams') if isinstance(org, dict) else getattr(org, 'teams', None)
+        out: Dict[str, str] = {}
+        for team in teams or []:
+            team_id = team.get('id') if isinstance(team, dict) else getattr(team, 'id', None)
+            name = team.get('name') if isinstance(team, dict) else getattr(team, 'name', None)
+            if team_id and name:
+                out[str(team_id)] = str(name)
+        return out
+
+    def _describe(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        A deployment row as THIS caller reads it: its ``audience``, ``rung`` and ``handle`` (plan 2.5).
+
+        The backend's row carries the audience as ``teamId``; the rung
+        (``me`` or ``personal`` for a personal space) and the handle (a team
+        by the name the caller knows it by) depend on who reads, so they are
+        composed here. A client shows the handle and passes the audience
+        back unchanged; it parses neither.
+
+        Args:
+            row: A deployment row whose ``teamId`` is an audience.
+
+        Returns:
+            A copy of the row with the three fields.
+        """
+        org = getattr(self._account_info, 'organization', None) or {}
+        org_id = (org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)) or ''
+        described = describe(
+            str(row.get('teamId') or ''),
+            caller_id=str(self._account_info.userId or ''),
+            team_names=self._team_names(),
+            org_id=str(org_id),
+        )
+        return {**row, **described}
+
+    def _audience_arg(self, args: Dict[str, Any]) -> Audience:
+        """
+        Read the ``teamId`` argument of a deploy verb as the audience it names.
+
+        ``teamId`` takes ``@me`` (the caller's personal space), ``@public``
+        (the store), ``@<team>`` (one of the caller's teams by name,
+        ignoring case: what a person types, passed through by the SDKs), any
+        audience a row or the ConnectResult carried (``=team/<tid>``,
+        ``=user/<uid>``, passed back unchanged), or a team id. This is the
+        ONE place the door reads the argument; everything after it holds a
+        decoded audience.
+
+        Args:
+            args: The verb's arguments.
+
+        Returns:
+            The decoded audience (``@me`` and a team name already resolved).
+
+        Raises:
+            ValueError: No ``teamId``, a form that is no target, or the org
+                audience.
+            PermissionError: ``@me`` with no authenticated user, or a team
+                name that names none (or more than one) of the caller's teams.
+        """
+        value = args.get('teamId')
+        if not value:
+            raise ValueError('teamId is required')
+        value = str(value)
+        # A bare value is a team id; anything rooted is read by the grammar
+        if not value.startswith(('@', '=')):
+            return parse_audience(team_audience(value))
+        target = parse_target(value)
+        if target.kind == 'me':
+            if not self._account_info.userId:
+                raise PermissionError('Personal (@me) deployments require an authenticated user')
+            return parse_audience(user_audience(self._account_info.userId))
+        if target.kind == 'public':
+            return parse_audience(PUBLIC_AUDIENCE)
+        if target.kind == 'org':
+            raise ValueError(
+                'The org audience does not exist — publish to a team instead '
+                '(an org-admin-maintained "All members" team covers org-wide distribution)'
+            )
+        if not target.by_id:
+            # A team by name: the caller's own membership, ignoring case
+            team_id = team_id_of_name(self._account_info, target.ref)
+            if not team_id:
+                raise PermissionError(f'You are not a member of a team named {target.ref!r}')
+            return Audience('team', team_id)
+        return Audience(target.kind, target.ref)
+
     def _require_team(self, args: Dict[str, Any], perm: str) -> str:
         """Extract the REQUIRED deploy target and verify ``perm`` on it.
 
@@ -194,34 +293,37 @@ class _DeployBase(DAPConn):
         to the caller's development team, so a user changing their profile
         assignment can never silently re-target a deployment.
 
-        The sentinel ``teamId='@me'`` targets the CALLER's PERSONAL space:
-        the returned owner key is ``user~{userId}``, which rides every
-        ``team_id`` slot downstream (deployment records, scheduler keys,
-        events) and can never collide with a real team id (team uuids never
-        contain '~'). No team permission applies to your own space — the
-        run's billing/secrets team is the ABSOLUTE stamp written at pointer
-        time (``_billing_team_of``), never resolved at fire time.
+        The returned value is the target's AUDIENCE (plan 2.5), which rides
+        every ``team_id`` slot downstream (deployment records, scheduler
+        keys, events) under the wire's name for it, ``teamId``.
 
-        The sentinel ``teamId='@public'`` targets the store (plan 10.1): the
-        owner key is ``~public``, the slot the resolver's ``@public`` rung
-        reads. Who may act on it is the app door's rule for the store
-        (``app_deploy._resolve_target``): an organization registered as a
-        developer, on a name in its own namespace (``_registry_id``); no team
-        grant applies.
+        ``@me`` (or the caller's own ``=user/<uid>``) is the CALLER's
+        PERSONAL space. No team permission applies to your own space — the
+        run's billing/secrets team is the ABSOLUTE stamp written at pointer
+        time (``_billing_team_of``), never resolved at fire time. Another
+        user's space is never a target.
+
+        ``@public`` targets the store (plan 10.1), the audience the
+        resolver's ``@public`` rung reads. Who may act on it is the app
+        door's rule for the store (``app_deploy._resolve_target``): an
+        organization registered as a developer, on a name in its own
+        namespace (``_registry_id``); no team grant applies.
+
+        A team (``=team/<tid>`` or its id) needs ``perm`` on that team.
         """
-        team_id = args.get('teamId')
-        if not team_id:
-            raise ValueError('teamId is required')
-        if team_id == '@me':
-            if not self._account_info.userId:
-                raise PermissionError('Personal (@me) deployments require an authenticated user')
-            return f'user~{self._account_info.userId}'
-        if team_id == '@public':
+        audience = self._audience_arg(args)
+        if audience.kind == 'user':
+            if audience.id != self._account_info.userId:
+                raise PermissionError("Another user's personal space is not a deploy target")
+            return user_audience(audience.id)
+        if audience.kind == 'public':
             if not _developer_id_of(self):
                 raise ValueError('Public publishing requires the organization to be registered as a developer')
-            return PUBLIC_AUDIENCE_KEY
-        self.verify_team_permission(team_id, perm)
-        return team_id
+            return PUBLIC_AUDIENCE
+        if audience.kind != 'team':
+            raise ValueError(f'Not a deploy target: {compose_audience(*audience)}')
+        self.verify_team_permission(audience.id, perm)
+        return team_audience(audience.id)
 
     def _is_org_admin(self) -> bool:
         """True for org.admin on the caller's org — and for the sys.admin /
@@ -258,7 +360,7 @@ class _DeployBase(DAPConn):
         it is stored, so a version in any other state never finished its
         deploy. Only a pipe version takes this door: an app reaches the store
         through the app door, which keeps its manifest. Every door that can
-        point ``~public`` calls this first (``rrext_deploy_pipe deploy`` and
+        point ``@public`` calls this first (``rrext_deploy_pipe deploy`` and
         ``add``'s ``deployTo``).
 
         Raises:
@@ -288,19 +390,23 @@ class _DeployBase(DAPConn):
         """The ABSOLUTE billing/secrets team stamped onto a publish at pointer time.
 
         A team audience bills itself — unambiguous by construction. A
-        personal (``user~``) audience and the store (``~public``) bill the
-        PUBLISHER's dev team, which must be one of their membership teams in
-        the session org; without one the @me or @public publish REFUSES —
-        billing never guesses, and runs only ever read the stamp (they never
-        resolve). On the store the stamp pays only for the publisher's own
-        runs of the publication (its schedules, run-now); every caller of a
-        public pipe pays for their own calls.
+        personal audience and the store bill the PUBLISHER's dev team, which
+        must be one of their membership teams in the session org; without
+        one the @me or @public publish REFUSES — billing never guesses, and
+        runs only ever read the stamp (they never resolve). On the store the
+        stamp pays only for the publisher's own runs of the publication (its
+        schedules, run-now); every caller of a public pipe pays for their
+        own calls.
+
+        Args:
+            team_id: The target's audience (``_require_team``'s result).
         """
-        if not team_id.startswith('user~') and team_id != PUBLIC_AUDIENCE_KEY:
-            return team_id
+        audience = parse_audience(team_id)
+        if audience.kind == 'team':
+            return audience.id
         dev_team = getattr(self._account_info, 'devTeam', '') or ''
         if not dev_team or dev_team not in self._member_team_ids():
-            handle = '@public' if team_id == PUBLIC_AUDIENCE_KEY else '@me'
+            handle = compose_handle(team_id, caller_id=str(self._account_info.userId or ''))
             raise PermissionError(
                 f'Publishing to {handle} needs your development team set in this organization — pick one in your profile'
             )
@@ -311,30 +417,26 @@ class _DeployBase(DAPConn):
 
         An org admin can see anything deployed anywhere — any team, any
         user's personal space. A regular user can see their OWN personal
-        space (``teamId='@me'``, mapped to ``user~{userId}``), the
-        organization's store publications (``teamId='@public'``, mapped to
-        ``~public``) and the teams they are a MEMBER of — membership alone
-        grants read visibility; the task.* grants gate actions, not sight.
+        space (``teamId='@me'`` or their own ``=user/<uid>``), the
+        organization's store publications (``teamId='@public'``) and the
+        teams they are a MEMBER of — membership alone grants read
+        visibility; the task.* grants gate actions, not sight.
+
+        Returns:
+            The addressed audience.
         """
-        team_id = args.get('teamId')
-        if not team_id:
-            raise ValueError('teamId is required')
-        if team_id == '@me':
-            if not self._account_info.userId:
-                raise PermissionError('Personal (@me) deployments require an authenticated user')
-            return f'user~{self._account_info.userId}'
-        if team_id == '@public':
-            return PUBLIC_AUDIENCE_KEY
-        team_id = str(team_id)
-        if self._is_org_admin():
-            return team_id
-        if team_id.startswith('user~'):
-            if team_id == f'user~{self._account_info.userId}':
-                return team_id
+        audience = self._audience_arg(args)
+        if audience.kind == 'public':
+            return PUBLIC_AUDIENCE
+        if audience.kind == 'user':
+            if audience.id == self._account_info.userId or self._is_org_admin():
+                return user_audience(audience.id)
             raise PermissionError("Another user's personal deployments are visible to org admins only")
-        if team_id in self._member_team_ids():
-            return team_id
-        raise PermissionError(f'No membership in team {team_id!r}')
+        if audience.kind != 'team':
+            raise ValueError(f'Not a deployment scope: {compose_audience(*audience)}')
+        if self._is_org_admin() or audience.id in self._member_team_ids():
+            return team_audience(audience.id)
+        raise PermissionError(f'No membership in team {audience.id!r}')
 
     async def _notify_deploy_changed(self, org_id: str, team_id: str, project_id: str, action: str) -> None:
         """Push an org-scoped invalidation event for a deployment mutation.
@@ -580,14 +682,14 @@ class DeployCommands(_DeployBase):
             team_id = self._require_team({'teamId': str(args['deployTo'])}, 'task.control')
             # The store takes its gate on this door too: on a review-ladder
             # server the version just added is a draft, so it cannot go public
-            if team_id == PUBLIC_AUDIENCE_KEY:
+            if team_id == PUBLIC_AUDIENCE:
                 await self._require_store_publishable(org_id, project_id, int(entry['version']))
             billing_team = self._billing_team_of(team_id)
             dep = await account.deployments_deploy(
                 org_id, team_id, project_id, entry['version'], self._actor(), billing_team
             )
             self._scheduler.sync(org_id, dep)
-            body['deployment'] = dep
+            body['deployment'] = self._describe(dep)
             await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
         return self.build_response(request, body=body)
 
@@ -718,4 +820,9 @@ class DeployCommands(_DeployBase):
         # Paging happens in the BACKEND (SQL on saas): the trail is
         # append-only and unbounded, so it is never fully materialized here.
         body = await account.deployments_history(self._org_id(), project_id, team_id, args)
+
+        # A pointer row names its audience: it carries the reader's rung and
+        # handle like a deployment row; an org-wide row ('' teamId) none
+        if isinstance(body, dict) and isinstance(body.get('rows'), list):
+            body = {**body, 'rows': [self._describe(r) if r.get('teamId') else r for r in body['rows']]}
         return self.build_response(request, body=body)

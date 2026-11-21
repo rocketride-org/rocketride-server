@@ -211,11 +211,15 @@ class TeamInfo(TypedDict):
         id (str): Unique identifier for the team.
         name (str): Human-readable display name.
         permissions (list[str]): Permission strings granted to this team.
+        audience (str): The team's audience as the server composes it
+            (``=team/<tid>``): what a deploy verb's ``teamId`` takes for this
+            team. Pass it unchanged; never build or parse one.
     """
 
     id: str
     name: str
     permissions: list[str]
+    audience: NotRequired[str]
 
 
 class OrgInfo(TypedDict):

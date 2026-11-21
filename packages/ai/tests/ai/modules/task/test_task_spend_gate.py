@@ -105,7 +105,7 @@ CORRELATION = 'c' * 32
 def _bound(mode='subscription', *, caller_org='org-2', rung='public'):
     """An engine with one binding EaaS admitted for a caller's control on a publication of ``mode``."""
     control = TaskControl(address='acme.docBrain.chat', orgId=caller_org, rung=rung, key='=control/' + 'a' * 32)
-    control.deployment = DeploymentRef(org_id='org-1', team_id='~public', project_id='acme.docBrain')
+    control.deployment = DeploymentRef(org_id='org-1', team_id='@public', project_id='acme.docBrain')
     control.listing = Listing(mode=mode, plan='Pro')
     task = _task('org-1')
     task._server.control_by_key = lambda key: control if key == control.key else None
