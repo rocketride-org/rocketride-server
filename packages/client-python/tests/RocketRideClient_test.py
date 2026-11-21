@@ -64,6 +64,8 @@ import json
 import random
 import string
 import time
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import AsyncMock
@@ -109,6 +111,19 @@ TEST_CONFIG = {
     'auth': os.getenv('ROCKETRIDE_APIKEY', 'MYAPIKEY'),
     'timeout': 30.0,  # 30 second timeout for integration tests
 }
+
+
+def http_base(uri: str) -> str:
+    """
+    The server's base URL for its HTTP doors.
+
+    ``uri`` is normalized the way the SDK normalizes it (a bare port or host
+    gains its scheme and port), and a WebSocket scheme maps to its HTTP twin:
+    ``ROCKETRIDE_URI`` may name ``ws://`` or ``wss://``, which urllib cannot open.
+    """
+    parsed = urllib.parse.urlparse(ConnectionMixin.normalize_uri(uri))
+    scheme = {'ws': 'http', 'wss': 'https'}.get(parsed.scheme, parsed.scheme)
+    return parsed._replace(scheme=scheme, path='', params='', query='', fragment='').geturl()
 
 
 async def ensure_clean_pipeline(client: RocketRideClient, token: str) -> None:
@@ -356,6 +371,60 @@ class TestDataOperations:
 
             # Without MIME type, should not have processed content
             assert 'result_types' not in result or result['result_types'] is None
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_send_by_address(self):
+        """send() given an ADDRESS: the open resolves it and answers with the control id the later frames name."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+
+            started = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo-address'))
+            pipeline_token = started['token']
+
+            # The write and the close are refused unless they name the control id
+            result = await client.send(started['address'], 'Hello by address', mimetype='text/plain')
+
+            assert isinstance(result, dict)
+            assert 'objectId' in result
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_post_to_the_webhook_door_by_address(self):
+        """The HTTP door runs the SDK by ADDRESS: POST /webhook/{address} completes the object end to end."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+
+            started = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo-door'))
+            pipeline_token = started['token']
+
+            def _post() -> Dict[str, Any]:
+                request = urllib.request.Request(
+                    f'{http_base(TEST_CONFIG["uri"])}/webhook/{started["address"]}',
+                    data=b'Hello through the door',
+                    headers={'Authorization': f'Bearer {TEST_CONFIG["auth"]}', 'Content-Type': 'text/plain'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(request, timeout=TEST_CONFIG['timeout']) as answer:
+                    return json.loads(answer.read().decode('utf-8'))
+
+            answer = await asyncio.to_thread(_post)
+
+            assert answer['status'] == 'OK'
+            assert answer['data']['objectsCompleted'] == 1
+            assert answer['data']['objects']['body']['status'] == 'OK'
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)
@@ -2412,6 +2481,20 @@ def test_get_websocket_uri_normalization(input_uri: str, expected_uri: str) -> N
 def test_get_websocket_uri_model_server_address(input_uri: str, expected_uri: str) -> None:
     """Verify every --modelserver form, a bare port included, reaches the model server."""
     assert ConnectionMixin._get_websocket_uri(input_uri, '/models') == expected_uri
+
+
+@pytest.mark.parametrize(
+    ('input_uri', 'expected_base'),
+    [
+        ('ws://localhost:5565', 'http://localhost:5565'),
+        ('wss://api.rocketride.ai', 'https://api.rocketride.ai'),
+        ('http://127.0.0.1:20001/', 'http://127.0.0.1:20001'),
+        ('https://api.rocketride.ai', 'https://api.rocketride.ai'),
+    ],
+)
+def test_http_base_maps_a_websocket_uri_to_http(input_uri: str, expected_base: str) -> None:
+    """The HTTP-door tests reach the server over HTTP whatever scheme ROCKETRIDE_URI names."""
+    assert http_base(input_uri) == expected_base
 
 
 # ============================================================================

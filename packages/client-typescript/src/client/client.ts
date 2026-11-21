@@ -86,7 +86,8 @@ export class DataPipe {
 	 * Creates a new DataPipe instance.
 	 *
 	 * @param client - The RocketRideClient instance managing this pipe
-	 * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data
+	 * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data, or an
+	 *                address the open resolves (its answer's control id then names the pipe on every later frame)
 	 * @param objinfo - Metadata about the object being sent (e.g., filename, size)
 	 * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
 	 * @param provider - Optional provider name for the data source
@@ -189,6 +190,14 @@ export class DataPipe {
 
 		this._pipeId = response.body?.pipeId as number | undefined;
 		this._traceId = response.body?.traceId as string | undefined;
+
+		// The open answers with the control it opened on: a pipe opened by an
+		// address names that control's id on every later frame (the server
+		// takes a control id only once the pipe is open)
+		const controlId = response.body?.controlId;
+		if (typeof controlId === 'string' && controlId) {
+			this._token = controlId;
+		}
 
 		// If an SSE callback was provided, subscribe and register for this pipe
 		if (this._onSSE !== undefined && this._pipeId !== undefined) {
@@ -1983,6 +1992,9 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Create a data pipe for streaming operations.
+	 *
+	 * `token` is the control id, or an address the open resolves the way `submit()`
+	 * resolves a name, starting a published rung when nothing is live.
 	 */
 	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe> {
 		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team, params);
@@ -2033,7 +2045,7 @@ export class RocketRideClient extends DAPClient {
 	 * (matching Python client behavior) rather than through a callback parameter.
 	 *
 	 * @param files - Array of file objects with optional metadata and MIME types
-	 * @param token - The control id of the control receiving the uploads
+	 * @param token - The control id of the control receiving the uploads, or its address (resolved by each open)
 	 * @param maxConcurrent - Maximum number of concurrent uploads (default: 5)
 	 *
 	 * @returns Promise resolving to array of UPLOAD_RESULT objects in the same order as input

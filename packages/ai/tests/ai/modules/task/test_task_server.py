@@ -36,8 +36,8 @@ from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskSer
 from ai.modules.task.types import TaskError
 from ai.modules.task.trace_owner import TraceOwners
 
-# A registry key: the control id start_task mints (32 hex characters).
-KEY = 'c0ffee00c0ffee00c0ffee00c0ffee00'
+# A registry key: the control id start_task mints (=control/ and 32 hex characters).
+KEY = '=control/c0ffee00c0ffee00c0ffee00c0ffee00'
 
 
 def _make_server(*, config=None, web_server=None):
@@ -521,14 +521,14 @@ def test_control_by_key_unknown_key_raises_runtime():
     """An unknown key raises RuntimeError (existing handlers still catch it)."""
     ts = _make_server()
     with pytest.raises(RuntimeError, match='not running'):
-        ts.control_by_key('deadbeefdeadbeefdeadbeefdeadbeef')
+        ts.control_by_key('=control/deadbeefdeadbeefdeadbeefdeadbeef')
 
 
 def test_control_by_key_unknown_key_carries_a_code():
     """The failure is classifiable without matching the English message (#2097)."""
     ts = _make_server()
     with pytest.raises(TaskError) as excinfo:
-        ts.control_by_key('deadbeefdeadbeefdeadbeefdeadbeef')
+        ts.control_by_key('=control/deadbeefdeadbeefdeadbeefdeadbeef')
     assert excinfo.value.code == TaskError.NOT_REGISTERED
     assert isinstance(excinfo.value, RuntimeError)
 
@@ -760,14 +760,14 @@ async def test_cleanup_tasks_removes_completed_expired_task(monkeypatch):
     task.is_task_complete = MagicMock(return_value=True)
     # endTime well in the past: 10000 - 200 -> grace window expired
     task.get_status = MagicMock(return_value=SimpleNamespace(endTime=9_000.0))
-    ts._task_control['01d001d001d001d001d001d001d001d0'] = _make_control(
-        key='01d001d001d001d001d001d001d001d0', task=task
+    ts._task_control['=control/01d001d001d001d001d001d001d001d0'] = _make_control(
+        key='=control/01d001d001d001d001d001d001d001d0', task=task
     )
 
     with pytest.raises(_LoopBreak):
         await TaskServer._cleanup_tasks(ts)
 
-    ts.remove_task.assert_awaited_once_with('01d001d001d001d001d001d001d001d0')
+    ts.remove_task.assert_awaited_once_with('=control/01d001d001d001d001d001d001d001d0')
 
 
 @pytest.mark.asyncio
@@ -786,8 +786,8 @@ async def test_cleanup_tasks_skips_running_task(monkeypatch):
 
     task = MagicMock()
     task.is_task_complete = MagicMock(return_value=False)
-    ts._task_control['a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0'] = _make_control(
-        key='a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', task=task
+    ts._task_control['=control/a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0'] = _make_control(
+        key='=control/a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', task=task
     )
 
     with pytest.raises(_LoopBreak):
@@ -894,7 +894,7 @@ async def test_remove_task_unknown_key_carries_a_code():
     """
     ts = _make_server()
     with pytest.raises(TaskError) as excinfo:
-        await ts.remove_task('deadbeefdeadbeefdeadbeefdeadbeef')
+        await ts.remove_task('=control/deadbeefdeadbeefdeadbeefdeadbeef')
     assert excinfo.value.code == TaskError.NOT_REGISTERED
 
 
@@ -911,8 +911,8 @@ async def test_remove_task_calls_stop_and_broadcasts():
     task.release.return_value = 0
     control = SimpleNamespace(
         id='acme.proj-1.src-1',
-        key='d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0',
-        control_id='d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0',
+        key='=control/d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0',
+        control_id='=control/d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0',
         index_key='spec.u1.acme.proj-1.src-1',
         address='acme.proj-1.src-1',
         developer_id='acme',
@@ -1232,8 +1232,8 @@ async def test_monitor_ttl_drops_the_stale_entry_of_a_replaced_control(monkeypat
     """A control replaced under its key is not released at its predecessor's deadline."""
     ts = _make_server()
     ts.stop_task = AsyncMock()
-    _ttl_control(ts, 'a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', ttl=60, idle=60)
-    _ttl_control(ts, 'a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', ttl=600, idle=0)
+    _ttl_control(ts, '=control/a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', ttl=60, idle=60)
+    _ttl_control(ts, '=control/a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0', ttl=600, idle=0)
 
     await _one_ttl_cycle(monkeypatch, ts)
 
@@ -1268,7 +1268,7 @@ LAUNCH_IDENTITY = {'client_id': 'user-1', 'user_id': 'user-1', 'team_id': 'team-
 # The address, the index key and the control id of a dev launch of ``_launch_pipeline()``.
 LAUNCH_ADDRESS = 'acme.project-1.src'
 LAUNCH_INDEX = f'spec.user-1.{LAUNCH_ADDRESS}'
-LAUNCH_ID = 'ab1e5ab1e5ab1e5ab1e5ab1e5ab1e5ab'
+LAUNCH_ID = '=control/ab1e5ab1e5ab1e5ab1e5ab1e5ab1e5ab'
 
 
 def _seed_running_task(ts):

@@ -23,7 +23,7 @@ import pytest
 from ai.modules.task.commands.cmd_task import TaskCommands
 
 #: The control id the requests name in their token slot.
-CONTROL_ID = '0123456789abcdef0123456789abcdef'
+CONTROL_ID = '=control/0123456789abcdef0123456789abcdef'
 from ai.modules.task.commands.cmd_store import StoreCommands
 
 

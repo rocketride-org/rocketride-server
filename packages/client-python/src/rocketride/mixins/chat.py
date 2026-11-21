@@ -101,7 +101,8 @@ class ChatMixin(DAPClient):
         and can provide responses in both natural language and structured JSON.
 
         Args:
-            token: The control id (a ``use()``/``submit()`` result's ``token``) of the chat pipeline's control
+            token: The control id (a ``use()``/``submit()`` result's ``token``) of the chat pipeline's control,
+                or its address, which the open resolves the way ``submit()`` resolves a name
             question: A Question object containing your query, instructions,
                      examples, and any context you want to provide
 

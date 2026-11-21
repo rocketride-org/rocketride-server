@@ -40,7 +40,7 @@ from ai.modules.task.task_control import DeploymentRef
 from ai.modules.task.task_server_facade import start_server_task_as_team
 
 #: The control id the execute answers with (the token slot, plan section 1).
-CONTROL_ID = '0123456789abcdef0123456789abcdef'
+CONTROL_ID = '=control/0123456789abcdef0123456789abcdef'
 
 
 # ============================================================================
@@ -166,7 +166,7 @@ async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipe
     The facade hands back the DEPLOY run's id, never the Play'd dev run's: the
     execute answered with it, and no rung is walked.
     """
-    played = 'feedfacefeedfacefeedfacefeedface'
+    played = '=control/feedfacefeedfacefeedfacefeedface'
     controls = {played: SimpleNamespace(key=played), CONTROL_ID: SimpleNamespace(key=CONTROL_ID)}
     captured = await _dispatch(None, owner_kind='user', owner_user_id='user-7', controls=controls)
     assert captured['key'] == CONTROL_ID

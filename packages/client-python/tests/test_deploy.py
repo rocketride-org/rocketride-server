@@ -37,6 +37,7 @@ server-side (test_task_scheduler.py), not here.
 """
 
 import os
+import re
 
 import pytest
 
@@ -185,7 +186,7 @@ class TestDeploy:
             await self.client.deploy.add(make_pipeline(project), deploy_to=TEAM)
             result = await self.client.deploy.run(project, 'webhook_1', TEAM)
             # The control id in the token slot, the address beside it: both required.
-            assert len(result['token']) == 32 and all(c in '0123456789abcdef' for c in result['token'])
+            assert re.fullmatch(r'=control/[0-9a-f]{32}', result['token'])
             assert result['address'] == f'{self.registry_id(project)}.webhook_1'
             # The UI's stop path: resolve the live control and terminate it.
             # team_id addresses the TEAM's deploy run — an unscoped lookup

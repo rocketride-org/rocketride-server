@@ -470,7 +470,7 @@ const ocr = await client.getService('ocr');
 
 ### `send(token, data, objinfo?, mimetype?, onSSE?, team?, params?): Promise<PIPELINE_RESULT | undefined>`
 
-Send data directly to a pipeline in one shot (internally: open pipe → write → close).
+Send data directly to a pipeline in one shot (internally: open pipe → write → close). `token` is the control id, or an address (`developerId.pipelineId[.source]`) that the open resolves the way `submit()` resolves a name, starting a published rung when nothing is live; the pipe's later frames name the control id the open answered with.
 
 ```typescript
 send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>)
@@ -505,7 +505,7 @@ const results = await client.sendFiles(
 
 ### `pipe(token, objinfo?, mimeType?, provider?, onSSE?, team?, params?): Promise<DataPipe>`
 
-Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`.
+Create a streaming data pipe for sending large datasets. `mimeType` defaults to `application/octet-stream`. `token` takes a control id or an address, as for `send()`.
 
 ### DataPipe
 

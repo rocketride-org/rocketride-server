@@ -44,7 +44,7 @@ def _make_conn(*, account_info=None, server=None, monitors=None, connection_id=1
 # The one control every helper describes: its address, and the registry key
 # (its control id) the engine reports events under.
 ADDRESS = 'acme.proj-1.src-1'
-KEY = '1234abcd1234abcd1234abcd1234abcd'
+KEY = '=control/1234abcd1234abcd1234abcd1234abcd'
 
 
 def _account_info(*, user_id='user-1', team_id='team-1', sys_permissions=()):

@@ -490,7 +490,7 @@ def test_verify_plans_raises_when_validation_fails(monkeypatch):
 # get_token_slot
 # ---------------------------------------------------------------------------
 
-CONTROL_ID = '0123456789abcdef0123456789abcdef'
+CONTROL_ID = '=control/0123456789abcdef0123456789abcdef'
 
 
 def test_get_token_slot_unauthenticated_raises():

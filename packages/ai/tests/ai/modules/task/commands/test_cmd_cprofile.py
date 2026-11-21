@@ -48,7 +48,7 @@ from ai.modules.task.commands import cmd_cprofile
 from ai.modules.task.commands.cmd_cprofile import CProfileCommands
 
 #: The control id a proxy request names in ``target``.
-TARGET = '0123456789abcdef0123456789abcdef'
+TARGET = '=control/0123456789abcdef0123456789abcdef'
 
 
 # ---------------------------------------------------------------------------
