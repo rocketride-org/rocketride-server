@@ -47,6 +47,8 @@ import {
 	RocketRideException,
 	ValidationException,
 } from 'rocketride';
+// A leaf module (no imports), so registering it here creates no cycle.
+import { CapabilityDeniedError } from '../isolation/capabilityDenied';
 
 /** Marks a serialized error on the wire (a plain object, never an Error). */
 const ERROR_MARKER = '__rrerr';
@@ -69,6 +71,8 @@ const ERROR_CLASSES: Record<string, new (...args: never[]) => Error> = {
 	PipeException,
 	ExecutionException,
 	ValidationException,
+	// The isolated-app gate's refusal (`isolation/denial.ts` builds its wire form).
+	CapabilityDeniedError,
 };
 
 /** A thrown error flattened for transport. */

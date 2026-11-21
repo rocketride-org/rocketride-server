@@ -43,6 +43,8 @@ import ai.account.app_deploy as app_deploy_mod
 import ai.modules.shell.shell as shell_mod
 from ai.modules.task import deploy_events
 
+from . import isolation_support as sup
+
 
 # =============================================================================
 # HELPERS
@@ -92,6 +94,126 @@ def _setup(monkeypatch, maps):
 def _dirs(want=None):
     """One resolution as the serving route performs it."""
     return asyncio.run(shell_mod._version_dirs_for('tok', 'app.x', want=want))
+
+
+def test_paid_seat_revocation_applies_before_a_warm_version_map(monkeypatch):
+    """A previously allowed asset must stop serving as soon as its seat is revoked."""
+    from ai.account import account
+
+    _, calls = _setup(monkeypatch, [{1: 'app.x/v1/dist'}])
+    allowed = True
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        return allowed
+
+    async def entitled_version_dirs(info, app_id):
+        calls.append(app_id)
+        return {1: 'app.x/v1/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs(want=1) == {1: 'app.x/v1/dist'}
+    allowed = False
+    assert _dirs(want=1) == {}
+    assert calls == ['app.x']  # denial happened before using the warm map
+
+
+def test_saas_overlay_without_the_override_still_serves_assets_while_isolation_is_off(monkeypatch):
+    """The serving path (not just the hook) keeps serving an overlay that inherits the base hook."""
+    import functools
+
+    from ai.account import account
+    from ai.account.base import AccountBase
+
+    _setup(monkeypatch, [])
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'app.x/v1/dist'}
+
+    legacy_saas = SimpleNamespace(capabilities=('saas',))
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', functools.partial(AccountBase.authorize_app_use, legacy_saas))
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+
+    monkeypatch.delenv('RR_APP_ISOLATION', raising=False)
+    assert _dirs(want=1) == {1: 'app.x/v1/dist'}
+    assert _dirs() == {1: 'app.x/v1/dist'}
+
+    # Isolation on with a complete valid configuration (not merely a mode name).
+    for env in (
+        sup.valid_env(RR_APP_ISOLATION='enforce'),
+        sup.valid_env(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='app.x'),
+    ):
+        sup.apply_env(monkeypatch, env)
+        assert _dirs(want=1) == {}
+        assert _dirs() == {}
+
+
+def test_warm_full_map_filters_every_concrete_version(monkeypatch):
+    from ai.account import account
+
+    _setup(monkeypatch, [])
+    allowed = {1, 2}
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        return version in allowed
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'free/dist', 2: 'paid/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs() == {1: 'free/dist', 2: 'paid/dist'}
+    allowed.remove(2)
+    assert _dirs() == {1: 'free/dist'}
+    assert _dirs(want=2) == {}
+
+
+def test_raising_or_non_true_seat_hook_denies_on_a_warm_map_instead_of_a_500(monkeypatch):
+    """The main-origin resolver guards the hook like the isolated-origin path does."""
+    from ai.account import account
+
+    _setup(monkeypatch, [])
+    mode = {'verdict': True}
+
+    async def authenticate(token):
+        return SimpleNamespace(userId='u1', organization={'id': 'o'})
+
+    async def authorize_app_use(info, app_id, version=None):
+        if mode['verdict'] == 'raise':
+            raise RuntimeError('commerce backend down')
+        return mode['verdict']
+
+    async def entitled_version_dirs(info, app_id):
+        return {1: 'free/dist', 2: 'paid/dist'}
+
+    monkeypatch.setattr(shell_mod, '_is_saas', lambda: True)
+    monkeypatch.setattr(account, 'authenticate', authenticate)
+    monkeypatch.setattr(account, 'authorize_app_use', authorize_app_use)
+    monkeypatch.setattr(app_deploy_mod, 'entitled_version_dirs', entitled_version_dirs)
+    assert _dirs() == {1: 'free/dist', 2: 'paid/dist'}  # warms the map
+
+    mode['verdict'] = 'raise'
+    assert _dirs() == {}  # warm-map filter: denied, not an exception
+    assert _dirs(want=1) == {}  # want check: denied, not an exception
+
+    mode['verdict'] = 'yes'  # truthy but not True
+    assert _dirs() == {}
+    assert _dirs(want=2) == {}
 
 
 # =============================================================================

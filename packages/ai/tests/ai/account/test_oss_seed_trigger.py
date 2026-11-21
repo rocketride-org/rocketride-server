@@ -43,14 +43,14 @@ ENTRY = {'id': APP_ID, 'name': 'Hello', 'version': '1.0.0', 'entry': '/apps/hell
 
 def _seed_row(version: int, manifest_version: str = '1.0.0', digest: Any = 'sha-current') -> Dict:
     """A rail row the seeder minted: SEED_COMMENT + manifest + optional digest."""
-    build = {'status': 'ok'}
+    build = {'status': 'ok', 'seeded': True}
     if digest is not None:
         build['bundleSha256'] = digest
     return {
         'version': version,
         'comment': SEED_COMMENT,
         'state': 'ready',
-        'metadata': {'manifest': {'id': APP_ID, 'version': manifest_version}, 'build': build},
+        'metadata': {'manifest': {'id': APP_ID, 'version': manifest_version}, 'build': build, 'platform': True},
     }
 
 
@@ -143,3 +143,14 @@ def test_triggers_still_force_when_public_serves_the_seed(monkeypatch):
     # A user row exists but public still serves the seed: the march proceeds.
     rows = [_user_row(2), _seed_row(1)]
     assert _run_trigger(monkeypatch, rows, 'sha-rebuilt', public_version=1) == [True]
+
+
+def test_a_user_row_that_copies_the_seed_comment_is_not_a_seed(monkeypatch):
+    """#1022 G5 M2: the OSS policy finds seed rows by metadata; a deploy commented 'Platform seed' is a user row."""
+    spoof = _seed_row(3)  # comment, manifest and digest all look like a current seed ...
+    spoof['metadata'] = {
+        **spoof['metadata'],
+        'platform': False,
+        'build': {'status': 'ok', 'bundleSha256': 'sha-current'},
+    }
+    assert _run_trigger(monkeypatch, [spoof], 'sha-current') == [True]  # no seed row: reclaim with a fresh seed

@@ -56,8 +56,9 @@ from rocketlib import debug
 # card's version line), so the fallback only marks a manifest gap.
 SEED_VERSION = '0'
 
-# Registry comment stamped on every seeded version — the marker orchestrators
-# use to tell seed rows from user deploys of the same app id.
+# Registry comment stamped on every seeded version, for people reading the
+# rail. It is NOT how code tells seed rows from user deploys: a deploy's caller
+# chooses its comment. is_seed_row (metadata) decides (#1022).
 SEED_COMMENT = 'Platform seed'
 
 # System actor for seeded rows: no user FK (None), the display copy carries
@@ -326,7 +327,9 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
         # build.status 'ok': the seed's dist/ is populated by the copy below
         # from an already-built static tree, so seeded versions pass the SAME
         # built gate server builds do (no special-casing anywhere downstream).
-        metadata={'manifest': manifest, 'build': build},
+        # platform: the seeder is the ONE writer of this flag (deploys strip
+        # it from caller metadata); the OSS first-party rule reads it (#1022).
+        metadata={'manifest': manifest, 'build': build, 'platform': True},
         state='ready',
     )
     try:
@@ -371,6 +374,27 @@ async def seed_app(account: Any, org_id: str, entry: Dict[str, Any], actor: Dict
     return registered
 
 
+def is_seed_row(entry: Dict[str, Any]) -> bool:
+    """
+    Whether a rail row was written by the seeder (the platform's own version, #1022).
+
+    The seeder stamps BOTH ``metadata.platform = True`` and
+    ``metadata.build.seeded = True``; a row is a seed row only when the build
+    stamp says so and ``metadata.platform`` is not an explicit non-True value.
+    Rows deployed before ``platform`` was server-owned stored caller metadata
+    verbatim, so a stored ``platform: true`` alone proves nothing: the deploy
+    door replaced ``metadata.build`` wholesale with its own queued stamp, which
+    is why the seeder's ``seeded`` stamp is the trusted half. Rows seeded
+    before the ``platform`` flag existed have no key and rest on the build
+    stamp alone. Never the row's comment, which a deploy's caller chooses.
+    """
+    metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
+    if 'platform' in metadata and metadata['platform'] is not True:
+        return False
+    build = metadata.get('build') if isinstance(metadata.get('build'), dict) else {}
+    return build.get('seeded') is True
+
+
 def _build_ok(entry: Dict[str, Any]) -> bool:
     """Whether a registry row's build completed (``metadata.build.status`` ok)."""
     metadata = entry.get('metadata') if isinstance(entry.get('metadata'), dict) else {}
@@ -396,7 +420,7 @@ def public_serves_user_deploy(rows: List[Dict[str, Any]], public: Optional[Dict[
         return False
     bound = int(public.get('version', 0))
     live = next((row for row in rows or [] if int(row.get('version', 0)) == bound), None)
-    return live is not None and live.get('comment') != SEED_COMMENT
+    return live is not None and not is_seed_row(live)
 
 
 async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bool:
@@ -424,7 +448,7 @@ async def bundle_changed(account: Any, org_id: str, entry: Dict[str, Any]) -> bo
         return False
     rows = await account.deployments_versions(org_id, app_id)
     # Rows are newest-first, so the first seed row is the latest seed.
-    seeds = [row for row in rows or [] if row.get('comment') == SEED_COMMENT]
+    seeds = [row for row in rows or [] if is_seed_row(row)]
     if not seeds:
         return False
     public = await account.publish_get(org_id, 'app', app_id, PUBLIC_AUDIENCE)
@@ -530,7 +554,8 @@ async def seed_manifest_app(
             if target is None:
                 for row in ready:
                     # Newest SEED row only — user deploys are the worker's job.
-                    if str(row.get('comment') or '') != SEED_COMMENT:
+                    # Chosen by metadata, never by the caller-chosen comment.
+                    if not is_seed_row(row):
                         continue
                     try:
                         if await copy_bundle_to_store(app_id, str(row.get('artifactPath') or '')) > 0:

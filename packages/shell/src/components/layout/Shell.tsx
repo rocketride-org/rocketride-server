@@ -39,6 +39,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { ConnectResult, SignupProperties } from 'rocketride';
 import { ShellIdentityContext } from '../../hooks/useAuthUser';
+import { withoutCredentials } from '../../util/identity';
+import { deliverSession, forgetAuthPopup, isAuthPopupWindow, receiveSession, rememberAuthPopup, shouldStartPopupSignIn } from '../../util/authPopup';
+import type { IAuthChannel } from '../../util/authPopup';
 import { ConnectionManager } from '../../connection/connection';
 import { AuthPhase } from '../../types/connection';
 import { registerClientOps } from '../../ops/clientOps';
@@ -281,6 +284,10 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	// ── React state ───────────────────────────────────────────────────────
 	const [renderPhase, setRenderPhase] = useState<RenderPhase>('loading');
 	const [identity, setIdentity] = useState<ConnectResult | null>(null);
+	// What useAuthUser() hands the shell's subtree, apps included: the user
+	// with a blank session token (#1022). Shell code that needs the token
+	// reads it with cm.loadToken().
+	const publicIdentity = useMemo(() => withoutCredentials(identity), [identity]);
 
 	// The resolved identity drives telemetry's signed-in state and the opaque
 	// id the consented instance identifies by (never an email or name).
@@ -437,10 +444,13 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 			// embedded sign-in prompt opens THIS ORIGIN in a popup named
 			// 'rrauth': the popup runs the normal top-level round trip, then
 			// hands the session token back over BroadcastChannel and closes.
+			// COOP can clear window.name and the IdP drops ?rrauth=1, so the
+			// role is remembered in sessionStorage across the round trip.
 			const bootParams = new URLSearchParams(window.location.search);
-			const isAuthPopup = window.name === 'rrauth' || bootParams.get('rrauth') === '1';
-			if (isAuthPopup && !bootParams.get('code') && !cm.loadToken()) {
+			const isAuthPopup = isAuthPopupWindow(window.name, bootParams);
+			if (isAuthPopup && shouldStartPopupSignIn(bootParams, !!cm.loadToken())) {
 				// Fresh popup: head straight to the IdP (top-level — allowed)
+				rememberAuthPopup();
 				void cm.startOAuth();
 				return;
 			}
@@ -471,11 +481,15 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 				// Popup completion: deliver the session to the opener's iframe
 				// and close — the popup never renders the shell.
 				if (isAuthPopup) {
+					forgetAuthPopup();
+					// Close only once the embedded preview has ACKed the session: a post alone can
+					// be missed (the preview may still be loading), and closing then loses the sign-in.
+					let delivered = true;
 					try {
 						const token = cm.loadToken();
-						if (token) new BroadcastChannel('rr:auth').postMessage({ type: 'login', token });
+						if (token) delivered = await deliverSession(token, new BroadcastChannel('rr:auth') as unknown as IAuthChannel);
 					} catch { /* channel unavailable — the user closes the popup */ }
-					window.close();
+					if (delivered) window.close();
 					return;
 				}
 
@@ -728,12 +742,16 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 		if (window.self === window.top) return;
 		const channel = new BroadcastChannel('rr:auth');
 		channel.onmessage = (e: MessageEvent) => {
-			const data = e.data as { type?: string; token?: string } | undefined;
-			if (data?.type === 'login' && data.token) {
-				cm.saveToken(data.token);
-				console.warn('[shell] reloading: auth popup delivered a session over rr:auth');
-				window.location.reload();
-			}
+			receiveSession(e.data, {
+				loadToken: () => cm.loadToken() ?? '',
+				saveToken: (token) => cm.saveToken(token),
+				ack: () => channel.postMessage({ type: 'ack' }),
+				reload: () => {
+					console.warn('[shell] reloading: auth popup delivered a session over rr:auth');
+					// A tick later so the ACK posted just before is flushed ahead of the unload.
+					setTimeout(() => window.location.reload(), 0);
+				},
+			});
 		};
 		// (rrdev:loginPending — the embedder's ACK — needs no listener since
 		// the popup-or-embedder choice became synchronous; embedders keep
@@ -952,7 +970,7 @@ const Shell: React.FC<ShellProps> = ({ config }) => {
 	const orgId = identity?.organization?.id ?? '';
 
 	return (
-		<ShellIdentityContext.Provider value={identity}>
+		<ShellIdentityContext.Provider value={publicIdentity}>
 			<ShellApiConfigProvider config={config.apiConfig}>
 				{/* Mid-rescope the workspace subtree is OUT of the tree (its
 				    unmount flushed the old workspace's stores on the old

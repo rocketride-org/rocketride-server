@@ -240,6 +240,19 @@ def artifact_content_dir(artifact_path: str) -> str:
     return artifact_path[:-5] if artifact_path.endswith('.json') else artifact_path
 
 
+# Deployment metadata keys only the server writes (#1022): the seeder's
+# first-party marker, an admin's capability grant and the build stamp. A
+# caller's metadata never carries them (caller_metadata).
+SERVER_OWNED_METADATA = frozenset({'platform', 'approvedCapabilities', 'build'})
+
+
+def caller_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """A caller-supplied metadata blob without the server-owned keys ({} when not a dict)."""
+    if not isinstance(metadata, dict):
+        return {}
+    return {k: v for k, v in metadata.items() if k not in SERVER_OWNED_METADATA}
+
+
 def artifact_metadata(artifact: Dict[str, Any], metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """The rail entry's metadata blob, shared verbatim by both editions.
 
@@ -1060,6 +1073,53 @@ class FileDeploymentBackend:
             metadata = metadata if isinstance(metadata, dict) else {}
             metadata['build'] = dict(build)
             entry['metadata'] = metadata
+            return dict(entry)
+
+        return await self._mutate_meta(org_id, project_id, mutate)
+
+    async def set_approved_capabilities(
+        self,
+        org_id: str,
+        project_id: str,
+        version: int,
+        caps: List[str],
+        actor: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """Replace ONE registry version's ``metadata.approvedCapabilities`` (the admin's grant, #1022).
+
+        Same single-field mutation as ``set_build``; the review ``state`` is
+        not touched. The caller validates the names. With ``actor`` the
+        ``capabilities`` audit event is appended in the SAME metadata update,
+        so the grant and its audit row commit together or not at all.
+
+        Returns the refreshed rail entry.
+        """
+        _safe_id(org_id, 'org_id')
+        _safe_id(project_id, 'project_id')
+        if not isinstance(caps, list):
+            raise ValueError('caps must be a list')
+        who = _actor_record(actor) if actor is not None else None
+
+        async def mutate(meta: Dict[str, Any]) -> Dict[str, Any]:
+            """Swap the grant on the version's metadata."""
+            entry = next((v for v in meta['versions'] if int(v.get('version', 0)) == version), None)
+            if entry is None:
+                raise StorageError(f'{project_id} v{version}: not in the registry')
+            metadata = entry.get('metadata')
+            metadata = metadata if isinstance(metadata, dict) else {}
+            metadata['approvedCapabilities'] = list(caps)
+            entry['metadata'] = metadata
+            if who is not None:
+                meta['history'].append(
+                    {
+                        'at': time.time(),
+                        'action': 'capabilities',
+                        'teamId': '',
+                        'version': version,
+                        'actor': who,
+                        'data': {'capabilities': list(caps)},
+                    }
+                )
             return dict(entry)
 
         return await self._mutate_meta(org_id, project_id, mutate)

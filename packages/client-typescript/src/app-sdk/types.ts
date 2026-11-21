@@ -304,7 +304,10 @@ export interface ShellThemeConfig {
 export interface ShellApiConfig {
 	/** Base URI for the RocketRide WebSocket server. */
 	ROCKETRIDE_URI?: string;
-	/** Hard-coded API key for dev; bypasses OAuth2 when present. */
+	/**
+	 * Hard-coded API key for dev; bypasses OAuth2 when present. Host input only:
+	 * useShellApiConfig() omits it (#1022).
+	 */
 	RR_APIKEY?: string;
 	/** Stripe publishable key. */
 	RR_STRIPE_PUBLISHABLE_KEY?: string;

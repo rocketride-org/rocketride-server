@@ -318,6 +318,18 @@ class WebServer:
             response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
             return response
 
+        # App isolation (#1022): app hosts are dispatched before anything else
+        # runs. Added last, so it is the OUTERMOST middleware; the GZip, auth
+        # and security-headers layers above never see app-host traffic. Under
+        # RR_APP_ISOLATION=off (the default) nothing is installed.
+        from ai.modules.shell.app_origin import current_config
+
+        isolation = current_config()
+        if isolation.mode != 'off':
+            from .app_host import AppHostMiddleware
+
+            self.app.add_middleware(AppHostMiddleware, config=isolation)
+
         # Store the server configuration
         self.config = config if config is not None else {}
 

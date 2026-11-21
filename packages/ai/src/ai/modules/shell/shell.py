@@ -55,6 +55,7 @@ derived from request headers.
 """
 
 import hashlib
+import json
 import math
 import mimetypes
 import os
@@ -79,6 +80,27 @@ from . import public_pages
 from .contract import Page, own_title, page_instant
 from .settings import app_url
 
+# Script and stylesheet types pinned for every platform. mimetypes.guess_type
+# reads the OS registry on Windows, where '.js' maps to application/javascript
+# or even text/plain depending on what is installed; text/plain under
+# nosniff breaks module scripts. These are the types Python itself uses on
+# POSIX (RFC 9239 for JavaScript), so Linux and macOS responses do not change.
+_PINNED_MEDIA_TYPES = {
+    '.js': 'text/javascript',
+    '.mjs': 'text/javascript',
+    '.css': 'text/css',
+}
+
+
+def _media_type(name: str | os.PathLike) -> Optional[str]:
+    """Return the media type for a served file name, the same on every OS.
+
+    None means "no opinion": FileResponse then falls back to its own guess.
+    """
+    suffix = os.path.splitext(os.fspath(name))[1].lower()
+    return _PINNED_MEDIA_TYPES.get(suffix) or mimetypes.guess_type(os.fspath(name))[0]
+
+
 # Engine binary directory — all static paths are relative to this.
 _root_dir = os.path.dirname(sys.executable)
 
@@ -91,6 +113,95 @@ _apps_root = os.path.join(_root_dir, 'static', 'apps')
 # Crawler files are cheap to regenerate but change rarely — let shared
 # caches hold them for an hour (same max-age convention as task/fetch.py).
 CACHE_CONTROL = 'public, max-age=3600'
+
+# Frame ancestors every shell document allows: its own origin, and the VS Code
+# App Builder preview, whose webview iframe (vscode-webview://<id>) sits inside
+# the desktop workbench (vscode-file://vscode-app). frame-ancestors checks
+# every ancestor up to the top, so both schemes are needed for the desktop
+# preview. Any VS Code extension's webview matches vscode-webview:, which the
+# #1022 design accepts. Web-hosted VS Code (vscode.dev, code-server,
+# github.dev) uses https origins instead; those hosts are added through
+# RR_SHELL_FRAME_ANCESTORS_EXTRA. A wildcard over a multi-label public suffix
+# (*.co.uk) is not detected: that needs the public suffix list.
+_FRAME_ANCESTORS_DEFAULT = ("'self'", 'vscode-webview:', 'vscode-file:')
+
+# Sources accepted from RR_SHELL_FRAME_ANCESTORS_EXTRA (lowercased first): a
+# non-web scheme ("vscode-webview:"), or an http(s) host with an optional port
+# whose name is not a bare or top-level wildcard. Anything else (keywords,
+# paths, separators, quotes, '*', web schemes) would widen or break the policy.
+_FRAME_ANCESTOR_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*:$')
+_FRAME_ANCESTOR_HOST = re.compile(r'^https?://(\*\.[a-z0-9-]+(\.[a-z0-9-]+)+|[a-z0-9-]+(\.[a-z0-9-]+)*)(:\d{1,5})?$')
+_FRAME_ANCESTOR_WEB_SCHEMES = frozenset(
+    {'http:', 'https:', 'ws:', 'wss:', 'data:', 'blob:', 'filesystem:', 'javascript:'}
+)
+
+
+def _frame_ancestor_sources(value: str) -> str:
+    """
+    Build the frame-ancestors source list for shell documents.
+
+    Args:
+        value: Whitespace-separated extra CSP sources, appended to
+            ``'self' vscode-webview: vscode-file:``.
+
+    Returns:
+        The full source list, lowercased, in order, without duplicates.
+
+    Raises:
+        ValueError: If any extra token is not a non-web scheme source or an
+            http(s) host source; the message names the offending token.
+    """
+    sources = list(_FRAME_ANCESTORS_DEFAULT)
+    for raw in value.split():
+        token = raw.lower()
+        is_scheme = bool(_FRAME_ANCESTOR_SCHEME.match(token)) and token not in _FRAME_ANCESTOR_WEB_SCHEMES
+        if not (is_scheme or _FRAME_ANCESTOR_HOST.match(token)):
+            raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {raw}')
+        if token not in sources:
+            sources.append(token)
+    return ' '.join(sources)
+
+
+# Headers for shell DOCUMENTS (index.html, prerender captures, any other HTML
+# under the shell root, static/ included), never scripts, styles or other
+# assets. frame-ancestors stops a cross-origin page from framing the shell;
+# COOP cuts the window.opener handle of a page that window.open()s the shell
+# (#1022). Built once at import, so an invalid RR_SHELL_FRAME_ANCESTORS_EXTRA
+# stops engine startup.
+_frame_ancestors = _frame_ancestor_sources(os.environ.get('RR_SHELL_FRAME_ANCESTORS_EXTRA', ''))
+_SHELL_DOCUMENT_HEADERS = {
+    'Content-Security-Policy': f'frame-ancestors {_frame_ancestors}',
+    'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+}
+
+# Suffixes served as documents. SVG is left out: the shell only loads its SVGs
+# (favicon, icons) as images, where neither header applies.
+_DOCUMENT_SUFFIXES = frozenset({'.html', '.htm', '.xhtml'})
+
+
+def _document_headers() -> dict:
+    """
+    The headers of one shell document response.
+
+    ``_SHELL_DOCUMENT_HEADERS``, plus, while app isolation is not ``off``, a
+    Report-Only ``frame-src 'self' <every app origin>`` (#1022, Appendix C):
+    it reports frames from anywhere else and is enforced only 30 days after
+    staging reaches ``enforce``. Read per request, like the mode.
+    """
+    from .app_origin import current_config
+
+    config = current_config()
+    if config.mode == 'off':
+        return _SHELL_DOCUMENT_HEADERS
+    return {
+        **_SHELL_DOCUMENT_HEADERS,
+        'Content-Security-Policy-Report-Only': f"frame-src 'self' {config.frame_src_wildcard()}",
+    }
+
+
+def shell_document_headers(headers: Optional[dict] = None) -> dict:
+    """Apply shell policy, including the active origin report policy, to HTML."""
+    return {**(headers or {}), **_document_headers()}
 
 
 def _resolve_safe(base_dir: str, requested_path: str) -> Path:
@@ -219,12 +330,11 @@ async def shell_static(request: Request):
     file_path = _resolve_safe(_shell_root, raw_path)
 
     # Prerendered marketing page, when the shell build carries a capture for
-    # this route (see _capture_for). Only '/' reaches here with a non-/shell/
-    # path, and a capture is served only if it exists, so no route list is
-    # mirrored.
+    # this route (see _capture_for). Every capture is a shell document and
+    # receives both the PR0 policy and the active app-origin report policy.
     capture = _capture_for(request)
     if capture is not None:
-        return FileResponse(capture)
+        return FileResponse(capture, headers=_document_headers())
 
     # Content-hashed bundles under /shell/static/ are not navigation routes: a
     # miss must 404 rather than fall through to the index.html SPA response
@@ -254,16 +364,19 @@ async def shell_static(request: Request):
 
     # Serve the file if it exists. Everything under static/ is content-hashed
     # (a new build changes the name), so the browser may keep it for good.
+    # HTML anywhere under the shell root (static/ included) is a document and
+    # gets the framing policy; themes, icons and other assets do not.
     if file_path.exists() and file_path.is_file():
+        headers = dict(_document_headers()) if file_path.suffix.lower() in _DOCUMENT_SUFFIXES else {}
         if is_static:
-            return FileResponse(file_path, headers={'Cache-Control': 'public, max-age=31536000, immutable'})
-        return FileResponse(file_path)
+            headers['Cache-Control'] = 'public, max-age=31536000, immutable'
+        return FileResponse(file_path, headers=headers or None, media_type=_media_type(file_path))
 
     # SPA fallback: serve index.html for any unmatched route so that
     # client-side routing (React Router, etc.) can handle it.
     index_path = Path(_shell_root) / 'index.html'
     if index_path.exists() and index_path.is_file():
-        return FileResponse(index_path)
+        return FileResponse(index_path, headers=_document_headers())
 
     # Shell hasn't been built yet
     raise HTTPException(
@@ -374,6 +487,12 @@ async def _app_entry_info(token: str, app_id: str) -> Optional[dict]:
         version = int(registry_version)
         if version not in await _version_dirs_for(token, app_id, want=version):
             return None
+        # An isolated app's main-origin entry URL is refused by _serve_versioned
+        # (E8): do not advertise it. Same None as an unbuilt version.
+        from .app_origin import isolated_for
+
+        if await isolated_for(token, app_id):
+            return None
         return {
             'appId': app_id,
             'name': _app_field(entry, 'name') or app_id,
@@ -429,8 +548,21 @@ async def _authorize_app(token: str, app_id: str) -> bool:
 # warm map forces one re-resolution, refractory-limited below.
 
 _VERSION_SEG = re.compile(r'^v(\d{1,9})$')
+# An isolated app's image on the main origin (E8): never a script context.
+_SANDBOXED_ASSET_HEADERS = {
+    'Content-Security-Policy': "default-src 'none'; sandbox",
+    'X-Content-Type-Options': 'nosniff',
+}
 _APP_ID_SEG = re.compile(r'^[A-Za-z0-9_][A-Za-z0-9_.\-]*$')
 _BUNDLE_CACHE = 'private, max-age=3600'
+# While isolation is on every reuse revalidates (with an ETag), so the E8
+# decision and its headers are applied on each use instead of being replayed
+# from a browser cache. Entries a browser stored BEFORE isolation was enabled
+# keep their one-hour lifetime and cannot be revoked from here: operators
+# enabling isolation should expect main-origin bundles cached earlier to age
+# out within an hour (a hard refresh or the shell's own version bump clears
+# them sooner).
+_BUNDLE_REVALIDATE = 'private, no-cache'
 # sha256('<token>.<app_id>') -> {'dirs': {version: dist_dir}, 'expiry',
 # 'resolvedAt', 'floor', 'appId'} — HARD expiry (contrast _app_auth_cache's
 # sliding window); every deploy change also drops the app's entries
@@ -461,33 +593,49 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
     stays conservative both ways: the refresh can only ADD what the DB now
     grants, and revocation still converges on the hard expiry as before.
     """
+    from ai.account import account
+    from ai.account.app_deploy import _use_allowed, entitled_version_dirs, open_version_dirs
+
+    info = None
+    auth_failed = False
+    if _is_saas():
+        if token:
+            try:
+                info = await account.authenticate(token)
+            except Exception:
+                auth_failed = True
+                info = None
+        if info is not None and not hasattr(info, 'userId'):
+            info = None
+        # A cached publish/version map is not a cached paid seat. Re-check
+        # live membership and seat allocation even on a warm asset request.
+        if want is not None and not await _use_allowed(account, info, app_id, want):
+            return {}
+
     key = hashlib.sha256(f'{token}.{app_id}'.encode('utf-8')).hexdigest()
     now = time.time()
     hit = _version_dir_cache.get(key)
-    if hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
+    if not auth_failed and hit is not None and hit['expiry'] > now:  # no slide — HARD expiry
         # A hit only answers when it can satisfy the caller: an absent
         # ``want`` on a map old enough to re-resolve falls through to a
         # fresh DB walk below (the miss-refresh); a map younger than the
         # key's current floor answers stale to keep the miss path from
         # becoming a per-request walk.
         if want is None or want in hit['dirs'] or now - hit['resolvedAt'] < hit['floor']:
+            if _is_saas() and want is None:
+                return {
+                    version: path
+                    for version, path in hit['dirs'].items()
+                    if await _use_allowed(account, info, app_id, version)
+                }
             return hit['dirs']
 
-    from ai.account import account
-    from ai.account.app_deploy import entitled_version_dirs, open_version_dirs
-
     if _is_saas():
-        info = None
-        if token:
-            try:
-                info = await account.authenticate(token)
-            except Exception:
-                info = None
-        if info is not None and not hasattr(info, 'userId'):
-            info = None  # authenticate() returns an error tuple on failure
         dirs = await entitled_version_dirs(info, app_id)
     else:
         dirs = await open_version_dirs(app_id)
+    if auth_failed:
+        return dirs
 
     # The key's NEXT floor: a miss-forced walk that still lacks the wanted
     # version was fruitless — double the floor (capped at the TTL) so a
@@ -530,6 +678,11 @@ def invalidate_app_serving(app_id: str) -> None:
     for cache in (_version_dir_cache, _app_auth_cache):
         for key in [k for k, entry in cache.items() if entry.get('appId') == app_id]:
             cache.pop(key, None)
+    # The app-origin caches (entitlement behind frame tokens, isolation
+    # verdicts) follow the same deploy events (#1022).
+    from .app_origin import drop_app
+
+    drop_app(app_id)
 
 
 async def _serve_versioned(request: Request, app_id: str, version: int, rest: list) -> Response:
@@ -547,7 +700,28 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         if not seg or seg in ('.', '..') or '\\' in seg or ':' in seg:
             raise HTTPException(status_code=404, detail='Not found')
 
-    dirs = await _version_dirs_for(request.cookies.get(_APP_COOKIE, ''), app_id, want=version)
+    # E8 (#1022): an isolated app's code never serves on the main origin, for
+    # any client (an old shell or a stale tab would run it in the shell
+    # realm); it loads only from its own app origin. Its images still feed
+    # <img> tiles, sandboxed so an SVG opened as a document cannot run
+    # script here. Same 404 as an absent version. Skipped under off.
+    token = request.cookies.get(_APP_COOKIE, '')
+    media_type = _media_type(rest[-1]) or 'application/octet-stream'
+    from .app_origin import current_config, is_canonical_app_id, isolated_for
+
+    headers = {'Cache-Control': _BUNDLE_CACHE if current_config().mode == 'off' else _BUNDLE_REVALIDATE}
+
+    # A non-canonical spelling (acme.foo. names acme.foo's directory on a
+    # Windows store) is refused while isolation is on, before the isolation
+    # check and before it becomes a store path.
+    if not is_canonical_app_id(app_id) and current_config().mode != 'off':
+        raise HTTPException(status_code=404, detail='Not found')
+    if await isolated_for(token, app_id):
+        if not media_type.startswith('image/'):
+            raise HTTPException(status_code=404, detail='Not found')
+        headers.update(_SANDBOXED_ASSET_HEADERS)
+
+    dirs = await _version_dirs_for(token, app_id, want=version)
     dist_dir = dirs.get(version)
     if not dist_dir:
         raise HTTPException(status_code=404, detail='Not found')
@@ -558,8 +732,12 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
         data = await Store.instance()._store.read_bytes(f'{dist_dir}/{"/".join(rest)}')
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
-    media_type = mimetypes.guess_type(rest[-1])[0] or 'application/octet-stream'
-    return Response(content=data, media_type=media_type, headers={'Cache-Control': _BUNDLE_CACHE})
+    if headers['Cache-Control'] == _BUNDLE_REVALIDATE:
+        etag = f'"{hashlib.sha256(data).hexdigest()[:32]}"'
+        headers['ETag'] = etag
+        if request.headers.get('if-none-match') == etag:
+            return Response(status_code=304, headers=headers)
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 async def apps_session(request: Request):
@@ -607,6 +785,81 @@ async def apps_session(request: Request):
         samesite='lax',
     )
     return resp
+
+
+# POST /apps/frame bodies are {appId, version}: anything near this is not one.
+_FRAME_BODY_MAX = 4096
+
+
+def _frame_error(status: int, code: str) -> JSONResponse:
+    """One ``POST /apps/frame`` error body (Appendix A codes)."""
+    return JSONResponse({'error': code}, status_code=status, headers={'Cache-Control': 'no-store'})
+
+
+async def apps_frame(request: Request):
+    """
+    ``POST /apps/frame {appId, version}``: what the shell needs to open an isolated app (#1022).
+
+    Bearer optional: a signed-in caller gets a frame token for a version it is
+    entitled to (``/_t/<token>/v<N>/``); an anonymous caller gets the
+    ``/_p/<appId>/v<N>/`` prefix of a public ``ready`` version. Answers
+    (design Appendix A): 200 ``{v, origin, entryPrefix, expiresAt,
+    capabilities, network, state}``; 400 ``bad_request``; 401
+    ``invalid_token`` (a bearer that does not authenticate); 404
+    ``not_found``, one answer for every cause (unknown, not entitled, not
+    isolated); 409 ``isolation_off``; 413 ``too_large`` (a body over 4 KiB);
+    429 ``rate_limited`` (per client address before authentication, then per
+    caller).
+    """
+    from .app_origin import (
+        caller_of,
+        client_ip,
+        client_rate_ok,
+        current_config,
+        frame_grant,
+        frame_rate_ok,
+        is_canonical_app_id,
+    )
+
+    config = current_config()
+    if config.mode == 'off':
+        return _frame_error(409, 'isolation_off')
+    # Per client address BEFORE anything costs a lookup: junk bearers never
+    # reach the auth backend unthrottled.
+    client = client_ip(request.headers, request.client.host if request.client else '', config)
+    if not client_rate_ok(client):
+        return _frame_error(429, 'rate_limited')
+    declared = request.headers.get('content-length', '')
+    if declared.isascii() and declared.isdigit() and int(declared) > _FRAME_BODY_MAX:
+        return _frame_error(413, 'too_large')
+    raw = b''
+    async for chunk in request.stream():
+        raw += chunk
+        if len(raw) > _FRAME_BODY_MAX:
+            return _frame_error(413, 'too_large')
+    try:
+        body = json.loads(raw)
+    except (ValueError, RecursionError):  # the byte cap bounds size, not nesting depth
+        return _frame_error(400, 'bad_request')
+    app_id = body.get('appId') if isinstance(body, dict) else None
+    version = body.get('version') if isinstance(body, dict) else None
+    if not is_canonical_app_id(app_id):
+        return _frame_error(400, 'bad_request')
+    if type(version) is not int or version < 1:
+        return _frame_error(400, 'bad_request')
+
+    auth = request.headers.get('authorization', '')
+    token = auth[7:].strip() if auth[:7].lower() == 'bearer ' else auth.strip()
+    info = await caller_of(token) if token else None
+    if token and info is None:
+        return _frame_error(401, 'invalid_token')
+    if not frame_rate_ok(f'u:{info.userId}' if info is not None else f'ip:{client}'):
+        return _frame_error(429, 'rate_limited')
+
+    grant = await frame_grant(app_id, version, token, info, config)
+    if grant is None:
+        return _frame_error(404, 'not_found')
+    return JSONResponse(grant, headers={'Cache-Control': 'no-store'})
 
 
 async def apps_static(request: Request):
@@ -690,7 +943,7 @@ async def apps_static(request: Request):
 
     # Serve the file if it exists
     if file_path.exists() and file_path.is_file():
-        return FileResponse(file_path)
+        return FileResponse(file_path, media_type=_media_type(file_path))
 
     raise HTTPException(status_code=404, detail='Not found')
 

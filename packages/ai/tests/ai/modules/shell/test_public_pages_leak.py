@@ -68,6 +68,16 @@ def world(monkeypatch, tmp_path):
     acct = install(monkeypatch, hostile_account())
     (tmp_path / 'index.html').write_text('<html><head><title>shell</title></head><body>SPA</body></html>')
     monkeypatch.setattr(shell_mod, '_shell_root', str(tmp_path))
+    # Pin the DEFAULT framing policy, whatever RR_SHELL_FRAME_ANCESTORS_EXTRA the test
+    # process inherits (shell.py appends it at import time).
+    monkeypatch.setattr(
+        shell_mod,
+        '_SHELL_DOCUMENT_HEADERS',
+        {
+            **shell_mod._SHELL_DOCUMENT_HEADERS,
+            'Content-Security-Policy': f'frame-ancestors {shell_mod._frame_ancestor_sources("")}',
+        },
+    )
     assert asyncio.run(pp.rebuild())
     app = FastAPI()
     app.get('/')(public_page)
@@ -149,3 +159,30 @@ def test_an_unpublished_root_app_stops_serving_its_pages_after_the_rebuild(world
     llms = client.get('/llms.txt').text
     assert 'The blurb.' not in llms
     assert_no_leak(llms)
+
+
+@pytest.mark.parametrize('ua', [GOOGLEBOT, BROWSER])
+def test_rendered_public_pages_keep_shell_document_protection(world, ua):
+    """The new public-page renderer must not bypass the shell's framing policy."""
+    _, client = world
+    for path in ('/', '/pricing', '/marketplace'):
+        for _ in range(2):  # both the render and its warm-cache response
+            response = client.get(path, headers={'User-Agent': ua})
+            assert response.status_code == 200
+            assert response.headers['content-security-policy'] == "frame-ancestors 'self' vscode-webview: vscode-file:"
+            assert response.headers['cross-origin-opener-policy'] == 'same-origin-allow-popups'
+    missing = client.get('/missing', headers={'User-Agent': ua, 'Accept': 'text/html'})
+    assert missing.status_code == 404
+    assert missing.headers['content-security-policy'] == "frame-ancestors 'self' vscode-webview: vscode-file:"
+    assert missing.headers['cross-origin-opener-policy'] == 'same-origin-allow-popups'
+
+
+def test_rendered_public_pages_keep_the_active_app_origin_report_policy(world, isolation_env):
+    """The page renderer carries the same active-origin report policy as shell_static."""
+    _, client = world
+    expected = f"frame-src 'self' {isolation_env.config().frame_src_wildcard()}"
+    for ua in (GOOGLEBOT, BROWSER):
+        for _ in range(2):
+            response = client.get('/pricing', headers={'User-Agent': ua})
+            assert response.status_code == 200
+            assert response.headers['content-security-policy-report-only'] == expected

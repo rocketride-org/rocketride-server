@@ -51,6 +51,7 @@ from ai.account.app_deploy import (
     _REPLY_MAX_CHARS,
     _home_org_of,
     _publisher_of,
+    _caller_entitled_to_version,
     entitled_version_dirs,
     handle_app_add,
     handle_deploy_app,
@@ -58,6 +59,7 @@ from ai.account.app_deploy import (
     resolve_app_pins,
 )
 from ai.account.store import Store
+from tests.ai.modules.shell import isolation_support as sup
 
 
 # =============================================================================
@@ -1428,6 +1430,59 @@ async def test_entitled_dirs_from_visible_publishes(registry):
     # A caller outside the team AND outside the developer org has no road
     # to it (org2 has no rail for the app; the binding is team-scoped).
     assert await entitled_version_dirs(_info(user_id='u2', org_id='org2', teams=[]), 'acme.brandy') == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('audience', [AUD_PUBLIC, AUD_TEAM, AUD_USER])
+async def test_paid_use_denial_blocks_visible_versions_and_developer_rail(registry, monkeypatch, audience):
+    """A visible publish or own rail does not override a live commerce denial."""
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+    registry.seed_publish(audience, 1)
+
+    async def denied(info, app_id, version=None):
+        return False
+
+    monkeypatch.setattr(account_singleton, 'authorize_app_use', denied)
+    assert await entitled_version_dirs(_info(), 'acme.brandy') == {}
+    assert await _caller_entitled_to_version(_FakeConn(), account_singleton, 'org1', 'org1', 'acme.brandy', 1) is False
+
+
+@pytest.mark.asyncio
+async def test_saas_overlay_without_a_commerce_gate_serves_until_isolation_is_on(monkeypatch):
+    from ai.account.base import AccountBase
+
+    legacy_saas = SimpleNamespace(capabilities=('saas',))
+    oss = SimpleNamespace(capabilities=())
+    monkeypatch.delenv('RR_APP_ISOLATION', raising=False)
+    # Isolation off (the default): an overlay without the override must not deny every app.
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is True
+    assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+    # Isolation on with a COMPLETE valid configuration: the base fails closed
+    # (startup check d requires the override), in both enforcing modes.
+    sup.apply_env(monkeypatch, sup.valid_env(RR_APP_ISOLATION='enforce'))
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
+    assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+    sup.apply_env(monkeypatch, sup.valid_env(RR_APP_ISOLATION='optin', RR_APP_ISOLATION_APPS='acme.brandy'))
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
+    assert await AccountBase.authorize_app_use(oss, None, 'acme.brandy') is True
+    # An unreadable isolation configuration is a separate fail-closed path.
+    monkeypatch.setenv('RR_APP_ISOLATION', 'bogus')
+    assert await AccountBase.authorize_app_use(legacy_saas, _info(), 'acme.brandy') is False
+
+
+@pytest.mark.asyncio
+async def test_commerce_gate_is_specific_to_each_registry_version(registry, monkeypatch):
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+    registry.add_version(2, '2.0.0', publisher_id='u1')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.seed_publish(AUD_USER, 2)
+
+    async def only_free_version(info, app_id, version=None):
+        return version == 1
+
+    monkeypatch.setattr(account_singleton, 'authorize_app_use', only_free_version)
+    assert await entitled_version_dirs(_info(), 'acme.brandy') == {1: _V1_DIST}
+    assert await _caller_entitled_to_version(_FakeConn(), account_singleton, 'org1', 'org1', 'acme.brandy', 2) is False
 
 
 @pytest.mark.asyncio

@@ -1085,6 +1085,7 @@ class TaskServer(DAPBase):
         checks use the fresh data.
         """
         from ai.account import account
+        from ai.modules.shell.app_origin import wire_view
 
         for conn in list(self._connections.values()):
             if not getattr(conn, '_account_info', None):
@@ -1102,7 +1103,10 @@ class TaskServer(DAPBase):
             try:
                 fresh = await account._service.get_authentication_result(user_id, conn._account_info.auth)
                 conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
+                body = fresh.to_push_result()
+                if 'apps' in body:
+                    body['apps'] = wire_view(body['apps'], getattr(conn, '_shell_caps', ()))
+                await conn.send_event('apaext_account', body=body)
             except Exception as e:
                 self.debug_message(f'push_account_update failed for conn {conn.get_connection_id()}: {e}')
 
@@ -1117,6 +1121,7 @@ class TaskServer(DAPBase):
         just the caller's connections.
         """
         from ai.account import account
+        from ai.modules.shell.app_origin import wire_view
 
         notified = 0
         for conn in list(self._connections.values()):
@@ -1138,7 +1143,10 @@ class TaskServer(DAPBase):
             try:
                 fresh = await account._service.get_authentication_result(info.userId, info.auth)
                 conn._account_info = fresh
-                await conn.send_event('apaext_account', body=fresh.to_push_result())
+                body = fresh.to_push_result()
+                if 'apps' in body:
+                    body['apps'] = wire_view(body['apps'], getattr(conn, '_shell_caps', ()))
+                await conn.send_event('apaext_account', body=body)
                 notified += 1
             except Exception as e:
                 self.debug_message(f'push_org_update failed for conn {conn.get_connection_id()}: {e}')

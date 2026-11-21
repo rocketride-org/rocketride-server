@@ -96,11 +96,17 @@ class _Registry:
         return {}
 
 
-def _seed_row(digest=None, comment=SEED_COMMENT, status='ok', version=1):
-    build = {'status': status, 'seeded': True}
+def _seed_row(digest=None, comment=SEED_COMMENT, status='ok', version=1, seed=None):
+    """A rail row: the seeder's (platform True) when the comment is the seed comment, a user deploy otherwise.
+
+    ``seed`` overrides that, to model a deploy whose caller copied the seed comment (#1022).
+    """
+    seed = comment == SEED_COMMENT if seed is None else seed
+    build = {'status': status, 'seeded': True} if seed else {'status': status}
     if digest is not None:
         build['bundleSha256'] = digest
-    return {'version': version, 'comment': comment, 'state': 'ready', 'metadata': {'build': build}}
+    metadata = {'build': build, 'platform': seed}
+    return {'version': version, 'comment': comment, 'state': 'ready', 'metadata': metadata}
 
 
 # =============================================================================
@@ -370,3 +376,71 @@ async def test_a_forced_reseed_with_a_repoint_hook_leaves_the_state_to_the_hook(
     assert registry.bindings == []
     assert registry.state_flips == []
     assert registry.state == 'disabled'
+
+
+# =============================================================================
+# self-heal picks the seeder's rows by metadata, never by comment (#1022 G4 round 2 SHOULD-3)
+# =============================================================================
+
+
+async def _heal(static_apps, monkeypatch, row):
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+    copies = []
+
+    async def copied(app_id, artifact_path):
+        copies.append(artifact_path)
+        return 1
+
+    monkeypatch.setattr(seed_apps, 'copy_bundle_to_store', copied)
+    row['artifactPath'] = f'.deployments/{APP_ID}/v1-abcdef12.json'
+    registry = _Registry([row])
+    healed = await seed_manifest_app(registry, 'org', ENTRY, seed_apps.SYSTEM_ACTOR)
+    return healed, copies, registry
+
+
+@pytest.mark.asyncio
+async def test_self_heal_ignores_a_user_deploy_that_copies_the_seed_comment(static_apps, monkeypatch):
+    """A deploy's comment is the caller's: a failed user deploy commented 'Platform seed' is never healed or bound."""
+    row = _seed_row(status='failed')
+    row['metadata'] = {'platform': False, 'build': {'status': 'failed'}}
+    healed, copies, registry = await _heal(static_apps, monkeypatch, row)
+    assert healed is False and copies == [] and registry.bindings == []
+
+
+@pytest.mark.asyncio
+async def test_self_heal_picks_a_platform_row_whatever_its_comment(static_apps, monkeypatch):
+    """The seeder's row is the one with metadata.platform True (build.seeded only for rows from before the flag)."""
+    row = _seed_row(status='failed', comment='renamed by an operator')
+    row['metadata'] = {'platform': True, 'build': {'status': 'failed', 'seeded': True}}
+    healed, copies, registry = await _heal(static_apps, monkeypatch, row)
+    assert healed is True and len(copies) == 1 and registry.bindings == [1]
+
+
+@pytest.mark.asyncio
+async def test_bundle_changed_ignores_a_user_deploy_that_copies_the_seed_comment(static_apps):
+    """#1022 G5 M2: the newest SEED row is chosen by metadata; a user deploy commented 'Platform seed' is not one."""
+    _write(static_apps / APP_ID, {'remoteEntry.js': b'a'})
+    current = bundle_digest(APP_ID)
+    registry = _Registry([_seed_row('0' * 64, version=2, seed=False), _seed_row(current, version=1)])
+    assert await bundle_changed(registry, 'org', ENTRY) is False  # the real seed row is current
+
+
+def test_public_serves_user_deploy_reads_metadata_not_comment():
+    """#1022 G5 M2: a live user deploy commented 'Platform seed' is still a user deploy; a renamed seed row is not."""
+    from ai.account.seed_apps import public_serves_user_deploy
+
+    spoof = _seed_row(version=2, seed=False)
+    assert public_serves_user_deploy([spoof], {'version': 2}) is True
+    renamed = _seed_row(version=3, comment='renamed by an operator', seed=True)
+    assert public_serves_user_deploy([renamed], {'version': 3}) is False
+
+
+def test_is_seed_row_ignores_a_caller_written_platform_flag_without_the_build_stamp():
+    """A pre-upgrade row whose caller stored ``platform: true`` is not a seed row."""
+    from ai.account.seed_apps import is_seed_row
+
+    assert is_seed_row({'metadata': {'platform': True, 'build': {'status': 'ok', 'seeded': True}}}) is True
+    assert is_seed_row({'metadata': {'platform': True, 'build': {'status': 'ok'}}}) is False
+    assert is_seed_row({'metadata': {'platform': True}}) is False
+    assert is_seed_row({'metadata': {'platform': False, 'build': {'seeded': True}}}) is False
+    assert is_seed_row({'metadata': {'build': {'seeded': True}}}) is True  # legacy seeded row, no key
