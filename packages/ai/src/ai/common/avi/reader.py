@@ -308,9 +308,11 @@ class AVIReader(ABC):
         self._media_type = None
         self._isStdinCompatible = False
 
-        # Done is set when ffmpeg terminates
+        # Done is set when ffmpeg terminates; ended_by_consumer when end_decoding()
+        # terminated it, so the nonzero exit is not a failure
         self._done = False
         self._exit_code = 0
+        self._ended_by_consumer = False
 
         # New stream - restart the decoded-output byte count
         self._bytes_read = 0
@@ -345,6 +347,9 @@ class AVIReader(ABC):
         process = getattr(self, '_ffmpeg_process', None)
         if process is not None and process.poll() is None:
             debug(f'[Reader] {self._name}: decoding ended early by its consumer')
+            # Recorded BEFORE the terminate: the watcher then sees a nonzero exit, and
+            # write() must tell this stop from a decoder that failed
+            self._ended_by_consumer = True
             process.terminate()
 
     def stop(self):
@@ -435,9 +440,11 @@ class AVIReader(ABC):
             raise Exception(f'[Reader]: {self._name} is not started')
 
         # If the ffmpeg process is done, we don't need to write anything since
-        # it terminated, it is complete but we still need to send blocks through
+        # it terminated, it is complete but we still need to send blocks through.
+        # A consumer that ended decoding itself (end_decoding) exits nonzero by
+        # design; its remaining writes are dropped like any other's
         if self._done:
-            if self._exit_code != 0:
+            if self._exit_code != 0 and not self._ended_by_consumer:
                 raise Exception(f'[Reader]: {self._name} terminated with error {self._exit_code}')
             return
 

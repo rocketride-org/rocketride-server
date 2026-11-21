@@ -34,11 +34,13 @@ numbers are counted from the start of the video.
 
 import queue
 import struct
+import subprocess
 import zlib
 from fractions import Fraction
 from pathlib import Path
 from types import SimpleNamespace
 
+import imageio_ffmpeg
 import pytest
 from rocketlib import AVI_ACTION
 from ai.common.avi import frame as F
@@ -407,6 +409,65 @@ def test_end_decoding_from_the_frame_callback_stops_ffmpeg_and_the_stream_still_
 
     emitted = [image for image in frames if image is not None]
     assert 1 <= len(emitted) < 10, 'at 1 fps the whole 74 s video gives 74 frames'
+    assert frames[-1] is None, 'the end of the stream is still reported'
+
+
+def test_writes_after_end_decoding_are_dropped_but_a_failed_decoder_still_raises():
+    """end_decoding's terminate exits nonzero by design; only an unrequested exit is an error."""
+    extractor = _extractor([])
+    # A started stream without ffmpeg: write() checks only these, and no real process
+    # is involved; _started is cleared after, so __del__'s stop() has nothing to stop
+    extractor._started = True
+    extractor._ffmpeg_process = SimpleNamespace(poll=lambda: None, terminate=lambda: None)
+    try:
+        extractor.end_decoding()
+        extractor._done, extractor._exit_code = True, 1  # what the watcher records next
+        extractor.write(b'the rest of the stream')  # dropped, not raised
+
+        extractor._ended_by_consumer = False  # the same exit, not requested
+        with pytest.raises(Exception, match='terminated with error 1'):
+            extractor.write(b'the rest of the stream')
+    finally:
+        extractor._started = False
+
+
+@pytest.mark.skipif(not _VIDEO.exists(), reason='the test video is not checked out')
+def test_end_decoding_on_a_piped_stream_drops_the_remaining_writes(tmp_path):
+    """MPEG-TS goes to ffmpeg's stdin as it arrives, so writes keep coming after the stop."""
+    stream = tmp_path / 'clip.ts'
+    subprocess.run(
+        [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            '-loglevel',
+            'error',
+            '-i',
+            str(_VIDEO),
+            '-c',
+            'copy',
+            '-bsf:v',
+            'h264_mp4toannexb',
+            '-f',
+            'mpegts',
+            str(stream),
+        ],
+        check=True,
+    )
+    frames = []
+
+    def callback(image, number, seconds):
+        frames.append(image)
+        if image is not None and len(frames) == 1:
+            extractor.end_decoding()
+
+    extractor = VideoFrameExtractor(callback, name='FrameGrabber', config={'type': 'interval', 'fps': 1.0})
+    data = stream.read_bytes()
+    extractor.writeAVI(AVI_ACTION.BEGIN, 'video/mp2t', b'')
+    for offset in range(0, len(data), 1 << 16):
+        extractor.writeAVI(AVI_ACTION.WRITE, 'video/mp2t', data[offset : offset + (1 << 16)])
+    extractor.writeAVI(AVI_ACTION.END, 'video/mp2t', b'')
+
+    assert extractor._isStdinCompatible, 'precondition: the stream was piped, not cached'
+    assert 1 <= len([image for image in frames if image is not None]) < 10
     assert frames[-1] is None, 'the end of the stream is still reported'
 
 
