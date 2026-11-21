@@ -632,12 +632,16 @@ class Resolution(NamedTuple):
         pin: The publication that answered a ``read``, or that a ``start``
             started its control from; ``None`` when a registered control answered.
         started: True when this call started the control from the publication.
+        artifact: The pinned artifact a ``read`` decided on (the spec the
+            answering publication serves, loaded server-side); ``None``
+            otherwise.
     """
 
     target: Target
     control: Optional[TaskControl]
     pin: Optional[Pin]
     started: bool
+    artifact: Optional[Dict[str, Any]] = None
 
 
 class TaskServer(DAPBase):
@@ -1341,17 +1345,20 @@ class TaskServer(DAPBase):
             target: The target text, or one already parsed.
             require: The permission the request needs (``'task.data'``,
                 ``'task.control'``, ``'task.monitor'`` ...).
-            mode: ``start`` (act on the first candidate: a publication starts
-                its control from the artifact), ``read`` (the same decision,
-                nothing started: the first candidate, a control or a
-                publication) or ``attach`` (registered controls only, live
+            mode: ``start`` (act on the first candidate that can serve: a
+                publication starts its control from the artifact), ``read``
+                (the same decision, nothing started: the candidate a start
+                would act on, a control or a publication with its artifact;
+                a pinned artifact without the named source yields to the next
+                candidate in both) or ``attach`` (registered controls only, live
                 first, then one still registered so a run that just finished
                 keeps its final status readable; nothing starts).
 
         Returns:
             The ``Resolution``: the parsed target, the control that answers
             (``None`` only for a ``read`` a publication answers), the pin of
-            that publication, and whether this call started the control.
+            that publication, whether this call started the control, and (a
+            ``read`` a publication answers) the pinned artifact.
 
         Raises:
             TaskError: TASK_INVALID_ARGUMENT (grammar, a refused or retired
@@ -1394,18 +1401,22 @@ class TaskServer(DAPBase):
                     return Resolution(parsed, self._check_engine_available(control), None, False)
             raise self._not_registered(parsed.dotted, rungs, plan)
 
-        # Step 5: the candidates in the ladder's order; read answers the first.
-        # A held refusal (an ambiguous rung) is raised where it stands
+        # Step 5: the candidates in the ladder's order; read answers the one a
+        # start would act on, without acting: a pinned artifact without the
+        # named source yields to the next candidate in both modes
+        # (_artifact_source), so discovery and execution pick the same
+        # publication. A held refusal (an ambiguous rung) is raised where it stands
         candidates = await self._candidates(parsed.address, account_info, require, rungs, plan)
         if mode == RESOLVE_READ:
-            if not candidates:
-                raise self._not_registered(parsed.dotted, rungs, plan)
-            first = candidates[0]
-            if isinstance(first, TaskError):
-                raise first
-            if isinstance(first, TaskControl):
-                return Resolution(parsed, first, None, False)
-            return Resolution(parsed, None, first, False)
+            for candidate in candidates:
+                if isinstance(candidate, TaskError):
+                    raise candidate
+                if isinstance(candidate, TaskControl):
+                    return Resolution(parsed, candidate, None, False)
+                artifact = await self._read_pin(candidate, parsed.address)
+                if artifact is not None:
+                    return Resolution(parsed, None, candidate, False, artifact)
+            raise self._not_registered(parsed.dotted, rungs, plan)
 
         # Step 6: start acts on the first candidate that can serve, and the
         # store gate stands on whichever answers (plan 0 S9/S10, 8.4): a live
@@ -1830,6 +1841,64 @@ class TaskServer(DAPBase):
             reason=reason,
         )
 
+    @staticmethod
+    def _artifact_source(pipeline: Dict[str, Any], parsed: Address) -> Tuple[Optional[str], bool]:
+        """
+        The source an address names on a pinned artifact, and whether the artifact has it.
+
+        THE one source decision a publication answers by, in a ``start``
+        (``_start_from_pin``) and a ``read`` (``_read_pin``) alike: the
+        address's own source segment, else the artifact's default
+        ``source``, else its one implied source.
+
+        Args:
+            pipeline: The pinned artifact.
+            parsed: The parsed address.
+
+        Returns:
+            ``(source, present)``: ``source`` is None when the artifact has
+            several sources and no default (or none at all); ``present`` is
+            whether a component of that id is in the artifact.
+        """
+        source = parsed.source or pipeline.get('source')
+        if not source:
+            try:
+                source = resolve_implied_source(pipeline)
+            except MultipleSourcesError:
+                source = None
+        if not source:
+            return None, False
+        components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
+        return source, source in {c.get('id') for c in components}
+
+    async def _read_pin(self, pin: Pin, parsed: Address) -> Optional[Dict[str, Any]]:
+        """
+        The pinned artifact when ``pin`` answers a ``read`` of ``parsed``; None when it yields.
+
+        A read takes the source decision a start takes (``_artifact_source``):
+        an artifact without the source the address names yields, and the
+        next candidate answers, exactly as ``_start_from_pin`` yields. An
+        artifact with several sources and no default answers the read (its
+        interface map names the sources to choose from) where a start of the
+        same publication asks for one (``TASK_SOURCE_REQUIRED``).
+
+        Args:
+            pin: The serving publication.
+            parsed: The parsed address.
+
+        Returns:
+            The artifact, or None when it has no such source.
+        """
+        # Deferred: the account singleton loads after this module
+        from ai.account import account
+
+        deployment = pin.deployment
+        pipeline = await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version)
+        source, present = self._artifact_source(pipeline, parsed)
+        if source is not None and not present:
+            return None
+        return pipeline
+
     async def _start_from_pin(
         self,
         pin: Pin,
@@ -1887,13 +1956,8 @@ class TaskServer(DAPBase):
         state_epoch = time.monotonic()
         pipeline = dict(await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version))
         components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
-        source = parsed.source or pipeline.get('source')
-        if not source:
-            try:
-                source = resolve_implied_source(pipeline)
-            except MultipleSourcesError:
-                source = None
-        if not source:
+        source, present = self._artifact_source(pipeline, parsed)
+        if source is None:
             pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
             raise TaskError(
                 TaskError.SOURCE_REQUIRED,
@@ -1901,7 +1965,7 @@ class TaskServer(DAPBase):
                 address=pipe_address,
                 sources=sorted(str(c.get('id')) for c in components if (c.get('config') or {}).get('mode') == 'Source'),
             )
-        if source not in {c.get('id') for c in components}:
+        if not present:
             return None, False
         address = build_address(parsed.developer_id, parsed.pipe_id, source)
         endpoints = getattr(account_info, 'endpoints', None)

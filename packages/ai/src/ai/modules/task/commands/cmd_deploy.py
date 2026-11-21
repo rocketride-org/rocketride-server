@@ -242,28 +242,37 @@ class _DeployBase(DAPConn):
 
         Publish rows store the audience pair and its display name, never a
         handle (``deployment_backend.audience_display``); a handle an older
-        row stored is replaced, so every reader sees the one the server
-        composes for them (``deployment_backend.audience_handle``).
+        row stored is never shown: every reader sees the one the server
+        composes for them (``deployment_backend.audience_handle``), or none
+        where the pair names no audience.
 
         Args:
             row: A history row.
 
         Returns:
             The row, with ``data.audience.handle`` composed when it has an
-            audience pair; unchanged otherwise.
+            audience pair, and a stored handle dropped when the pair decodes
+            to no audience; unchanged when it has no ``data.audience``.
         """
+        # Step 1: the stored pair, without any handle an older row stored
         data = row.get('data')
         audience = data.get('audience') if isinstance(data, dict) else None
-        if not isinstance(audience, dict) or not audience.get('type'):
+        if not isinstance(audience, dict):
             return row
+        pair = {key: value for key, value in audience.items() if key != 'handle'}
+        if not pair.get('type'):
+            # No type: no audience to compose a handle for
+            return {**row, 'data': {**data, 'audience': pair}}
+
+        # Step 2: this reader's handle for the pair
         org = getattr(self._account_info, 'organization', None) or {}
         org_id = (org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)) or ''
         try:
-            handle = audience_handle(audience, str(self._account_info.userId or ''), self._team_names(), str(org_id))
+            handle = audience_handle(pair, str(self._account_info.userId or ''), self._team_names(), str(org_id))
         except ValueError:
             # A pair no audience decodes (a legacy row): shown without a handle
-            return row
-        return {**row, 'data': {**data, 'audience': {**audience, 'handle': handle}}}
+            return {**row, 'data': {**data, 'audience': pair}}
+        return {**row, 'data': {**data, 'audience': {**pair, 'handle': handle}}}
 
     def _audience_arg(self, args: Dict[str, Any]) -> Audience:
         """
