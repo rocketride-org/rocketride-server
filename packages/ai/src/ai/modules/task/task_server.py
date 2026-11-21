@@ -1190,7 +1190,9 @@ class TaskServer(DAPBase):
         if account_info is None:
             raise PermissionError('Not authenticated')
         if not is_control_id(control_id):
-            raise PermissionError('The token slot carries a control id (32 hex characters)')
+            raise PermissionError(
+                'The token slot carries a control id: =control/ and 32 hex characters, as use() and submit() return it'
+            )
 
         # Step 2: the registry hit, then the caller: a foreign or unknown id
         # reads the same
@@ -1213,7 +1215,8 @@ class TaskServer(DAPBase):
         The monitor key builders send either the control id they were handed
         or an address, which resolves to the caller's own control; a
         standalone ``tool`` borrow resolves an address the way ``submit()``
-        does (plan 3.6). An address always carries a dot, a control id never.
+        does (plan 3.6). A control id is the ``=control/`` id root (plan
+        2.5), a form no address can take.
 
         Args:
             token: What the client put in the token slot.

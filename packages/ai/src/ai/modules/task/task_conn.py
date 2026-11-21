@@ -737,7 +737,9 @@ class TaskConn(
         through ``TaskServer.control_by_id``, which re-checks the caller on
         EVERY call (the owner, team membership, sys.admin) and enforces a
         scoped key's endpoints. An address in the slot is refused: a name is
-        resolved by ``submit()`` and the ``tool`` borrow only (plan section 1).
+        resolved by ``resolve_control_or_start`` for ``submit()`` and for the
+        frames that start a binding (a data ``open``, a standalone ``tool``
+        borrow), whose answer carries the control id (plan section 1).
 
         Args:
             request (Dict[str, Any]): The command request.
@@ -757,8 +759,9 @@ class TaskConn(
         """
         Resolve the ADDRESS a request names, starting its publication when nothing is live.
 
-        A standalone ``tool`` borrow (plan 3.6) and ``submit(name)`` resolve
-        the same way (plan 3.2, one resolver for every verb): the caller's
+        A data ``open`` by address (the HTTP door, ``send``/``pipe`` given a
+        name), a standalone ``tool`` borrow (plan 3.6) and ``submit(name)``
+        resolve the same way (plan 3.2, one resolver for every verb): the caller's
         rungs in order, ``@spec`` attach-only, a published rung answered by
         its live control or started from its artifact. ``team`` in the
         arguments overrides the caller's team order for the call.

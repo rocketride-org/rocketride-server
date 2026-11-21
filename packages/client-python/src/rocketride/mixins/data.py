@@ -155,7 +155,9 @@ class DataMixin(DAPClient):
             Args:
                 client: The RocketRide client instance
                 token: The control id (a ``use()``/``submit()`` result's
-                    ``token``) of the control receiving the data
+                    ``token``) of the control receiving the data, or an
+                    address the open resolves (its answer's control id then
+                    names the pipe on every later frame)
                 objinfo: Optional metadata about the data
                 mime_type: MIME type of data (e.g., "text/csv", "application/json")
                 provider: Optional provider specification
@@ -281,6 +283,12 @@ class DataMixin(DAPClient):
             self._pipe_id = body.get('pipeId')
             self._trace_id = body.get('traceId')
             self._opened = True
+
+            # The open answers with the control it opened on: a pipe opened by
+            # an address names that control's id on every later frame (the
+            # server takes a control id only once the pipe is open)
+            if body.get('controlId'):
+                self._token = body['controlId']
 
             # If an SSE callback was provided, subscribe and register for this pipe
             if self._on_sse is not None and self._pipe_id is not None:
@@ -534,7 +542,8 @@ class DataMixin(DAPClient):
         control than the simple send() method.
 
         Args:
-            token: The control id (a ``use()``/``submit()`` result's ``token``) to send data to
+            token: The control id (a ``use()``/``submit()`` result's ``token``) to send data to,
+                or an address the open resolves the way ``submit()`` resolves a name
             objinfo: Optional metadata about your data (e.g., {"name": "my_data.csv"})
             mime_type: MIME type of your data (auto-detected if not provided)
             provider: Optional provider specification
@@ -593,7 +602,8 @@ class DataMixin(DAPClient):
         according to the pipeline's configuration, and results are returned.
 
         Args:
-            token: The control id (a ``use()``/``submit()`` result's ``token``) to send data to
+            token: The control id (a ``use()``/``submit()`` result's ``token``) to send data to,
+                or an address the open resolves the way ``submit()`` resolves a name
             data: Your data as string or bytes to process
             objinfo: Optional metadata about the data (e.g., {"name": "data.txt"})
             mimetype: MIME type of the data (auto-detected if not specified)
@@ -680,7 +690,8 @@ class DataMixin(DAPClient):
 
         Args:
             files: List of files to upload (see formats above)
-            token: The control id (a ``use()``/``submit()`` result's ``token``) to upload files to
+            token: The control id (a ``use()``/``submit()`` result's ``token``) to upload files to,
+                or an address the open resolves the way ``submit()`` resolves a name
 
         Returns:
             List[Dict]: Upload results for each file with status, timing, and processing results

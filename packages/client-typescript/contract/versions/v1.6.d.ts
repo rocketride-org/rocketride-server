@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 01940f750ddc1a5d83dd78b8e1940b7286679be0
+// Source commit: 34146e5f4c033b92e4ecb3abf81684c288ccf869
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5361,7 +5361,8 @@ export declare class DataPipe {
      * Creates a new DataPipe instance.
      *
      * @param client - The RocketRideClient instance managing this pipe
-     * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data
+     * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data, or an
+     *                address the open resolves (its answer's control id then names the pipe on every later frame)
      * @param objinfo - Metadata about the object being sent (e.g., filename, size)
      * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
      * @param provider - Optional provider name for the data source
@@ -6027,6 +6028,9 @@ export declare class RocketRideClient extends DAPClient {
     }): Promise<PipeInterfaces>;
     /**
      * Create a data pipe for streaming operations.
+     *
+     * `token` is the control id, or an address the open resolves the way `submit()`
+     * resolves a name, starting a published rung when nothing is live.
      */
     pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe>;
     /**
@@ -6044,7 +6048,7 @@ export declare class RocketRideClient extends DAPClient {
      * (matching Python client behavior) rather than through a callback parameter.
      *
      * @param files - Array of file objects with optional metadata and MIME types
-     * @param token - The control id of the control receiving the uploads
+     * @param token - The control id of the control receiving the uploads, or its address (resolved by each open)
      * @param maxConcurrent - Maximum number of concurrent uploads (default: 5)
      *
      * @returns Promise resolving to array of UPLOAD_RESULT objects in the same order as input

@@ -30,9 +30,9 @@ from rocketride.core.constants import SUBMIT_INLINE_MAX
 from rocketride.mixins import execution
 from rocketride.mixins.execution import ExecutionMixin
 
-# The token slot carries the control id (32 hex); the address rides beside it.
+# The token slot carries the control id (=control/<32 hex>); the address rides beside it.
 STAMPS = {
-    'token': '1234abcd1234abcd1234abcd1234abcd',
+    'token': '=control/1234abcd1234abcd1234abcd1234abcd',
     'address': 'acme.docBrain.webhook_1',
     'resolved': '@team',
     'converged': 'none',

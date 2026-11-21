@@ -483,7 +483,7 @@ Test connectivity to the RocketRide server. Raises `RuntimeError` if the server 
 
 ### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None, team: str = None, params: Dict[str, Any] = None) -> Dict[str, Any]`
 
-Send data directly to a pipeline. `data` is str or bytes; `objinfo` is optional metadata (e.g. `{'name': 'data.txt'}`); `mimetype` overrides auto-detection; `on_sse` streams SSE events for this call (see [Streaming Callback](#streaming-callback-on_sse)). Returns the processing result dict. Raises `ValueError` (data is not str/bytes) or `PipeException` (the underlying pipe open/write/close failed).
+Send data directly to a pipeline. `token` is the control id, or an address (`developerId.pipelineId[.source]`) that the open resolves the way `submit()` resolves a name, starting a published rung when nothing is live; the pipe's later frames name the control id the open answered with. `data` is str or bytes; `objinfo` is optional metadata (e.g. `{'name': 'data.txt'}`); `mimetype` overrides auto-detection; `on_sse` streams SSE events for this call (see [Streaming Callback](#streaming-callback-on_sse)). Returns the processing result dict. Raises `ValueError` (data is not str/bytes) or `PipeException` (the underlying pipe open/write/close failed).
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component. For chat/Q&A systems, use `chat()` instead with a `chat` source component.
 
@@ -508,7 +508,7 @@ for result in results:
 
 ### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, team: str = None, params: Dict[str, Any] = None) -> DataPipe`
 
-Create a streaming data pipe for sending large datasets in chunks. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
+Create a streaming data pipe for sending large datasets in chunks. `token` takes a control id or an address, as for `send()`. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
 
 ### DataPipe
 

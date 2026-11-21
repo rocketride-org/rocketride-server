@@ -64,6 +64,7 @@ import json
 import random
 import string
 import time
+import urllib.request
 from pathlib import Path
 from typing import Dict, Any
 from unittest.mock import AsyncMock
@@ -356,6 +357,60 @@ class TestDataOperations:
 
             # Without MIME type, should not have processed content
             assert 'result_types' not in result or result['result_types'] is None
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_send_by_address(self):
+        """send() given an ADDRESS: the open resolves it and answers with the control id the later frames name."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+
+            started = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo-address'))
+            pipeline_token = started['token']
+
+            # The write and the close are refused unless they name the control id
+            result = await client.send(started['address'], 'Hello by address', mimetype='text/plain')
+
+            assert isinstance(result, dict)
+            assert 'objectId' in result
+        finally:
+            if pipeline_token:
+                await ensure_clean_pipeline(client, pipeline_token)
+            if client.is_connected():
+                await client.disconnect()
+
+    @pytest.mark.asyncio
+    async def test_should_post_to_the_webhook_door_by_address(self):
+        """The HTTP door runs the SDK by ADDRESS: POST /webhook/{address} completes the object end to end."""
+        client = RocketRideClient(auth=TEST_CONFIG['auth'], uri=TEST_CONFIG['uri'])
+        pipeline_token = None
+        try:
+            await client.connect()
+
+            started = await client.use(pipeline=get_echo_pipeline(), token=private_token('py-echo-door'))
+            pipeline_token = started['token']
+
+            def _post() -> Dict[str, Any]:
+                request = urllib.request.Request(
+                    f'{TEST_CONFIG["uri"].rstrip("/")}/webhook/{started["address"]}',
+                    data=b'Hello through the door',
+                    headers={'Authorization': f'Bearer {TEST_CONFIG["auth"]}', 'Content-Type': 'text/plain'},
+                    method='POST',
+                )
+                with urllib.request.urlopen(request, timeout=TEST_CONFIG['timeout']) as answer:
+                    return json.loads(answer.read().decode('utf-8'))
+
+            answer = await asyncio.to_thread(_post)
+
+            assert answer['status'] == 'OK'
+            assert answer['data']['objectsCompleted'] == 1
+            assert answer['data']['objects']['body']['status'] == 'OK'
         finally:
             if pipeline_token:
                 await ensure_clean_pipeline(client, pipeline_token)

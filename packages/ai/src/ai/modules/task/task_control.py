@@ -26,7 +26,7 @@ TaskControl: the CALLER's view of a run.
 A control is what a request resolves to. Its IDENTITY is ``(owner, rung,
 project_id, hash(resolved config))`` (plan section 1): a spec that differs in
 configuration under the same ``project_id`` is another control on the same
-engine. Its HANDLE is the ``control_id``, 32 hex characters minted when the
+engine. Its HANDLE is the ``control_id``, ``=control/<32 hex>`` minted when the
 control is created, returned to the caller in the ``token`` slot and named by
 every verb after that; it dies with the control and is never written to disk
 (plan 15 item 20). It carries everything that belongs to the caller rather
@@ -215,28 +215,35 @@ if TYPE_CHECKING:
 
 # ==== The control id ============================================================
 
-#: The shape of a control id: 32 lowercase hex characters (``uuid4().hex``).
-CONTROL_ID = re.compile(r'^[0-9a-f]{32}$')
+#: What every control id starts with: the ``=`` id root of plan 2.5, naming
+#: its kind. An address segment is ``[A-Za-z0-9_-]+``, so no address can
+#: start with ``=`` and the token slot tells the two forms apart by
+#: construction, not by a convention about dots.
+CONTROL_ID_PREFIX = '=control/'
+
+#: The shape of a control id: ``=control/`` and 32 lowercase hex characters.
+CONTROL_ID = re.compile(r'^=control/[0-9a-f]{32}$')
 
 
 def mint_control_id() -> str:
     """A fresh control id: random, transient, never a storage key (plan 15 item 20)."""
-    return uuid.uuid4().hex
+    return f'{CONTROL_ID_PREFIX}{uuid.uuid4().hex}'
 
 
 def is_control_id(value: Any) -> bool:
     """
-    Whether ``value`` has the shape of a control id.
+    Whether ``value`` is a control id.
 
-    An address always carries a dot, so the two forms never overlap: the
-    verbs that take either (a standalone ``tool`` borrow, the monitor key
-    builders) tell them apart by this test.
+    A control id is ``=control/`` and 32 lowercase hex characters (plan
+    2.5): the prefix is a form no address can take, so the verbs that take
+    either (a data ``open``, a standalone ``tool`` borrow, the monitor key
+    builders) tell them apart by this test alone.
 
     Args:
         value: What the client put in the token slot.
 
     Returns:
-        True for 32 lowercase hex characters.
+        True for ``=control/`` followed by 32 lowercase hex characters.
     """
     return isinstance(value, str) and CONTROL_ID.match(value) is not None
 
@@ -461,7 +468,7 @@ class TaskControl:
 
     Attributes:
         id: Display id: the address.
-        control_id: The handle (plan section 1): 32 hex characters minted at
+        control_id: The handle (plan section 1): ``=control/<32 hex>`` minted at
             creation, what the caller gets in the ``token`` slot and names on
             every verb; the registry key. Transient, never persisted.
         key: The registry key: the control id.

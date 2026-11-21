@@ -49,7 +49,7 @@ from ai.modules.task.task_engine import TaskEngine, component_facts
 from ai.modules.task.task_control import TaskControl, config_hash, mint_control_id
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.trace_owner import TraceOwners
-from ai.modules.task.types import EngineState
+from ai.modules.task.types import EngineState, TaskError
 
 ADDRESS = 'acme.proj-tk.src'
 
@@ -161,18 +161,17 @@ def _live_run(user_id='user-1', complete=False):
 
 @pytest.mark.asyncio
 async def test_another_users_session_cannot_reuse_a_run_by_naming_its_id(no_launch):
-    """A control id in the ``token`` of a spec call is a project_id override inside the CALLER's namespace:
-    it names a pipeline of their own, never another user's control.
+    """The ``token`` of a spec call overrides the project_id segment, and a control id is not one: its ``=control/``
+    form is refused by the segment grammar, so naming another user's control can never reach or reuse it.
     """
     ts = _server()
     control = _live_run(user_id='user-1')
     ts._task_control[control.key] = control
 
-    result = await _start(ts, user_id='user-2', token=control.key)
-    assert result['reused'] is False and result['token'] != control.key
-    assert result['address'] == f'acme.{control.key}.src'
+    with pytest.raises(TaskError, match='not a valid address segment'):
+        await _start(ts, user_id='user-2', token=control.key)
     control.task.wait_for_running.assert_not_awaited()
-    assert ts._task_control[control.key] is control and ts._task_control[result['token']].userId == 'user-2'
+    assert list(ts._task_control) == [control.key] and ts._task_control[control.key] is control
 
 
 @pytest.mark.asyncio

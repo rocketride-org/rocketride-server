@@ -120,8 +120,8 @@ def _renamed(pipeline, *, source='hook', step='ask', project_id='docBrainRenamed
 def _sibling(control: TaskControl, pipeline) -> TaskControl:
     """Another control of the same shape, written with other ids, holding the same engine."""
     other = TaskControl(
-        control_id='b' * 32,
-        key='b' * 32,
+        control_id='=control/' + 'b' * 32,
+        key='=control/' + 'b' * 32,
         userId=control.userId,
         teamId=control.teamId,
         orgId=control.orgId,

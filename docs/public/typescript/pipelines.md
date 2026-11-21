@@ -18,8 +18,8 @@ data and control call takes it. The task's **address** rides beside it as
 
 ```typescript
 const { token, address } = await client.use({ filepath: './pipeline.pipe', ttl: 3600 });
-// token === '1234abcd1234abcd1234abcd1234abcd'   (the control id)
-// address === 'acme.docBrain.chat_1'              (the address)
+// token === '=control/1234abcd1234abcd1234abcd1234abcd'   (the control id)
+// address === 'acme.docBrain.chat_1'                       (the address)
 ```
 
 The control id is an opaque, transient handle: the server mints it when it creates
@@ -82,6 +82,14 @@ the control and creates a new one, so read the new control id with
 pipeline of the same shape. The control id targets `send()`, `sendFiles()`,
 `pipe()`, `chat()`, `getTaskStatus()`, and `terminate()` at your control, and
 nothing else; the address is what names and resolves the pipe.
+
+The data calls (`send()`, `sendFiles()`, `pipe()`, `chat()`) also take an
+address in place of the control id. The open resolves it the way `submit()`
+resolves a name, starting a published rung when nothing is live, and answers
+with the control id that every later frame of the pipe names. This is how the
+webhook door and the chat and dropper apps reach a pipe they know only by name.
+The server tells the two apart by form: a control id always starts with
+`=control/`, which no address can.
 
 ## Calls from other systems
 

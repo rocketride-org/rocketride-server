@@ -202,10 +202,15 @@ class DataCommands(DAPConn):
                         # when the pipeline failed it
                         self._retire(control, pipe_id, succeeded and not _object_failed(body))
 
-                # Step 4: a successful open is a binding the control now has open;
-                # a standalone tool call was a binding that opened and closed
+                # Step 4: a successful open is a binding the control now has open,
+                # answered with the control it opened on: an open that named an
+                # address learns the id its later frames name. A standalone tool
+                # call was a binding that opened and closed
                 if subcommand == 'open':
                     kept = self._record_open(control, frame, body, account_info)
+                    if kept:
+                        body['controlId'] = control.control_id
+                        body['address'] = control.address
                 elif subcommand == 'tool' and pipe_id is None:
                     self._note_borrowed(control, body, account_info)
             finally:
@@ -231,15 +236,17 @@ class DataCommands(DAPConn):
         """
         The caller's control for the request's token slot.
 
-        An OPEN, and every frame on an open pipe, names a CONTROL ID (plan
-        section 1): the registry hit is followed by the caller check, never
-        by the id alone. A STANDALONE TOOL CALL (a ``tool`` frame naming no
-        pipe) is a binding of its own — it opens, runs and closes in one
-        frame — and keeps taking an ADDRESS as well: a front end exploring a
-        published pipe nobody has called recently resolves it the way
-        submit() does and starts its engine, not be told nothing is running
-        (plan 3.6). A 32-hex value in that slot is a control id, anything
-        else an address.
+        A frame that STARTS a binding (an ``open``, or a standalone ``tool``
+        call naming no pipe) takes a CONTROL ID or an ADDRESS: an address
+        resolves through the caller's rungs the way submit() does and starts
+        a publication nobody has called recently (plan section 1: send, pipe
+        and the HTTP door resolve through ``resolve_control_or_start``; plan
+        3.6 for the tool borrow). The open answers with the control id, and
+        every later frame of the pipe names that id: a frame on an open pipe
+        takes a CONTROL ID only, so it can never land on a sibling control
+        the address would resolve to by then. A ``=control/`` value in the
+        slot is a control id, anything else an address. Either way the registry hit
+        is followed by the caller check, never by the id alone.
 
         Args:
             request: The DAP request.
@@ -251,7 +258,7 @@ class DataCommands(DAPConn):
             The control.
         """
         token = (request.get('arguments') or {}).get('token')
-        if subcommand == 'tool' and pipe_id is None and not is_control_id(token):
+        if subcommand in ('open', 'tool') and pipe_id is None and not is_control_id(token):
             return await self.resolve_control_or_start(request, 'task.data')
         return self.get_control(request, 'task.data')
 

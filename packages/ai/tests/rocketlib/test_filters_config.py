@@ -239,7 +239,7 @@ class TestCaller:
     """``self.caller``: bound once by the engine, frozen, read-only (plan 4.1 rule 7)."""
 
     ENVELOPE = {
-        'controlId': 'c' * 32,
+        'controlId': '=control/' + 'c' * 32,
         'userId': 'user-1',
         'teamId': 'team-1',
         'orgId': 'org-1',

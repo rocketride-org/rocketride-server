@@ -2289,11 +2289,11 @@ def test_a_resolve_touches_constant_entries_however_large_the_registry():
             developer_id='acme', project_id=f'pipe{n}', source='webhook_1', userId=f'user-{n % 97}', teamId='team-1'
         )
         other.address = f'acme.pipe{n}.webhook_1'
-        other.control_id = other.key = f'{n:032x}'
+        other.control_id = other.key = f'=control/{n:032x}'
         registry[other.key] = other
     mine = TaskControl(developer_id='acme', project_id='docBrain', source='webhook_1', userId='user-a', teamId='team-1')
     mine.address = ADDRESS
-    mine.control_id = mine.key = 'a' * 32
+    mine.control_id = mine.key = '=control/' + 'a' * 32
     mine.task = MagicMock()
     mine.task.is_task_complete.return_value = False
     mine.task.dormant_reason = None
