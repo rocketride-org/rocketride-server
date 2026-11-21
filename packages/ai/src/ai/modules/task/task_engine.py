@@ -460,6 +460,33 @@ def _accepts_credential(authorize: Callable[..., Any]) -> bool:
     return any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values())
 
 
+# The node that opens the store from inside the task (its tool, source and store services)
+CONST_STORE_NODE_PATH = 'nodes.tool_filesystem'
+
+
+def pipeline_opens_store(pipeline: Dict[str, Any], get_service: Callable[[str], Any]) -> bool:
+    """
+    Whether a component of the pipeline opens the store from inside the task.
+
+    ``tool_filesystem`` does (its tool, source and store services alike), so a
+    runtime that isolates the task's files has to give it the run's store or
+    refuse the pipeline.
+
+    Args:
+        pipeline: The resolved pipeline.
+        get_service: ``rocketlib.getServiceDefinition`` in production.
+
+    Returns:
+        True if any component is served by ``nodes.tool_filesystem``.
+    """
+    for component in pipeline.get('components', []) or []:
+        provider = str(component.get('provider') or '')
+        service = get_service(provider) if provider else None
+        if str((service or {}).get('path') or '').lower() == CONST_STORE_NODE_PATH:
+            return True
+    return False
+
+
 def _is_saas_engine() -> bool:
     """True when this engine is the hosted (SaaS) one.
 
@@ -1228,13 +1255,15 @@ class Task(DAPBase):
         """
         Whether the task shares the engine's host, so it gets --shared-host.
 
-        A hosted engine's task does: spawn is the only runtime. The pre-launch
-        check and the task's command line both ask here, so they agree.
+        A hosted engine's task does under spawn. In a container or a pod it
+        does not: the container is the boundary, and the task keeps only the
+        hosted rules (--hosted). The pre-launch check and the task's command
+        line both ask here, so they agree.
 
         Returns:
-            True for a task of a hosted engine.
+            True for a task of a hosted engine whose runtime does not isolate it.
         """
-        return _is_saas_engine()
+        return _is_saas_engine() and not self._launcher.isolated
 
     def _check_pipeline(self, pipeline: Dict[str, Any]) -> None:
         """
@@ -1750,10 +1779,21 @@ class Task(DAPBase):
         A process that reported no crash but ended by a crash signal, an OOM
         kill or, on Windows, a crash exception code crashed before its handlers
         could say so, unless the server killed it.
+
+        A task in a container or a pod that left with code 0 was cut off from
+        the engine: a task reports every end it reaches by itself, and leaves
+        with 0 and no word once its input closes (``--autoterm``). Its 0
+        records 1, because the dashboard's task_error goes by a non-zero code.
         """
         if not self._exit_event_seen and not self._stop_requested:
             self._status.exitCode = exit_code if exit_code is not None else 1
             self._status.exitMessage = 'Stopped'
+            if exit_code == 0 and self._launcher.isolated:
+                self._crash = (
+                    'the task ended without reporting its end, as it does when its connection to the engine drops'
+                )
+                self._status.exitCode = 1
+                return
             if exit_code is None or self._process_killed:
                 return
             if exit_code < 0:
@@ -3040,6 +3080,13 @@ class Task(DAPBase):
                 await asyncio.to_thread(node_store.place, resolved)
             except Exception as e:
                 raise RuntimeError(f"Refusing to run: could not get the pipeline's nodes ({e})") from e
+
+            # A runtime that isolates the task's files needs to know whether it opens the store
+            uses_store = False
+            if self._launcher.isolated:
+                from rocketlib import getServiceDefinition
+
+                uses_store = pipeline_opens_store(resolved, getServiceDefinition)
             del resolved
 
             # VS Code subprocess debugging goes through the python shim (subprocess runtime)
@@ -3107,6 +3154,8 @@ class Task(DAPBase):
                     hosted=_is_saas_engine(),
                     shared_host=self._shares_host(),
                     debug_attach=debug_attach,
+                    uses_store=uses_store,
+                    storage_root=self._storage_root() if uses_store else '',
                 )
             )
             del task_file
