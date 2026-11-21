@@ -17,6 +17,7 @@ Classes:
 """
 
 import asyncio
+import hashlib
 import time
 import uuid
 import psutil
@@ -68,25 +69,64 @@ class TraceUsage:
 CONST_ORPHAN_BUCKET_SECONDS = 60.0
 
 
+def usage_key(
+    org_id: str,
+    user_id: Optional[str],
+    team_id: Optional[str],
+    pipe: str,
+    rung: Optional[str],
+    publication: Optional[str],
+    version: Optional[int],
+    resource: str,
+) -> str:
+    """
+    The ledger key of one paying unit's usage through one publication (plan 8.2).
+
+    The ledger matches a row by its key alone, so everything that makes two
+    usages different rows is in it: who pays (the org), who is attributed (the
+    user and the billing team), what answered (the pipe, the rung, the
+    publication's audience slot and version) and the resource. The facts are
+    hashed rather than spelled out, so the key has one length whatever the ids
+    are; the readable facts live in the row's columns and context.
+
+    Args:
+        org_id: The paying org.
+        user_id: The caller, or None for a run with no caller.
+        team_id: The billing team, or None.
+        pipe: ``developerId.pipeId``.
+        rung: The rung that answered.
+        publication: The publication's audience slot, or None for a spec run.
+        version: The artifact version served, or None for a spec run.
+        resource: The metered resource.
+
+    Returns:
+        ``usage:`` and the SHA-256 of the facts: 70 characters.
+    """
+    facts = (org_id, user_id, team_id, pipe, rung, publication, version, resource)
+    # A separator no id can contain keeps ('a', 'bc') and ('ab', 'c') apart
+    text = '\x1f'.join('' if fact is None else str(fact) for fact in facts)
+    return 'usage:' + hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
 class UsageSink:
     """
     Where a request tree's usage leaves the engine host (plan 8.2, ALB seam 5).
 
     The unit of accounting is ONE REQUEST: when a tree closes, its tokens per
-    resource and ``request_count`` 1 are an INCREMENT to the day row
-    ``usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}``
-    of its paying unit, written with the account's additive ``apply_usage``.
-    The PUBLICATION that answered (rung, audience slot, version; ``-`` where a
-    dev run has none) is part of the key, so one caller's calls through
-    Staging and through Production on one day are two rows and a per-team
-    count is a plain group-by (decided 2026-11-16). The org pays; the user
-    and the team attribute, and either may be absent: a run with no caller (a
-    schedule, a run-now, a listener) carries ``-`` for the user in the key and
-    no user on the row, an org-owned run no team either (plan 8.3). Posting
-    coalesces the increments of one row until ``flush`` (the billing report
-    interval, and engine end), an optimisation only: a buffered increment is
-    dropped when the database confirms the write, and a failed write rides
-    the next flush. Nothing here ever holds a row's total.
+    resource and ``request_count`` 1 are an INCREMENT to one ledger row,
+    written with the account's additive ``apply_usage``. The row is the usage
+    of ONE paying unit through ONE publication for as long as both exist; its
+    key is ``usage_key``: a hash of the org, the user, the billing team, the
+    pipe, the rung, the publication that answered (audience slot and version)
+    and the resource. There is no day in it: a control that expires and is
+    started again adds to the same row, and the ledger's ``modified_at`` says
+    when the row was last charged. The org pays; the user and the team
+    attribute, and either may be absent: a run with no caller (a schedule, a
+    run-now, a listener) has no user, an org-owned run no team either (plan
+    8.3). Posting coalesces the increments of one row until ``flush`` (the
+    billing report interval, and engine end), an optimisation only: a buffered
+    increment is dropped when the database confirms the write, and a failed
+    write rides the next flush. Nothing here ever holds a row's total.
     """
 
     def __init__(self, post: Optional[Callable[..., Any]] = None) -> None:
@@ -99,19 +139,13 @@ class UsageSink:
         self._pending: Dict[str, Dict[str, Any]] = {}
         self._unconfirmed: Dict[str, Dict[str, Any]] = {}
 
-    @staticmethod
-    def day_number(now: Optional[float] = None) -> int:
-        """UTC days since 1970-01-01 of ``now`` (the day a request CLOSED on)."""
-        return int((time.time() if now is None else now) // 86400)
-
-    def post(self, usage: 'TraceUsage', tokens: Dict[str, float], now: Optional[float] = None) -> None:
+    def post(self, usage: 'TraceUsage', tokens: Dict[str, float]) -> None:
         """
-        Queue one closed request tree's usage as increments to its day rows.
+        Queue one closed request tree's usage as increments to its ledger rows.
 
         Args:
             usage: The tree's accumulator (its paying unit, address and rung).
             tokens: Tokens per resource, already converted at the rates.
-            now: The close time (injectable).
         """
         billing = usage.billing
         # The org is the payer; without one there is nobody to charge. A user
@@ -119,26 +153,17 @@ class UsageSink:
         if billing is None or not getattr(billing, 'org_id', ''):
             return
         user_id = getattr(billing, 'user_id', '') or None
+        team_id = getattr(billing, 'team_id', '') or None
         pipe = '.'.join(usage.address.split('.')[:2]) if usage.address else ''
-        day = self.day_number(now)
-        # The publication segments: a dev run serves through none, so its
-        # rows carry '-' where a published rung carries the slot and version
-        team = usage.team or '-'
-        version = '-' if usage.version is None else str(usage.version)
         for resource, amount in tokens.items():
             if amount <= 0:
                 continue
-            key = f'usage:{day}:{pipe}:{usage.rung or "-"}:{team}:{version}:{user_id or "-"}:{resource}'
+            # The paying unit is part of the key, so two orgs or two billing
+            # teams never coalesce here and never share a row in the ledger
+            key = usage_key(
+                billing.org_id, user_id, team_id, pipe, usage.rung, usage.team or None, usage.version, resource
+            )
             pending = self._pending.get(key)
-            # Increments coalesce only for ONE paying unit. An open entry of
-            # another org or billing team under this key (one user calling from
-            # two orgs, an engine shared by two owners) is detached to be
-            # written as it stands, and this post opens its own
-            if pending is not None and (
-                pending['row']['org_id'] != billing.org_id or pending['row']['team_id'] != (billing.team_id or None)
-            ):
-                self._unconfirmed[pending['increment_id']] = self._pending.pop(key)
-                pending = None
             if pending is None:
                 pending = self._pending[key] = {
                     # The increment's own identity: the ledger refuses a second
@@ -149,17 +174,18 @@ class UsageSink:
                     'row': {
                         'org_id': billing.org_id,
                         'user_id': user_id,
-                        'team_id': billing.team_id or None,
+                        'team_id': team_id,
                         'resource': resource,
                         'idempotency_key': key,
                         'description': resource,
+                        # What the key hashes, readable: the publication
+                        # breakdown groups the org's rows on these
                         'context': {
                             'address': usage.address,
                             'pipe': pipe,
                             'rung': usage.rung,
                             'team': usage.team or None,
                             'version': usage.version,
-                            'day': day,
                         },
                     },
                 }
@@ -741,7 +767,7 @@ class TaskMetrics:
         for counter_name, counter_tokens in self._status.tokens.custom.items():
             token_totals.append((counter_name, counter_name, counter_tokens))
         # A caller's request is charged once: what the usage sink posted to the
-        # callers' day rows (hold time, bytes, the trees' GPU time) comes off
+        # callers' usage rows (hold time, bytes, the trees' GPU time) comes off
         # the engine owner's cumulative debit, per resource (dashboard totals
         # above stay engine-wide)
         token_totals = self._less_attributed(token_totals)

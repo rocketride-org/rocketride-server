@@ -325,10 +325,10 @@ subscription time.
 object counts: what each request cost its caller is accounted per request
 instead. Every request tree's pipe hold (admission to `putPipe`, less the GPU
 queue wait it sat through), bytes and model timings are booked to the tree
-and, when it closes, added to the caller's DAY row in the ledger
-(`usage:{dayNumber}:{developerId.pipeId}:{rung}:{team}:{version}:{userId}:{resource}`, one row per
-day, pipe, publication (rung, team, version), user and resource, with a `request_count`). Nothing per request
-rides the status body.
+and, when it closes, added to the caller's usage row in the ledger: one row per
+paying unit (org, user, billing team), pipe, publication (rung, team, version) and resource, with a
+`request_count` and a `modified_at` that says when it was last charged. The row's key is `usage:` and a
+SHA-256 of those facts; there is no day in it. Nothing per request rides the status body.
 
 `state` enum mapping:
 `0=NONE, 1=STARTING, 2=INITIALIZING, 3=RUNNING, 4=STOPPING, 5=COMPLETED, 6=CANCELLED`.
