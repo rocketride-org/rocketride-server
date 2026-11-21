@@ -297,8 +297,8 @@ def _effective_base_url(base_url: str) -> str:
 
 def _retired_names(apikey: str, base_url: str) -> list[str]:
     """A warning for each Tenki-era name configured: Luxor retires tk_ keys and tenki.cloud hosts on 2027-01-01."""
-    # TODO: once 2027-01-01 has passed, drop the tk_ handling and the dated warnings. Keep _effective_base_url's
-    # swap: pipelines saved with api.tenki.cloud need it most once that host stops answering.
+    # TODO(#3411): once 2027-01-01 has passed, drop the tk_ handling and the dated warnings. Keep
+    # _effective_base_url's swap: pipelines saved with api.tenki.cloud need it most once that host stops answering.
     retired = []
     if apikey.startswith('tk_'):
         retired.append(
