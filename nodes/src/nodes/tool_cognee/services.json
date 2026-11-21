@@ -37,6 +37,7 @@
 			"env": "ROCKETRIDE_COGNEE_APIKEY"
 		},
 		"cognee.dataset": {
+			"param": true,
 			"type": "string",
 			"title": "Dataset",
 			"description": "Default Cognee dataset used by all agent tools. Tool calls stay in this operator-controlled scope unless per-call overrides are enabled.",
@@ -44,12 +45,15 @@
 			"minLength": 1
 		},
 		"cognee.allow_dataset_override": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Allow dataset override",
 			"description": "Allow agents to select a dataset per call. Leave off when several agents should share one operator-controlled memory scope.",
 			"default": false
 		},
 		"cognee.search_type": {
+			"param": true,
 			"type": "string",
 			"title": "Default recall strategy",
 			"description": "How recall retrieves memory. Graph completion decomposition is the semantic default; the agent can override it per call.",
@@ -65,6 +69,7 @@
 			]
 		},
 		"cognee.top_k": {
+			"param": true,
 			"type": "integer",
 			"title": "Recall results (top_k)",
 			"description": "Maximum number of results recall retrieves per query.",
@@ -73,6 +78,7 @@
 			"maximum": 100
 		},
 		"cognee.request_timeout": {
+			"param": true,
 			"type": "integer",
 			"title": "Request timeout (s)",
 			"description": "Maximum seconds to wait for one Cognee request.",

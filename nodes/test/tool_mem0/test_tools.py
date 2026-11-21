@@ -162,20 +162,21 @@ def _pin_normalizer(monkeypatch):
 
 
 def _make_global(**overrides):
-    """Build an IGlobal preset with test credentials, scope, and wait settings."""
+    """Build an IGlobal preset with test credentials, carrying the scope and wait settings its calls bind."""
     glb = IGlobal()
-    glb.api_key = 'm0_test'
-    glb.base_url = 'https://api.mem0.ai'
-    glb.user_id = 'alice'
-    glb.agent_id = ''
-    glb.run_id = ''
-    glb.app_id = ''
-    glb.infer = True
-    glb.wait = True
-    glb.ingest_timeout = 30
-    glb.search_limit = 10
-    for k, v in overrides.items():
-        setattr(glb, k, v)
+    glb.api_key = overrides.pop('api_key', 'm0_test')
+    glb.base_url = overrides.pop('base_url', 'https://api.mem0.ai')
+    glb.call_settings = {
+        'user_id': 'alice',
+        'agent_id': '',
+        'run_id': '',
+        'app_id': '',
+        'infer': True,
+        'wait': True,
+        'ingest_timeout': 30,
+        'search_limit': 10,
+        **overrides,
+    }
     return glb
 
 
@@ -207,9 +208,11 @@ def captured(monkeypatch):
 
 
 def _instance(glb):
-    """Construct an IInstance bound to the given IGlobal."""
+    """Construct an IInstance bound to the given IGlobal and the call settings it carries."""
     inst = IInstance()
     inst.IGlobal = glb
+    # The scope and the ingest/search options are the call's settings
+    inst.settings = types.SimpleNamespace(**glb.call_settings)
     return inst
 
 
@@ -409,3 +412,18 @@ def test_recall_requires_scope(captured):
     assert out['success'] is False
     assert 'scope' in out['error']
     assert captured['calls'] == []
+
+
+def test_one_control_serves_two_calls_with_their_own_scope_and_limit(captured):
+    """The default scope and the search limit are each call's: one control, two calls, two bodies."""
+    captured['search'] = []
+    glb = _make_global()
+    first = _instance(glb)
+    second = _instance(glb)
+    second.settings = types.SimpleNamespace(**{**glb.call_settings, 'user_id': ' bob ', 'search_limit': 3})
+
+    first.recall({'query': 'q'})
+    second.recall({'query': 'q'})
+
+    bodies = [call['payload'] for call in captured['calls']]
+    assert [(p['user_id'], p['top_k']) for p in bodies] == [('alice', 10), ('bob', 3)]

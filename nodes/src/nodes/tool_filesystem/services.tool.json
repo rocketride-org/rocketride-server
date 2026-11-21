@@ -13,6 +13,8 @@
 	"lanes": {},
 	"propertyDefinitions": {
 		"filesystem.allowRead": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Read files",
 			"default": true,
@@ -22,6 +24,8 @@
 			]
 		},
 		"filesystem.allowWrite": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Write files",
 			"default": true,
@@ -31,6 +35,8 @@
 			]
 		},
 		"filesystem.allowList": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "List directories",
 			"default": true,
@@ -40,6 +46,8 @@
 			]
 		},
 		"filesystem.allowMkdir": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Create directories",
 			"default": true,
@@ -49,6 +57,8 @@
 			]
 		},
 		"filesystem.allowStat": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Stat (metadata)",
 			"default": true,
@@ -58,6 +68,8 @@
 			]
 		},
 		"filesystem.allowDelete": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Delete files",
 			"description": "Destructive: enable only when the agent is trusted to delete account files.",
@@ -73,6 +85,8 @@
 			"default": ""
 		},
 		"filesystem.pathWhitelist": {
+			"param": true,
+			"tool": false,
 			"title": "Path Whitelist",
 			"description": "Regex patterns applied to the relative path of every operation using re.search semantics: a partial match anywhere in the path is enough, so a pattern like 'secret' will also match 'notsecret/file.txt'. Anchor with ^ and $ if you need a full-path match (e.g. '^docs/.*$'). If non-empty, a path must match at least one pattern. If empty, all paths under the task's storage anchor (the owning user's file tree for development runs, the task's team subtree for deployed runs) are allowed.",
 			"type": "array",

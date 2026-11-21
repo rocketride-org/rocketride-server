@@ -46,6 +46,60 @@ _RESPONSE = ['laneName']
 #: The scan_cropper scan types, each with its own detection branch.
 _SCANS = ('album', 'detail', 'loose', 'textured')
 
+#: The File System tool's gates and whitelist, every one caller-only.
+_FILESYSTEM_GATES = ['allowRead', 'allowWrite', 'allowList', 'allowMkdir', 'allowStat', 'allowDelete', 'pathWhitelist']
+
+#: The GitHub tool's caller-only options.
+_GITHUB_GATES = [
+    'readOnly',
+    'tools',
+    'graphqlAllowMutations',
+    'graphqlMaxResponseBytes',
+    'rateLimitBudgetSeconds',
+    'rateLimitMaxRetries',
+]
+
+#: The write gate and tool surface of the CRM tools (GoHighLevel, Pipedrive), every one caller-only.
+_CRM_GATES = ['readOnly', 'toolGroups', 'allowRawRequest']
+
+#: Masky's caller-only settings: the budgets, the gates, the pipeline action and the share page.
+_MASKY_CALLER_ONLY = [
+    'maxCreditsPerCall',
+    'timeoutSec',
+    'pollIntervalSec',
+    'readOnly',
+    'allowDelete',
+    'allowPublicSharing',
+    'action',
+    'share',
+]
+
+#: Every Masky setting but the key, the namespace and the base URL.
+_MASKY_PARAMS = [
+    'defaultAvatar',
+    'defaultLook',
+    'language',
+    'includeMediaUrls',
+    'output',
+    'textMode',
+    'quality',
+    'aspectRatio',
+    'fps',
+    'durationSec',
+    'seed',
+    'silent',
+    'expandPrompt',
+    'sourceImageUrl',
+    'speechLine',
+    'engine',
+    'editEngine',
+    'conversation',
+    'turnMode',
+    'turnOutput',
+    'waitForTurn',
+    *_MASKY_CALLER_ONLY,
+]
+
 #: The ner model entries, each with its own confidence threshold.
 _NER_MODELS = ('bertBase', 'bertLarge', 'biomedical', 'custom', 'deberta', 'distilbert', 'xlmRoberta')
 
@@ -200,6 +254,48 @@ SCHEMAS = {
         ['configMode', 'advanced.advanced_config', 'simple.parse_mode']
         + [f'simple.{mode}.lvm_model' for mode in ('agentic', 'agentic_plus', 'parse_page_with_lvm')],
         {'api_key': 'k1'},
+    ),
+    'tool_bland_ai': (['voice', 'maxDuration', 'language', 'record'], ['maxDuration', 'record'], {'apikey': 'k1'}),
+    'tool_cognee': (
+        ['dataset', 'allow_dataset_override', 'search_type', 'top_k', 'request_timeout'],
+        ['allow_dataset_override'],
+        {},
+    ),
+    'tool_filesystem': (_FILESYSTEM_GATES, _FILESYSTEM_GATES, {}),
+    'filestore': (
+        ['targetDir', 'onConflict', 'emitUrl', 'urlExpiresIn', 'pathWhitelist'],
+        ['targetDir', 'onConflict', 'urlExpiresIn', 'pathWhitelist'],
+        {},
+    ),
+    'tool_git': (['safeMode', 'readOnlyMode'], ['safeMode', 'readOnlyMode'], {}),
+    'tool_github': (['defaultRepo', *_GITHUB_GATES], _GITHUB_GATES, {}),
+    'tool_gohighlevel': (
+        _CRM_GATES,
+        _CRM_GATES,
+        {'privateIntegrationToken': 'pit-1', 'locationId': 'loc1'},
+    ),
+    'tool_pipedrive': (_CRM_GATES, _CRM_GATES, {'apiToken': 'k1'}),
+    'tool_laserdata_memory': (
+        ['namespace', 'allow_namespace_override', 'folded', 'recall_limit', 'op_timeout'],
+        ['allow_namespace_override', 'op_timeout'],
+        {'local': {'connection_string': 'u:p@h:1'}},
+    ),
+    'tool_masky': (_MASKY_PARAMS, _MASKY_CALLER_ONLY, {'apikey': 'k1'}),
+    'tool_mem0': (
+        ['user_id', 'agent_id', 'run_id', 'app_id', 'infer', 'wait', 'ingest_timeout', 'search_limit'],
+        ['agent_id', 'app_id', 'wait', 'ingest_timeout'],
+        {'api_key': 'k1'},
+    ),
+    'tool_n8n': (
+        ['workflow', 'payloadMode', 'mode', 'sync.syncTimeout', 'async.asyncTimeout', 'verifyTls', 'readOnly'],
+        ['payloadMode', 'mode', 'sync.syncTimeout', 'async.asyncTimeout', 'verifyTls', 'readOnly'],
+        {},
+    ),
+    'tool_xtrace_memory': (
+        ['user_id', 'group_ids', 'agent_id', 'app_id', 'wait', 'ingest_timeout']
+        + ['extract_artifacts', 'search_mode', 'search_limit'],
+        ['agent_id', 'app_id', 'wait', 'ingest_timeout'],
+        {'api_key': 'k1', 'org_id': 'o1'},
     ),
     'reducto': (
         ['parse_mode', 'Contains_Handwritten_Text', 'Contains_Non_English_Text', 'Summarize_Text']

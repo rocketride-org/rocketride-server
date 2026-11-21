@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import time
 import uuid
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -39,11 +40,46 @@ from .IGlobal import IGlobal
 _REQUEST_TIMEOUT = 35
 
 
+def split_group_ids(raw: object) -> List[str]:
+    """Accept a comma-separated string or a list and return a clean id list."""
+    if isinstance(raw, list):
+        return [str(g).strip() for g in raw if str(g).strip()]
+    if isinstance(raw, str):
+        return [g.strip() for g in raw.split(',') if g.strip()]
+    return []
+
+
 class IInstance(IInstanceBase):
     """Node instance exposing xTrace Memory as agent tools."""
 
     IGlobal: IGlobal
     _conv_id: str = ''
+
+    # This call's default scope and ingest/recall options, read from its settings on first use
+    _call: SimpleNamespace | None = None
+
+    def _call_options(self) -> SimpleNamespace:
+        """
+        This call's default memory scope (user, agent, app, group ids) and its ingest
+        and recall options (wait, ingest timeout, artifact extraction, search mode and limit).
+
+        Returns:
+            The options, read once per call from its settings.
+        """
+        if self._call is None:
+            settings = self.settings
+            self._call = SimpleNamespace(
+                user_id=str(settings.user_id or '').strip(),
+                agent_id=str(settings.agent_id or '').strip(),
+                app_id=str(settings.app_id or '').strip(),
+                group_ids=split_group_ids(settings.group_ids),
+                wait=settings.wait,
+                ingest_timeout=settings.ingest_timeout,
+                extract_artifacts=settings.extract_artifacts,
+                search_mode=settings.search_mode,
+                search_limit=settings.search_limit,
+            )
+        return self._call
 
     def beginInstance(self) -> None:
         self._conv_id = ''
@@ -106,6 +142,7 @@ class IInstance(IInstanceBase):
         """Ingest conversation turns into xTrace memory."""
         args = normalize_tool_input(args, tool_name='remember')
         cfg = self.IGlobal
+        call = self._call_options()
 
         messages = _coerce_messages(args.get('messages'), args.get('content'), args.get('role'))
         if not messages:
@@ -115,7 +152,7 @@ class IInstance(IInstanceBase):
                 'error': 'provide "messages" (array of {role, content}) or "content"',
             }
 
-        user_id = str(args.get('user_id') or cfg.user_id or '').strip()
+        user_id = str(args.get('user_id') or call.user_id or '').strip()
         if not user_id:
             return {
                 'success': False,
@@ -132,17 +169,17 @@ class IInstance(IInstanceBase):
             'messages': messages,
             'user_id': user_id,
             'conv_id': conv_id,
-            'extract_artifacts': cfg.extract_artifacts,
+            'extract_artifacts': call.extract_artifacts,
         }
-        if cfg.agent_id:
-            payload['agent_id'] = cfg.agent_id
-        if cfg.app_id:
-            payload['app_id'] = cfg.app_id
-        if cfg.group_ids:
-            payload['group_ids'] = cfg.group_ids
+        if call.agent_id:
+            payload['agent_id'] = call.agent_id
+        if call.app_id:
+            payload['app_id'] = call.app_id
+        if call.group_ids:
+            payload['group_ids'] = call.group_ids
 
         url = f'{cfg.base_url}/v1/memories'
-        params = {'wait': 'true'} if cfg.wait else None
+        params = {'wait': 'true'} if call.wait else None
 
         try:
             # Ingest is a non-idempotent write (no idempotency key in the API),
@@ -207,6 +244,7 @@ class IInstance(IInstanceBase):
         """Search xTrace memory and return relevant context."""
         args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
+        call = self._call_options()
 
         query = (args.get('query') or '').strip()
         if not query:
@@ -218,13 +256,13 @@ class IInstance(IInstanceBase):
                 'error': 'query is required and must be a non-empty string',
             }
 
-        user_id = str(args.get('user_id') or cfg.user_id or '').strip()
+        user_id = str(args.get('user_id') or call.user_id or '').strip()
         group_ids = args.get('group_ids')
         if not isinstance(group_ids, list) or not group_ids:
-            group_ids = cfg.group_ids
+            group_ids = call.group_ids
 
         # At least one scope axis is required by the API.
-        if not user_id and not group_ids and not cfg.agent_id and not cfg.app_id:
+        if not user_id and not group_ids and not call.agent_id and not call.app_id:
             return {
                 'success': False,
                 'context': '',
@@ -233,13 +271,13 @@ class IInstance(IInstanceBase):
                 'error': 'a scope is required — set user_id or group_ids on the call or in node config',
             }
 
-        mode = str(args.get('mode') or cfg.search_mode).strip().lower()
+        mode = str(args.get('mode') or call.search_mode).strip().lower()
         if mode not in ('compose', 'retrieve'):
-            mode = cfg.search_mode
+            mode = call.search_mode
 
-        raw_limit = args.get('limit', cfg.search_limit)
+        raw_limit = args.get('limit', call.search_limit)
         if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
-            raw_limit = cfg.search_limit
+            raw_limit = call.search_limit
         limit = max(1, min(100, raw_limit))
 
         payload: Dict[str, Any] = {'query': query, 'mode': mode, 'limit': limit}
@@ -247,10 +285,10 @@ class IInstance(IInstanceBase):
             payload['user_id'] = user_id
         if group_ids:
             payload['group_ids'] = group_ids
-        if cfg.agent_id:
-            payload['agent_id'] = cfg.agent_id
-        if cfg.app_id:
-            payload['app_id'] = cfg.app_id
+        if call.agent_id:
+            payload['agent_id'] = call.agent_id
+        if call.app_id:
+            payload['app_id'] = call.app_id
 
         url = f'{cfg.base_url}/v1/memories/search'
         try:
@@ -283,14 +321,14 @@ class IInstance(IInstanceBase):
     def _await_terminal(self, job: Dict[str, Any], cfg: IGlobal) -> Dict[str, Any]:
         """Poll the ingest job until it reaches a terminal state or times out."""
         status = str(job.get('status') or '')
-        if status in ('succeeded', 'failed') or not cfg.wait:
+        if status in ('succeeded', 'failed') or not self._call_options().wait:
             return job
 
         job_id = job.get('id')
         if not job_id:
             return job
 
-        deadline = time.monotonic() + cfg.ingest_timeout
+        deadline = time.monotonic() + self._call_options().ingest_timeout
         delay = 0.5
         url = f'{cfg.base_url}/v1/memories/jobs/{job_id}'
         while time.monotonic() < deadline:

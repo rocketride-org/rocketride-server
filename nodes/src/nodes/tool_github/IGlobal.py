@@ -26,12 +26,14 @@
 """
 GitHub tool node - global (shared) state.
 
-Reads the resolved node config: the selected auth branch (PAT or GitHub App),
-an optional credentialMap, default_repo, the read_only flag, the tool allowlist,
-the GraphQL response cap and the rate-limit retry policy. The schema validates
-the scalars; ``node_config`` keeps the semantic checks it cannot express and
-``IValidator`` runs the same readers at save time. Which credential serves a
-call, and the installation tokens it mints, live in ``credentials``.
+Reads the resolved node config: the selected auth branch (PAT or GitHub App)
+and an optional credentialMap, with the installation-token caches they carry.
+The default repository, the read-only gate, the tool allowlist, the GraphQL
+gate and response cap and the rate-limit retry policy are each call's settings
+(``IInstance._options``). The schema validates the scalars; ``node_config``
+keeps the semantic checks it cannot express and ``IValidator`` runs the same
+readers at save time. Which credential serves a call, and the installation
+tokens it mints, live in ``credentials``.
 """
 
 from __future__ import annotations
@@ -39,11 +41,10 @@ from __future__ import annotations
 from rocketlib import IGlobalBase
 
 from . import credentials, github_client, node_config
-from .IInstance import validate_tool_names
 
 
 class IGlobal(IGlobalBase):
-    """Global state for tool_github."""
+    """Global state for tool_github: the credentials and their token caches."""
 
     # The configured authType field only. The node never reads it to serve a call: a
     # credentialMap can serve calls with the other kind, so every tool asks auth_type_for(repo).
@@ -52,12 +53,6 @@ class IGlobal(IGlobalBase):
     app_id: str = ''
     private_key_pem: str = ''
     installation_id: str = ''
-    default_repo: str = ''
-    read_only: bool = False
-    tools: frozenset = frozenset()
-    graphql_max_bytes: int = github_client.DEFAULT_GRAPHQL_MAX_BYTES
-    graphql_allow_mutations: bool = False
-    retry_policy: github_client.RetryPolicy = github_client.RetryPolicy()
     credential_map: credentials.CredentialMap | None = None
 
     # The node credential: a PatCredential or an AppCredential. With a credentialMap it is
@@ -68,17 +63,6 @@ class IGlobal(IGlobalBase):
         # The resolved config: the active authType branch flattened beside the
         # options, every scalar typed and ranged by the schema
         cfg = self.config
-        self.read_only = cfg.readOnly
-
-        options = node_config.read_options(cfg)
-        self.default_repo = options['defaultRepo']
-        self.tools = validate_tool_names(options['tools'])
-        self.graphql_max_bytes = options['graphqlMaxResponseBytes']
-        self.graphql_allow_mutations = options['graphqlAllowMutations']
-        self.retry_policy = github_client.RetryPolicy(
-            budget_seconds=options['rateLimitBudgetSeconds'],
-            max_retries=options['rateLimitMaxRetries'],
-        )
 
         auth = node_config.read_auth(cfg)
         self.auth_type = auth['authType']
@@ -101,12 +85,6 @@ class IGlobal(IGlobalBase):
         self.app_id = ''
         self.private_key_pem = ''
         self.installation_id = ''
-        self.default_repo = ''
-        self.read_only = False
-        self.tools = frozenset()
-        self.graphql_max_bytes = github_client.DEFAULT_GRAPHQL_MAX_BYTES
-        self.graphql_allow_mutations = False
-        self.retry_policy = github_client.RetryPolicy()
         self.credential_map = None
         self._credential = None
         # The compiled redaction patterns are keyed by the secret sets they were built from;

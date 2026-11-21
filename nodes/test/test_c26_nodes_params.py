@@ -653,3 +653,50 @@ def test_reducto_refuses_a_call_whose_option_is_not_a_dictionary():
     instance = _call('nodes.reducto', glb, {'parse_mode': True, 'options': '[1]'})
     with pytest.raises(ValueError, match='options must be a Python dictionary'):
         instance.beginInstance()
+
+
+# ==== tool_bland_ai ==============================================================
+
+
+def test_bland_ai_places_each_call_with_its_own_defaults(monkeypatch):
+    placed = []
+    client = importlib.import_module('nodes.tool_bland_ai.bland_client')
+    monkeypatch.setattr(client, 'make_call', lambda api_key, **kwargs: placed.append(kwargs) or {'call_id': 'c1'})
+    glb = SimpleNamespace(config=control_config('tool_bland_ai', {'apikey': 'k1'}), api_key='k1', server_name='bland')
+    for params in ({}, {'voice': 'Josh', 'maxDuration': 2, 'record': False, 'language': 'de'}):
+        driver = _call('nodes.tool_bland_ai', glb, params)._driver()
+        driver._tool_invoke(tool_name='make_call', input_obj={'phone_number': '+15550001', 'task': 'say hi'})
+
+    first, second = placed
+    assert (first['voice'], first['max_duration'], first['record'], first['language']) == ('June', 5, True, 'en')
+    assert (second['voice'], second['max_duration'], second['record'], second['language']) == ('Josh', 2, False, 'de')
+
+
+# ==== tool_filesystem ============================================================
+
+
+def test_filesystem_gates_each_call_by_its_own_policy():
+    # The node keeps nothing on its control: the control is its config
+    control = control_config('tool_filesystem')
+    default = _call('nodes.tool_filesystem', control)
+    deleting = _call(
+        'nodes.tool_filesystem', control, {'allowDelete': True, 'pathWhitelist': [{'whitelistPattern': '^docs/'}]}
+    )
+
+    assert not default._is_method_allowed('delete_file')
+    assert deleting._is_method_allowed('delete_file')
+    default._check_path('anywhere/file.txt')
+    with pytest.raises(ValueError, match='does not match any allowed path pattern'):
+        deleting._check_path('anywhere/file.txt')
+    deleting._check_path('docs/file.txt')
+
+
+def test_filestore_sinks_each_call_by_its_own_settings():
+    control = control_config('filestore')
+    default = _call('nodes.tool_filesystem', control)._policy()
+    custom = _call(
+        'nodes.tool_filesystem', control, {'targetDir': 'exports/', 'onConflict': 'overwrite', 'emitUrl': True}
+    )._policy()
+
+    assert (default.target_dir, default.on_conflict.name, default.emit_url) == ('output/', 'UNIQUE', False)
+    assert (custom.target_dir, custom.on_conflict.name, custom.emit_url) == ('exports/', 'OVERWRITE', True)

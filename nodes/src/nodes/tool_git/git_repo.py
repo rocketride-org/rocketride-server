@@ -268,21 +268,11 @@ class GitRepo:
         PEM-encoded SSH private key content for SSH auth.
     ssh_passphrase:
         Passphrase for the SSH key (may be empty).
-    safe_mode:
-        When ``True``, destructive operations (force-push, deleting unmerged
-        branches) raise ``GitError`` instead of executing.
-    read_only_mode:
-        When ``True``, *all* write operations (clone, init, write_file, stage,
-        commit, stash push/pop/drop, branch create/delete, checkout, merge,
-        fetch, pull, push) raise ``GitError``. Strictly stronger than
-        ``safe_mode`` — overrides it for the operations it covers.
-    """
 
-    # Class-level annotations: these are also instance attributes (assigned in
-    # __init__), but declaring them here makes them visible to introspection
-    # (e.g. unittest.mock.create_autospec) and matches the IGlobal style.
-    safe_mode: bool = True
-    read_only_mode: bool = True
+    The gates are each call's: the destructive operations (force-push,
+    force-deleting a branch) take ``safe_mode`` per call, and the node's
+    instance refuses every write tool when the call's read-only setting is on.
+    """
 
     def __init__(
         self,
@@ -293,8 +283,6 @@ class GitRepo:
         token: str = '',
         ssh_key: str = '',
         ssh_passphrase: str = '',
-        safe_mode: bool = True,
-        read_only_mode: bool = True,
     ) -> None:
         """Configure the wrapper and optionally open an existing local repository.
 
@@ -307,12 +295,6 @@ class GitRepo:
             token: Personal access token or password for HTTPS authentication.
             ssh_key: PEM-encoded SSH private key content.
             ssh_passphrase: Passphrase for the SSH private key (may be empty).
-            safe_mode: When ``True``, blocks destructive operations such as
-                force-push and force branch deletion.
-            read_only_mode: When ``True``, blocks every mutating operation —
-                strictly stronger than ``safe_mode``. Read-only tools (status,
-                log, show, diff, blame, file_at, branch_list, grep, ls_files,
-                stash list) remain available.
         """
         self._repo_path = repo_path
         self._auth_type = auth_type.lower()
@@ -320,8 +302,6 @@ class GitRepo:
         self._token = token
         self._ssh_key = ssh_key
         self._ssh_passphrase = ssh_passphrase
-        self.safe_mode = safe_mode
-        self.read_only_mode = read_only_mode
         self._repo: Optional[pygit2.Repository] = None
 
         if repo_path:
@@ -374,9 +354,10 @@ class GitRepo:
             raise GitError('No repository loaded. Set repoPath in config or call clone first.')
         return self._repo
 
-    def _safe_guard(self, operation: str) -> None:
-        """Raise GitError if safe_mode is enabled, blocking the named operation."""
-        if self.safe_mode:
+    @staticmethod
+    def _safe_guard(operation: str, safe_mode: bool) -> None:
+        """Raise GitError if the call's safe mode is on, blocking the named operation."""
+        if safe_mode:
             raise GitError(f'{operation!r} is blocked in safe mode. Set safeMode=false in node config to allow it.')
 
     def _resolve_ref(self, repo: pygit2.Repository, ref: str) -> pygit2.Commit:
@@ -799,11 +780,11 @@ class GitRepo:
             'sha': str(repo.head.target)[:8],
         }
 
-    def branch_delete(self, name: str, force: bool = False) -> Dict[str, Any]:
-        """Delete a branch."""
+    def branch_delete(self, name: str, force: bool = False, *, safe_mode: bool = True) -> Dict[str, Any]:
+        """Delete a branch; a force deletion is refused while the call's ``safe_mode`` is on."""
         repo = self._require_repo()
         if force:
-            self._safe_guard('force-deleting a branch')
+            self._safe_guard('force-deleting a branch', safe_mode)
         try:
             b = repo.branches[name]
         except KeyError:
@@ -956,10 +937,12 @@ class GitRepo:
         remote: str = 'origin',
         branch: Optional[str] = None,
         force: bool = False,
+        *,
+        safe_mode: bool = True,
     ) -> Dict[str, Any]:
-        """Push to a remote."""
+        """Push to a remote; a force-push is refused while the call's ``safe_mode`` is on."""
         if force:
-            self._safe_guard('force push')
+            self._safe_guard('force push', safe_mode)
         repo = self._require_repo()
         target = branch or (repo.head.shorthand if not repo.head_is_unborn else None)
         if not target:

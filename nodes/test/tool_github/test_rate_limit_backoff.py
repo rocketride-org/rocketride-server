@@ -14,7 +14,7 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from ._stubs import scoped_stubs
+from ._stubs import call_options, scoped_stubs
 
 TOKEN = 'sentinel-backoff-token-2592'
 NOW = 1_800_000_000.0
@@ -68,21 +68,18 @@ def node(monkeypatch):
             auth_type='pat',
             token=TOKEN,
             private_key_pem='',
-            default_repo='owner/repo',
-            read_only=True,
             get_token=Mock(return_value=TOKEN),
             secrets=lambda: (TOKEN,),
-            tools=frozenset(),
-            graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
-            graphql_allow_mutations=False,
         )
+        # The options are the call's settings
+        inst._call_options = call_options(github_client, default_repo='owner/repo', read_only=True)
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)
         # A real sleep fails the test: every wait must go through the injected one.
         monkeypatch.setattr(github_client.time, 'sleep', Mock(side_effect=AssertionError('slept for real')))
 
         def policy(**kwargs):
-            inst.IGlobal.retry_policy = github_client.RetryPolicy(sleep=slept.append, clock=lambda: NOW, **kwargs)
+            inst._options().retry_policy = github_client.RetryPolicy(sleep=slept.append, clock=lambda: NOW, **kwargs)
 
         policy()
         yield SimpleNamespace(inst=inst, request=request, client=github_client, slept=slept, policy=policy)
@@ -279,8 +276,8 @@ def test_graphql_200_rate_limited_without_a_usable_reset_waits_a_minute(node):
 
 def test_graphql_200_rate_limited_with_partial_data_is_returned_not_retried(node):
     # GitHub ran part of the mutation; resending it could run that part twice.
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     body = {
         'data': {'first': {'clientMutationId': 'a'}, 'second': None},
         'errors': [{'type': 'RATE_LIMITED', 'path': ['second'], 'message': 'API rate limit exceeded.'}],
@@ -301,8 +298,8 @@ def test_graphql_200_rate_limited_with_partial_data_is_returned_not_retried(node
 def test_graphql_200_with_a_path_error_and_null_data_is_returned_not_retried(node, headers):
     # Null propagation emptied data after a field ran; the path says GitHub executed the document,
     # so neither the RATE_LIMITED type nor Retry-After may trigger a retry.
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     body = {
         'data': None,
         'errors': [{'type': 'RATE_LIMITED', 'path': ['second'], 'message': 'API rate limit exceeded.'}],
@@ -390,8 +387,8 @@ def test_graphql_execution_error_with_path_on_the_last_point_is_not_retried(node
 )
 @pytest.mark.parametrize('retry_after', [False, True])
 def test_mutation_http_200_errors_never_resend_a_possibly_applied_write(node, error, retry_after):
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     body = {'data': None, 'errors': [error]}
     headers = dict(graphql_limited().headers)
     if retry_after:
@@ -406,8 +403,8 @@ def test_mutation_http_200_errors_never_resend_a_possibly_applied_write(node, er
 
 @pytest.mark.parametrize('status', [403, 429])
 def test_mutation_http_rate_limit_refusal_still_backs_off(node, status):
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     body = {'data': {'addStar': {'clientMutationId': 'once'}}}
     node.request.side_effect = [secondary_limit(status, '1'), response(body)]
     result = node.inst.graphql({'query': 'mutation { addStar(input: {starrableId: "repo"}) { clientMutationId } }'})

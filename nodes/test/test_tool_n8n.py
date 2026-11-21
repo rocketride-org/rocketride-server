@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -212,6 +213,22 @@ def _begin(conn_config):
     return glb
 
 
+def _bind_settings(inst, view):
+    """Give an instance its call's settings, whichever base it was built on (the engine's or the stand-in)."""
+    if isinstance(getattr(type(inst), 'settings', None), property):
+        inst._settings = view
+    else:
+        inst.settings = view
+
+
+def _run_options(glb):
+    """One call's run options on the control: a call with no params reads the stored values."""
+    inst = instance_mod.IInstance()
+    inst.IGlobal = glb
+    _bind_settings(inst, glb._resolved())
+    return inst._run_options()
+
+
 def test_begin_global_has_no_process_env_fallback(monkeypatch):
     """The workflow and key arrive through the node config only (${ROCKETRIDE_N8N_*} references per call)."""
     monkeypatch.setenv('ROCKETRIDE_N8N_WORKFLOW', 'env-webhook-path')
@@ -219,7 +236,7 @@ def test_begin_global_has_no_process_env_fallback(monkeypatch):
 
     glb = _begin({'baseUrl': 'http://n8n:5678', 'workflow': '   '})
 
-    assert glb.default_workflow == ''
+    assert _run_options(glb).default_workflow == ''
     assert glb.api_key == ''
     assert glb.base_url == 'http://n8n:5678'
 
@@ -234,8 +251,9 @@ def test_begin_global_reads_the_selected_branches():
             'sync': {'syncTimeout': 7},
         }
     )
-    assert (glb.mode, glb.async_timeout) == ('async', 45)
-    assert glb.sync_timeout == 30  # the unselected branch's value is kept in the file, not read
+    options = _run_options(glb)
+    assert (options.mode, options.async_timeout) == ('async', 45)
+    assert options.sync_timeout == 30  # the unselected branch's value is kept in the file, not read
     assert glb.webhook_auth == {'type': 'bearer', 'value': 'tok'}
 
 
@@ -553,22 +571,32 @@ def test_wait_for_execution_skips_stale_run_across_iso_formats(monkeypatch):
 class _FakeGlobal:
     base_url = 'http://localhost:5678'
     api_key = 'key'
-    default_workflow = 'enrich'
-    mode = 'async'
-    payload_mode = 'simple'
-    sync_timeout = 30
-    async_timeout = 30
-    verify_tls = True
-    read_only = True
     webhook_auth = None
+
+
+#: The run options a test's call starts from (the call's settings).
+_RUN_OPTIONS = {
+    'default_workflow': 'enrich',
+    'mode': 'async',
+    'payload_mode': 'simple',
+    'sync_timeout': 30,
+    'async_timeout': 30,
+    'verify_tls': True,
+    'read_only': True,
+}
 
 
 def _make_instance(**overrides):
     inst = instance_mod.IInstance()
     g = _FakeGlobal()
+    options = dict(_RUN_OPTIONS)
     for key, value in overrides.items():
-        setattr(g, key, value)
+        if key in options:
+            options[key] = value
+        else:
+            setattr(g, key, value)
     inst.IGlobal = g
+    inst._call_options = SimpleNamespace(**options)
     inst._preflight_done = True  # skip the network preflight in unit tests
     return inst
 
@@ -1018,3 +1046,25 @@ def test_clean_execution_adds_deeplink():
 def test_clean_execution_no_url_without_base_or_ids():
     assert 'url' not in client.clean_execution({'id': '7', 'workflowId': 'wf9'})
     assert 'url' not in client.clean_execution({'id': '7'}, base_url='http://x')
+
+
+def test_one_control_serves_two_calls_with_their_own_run_options():
+    """The run options are each call's settings: one control, two calls, each read from its own view."""
+    from .framework.controls import resolved_config
+
+    control = _FakeGlobal()
+    options = []
+    for params in ({}, {'mode': 'async', 'async.asyncTimeout': 45, 'workflow': ' other ', 'readOnly': False}):
+        inst = instance_mod.IInstance()
+        inst.IGlobal = control
+        _bind_settings(inst, resolved_config('tool_n8n').overlay(params))
+        options.append(inst._run_options())
+
+    first, second = options
+    assert (first.mode, first.sync_timeout, first.default_workflow, first.read_only) == ('sync', 30, '', True)
+    assert (second.mode, second.async_timeout, second.default_workflow, second.read_only) == (
+        'async',
+        45,
+        'other',
+        False,
+    )

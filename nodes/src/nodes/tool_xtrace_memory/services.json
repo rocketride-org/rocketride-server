@@ -33,6 +33,7 @@
 			"required": true
 		},
 		"xtrace_memory.user_id": {
+			"param": true,
 			"type": "string",
 			"optional": true,
 			"title": "User id",
@@ -40,6 +41,7 @@
 			"default": ""
 		},
 		"xtrace_memory.group_ids": {
+			"param": true,
 			"type": "string",
 			"optional": true,
 			"title": "Group ids (shared memory)",
@@ -54,6 +56,8 @@
 			"minLength": 1
 		},
 		"xtrace_memory.agent_id": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"optional": true,
 			"title": "Agent id",
@@ -61,6 +65,8 @@
 			"default": ""
 		},
 		"xtrace_memory.app_id": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"optional": true,
 			"title": "App id",
@@ -68,6 +74,8 @@
 			"default": ""
 		},
 		"xtrace_memory.wait": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Synchronous ingest",
 			"description": "When on, ingest waits (up to ~30s) for extraction to finish so the agent gets a terminal result. When off, ingest returns immediately and runs in the background.",
@@ -78,6 +86,8 @@
 			]
 		},
 		"xtrace_memory.ingest_timeout": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Ingest timeout (s)",
 			"description": "Max seconds to wait/poll for an ingest job to reach a terminal state.",
@@ -86,6 +96,7 @@
 			"maximum": 120
 		},
 		"xtrace_memory.extract_artifacts": {
+			"param": true,
 			"type": "boolean",
 			"title": "Extract artifacts",
 			"description": "Opt into artifact extraction (the most expensive stage). Facts and episodes are always extracted. Leave off unless you need it.",
@@ -96,6 +107,7 @@
 			]
 		},
 		"xtrace_memory.search_mode": {
+			"param": true,
 			"type": "string",
 			"title": "Recall mode",
 			"description": "'compose' returns a ready-to-inject markdown context block (LLM-selected); 'retrieve' returns ranked rows only.",
@@ -106,6 +118,7 @@
 			]
 		},
 		"xtrace_memory.search_limit": {
+			"param": true,
 			"type": "integer",
 			"title": "Recall limit",
 			"description": "Maximum number of memory rows to retrieve per recall.",

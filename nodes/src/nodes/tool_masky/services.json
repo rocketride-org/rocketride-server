@@ -39,6 +39,7 @@
 		},
 		"tool_masky.baseUrl": {
 			"hidden": true,
+			"env": "ROCKETRIDE_MASKY_BASE_URL",
 			"type": "string",
 			"title": "API base URL",
 			"description": "Masky API root. Change only to point at a staging environment.",
@@ -46,6 +47,7 @@
 			"minLength": 1
 		},
 		"tool_masky.defaultAvatar": {
+			"param": true,
 			"optional": true,
 			"type": "string",
 			"title": "Default Avatar",
@@ -53,6 +55,7 @@
 			"default": ""
 		},
 		"tool_masky.defaultLook": {
+			"param": true,
 			"optional": true,
 			"type": "string",
 			"title": "Default Look",
@@ -60,6 +63,7 @@
 			"default": ""
 		},
 		"tool_masky.language": {
+			"param": true,
 			"type": "string",
 			"title": "Language",
 			"description": "Spoken language code, e.g. en, es, fr.",
@@ -67,6 +71,8 @@
 			"minLength": 1
 		},
 		"tool_masky.maxCreditsPerCall": {
+			"param": true,
+			"tool": false,
 			"type": "number",
 			"title": "Max Credits per Call",
 			"description": "Cost guard: refuse any render whose estimate is higher. 0 turns the guard off.",
@@ -74,6 +80,8 @@
 			"minimum": 0
 		},
 		"tool_masky.timeoutSec": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Render Timeout (seconds)",
 			"description": "Longest to wait for a render. Scene video can take about 3 minutes.",
@@ -81,12 +89,15 @@
 			"minimum": 10
 		},
 		"tool_masky.pollIntervalSec": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Poll Interval (seconds)",
 			"default": 3,
 			"minimum": 1
 		},
 		"tool_masky.includeMediaUrls": {
+			"param": true,
 			"type": "boolean",
 			"title": "Include Media URLs in Tool Results",
 			"description": "Turn off when an agent calls this node: results then carry job ids only, so signed URLs stay out of the model's context. Pipeline receipts always include URLs.",
@@ -97,6 +108,8 @@
 			]
 		},
 		"tool_masky.readOnly": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Read-only mode",
 			"description": "When enabled, every agent tool that changes or spends anything (create, train, set, add, speak, generate, edit, conversations and turns, agent binding, visibility, rename, delete, restore) is hidden from the agent rather than merely refused. Listing, get, get_generation and estimate_cost remain. Does not affect the pipeline action. Safe for agents that should only inspect the account.",
@@ -107,6 +120,8 @@
 			]
 		},
 		"tool_masky.allowDelete": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Allow deletion",
 			"description": "Destructive: enable only when the agent is trusted to delete Masky conversations, turns and agent bindings. Deleted conversations can't be recovered.",
@@ -117,6 +132,8 @@
 			]
 		},
 		"tool_masky.allowPublicSharing": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Allow public sharing",
 			"description": "Off by default. When off, making an avatar or conversation public, creating a public avatar, and scene video with Share Page Public (agent tools and the scene_video action) are refused. Making something private is never gated.",
@@ -127,6 +144,8 @@
 			]
 		},
 		"tool_masky.action": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Pipeline Action",
 			"description": "What the node does with each text record when it sits in a pipeline. Agent tool calls ignore this; the render settings below apply to the matching action and to the agent tools alike.",
@@ -139,6 +158,7 @@
 			]
 		},
 		"tool_masky.output": {
+			"param": true,
 			"type": "string",
 			"title": "Output",
 			"description": "Talking head: video or voice only.",
@@ -149,6 +169,7 @@
 			]
 		},
 		"tool_masky.textMode": {
+			"param": true,
 			"type": "string",
 			"title": "Text Mode",
 			"description": "Talking head: Literal reads the text as written; Personality lets the avatar rephrase it in its own voice.",
@@ -159,6 +180,7 @@
 			]
 		},
 		"tool_masky.quality": {
+			"param": true,
 			"type": "string",
 			"title": "Quality",
 			"description": "Scene video: draft costs about 40% less; 1080p costs about twice 720p.",
@@ -171,6 +193,7 @@
 			]
 		},
 		"tool_masky.aspectRatio": {
+			"param": true,
 			"type": "string",
 			"title": "Aspect Ratio",
 			"description": "Scene video.",
@@ -186,6 +209,7 @@
 			]
 		},
 		"tool_masky.fps": {
+			"param": true,
 			"type": "integer",
 			"title": "Frame Rate",
 			"description": "Scene video.",
@@ -196,6 +220,7 @@
 			]
 		},
 		"tool_masky.durationSec": {
+			"param": true,
 			"type": "integer",
 			"title": "Duration (seconds)",
 			"description": "Scene video: 1 to 20. Ignored when a speech line is set; the line sets the length.",
@@ -204,6 +229,7 @@
 			"maximum": 20
 		},
 		"tool_masky.seed": {
+			"param": true,
 			"optional": true,
 			"type": "integer",
 			"title": "Seed",
@@ -211,6 +237,7 @@
 			"minimum": 0
 		},
 		"tool_masky.silent": {
+			"param": true,
 			"type": "boolean",
 			"title": "Silent",
 			"description": "Scene video: render the clip without an audio track.",
@@ -221,6 +248,7 @@
 			]
 		},
 		"tool_masky.expandPrompt": {
+			"param": true,
 			"type": "boolean",
 			"title": "Expand Prompt",
 			"description": "Scene video: let Masky enrich the prompt. Turn off to use it word for word.",
@@ -231,6 +259,8 @@
 			]
 		},
 		"tool_masky.share": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Share Page",
 			"description": "Scene video: Masky creates a share page for every clip; choose who can open it.",
@@ -241,6 +271,7 @@
 			]
 		},
 		"tool_masky.sourceImageUrl": {
+			"param": true,
 			"optional": true,
 			"type": "string",
 			"title": "Source Image URL",
@@ -248,6 +279,7 @@
 			"default": ""
 		},
 		"tool_masky.speechLine": {
+			"param": true,
 			"optional": true,
 			"type": "string",
 			"title": "Speech Line",
@@ -255,6 +287,7 @@
 			"default": ""
 		},
 		"tool_masky.engine": {
+			"param": true,
 			"type": "string",
 			"title": "Generation Engine",
 			"description": "Image: Ideogram costs about 3x the default.",
@@ -265,6 +298,7 @@
 			]
 		},
 		"tool_masky.editEngine": {
+			"param": true,
 			"type": "string",
 			"title": "Edit Engine",
 			"description": "Image: used when a source image URL is set. Qwen costs about 3x the default.",
@@ -275,6 +309,7 @@
 			]
 		},
 		"tool_masky.conversation": {
+			"param": true,
 			"optional": true,
 			"type": "string",
 			"title": "Conversation",
@@ -282,6 +317,7 @@
 			"default": ""
 		},
 		"tool_masky.turnMode": {
+			"param": true,
 			"type": "string",
 			"title": "Turn Mode",
 			"description": "Live: Chat lets the avatar answer the text; Speak has it say the text as written.",
@@ -292,6 +328,7 @@
 			]
 		},
 		"tool_masky.turnOutput": {
+			"param": true,
 			"type": "string",
 			"title": "Turn Output",
 			"description": "Live.",
@@ -302,6 +339,7 @@
 			]
 		},
 		"tool_masky.waitForTurn": {
+			"param": true,
 			"type": "boolean",
 			"title": "Wait for Each Turn",
 			"description": "Live: wait for each turn to render before sending the next.",

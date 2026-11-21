@@ -86,9 +86,8 @@ class IInstance(IInstanceBase):
         namespace = self._namespace(args, 'remember')
         conversation = _opt_str(args, 'remember', 'conversation')
 
-        cfg = self.IGlobal
         laser = self._laser('remember')
-        memory_id = _run(cfg, 'remember', _remember_op(laser, namespace, content, conversation))
+        memory_id = self._run('remember', _remember_op(laser, namespace, content, conversation))
 
         # The answer names the namespace as the caller knows it, so it can be
         # passed back to recall/improve/forget unchanged
@@ -147,7 +146,7 @@ class IInstance(IInstanceBase):
     def recall(self, args):
         """Fold the memory topic back and return matching items."""
         args = normalize_tool_input(args, tool_name='recall')
-        cfg = self.IGlobal
+        settings = self.settings  # this call's recall defaults
 
         namespace = self._namespace(args, 'recall')
         conversation = _opt_str(args, 'recall', 'conversation')
@@ -155,12 +154,11 @@ class IInstance(IInstanceBase):
         strategy = _opt_str(args, 'recall', 'strategy')
 
         limit = int_arg(
-            args, 'limit', default=cfg.recall_limit, lo=1, hi=MAX_RECALL_LIMIT, tool_name='laserdata.recall'
+            args, 'limit', default=settings.recall_limit, lo=1, hi=MAX_RECALL_LIMIT, tool_name='laserdata.recall'
         )
 
         laser = self._laser('recall')
-        items = _run(
-            cfg,
+        items = self._run(
             'recall',
             _recall_op(
                 laser,
@@ -169,7 +167,7 @@ class IInstance(IInstanceBase):
                 semantic=query,
                 strategy=strategy,
                 conversation=conversation,
-                folded=cfg.folded,
+                folded=settings.folded,
             ),
         )
 
@@ -220,9 +218,8 @@ class IInstance(IInstanceBase):
         namespace = self._namespace(args, 'improve')
         conversation = _opt_str(args, 'improve', 'conversation')
 
-        cfg = self.IGlobal
         laser = self._laser('improve')
-        feedback_id = _run(cfg, 'improve', _improve_op(laser, namespace, memory_id, float(weight), conversation))
+        feedback_id = self._run('improve', _improve_op(laser, namespace, memory_id, float(weight), conversation))
         return {'feedback_id': str(feedback_id), 'memory_id': memory_id}
 
     @tool_function(
@@ -261,9 +258,8 @@ class IInstance(IInstanceBase):
         namespace = self._namespace(args, 'forget')
         conversation = _opt_str(args, 'forget', 'conversation')
 
-        cfg = self.IGlobal
         laser = self._laser('forget')
-        _run(cfg, 'forget', _forget_op(laser, namespace, memory_id, conversation))
+        self._run('forget', _forget_op(laser, namespace, memory_id, conversation))
         return {'forgotten': True, 'memory_id': memory_id}
 
     # ------------------------------------------------------------------
@@ -282,14 +278,15 @@ class IInstance(IInstanceBase):
 
     def _public_namespace(self, args: Dict[str, Any], tool_name: str) -> str:
         """The namespace as the caller names it: per-call override falling back to config (what answers carry)."""
-        cfg = self.IGlobal
+        settings = self.settings  # this call's namespace and its override gate
+        configured = str(settings.namespace or '').strip()
         ns = _opt_str(args, tool_name, 'namespace')
-        if ns and ns != cfg.namespace and not cfg.allow_namespace_override:
+        if ns and ns != configured and not settings.allow_namespace_override:
             raise ValueError(
                 f'laserdata.{tool_name}: per-call namespace override is disabled — '
                 'use the configured namespace or enable "Allow namespace override"'
             )
-        ns = ns or cfg.namespace
+        ns = ns or configured
         if not ns:
             raise ValueError(
                 f'laserdata.{tool_name}: a namespace is required — pass it on the call or set it in node config'
@@ -305,20 +302,19 @@ class IInstance(IInstanceBase):
         except Exception as exc:
             raise RuntimeError(f'laserdata.{tool_name}: connect failed: {_safe_error(self.IGlobal, exc)}') from None
 
+    def _run(self, tool_name: str, coro) -> Any:
+        """Run one SDK coroutine on the bridge loop within this call's op_timeout, mapping failures to RuntimeError."""
+        try:
+            return self.IGlobal.run(coro, timeout=self.settings.op_timeout)
+        except (ValueError, RuntimeError):
+            raise
+        except Exception as exc:
+            raise RuntimeError(f'laserdata.{tool_name}: {_safe_error(self.IGlobal, exc)}') from None
+
 
 # ---------------------------------------------------------------------------
 # Module helpers
 # ---------------------------------------------------------------------------
-
-
-def _run(cfg: IGlobal, tool_name: str, coro) -> Any:
-    """Run one SDK coroutine on the bridge loop, mapping failures to RuntimeError."""
-    try:
-        return cfg.run(coro)
-    except (ValueError, RuntimeError):
-        raise
-    except Exception as exc:
-        raise RuntimeError(f'laserdata.{tool_name}: {_safe_error(cfg, exc)}') from None
 
 
 def _safe_error(cfg: IGlobal, exc: BaseException) -> str:

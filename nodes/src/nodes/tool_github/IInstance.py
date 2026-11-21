@@ -37,6 +37,7 @@ import functools
 import itertools
 import re
 from collections.abc import Iterable
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Callable
 
 from rocketlib import IInstanceBase, tool_function, warning
@@ -243,6 +244,42 @@ def _rejected(result, error: Exception | None) -> bool:
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    # This call's options, read from its settings on first use (see _options)
+    _call_options: SimpleNamespace | None = None
+
+    def _options(self) -> SimpleNamespace:
+        """
+        This call's options: the default repository, the read-only gate, the tool allowlist,
+        the GraphQL mutation gate and response cap, and the rate-limit retry policy.
+
+        The control holds only the credentials; every option is a per-call setting,
+        checked here as the control used to check it at start.
+
+        Returns:
+            The options, built once per call.
+
+        Raises:
+            ValueError: ``defaultRepo`` is not ``owner/repo``, or ``tools`` names a tool
+                this node does not implement.
+        """
+        if self._call_options is None:
+            from . import node_config
+
+            settings = self.settings
+            options = node_config.read_options(settings)
+            self._call_options = SimpleNamespace(
+                default_repo=options['defaultRepo'],
+                read_only=settings.readOnly,
+                tools=validate_tool_names(options['tools']),
+                graphql_max_bytes=options['graphqlMaxResponseBytes'],
+                graphql_allow_mutations=options['graphqlAllowMutations'],
+                retry_policy=github_client.RetryPolicy(
+                    budget_seconds=options['rateLimitBudgetSeconds'],
+                    max_retries=options['rateLimitMaxRetries'],
+                ),
+            )
+        return self._call_options
+
     # -----------------------------------------------------------------------
     # Tool publication
     # -----------------------------------------------------------------------
@@ -257,7 +294,7 @@ class IInstance(IInstanceBase):
         retried once with a fresh token.
         """
         methods = super()._collect_tool_methods()
-        allowed = self.IGlobal.tools
+        allowed = self._options().tools
         if allowed:
             methods = {name: method for name, method in methods.items() if name in allowed}
         return {name: self._redacting(method) for name, method in methods.items()}
@@ -364,19 +401,19 @@ class IInstance(IInstanceBase):
     def _credential_repo(self, args: dict, tool_name: str) -> str | None:
         """The repository that picks the credential for a tool whose request names none.
 
-        An explicit ``repo`` must be ``owner/repo``. ``defaultRepo`` is checked by IGlobal
+        An explicit ``repo`` must be ``owner/repo``. ``defaultRepo`` is checked by the call options
         only where it chooses a credential, so a malformed one does not break a PAT call.
         """
         repo = (optional_str(args, 'repo', default='', tool_name=tool_name) or '').strip()
         if repo:
             repository_reads.repository_path(repo)
             return repo
-        return (self.IGlobal.default_repo or '').strip() or None
+        return (self._options().default_repo or '').strip() or None
 
     def _repo(self, args: dict, tool_name: str = '') -> str:
         """The call's repository, or the configured default; every error names ``tool_name``."""
         prefix = f'{tool_name}: ' if tool_name else ''
-        repo = args.get('repo') or self.IGlobal.default_repo or ''
+        repo = args.get('repo') or self._options().default_repo or ''
         if not isinstance(repo, str):
             raise ValueError(f'{prefix}repo must be in owner/repo format')
         repo = repo.strip()
@@ -385,7 +422,7 @@ class IInstance(IInstanceBase):
         return repo
 
     def _require_write(self) -> None:
-        if self.IGlobal.read_only:
+        if self._options().read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
 
     def _get(
@@ -405,7 +442,7 @@ class IInstance(IInstanceBase):
         budget = _budget_of(ctx)
         return self._with_credentials(
             lambda credential, secrets: github_client.get_result(
-                credential, path, params=params, retry=self.IGlobal.retry_policy, secrets=secrets, budget=budget
+                credential, path, params=params, retry=self._options().retry_policy, secrets=secrets, budget=budget
             ),
             app_identity=app_identity,
             repo=repo,
@@ -420,7 +457,7 @@ class IInstance(IInstanceBase):
                 method,
                 path,
                 body=body,
-                retry=self.IGlobal.retry_policy,
+                retry=self._options().retry_policy,
                 secrets=secrets,
                 budget=_budget_of(ctx),
             ),
@@ -430,7 +467,7 @@ class IInstance(IInstanceBase):
 
     def _write_refusal(self, tool_name: str) -> dict | None:
         """The read-only refusal of an envelope write, as a result; checked before any token is minted."""
-        if not self.IGlobal.read_only:
+        if not self._options().read_only:
             return None
         return github_client.failure_result(
             f'{tool_name} refused by readOnly: read-only mode blocks writes. '
@@ -1473,9 +1510,9 @@ class IInstance(IInstanceBase):
         # Checked before a token is minted, so nothing reaches GitHub. The whole
         # document is checked: operationName does not exempt a mutation in it.
         refusal = graphql_guard.mutation_refusal(query)
-        if refusal and self.IGlobal.read_only:
+        if refusal and self._options().read_only:
             return github_client.failure_result(refusal)
-        if refusal and not self.IGlobal.graphql_allow_mutations:
+        if refusal and not self._options().graphql_allow_mutations:
             # Off by default: a mutation can do anything the credential allows, far more
             # than the write tools, so existing settings do not enable GraphQL mutations.
             return github_client.failure_result(graphql_guard.not_allowed(refusal))
@@ -1485,8 +1522,8 @@ class IInstance(IInstanceBase):
                 query,
                 variables,
                 operation_name,
-                retry=self.IGlobal.retry_policy,
-                max_bytes=self.IGlobal.graphql_max_bytes,
+                retry=self._options().retry_policy,
+                max_bytes=self._options().graphql_max_bytes,
                 secrets=secrets,
                 budget=_budget_of(ctx),
             ),
@@ -1837,7 +1874,7 @@ class IInstance(IInstanceBase):
             'page': max(1, int(args.get('page') or 1)),
         }
         # No repository in this request: the default repository picks the credential.
-        repo = (self.IGlobal.default_repo or '').strip() or None
+        repo = (self._options().default_repo or '').strip() or None
         if not username and self.IGlobal.auth_type_for(repo) == 'app':
             # An installation token has no user, so GET /user/repos is 403; list the
             # installation's repositories instead (no `type` filter on that endpoint).
@@ -1975,7 +2012,7 @@ class IInstance(IInstanceBase):
     def search_code(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         q = require_str(args, 'query', tool_name='search_code')
-        repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
+        repo = (args.get('repo') or self._options().default_repo or '').strip()
         if repo:
             q = f'{q} repo:{repo}'
         params = {
@@ -2022,7 +2059,7 @@ class IInstance(IInstanceBase):
     def search_issues(self, args, ctx: _ToolCall | None = None):
         args = normalize_tool_input(args, tool_name='tool_github')
         q = require_str(args, 'query', tool_name='search_issues')
-        repo = (args.get('repo') or self.IGlobal.default_repo or '').strip()
+        repo = (args.get('repo') or self._options().default_repo or '').strip()
         if repo:
             q = f'{q} repo:{repo}'
         if args.get('state'):
@@ -2149,8 +2186,8 @@ def tool_names() -> frozenset[str]:
 def validate_tool_names(names: Iterable[str]) -> frozenset[str]:
     """``names`` as a set when each is a tool this node implements; unknown names fail, listing the valid ones.
 
-    ``IGlobal`` parses the ``tools`` allowlist and checks it here, next to the tool
-    definitions, at pipeline start (``beginGlobal``) and in the canvas (``validateConfig``).
+    A call's options (``IInstance._options``) parse the ``tools`` allowlist and check it
+    here, next to the tool definitions, when the call first needs them.
     """
     names = frozenset(names)
     valid = tool_names()

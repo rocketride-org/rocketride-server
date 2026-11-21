@@ -102,8 +102,7 @@ class IGlobal(IGlobalBase):
         token = str(cfg.get('token') or '').strip()
         ssh_key = str(cfg.get('sshKey') or '').strip()
         ssh_passphrase = str(cfg.get('sshPassphrase') or '').strip()
-        safe_mode = cfg.safeMode
-        read_only_mode = cfg.readOnlyMode
+        # safeMode and readOnlyMode are each call's gates: the instance passes them per operation
 
         # --- Build the GitRepo wrapper ------------------------------------
         # Construct without an open repo first; the repo is bound below depending
@@ -115,8 +114,6 @@ class IGlobal(IGlobalBase):
             token=token,
             ssh_key=ssh_key,
             ssh_passphrase=ssh_passphrase,
-            safe_mode=safe_mode,
-            read_only_mode=read_only_mode,
         )
 
         # --- Bind a repository to the wrapper -----------------------------

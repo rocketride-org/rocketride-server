@@ -71,11 +71,12 @@ def check_api_key(value: Any) -> str:
 
 
 def read_settings(cfg: Mapping) -> Dict[str, Any]:
-    """Read the node settings from the resolved config; raise ValueError on a semantic problem.
+    """Read one call's node settings from its resolved view; raise ValueError on a semantic problem.
 
     The resolver has already applied the defaults and checked every type, range
     and enum, so the view is read as is. What remains is the base URL scheme and
-    a finite credit cap (JSON cannot carry one, a hand-built config can).
+    a finite credit cap (JSON cannot carry one, a hand-built config can). The
+    instance runs this on its settings (``IInstance._call_settings``).
     """
     max_credits = float(cfg['maxCreditsPerCall'])
     if not math.isfinite(max_credits) or max_credits < 0:
@@ -149,37 +150,39 @@ def config_warnings(cfg: Mapping) -> List[str]:
 
 
 class IGlobal(IGlobalBase):
-    """Global state for tool_masky."""
+    """Global state for tool_masky: the account client, the run's registries and the pricing cache.
+
+    Every setting but the key, the tool namespace and the base URL is each call's:
+    the instance reads them with ``read_settings`` from its settings and works
+    through a call view of the driver (``MaskyDriver.for_call``).
+    """
 
     driver: MaskyDriver | None = None
-    settings: Dict[str, Any] | None = None
 
     def beginGlobal(self) -> None:
         from depends import load_depends
 
         load_depends(__file__)
 
-        # The resolved config: every setting defaulted, typed and ranged; the
-        # key a required secret (a ${ROCKETRIDE_MASKY_KEY} reference resolved
-        # per call, no process-env fallback)
+        # The resolved config: the key a required secret (a ${ROCKETRIDE_MASKY_KEY}
+        # reference resolved per call, no process-env fallback), the base URL an
+        # endpoint (env), the tool namespace the control's
         cfg = self.config
 
         try:
             # A ${ROCKETRIDE_...} placeholder with no saved value must not reach Masky as the key.
             api_key = check_api_key(cfg.apikey)
-            self.settings = read_settings(cfg)
+            base_url = validate_base_url(cfg.baseUrl)
         except ValueError as e:
             warning(str(e))
             raise
 
-        client = MaskyClient(api_key, base_url=self.settings['base_url'])
+        client = MaskyClient(api_key, base_url=base_url)
         import rocketlib
 
         self.driver = MaskyDriver(
-            server_name=self.settings['server_name'],
+            server_name=cfg.serverName,
             client=client,
-            include_media_urls=self.settings['include_media_urls'],
-            settings=self.settings,
             is_cancelled=getattr(rocketlib, 'isCancelled', None),
         )
         # One free, unauthenticated pricing read per run, so every later estimate
@@ -190,4 +193,3 @@ class IGlobal(IGlobalBase):
         if self.driver is not None:
             self.driver.close()
         self.driver = None
-        self.settings = None
