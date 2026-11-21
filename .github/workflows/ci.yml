@@ -84,6 +84,7 @@ jobs:
             container:
               - 'docker/**'
               - 'nodes/scripts/tasks.js'
+              - 'nodes/scripts/container-checks.js'
               - 'nodes/**/requirement*.txt'
               - 'nodes/**/overrides.txt'
               - 'packages/ai/**/requirement*.txt'
@@ -358,6 +359,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint:scripts
+      # Not in the hook: the unit tests of the builder's container checks
+      - run: node --test nodes/scripts/container-checks.test.js
 
   # ---------------------------------------------------------------------------
   #  gitleaks — secret scan. Installs the binary directly because the upstream
