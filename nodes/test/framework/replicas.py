@@ -59,6 +59,7 @@ import itertools
 import shutil
 import sys
 import tempfile
+import threading
 import types
 import uuid
 from dataclasses import dataclass, field
@@ -195,10 +196,16 @@ class ReplicaServer:
         self._current: contextvars.ContextVar = contextvars.ContextVar('replica_engine')
         self._files_root: Optional[str] = None
         self._previous_store: Optional[Store] = None
+        # One loop for every request of this server, as the real channel has one: the
+        # file store's open handles belong to the loop that opened them. Requests from
+        # several test threads take turns on it
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._loop_lock = threading.Lock()
 
     def __enter__(self) -> 'ReplicaServer':
         """Install the state store, a fresh file store and the channel."""
         self._files_root = tempfile.mkdtemp(prefix='replica-files-')
+        self._loop = asyncio.new_event_loop()
         self._previous_store = Store._instance
         Store._instance = Store(FilesystemStore(f'filesystem://{self._files_root}'))
         install_state_store(self.state)
@@ -211,6 +218,7 @@ class ReplicaServer:
         install_state_store(None)
         Store._instance = self._previous_store
         shutil.rmtree(self._files_root, ignore_errors=True)
+        self._loop.close()
 
     def engine(self) -> ReplicaEngine:
         """A new engine launch of this server."""
@@ -236,6 +244,11 @@ class ReplicaServer:
         """Unmark it."""
         self._current.reset(token)
 
+    def _run(self, coroutine: Any) -> Any:
+        """Run one request on the server's loop, one request at a time."""
+        with self._loop_lock:
+            return self._loop.run_until_complete(coroutine)
+
     def _request(self, command: str, arguments: Dict[str, Any], data: Optional[bytes]) -> Tuple[Dict[str, Any], Any]:
         """
         One node-door request through the real channel dispatch.
@@ -253,7 +266,7 @@ class ReplicaServer:
         """
         engine = self._current.get()
         message = {'command': command, 'arguments': {**arguments, **({'data': data} if data is not None else {})}}
-        response = asyncio.run(handle(engine, _Client(), engine.streams, message, startup_open=False))
+        response = self._run(handle(engine, _Client(), engine.streams, message, startup_open=False))
         if not response.get('success'):
             raise RuntimeError(f'{command}: {response.get("message")}')
         body = dict(response.get('body') or {})
@@ -263,7 +276,7 @@ class ReplicaServer:
             return body, payload
         buffer = bytearray()
         while True:
-            chunk = asyncio.run(
+            chunk = self._run(
                 handle(
                     engine,
                     _Client(),
