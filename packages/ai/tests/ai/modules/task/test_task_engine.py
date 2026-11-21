@@ -1524,9 +1524,14 @@ def test_resolve_parameter_tokens_reads_process_environment(engine_resolve, monk
 
 
 def test_param_token_secret_stays_out_of_subprocess():
-    """The child never gets the secret, which is why the engine decodes for it."""
-    env = filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'param-token-secret'})
-    assert env == {'PATH': '/usr/bin'}
+    """Never forward the deployment secret, even when explicitly opted in."""
+    for opt_in in ('*', 'RR_*', CONST_PARAM_TOKEN_SECRET_ENV):
+        env = filter_subprocess_env(
+            {'PATH': '/usr/bin', 'RR_SUBPROCESS_ENV': opt_in, 'Rr_Param_Token_Secret': 'private'}
+        )
+        assert 'Rr_Param_Token_Secret' not in env
+        assert env['PATH'] == '/usr/bin'
+    assert filter_subprocess_env({'PATH': '/usr/bin', CONST_PARAM_TOKEN_SECRET_ENV: 'private'}) == {'PATH': '/usr/bin'}
 
 
 def test_filter_subprocess_env_matches_names_case_insensitively():
