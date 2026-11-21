@@ -18,7 +18,7 @@ class IInstance(IInstanceBase):
             raise RuntimeError('search_exa: search backend not initialized')
 
         try:
-            answer = search.chat(question)
+            answer = search.chat(question, self.settings)
         except TimeoutError as e:
             raise RuntimeError('search_exa: Exa request timed out') from e
         except ConnectionError as e:
