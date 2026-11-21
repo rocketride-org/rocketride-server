@@ -393,11 +393,36 @@ class TestPublish:
         conn._test_scheduler.sync.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_publish_deploy_to_foreign_team_denied(self, account_stub):
+    @pytest.mark.parametrize(
+        ('deploy_to', 'error'),
+        [
+            ('=team/team-foreign', PermissionError),
+            # The retired spellings, the bare team id among them
+            ('team-1', ValueError),
+            ('@team/Development', ValueError),
+            ('@user', ValueError),
+        ],
+    )
+    async def test_a_refused_deploy_to_writes_nothing(self, account_stub, deploy_to, error):
+        """The one-step target is read and authorized before the registry write: no version, no
+        withdrawn review, no change notification is left behind by a refused target.
+        """
         conn = _make_conn(_account_info())
-        with pytest.raises(PermissionError):
-            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '=team/team-foreign'})
+        conn._notify_deploy_changed = AsyncMock()
+        with pytest.raises(error):
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': deploy_to})
+        account_stub.deployments_publish.assert_not_awaited()
+        account_stub.set_artifact_state.assert_not_awaited()
         account_stub.deployments_deploy.assert_not_awaited()
+        conn._notify_deploy_changed.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_deploy_to_needing_a_dev_team_writes_nothing(self, account_stub):
+        """The pointer-time billing stamp is checked before the write too: @me without a dev team refuses first."""
+        conn = _make_conn(_account_info(dev_team=''))
+        with pytest.raises(PermissionError, match='development team'):
+            await conn._deploy_add_pipe({}, {'pipeline': PIPE, 'deployTo': '@me'})
+        account_stub.deployments_publish.assert_not_awaited()
 
 
 # ============================================================================
@@ -626,6 +651,7 @@ class TestReads:
             ttl=None,
             trace_level=None,
             debug_out=False,
+            listing=None,
         ):
             dispatched.update(
                 pipeline=pipeline,
@@ -635,10 +661,20 @@ class TestReads:
                 ttl=ttl,
                 trace_level=trace_level,
                 debug_out=debug_out,
+                listing=listing,
             )
             return '=control/c0ffee00c0ffee00c0ffee00c0ffee00'
 
         monkeypatch.setattr('ai.modules.task.task_server_facade.start_server_task_as_team', fake_dispatch)
+        # The run's version (1) is a paid listing; another version is free:
+        # the dispatch carries the listing of the version it runs
+        account_stub.deployments_versions.return_value = [
+            {'version': 3, 'metadata': {'manifest': {'mode': 'free'}}},
+            {
+                'version': 1,
+                'metadata': {'manifest': {'mode': 'subscription', 'billing': {'plans': [{'nickname': 'Pro'}]}}},
+            },
+        ]
         account_stub.deployments_get.return_value = {
             **account_stub.deployments_get.return_value,
             'schedules': {
@@ -682,6 +718,8 @@ class TestReads:
         assert dispatched['deployment'] == DeploymentRef(
             org_id='org-1', team_id='=team/team-1', project_id='acme.proj-1'
         )
+        # The run carries the listing of the version it starts, not another version's
+        assert (dispatched['listing'].mode, dispatched['listing'].plan) == ('subscription', 'Pro')
         assert dispatched['pipeline']['source'] == 'webhook_1'
         # No actor rides the dispatch — the run is owned by the team alone.
         assert 'actor' not in dispatched
@@ -1383,14 +1421,17 @@ class TestInterfaces:
         assert decide.await_args.args[1] == '@Development/acme.docBrain'
 
     @pytest.mark.asyncio
-    async def test_the_retired_team_option_is_refused(self, interfaces_stub):
+    @pytest.mark.parametrize('typed', ['team-1', '@development', '@DEVELOPMENT', '=team/team-1', '@me', '@QA'])
+    async def test_the_retired_team_option_is_refused(self, interfaces_stub, typed):
+        # Every form the option ever took is refused before the decision: the
+        # team rides the address as its root instead
         from ai.modules.task.types import TaskError
 
         conn = _make_conn(_data_account())
         decide = _answers(conn, _pin())
         with pytest.raises(TaskError) as excinfo:
             await conn.on_rrext_deploy_pipe(
-                {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': 'team-1'}}
+                {'arguments': {'subcommand': 'interfaces', 'address': 'acme.docBrain', 'team': typed}}
             )
         assert excinfo.value.field == 'team' and 'rooted address' in str(excinfo.value)
         decide.assert_not_awaited()

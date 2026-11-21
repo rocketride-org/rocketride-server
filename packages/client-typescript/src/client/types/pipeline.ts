@@ -149,8 +149,8 @@ export interface SUBMIT_RESULT {
 	/** The address that answered: `developerId.pipelineId.source` (the stable identity, beside the id) */
 	address?: string;
 
-	/** The rung that answered (`'@org'` is the org rung, plan 3.2) */
-	resolved: '@spec' | '@me' | '@team' | '@org' | '@public';
+	/** The rung that answered */
+	resolved: '@spec' | '@me' | '@team' | '@public';
 
 	/** On `@team`: the answering team */
 	team?: string;

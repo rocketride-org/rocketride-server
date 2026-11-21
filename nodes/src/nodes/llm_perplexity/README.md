@@ -21,6 +21,8 @@ the pipeline needs. Each listed model pins its model id, context window, and out
 budget; only the Perplexity API key normally needs to be supplied. The default is
 **Sonar** (`sonar`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

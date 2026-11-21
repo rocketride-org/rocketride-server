@@ -26,7 +26,7 @@ Deepseek binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 
 from .deepseek_endpoint import is_deepseek_api
@@ -50,27 +50,34 @@ class Chat(ChatBase):
         # Init the base
         super().__init__(provider, connConfig, bag)
 
-        # Get the nodes configuration
-        config = self._config
+        # The API key belongs to the cloud endpoint; each model branch names
+        # its own endpoint, so the client is the call's (``_llm_for``)
+        self._apikey = (self._config.get('apikey') or '').strip()
 
-        # The endpoint that serves the selected model: the DeepSeek API for the
-        # cloud branches, the Ollama server the local branches alias
-        serverbase = (config['serverbase'] or '').strip()
+    def _llm_for(self) -> ChatOpenAI:
+        """
+        Return the client of the endpoint that serves this call's model.
+
+        The DeepSeek API for the cloud branches, the Ollama server the local
+        branches alias: one client per endpoint, from the bounded keyed cache.
+        """
+        # The endpoint that serves the selected model
+        serverbase = (self.call.settings['serverbase'] or '').strip()
         if not serverbase:
             # An empty endpoint would let the OpenAI client fall back to its own
             # default host and fail with an unrelated authentication error
             raise ValueError('DeepSeek serverbase is required.')
+        return self._keyed_handle(('llm', serverbase), lambda: self._build(serverbase))
 
-        # The API key belongs to the cloud endpoint; a local server takes any token
-        apikey = (config.get('apikey') or '').strip()
+    def _build(self, serverbase: str) -> ChatOpenAI:
+        """Build the client of one endpoint: every request binds its model and max_tokens."""
+        # A local server takes any token; the DeepSeek API needs its key
+        apikey = self._apikey
         if is_deepseek_api(serverbase):
             if not apikey:
                 raise ValueError('DeepSeek API key is required for the DeepSeek API endpoint.')
             if not apikey.startswith('sk-'):
                 raise ValueError('Invalid DeepSeek API key format, please check your API key.')
-        apikey = apikey or 'sk-local-dummy-key'
-
-        # Get the llm
-        self._llm = ChatOpenAI(
-            model=self._model, base_url=serverbase, api_key=apikey, temperature=0, max_tokens=self._modelOutputTokens
+        return ChatOpenAI(
+            model=UNBOUND_MODEL, base_url=serverbase, api_key=apikey or 'sk-local-dummy-key', temperature=0
         )

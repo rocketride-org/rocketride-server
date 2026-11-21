@@ -6,8 +6,11 @@
 """
 CrewAI Agent — global state for the standalone single-agent CrewAI node.
 
-Loads connConfig fields, ensures the process-wide CrewAI kickoff runner is
-running, and instantiates the `CrewAgent` driver held on `self.agent`.
+Ensures the process-wide CrewAI kickoff runner is running and instantiates
+the `CrewAgent` driver held on `self.agent`. The persona and task (role,
+goal, backstory, task description, expected output) are per-call parameters
+the driver reads from the invoking instance's settings; nothing of the
+node's configuration is kept here.
 """
 
 from __future__ import annotations
@@ -21,11 +24,6 @@ from rocketlib import IGlobalBase
 class IGlobal(IGlobalBase):
     process: Any = None
     agent: Any = None
-    role: str = 'Assistant'
-    task_description: str = ''
-    goal: str = ''
-    backstory: str = ''
-    expected_output: str = ''
     # Reference to the process-wide CrewKickoffRunner.  All three CrewAI
     # sub-packages share the same singleton via the parent package's
     # `crewai_runner` module — see `nodes/src/nodes/agent_crewai/crewai_runner.py`.
@@ -47,16 +45,6 @@ class IGlobal(IGlobalBase):
 
         self.process = Process.sequential
 
-        # The resolved config: defaults applied, every field flat (the same view
-        # the agent driver reads instructions/agent_description from)
-        config = self.config
-
-        self.role = config.role.strip() or 'Assistant'
-        self.task_description = config.task_description.strip()
-        self.goal = config.goal.strip()
-        self.backstory = config.backstory.strip()
-        self.expected_output = config.expected_output.strip()
-
         # Resolve the process-wide kickoff runner.  First call lazily starts
         # the daemon thread and installs the persistent event listener; later
         # calls (from this or any other CrewAI sub-package's beginGlobal) just
@@ -67,24 +55,11 @@ class IGlobal(IGlobalBase):
 
         from .agent import CrewAgent
 
-        self.agent = CrewAgent(
-            self,
-            process=self.process,
-            role=self.role,
-            task_description=self.task_description,
-            goal=self.goal,
-            backstory=self.backstory,
-            expected_output=self.expected_output,
-        )
+        self.agent = CrewAgent(self, process=self.process)
 
     def endGlobal(self) -> None:
         self.agent = None
         self.process = None
-        self.role = 'Assistant'
-        self.task_description = ''
-        self.goal = ''
-        self.backstory = ''
-        self.expected_output = ''
         # Clear our local reference only.  The underlying CrewRunner is a
         # process-wide singleton (other CrewAI nodes may still need it) and
         # its daemon thread dies with the Python interpreter automatically.

@@ -32,6 +32,7 @@ the source tree and fails on any of them outside
   its test file;
 - the frozen contract version files (``contract/versions/``), which are
   history and are never edited;
+- the release notes (``CHANGELOG.md``), which name the spellings they retire;
 - this file.
 """
 
@@ -51,6 +52,8 @@ ALLOWED = {
     'packages/ai/src/ai/account/legacy_audience.py',
     'packages/ai/tests/ai/account/test_legacy_audience.py',
     'packages/ai/tests/ai/test_retired_spellings_gate.py',
+    # The release notes name the spellings they retire (B42, B45)
+    'CHANGELOG.md',
 }
 
 #: Directories that are no source when git cannot list the tree.

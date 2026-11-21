@@ -275,7 +275,14 @@ class RequestProcessing:
         """
         if isinstance(result, Exception):
             # For failed uploads, add formatted exception to results dict
-            dataResults.objects[unique_key] = formatException(result).model_dump()
+            envelope = formatException(result).model_dump()
+            # A refusal keeps the server's machine-readable code across the
+            # DAP hop (SUBSCRIPTION_REQUIRED, OUT_OF_CREDITS, TASK_*), so an
+            # HTTP caller classifies on it the way an SDK caller does
+            code = getattr(result, 'code', None)
+            if isinstance(code, str) and code and isinstance(envelope.get('error'), dict):
+                envelope['error']['code'] = code
+            dataResults.objects[unique_key] = envelope
         else:
             # Get the data returned (it was in binary)
             # Handle types if present

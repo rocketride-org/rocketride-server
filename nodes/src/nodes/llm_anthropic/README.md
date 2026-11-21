@@ -63,6 +63,8 @@ whole configuration for most pipelines. Each listed model pins its model id,
 context window, and output limit. The default is **Claude Sonnet 4.6**
 (`claude-sonnet-4-6`).
 
+The model settings (the selector, a custom model id and its token limits) and extended thinking are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and binds the call's values onto each request. A caller may choose the model and its limits and turn thinking on; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

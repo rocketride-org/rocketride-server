@@ -180,7 +180,7 @@ or requesting signed entry URLs, it predates the current platform.
 - **Engines are shared by shape.** An engine process is keyed by the
   pipeline's SHAPE (its nodes, wiring and source), never by configuration.
   Your own runs (`@spec`: Play, `use(spec)`) get an engine per shape that is
-  yours alone. A published pipe (`@me`, `@team/<name>`, `@public`) runs on
+  yours alone. A published pipe (`@me`, `@<team>`, `@public`) runs on
   ONE engine per shape for every caller: each caller has their own control,
   configuration, environment and billing, and each control its own set of
   node globals inside that process. Two exceptions keep an engine per owner

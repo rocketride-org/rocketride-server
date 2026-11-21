@@ -180,6 +180,8 @@ class TaskCommands(DAPConn):
                     caller_id=trusted.caller_id,
                     env_team=trusted.env_team,
                     owner_account=getattr(self, '_trusted_caller_account', None),
+                    # The store listing of that version (plan 8.4)
+                    listing=getattr(self, '_trusted_listing', None),
                 )
                 return self.build_response(request, body=response)
 

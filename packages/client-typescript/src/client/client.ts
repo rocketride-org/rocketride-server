@@ -51,6 +51,9 @@ const TEAM_OPTION_RETIRED = 'team= is retired: write a rooted address, @<team>/.
  * constructor stays in the signature until the 2.0 floors let it go; a rooted
  * address names the rung now (`@<team>/...`, `=team/<tid>/...`), so any value
  * is a caller still writing the old form and is told what to write instead.
+ * `submit()`, `tool()` and `interfaces()` lost the option from their types,
+ * and refuse it too when an untyped caller still sends it, rather than drop
+ * it and land on another rung.
  *
  * @param team - What the caller passed in the retired slot
  * @throws Error when `team` is anything but `undefined`, `null` or `''`
@@ -1742,7 +1745,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
 	 * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
 	 * @returns The pipe close body plus `token` (the control id: opaque, transient, valid for the life of the control; never persist it), `address`, `resolved`, `team`, `version`, `engineKey`, `converged` and `ignored`
-	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
+	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the retired `team` option is passed, when the server refuses, or when the server does not support `submit`
 	 *
 	 * @example
 	 * ```typescript
@@ -1768,6 +1771,8 @@ export class RocketRideClient extends DAPClient {
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
 		} = {}
 	): Promise<SUBMIT_RESULT> {
+		// Step 0: the retired team option, from an untyped caller, is refused before any request
+		refuseTeamOption((options as Record<string, unknown>).team);
 		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel } = options;
 
 		// Step 1: exactly one of name / pipeline / filepath
@@ -1819,16 +1824,21 @@ export class RocketRideClient extends DAPClient {
 		// requestTimeout still applies, as the caller's own bound). A caller
 		// that wants to stop a request streams through its own pipe and calls
 		// cancel() on it.
-		let stamps: SUBMIT_RESULT;
-		try {
-			stamps = (await this.call('rrext_submit', arguments_)) as SUBMIT_RESULT;
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+		// A refusal keeps the server's code (SUBSCRIPTION_REQUIRED,
+		// OUT_OF_CREDITS, TASK_*) on a PipeException
+		const submitRequest = this.buildRequest('rrext_submit', { arguments: arguments_ });
+		this._onTrace?.(TraceType.Request, redactProtocolMessage(submitRequest));
+		const submitResponse = await this.request(submitRequest);
+		if (submitResponse.success === false) {
+			this._onTrace?.(TraceType.Error, redactProtocolMessage(submitResponse));
+			const message = String(submitResponse.message ?? '');
 			if (message.startsWith('Unsupported command: rrext_submit')) {
 				throw new Error('This server does not support submit(); upgrade the server');
 			}
-			throw err;
+			throw new PipeException({ ...submitResponse, message: message || 'rrext_submit failed' });
 		}
+		this._onTrace?.(TraceType.Success, redactProtocolMessage(submitResponse));
+		const stamps = (submitResponse.body ?? submitResponse) as SUBMIT_RESULT;
 		if (inline || data === undefined) {
 			return stamps;
 		}
@@ -1982,12 +1992,18 @@ export class RocketRideClient extends DAPClient {
 	 * (`acme.docBrain`, the default source). A front end filters with plain
 	 * equality on the classType word: `chat`, `dropper`, `database`.
 	 *
-	 * @param address - `[<root>/]developerId.pipelineId[.source]`; a source segment is accepted and ignored.
+	 * @param address - `[<root>/]developerId.pipelineId[.source]`; a source segment resolves as it does for
+	 *                  `submit()`, and the map covers the whole pipe whichever source is named.
+	 * @param retired - The retired options slot (`{ team }`): any value throws; root the address instead
+	 *                  (`@<team>/...`, `=team/<tid>/...`).
 	 * @returns The answering rung and version, and the interface map.
 	 * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
-	 *         address is outside a scoped key's endpoints.
+	 *         address is outside a scoped key's endpoints, or when `retired` is passed.
 	 */
-	async interfaces(address: string): Promise<PipeInterfaces> {
+	async interfaces(address: string, retired?: unknown): Promise<PipeInterfaces> {
+		if (retired !== undefined) {
+			throw new Error(TEAM_OPTION_RETIRED);
+		}
 		return this.call<PipeInterfaces>('rrext_deploy_pipe', {
 			subcommand: 'interfaces',
 			address,
@@ -3931,9 +3947,11 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.input - Arguments forwarded to the tool function
 	 * @param options.timeout - Optional per-request timeout in ms
 	 * @returns The tool's return value (typically a record/object)
-	 * @throws Error if the server signals failure or no node handles the requested tool
+	 * @throws Error if the retired `team` option is passed, the server signals failure or no node handles the requested tool
 	 */
 	async tool<T = any>(options: { address?: string; token?: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
+		// The retired team option, from an untyped caller, is refused before any request
+		refuseTeamOption((options as Record<string, unknown>).team);
 		const address = options.address ?? options.token;
 		if (!address) {
 			throw new Error('tool() needs the pipe address (options.address)');

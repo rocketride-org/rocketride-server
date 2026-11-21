@@ -56,6 +56,7 @@ from croniter import croniter
 from rocketlib import debug, error, warning
 
 from ai.account import account
+from ai.account.pipe_deploy import listing_of
 from .deploy_events import broadcast_deploy_changed
 from .task_control import DeploymentRef, unattended_attribution
 from .task_server_facade import start_server_task_as_team
@@ -432,6 +433,9 @@ class TaskScheduler:
 
             try:
                 ttl = sched.get('ttl')
+                # The store listing of the version this run starts (plan 8.4):
+                # the control's store gate holds for anyone who reaches it
+                listing = await listing_of(account, org_id, project_id, dep['version'])
                 control_id = await start_server_task_as_team(
                     self._server,
                     pipeline,
@@ -445,6 +449,7 @@ class TaskScheduler:
                     # Per-source execution settings ride the schedule record.
                     trace_level=sched.get('traceLevel') or 'full',
                     debug_out=bool(sched.get('debugOut')),
+                    listing=listing,
                 )
             except PermissionError as e:
                 # Permission-shaped failures are permanent until a human acts —

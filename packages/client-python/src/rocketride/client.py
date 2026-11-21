@@ -395,7 +395,8 @@ class RocketRideClient(
 
         Args:
             address: ``[<root>/]developerId.pipelineId[.source]``; a source
-                segment is accepted and ignored.
+                segment resolves as it does for :meth:`submit`, and the map
+                covers the whole pipe whichever source is named.
 
         Returns:
             ``{'address', 'rung', 'version', 'teamId'?, 'interfaces'}`` where

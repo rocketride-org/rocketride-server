@@ -23,6 +23,8 @@ then select the DashScope region that issued your API key. Each listed model kee
 model id and token values fixed, while the API key, region, and base URL override apply
 to every model. The default is **Qwen Flash (latest)** (`qwen-flash`).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and region and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 The `(latest)` stable aliases always resolve to DashScope's current snapshot for their tier, so they do not go stale as new generations ship — prefer these unless you need to pin a specific release.

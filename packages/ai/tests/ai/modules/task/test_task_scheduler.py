@@ -88,6 +88,7 @@ def account_stub(monkeypatch):
     """Replace the scheduler's account module with controllable stubs."""
     stub = SimpleNamespace(
         deployments_get=AsyncMock(return_value=_dep()),
+        deployments_versions=AsyncMock(return_value=[]),
         deployments_artifact=AsyncMock(return_value={'project_id': 'proj-1', 'source': 'orig', 'components': []}),
         deployments_set_state=AsyncMock(return_value=_dep(state='errored', schedules={})),
         deployments_mark_run=AsyncMock(),

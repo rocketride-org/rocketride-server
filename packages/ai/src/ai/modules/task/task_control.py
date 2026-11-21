@@ -214,6 +214,8 @@ def expand_note(note: Any, address: str, project_id: str) -> Any:
 
 
 if TYPE_CHECKING:
+    from ai.account.file_store import DeclaredRoot
+
     from .task_conn import TaskConn
     from .task_engine import TaskEngine
 
@@ -397,6 +399,37 @@ class DeploymentRef:
         """The team id of a team audience; ``''`` for every other audience."""
         decoded = parse_audience(self.team_id)
         return decoded.id if decoded.kind == 'team' else ''
+
+
+# ==== Store listing ============================================================
+
+#: The listing mode of a publication that charges no subscription, and of a
+#: publication with no store block at all (plan 8.4, 9).
+LISTING_FREE = 'free'
+
+
+@dataclass(frozen=True)
+class Listing:
+    """
+    The store listing facts of the publication a control serves through (plan 8.4).
+
+    Read once from the version's ``metadata.manifest`` when the control is
+    created: a version is immutable, so its listing never changes under a
+    control. A dev run, and a publication with no store block, is ``free``.
+
+    Attributes:
+        mode: ``'free'``, ``'subscription'`` or ``'paywall'``.
+        plan: The nickname of the listing's first plan ('' when it names
+            none): what a refused caller is told to subscribe to.
+    """
+
+    mode: str = LISTING_FREE
+    plan: str = ''
+
+    @property
+    def paid(self) -> bool:
+        """True when calling the publication needs a subscription (any mode but ``free``)."""
+        return self.mode != LISTING_FREE
 
 
 # ==== The rung table ===========================================================
@@ -661,6 +694,10 @@ class TaskControl:
             to through the run's OWNER when the control started (plan 2.5,
             ``file_store.declared_roots``): what ``self.files`` admits beyond
             the storage anchor.
+        listing: The store listing of that version (``free`` on @spec and
+            for a publication with no store block).
+        subscription_allowed_at: Monotonic time the caller's subscription to
+            a paid listing was last confirmed (0.0 = never).
         task: The ONE engine this control holds. It may be an engine that
             stopped on its inactivity timer or crashed after it confirmed
             running; the next request starts it again under the same key.
@@ -758,6 +795,10 @@ class TaskControl:
     # trusts an allow for the same window). A refusal is never cached.
     credit_allowed_at: float = 0.0
 
+    # The same window for the subscription to a paid listing (plan 8.4): one
+    # question per control per window, and a refusal is never cached
+    subscription_allowed_at: float = 0.0
+
     # The control's own idle clock and its idle-expiry heap entry: activity
     # through one control never keeps another alive (plan 7.1)
     last_activity: float = field(default_factory=time.monotonic)
@@ -772,7 +813,10 @@ class TaskControl:
 
     # The declared roots, resolved through the owner when the control started
     # (plan 2.5): ``self.files`` reaches them and nothing else beyond its anchor
-    roots: Tuple[Tuple[str, str], ...] = ()
+    roots: Tuple['DeclaredRoot', ...] = ()
+
+    # The store listing of that version (plan 8.4); free for a dev run
+    listing: Listing = field(default_factory=Listing)
 
     # The ONE engine this control holds
     task: Optional['TaskEngine'] = None
@@ -1202,6 +1246,18 @@ class TaskControl:
             True within ``CONST_SPEND_ALLOW_SECONDS`` of the last allow.
         """
         return now - self.credit_allowed_at < CONST_SPEND_ALLOW_SECONDS
+
+    def subscription_allowed(self, now: float) -> bool:
+        """
+        Whether the caller's subscription to this control's paid listing was confirmed recently.
+
+        Args:
+            now: ``time.monotonic()``.
+
+        Returns:
+            True within ``CONST_SPEND_ALLOW_SECONDS`` of the last confirmation.
+        """
+        return now - self.subscription_allowed_at < CONST_SPEND_ALLOW_SECONDS
 
     def begin_request(self) -> None:
         """

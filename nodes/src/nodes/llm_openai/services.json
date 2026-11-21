@@ -92,6 +92,7 @@
 			"required": true
 		},
 		"llm_openai.temperature": {
+			"param": true,
 			"type": "number",
 			"title": "Temperature",
 			"description": "Sampling temperature for non-reasoning models: 0 is generally more deterministic, higher values increase variety. Ignored for reasoning models (o1, o3, GPT-5 reasoning variants, ...), which OpenAI's Responses API controls separately.",
@@ -100,13 +101,17 @@
 			"maximum": 2
 		},
 		"llm_openai.customModel": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model id",
 			"description": "Model id exactly as the provider names it",
 			"required": true
 		},
-		"llm_openai.custom.modelTotalTokens": { "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16384 },
+		"llm_openai.custom.modelTotalTokens": { "param": true, "tool": false, "type": "number", "title": "Tokens", "description": "Total Tokens", "minimum": 1, "default": 16384 },
 		"llm_openai.custom.modelOutputTokens": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Most tokens the model may write in one reply (at least 1,024). Leave it empty to keep the node's default. Reasoning models count their thinking against this limit: set it well above the reply you expect, or they can spend it all thinking and return nothing. It cannot exceed Tokens; a larger value is lowered to it.",
@@ -121,6 +126,8 @@
 	"properties": [
 		{
 			"name": "model",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"description": "LLM model",

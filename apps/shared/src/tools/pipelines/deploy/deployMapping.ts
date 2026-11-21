@@ -97,6 +97,7 @@ const DRAWN_RUNGS: ReadonlySet<string> = new Set<string>(['me', 'personal', 'tea
  * @param registryId - The pipe's registry name (`registryIdOf`), the id every row carries.
  * @param teams - The caller's team refs, whose ids are the teams' audiences:
  *                a team row is named by its ref, any other row by its handle.
+ *                Every row keeps the server's handle for the table to show.
  * @returns The "where live" rows for the lifecycle panel.
  */
 export function mapTeamDeploymentRows(deployments: Deployment[], registryId: string, teams: DeployTeamRefDTO[]): TeamDeploymentRowDTO[] {

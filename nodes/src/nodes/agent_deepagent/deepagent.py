@@ -280,19 +280,16 @@ class DeepAgentDriver(AgentBase):
     def __init__(self, iGlobal: Any) -> None:
         """Initialise the DeepAgents driver.
 
-        Reads ``description`` and ``system_prompt`` from node config on top
-        of the ``agent_description`` / ``instructions`` already loaded by
-        ``AgentBase.__init__``. These four fields together drive the describe
-        fan-out when this driver is used as a sub-agent.
+        ``description``, ``system_prompt`` and ``instructions`` are per-call
+        parameters: the driver reads them from the invoking (or described)
+        instance's settings, never from the control's config.
         """
         super().__init__(iGlobal)
 
-        # ``_instructions`` / ``_agent_description`` are already loaded by
-        # ``AgentBase.__init__`` from the resolved config (which handles both the
-        # flat and nested-under-default pipe shapes). Read this driver's two extra
-        # fields from the same resolved config.
-        self._description: str = (self._config.get('description', '') or '').strip()
-        self._system_prompt: str = (self._config.get('system_prompt', '') or '').strip()
+    @staticmethod
+    def system_prompt_of(invoker: Any) -> str:
+        """Return the ``system_prompt`` of an instance's call, or ''."""
+        return (invoker.settings.get('system_prompt') or '').strip()
 
     def _run(self, *, context: AgentContext, question: Question) -> AgentRunResult:
         """Execute the agent using ``deepagents.create_deep_agent``."""
@@ -350,8 +347,8 @@ class DeepAgentDriver(AgentBase):
         tools_for_agent = _build_deepagent_tools(self, context, tool_descriptors)
 
         system_prompt = _compose_system_prompt(
-            base=self._system_prompt,
-            instructions=self._instructions,
+            base=self.system_prompt_of(context.invoker),
+            instructions=self.instructions_of(context.invoker),
             fallback='You are an agent node in a tool-invocation hierarchy.\nUse the provided tools when needed.',
         )
 

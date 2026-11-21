@@ -117,12 +117,13 @@ from ai.account.models import (
     resolve_task_permissions,
     team_id_of_name,
 )
-from ai.account.pipe_deploy import Pin, resolve_pins, teams_to_probe
+from ai.account.pipe_deploy import Pin, listing_of, resolve_pins, teams_to_probe
 from ai.account.roots import KIND_CONTROL, KIND_ME, KIND_NONE, KIND_ORG, KIND_PUBLIC, KIND_SPEC, KIND_TEAM
 from ai.account.file_store import declared_roots
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .trace_owner import TraceOwners
+from . import store_gate
 from .task_control import (
     OWNER_KINDS,
     RESOLVE_ATTACH,
@@ -131,6 +132,7 @@ from .task_control import (
     RUNGS,
     CallerConfigError,
     DeploymentRef,
+    Listing,
     TaskControl,
     caller_attribution,
     config_hash,
@@ -1382,9 +1384,21 @@ class TaskServer(DAPBase):
 
         On each rung the live control answers, else (``start``/``read``) a
         publication that can start one; candidates are ordered by rung, so a
-        live control never beats an earlier rung's publication. Every probe
-        is an index lookup, never a registry walk. Every hit is
-        permission-checked and held to a scoped key's ``endpoints``.
+        live control never beats an earlier rung's publication, and a later
+        rung with several live sources (``TASK_SOURCE_REQUIRED``) never
+        blocks it: that refusal stands only where the rung would have
+        answered. Every probe is an index lookup, never a registry walk.
+        Every hit is permission-checked and held to a scoped key's
+        ``endpoints``.
+
+        A ``start`` is where a binding begins, so the store gate stands on
+        every control it returns (plan 0 S9/S10, 8.4): a control id and a
+        live control answer from the verdict the control holds
+        (``store_gate.require_access``, cached for the allow window), and a
+        publication is checked with the listing of its pinned version in hand
+        before any engine starts (``_start_from_pin``). A ``read`` and an
+        ``attach`` start no binding and are not gated; the open that follows
+        is (``DataCommands._new_binding``, then the engine's ``spend.check``).
 
         Args:
             account_info: The request's account (required).
@@ -1409,7 +1423,11 @@ class TaskServer(DAPBase):
                 TASK_NOT_REGISTERED (with ``rungsTried``) when nothing answers.
             PermissionError: Unauthenticated, no permission, a team root the
                 caller is not a member of (or not a scoped key's frozen
-                team), another org, or outside the key's endpoints scope.
+                team), another org, outside the key's endpoints scope, or (a
+                ``start``) a scoped key on a publication that is not free
+                (``required='account key'``).
+            SubscriptionRequiredError: A ``start`` whose caller has no
+                subscription to a subscription-priced publication.
         """
         # Step 1: the account and the grammar
         if account_info is None:
@@ -1418,9 +1436,13 @@ class TaskServer(DAPBase):
             raise ValueError(f'Unknown resolution mode: {mode!r}')
         parsed = target if isinstance(target, Target) else parse_target(target)
 
-        # Step 2: a control id is one registry hit, the caller re-checked
+        # Step 2: a control id is one registry hit, the caller re-checked; a
+        # start through it passes the store gate like any other
         if parsed.root == KIND_CONTROL:
-            return Resolution(parsed, self.control_by_id(format_target(parsed), account_info, require), None, False)
+            control = self.control_by_id(format_target(parsed), account_info, require)
+            if mode == RESOLVE_START:
+                await store_gate.require_access(control, account_info)
+            return Resolution(parsed, control, None, False)
 
         # Step 3: the rungs this target walks; a version pins one of them
         plan = self._rung_plan(account_info, parsed)
@@ -1605,7 +1627,10 @@ class TaskServer(DAPBase):
                 )
             control = self._verify_control(live[0], account_info, require)
             check_endpoint_scope(getattr(account_info, 'endpoints', None), control.address)
-            return Resolution(target, self._check_engine_available(control), None, False)
+            control = self._check_engine_available(control)
+            if mode == RESOLVE_START:
+                await store_gate.require_access(control, account_info)
+            return Resolution(target, control, None, False)
         if mode == RESOLVE_ATTACH:
             raise self._not_registered(target.dotted, [f'@{pin.rung}'], rung_plan)
         if mode == RESOLVE_READ:
@@ -1627,8 +1652,9 @@ class TaskServer(DAPBase):
         registered so a run that just finished keeps its final status
         readable. ``read`` answers the first candidate in the ladder's order,
         a control or a publication. ``start`` acts on the first candidate
-        that can serve: a pinned artifact without the named source yields
-        nothing, and the next answers.
+        that can serve, and the store gate stands on the control it returns:
+        a pinned artifact without the named source yields nothing, and the
+        next answers.
 
         Args:
             account_info: The request's account.
@@ -1648,17 +1674,32 @@ class TaskServer(DAPBase):
                 if control is not None:
                     return Resolution(target, self._check_engine_available(control), None, False)
             raise self._not_registered(target.dotted, rungs, plan)
+        # The candidates in the ladder's order; read answers the first. A
+        # held refusal (an ambiguous rung) is raised where it stands
         candidates = await self._candidates(target.address, account_info, require, rungs, plan)
-        if not candidates:
-            raise self._not_registered(target.dotted, rungs, plan)
         if mode == RESOLVE_READ:
+            if not candidates:
+                raise self._not_registered(target.dotted, rungs, plan)
             first = candidates[0]
+            if isinstance(first, TaskError):
+                raise first
             if isinstance(first, TaskControl):
                 return Resolution(target, first, None, False)
             return Resolution(target, None, first, False)
+
+        # Start acts on the first candidate that can serve, and the store gate
+        # stands on whichever answers (plan 0 S9/S10, 8.4): a live control
+        # answers from the verdict it holds, a publication is checked with its
+        # listing in hand before any engine starts. A pinned artifact without
+        # the named source yields nothing; the next answers, and a held
+        # refusal stands once every earlier candidate yielded nothing
         for candidate in candidates:
+            if isinstance(candidate, TaskError):
+                raise candidate
             if isinstance(candidate, TaskControl):
-                return Resolution(target, self._check_engine_available(candidate), None, False)
+                control = self._check_engine_available(candidate)
+                await store_gate.require_access(control, account_info)
+                return Resolution(target, control, None, False)
             control, started = await self._start_from_pin(candidate, target.address, account_info, require)
             if control is not None:
                 return Resolution(target, control, candidate, started)
@@ -1671,7 +1712,7 @@ class TaskServer(DAPBase):
         require: Optional[str],
         rungs: List[str],
         plan: RungPlan,
-    ) -> List[Union[TaskControl, Pin]]:
+    ) -> List[Union[TaskControl, Pin, TaskError]]:
         """
         What answers ``parsed`` for this caller on the plan's rungs, in the ladder's order. A pure read.
 
@@ -1685,6 +1726,11 @@ class TaskServer(DAPBase):
           of a later rung. A
           dormant control (engine stopped on its idle timer) counts as
           registered: its spec stays readable and its next request restarts it.
+        - A rung whose live sources are ambiguous (``TASK_SOURCE_REQUIRED``
+          from the control walk) is HELD at its place in that order: an
+          earlier rung's publication still answers first, and the refusal
+          stands where the rung's control would have stood. On ``@spec`` it
+          is raised at once (nothing comes before it).
 
         Args:
             parsed: The parsed address.
@@ -1694,15 +1740,24 @@ class TaskServer(DAPBase):
             plan: The rungs the target walks.
 
         Returns:
-            The candidates in answer order, each a ``TaskControl`` or a
-            ``Pin``; empty when no rung has anything.
+            The candidates in answer order, each a ``TaskControl``, a ``Pin``
+            or a held ``TaskError`` (``TASK_SOURCE_REQUIRED``, raised by the
+            caller when it is reached); empty when no rung has anything.
 
         Raises:
-            TaskError: TASK_SOURCE_REQUIRED.
+            TaskError: TASK_SOURCE_REQUIRED on ``@spec``.
             PermissionError: No permission, or outside the key's endpoints scope.
         """
-        # Step 1: the caller's registered control on the plan's rungs
-        live = self._walk_rungs(parsed, account_info, require, True, rungs, plan)
+        # Step 1: the caller's registered control on the plan's rungs; an
+        # ambiguous rung is held at its place in the order (only @spec, which
+        # nothing precedes, raises at once)
+        held: Optional[TaskError] = None
+        try:
+            live = self._walk_rungs(parsed, account_info, require, True, rungs, plan)
+        except TaskError as e:
+            if e.code != TaskError.SOURCE_REQUIRED or getattr(e, 'rung', '') == 'spec':
+                raise
+            live, held = None, e
         if live is not None and live.rung in ('spec', 'me'):
             return [live]
 
@@ -1726,21 +1781,28 @@ class TaskServer(DAPBase):
                 return 2 + len(probe)
             return 3 + len(probe)
 
-        candidates: List[Union[TaskControl, Pin]] = []
-        live_rank = _rank(live.rung, live.teamId) if live is not None else None
+        # The control, or the held refusal, takes the control's place
+        entry: Optional[Union[TaskControl, TaskError]] = live if live is not None else held
+        if live is not None:
+            entry_rank: Optional[int] = _rank(live.rung, live.owner_id)
+        elif held is not None:
+            entry_rank = _rank(getattr(held, 'rung', ''), getattr(held, 'teamId', ''))
+        else:
+            entry_rank = None
+        candidates: List[Union[TaskControl, Pin, TaskError]] = []
         placed = False
         for pin in pins:
             if (
-                live is not None
+                entry is not None
                 and not placed
-                and live_rank is not None
-                and live_rank <= _rank(pin.rung, pin.deployment.team)
+                and entry_rank is not None
+                and entry_rank <= _rank(pin.rung, pin.deployment.team)
             ):
-                candidates.append(live)
+                candidates.append(entry)
                 placed = True
             candidates.append(pin)
-        if live is not None and not placed:
-            candidates.append(live)
+        if entry is not None and not placed:
+            candidates.append(entry)
         return candidates
 
     def _walk_rungs(
@@ -1799,8 +1861,8 @@ class TaskServer(DAPBase):
         def _usable(control: Optional[TaskControl]) -> bool:
             return control is not None and (control.live or not live_only)
 
-        def _pick(candidates: List[TaskControl]) -> Optional[TaskControl]:
-            """One control, or the source-required error when several sources answer."""
+        def _pick(candidates: List[TaskControl], rung: str, team_id: str = '') -> Optional[TaskControl]:
+            """One control, or the source-required error (naming its rung and team) when several sources answer."""
             if not candidates:
                 return None
             if len(candidates) > 1:
@@ -1810,6 +1872,8 @@ class TaskServer(DAPBase):
                     f'{address!r} has several live sources ({", ".join(sources)}); name one',
                     address=address,
                     sources=sources,
+                    rung=rung,
+                    teamId=team_id,
                 )
             return candidates[0]
 
@@ -1824,7 +1888,7 @@ class TaskServer(DAPBase):
                 ]
                 if usable:
                     found.append(usable[0])
-            return _pick(found)
+            return _pick(found, rung, owner_id if rung == 'team' else '')
 
         # Step 2: @spec, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
@@ -1971,8 +2035,11 @@ class TaskServer(DAPBase):
         Raises:
             TaskError: TASK_SOURCE_REQUIRED (two-segment address, several
                 sources and no default).
-            PermissionError: No permission on the team, or outside the key's
-                endpoints scope.
+            PermissionError: No permission on the team, outside the key's
+                endpoints scope, or a scoped key on a publication that is not
+                free.
+            SubscriptionRequiredError: The caller's org has no subscription
+                to a subscription-priced publication.
             ValueError: A personal deployment without its billing stamp.
         """
         # Deferred: the account singleton and the facade (which imports
@@ -2020,7 +2087,28 @@ class TaskServer(DAPBase):
             pin.rung, attribution.owner_id, address, attribution.caller_id, pin.version if pinned else None
         )
 
-        # Step 3: one start per index key; a concurrent request attaches
+        # Step 3: the store gate, with the publication in hand and before any
+        # engine starts (plan 0 S9/S10): the listing of the pinned version
+        # refuses a scoped key and a caller with no subscription. The caller's
+        # org is read as the account states it: an account that names none is
+        # never taken for the publisher's
+        listing = await listing_of(account, deployment.org_id, deployment.project_id, pin.version)
+        store_gate.require_account_key(listing, endpoints, address)
+        caller_org = attribution.org_id
+        asked = store_gate.needs_subscription(listing, pin.rung, caller_org, deployment.org_id)
+        refusal = await store_gate.subscription_refusal(
+            listing,
+            rung=pin.rung,
+            caller_org=caller_org,
+            publisher_org=deployment.org_id,
+            pipe_name=deployment.project_id,
+            address=address,
+        )
+        if refusal is not None:
+            raise refusal
+        confirmed_at = time.monotonic() if asked else 0.0
+
+        # Step 4: one start per index key; a concurrent request attaches
         async with self._engines.control_start_lock(key):
             existing = next((c for c in self._task_control.lookup(key) if c.live and not c.restarting), None)
             if existing is not None:
@@ -2038,10 +2126,14 @@ class TaskServer(DAPBase):
                 version=pin.version,
                 pinned=pinned,
                 caller_account=account_info,
+                listing=listing,
             )
 
-        # Step 4: the started control, checked like any other hit
-        return self._verify_control(self.control_by_key(started), account_info, require), True
+        # Step 5: the started control, checked like any other hit; the
+        # subscription just confirmed stands for its allow window
+        control = self._verify_control(self.control_by_key(started), account_info, require)
+        control.subscription_allowed_at = confirmed_at
+        return control, True
 
     def assign_port(self) -> int:
         """
@@ -2790,6 +2882,7 @@ class TaskServer(DAPBase):
         env_team: Optional[str] = None,
         owner_account: Optional[AccountInfo] = None,
         deployment_epoch: Optional[float] = None,
+        listing: Optional[Listing] = None,
     ) -> Dict[str, Any]:
         """
         Resolve a spec to a control and acquire its hold on an engine, starting one if needed.
@@ -2845,6 +2938,8 @@ class TaskServer(DAPBase):
                 disable/remove after that moment refuses the control instead
                 of registering it (plan 7.2): the window between the state
                 read and the registration is closed. Default: now.
+            listing: The store listing of the version a published rung
+                started from (trusted dispatch only). Default: free.
 
         Returns:
             Dict[str, Any]: The task's identity; ``token`` carries the CONTROL
@@ -3088,6 +3183,7 @@ class TaskServer(DAPBase):
             raise TaskError(TaskError.INVALID_ARGUMENT, f'The pipeline cannot start: {exc}', field='roots') from exc
         control.deployment = deployment
         control.version = version
+        control.listing = listing or Listing()
         control.pinned = bool(pinned and version is not None and control.rung != 'spec')
         # The values this control's bindings run with, from its environment
         # chain (plan 6.2): resolved once here, carried on every frame's
@@ -3759,6 +3855,7 @@ class TaskServer(DAPBase):
                     pinned=control.pinned,
                     caller_id=control.caller_id,
                     env_team=control.env_team,
+                    listing=control.listing,
                     # The predecessor's state epoch carries over: a deployment
                     # revoked since it registered refuses the successor too
                     deployment_epoch=control.registered_at,

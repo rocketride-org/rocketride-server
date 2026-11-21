@@ -72,33 +72,35 @@ class AgentBase(ABC):
         iGlobal: Any,
     ):
         """
-        Initialize be saving containing IInstance, and gathering tools
+        Initialize the driver for one control's IGlobal.
+
+        The driver keeps nothing from the node's configuration: every leaf an
+        agent reads (persona, instructions, guards, budgets) is a per-call
+        parameter, read from the invoking instance's ``settings`` at run time
+        (plan 4.1 rule 4).
         """
-        # Save the containing IInstance
+        # Save the containing IGlobal
         self._iGlobal = iGlobal
 
         # Get the logical type (nodeId) of our invoker
         self._node_id = self._iGlobal.config.node.provider
 
-        # The resolver's view of the node's config: defaults applied, the active
-        # branch flattened, keys read by path.
-        config = self._iGlobal.config
+    # =========================================================================
+    # PER-CALL SETTINGS
+    # =========================================================================
+    @staticmethod
+    def instructions_of(invoker: Any) -> List[str]:
+        """
+        Return the ``instructions`` of an instance's call.
 
-        # Keep the resolved config so subclasses can read their own extra fields
-        # without re-resolving.
-        self._config = config
+        Args:
+            invoker: The node instance whose settings decide (the run's
+                invoker, or a sub-agent's described instance).
 
-        # And save any specific instructions
-        self._instructions = config.get('instructions', [])
-        self._agent_description = config.get('agent_description', '') or ''
-
-        # Optional runtime guardrail.  When enabled, `run_agent` fails any run
-        # that produces an answer without invoking at least one tool (see
-        # `ToolCallRequiredError`).  Off by default — opt-in per node config so
-        # existing pipelines that legitimately answer tool-free are unaffected.
-        # parse_bool (not bool()) so a stringified "false"/"0"/"no" disables it
-        # instead of tripping the guard on every run.
-        self._require_tool_call = parse_bool(config.get('require_tool_call'), False)
+        Returns:
+            The instruction texts; empty when the node declares none.
+        """
+        return list(invoker.settings.get('instructions') or [])
 
     # =========================================================================
     # PIPELINE-FACING ENTRYPOINT
@@ -167,10 +169,17 @@ class AgentBase(ABC):
         # invokes (and may drive sub-agents), possibly on a worker thread with a copied
         # context (CrewAI); turn_usage collects them all and reads back the whole turn's
         # total here regardless of thread, then clears once this outermost scope exits.
+        # This call's guardrail.  When enabled, the run fails if it produces an
+        # answer without invoking at least one tool (see `ToolCallRequiredError`).
+        # Off by default — opt-in per call so pipelines that legitimately answer
+        # tool-free are unaffected.  parse_bool (not bool()) so a stringified
+        # "false"/"0"/"no" disables it instead of tripping the guard on every run.
+        require_tool_call = parse_bool(iInstance.settings.get('require_tool_call'), False)
+
         with turn_usage() as read_usage:
             try:
-                # Add any global instructions from the config
-                for inst in self._instructions:
+                # Add this call's instructions
+                for inst in self.instructions_of(iInstance):
                     question.addInstruction('Additional Instruction', inst.strip())
 
                 # The task's id is deliberately not read here. It is the
@@ -202,7 +211,7 @@ class AgentBase(ABC):
                 # operator required it.  A weak planning model can narrate a tool
                 # chain in prose without ever calling a tool; require_tool_call
                 # turns that silent failure into a loud, structural one.
-                if self._require_tool_call and not context.invoked_tools:
+                if require_tool_call and not context.invoked_tools:
                     raise ToolCallRequiredError(
                         'require_tool_call is enabled but the agent produced an '
                         'answer without invoking any tool (possible narrated or '

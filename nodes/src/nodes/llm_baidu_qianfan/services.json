@@ -99,12 +99,16 @@
 			]
 		},
 		"llm_baidu_qianfan.customModel": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model id",
 			"description": "Model id exactly as the provider names it",
 			"required": true
 		},
 		"llm_baidu_qianfan.custom.modelTotalTokens": {
+			"param": true,
+			"tool": false,
 			"type": "number",
 			"title": "Tokens",
 			"description": "Maximum context length in tokens",
@@ -112,6 +116,8 @@
 			"default": 32768
 		},
 		"llm_baidu_qianfan.custom.modelOutputTokens": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Output Tokens",
 			"description": "Maximum generated tokens",
@@ -126,6 +132,8 @@
 	"properties": [
 		{
 			"name": "model",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"description": "Baidu Qianfan model selection",

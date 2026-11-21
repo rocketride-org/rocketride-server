@@ -26,7 +26,7 @@ OpenAI binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APIConnectionError
 
@@ -34,6 +34,10 @@ from openai import OpenAI, APIError, AuthenticationError, RateLimitError, APICon
 class Chat(ChatBase):
     """
     Create an OpenAI chat bot.
+
+    One ``ChatOpenAI`` and one raw ``OpenAI`` client, both built from the key
+    alone; the model, its output window and the temperature are the call's
+    (``call_kwargs``), so one control serves every model.
     """
 
     # Reasoning-capable models route through the OpenAI Responses API so we can
@@ -54,25 +58,24 @@ class Chat(ChatBase):
 
         # Get the api key, don't save it
         apikey = config.get('apikey')
-        self._apikey = apikey
 
-        # Reasoning models stream via the Responses API + max_completion_tokens.
-        if self._is_reasoning:
-            # Raw client for the Responses API path (reasoning models).
-            self._raw_client = OpenAI(api_key=apikey)
-            self._llm = ChatOpenAI(
-                model=self._model,
-                api_key=apikey,
-                model_kwargs={'max_completion_tokens': self._modelOutputTokens},
-            )
-        else:
-            self._raw_client = None
-            self._llm = ChatOpenAI(
-                model=self._model,
-                api_key=apikey,
-                temperature=config['temperature'],
-                max_tokens=self._modelOutputTokens,
-            )
+        # Raw client for the Responses API path (reasoning models), and the
+        # LangChain object every other request binds its values onto
+        self._raw_client = OpenAI(api_key=apikey)
+        self._llm = ChatOpenAI(model=UNBOUND_MODEL, api_key=apikey)
+
+    def call_kwargs(self) -> Dict[str, Any]:
+        """
+        Return this call's request values.
+
+        A reasoning model (the branch's ``reasoning`` constant) takes
+        ``max_completion_tokens`` and no temperature; any other model takes
+        ``max_tokens`` and the call's temperature.
+        """
+        call = self.call
+        if call.reasoning:
+            return {'model': call.model, 'max_completion_tokens': call.output_tokens}
+        return {'model': call.model, 'max_tokens': call.output_tokens, 'temperature': call.settings['temperature']}
 
     def is_retryable_error(self, error):
         """

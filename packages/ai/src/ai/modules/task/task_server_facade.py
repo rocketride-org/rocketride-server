@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from ai.common.dap import TransportBase
 
 from .task_conn import TaskConn
-from .task_control import Attribution, DeploymentRef
+from .task_control import Attribution, DeploymentRef, Listing
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -77,6 +77,7 @@ async def start_server_task_as_team(
     pinned: bool = False,
     caller_account: Any = None,
     deployment_epoch: Optional[float] = None,
+    listing: Optional[Listing] = None,
 ) -> str:
     """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential; return the control's KEY.
 
@@ -110,6 +111,8 @@ async def start_server_task_as_team(
       - ``caller_account`` is the caller's own session (a ``submit(name)``
         start): the pipeline's declared roots resolve through it (plan 2.5).
         None for a run with no caller.
+      - ``listing`` is the store listing of that version (plan 8.4): what
+        the control's store gate re-checks per request; default free.
 
     Returns:
         The started control's registry KEY (an in-process handle for the
@@ -178,6 +181,7 @@ async def start_server_task_as_team(
     conn._trusted_pinned = pinned
     conn._trusted_caller_account = caller_account
     conn._trusted_deployment_epoch = deployment_epoch
+    conn._trusted_listing = listing
 
     # The schedule's run window rides the execute arguments: start_task
     # reads 'ttl', and a deploy run ALWAYS sends it. 0 means no window

@@ -26,7 +26,7 @@ Kimi (Moonshot) binding for the ChatLLM.
 """
 
 from typing import Any, Dict
-from ai.common.chat import ChatBase
+from ai.common.chat import ChatBase, UNBOUND_MODEL
 from langchain_openai import ChatOpenAI
 
 from .kimi_endpoint import is_moonshot_api
@@ -65,17 +65,19 @@ class Chat(ChatBase):
         if is_moonshot_api(serverbase) and not apikey.startswith('sk-'):
             raise ValueError('Invalid Kimi (Moonshot) API key format, please check your API key.')
 
-        # Kimi K2 reasoning models reject any temperature other than 1
-        # ("invalid temperature: only 1 is allowed for this model"). The classic
-        # Moonshot v1 generation models accept the full range, so default them to
-        # 0 for deterministic pipeline output.
-        temperature = 1 if self._model.startswith('kimi-k2') else 0
+        # Get the llm: one for every call, each request binds its model,
+        # max_tokens and the temperature its model accepts
+        self._llm = ChatOpenAI(model=UNBOUND_MODEL, base_url=serverbase, api_key=apikey)
 
-        # Get the llm
-        self._llm = ChatOpenAI(
-            model=self._model,
-            base_url=serverbase,
-            api_key=apikey,
-            temperature=temperature,
-            max_tokens=self._modelOutputTokens,
-        )
+    def call_kwargs(self) -> Dict[str, Any]:
+        """
+        Return this call's request values, the temperature its model accepts included.
+
+        Kimi K2 reasoning models reject any temperature other than 1
+        ("invalid temperature: only 1 is allowed for this model"). The classic
+        Moonshot v1 generation models accept the full range, so they get 0 for
+        deterministic pipeline output.
+        """
+        kwargs = super().call_kwargs()
+        kwargs['temperature'] = 1 if str(kwargs['model']).startswith('kimi-k2') else 0
+        return kwargs

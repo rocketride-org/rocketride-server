@@ -26,6 +26,8 @@ settings. Budget generous output tokens for reasoning-heavy prompts. The default
 **GLM-5.2** (`glm-5.2`). The model list matches the live Z.ai `/models` catalog
 (verified 2026-08).
 
+The model settings (the selector, a custom model id and its token limits) are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which builds its client once from the key and endpoint and binds the call's values onto each request. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

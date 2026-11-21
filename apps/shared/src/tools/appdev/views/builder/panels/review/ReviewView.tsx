@@ -293,18 +293,23 @@ function audienceHandle(audience: { type?: string; handle?: string } | undefined
  * The timeline title verb for one history row. A 'publish' row carrying an
  * audience is the PUBLISH (bind to a rung) — with the version it repointed
  * OFF of when the row records one; without an audience it is the registry
- * write — the DEPLOY. The binding-lifecycle rows name their rung the same
- * way — "v15 removed" alone reads like the VERSION vanished.
+ * write — the DEPLOY. A publish row whose audience the server could not
+ * name for this reader (a legacy pair it decodes to no audience, so no
+ * handle) is still a publish, told without the rung. The binding-lifecycle
+ * rows name their rung the same way — "v15 removed" alone reads like the
+ * VERSION vanished.
  *
  * @param entry - The history row.
  * @returns The verb phrase after "vN ".
  */
 export function streamLabel(entry: AppHistoryEntry): string {
-	const handle = audienceHandle(entry.data?.audience);
+	const audience = entry.data?.audience;
+	const handle = audienceHandle(audience);
 	if (entry.action === 'publish') {
-		if (!handle) return 'deployed to the server';
+		if (!audience?.type) return 'deployed to the server';
 		const prev = entry.data?.previousVersion;
-		return prev ? `published to ${handle} (was v${prev})` : `published to ${handle}`;
+		const where = handle ? `published to ${handle}` : 'published';
+		return prev ? `${where} (was v${prev})` : where;
 	}
 	if (handle) {
 		if (entry.action === 'removed' || entry.action === 'remove') return `removed from ${handle}`;

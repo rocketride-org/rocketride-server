@@ -39,8 +39,8 @@ class IInstance(IInstanceBase):
         input_schema=AGENT_TOOL_INPUT_SCHEMA,
         output_schema=AGENT_TOOL_OUTPUT_SCHEMA,
         description=lambda self: (
-            f'This agent: {self.IGlobal.agent._agent_description} Invoke this CrewAI Manager as a tool. Input: {{query: string, context?: object}}. Output: {{content, meta, stack}}.'
-            if getattr(self.IGlobal.agent, '_agent_description', '')
+            f'This agent: {self.settings.agent_description} Invoke this CrewAI Manager as a tool. Input: {{query: string, context?: object}}. Output: {{content, meta, stack}}.'
+            if self.settings.get('agent_description')
             else (
                 'Invoke this CrewAI Manager as a tool. Input: {query: string, context?: object}. Output: {content, meta, stack}.'
             )

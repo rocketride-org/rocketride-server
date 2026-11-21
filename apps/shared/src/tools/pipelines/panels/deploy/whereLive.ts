@@ -11,9 +11,9 @@
  *   publication, in rung order: Me (@me), other users' personal spaces (an
  *   org admin sees them), the teams in the caller's roster order, then the
  *   store (@public). A removed publication has no row.
- * - A row names its rung by label and the handle the server composed: 'Me @me', 'Staging
- *   @Staging', 'Store @public'. A version card's audience chips use
- *   the same labels.
+ * - A row names its rung by label and handle: 'Me @me', 'Staging
+ *   @Staging', 'Store @public'. The handle is the server's, shown as it
+ *   came; a version card's audience chips use the same labels.
  * - Every rung's sources take a schedule (decided 2026-11-20): any
  *   publication of a pipe can run on a timer, billed to the team stamped
  *   when it was published.
@@ -44,7 +44,7 @@ export interface IWhereLiveRung {
 	row: TeamDeploymentRow;
 	/** The rung's label: 'Me', the team's name, 'Store' (another user's space keeps its row name). */
 	label: string;
-	/** The rung's handle as the server composed it: '@me', '@<team>', '=team/<tid>', '@public'; '' for another user's space. */
+	/** The rung's handle as the server composed it ('@me', '@<team>', '@public', '=team/<tid>'); '' for another user's space. */
 	handle: string;
 }
 
@@ -79,9 +79,14 @@ function labelOf(row: TeamDeploymentRow): string {
 	return row.teamName;
 }
 
-/** The rung's handle as the server composed it; none for another user's space (its label already says 'Personal'). */
+/**
+ * The rung's handle: the row's own, as the server composed it for the
+ * caller ('@me', '@<team>', '@public', '=team/<tid>' for a team the caller
+ * cannot name). Another user's space shows none: its label already says
+ * 'Personal'.
+ */
 function handleOf(row: TeamDeploymentRow): string {
-	return row.rung === 'personal' ? '' : (row.handle ?? '');
+	return row.rung === 'personal' ? '' : row.handle;
 }
 
 /**

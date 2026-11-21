@@ -164,9 +164,10 @@ class CrewManager(CrewBase):
     def __init__(self, iGlobal: Any):
         """Initialise the manager driver.
 
-        Stores a reference to iGlobal for accessing expert config fields at
-        run time.  No per-call state is held on `self` -- the engine invoker
-        and host services flow through `context` in `_run`.
+        Stores a reference to iGlobal (the shared kickoff runner).  The goal,
+        backstory, planning and instructions are each call's settings; no
+        per-call state is held on `self` -- the engine invoker and host
+        services flow through `context` in `_run`.
         """
         super().__init__(iGlobal)
         self._iGlobal = iGlobal
@@ -183,7 +184,7 @@ class CrewManager(CrewBase):
           1. Collect descriptors from each sub-agent node via per-node describe invoke.
           2. Build a CrewAI Agent + Task per descriptor, routing LLM/tool calls back through
              each sub-agent's own engine channels.
-          3. Build the manager agent using this node's LLM channel and expert config.
+          3. Build the manager agent using this node's LLM channel and this call's settings.
           4. Kick off a hierarchical Crew and return the synthesised result.
         """
         from crewai import Agent, Crew, Process, Task
@@ -324,10 +325,12 @@ class CrewManager(CrewBase):
         # 4. Build manager agent. The user's prompt goes into backstory (background context)
         #    rather than the goal so it doesn't drive active reasoning on every LLM call.
         #    The goal stays generic: delegate once, return the result.
-        #    The manager's `instructions` config field is also woven into the backstory
-        #    here — otherwise it would be loaded by AgentBase but never reach CrewAI.
-        ig = self._iGlobal
-        base_backstory = self._merge_instructions(ig.backstory or _MGR_BACKSTORY, self._instructions)
+        #    The manager's `instructions` are also woven into the backstory here,
+        #    otherwise they would never reach CrewAI. All of it is this call's settings.
+        settings = pSelf.settings
+        goal = settings.goal.strip()
+        backstory = settings.backstory.strip()
+        base_backstory = self._merge_instructions(backstory or _MGR_BACKSTORY, self.instructions_of(pSelf))
         if prompt:
             escaped_prompt = self._escape_braces(prompt)
             manager_backstory = f'{base_backstory}\n\nBackground context — user request: {escaped_prompt}'
@@ -338,7 +341,7 @@ class CrewManager(CrewBase):
         # The channel rides on task_obj.tools in step 3 instead.
         manager_agent = Agent(
             role=_MGR_ROLE,
-            goal=ig.goal or _MGR_GOAL,
+            goal=goal or _MGR_GOAL,
             backstory=manager_backstory,
             llm=manager_llm,
             verbose=False,
@@ -358,7 +361,7 @@ class CrewManager(CrewBase):
         # have run fine dies during planning. It also costs an extra LLM
         # round-trip per kickoff. Operators whose model reliably emits JSON can
         # turn it back on.
-        planning = bool(getattr(ig, 'planning', False))
+        planning = bool(settings.planning)
         crew = Crew(
             agents=sub_agents,
             tasks=sub_tasks,
@@ -407,7 +410,7 @@ class CrewManager(CrewBase):
             tasks_out=tasks_out,
             sub_tasks=sub_tasks,
             manager_backstory=manager_backstory,
-            manager_goal=ig.goal or _MGR_GOAL,
+            manager_goal=goal or _MGR_GOAL,
         )
 
         return _finalize_answer(findings, final_text, result), result
