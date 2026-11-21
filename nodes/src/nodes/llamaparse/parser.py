@@ -28,9 +28,62 @@ from depends import depends  # type: ignore
 requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
 depends(requirements)
 
-from typing import Any, Dict, Optional
+import json
+from typing import Any, Dict, Mapping, Optional
 from ai.web.metrics import metrics
 from rocketlib import debug
+
+
+def llama_parse_args(settings: Mapping[str, Any], api_key: str) -> Dict[str, Any]:
+    """
+    The ``LlamaParse`` constructor arguments for one call's parse configuration.
+
+    Args:
+        settings: The call's resolved settings; the mode selector decides which leaves are present.
+        api_key: The control's account key.
+
+    Returns:
+        The keyword arguments, the key included.
+
+    Raises:
+        RuntimeError: The advanced block is not a JSON object. The validator reports
+            it at save time; here it stops the call so no tokens are spent on an
+            unintended configuration.
+    """
+    parser_args: Dict[str, Any] = {'verbose': False, 'api_key': api_key}
+    if settings.get('configMode') == 'advanced':
+        # The raw JSON block is merged into the constructor arguments
+        try:
+            advanced_config = json.loads((settings.get('advanced_config') or '').strip() or '{}')
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f'LlamaParse: advanced configuration is not valid JSON: {e}') from e
+        if not isinstance(advanced_config, dict):
+            raise RuntimeError('LlamaParse: advanced configuration must be a JSON object')
+        for key, value in advanced_config.items():
+            if key != 'api_key':  # Don't override API key handling
+                parser_args[key] = value
+        return parser_args
+
+    # Each parse mode branch declares only the leaves it sends, so a leaf is
+    # read inside the branch that declares it
+    parse_mode = settings.get('parse_mode')
+    if parse_mode == 'cost_effective':
+        parser_args['parse_mode'] = 'parse_page_with_llm'
+    elif parse_mode in ('agentic', 'agentic_plus'):
+        parser_args['parse_mode'] = 'parse_page_with_agent'
+        parser_args['vendor_multimodal_model_name'] = settings.get('lvm_model')
+    elif parse_mode == 'parse_page_with_lvm':
+        # Legacy LVM mode with special parameters
+        parser_args['parse_mode'] = parse_mode
+        parser_args['vendor_multimodal_model_name'] = settings.get('lvm_model')
+        system_prompt_append = (settings.get('system_prompt_append') or '').strip()
+        if system_prompt_append:
+            parser_args['system_prompt_append'] = system_prompt_append
+        parser_args['page_error_tolerance'] = 0.05
+
+    if settings.get('spreadsheet_extract_sub_tables'):
+        parser_args['spreadsheet_extract_sub_tables'] = True
+    return parser_args
 
 
 class Parser:
@@ -49,8 +102,8 @@ class Parser:
 
         Args:
             provider (str): The node's provider word, for the debug trail.
-            connConfig (Dict[str, Any]): The control's resolved configuration.
-            llama_parse (Any): The control's ``LlamaParse`` client, built by the IGlobal.
+            connConfig (Dict[str, Any]): The settings of the calls this parser serves (its client's configuration).
+            llama_parse (Any): The ``LlamaParse`` client the IGlobal built for that configuration.
         """
         # The control's client, owned and dropped by the IGlobal
         self._llama_parse = llama_parse

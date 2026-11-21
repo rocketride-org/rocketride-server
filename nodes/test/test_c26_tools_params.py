@@ -193,6 +193,20 @@ SCHEMAS = {
         {'apikey': 'k1'},
     ),
     'search_exa': (['type', 'numResults', 'includeHighlights', 'highlightChars'], [], {'apikey': 'k1'}),
+    'llamaparse': (
+        ['configMode', 'advanced.advanced_config', 'simple.parse_mode', 'simple.spreadsheet_extract_sub_tables']
+        + [f'simple.{mode}.lvm_model' for mode in ('agentic', 'agentic_plus', 'parse_page_with_lvm')]
+        + ['simple.parse_page_with_lvm.system_prompt_append'],
+        ['configMode', 'advanced.advanced_config', 'simple.parse_mode']
+        + [f'simple.{mode}.lvm_model' for mode in ('agentic', 'agentic_plus', 'parse_page_with_lvm')],
+        {'api_key': 'k1'},
+    ),
+    'reducto': (
+        ['parse_mode', 'Contains_Handwritten_Text', 'Contains_Non_English_Text', 'Summarize_Text']
+        + ['options', 'advanced_options', 'experimental_options'],
+        [],
+        {'api_key': 'k1'},
+    ),
     **{
         f'response_{lane}': (_RESPONSE, _RESPONSE, {})
         for lane in ('answers', 'audio', 'documents', 'hash', 'image', 'json', 'questions', 'table', 'text', 'video')

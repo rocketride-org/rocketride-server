@@ -39,7 +39,8 @@ from __future__ import annotations
 
 import importlib
 import json
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 from ai.common.schema import Question
@@ -557,3 +558,98 @@ def test_search_exa_sends_each_call_its_own_search_knobs(monkeypatch):
         'contents': {'highlights': {'maxCharacters': 600}},
     }
     assert sent[1] == {'query': 'rocket engines', 'type': 'neural', 'numResults': 2}
+
+
+# ==== llamaparse =================================================================
+
+
+class _RecordingLlamaParse:
+    """Stands in for llama_parse.LlamaParse: records the constructor arguments of each client."""
+
+    built = []
+
+    def __init__(self, **kwargs):
+        type(self).built.append(kwargs)
+
+
+def _stub_module(name: str, **attributes) -> ModuleType:
+    """A stand-in module carrying the given attributes."""
+    module = ModuleType(name)
+    for key, value in attributes.items():
+        setattr(module, key, value)
+    return module
+
+
+@pytest.fixture
+def llamaparse_node(monkeypatch):
+    """The llamaparse node imported over a stand-in SDK and install (no package is fetched)."""
+    monkeypatch.setitem(sys.modules, 'depends', _stub_module('depends', depends=lambda *args, **kwargs: None))
+    monkeypatch.setitem(sys.modules, 'llama_parse', _stub_module('llama_parse', LlamaParse=_RecordingLlamaParse))
+    for name in ('nodes.llamaparse.IGlobal', 'nodes.llamaparse.parser'):
+        monkeypatch.delitem(sys.modules, name, raising=False)
+    _RecordingLlamaParse.built = []
+    glb = _control('nodes.llamaparse', 'llamaparse', {'api_key': 'k1'})
+    yield glb
+    glb.endGlobal()
+
+
+def test_llamaparse_builds_one_client_per_parse_configuration(llamaparse_node):
+    glb = llamaparse_node
+    calls = [{}, {'simple.parse_mode': 'cost_effective'}, {}]
+    parsers = [_call('nodes.llamaparse', glb, params)._parser() for params in calls]
+
+    assert parsers[0] is parsers[2] and parsers[0] is not parsers[1]
+    first, second = _RecordingLlamaParse.built
+    assert (first['parse_mode'], first['page_error_tolerance'], first['api_key']) == ('parse_page_with_lvm', 0.05, 'k1')
+    assert second == {'verbose': False, 'api_key': 'k1', 'parse_mode': 'parse_page_with_llm'}
+
+
+def test_llamaparse_refuses_a_call_whose_advanced_block_is_not_an_object(llamaparse_node):
+    instance = _call('nodes.llamaparse', llamaparse_node, {'configMode': 'advanced', 'advanced.advanced_config': '[1]'})
+    with pytest.raises(RuntimeError, match='must be a JSON object'):
+        instance._parser()
+
+
+# ==== reducto ====================================================================
+
+
+class _RecordingReducto:
+    """Stands in for reducto.Reducto: records the enhance options of each parse."""
+
+    runs = []
+
+    def __init__(self, api_key):
+        self.parse = SimpleNamespace(run=lambda **kwargs: type(self).runs.append(kwargs) or SimpleNamespace())
+
+    def upload(self, file):
+        return SimpleNamespace(file_id='f1')
+
+
+def test_reducto_parses_each_call_by_its_own_mode(monkeypatch):
+    monkeypatch.setitem(sys.modules, 'reducto', _stub_module('reducto', Reducto=_RecordingReducto))
+    _RecordingReducto.runs = []
+    config = control_config('reducto', {'api_key': 'k1'})
+    parser = importlib.import_module('nodes.reducto.parser').Parser('reducto', config, {})
+    glb = SimpleNamespace(config=config, parser=parser)
+    calls = (
+        {},
+        {'Contains_Handwritten_Text': True, 'Summarize_Text': True},
+        {'parse_mode': True, 'options': "{'table_summary': {'enabled': True}}"},
+    )
+    for params in calls:
+        instance = _call('nodes.reducto', glb, params)
+        instance.beginInstance()
+        parser.parse(b'%PDF', instance.settings, 'a.pdf')
+
+    assert [run.get('enhance') for run in _RecordingReducto.runs] == [
+        {'summarize_figures': False, 'summarize_tables': False},
+        {'ocr_mode': 'agentic', 'summarize_figures': True, 'summarize_tables': False},
+        {'table_summary': {'enabled': True}},
+    ]
+
+
+def test_reducto_refuses_a_call_whose_option_is_not_a_dictionary():
+    glb = SimpleNamespace(config=control_config('reducto', {'api_key': 'k1'}))
+    instance = _call('nodes.reducto', glb, {'parse_mode': True, 'options': '[1]'})
+    with pytest.raises(ValueError, match='options must be a Python dictionary'):
+        instance.beginInstance()

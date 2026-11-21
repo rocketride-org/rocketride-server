@@ -81,30 +81,35 @@
 			"required": true
 		},
 		"reducto.parse_mode": {
+			"param": true,
 			"type": "boolean",
 			"title": "Advanced Mode",
 			"description": "Toggle to use the advanced parse mode, and have access to the full set of options from the Reducto API. In advanced mode the simple-mode switches are ignored.",
 			"default": false
 		},
 		"reducto.Contains_Handwritten_Text": {
+			"param": true,
 			"type": "boolean",
 			"title": "Contains Handwritten Text",
 			"description": "Simple mode: enables Agentic OCR mode for better handwriting recognition and small text/table cell corrections.",
 			"default": false
 		},
 		"reducto.Contains_Non_English_Text": {
+			"param": true,
 			"type": "boolean",
 			"title": "Contains Non-English Text",
 			"description": "Simple mode: enables the Multilingual OCR system which can parse non-Germanic languages and unicode symbols.",
 			"default": false
 		},
 		"reducto.Summarize_Text": {
+			"param": true,
 			"type": "boolean",
 			"title": "AI Summarize Figures/Images",
 			"description": "Simple mode: generate AI summaries for figures, diagrams, and images using vision-language models.",
 			"default": false
 		},
 		"reducto.options": {
+			"param": true,
 			"type": "string",
 			"title": "Options",
 			"description": "Advanced mode: options for the Reducto API as a Python dictionary, e.g. {'key': 'value', 'flag': True}. Empty keeps the API defaults. See https://docs.reducto.ai/parsing/default-configurations for the available options and examples.",
@@ -112,6 +117,7 @@
 			"default": ""
 		},
 		"reducto.advanced_options": {
+			"param": true,
 			"type": "string",
 			"title": "Advanced Options",
 			"description": "Advanced mode: advanced options for the Reducto API as a Python dictionary. Empty keeps the API defaults.",
@@ -119,6 +125,7 @@
 			"default": ""
 		},
 		"reducto.experimental_options": {
+			"param": true,
 			"type": "string",
 			"title": "Experimental Options",
 			"description": "Advanced mode: experimental options for the Reducto API as a Python dictionary. Empty keeps the API defaults.",

@@ -74,7 +74,9 @@ class IValidator(IValidatorBase):
         Raises:
             ConfigError: The stored configuration does not fit the schema.
         """
-        config = self.config
+        self.config
+        # The mode and the advanced block are params, which self.config refuses: the stored values are in the full view
+        config = self._resolved()
         if syntaxOnly or config.configMode != 'advanced':
             return
         for problem in advanced_config_problems(config.advanced_config):
