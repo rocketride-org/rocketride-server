@@ -170,6 +170,8 @@ class TestSentinel:
             # The same with its escaping still broken, and inside a fence.
             '{"type":"final","content":"No org named "EARTH" was found."}',
             '```json\n{"type":"final","content":"No org named \\"EARTH\\" was found."}\n```',
+            # The fence with the envelope on its own line, which the node reads without the marker too.
+            '```json {"type":"final","content":"No org named \\"EARTH\\" was found."}\n```',
         ],
     )
     def test_an_envelope_kept_after_the_marker_is_read_as_the_envelope(self, after):
@@ -260,9 +262,17 @@ class TestSentinel:
         assert parse(raw) is None
         assert reply._parse_failure_hint(raw).endswith('do not answer in prose.')
 
-    def test_a_final_line_stacked_onto_a_tool_call_that_lost_its_type_is_not_delivered(self):
+    @pytest.mark.parametrize(
+        'call',
+        [
+            'Here is the result:\n{"name":"crm.create","args":{}}',
+            # Bad escaping in the arguments does not make it less of a call.
+            '{"name":"crm.create","args":{"note":"a "quoted" word"}}',
+        ],
+    )
+    def test_a_final_line_stacked_onto_a_tool_call_that_lost_its_type_is_not_delivered(self, call):
         """A name and its arguments with no "type" is a call that will not run. Its claim is not the answer."""
-        raw = 'Here is the result:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.'
+        raw = call + '\nFINAL>>> Created.'
 
         assert parse(raw) is None
         assert reply._parse_failure_hint(raw).endswith('do not answer in prose.')
@@ -349,13 +359,12 @@ class TestSentinel:
         'before',
         [
             '{"type":"final","content":"old"}',
-            '{"type":"final","content":"an "old" one"}',
             '{"type":"final","content":"old"} Done.',
             '{"type":"final","content":"old","done":true}',
         ],
     )
     def test_a_marker_after_a_final_envelope_that_already_closed_is_still_the_sentinel(self, before):
-        """Also when the answer after it ends the way an envelope does. A broken envelope counts when it is all there is before the marker."""
+        """An envelope that parses has closed for certain. Also when the answer after the marker ends the way an envelope does."""
         assert parse(before + '\nFINAL>>> {"company":"Acme"}').content == '{"company":"Acme"}'
 
     @pytest.mark.parametrize(
@@ -363,6 +372,9 @@ class TestSentinel:
         [
             # Closed, with a word of prose after it? Or still open, with a quote and a brace of its own?
             '{"type":"final","content":"an "old" one"} Done.\nFINAL>>> {"company":"Acme"}',
+            # The same question when the quote and brace are the last thing before the marker line.
+            '{"type":"final","content":"an "old" one"}\nFINAL>>> {"company":"Acme"}',
+            '{"type":"final","content":"Example: {"k":"v"}\nFINAL>>> partial',
             '{"type":"final","content":"Example: {"k":"v"} is an object.\nFINAL>>> is the marker"}',
             '{"type":"final","content":"Example: {"k":"v"} and\nFINAL>>> partial',
         ],
@@ -802,6 +814,23 @@ class TestRetryHint:
     def test_what_an_unparsed_reply_set_out_to_be(self, text, kind):
         assert reply._attempted_kind(text) == kind
 
+    @pytest.mark.parametrize(
+        'text, lost',
+        [
+            ('{"name":"crm.create","args":{}}', True),
+            ('Sure.\n{"name":"crm.create","args":{"note":"a "quoted" word"}}', True),
+            # With its type it is an ordinary tool call, and a name alone is not a call.
+            ('{"type":"tool_call","name":"crm.create","args":{}}', False),
+            ('{"args":{"note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}', False),
+            ('{"name":"crm.create"}', False),
+            ('{"name":{"first":"x"},"args":{}}', False),
+            # Members nested in a value are not the object's own.
+            ('{"answer":{"name":"crm.create","args":{}},"note":"a "quoted" word"}', False),
+        ],
+    )
+    def test_a_tool_call_that_lost_its_type_is_told_by_its_own_members(self, text, lost):
+        assert reply._tool_call_without_type(text) is lost
+
     def test_a_broken_tool_call_stays_one_when_final_is_named_first(self):
         """A "type":"final" inside the arguments, ahead of the envelope's own type, does not turn the call into an answer."""
         raw = '{"args":{"type":"final","note":"a "quoted" word"},"type":"tool_call","name":"crm.create"}'
@@ -1001,7 +1030,7 @@ class TestRunModelTurn:
         assert len(feedback) == 3
 
     def test_a_marker_after_an_envelope_that_closed_costs_one_call(self):
-        ask, feedback = scripted('{"type":"final","content":"an "old" one"}\nFINAL>>> {"company":"Acme"}')
+        ask, feedback = scripted('{"type":"final","content":"old"}\nFINAL>>> {"company":"Acme"}')
 
         assert answer_of(reply._run_model_turn(ask)) == '{"company":"Acme"}'
         assert len(feedback) == 1

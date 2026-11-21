@@ -120,8 +120,9 @@ and without the parallel `tool_calls` form:
 - A tool call with a `FINAL>>>` line stacked after it is run as the tool call:
   the line is a claim about work not yet done. A tool call that lost its `type`
   does not run, and the line stacked after it is not delivered either.
-- A `FINAL>>>` line after a broken `final` envelope that may or may not have
-  closed before it is not read either way: the reply is retried.
+- A `FINAL>>>` line after a `final` envelope is read when that envelope parses.
+  After a broken one that may or may not have closed, the reply is retried: the
+  line could as well be part of an answer that is still going.
 
 A reply that is neither a tool call nor an answer is retried twice, each time
 with a hint that says what was wrong and how to send it: a broken tool call, or

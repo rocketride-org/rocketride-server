@@ -387,7 +387,7 @@ _FINAL_ENVELOPE_CLOSE = re.compile(r'"\s*\}\s*(?:```\s*)?$')
 _STACKED_OBJECT = re.compile(r'"\s*\}\s*(?:```\s*)?\{')
 
 #: A markdown fence that encloses all of a text. Group 1 is what is inside it.
-_ENCLOSING_FENCE = re.compile(r'```[A-Za-z]*[ \t]*\n(.*)```', re.S)
+_ENCLOSING_FENCE = re.compile(r'```[A-Za-z]*\s*(.*)```', re.S)
 
 #: The same quote and brace anywhere in a reply: where an envelope whose content is unescaped may have closed.
 _FINAL_ENVELOPE_CLOSING = re.compile(r'"\s*\}')
@@ -402,8 +402,8 @@ _ATTEMPTED_TYPE = re.compile(r'"type"\s*:\s*"(tool_calls?|final)"')
 #: The digits of a ``\uXXXX`` escape. ``int(x, 16)`` alone also takes a sign, a space and an underscore.
 _HEX4 = re.compile(r'[0-9A-Fa-f]{4}')
 
-#: What follows a ``"type"`` key when its value is a plain string. Group 1 is the value.
-_TYPE_VALUE = re.compile(r'\s*:\s*"([^"\\]*)"')
+#: What follows a member's key: the colon, and the value when it is a plain string (group 1).
+_MEMBER_VALUE = re.compile(r'\s*:(?:\s*"([^"\\]*)")?')
 
 _ENVELOPE_KINDS = ('tool_call', 'tool_calls', 'final')
 
@@ -428,15 +428,17 @@ def _without_fence(raw: str) -> str:
     return s
 
 
-def _own_type(text: str) -> Optional[str]:
+def _own_members(text: str) -> Dict[str, Optional[str]]:
     """
-    The ``"type"`` an unparsed JSON object carries itself, and not one nested in a member's value.
+    The members an unparsed JSON object carries itself, and not the ones nested in their values.
 
-    Walks the first object in `text` as far as it goes and reads the first ``"type"`` member at its
-    top level, whatever comes before it and whatever its other members hold. Returns None when the
-    object ends or the text runs out before one is found. Escaping that is broken can put the walk
-    out of step with the object, which is why ``_attempted_kind`` falls back to searching the text.
+    Walks the first object in `text` as far as it goes and collects each key at its top level, with
+    its value when that is a plain string and None when it is anything else. This is how a reply
+    that does not parse is still read for what it set out to be: its own ``"type"``, or a tool
+    call's ``name`` and ``args`` when the type is missing. Escaping that is broken can put the walk
+    out of step with the object, so it finds what comes before the break and may miss what follows.
     """
+    members: Dict[str, Optional[str]] = {}
     at = text.find('{')
     depth = 0
     while 0 <= at < len(text):
@@ -446,11 +448,10 @@ def _own_type(text: str) -> Optional[str]:
             while end < len(text) and (text[end] != '"' or _is_escaped(text, end)):
                 end += 1
             if end >= len(text):
-                return None
-            if depth == 1 and text[at + 1 : end] == 'type':
-                value = _TYPE_VALUE.match(text, end + 1)
-                if value:
-                    return value.group(1)
+                break
+            value = _MEMBER_VALUE.match(text, end + 1) if depth == 1 else None
+            if value:
+                members.setdefault(text[at + 1 : end], value.group(1))
             at = end + 1
             continue
         if ch in '{[':
@@ -458,9 +459,9 @@ def _own_type(text: str) -> Optional[str]:
         elif ch in '}]':
             depth -= 1
             if depth <= 0:
-                return None
+                break
         at += 1
-    return None
+    return members
 
 
 def _attempted_kind(text: str) -> Optional[str]:
@@ -469,7 +470,7 @@ def _attempted_kind(text: str) -> Optional[str]:
 
     The envelope's own ``"type"`` decides, so one nested in a tool's arguments or in an answer's
     content does not: the parsed object's when the first object parses, and the one at its top
-    level when it does not (``_own_type``). Only when neither is there to read is the text
+    level when it does not (``_own_members``). Only when neither is there to read is the text
     searched, and then a tool-call type anywhere in it wins over ``final``: a broken call must
     stay a call.
     """
@@ -477,7 +478,7 @@ def _attempted_kind(text: str) -> Optional[str]:
     if isinstance(obj, dict):
         kind = obj.get('type')
         return kind if kind in _ENVELOPE_KINDS else None
-    own = _own_type(text)
+    own = _own_members(text).get('type')
     if own is not None:
         return own if own in _ENVELOPE_KINDS else None
     kinds = [match.group(1) for match in _ATTEMPTED_TYPE.finditer(text)]
@@ -490,9 +491,14 @@ def _attempted_tool_call(text: str) -> bool:
 
 
 def _tool_call_without_type(text: str) -> bool:
-    """Whether the first JSON object in the text has a tool call's members, a name and its arguments, and no ``"type"``."""
+    """
+    Whether the first JSON object in the text has a tool call's members, a name and its arguments, and no ``"type"``.
+
+    Also when the object does not parse: bad escaping in the arguments does not make it less of a call.
+    """
     obj = _extract_first_json_object(text)
-    return isinstance(obj, dict) and 'type' not in obj and isinstance(obj.get('name'), str) and 'args' in obj
+    members = obj if isinstance(obj, dict) else _own_members(text)
+    return 'type' not in members and isinstance(members.get('name'), str) and 'args' in members
 
 
 def _extract_first_json_object(raw: Any) -> Any:
@@ -766,11 +772,12 @@ def _envelope_before(raw: str, at: int) -> str:
       answer's own text: the content has literal line breaks and one of its lines starts with the
       marker. The reply is then read as the envelope it opened as. One that closes at the end of
       the reply gives its content, and one that never closes was cut off and is retried.
-    - ``'closed'``: an envelope ended before `at`, or there is none. The marker is the sentinel.
+    - ``'closed'``: an envelope parsed before `at`, or there is none. The marker is the sentinel.
     - ``'unclear'``: a broken envelope that may or may not have ended before `at`. Unescaped
-      content can only be closed by a quote and a brace, and here one is followed by more text, so
-      it is either the envelope's own closing with prose after it, or part of an answer that is
-      still going. Neither reading can be trusted, and the reply is retried.
+      content can only be closed by a quote and a brace, and here there is one, so it is either
+      the envelope's own closing or part of an answer that is still going. That holds even when
+      it is the last thing before `at`: an answer cut off after a line that ends in ``"}`` looks
+      the same. Neither reading can be trusted, and the reply is retried.
 
     The envelope is looked for from the first ``{`` before `at`, as the parser looks for it, so a
     line of prose before it changes nothing. An escaped quote is the answer's own and closes
@@ -786,10 +793,7 @@ def _envelope_before(raw: str, at: int) -> str:
     opening = _FINAL_ENVELOPE_OPEN.match(before)
     if opening:
         closings = _FINAL_ENVELOPE_CLOSING.finditer(before, opening.end())
-        if not any(not _is_escaped(before, closing.start()) for closing in closings):
-            return 'open'
-        # Closed for certain only when all of the text before the marker is one envelope.
-        return 'closed' if _salvage_final_content(before) is not None else 'unclear'
+        return 'unclear' if any(not _is_escaped(before, closing.start()) for closing in closings) else 'open'
     return 'open' if _looks_like_envelope(before) and _attempted_kind(before) == 'final' else 'closed'
 
 

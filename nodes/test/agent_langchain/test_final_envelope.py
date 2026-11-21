@@ -84,6 +84,10 @@ FAILED = {
         'Here is the result:\n{"name":"crm.get_deal","args":{"deal_id":42}}',
         'named a tool and its arguments with no "type"',
     ),
+    'final_line_stacked_onto_a_broken_tool_call_that_lost_its_type': (
+        '{"name":"crm.get_deal","args":{"note":"a "quoted" word"}}\nFINAL>>> Deal 42 is won.',
+        'named a tool and its arguments with no "type"',
+    ),
     'final_line_stacked_onto_a_tool_call_that_lost_its_type': (
         'Here is the result:\n{"name":"crm.get_deal","args":{"deal_id":42}}\nFINAL>>> Deal 42 is won.',
         'named a tool and its arguments with no "type"',
