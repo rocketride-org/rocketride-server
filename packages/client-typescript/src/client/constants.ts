@@ -73,6 +73,13 @@ export const CONST_SOCKET_TIMEOUT = 180;
 export const SUBMIT_INLINE_MAX = 1024 * 1024;
 
 /**
+ * The wire protocol major this SDK speaks. It is sent as `protocol` in the login
+ * arguments; the server refuses a login whose protocol it does not speak.
+ * One shared constant with the server and the Python SDK.
+ */
+export const WIRE_PROTOCOL = 2;
+
+/**
  * WebSocket ping interval in seconds.
  * Ping frames are sent at this interval to detect dead connections.
  */

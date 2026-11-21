@@ -61,6 +61,7 @@ from ..core import (
     CONST_DEFAULT_WEB_PORT,
     CONST_DEFAULT_WEB_PROTOCOL,
 )
+from ..core.constants import WIRE_PROTOCOL
 from ..core.exceptions import AuthenticationException
 from ..types.client import ConnectResult
 
@@ -141,7 +142,9 @@ class ConnectionMixin(DAPClient):
 
     async def _internal_login(self, timeout: Optional[float] = None) -> Dict[str, Any]:
         """Send the ``auth`` DAP command over the open transport."""
-        auth_args: Dict[str, Any] = {'auth': self._apikey or ''}
+        # `protocol` names the wire protocol this SDK speaks: the server refuses
+        # a login whose protocol it does not speak (TASK_VERSION_MISMATCH)
+        auth_args: Dict[str, Any] = {'auth': self._apikey or '', 'protocol': WIRE_PROTOCOL}
         if getattr(self, '_client_display_name', None):
             auth_args['clientName'] = self._client_display_name
         if getattr(self, '_client_display_version', None):

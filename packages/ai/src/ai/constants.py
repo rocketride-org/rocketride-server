@@ -72,6 +72,10 @@ CONST_SUBMIT_CLOSE_SECONDS = (
     5.0  # bound on the CLEANUP close after a failed submit() write; the write's failure is what the caller sees
 )
 CONST_SUBMIT_INLINE_MAX = 1024 * 1024  # bytes: submit() data delivered inline in one request (plan 3.1)
+CONST_WIRE_PROTOCOL = 2  # the wire protocol major this server speaks; the probe advertises it (plan 11.2)
+CONST_ACCEPT_PROTOCOL_1 = (
+    True  # a login with no `protocol` is protocol 1, translated at the connection (plan 11.3); False refuses it
+)
 CONST_TTL_CHECK = 60  # check for tasks to kill every 60 seconds
 
 # =============================================================================

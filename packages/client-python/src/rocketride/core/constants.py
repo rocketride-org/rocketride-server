@@ -92,6 +92,11 @@ CONST_ENV_MASK = '••••••••'
 # One shared constant with the server and the TypeScript SDK (1 MiB).
 SUBMIT_INLINE_MAX = 1024 * 1024
 
+# The wire protocol major this SDK speaks. It is sent as `protocol` in the login
+# arguments; the server refuses a login whose protocol it does not speak.
+# One shared constant with the server and the TypeScript SDK.
+WIRE_PROTOCOL = 2
+
 # Default store directory for project pipeline files.
 # Use this constant instead of hardcoding '.projects'.
 PROJECT_DIR = '.projects'

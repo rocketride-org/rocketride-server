@@ -51,7 +51,8 @@ def _make_conn(
     ``_server``, ``_transport``, ``_account_info``, ``_authenticated``,
     ``_connection_id``, ``_client_ip``, ``_auth_attempts``, the session
     epoch and lock, counters,
-    ``_messages_in/out``, ``_last_activity``, ``_monitors`` (empty).
+    ``_messages_in/out``, ``_last_activity``, ``_monitors`` (empty),
+    ``_protocol`` (2, the server's own, as before any login).
 
     Real DAPConn helpers (``build_response``, ``build_error``,
     ``build_event``, ``debug_message``) are stubbed with MagicMocks that
@@ -81,6 +82,7 @@ def _make_conn(
     conn._last_activity = 0.0
     conn._connected_at = 0.0
     conn._client_info = {}
+    conn._protocol = 2
     conn._monitors = {}
     conn._server = server or MagicMock()
 
@@ -259,6 +261,139 @@ async def test_on_auth_success_sets_account_and_releases_unauthed_slot():
     assert conn._client_info == {'name': 'rocketride-py', 'version': '1.2.3'}
     server.broadcast_server_event.assert_awaited_once()
     assert response == {'type': 'response', 'body': {'session': 'abc'}}
+
+
+# ---------------------------------------------------------------------------
+# on_auth — wire protocol negotiation
+# ---------------------------------------------------------------------------
+
+
+def _auth_server():
+    """A server stub whose credential check succeeds, with the account it returns."""
+    account = _make_account_info()
+    account.to_connect_result = MagicMock(return_value={'session': 'abc'})
+    server = MagicMock()
+    server._server = MagicMock()
+    server._server.authenticate_credential = AsyncMock(return_value=account)
+    server.release_unauthed_slot = MagicMock()
+    server.broadcast_server_event = AsyncMock()
+    return server
+
+
+def _login(**arguments):
+    """An ``auth`` request carrying a key and the given extra arguments."""
+    return {'type': 'request', 'command': 'auth', 'seq': 1, 'arguments': {'auth': 'rr_key', **arguments}}
+
+
+def _connection_added(server):
+    """The body of the one ``connection_added`` dashboard event the login broadcast."""
+    server.broadcast_server_event.assert_awaited_once()
+    body = server.broadcast_server_event.await_args.args[1]['body']
+    assert body['action'] == 'connection_added'
+    return body
+
+
+@pytest.mark.asyncio
+async def test_on_auth_protocol_2_is_stored_and_reported():
+    """A login naming protocol 2 is a protocol-2 connection, and the dashboard event says so."""
+    server = _auth_server()
+    conn = _make_conn(authenticated=False, server=server)
+
+    await TaskConn.on_auth(conn, _login(protocol=2, clientName='rocketride-py', clientVersion='2.0.0'))
+
+    assert conn._authenticated is True
+    assert conn._protocol == 2
+    body = _connection_added(server)
+    assert body['protocol'] == 2
+    assert (body['clientName'], body['clientVersion']) == ('rocketride-py', '2.0.0')
+
+
+@pytest.mark.asyncio
+async def test_on_auth_without_protocol_is_protocol_1():
+    """A 1.x SDK sends no protocol: the connection is protocol 1 while the flag is on."""
+    server = _auth_server()
+    conn = _make_conn(authenticated=False, server=server)
+
+    await TaskConn.on_auth(conn, _login(clientName='rocketride-py', clientVersion='1.6.0'))
+
+    assert conn._authenticated is True
+    assert conn._protocol == 1
+    assert _connection_added(server)['protocol'] == 1
+
+
+def _assert_version_mismatch(conn, server, client_protocol):
+    """The login was refused with the structured error and nothing was authenticated."""
+    server._server.authenticate_credential.assert_not_awaited()
+    server.broadcast_server_event.assert_not_awaited()
+    assert conn._authenticated is False
+    assert conn._protocol == 2
+    conn._transport.disconnect.assert_called_once()
+    conn._transport.send.assert_awaited_once()
+    refusal = conn._transport.send.await_args.args[0]
+    assert refusal['success'] is False
+    assert refusal['command'] == 'auth'
+    assert refusal['code'] == 'TASK_VERSION_MISMATCH'
+    assert 'protocol 2' in refusal['message']
+    if client_protocol is not None:
+        assert repr(client_protocol) in refusal['message']
+
+
+@pytest.mark.asyncio
+async def test_on_auth_without_protocol_is_refused_when_protocol_1_is_off(monkeypatch):
+    """With CONST_ACCEPT_PROTOCOL_1 off, a login naming no protocol is a version mismatch."""
+    from ai.modules.task import task_conn as tc_mod
+
+    monkeypatch.setattr(tc_mod, 'CONST_ACCEPT_PROTOCOL_1', False)
+    server = _auth_server()
+    conn = _make_conn(authenticated=False, server=server)
+
+    assert await TaskConn.on_auth(conn, _login(clientVersion='1.6.0')) is None
+
+    _assert_version_mismatch(conn, server, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('accept_protocol_1', [True, False])
+@pytest.mark.parametrize('protocol', [3, 1, 0, '2', 2.0, True, None])
+async def test_on_auth_refuses_a_protocol_it_does_not_speak(monkeypatch, accept_protocol_1, protocol):
+    """Any ``protocol`` other than the integer 2 is refused, whatever the protocol-1 flag says."""
+    from ai.modules.task import task_conn as tc_mod
+
+    monkeypatch.setattr(tc_mod, 'CONST_ACCEPT_PROTOCOL_1', accept_protocol_1)
+    server = _auth_server()
+    conn = _make_conn(authenticated=False, server=server)
+
+    assert await TaskConn.on_auth(conn, _login(protocol=protocol)) is None
+
+    _assert_version_mismatch(conn, server, protocol)
+
+
+def test_negotiate_protocol_names_both_sides_on_the_error():
+    """The refusal carries the server's protocol and the one the client sent."""
+    from ai.modules.task.types import TaskError
+
+    with pytest.raises(TaskError) as refused:
+        TaskConn._negotiate_protocol({'protocol': 3})
+
+    assert refused.value.code == TaskError.VERSION_MISMATCH
+    assert refused.value.serverProtocol == 2
+    assert refused.value.clientProtocol == 3
+
+
+@pytest.mark.asyncio
+async def test_protocol_2_connection_is_not_translated():
+    """The two guards are inert on a protocol-2 connection: old spellings pass through untouched."""
+    conn = _make_conn()
+    conn.on_rrext_process = AsyncMock(return_value=None)
+    request = {'type': 'request', 'command': 'rrext_process', 'seq': 1, 'arguments': {'pipe_id': 4}}
+
+    await TaskConn.on_receive(conn, request)
+    conn.on_rrext_process.assert_awaited_once_with(request)
+
+    response = {'type': 'response', 'command': 'rrext_process', 'success': True, 'body': {'pipeId': 4}}
+    await TaskConn.send(conn, response)
+    conn._transport.send.assert_awaited_once_with(response)
+    assert response['body'] == {'pipeId': 4}
 
 
 # ---------------------------------------------------------------------------

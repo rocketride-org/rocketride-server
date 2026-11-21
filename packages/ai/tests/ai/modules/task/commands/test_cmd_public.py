@@ -75,6 +75,8 @@ async def test_on_rrext_public_probe_returns_server_info_without_authenticating(
     assert result['type'] == 'response'
     body = result['body']
     assert body['version'] == '9.9.9'
+    # The wire protocol major rides beside the version: it decides compatibility
+    assert body['protocol'] == 2
     assert body['capabilities'] == {'feature': True}
     assert 'platform' in body  # sys.platform is OS-dependent; existence is enough
     assert body['apps'] == [{'id': 'app-1'}]

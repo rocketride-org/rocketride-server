@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v1.6 — never edit by hand
 // =============================================================================
 // Floor key:     1.6 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 23856ebecb39045986cf65e59c5271da1a8ed74f
+// Source commit: 477a8d59def21a375c42e39810db8c51441a867f
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -2604,6 +2604,8 @@ interface DashboardConnectionAdded extends DashboardEventBase {
     clientName?: string | null;
     /** Client version from auth handshake. */
     clientVersion?: string | null;
+    /** Wire protocol the login negotiated: 2, or 1 for a 1.x client that named none. */
+    protocol?: number | null;
     /** Account identifier. */
     clientId?: string | null;
 }
@@ -3685,6 +3687,12 @@ export declare const CONST_SOCKET_TIMEOUT: number;
  * One shared constant with the server and the Python SDK (1 MiB).
  */
 export declare const SUBMIT_INLINE_MAX: number;
+/**
+ * The wire protocol major this SDK speaks. It is sent as `protocol` in the login
+ * arguments; the server refuses a login whose protocol it does not speak.
+ * One shared constant with the server and the Python SDK.
+ */
+export declare const WIRE_PROTOCOL: number;
 /**
  * WebSocket ping interval in seconds.
  * Ping frames are sent at this interval to detect dead connections.

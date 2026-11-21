@@ -20,6 +20,9 @@ The connection has two layers you can drive together or separately:
   `developerId.pipelineId.source` (or `developerId.pipelineId.*`) patterns a
   scoped key may reach, or `null`/absent for an unscoped key. It is not
   `ServerInfoResult.endpoints`, which holds the server's `api` and `ui` URLs.
+  Every login names the wire protocol the SDK speaks (`protocol: 2` in the auth
+  arguments); a server that does not speak it refuses the login with the error code
+  `TASK_VERSION_MISMATCH` and closes the connection.
 
 `connect()` performs attach + login as one foreground operation; `disconnect()` does
 a best-effort logout, cancels pending work, and detaches. The state probes mirror

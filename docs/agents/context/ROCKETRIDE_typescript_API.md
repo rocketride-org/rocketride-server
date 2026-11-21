@@ -239,6 +239,8 @@ that drive deploy/publish decisions:
 
 Lower-level primitives that `connect()`/`disconnect()` build on — open a transport, authenticate, and tear down independently.
 
+Every login also names the wire protocol the SDK speaks: the auth arguments carry `protocol: 2`, and `getServerInfo()` reports the server's own value as `protocol`. That one number decides compatibility; package versions are never compared. A server refuses a login whose `protocol` it does not speak with the error code `TASK_VERSION_MISMATCH` and closes the connection, so `login()`/`connect()` throw `AuthenticationException`. A 1.x SDK sends no `protocol`: the server serves it as protocol 1 and translates the renamed wire fields (`pipe_id` beside `pipeId`) at the connection, until that support is retired.
+
 - `attach(uri?: string, options?: { timeout?: number }): Promise<void>` — open the WebSocket transport without authenticating. If `uri` differs from the current one, the client detaches first; if already attached to the same URI this is a no-op. After attach, public (`rrext_public_*`) APIs are available
 - `login(credential?, options?): Promise<ConnectResult>` — authenticate over an already-attached transport; same credential forms as `connect()`. If `options.uri` differs, it detaches and re-attaches first. Throws `AuthenticationException` on failure — the transport stays attached. A login superseded by a newer `login()`/`logout()`/`detach()` rejects with `LoginAttemptCancelledError` (`reason`: `'superseded' | 'logout' | 'detached'`)
 - `logout(): Promise<void>` — deauthenticate (sends `deauth`) and clear client auth state. The transport stays attached, so public APIs keep working
