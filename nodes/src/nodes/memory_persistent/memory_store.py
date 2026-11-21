@@ -23,6 +23,7 @@ import time
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional
 
+from ai.constants import CONST_STATE_MAX_TTL_SECONDS
 from rocketlib import warning
 
 
@@ -123,6 +124,19 @@ MAX_STATE_SESSIONS = 15
 #: The state key of the session index: ``{session_id: expires_at or None}``.
 _INDEX_KEY = 'sessions'
 
+#: Seconds the index lives after its last write: the state store's ceiling.
+_INDEX_TTL = float(CONST_STATE_MAX_TTL_SECONDS)
+
+#: How much sooner than the index a session record may expire at the latest.
+#: A record outliving the index would be a session nobody counts, so a record
+#: lives at most ``_INDEX_TTL - _INDEX_MARGIN`` after its last write, and a
+#: write that would carry it past the index rewrites the index first: at most
+#: once per margin per session in use.
+_INDEX_MARGIN = 3600.0
+
+#: Seconds a session record lives after its last write at most.
+_RECORD_MAX_TTL = _INDEX_TTL - _INDEX_MARGIN
+
 
 def _session_key(session_id: str) -> str:
     """The state key of one session's record (its data, history and expiry)."""
@@ -136,9 +150,13 @@ class StateBackend(MemoryBackend):
     The server keys every value by the control's organization, owner, address
     and node id, so another owner's sessions are out of reach by construction.
     A record is ``{'data': {key: value}, 'history': [...], 'created_at',
-    'ttl_seconds', 'expires_at'}``; it is written with the session's remaining
-    time to live, and a session with none takes the state store's maximum
-    (seven days after its last write). Values are JSON.
+    'ttl_seconds', 'expires_at', 'index_until'}``. Every value is written with
+    an explicit time to live within the state store's seven-day ceiling: a
+    record with the session's remaining time (a session with none, or more
+    than the ceiling allows, lives a little under seven days after its last
+    write), the index with the ceiling. ``index_until`` is the earliest the
+    index can expire as this record last saw it; a record is never written to
+    outlive it, so every live record is listed and counted. Values are JSON.
     """
 
     def __init__(self, state: Any) -> None:
@@ -168,10 +186,37 @@ class StateBackend(MemoryBackend):
             return None
         return record
 
+    def _put_index(self, index: Dict[str, Optional[float]]) -> float:
+        """
+        Write the index with the longest time to live; the caller holds the index lock.
+
+        Returns:
+            The earliest the written index expires.
+        """
+        until = time.time() + _INDEX_TTL
+        self._state.put(_INDEX_KEY, index, ttl=_INDEX_TTL)
+        return until
+
     def _save(self, session_id: str, record: Dict[str, Any]) -> None:
-        """Write a record with the session's remaining time to live."""
+        """
+        Write a record with the session's remaining time to live, never past the index.
+
+        The caller holds the session's lock, never the index's: a write that
+        would carry the record past ``index_until`` rewrites the index first,
+        under the index lock, listing the session again.
+        """
+        # 1. The record's time to live: the session's remaining time, within the ceiling
+        now = time.time()
         expires = record.get('expires_at')
-        ttl = max(1.0, expires - time.time()) if expires else None
+        ttl = min(_RECORD_MAX_TTL, max(1.0, expires - now)) if expires else _RECORD_MAX_TTL
+
+        # 2. Keep the index alive at least as long as the record
+        if now + ttl > record.get('index_until', 0):
+            with self._state.lock(_INDEX_KEY):
+                index = self._state.get(_INDEX_KEY) or {}
+                index.setdefault(session_id, expires)
+                record['index_until'] = self._put_index(index)
+
         self._state.put(_session_key(session_id), record, ttl=ttl)
 
     def _missing(self, session_id: str) -> Dict[str, Any]:
@@ -210,12 +255,22 @@ class StateBackend(MemoryBackend):
                 return {'ok': False, 'error': f'Maximum sessions ({MAX_STATE_SESSIONS}) reached'}
             now = time.time()
             expires = (now + ttl_seconds) if ttl_seconds else None
+            # The index first: a record is never live unlisted (a listed
+            # session whose record never landed is pruned above), and the
+            # record then needs no rewrite of the index this block holds
+            index[session_id] = expires
+            index_until = self._put_index(index)
             self._save(
                 session_id,
-                {'data': {}, 'history': [], 'created_at': now, 'ttl_seconds': ttl_seconds, 'expires_at': expires},
+                {
+                    'data': {},
+                    'history': [],
+                    'created_at': now,
+                    'ttl_seconds': ttl_seconds,
+                    'expires_at': expires,
+                    'index_until': index_until,
+                },
             )
-            index[session_id] = expires
-            self._state.put(_INDEX_KEY, index)
             return {'ok': True, 'session_id': session_id}
 
     def resume_session(self, session_id: str) -> Dict[str, Any]:
@@ -233,14 +288,16 @@ class StateBackend(MemoryBackend):
 
     def delete_session(self, session_id: str) -> Dict[str, Any]:
         _validate_session_id(session_id)
-        with self._state.lock(_INDEX_KEY):
+        # The session's lock first, then the index's (the order every write
+        # takes them in), so a write in flight cannot save the record again
+        with self._state.lock(_session_key(session_id)), self._state.lock(_INDEX_KEY):
             record = self._record(session_id)
             index = self._state.get(_INDEX_KEY) or {}
             if record is None and session_id not in index:
                 return self._missing(session_id)
             self._state.delete(_session_key(session_id))
             index.pop(session_id, None)
-            self._state.put(_INDEX_KEY, index)
+            self._put_index(index)
             keys_cleared = sorted(record['data']) if record else []
             return {'ok': True, 'session_id': session_id, 'keys_cleared': keys_cleared}
 

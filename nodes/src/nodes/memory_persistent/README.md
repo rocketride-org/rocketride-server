@@ -8,7 +8,7 @@ A RocketRide filter node that carries session memory across pipeline work by
 
 Redis is an optional backend this node uses for session values, metadata, and
 operation history. Select it when memory must outlive the Python process; the
-alternative backend keeps the same data in process for testing and development.
+default backend keeps the same data in the node's state, which the server holds.
 
 ## What it does
 
@@ -28,16 +28,16 @@ backend, or configurable expiry is needed.
 
 ## Profiles
 
-Default: `memory`, the in-process store.
+Default: `memory` (**In-Memory (testing)**), which keeps the sessions in the
+node's state.
 
 | Profile | Backend | Session lifetime |
 | --- | --- | --- |
-| `memory` *(default)* | In-memory | No expiry. |
+| `memory` *(default)* | The node's state | Up to seven days after the last write. |
 | `redis` | Redis at `localhost:6379` | 24 hours. |
-| `custom` | Redis at a supplied connection | 24 hours. |
 
-Start with `memory` for a local test, then select `redis` when a process-local
-store is not sufficient, or `custom` to point at a Redis instance other than
+Start with `memory`, then select `redis` when fifteen sessions per owner are
+not enough; change its host and port to reach a Redis instance other than
 the default `localhost:6379`.
 
 ## Configuration
@@ -52,10 +52,10 @@ parameters. The generated schema below is the complete field reference.
 ### Backend
 
 `backend` accepts `memory` or `redis` and defaults to `memory`. The memory
-backend is thread-safe and limits itself to 1,000 active sessions; it is useful
-for testing and development but its contents live only in the engine process.
-Switch to `redis` for a shared or process-surviving store. Any other backend
-value stops initialization with a `ValueError`.
+backend keeps each session as one value of the node's state, plus one index
+of the sessions: a node holds at most 16 state keys, so it keeps at most 15
+sessions per owner, and the server, not the engine process, holds them.
+Switch to `redis` for more sessions or for a retention policy of your own.
 
 ### Redis connection
 
@@ -71,9 +71,11 @@ backend selected when no reachable Redis service is available.
 The default `0` means no expiry; a value greater than zero expires all data,
 keys, history, and metadata for that session together. Set a positive value
 when stale context should be discarded automatically. With the state backend
-a session record is written with its remaining TTL (and with no TTL it lives
-seven days after its last write); Redis aligns the backend keys with the
-session metadata TTL.
+no value outlives the state store's seven-day ceiling: a session record is
+written with its remaining TTL, and a session with no TTL (or a longer one)
+lives seven days, less an hour, after its last write; the index of sessions
+is rewritten before any record could outlive it. Redis aligns the backend
+keys with the session metadata TTL.
 
 ### History retention
 

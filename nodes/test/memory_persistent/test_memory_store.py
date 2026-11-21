@@ -9,6 +9,8 @@ Covers the CodeRabbit review follow-ups:
   - Atomic counter under concurrent writes (in-memory threading.Lock)
   - TTL inheritance for keys added after session creation
   - Explicit Redis close() on teardown (no reliance on GC)
+and the state store's ceilings: every write within seven days, and an index
+of sessions that outlives every session record.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
+from ai.constants import CONST_STATE_MAX_TTL_SECONDS
 from test.mocks.redis_fake import FakeRedis
 from nodes.memory_persistent.memory_store import (
     StateBackend,
@@ -123,6 +126,69 @@ def test_state_create_prunes_expired_session_before_duplicate_check(state):
 
         assert result['ok'] is True
         assert backend.resume_session('reusable')['ok'] is True
+
+
+# ---------------------------------------------------------------------------
+# The state store's ceilings (every value within seven days; the index last)
+# ---------------------------------------------------------------------------
+
+
+class _RecordingState:
+    """The state door, recording the time, key and ttl of every ``put``."""
+
+    def __init__(self, state, clock):
+        """Wrap ``state``; ``clock`` names the time each put is recorded at."""
+        self._state = state
+        self._clock = clock
+        self.puts = []
+
+    def put(self, key, value, ttl=None):
+        """Record the write, then make it."""
+        self.puts.append((self._clock(), key, ttl))
+        self._state.put(key, value, ttl=ttl)
+
+    def __getattr__(self, name):
+        """Every other operation is the door's own."""
+        return getattr(self._state, name)
+
+
+def test_state_every_write_names_a_ttl_within_the_ceiling(state):
+    """A session longer than the state store allows, or with none, is still written within seven days."""
+    recording = _RecordingState(state, time.time)
+    backend = StateBackend(recording)
+    assert backend.create_session('month', ttl_seconds=30 * 24 * 3600)['ok'] is True
+    assert backend.create_session('open')['ok'] is True
+    assert backend.put('month', 'k', 1)['ok'] is True
+    assert backend.put('open', 'k', 2)['ok'] is True
+    assert backend.get('month', 'k')['value'] == 1
+    ttls = [ttl for _, _, ttl in recording.puts]
+    assert ttls and all(ttl is not None and 0 < ttl <= CONST_STATE_MAX_TTL_SECONDS for ttl in ttls)
+
+
+def test_state_the_index_outlives_every_session_record(state):
+    """A session in use for hours keeps the index alive, without rewriting it on every write."""
+    now = [time.time()]
+    with patch('nodes.memory_persistent.memory_store.time') as fake_time:
+        fake_time.time = lambda: now[0]
+        recording = _RecordingState(state, lambda: now[0])
+        backend = StateBackend(recording)
+        backend.create_session('open')
+        for _ in range(10):
+            # Half an hour between writes, five hours in all
+            now[0] += 1800
+            assert backend.put('open', 'k', now[0])['ok'] is True
+
+    # No record is written to expire after the index last written before it
+    index_until = 0.0
+    for at, key, ttl in recording.puts:
+        if key == 'sessions':
+            index_until = at + ttl
+        else:
+            assert at + ttl <= index_until, f'the record written at {at} outlives the index'
+
+    # The index: written at creation, then again only when a record would pass
+    # it (here every hour and a half of use), not on each of the ten writes
+    assert sum(1 for _, key, _ in recording.puts if key == 'sessions') == 4
 
 
 # ---------------------------------------------------------------------------

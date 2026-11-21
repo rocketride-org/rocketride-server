@@ -21,17 +21,20 @@ from rocketlib.doors import NodeState
 
 from ..framework.replicas import Owner, ReplicaServer
 
+#: The component id the pipeline gives the node; the server keys its state by it.
+NODE_ID = 'memory_1'
+
 
 @pytest.fixture
 def state():
-    """One binding's state door, owned by one user, for the duration of a test."""
+    """One binding's state door for one memory_persistent node, owned by one user, for the duration of a test."""
     with ReplicaServer() as server:
         engine = server.engine()
         binding = uuid.uuid4().hex
         server.admit(engine, binding, Owner(orgId='org-a', userId='alice'))
         token = server.serving(engine)
         try:
-            yield NodeState(binding)
+            yield NodeState(binding, NODE_ID)
         finally:
             server.done(token)
             server.end(engine, binding)
