@@ -3261,6 +3261,14 @@ class TaskServer(DAPBase):
         control.db_approved = await self._authorize_control_db(control)
 
         def _hold(engine: TaskEngine) -> None:
+            # A control removed while this request waited (the account
+            # question, the start gate) takes no hold: nothing could release it
+            if self._task_control.get(control.key) is not control:
+                raise TaskError(
+                    TaskError.ENGINE_UNAVAILABLE,
+                    f'Task "{control.id}" was removed while its engine was being started again',
+                    address=control.address,
+                )
             # A concurrent request through this control may have moved it
             if control.task is engine:
                 return

@@ -695,6 +695,43 @@ async def test_a_control_wanting_fewer_databases_or_another_org_is_refused(catal
 
 
 @pytest.mark.asyncio
+async def test_the_same_databases_from_another_org_are_refused(catalog, engines, db_account):
+    """A user scope approves the same owner in every org, but resolves to each org's database: the org alone refuses."""
+    ts = _server()
+    first = await _start(ts, _db_pipeline(scope='user'), user='user-a', org='org-a')
+    first.task.db_approved = dict(first.db_approved)
+    first.task.org_id = 'org-a'
+    assert first.db_approved == {'user': 'user-a'}
+
+    with pytest.raises(TaskError) as other_org:
+        await _start(ts, _db_pipeline(scope='user', project_id='docDbOrgB'), user='user-a', org='org-b')
+    assert other_org.value.code == TaskError.ENGINE_UNAVAILABLE
+    # The user scope's request names the user in both orgs: the maps are equal
+    assert [request.get('user_id') for _, _, request in db_account] == ['user-a', 'user-a']
+
+
+@pytest.mark.asyncio
+async def test_a_control_removed_during_its_restart_takes_no_hold(catalog, engines, db_account, clock, monkeypatch):
+    """remove_task during the account question: the restart aborts and the removed control holds nothing."""
+    ts = _server()
+    control = await _start(ts, _db_pipeline(), user='user-a', ttl=3600)
+    await _idle_out(ts, clock)
+    assert control.dormant
+    original = ts._authorize_control_db
+
+    async def authorize_then_remove(target):
+        approved = await original(target)
+        ts._task_control.pop(target.key, None)
+        return approved
+
+    monkeypatch.setattr(ts, '_authorize_control_db', authorize_then_remove)
+    with pytest.raises(TaskError) as removed:
+        await ts.ensure_engine(control)
+    assert removed.value.code == TaskError.ENGINE_UNAVAILABLE
+    assert all(control.key not in engine.holds for engine in ts._engines.values())
+
+
+@pytest.mark.asyncio
 async def test_a_dormant_control_is_reauthorized_before_it_rejoins(catalog, engines, db_account, clock, monkeypatch):
     """Membership revoked after a control started refuses its rejoin; it stays on its stopped engine."""
     import ai.account
