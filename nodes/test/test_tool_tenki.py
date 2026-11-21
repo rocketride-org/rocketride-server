@@ -585,7 +585,8 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     assert not any('2027-01-01' in line for line in logs)
     # Unparseable: the real SDK's client refuses it, so no retired-name check stands in the way.
     _, built = _started(monkeypatch, {'base_url': 'https://[api.tenki.cloud'})
-    assert built[0]['base_url'] == 'https://[api.tenki.cloud' and not any('2027-01-01' in line for line in logs)
+    assert built[0]['base_url'] == 'https://[api.tenki.cloud'
+    assert not any('2027-01-01' in line for line in logs)
 
 
 @pytest.mark.parametrize(
@@ -593,6 +594,7 @@ def test_the_client_gets_the_stripped_key_the_public_endpoint_and_a_deadline(mon
     [
         ({'apikey': 'tk_mock-tenki-placeholder-for-tests'}, 'Tenki key (tk_)'),
         ({'base_url': 'https://eu.tenki.cloud'}, 'points at eu.tenki.cloud'),
+        ({'base_url': 'https://tenki.cloud'}, 'points at tenki.cloud,'),
     ],
 )
 def test_a_tenki_key_or_host_still_works_and_is_warned_about_before_luxor_retires_it(monkeypatch, logs, cfg, retired):
