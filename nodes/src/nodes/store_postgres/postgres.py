@@ -364,7 +364,7 @@ class Store(PgVectorStoreBase):
             return []
 
         where_sql, params = self._convertFilter(docFilter)
-        query_params = [f'%{query}%'] + params
+        query_params = [f'%{query.text}%'] + params
 
         with self._cursor() as cur:
             where_clause = ('AND ' + where_sql.split('WHERE ')[1]) if where_sql else ''

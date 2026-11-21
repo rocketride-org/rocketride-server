@@ -194,6 +194,20 @@ def test_listing_skips_the_schema_row_and_deleted_documents(store_env):
     assert store.getPaths() == {'/test': 'a'}
 
 
+def test_keyword_search_matches_the_question_text(store_env):
+    """A keyword search matches the question text, not the QuestionText repr."""
+    from ai.common.schema import DocFilter, QuestionText
+
+    store, _, _ = store_env
+    fox = _doc('a', 0, 'the quick brown fox')
+    dog = _doc('a', 1, 'a lazy dog')
+    store.addChunks([fox, dog])
+
+    docs = store.searchKeyword(QuestionText(text='brown fox'), DocFilter(limit=10))
+
+    assert [doc.page_content for doc in docs] == ['the quick brown fox']
+
+
 @pytest.mark.parametrize('repeated_chunk_id', [False, True])
 def test_get_tool_pages_past_one_hundred_chunks(store_env, repeated_chunk_id):
     """The tool cap must leave later chunks accessible on both Postgres drivers."""
