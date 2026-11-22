@@ -353,8 +353,9 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     """Resolve the engine URI the MCP tools connect back to.
 
     The single source for this value: the shared and per-caller engine
-    clients, the widget CSP origin and the user-facing upload/dropper links
-    all derive from what this returns. Rules, first match wins:
+    clients and the widget CSP origin derive from what this returns. The
+    user-facing upload/dropper links do not: they name this server's own
+    origin (``_resolve_mcp_origin``). Rules, first match wins:
 
     1. ``explicit`` -- ``config['rocketride_uri']`` or env ``RR_MCP_ENGINE_URI``,
        used as-is. (``ROCKETRIDE_URI`` is the address a CLIENT connects to;
