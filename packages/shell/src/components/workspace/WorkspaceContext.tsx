@@ -692,6 +692,11 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			const appId = e.state?.appId as string | undefined;
 			if (!appId) return;
 
+			// Back (or Forward) supersedes a launch that is still loading: its
+			// sequence goes stale, so the load's completion commits nothing and
+			// the user stays on the entry they navigated to.
+			switchSeqRef.current++;
+
 			// Suppress pushState — we're restoring, not navigating forward
 			_suppressPush = true;
 			switchApp(appId);
