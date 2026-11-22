@@ -28,6 +28,7 @@ from .._support import (
 )
 
 with engine_stubs():
+    from nodes.supabase import supabase_client as sc
     from nodes.supabase.auth.IGlobal import IGlobal
     from nodes.supabase.auth.IInstance import USER_FIELDS, IInstance
 
@@ -362,7 +363,8 @@ def test_verify_user_valid():
     [
         AuthApiError('invalid JWT: unable to parse or verify signature', 403, 'bad_jwt'),
         AuthApiError('User from sub claim in JWT does not exist', 404, 'user_not_found'),
-        AuthApiError('session expired', 401),
+        AuthApiError('Session from session_id claim in JWT does not exist', 403, 'session_not_found'),
+        AuthApiError('session expired', 401, 'session_expired'),
     ],
 )
 def test_verify_user_not_valid(error):
@@ -371,6 +373,26 @@ def test_verify_user_not_valid(error):
     assert out['valid'] is False and 'not accept the token' in out['reason']
     assert 'user' not in out
     _assert_clean(out)
+
+
+@pytest.mark.parametrize(
+    'error',
+    [
+        # The API gateway refusing the node's own (revoked) secret key: no GoTrue code.
+        AuthApiError('Invalid API key', 401),
+        AuthApiError('Forbidden', 403),
+        AuthApiError('no Route matched with those values', 404),
+    ],
+)
+def test_verify_user_refusal_without_a_token_code_points_at_the_node_settings(error):
+    inst, _ = _inst(results={'auth.get_user': error})
+    with pytest.raises(sc.SupabaseError) as err:
+        inst.verify_user({'access_token': USER_TOKEN})
+    message = str(err.value)
+    assert message.startswith('supabase_auth.verify_user: Supabase refused the request')
+    assert f'HTTP {error.status}' in message and 'Check Project URL and Secret key on the node' in message
+    assert USER_TOKEN not in message
+    assert_no_secrets(message)
 
 
 def test_verify_user_backend_failure_raises_without_token():

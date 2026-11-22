@@ -51,6 +51,7 @@ from rocketlib import tool_function
 
 from ai.common.utils import int_arg, optional_bool, optional_int, optional_str, require_str
 
+from .. import supabase_client as sc
 from ..IInstance import ADMIN, READ, WRITE, SupabaseInstanceBase, requires_access
 from .IGlobal import IGlobal
 
@@ -88,10 +89,12 @@ _MAX_EMAIL_LENGTH = 320
 _MAX_TEXT_LENGTH = 2048
 
 # GoTrue answers an invalid, expired or revoked token (or one whose user was
-# deleted) with one of these statuses / error codes. Anything else (network
-# failure, 5xx) is a real error and is raised, not reported as "not valid".
-_INVALID_TOKEN_STATUSES = (401, 403, 404)
+# deleted) with one of these error codes; only they mean "not valid". A
+# 401/403/404 without one did not come from GoTrue judging the token: the API
+# gateway refusing the node's own secret key (401 "Invalid API key") or a
+# wrong Project URL. Those, like a network failure or a 5xx, are raised.
 _INVALID_TOKEN_CODES = ('bad_jwt', 'no_authorization', 'session_not_found', 'session_expired', 'user_not_found')
+_NODE_SETTINGS_STATUSES = (401, 403, 404)
 
 _USER_SCHEMA = {
     'type': 'object',
@@ -272,11 +275,18 @@ class IInstance(SupabaseInstanceBase):
         except Exception as e:
             status = getattr(e, 'status', None)
             code = getattr(e, 'code', None)
-            if status in _INVALID_TOKEN_STATUSES or code in _INVALID_TOKEN_CODES:
+            if code in _INVALID_TOKEN_CODES:
                 reason = (
                     'Supabase did not accept the token: it is invalid, expired or revoked, or its user no longer exists'
                 )
-                return {'valid': False, 'reason': f'{reason} ({code or f"HTTP {status}"})'}
+                return {'valid': False, 'reason': f'{reason} ({code})'}
+            if status in _NODE_SETTINGS_STATUSES:
+                # Refused, but not by GoTrue judging the token: it says nothing about the user.
+                raise sc.SupabaseError(
+                    f'Supabase refused the request ({sc.describe_exception(e)}), not the user token. '
+                    'Check Project URL and Secret key on the node.',
+                    status=status,
+                ) from None
             # Not an answer about the token (network, 5xx): a real failure.
             raise
         user = _user_of(response) if response is not None else None
