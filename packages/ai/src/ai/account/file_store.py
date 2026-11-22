@@ -1093,7 +1093,10 @@ class FileStore:
         if not prefix.endswith('/'):
             prefix += '/'
 
-        all_files = await self._store.list_files(prefix)
+        # Only the keys under the directory itself: the S3 and Azure backends
+        # list by a prefix normpath stripped of its '/', so 'kb/' would also
+        # return 'kbx/...' (rmdir filters the same way)
+        all_files = [f for f in await self._store.list_files(prefix) if f.startswith(prefix)]
 
         # Track entries; for files, keep the full path for mtime lookup
         entries_map: dict[str, dict] = {}

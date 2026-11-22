@@ -537,6 +537,20 @@ class TestRmdirGuards:
             await fs.read('kb/a.txt')
 
     @pytest.mark.asyncio
+    async def test_list_dir_never_lists_a_sibling_sharing_its_name_prefix(self, fs, istore, monkeypatch):
+        """An object store lists 'kb/' by the raw prefix 'kb': 'kbx/' is not one of its entries."""
+        await fs.write('kb/a.txt', b'mine')
+        await fs.write('kbx/b.txt', b'other')
+        listed = istore.list_files
+
+        async def by_raw_prefix(prefix=''):
+            return [f for f in await listed('') if f.startswith(prefix.rstrip('/'))]
+
+        monkeypatch.setattr(istore, 'list_files', by_raw_prefix)
+        names = [entry['name'] for entry in (await fs.list_dir('kb'))['entries']]
+        assert names == ['a.txt']
+
+    @pytest.mark.asyncio
     async def test_rmdir_refuses_when_writer_open(self, fs):
         """Open writer under the prefix must block rmdir."""
         handle_id = await fs.open_write('project/data.bin')

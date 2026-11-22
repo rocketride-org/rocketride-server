@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 0768e137cea4c1677411d03505ba9d22340dd26a
+// Source commit: d0caf3efabb09dbf176136e7939de7a9e44917ca
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5013,8 +5013,10 @@ declare class DeployApi {
      * is always explicit: a team (requires `task.control` on it), `'@me'`
      * (your own space), or `'@public'` (the store: on a server that reviews,
      * only an approved `'ready'` version; your organization needs a developer
-     * id). A pointer on `'@me'` or `'@public'` is billed to your development
-     * team when its schedules or a run-now fire it.
+     * id). When its schedules or a run-now fire a pointer, the run is billed
+     * by its rung (plan 8.3): an `'@me'` pointer to your development team as
+     * stamped when you published it; a team's to that team; an `'@public'`
+     * (or `'@org'`) one to the organization, with no ledger team.
      *
      * @param projectId - The project whose artifact to deploy.
      * @param version - The registry version to point the audience at.

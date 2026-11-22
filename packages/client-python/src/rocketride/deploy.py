@@ -445,9 +445,11 @@ class DeployApi:
         audience is always explicit: a team (requires ``task.control`` on
         it), ``'@me'`` (your own space), or ``'@public'`` (the store: on a
         server that reviews, only an approved ``'ready'`` version; your
-        organization needs a developer id). A pointer on ``'@me'`` or
-        ``'@public'`` is billed to your development team when its schedules
-        or a run-now fire it.
+        organization needs a developer id). When its schedules or a run-now
+        fire a pointer, the run is billed by its rung (plan 8.3): an
+        ``'@me'`` pointer to your development team as stamped when you
+        published it; a team's to that team; an ``'@public'`` (or ``'@org'``)
+        one to the organization, with no ledger team.
 
         Args:
             project_id: The project whose artifact to deploy.
