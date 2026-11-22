@@ -1394,7 +1394,7 @@ def _walk_lock_resolutions(node: Any):
 # materialize step drops the developer's patch config (the `pnpm` package key
 # and `patchedDependencies`), so the reinstall resolves the same version
 # without that segment. It is not drift; peer suffixes stay compared.
-_PATCH_HASH_RE = re.compile(r'\(patch_hash=[^)]*\)')
+_PATCH_HASH_RE = re.compile(r'\(patch_hash=[^()]*\)')
 
 
 def _lockfile_importer_pins(lock_text: str) -> Dict[str, Dict[str, str]]:
