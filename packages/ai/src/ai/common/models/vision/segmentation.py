@@ -465,12 +465,15 @@ class Segmenter:
                 self.model_name, mode=mode, device=device if device != 'server' else None, revision=revision, **kwargs
             )
 
-    def segment(self, image: Any, threshold: Optional[float] = None) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
+    def segment(
+        self, image: Any, threshold: Optional[float] = None, max_edge: Optional[int] = None
+    ) -> Union[List[Dict[str, Any]], Dict[str, Any]]:
         """Segment one image and restore masks to its original resolution.
 
         Args:
             image: PIL Image or encoded image bytes.
             threshold: Override the default instance threshold for this call.
+            max_edge: Override the default long-edge bound of the inference resize for this call.
 
         Returns:
             instance mode: list of InstanceMask dicts; semantic mode: a SemanticMask dict.
@@ -485,7 +488,8 @@ class Segmenter:
             image = ImageProcessor.load_image_from_bytes(bytes(image))
 
         threshold = self.threshold if threshold is None else threshold
-        resized, original_size = resize_for_inference(image, self.max_edge)
+        max_edge = self.max_edge if max_edge is None else int(max_edge)
+        resized, original_size = resize_for_inference(image, max_edge)
         inf_w, inf_h = resized.size
 
         raw = self._infer(resized, threshold)

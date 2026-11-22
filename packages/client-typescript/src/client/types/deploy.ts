@@ -144,12 +144,14 @@ export interface DeployHistoryEntry {
 	/** Unix timestamp (seconds). */
 	at?: number;
 	/** `pause`/`resume` appear only on rows written before the
-	    enable/disable vocabulary (the trail is immutable). NOTE: app rails
-	    additionally carry the review vocabulary (`request`/`approved`/
-	    `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
-	    the union names the pipe-rail actions only and stays as the frozen
-	    v1.3 floor wrote it (widening a returned union would break floor
-	    assignability); compare raw strings for the app-rail extras. */
+	    enable/disable vocabulary (the trail is immutable). App rails also
+	    carry `delete`, a binding's lifecycle as its state (`enabled`/
+	    `disabled`/`removed`), the review transitions (`request`/`approved`/
+	    `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime:
+	    the union names the pipe-rail actions only, because the shell contract
+	    (append-only) re-exports this type; compare raw strings for the rest,
+	    widening first: `(entry.action as string | undefined) === 'delete'`
+	    (a literal outside the union does not compile against it directly). */
 	action?: 'publish' | 'deploy' | 'rollback' | 'enable' | 'disable' | 'pause' | 'resume' | 'errored' | 'remove';
 	/** `''` on org-wide rows (publish); the audience on pointer changes. */
 	teamId?: string;

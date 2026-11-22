@@ -1045,7 +1045,6 @@ def test_a_conforming_node_is_clean(tmp_path):
 #: after C.26). A node leaves this table in the PR that moves it: the test
 #: below fails as soon as the finding is gone and the entry is not.
 IDENTITY_PERSISTERS = {
-    'memory_persistent': ['memory_persistent/IInstance.py: identity-persist'],
     'tool_laserdata_memory': ['tool_laserdata_memory/IInstance.py: identity-persist'],
 }
 

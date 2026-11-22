@@ -43,6 +43,10 @@ class MediaInstance(IInstanceBase):
     node = 'media'
     modes = ()
 
+    def _max_input_bytes(self) -> int:
+        """The largest input this call's object may carry, in bytes (its ``max_input_mb``)."""
+        return int(self.settings.max_input_mb) * 1024 * 1024
+
     def open(self, obj):
         """Initialize temporary input state for the incoming object."""
         self.close()
@@ -50,7 +54,7 @@ class MediaInstance(IInstanceBase):
         self._active = {}
         self._inputs = {}
         self._input_bytes = 0
-        self._input_limit = self.IGlobal.input_limit()
+        self._input_limit = self._max_input_bytes()
         self._assets = []
         self._handled = False
         self._t0 = time.time()

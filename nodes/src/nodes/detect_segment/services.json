@@ -98,7 +98,8 @@
 			"description": "Minimum score (0.0-1.0) to include a mask",
 			"default": 0.3,
 			"minimum": 0.0,
-			"maximum": 1.0
+			"maximum": 1.0,
+			"param": true
 		},
 		"detect_segment.semantic.threshold": {
 			"base": "detect_segment.threshold",
@@ -110,7 +111,8 @@
 			"description": "Downscale source so long edge <= this value before inference; masks are upsampled back to the source size. Lower = faster + less VRAM.",
 			"default": 1024,
 			"minimum": 256,
-			"maximum": 4096
+			"maximum": 4096,
+			"param": true
 		}
 	},
 	//

@@ -161,9 +161,34 @@ class DeployHistoryEntry(TypedDict, total=False):
     seq: int
     # Unix timestamp (seconds).
     at: float
-    # 'pause'/'resume' appear only on rows written before the enable/disable
-    # vocabulary (the trail is immutable).
-    action: Literal['publish', 'deploy', 'rollback', 'enable', 'disable', 'pause', 'resume', 'errored', 'remove']
+    # Pipe rails: 'publish', 'deploy', 'rollback', 'enable', 'disable',
+    # 'errored', 'remove', and 'delete' when a deployed version's storage is
+    # removed; 'pause'/'resume' appear only on rows written before the
+    # enable/disable vocabulary (the trail is immutable). App rails add a
+    # binding's lifecycle as its state ('enabled'/'disabled'/'removed'), the
+    # review transitions ('request'/'approved'/'rejected'/'withdrawn'/
+    # 'failed') and the human 'reply' row.
+    action: Literal[
+        'publish',
+        'deploy',
+        'rollback',
+        'enable',
+        'disable',
+        'pause',
+        'resume',
+        'errored',
+        'remove',
+        'delete',
+        'enabled',
+        'disabled',
+        'removed',
+        'request',
+        'approved',
+        'rejected',
+        'withdrawn',
+        'failed',
+        'reply',
+    ]
     # '' on org-wide rows (publish); the audience on pointer changes.
     teamId: str
     # On pointer changes: the audience, the reader's rung and the handle to

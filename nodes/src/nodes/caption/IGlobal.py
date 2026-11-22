@@ -21,6 +21,14 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Global handler for the Caption node.
+
+The control's profile pins the model and its revision, which are the weights
+loaded here once per control. The caption granularity is a per-call
+parameter the instance passes to ``Captioner.caption``.
+"""
+
 from rocketlib import IGlobalBase
 from ai.common.models.base import make_device_lock
 from ai.common.models.vision.caption import Captioner
@@ -31,11 +39,11 @@ class IGlobal(IGlobalBase):
     device_lock = None
 
     def beginGlobal(self):
-        """Build the shared Captioner facade from the resolved config (model/revision/task)."""
+        """Build the shared Captioner facade for the control's profile (model and revision); the task is per call."""
         config = self.config
 
         # device=None -> model server when --modelserver is set, else local.
-        self.captioner = Captioner(model_name=config.model, device=None, task=config.task, revision=config.revision)
+        self.captioner = Captioner(model_name=config.model, device=None, revision=config.revision)
 
         # Local inference must serialize GPU access
         self.device_lock = make_device_lock()

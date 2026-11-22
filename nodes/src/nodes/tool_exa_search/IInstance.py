@@ -129,14 +129,15 @@ class IInstance(IInstanceBase):
             }
 
         cfg = self.IGlobal
-        num_results = args.get('num_results', cfg.num_results)
+        settings = self.settings  # this call's search defaults
+        num_results = args.get('num_results', settings.numResults)
         # bool is a subclass of int in Python — reject it explicitly so that
         # {'num_results': true} doesn't silently become 1.
         if isinstance(num_results, bool) or not isinstance(num_results, int):
-            num_results = cfg.num_results
-        search_type = args.get('type', cfg.search_type)
-        use_autoprompt = args.get('use_autoprompt', cfg.use_autoprompt)
-        include_text = args.get('include_text', cfg.include_text)
+            num_results = settings.numResults
+        search_type = args.get('type', settings.searchType)
+        use_autoprompt = args.get('use_autoprompt', settings.useAutoprompt)
+        include_text = args.get('include_text', settings.includeText)
 
         # Build the search request payload
         payload: Dict[str, Any] = {

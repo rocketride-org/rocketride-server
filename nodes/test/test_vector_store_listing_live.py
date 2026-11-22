@@ -32,7 +32,7 @@ _EMBEDDING = [1.0, 0.0, 0.0]
 
 
 def _tools(store, allow_write=True):
-    """The store instance base on the real store, the way StoreGlobalBase leaves a node after beginGlobal.
+    """The store instance base on the real store, served to the call the way StoreGlobalBase.store_for does.
 
     The engine's IInstanceBase supplies _collect_tool_methods, so discovery is
     the real thing; no engine wiring beyond IGlobal, as in test_store_base.
@@ -41,13 +41,9 @@ def _tools(store, allow_write=True):
 
     tool = StoreInstanceBase.__new__(StoreInstanceBase)
     tool.IGlobal = types.SimpleNamespace(
-        serverName='rrvector',
-        store=store,
-        embed_query=None,
-        embed_model_name=None,
-        expose_tools=True,
-        allow_write=allow_write,
+        store=store, _stores={}, store_for=lambda settings: store, embed_query=None, embed_model_name=None
     )
+    tool._settings = {'serverName': 'rrvector', 'expose_tools': True, 'allow_write': allow_write}
     return tool
 
 

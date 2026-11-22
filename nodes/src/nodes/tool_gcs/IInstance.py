@@ -23,16 +23,37 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Google Cloud Storage tool node instance.
+
+The bucket, the object prefix and the download cap are this call's
+(``self.settings``). A download is written to the control owner's file store
+(``self.files``), not to the engine host's disk, so whichever replica serves
+the next call, and the filesystem tool, can read it. Only the most recent
+download is kept: its path is the node's state, and a new download deletes
+it from any replica. The owner's file store is shared by every node of every
+pipeline the owner runs, so every download gets a path of its own: no download
+overwrites another's file, and a node deleting its previous download never
+reaches a file another node or another call still names.
+"""
+
 from __future__ import annotations
 
-import os
-import tempfile
-import threading
+import contextlib
+import secrets
 from typing import Any
 
 from rocketlib import IInstanceBase, tool_function, warning
 
 from .IGlobal import IGlobal
+
+# ==== Constants ==================================================================
+
+#: Where downloads land in the owner's file store.
+DOWNLOAD_ROOT = 'gcs'
+
+#: The state key holding the path of the most recent download.
+LAST_DOWNLOAD_KEY = 'last_download'
 
 
 def join_gcs_prefix(node_prefix: str, extra: str = '') -> str:
@@ -53,54 +74,91 @@ def _as_dict(args: Any) -> dict:
     return args if isinstance(args, dict) else {}
 
 
-# Two attached download_file calls of one binding run on worker threads and
-# os.remove blocks inside the retention step: one lock for the read-modify-write
-_TEMP_FILES_LOCK = threading.Lock()
+def download_path(object_name: str, download_id: str) -> str:
+    """
+    The file-store path one download of an object lands at.
+
+    Args:
+        object_name: The object's full name in the bucket (prefix included).
+        download_id: This download's id, which leads the file name.
+
+    Returns:
+        A relative path under ``gcs/`` that keeps the object's folders, its
+        file name led by the download's id (``gcs/data/<id>-a.txt``).
+    """
+    parts = [part for part in object_name.replace('\\', '/').split('/') if part not in ('', '.', '..')]
+    *folders, name = parts or ['object']
+    return '/'.join([DOWNLOAD_ROOT, *folders, f'{download_id}-{name}'])
 
 
 class IInstance(IInstanceBase):
-    """One request's view of the bucket: its downloads live and die with the binding (plan 4.1, 12 B)."""
-
-    #: Temp files this binding downloaded; the most recent is kept, the rest deleted
-    _temp_files: list | None = None
-
-    def _retain_temp_file(self, path: str) -> None:
-        """Track ``path`` for this request and delete its older download so disk use stays bounded."""
-        with _TEMP_FILES_LOCK:
-            if self._temp_files is None:
-                self._temp_files = []
-            # A path whose deletion failed stays tracked so endInstance retries it
-            self._temp_files = [older for older in self._temp_files if not self._remove_temp_path(older)]
-            self._temp_files.append(path)
-
-    @staticmethod
-    def _remove_temp_path(path: str) -> bool:
-        """Delete one downloaded file, tolerating one already gone; False when it is still there."""
-        try:
-            if path and os.path.exists(path):
-                os.remove(path)
-            return True
-        except OSError as e:
-            warning(f'tool_gcs: failed to remove temp file {path}: {e}')
-            return False
-
-    def endInstance(self) -> None:
-        """The request ended: its downloads go with it (another caller never sees or deletes them)."""
-        for path in list(self._temp_files or []):
-            self._remove_temp_path(path)
-        self._temp_files = None
-
     """GCS instance, providing tool functions for reading and listing files."""
 
     IGlobal: IGlobal
 
+    def _bucket_settings(self) -> tuple[str, str]:
+        """This call's bucket name and object prefix."""
+        settings = self.settings
+        return str(settings.bucketName or '').strip(), str(settings.prefix or '').strip()
+
+    def _publish_download(self, data: bytes, object_name: str) -> str:
+        """
+        Store ``data`` as the node's most recent download and delete the one it replaces.
+
+        The path is this download's own, so the write needs no lock (a write
+        of up to ``maxDownloadBytes`` would outlast the lock's lease and the
+        other callers' wait), and a concurrent download can neither overwrite
+        it nor delete it before it is recorded: a path is recorded once, and
+        only the download that replaces that record deletes it. The record is
+        read and written under the state lock.
+
+        Args:
+            data: The object's bytes.
+            object_name: The object's full name in the bucket.
+
+        Returns:
+            The download's path in the owner's file store.
+        """
+        path = download_path(object_name, secrets.token_hex(8))
+        self.files.write(path, data)
+        try:
+            with self.state.lock(LAST_DOWNLOAD_KEY):
+                previous = self.state.get(LAST_DOWNLOAD_KEY)
+                self.state.put(LAST_DOWNLOAD_KEY, path)
+        except BaseException:
+            # Never recorded, so nothing would ever delete it
+            with contextlib.suppress(Exception):
+                self.files.delete(path)
+            raise
+        if previous and previous != path:
+            try:
+                self.files.delete(previous)
+            except Exception as e:
+                warning(f'tool_gcs: failed to remove the previous download {previous}: {e}')
+        return path
+
+    @staticmethod
+    def _read_capped(blob: Any, max_bytes: int) -> bytes | None:
+        """
+        Read one object, refusing more than ``max_bytes``.
+
+        Args:
+            blob: The object's blob handle.
+            max_bytes: This call's download cap.
+
+        Returns:
+            The object's bytes, or None when it grew past the cap since it was sized.
+        """
+        with blob.open('rb') as reader:
+            data = reader.read(max_bytes + 1)
+        return None if len(data) > max_bytes else data
+
     @tool_function(
         description=(
-            'Download a file from Google Cloud Storage. Returns a dictionary containing '
-            'the local temporary path of the downloaded file. The file belongs to THIS '
-            'request: only its most recent download is retained (a new download deletes the '
-            'previous temp file) and every remaining file is removed when the request ends. '
-            'Objects larger than the configured maxDownloadBytes are rejected.'
+            "Download a file from Google Cloud Storage into the pipeline owner's file store. Returns a "
+            'dictionary containing the file-store path of the downloaded file (readable with the '
+            'filesystem tool). Only the most recent download is kept: a new download deletes the '
+            'previous one. Objects larger than the configured maxDownloadBytes are rejected.'
         ),
         input_schema={
             'type': 'object',
@@ -121,19 +179,18 @@ class IInstance(IInstanceBase):
         if not client:
             return {'error': 'GCS client is not connected.'}
 
-        bucket_name = self.IGlobal.bucket()
+        bucket_name, prefix = self._bucket_settings()
         if not bucket_name:
             return {'error': 'Bucket name not configured.'}
 
-        file_name = join_gcs_prefix(self.IGlobal.object_prefix(), file_name)
+        file_name = join_gcs_prefix(prefix, file_name)
+        max_bytes = self.settings.maxDownloadBytes
 
-        temp_path = None
         try:
             bucket = client.bucket(bucket_name)
             blob = bucket.blob(file_name)
             blob.reload()
             size = blob.size or 0
-            max_bytes = self.IGlobal.download_limit()
             if size > max_bytes:
                 return {
                     'error': (
@@ -142,27 +199,19 @@ class IInstance(IInstanceBase):
                     )
                 }
 
-            # Download to a temporary file
-            fd, temp_path = tempfile.mkstemp(prefix='gcs_')
-            os.close(fd)
-            blob.download_to_filename(temp_path)
-            # Re-check after download: the object can change between reload() and fetch.
-            actual_size = os.path.getsize(temp_path)
-            if actual_size > max_bytes:
-                os.remove(temp_path)
-                temp_path = None
+            # Into the owner's file store; the object can change between reload() and the read
+            data = self._read_capped(blob, max_bytes)
+            if data is None:
                 return {
                     'error': (
-                        f'Object {file_name!r} downloaded {actual_size} bytes, which exceeds '
-                        f'maxDownloadBytes ({max_bytes}). Increase the limit or download a smaller object.'
+                        f'Object {file_name!r} grew past maxDownloadBytes ({max_bytes}) while it was read. '
+                        'Increase the limit or download a smaller object.'
                     )
                 }
 
-            self._retain_temp_file(temp_path)
-            return {'success': True, 'local_path': temp_path, 'size': actual_size}
+            path = self._publish_download(data, file_name)
+            return {'success': True, 'path': path, 'size': len(data)}
         except Exception as e:
-            if temp_path and os.path.exists(temp_path):
-                os.remove(temp_path)
             return {'error': f'Failed to download file: {e}'}
 
     @tool_function(
@@ -190,11 +239,11 @@ class IInstance(IInstanceBase):
         if not client:
             return ['Error: GCS client is not connected.']
 
-        bucket_name = self.IGlobal.bucket()
+        bucket_name, node_prefix = self._bucket_settings()
         if not bucket_name:
             return ['Error: Bucket name not configured.']
 
-        full_prefix = join_gcs_prefix(self.IGlobal.object_prefix(), prefix)
+        full_prefix = join_gcs_prefix(node_prefix, prefix)
 
         try:
             bucket = client.bucket(bucket_name)

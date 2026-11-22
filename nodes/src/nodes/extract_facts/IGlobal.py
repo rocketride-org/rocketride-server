@@ -21,36 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
-from rocketlib import IGlobalBase, warning
+"""
+Extract Facts node - global state.
+
+The control holds nothing: the target fields, the validator toggle and the
+provenance toggle are per-call parameters the instance reads from its settings.
+"""
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    fields: List
-    validate: bool = True
-    include_provenance: bool = True
-
-    def beginGlobal(self) -> None:
-        """Read the toggles and the well-formed field definitions from the resolved config."""
-        config = self.config
-
-        # Validator + provenance toggles (see services.json facts.validate / facts.include_provenance)
-        self.validate = config.validate
-        self.include_provenance = config.include_provenance
-
-        # Filter out fields with empty name or type
-        self.fields = []
-        for field in config.fields:
-            field_name = field.get('column', '')
-            field_type = field.get('type', '')
-            if not field_name or not field_type:
-                warning(f'Skipping incorrectly defined field with name "{field_name}" and type "{field_type}"')
-                continue
-            self.fields.append(field)
-
-    def field_definitions(self):
-        """The well-formed field definitions kept from the config."""
-        return self.fields
-
-    def endGlobal(self) -> None:
-        pass
+    """Nothing per control: every key of the node is read per call."""

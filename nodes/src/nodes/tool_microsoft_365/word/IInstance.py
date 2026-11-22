@@ -174,7 +174,7 @@ class IInstance(MicrosoftToolInstanceBase):
 
         args = normalize_tool_input(args, tool_name='tool_word')
         file = require_str(args, 'file', tool_name='word_read_text')
-        content, _etag = download_docx(self.IGlobal.auth, self._base(), file)
+        content, _etag = download_docx(self._auth(), self._base(), file)
         doc = docx.Document(BytesIO(content))
         parts = [p.text for p in doc.paragraphs]
         for table in doc.tables:
@@ -211,7 +211,7 @@ class IInstance(MicrosoftToolInstanceBase):
     def word_create_document(self, args: dict) -> dict:
         """Create a new .docx document from paragraph texts at a OneDrive path. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_word')
-        self.IGlobal.access.require_write('word_create_document')
+        self._access().require_write('word_create_document')
         import docx
 
         path = require_str(args, 'path', tool_name='word_create_document')
@@ -225,7 +225,7 @@ class IInstance(MicrosoftToolInstanceBase):
         # than through upload_docx (which always sends If-Match when given one).
         base = self._base()
         data = request(
-            self.IGlobal.auth,
+            self._auth(),
             'PUT',
             f'{base}/drive/root:/{urllib.parse.quote(path, safe=chr(47))}:/content',
             data=buf.getvalue(),
@@ -258,19 +258,19 @@ class IInstance(MicrosoftToolInstanceBase):
     def word_append_text(self, args: dict) -> dict:
         """Append paragraphs to a .docx and re-upload with If-Match. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_word')
-        self.IGlobal.access.require_write('word_append_text')
+        self._access().require_write('word_append_text')
         import docx
 
         file = require_str(args, 'file', tool_name='word_append_text')
         paragraphs = require_str_list(args, 'paragraphs', tool_name='word_append_text')
         base = self._base()
-        content, etag = download_docx(self.IGlobal.auth, base, file)
+        content, etag = download_docx(self._auth(), base, file)
         doc = docx.Document(BytesIO(content))
         for text in paragraphs:
             doc.add_paragraph(text)
         buf = BytesIO()
         doc.save(buf)
-        data = upload_docx(self.IGlobal.auth, base, file, buf.getvalue(), etag)
+        data = upload_docx(self._auth(), base, file, buf.getvalue(), etag)
         return clean_item(data)
 
     @tool_function(
@@ -306,7 +306,7 @@ class IInstance(MicrosoftToolInstanceBase):
         Requires the write tier.
         """
         args = normalize_tool_input(args, tool_name='tool_word')
-        self.IGlobal.access.require_write('word_replace_text')
+        self._access().require_write('word_replace_text')
         import docx
 
         file = require_str(args, 'file', tool_name='word_replace_text')
@@ -315,7 +315,7 @@ class IInstance(MicrosoftToolInstanceBase):
         if not isinstance(replace, str):
             raise ValueError('word_replace_text: "replace" is required and must be a string')
         base = self._base()
-        content, etag = download_docx(self.IGlobal.auth, base, file)
+        content, etag = download_docx(self._auth(), base, file)
         doc = docx.Document(BytesIO(content))
         total = sum(_replace_in_paragraph(p, find, replace) for p in _iter_all_paragraphs(doc))
         if total == 0:
@@ -323,7 +323,7 @@ class IInstance(MicrosoftToolInstanceBase):
             return {'replacements': 0}
         buf = BytesIO()
         doc.save(buf)
-        upload_docx(self.IGlobal.auth, base, file, buf.getvalue(), etag)
+        upload_docx(self._auth(), base, file, buf.getvalue(), etag)
         return {'replacements': total}
 
     @tool_function(
@@ -347,10 +347,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def word_export_pdf(self, args: dict) -> dict:
         """Export a .docx to PDF and upload it beside the source. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_word')
-        self.IGlobal.access.require_write('word_export_pdf')
+        self._access().require_write('word_export_pdf')
         file = require_str(args, 'file', tool_name='word_export_pdf')
         base = self._base()
-        auth = self.IGlobal.auth
+        auth = self._auth()
         item = it(base, file)
         pdf_bytes = request(auth, 'GET', f'{item}/content', params={'format': 'pdf'}, binary=True)
         meta = request(auth, 'GET', item)

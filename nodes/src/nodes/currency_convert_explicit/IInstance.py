@@ -24,13 +24,10 @@
 from rocketlib import warning, Entry, IInstanceBase
 from ai.common.schema import Answer
 
-from .IGlobal import IGlobal
 from .convert import convert_payload
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal  # Reference to the global context holding the conversion settings
-
     # Converted payloads collected during the object, emitted at closing.
     # Each entry is (expectJson: bool, payload) — see writeAnswers/closing.
     pending: list = None

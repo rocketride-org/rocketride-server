@@ -37,9 +37,6 @@ class IGlobal(IGlobalBase):
     """Global state for tool_tavily."""
 
     apikey: str = ''
-    max_results: int = 5
-    search_depth: str = 'advanced'
-    topic: str = 'general'
 
     def beginGlobal(self) -> None:
         # The resolved config: maxResults within 1-20, the depth and topic pinned
@@ -52,9 +49,6 @@ class IGlobal(IGlobalBase):
             error('tool_tavily: apikey is required - set it in the node config (a ${ROCKETRIDE_TAVILY_KEY} reference)')
             raise ValueError('tool_tavily: apikey is required')
         self.apikey = apikey
-        self.max_results = cfg.maxResults
-        self.search_depth = cfg.searchDepth
-        self.topic = cfg.topic
 
     def endGlobal(self) -> None:
         self.apikey = ''

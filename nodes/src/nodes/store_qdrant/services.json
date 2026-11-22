@@ -130,18 +130,22 @@
 		},
 		"qdrant.local.host": {
 			"base": "vector.host",
-			"default": "localhost"
+			"default": "localhost",
+			"env": "ROCKETRIDE_QDRANT_HOST"
 		},
 		"qdrant.port": {
 			"base": "vector.port",
-			"default": 6333
+			"default": 6333,
+			"env": "ROCKETRIDE_QDRANT_PORT"
 		},
 		"qdrant.serverName": {
 			"type": "string",
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names qdrant.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "qdrant",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -162,8 +166,8 @@
 						"qdrant.cloud.host",
 						"qdrant.port",
 						{ "base": "vector.apikey", "env": "ROCKETRIDE_QDRANT_APIKEY", "required": true },
-						"vector.score",
-						"vector.collection",
+						{ "base": "vector.score", "param": true },
+						{ "base": "vector.collection", "param": true, "tool": false },
 						"qdrant.serverName"
 					]
 				},
@@ -172,8 +176,8 @@
 					"properties": [
 						"qdrant.local.host",
 						"qdrant.port",
-						"vector.score",
-						"vector.collection",
+						{ "base": "vector.score", "param": true },
+						{ "base": "vector.collection", "param": true, "tool": false },
 						"qdrant.serverName"
 					]
 				}

@@ -54,13 +54,16 @@ _PNG = 'image/png'
 
 _JPEG_FALLBACK_QUALITY = 92
 
+# The score threshold the detector is created with; every call sets its own before detecting.
+_INITIAL_MIN_CONFIDENCE = 0.6
 
-def _number(config: dict, key: str, default, cast):
+
+def _number(settings, key: str, default, cast):
     """
-    Read one numeric config value, clamped to its documented range.
+    Read one numeric setting of the call, clamped to its documented range.
 
     Args:
-        config: The node's resolved config, keyed on bare field names.
+        settings: The call's settings, keyed on bare field names.
         key: The field name.
         default: Value to use when absent or unparseable.
         cast: ``int`` or ``float``.
@@ -68,7 +71,7 @@ def _number(config: dict, key: str, default, cast):
     Returns:
         The clamped value.
     """
-    raw = config.get(key, default)
+    raw = settings.get(key, default)
     try:
         value = cast(raw)
     except (TypeError, ValueError):
@@ -105,32 +108,23 @@ def _encode(image, mime: str, source_bytes: bytes, quality_setting):
     return buf.tobytes() if ok else None
 
 
-def build_orient(config: dict):
+def build_orient():
     """
-    Bind the node's config into the single callable ``IInstance`` uses.
+    Load the detector and return the single callable ``IInstance`` uses.
 
-    Called once from ``IGlobal.beginGlobal`` so per-object work never re-parses config, and so the
-    model is loaded and checksummed once rather than per image.
-
-    Args:
-        config: The node's resolved config, keyed on bare field names.
+    Called once from ``IGlobal.beginGlobal`` so the model is loaded and checksummed once rather
+    than per image. Every tunable is the call's: ``orient`` reads them from the settings it is
+    handed, and sets the detector's score threshold per call under the detector's lock.
 
     Returns:
-        Callable: ``orient(image_bytes, mime, want_image)``.
+        Callable: ``orient(image_bytes, mime, want_image, settings)``.
     """
     import threading
 
-    min_conf = _number(config, 'minConfidence', 0.6, float)
-    margin = _number(config, 'margin', 1.1, float)
-    min_faces = _number(config, 'minFaces', 2, int)
-    detect_size = _number(config, 'detectSize', 800, int)
-    confidence_weight = _number(config, 'confidenceWeight', 1.0, float)
-    quality_setting = _resolve_quality(config.get('quality', 'auto'))
-
-    detector = build_detector(min_conf)
+    detector = build_detector(_INITIAL_MIN_CONFIDENCE)
     lock = threading.Lock()
 
-    def orient(image_bytes: bytes, mime: str, want_image: bool):
+    def orient(image_bytes: bytes, mime: str, want_image: bool, settings):
         """
         Decide which way up one image goes, and rotate it if the evidence is strong enough.
 
@@ -140,6 +134,8 @@ def build_orient(config: dict):
             want_image: False when nothing downstream consumes the image lane, in which case the
                 analysis still runs — the record is the point of that wiring — but nothing is
                 rotated or encoded.
+            settings: The call's settings (``self.settings``): the vote's margin, face count and
+                confidence weight, the detector's score threshold, the detect size, the quality.
 
         Returns:
             tuple | None: ``(out_bytes, record)``, where ``out_bytes`` is None whenever the
@@ -152,6 +148,14 @@ def build_orient(config: dict):
 
         if not image_bytes:
             return None
+
+        # This call's tunables
+        min_conf = _number(settings, 'minConfidence', 0.6, float)
+        margin = _number(settings, 'margin', 1.1, float)
+        min_faces = _number(settings, 'minFaces', 2, int)
+        detect_size = _number(settings, 'detectSize', 800, int)
+        confidence_weight = _number(settings, 'confidenceWeight', 1.0, float)
+        quality_setting = _resolve_quality(settings.get('quality', 'auto'))
         flags = cv2.IMREAD_UNCHANGED if mime == _PNG else cv2.IMREAD_COLOR
         image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), flags)
         if image is None:
@@ -173,7 +177,7 @@ def build_orient(config: dict):
         elif small.shape[2] == 4:
             small = cv2.cvtColor(small, cv2.COLOR_BGRA2BGR)
 
-        detections, areas = detect_rotations(detector, lock, small)
+        detections, areas = detect_rotations(detector, lock, small, min_conf)
         small = None  # detection is done; the rotation below allocates a full-size array
         scores = [score(d, a, confidence_weight) for d, a in zip(detections, areas)]
         # The second reading decide() requires to agree with the area-weighted one.

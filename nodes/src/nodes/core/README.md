@@ -100,7 +100,6 @@ These files define common fields that are merged into a service definition as re
 | Field | Type | Description |
 |-------|------|-------------|
 | `google.authType` | enum `service` / `user`, default `service` | Selects service-account vs user OAuth flow. |
-| `google.customerId` | string | Google Workspace Customer ID (service auth). |
 | `google.adminEmail` | string | Administrator e-mail with admin privileges (service auth). |
 | `google.serviceKey` | data-url (`.json` upload) | Service-account JSON key file (service auth). |
 | `google.oAuthButton` | string, optional | "Login with Google" OAuth widget (user auth). |
@@ -215,7 +214,6 @@ The internal Word indexer, ZIP Creation, and null endpoint are protocol-bearing 
 |---|---|---|---|
 | `google.adminEmail` | `string` | **Administrator E-mail**<br/>Enter the email address of a Google Workspace administrator.<br/><br/>This email should belong to a user with administrative privileges in your Google Workspace domain. |  |
 | `google.authType` | `string` | **Authentication Type** | `"service"` |
-| `google.customerId` | `string` | **Customer ID**<br/>Enter your Google Workspace Customer ID.<br/><br/>This unique identifier is assigned to your organization by Google. It is used to specify the particular Google Workspace domain you want to manage. |  |
 | `google.oAuthButton` | `string` | **Login with Google** |  |
 | `google.serviceKey` | `string` | **Service Account Key File**<br/>Upload the JSON key file for your Google Workspace service account.<br/><br/>This file contains the credentials necessary to authenticate API requests. |  |
 | `google.userToken` | `string` | **Access Token**<br/>It is a long term token that allows you to get new access tokens to access the Google API. |  |

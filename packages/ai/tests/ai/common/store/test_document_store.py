@@ -18,6 +18,17 @@ from ai.common.store import DocumentStoreBase
 from ai.common.store.document_store import VectorStoreToolMixin
 
 
+class _ToolsOnOneStore(VectorStoreToolMixin):
+    """The tool mixin as an IInstance carries it: the call's store and settings from the stand-in global."""
+
+    def _store(self):
+        return self.IGlobal.store
+
+    @property
+    def settings(self):
+        return {'serverName': self.IGlobal.serverName}
+
+
 class _FakeStore(DocumentStoreBase):
     """Minimal concrete DocumentStoreBase for exercising createCollection() in isolation."""
 
@@ -217,7 +228,7 @@ def test_tool_upsert_missing_model_name_does_not_prescribe_lane_wiring():
     # failure response and give guidance that applies to both entry points.
     store = _ExistingCollectionStore(control_docs=[_control_doc()])
     store.addChunks.side_effect = store.createCollection
-    tools = VectorStoreToolMixin()
+    tools = _ToolsOnOneStore()
     tools.IGlobal = SimpleNamespace(
         store=store, serverName='test', embed_query=lambda text: [0.1, 0.2, 0.3], embed_model_name=None
     )

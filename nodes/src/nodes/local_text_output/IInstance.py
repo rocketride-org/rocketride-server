@@ -85,7 +85,7 @@ class IInstance(IInstanceBase):
 
                 # Get the absolute path from the source object
                 abs_path = self.current_object.path
-                exclude = self.IGlobal.exclude
+                exclude = self.settings.exclude
 
                 # Remove one complete leading path prefix. Raw string replacement
                 # would also remove matching text from later path components.

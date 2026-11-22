@@ -27,8 +27,9 @@
 
 The three pipeline lane handlers are byte-identical across the store drivers:
 questions run a search, documents are written as chunks, and rendering rehydrates
-an object's chunks. They all delegate to ``self.IGlobal.store`` (a
-``DocumentStoreBase``), so they live here once. Subclassing
+an object's chunks. They all delegate to the call's store (the
+``DocumentStoreBase`` the IGlobal opens for this call's settings, see
+``StoreGlobalBase.store_for``), so they live here once. Subclassing
 ``VectorStoreToolMixin`` also gives every node the agent tools (``search``,
 ``objdir``, ``get``, ``stats``, the write tools, and ``list_documents`` where the
 driver supports it) uniformly.
@@ -47,8 +48,8 @@ from ai.common.schema import Doc, Question
 from .document_store import DocumentStoreBase, VectorStoreToolMixin
 from .store_global_base import StoreGlobalBase
 
-# Raised by the three lanes when the node's store is not open: it failed to open
-# when the pipeline started, or data arrived after it was closed. Public so a
+# Raised by the three lanes when the node's store is not open: data arrived
+# after the control was ended, or before it began. Public so a
 # store node with its own lane code (store_elasticsearch) raises the same text.
 NO_STORE_MESSAGE = 'Vector store connection is unavailable. Check its connection settings and startup errors.'
 
@@ -62,6 +63,16 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
     # engine calls on every node of the pipe before any lane writes to it
     _objectIdsWritten: Set[str]
 
+    def _store(self) -> DocumentStoreBase:
+        """Return the store for this call's settings: its collection, its threshold, its driver options.
+
+        Raises:
+            Exception: The control's store cache is not open, or the driver cannot open the store.
+        """
+        if self.IGlobal._stores is None:
+            raise Exception(NO_STORE_MESSAGE)
+        return self.IGlobal.store_for(self.settings)
+
     def open(self, object: Entry) -> None:
         """Start a new object: forget the object IDs the previous one wrote.
 
@@ -73,12 +84,8 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
 
     def writeQuestions(self, question: Question) -> None:
         """Take a question, perform a search, and write the results as documents."""
-        # Check it
-        if self.IGlobal.store is None:
-            raise Exception(NO_STORE_MESSAGE)
-
-        # Dispatch to the search handler
-        self.IGlobal.store.dispatchSearch(self, question)
+        # Dispatch to the search handler of the call's store
+        self._store().dispatchSearch(self, question)
 
     def writeDocuments(self, documents: List[Doc]) -> None:
         """Take a list of documents and add them to the vector store.
@@ -90,14 +97,13 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
         Args:
             documents: The batch from the documents lane.
         """
-        # Check it
-        if self.IGlobal.store is None:
-            raise Exception(NO_STORE_MESSAGE)
+        # The call's store: its collection
+        store = self._store()
 
         self._warnOnLateChunkZero(documents)
 
         # Add the document chunks
-        self.IGlobal.store.addChunks(documents)
+        store.addChunks(documents)
 
     def _warnOnLateChunkZero(self, documents: List[Doc]) -> None:
         """Warn when the batch holds chunk 0 of an object an earlier batch wrote since open(); then note its objects.
@@ -125,8 +131,8 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
         def callback(text: str) -> None:
             self.instance.sendText(text)
 
-        # Check it
-        if self.IGlobal.store is None:
+        # Check it: the control's store cache is open (as before, for every object)
+        if self.IGlobal._stores is None:
             raise Exception(NO_STORE_MESSAGE)
 
         # If we do not have a vectorize flag, or we have not vectorized
@@ -134,9 +140,9 @@ class StoreInstanceBase(VectorStoreToolMixin, IInstanceBase, ABC):
         if not object.hasVectorBatchId or not object.vectorBatchId:
             return
 
-        # Render the data on this object from the store and
-        # send it to the renderData function
-        self.IGlobal.store.render(objectId=object.objectId, callback=callback)
+        # Render the data on this object from the call's store (its
+        # collection, opened only now) and send it to the renderData function
+        self._store().render(objectId=object.objectId, callback=callback)
 
         # Stop right here
         self.preventDefault()

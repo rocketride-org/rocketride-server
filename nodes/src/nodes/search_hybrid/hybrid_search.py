@@ -184,6 +184,7 @@ class HybridSearchEngine:
         vector_scores: Optional[list[Optional[float]]] = None,
         top_k: int = 10,
         rrf_k: int = 60,
+        alpha: Optional[float] = None,
     ) -> list[dict[str, Any]]:
         """
         Full hybrid search: vector + BM25 merged via Reciprocal Rank Fusion.
@@ -197,6 +198,7 @@ class HybridSearchEngine:
                           the note below on why that is not the same as 0.0.
             top_k: Maximum number of results to return.
             rrf_k: RRF constant for fusion.
+            alpha: This call's weight for the vector ranking (0.0 to 1.0); None uses the engine's own.
 
         Returns:
             List of documents ranked by hybrid RRF score.
@@ -245,6 +247,11 @@ class HybridSearchEngine:
             scored.sort(key=lambda d: d['vector_score'], reverse=True)
             vector_results = scored
 
+        # This call's fusion weight
+        weight = self.alpha if alpha is None else float(alpha)
+        if not 0.0 <= weight <= 1.0:
+            raise ValueError('alpha must be between 0.0 and 1.0')
+
         # Run BM25 search
         bm25_results = self.bm25_search(query, documents, top_k=len(documents))
 
@@ -278,7 +285,7 @@ class HybridSearchEngine:
             vector_results,
             bm25_results,
             k=rrf_k,
-            weights=[self.alpha, 1.0 - self.alpha],
+            weights=[weight, 1.0 - weight],
         )
 
         return merged[:top_k]

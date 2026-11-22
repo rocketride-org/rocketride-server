@@ -22,17 +22,23 @@
 			"type": "string",
 			"title": "Bucket Name",
 			"description": "The Google Cloud Storage bucket name. Leave empty to let the agent name the bucket per call.",
+			"param": true,
+			"tool": false,
 			"default": ""
 		},
 		"gcs.prefix": {
 			"type": "string",
 			"title": "Path Prefix",
 			"description": "Optional path prefix inside the bucket.",
+			"param": true,
+			"tool": false,
 			"default": ""
 		},
 		"gcs.maxDownloadBytes": {
 			"type": "integer",
 			"title": "Max Download Bytes",
+			"param": true,
+			"tool": false,
 			"default": 52428800,
 			"minimum": 1,
 			"description": "Reject downloads larger than this many bytes (default 50 MiB). Protects server disk from oversized objects."

@@ -168,7 +168,9 @@
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names astra.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "astra",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -185,11 +187,11 @@
 			"enum": {
 				"cloud": {
 					"title": "Astra DB cloud server",
-					"properties": ["astra_db.api_endpoint", "astra_db.application_token", "vector.score", "vector.collection", "astra_db.serverName"]
+					"properties": ["astra_db.api_endpoint", "astra_db.application_token", { "base": "vector.score", "param": true }, { "base": "vector.collection", "param": true, "tool": false }, "astra_db.serverName"]
 				},
 				"local": {
 					"title": "Local test server",
-					"properties": ["astra_db.local.api_endpoint", "astra_db.local.application_token", "vector.score", "vector.collection", "astra_db.serverName"]
+					"properties": ["astra_db.local.api_endpoint", "astra_db.local.application_token", { "base": "vector.score", "param": true }, { "base": "vector.collection", "param": true, "tool": false }, "astra_db.serverName"]
 				}
 			}
 		}

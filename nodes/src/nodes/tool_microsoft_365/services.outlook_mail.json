@@ -22,6 +22,8 @@
 			"type": "string",
 			"title": "Access level",
 			"description": "Graph scopes to request. readonly: list, search, and read messages/folders/attachments only. send: readonly plus sending mail, replies, and forwards. modify: full read/write (default): drafts, moves, organizing, attachments, and permanent delete (when allowHardDelete is on), plus send.",
+			"param": true,
+			"tool": false,
 			"default": "modify",
 			"enum": [
 				["readonly", "Read-only"],
@@ -33,6 +35,8 @@
 			"type": "boolean",
 			"title": "Allow permanent delete",
 			"description": "Off by default. When off, delete moves messages to Deleted Items; permanent delete is refused. Turn on to allow permanent delete.",
+			"param": true,
+			"tool": false,
 			"default": false
 		}
 	},

@@ -25,6 +25,8 @@ exposes the model id, context limit and output limit (4,096 by default). The def
 model is **Llama 3.2 Vision 11B** (`llama3.2-vision:11b`) and the default server is
 `http://localhost:11434/v1`.
 
+The model settings (the selector, a custom model id and its token limits), the system prompt and the prompt are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which sends each request on the call's model with the call's output limit. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |

@@ -276,7 +276,7 @@ class _FakeEngine:
 
 
 def _config(**overrides):
-    """Build IGlobal settings with the node's defaults.
+    """Build one call's settings with the node's defaults.
 
     Args:
         **overrides: Settings to change.
@@ -304,13 +304,15 @@ def build():
         Args:
             listeners: Output lanes the engine reports.
             results: JSON results the LLM returns, in order.
-            **config: IGlobal settings to change.
+            **config: Settings of the call to change.
 
         Returns:
             (inst, engine).
         """
         inst = _load_iinstance_class()()
-        inst.IGlobal = _config(**config)
+        inst.IGlobal = types.SimpleNamespace()
+        # The four counts are this call's settings (the stub base has no settings door)
+        inst.settings = _config(**config)
         inst.instance = _FakeEngine(listeners, results)
         inst.beginInstance()
         inst.open(None)
@@ -461,6 +463,22 @@ def test_closing_leaves_out_disabled_sections(build, splitter):
     assert 'Key Points' not in text
     assert 'Entities' not in text
     assert engine.asked[0].instructions == ['Summary', 'Important Guidelines', 'Result Example']
+
+
+def test_closing_leaves_out_disabled_sections_on_the_documents_lane(build, splitter):
+    """A call that sets key points to 0 gets no key-points document, even when the LLM returns some.
+
+    Args:
+        build: Instance factory fixture.
+        splitter: Fixture that installs the fake text splitter.
+    """
+    inst, engine = build(listeners=['documents'], results=[_RESULT], numberOfKeyPointWords=0)
+    _write(inst.writeText, 'the whole document')
+
+    inst.closing()
+
+    contents = [doc.page_content for doc in engine.documents]
+    assert contents == ['Summary:\nA short summary.\n', 'Entities:\n- Acme\n- Bob\n']
 
 
 def test_closing_writes_nothing_without_listeners(build, splitter):

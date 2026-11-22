@@ -23,6 +23,8 @@
 			"type": "string",
 			"title": "Server name",
 			"description": "Namespace prefix for tools: <serverName>.<toolName> (example: local.echo)",
+			"param": true,
+			"tool": false,
 			"default": "mcp",
 			"minLength": 1
 		},

@@ -153,7 +153,8 @@ def _instance(apikey='test-key', default_limit=10):
     inst = IInstance.__new__(IInstance)
     glob = Mock()
     glob.apikey = apikey
-    glob.default_limit = default_limit
+    # The default page size is this call's setting (the stubbed base has no settings door of its own)
+    inst.settings = types.SimpleNamespace(defaultLimit=default_limit)
     inst.IGlobal = glob
     return inst
 

@@ -42,7 +42,6 @@ class IGlobal(IGlobalBase):
     """
 
     client: AqlClient | None = None
-    db_description: str = ''
 
     def beginGlobal(self) -> None:
         """Initialize the Aparavi HTTP client from node configuration.
@@ -51,9 +50,6 @@ class IGlobal(IGlobalBase):
         (the schema marks it required).
         """
         cfg = self.config
-
-        # Store data description for LLM prompt injection
-        self.db_description = cfg.db_description
 
         # Create the HTTP client
         self.client = AqlClient(

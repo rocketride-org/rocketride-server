@@ -99,20 +99,19 @@ class FaceDetector:
     Attributes:
         profile (str): Selected profile key (currently always 'short').
         model_url (str): Resolved .task bundle URL.
-        threshold (float): Minimum detection confidence.
-        emit_landmarks (bool): Whether to include 6 keypoints per face.
+        threshold (float): Minimum detection confidence, bound into the MediaPipe
+            detector at construction (its weighted NMS runs over the candidates the
+            threshold admits, so it cannot be applied afterwards).
     """
 
-    def __init__(self, threshold: float, emit_landmarks: bool):
+    def __init__(self, threshold: float):
         """
         Args:
             threshold: Minimum detection confidence, already bounded to 0..1 by the schema.
-            emit_landmarks: Include the 6 coarse keypoints per face.
         """
         self.profile = 'short'
         self.model_url = MODEL_URLS['short']
         self.threshold = float(threshold)
-        self.emit_landmarks = bool(emit_landmarks)
 
         self.model_name = f'blazeface-{self.profile}'
         self._detector = self._build_detector()
@@ -203,12 +202,13 @@ class FaceDetector:
     # Inference
     # -------------------------------------------------------------------------
 
-    def detect(self, image: Any) -> List[Dict[str, Any]]:
+    def detect(self, image: Any, emit_landmarks: bool) -> List[Dict[str, Any]]:
         """
         Run face detection on a PIL Image.
 
         Args:
             image: PIL Image (RGB).
+            emit_landmarks: Include the 6 coarse keypoints per face (this call's setting).
 
         Returns:
             List of dicts of the form::
@@ -236,7 +236,7 @@ class FaceDetector:
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
         result = self._detector.detect(mp_image)
-        faces = self._format(result, small.width, small.height)
+        faces = self._format(result, small.width, small.height, emit_landmarks)
         return self._rescale_to_original(faces, small.size, orig_w, orig_h)
 
     @staticmethod
@@ -272,8 +272,19 @@ class FaceDetector:
                 scale_point(kp, fx, fy)
         return faces
 
-    def _format(self, result: Any, img_w: int, img_h: int) -> List[Dict[str, Any]]:
-        """Convert a MediaPipe FaceDetectorResult to canonical dicts."""
+    def _format(self, result: Any, img_w: int, img_h: int, emit_landmarks: bool) -> List[Dict[str, Any]]:
+        """
+        Convert a MediaPipe FaceDetectorResult to canonical dicts.
+
+        Args:
+            result: The MediaPipe result.
+            img_w: Width of the image the detector ran on.
+            img_h: Height of the image the detector ran on.
+            emit_landmarks: Include the 6 coarse keypoints per face.
+
+        Returns:
+            One canonical dict per detected face.
+        """
         out: List[Dict[str, Any]] = []
         detections = getattr(result, 'detections', None) or []
 
@@ -296,7 +307,7 @@ class FaceDetector:
                 'centroid': {'x': (x1 + x2) / 2.0, 'y': (y1 + y2) / 2.0},
             }
 
-            if self.emit_landmarks:
+            if emit_landmarks:
                 kps = getattr(det, 'keypoints', None) or []
                 landmarks: List[Dict[str, Any]] = []
                 for idx, kp in enumerate(kps):

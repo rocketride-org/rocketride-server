@@ -88,6 +88,7 @@
 			"type": "number",
 			"title": "Alpha (vector weight)",
 			"description": "Weight for vector scores (0.0 = BM25 only, 1.0 = vector only, 0.5 = balanced)",
+			"param": true,
 			"default": 0.5,
 			"minimum": 0.0,
 			"maximum": 1.0
@@ -104,6 +105,7 @@
 			"type": "integer",
 			"title": "Top K results",
 			"description": "Maximum number of results to return after hybrid ranking",
+			"param": true,
 			"default": 10,
 			"minimum": 1
 		},
@@ -111,6 +113,7 @@
 			"type": "integer",
 			"title": "RRF constant (k)",
 			"description": "Reciprocal Rank Fusion constant. Higher values reduce impact of top rankings",
+			"param": true,
 			"default": 60,
 			"minimum": 0
 		}
@@ -125,6 +128,7 @@
 			"title": "Search mode",
 			"description": "Select the balance between vector and keyword search",
 			"type": "string",
+			"param": true,
 			"default": "balanced",
 			"enum": {
 				"balanced": {

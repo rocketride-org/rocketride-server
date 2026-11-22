@@ -22,6 +22,14 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Instance handler for the Caption node.
+
+The caption granularity is this call's (``self.settings.task``): one control,
+whose IGlobal holds the loaded model, serves calls asking for short and
+detailed captions alike.
+"""
+
 from rocketlib import IInstanceBase, AVI_ACTION, warning
 from ai.common.image import ImageProcessor
 from .IGlobal import IGlobal
@@ -49,11 +57,11 @@ class IInstance(IInstanceBase):
         """Caption one image and write the result to the text lane.
 
         Args:
-            image: Decoded input PIL image for this frame.
+            image: Decoded input PIL image for this frame (captioned at this call's granularity, ``settings.task``).
         """
         if self.instance.hasListener('text'):
             with self.IGlobal.device_lock:
-                caption_text = self.IGlobal.captioner.caption(image)
+                caption_text = self.IGlobal.captioner.caption(image, task=self.settings.task)
             self.instance.writeText(caption_text)
 
     def writeImage(self, action: int, mimeType: str, buffer: bytes):

@@ -31,7 +31,10 @@ own ``IValidator.py``, sets ``SERVICE`` and ``SPEC_NAME``, and inherits the
 whole check. The engine imports only this module in CONFIG mode, so it stays
 import-light: the schema check is the resolver (``self.config``), the
 semantic check decodes the user token and compares its scopes with the
-selected access tier, or confirms a service account key is present.
+selected access tier, or confirms a service account key is present. The
+tier and the gate flags are parameters, which ``self.config`` refuses, so
+the check reads the stored values (the defaults a call starts from) from
+the full resolved view.
 """
 
 from __future__ import annotations
@@ -57,9 +60,11 @@ class GoogleToolValidatorBase(IValidatorBase):
         Raises:
             ConfigError: The stored configuration does not fit the schema.
         """
-        cfg = self.config
+        self.config
         if syntaxOnly:
             return
+        # The stored tier and flags are params: the full view serves them
+        cfg = self._resolved()
 
         product = self.SERVICE.product
         try:

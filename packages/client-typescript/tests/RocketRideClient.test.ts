@@ -2274,6 +2274,49 @@ describe('RocketRideClient sendFiles concurrency', () => {
 	});
 });
 
+describe('RocketRideClient SSE dispatch', () => {
+	/** An apaevt_sse event as the server delivers it. */
+	const sse = (pipeId: number, traceId: string, type: string): DAPMessage => ({
+		type: 'event',
+		seq: 1,
+		event: 'apaevt_sse',
+		body: { pipeId, traceId, type, data: {} },
+	});
+
+	it('routes by traceId, so a late event of a closed pipe never reaches the next pipe on its slot', async () => {
+		const client = new RocketRideClient({ auth: 'test-key', uri: 'http://localhost:5565' });
+		// open A, close A, then open B on the SAME slot 7 (the engine reuses it)
+		const bodies: Record<string, unknown>[] = [{ pipeId: 7, traceId: 'n.e.1' }, {}, { pipeId: 7, traceId: 'n.e.2' }];
+		jest.spyOn(client, 'request').mockImplementation(async () => ({ type: 'response', seq: 0, success: true, body: bodies.shift() }));
+		const setEvents = jest.spyOn(client, 'setEvents').mockImplementation(async () => undefined);
+		const seen: string[] = [];
+
+		const first = await client.pipe('=control/1234abcd', {}, 'text/plain', undefined, async (type) => {
+			seen.push(`first:${type}`);
+		});
+		await first.open();
+		await first.close();
+		const second = await client.pipe('=control/1234abcd', {}, 'text/plain', undefined, async (type) => {
+			seen.push(`second:${type}`);
+		});
+		await second.open();
+
+		// The closed request's event arrives late, on the slot the new pipe now holds
+		await client.onEvent(sse(7, 'n.e.1', 'late'));
+		await client.onEvent(sse(7, 'n.e.2', 'chunk'));
+
+		expect(seen).toEqual(['second:chunk']);
+		expect(Array.from(client._ssePipeCallbacks.keys())).toEqual([7]);
+		expect(Array.from(client._sseTraceCallbacks.keys())).toEqual(['n.e.2']);
+		// The server still narrows each subscription by slot
+		expect(setEvents.mock.calls).toEqual([
+			['=control/1234abcd', ['SSE'], 7],
+			['=control/1234abcd', [], 7],
+			['=control/1234abcd', ['SSE'], 7],
+		]);
+	});
+});
+
 export async function isServerAvailable(): Promise<boolean> {
 	const client = new RocketRideClient({
 		auth: TEST_CONFIG.auth,
@@ -3162,7 +3205,7 @@ describe('RocketRideClient lifecycle operations', () => {
 		let sseStarted = false;
 		const onEvent = jest.fn(async (_message: DAPMessage) => undefined);
 		const client = makeClient({ onEvent });
-		client._ssePipeCallbacks.set(7, async () => {
+		client._sseTraceCallbacks.set('n.e.7', async () => {
 			sseStarted = true;
 			await sseGate;
 		});
@@ -3182,7 +3225,7 @@ describe('RocketRideClient lifecycle operations', () => {
 				type: 'event',
 				seq: 81,
 				event: 'apaevt_sse',
-				body: { pipeId: 7, type: 'chunk', data: { value: 'old' } },
+				body: { pipeId: 7, traceId: 'n.e.7', type: 'chunk', data: { value: 'old' } },
 			}),
 		} as MessageEvent);
 		await waitForLifecycle(() => sseStarted, 'held old SSE callback');

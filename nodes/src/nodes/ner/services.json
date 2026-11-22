@@ -46,6 +46,7 @@
 			"enum": ["none", "simple", "first", "average", "max"]
 		},
 		"ner.min_confidence": {
+			"param": true,
 			"type": "number",
 			"title": "Minimum confidence threshold",
 			"description": "Minimum confidence score (0.0-1.0) for entity detection",
@@ -55,6 +56,8 @@
 		},
 		"ner.biomedical.min_confidence": { "base": "ner.min_confidence", "default": 0.85 },
 		"ner.store_in_metadata": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Store entities in document metadata",
 			"description": "Add extracted entities to document metadata fields",

@@ -197,7 +197,7 @@ class IInstance(MicrosoftToolInstanceBase):
                 # Graph's $search is a quoted KQL phrase; a literal double quote
                 # inside it must be backslash-escaped or it ends the phrase early.
                 params['$search'] = '"{}"'.format(query.replace('"', '\\"'))
-        data = request(self.IGlobal.auth, 'GET', f'{self._folder_path(folder)}/messages', params=params)
+        data = request(self._auth(), 'GET', f'{self._folder_path(folder)}/messages', params=params)
         return {'messages': [clean_message(m) for m in data.get('value') or []]}
 
     @tool_function(
@@ -214,7 +214,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """Get a single message with its full body. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_get_message')
-        data = request(self.IGlobal.auth, 'GET', self._msg(message_id))
+        data = request(self._auth(), 'GET', self._msg(message_id))
         return clean_message(data, full=True)
 
     # =======================================================================
@@ -242,10 +242,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_send_message(self, args: dict) -> dict:
         """Send an email immediately. Requires the send or modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        _require_send(self.IGlobal.access, 'outlook_mail_send_message')
+        _require_send(self._access(), 'outlook_mail_send_message')
         message = self._compose_message(args, 'outlook_mail_send_message')
         request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             f'{self._base()}/sendMail',
             json_body={'message': message, 'saveToSentItems': True},
@@ -267,10 +267,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_create_draft(self, args: dict) -> dict:
         """Create a draft message. Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_create_draft')
-        _require_modify(self.IGlobal.access, 'outlook_mail_create_draft')
+        self._access().require_write('outlook_mail_create_draft')
+        _require_modify(self._access(), 'outlook_mail_create_draft')
         message = self._compose_message(args, 'outlook_mail_create_draft')
-        data = request(self.IGlobal.auth, 'POST', f'{self._base()}/messages', json_body=message)
+        data = request(self._auth(), 'POST', f'{self._base()}/messages', json_body=message)
         return clean_message(data)
 
     @tool_function(
@@ -287,10 +287,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_reply(self, args: dict) -> dict:
         """Reply to a message's sender only. Requires the send or modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        _require_send(self.IGlobal.access, 'outlook_mail_reply')
+        _require_send(self._access(), 'outlook_mail_reply')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_reply')
         comment = optional_str(args, 'comment', default='', tool_name='outlook_mail_reply') or ''
-        request(self.IGlobal.auth, 'POST', f'{self._msg(message_id)}/reply', json_body={'comment': comment})
+        request(self._auth(), 'POST', f'{self._msg(message_id)}/reply', json_body={'comment': comment})
         return {'replied': message_id}
 
     @tool_function(
@@ -307,10 +307,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_reply_all(self, args: dict) -> dict:
         """Reply to all recipients of a message. Requires the send or modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        _require_send(self.IGlobal.access, 'outlook_mail_reply_all')
+        _require_send(self._access(), 'outlook_mail_reply_all')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_reply_all')
         comment = optional_str(args, 'comment', default='', tool_name='outlook_mail_reply_all') or ''
-        request(self.IGlobal.auth, 'POST', f'{self._msg(message_id)}/replyAll', json_body={'comment': comment})
+        request(self._auth(), 'POST', f'{self._msg(message_id)}/replyAll', json_body={'comment': comment})
         return {'repliedAll': message_id}
 
     @tool_function(
@@ -328,12 +328,12 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_forward(self, args: dict) -> dict:
         """Forward a message to new recipients. Requires the send or modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        _require_send(self.IGlobal.access, 'outlook_mail_forward')
+        _require_send(self._access(), 'outlook_mail_forward')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_forward')
         to = require_str_list(args, 'to', tool_name='outlook_mail_forward')
         comment = optional_str(args, 'comment', default='', tool_name='outlook_mail_forward') or ''
         request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             f'{self._msg(message_id)}/forward',
             json_body={'comment': comment, 'toRecipients': recipients(to)},
@@ -361,11 +361,11 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_move_message(self, args: dict) -> dict:
         """Move a message to another mail folder. Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_move_message')
-        _require_modify(self.IGlobal.access, 'outlook_mail_move_message')
+        self._access().require_write('outlook_mail_move_message')
+        _require_modify(self._access(), 'outlook_mail_move_message')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_move_message')
         folder = require_str(args, 'folder', tool_name='outlook_mail_move_message')
-        data = request(self.IGlobal.auth, 'POST', f'{self._msg(message_id)}/move', json_body={'destinationId': folder})
+        data = request(self._auth(), 'POST', f'{self._msg(message_id)}/move', json_body={'destinationId': folder})
         return clean_message(data)
 
     @tool_function(
@@ -382,11 +382,11 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_set_read(self, args: dict) -> dict:
         """Mark a message read or unread. Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_set_read')
-        _require_modify(self.IGlobal.access, 'outlook_mail_set_read')
+        self._access().require_write('outlook_mail_set_read')
+        _require_modify(self._access(), 'outlook_mail_set_read')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_set_read')
         read = optional_bool(args, 'read', default=True, tool_name='outlook_mail_set_read')
-        data = request(self.IGlobal.auth, 'PATCH', self._msg(message_id), json_body={'isRead': bool(read)})
+        data = request(self._auth(), 'PATCH', self._msg(message_id), json_body={'isRead': bool(read)})
         return clean_message(data)
 
     @tool_function(
@@ -407,13 +407,13 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_set_categories(self, args: dict) -> dict:
         """Set (replace) the category labels on a message. Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_set_categories')
-        _require_modify(self.IGlobal.access, 'outlook_mail_set_categories')
+        self._access().require_write('outlook_mail_set_categories')
+        _require_modify(self._access(), 'outlook_mail_set_categories')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_set_categories')
         categories = args.get('categories')
         if not isinstance(categories, list) or not all(isinstance(c, str) for c in categories):
             raise ValueError('outlook_mail_set_categories: "categories" must be a list of strings')
-        data = request(self.IGlobal.auth, 'PATCH', self._msg(message_id), json_body={'categories': categories})
+        data = request(self._auth(), 'PATCH', self._msg(message_id), json_body={'categories': categories})
         return clean_message(data)
 
     # =======================================================================
@@ -436,10 +436,10 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_delete_message(self, args: dict) -> dict:
         """Move a message to Deleted Items (recoverable). Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_delete_message')
-        _require_modify(self.IGlobal.access, 'outlook_mail_delete_message')
+        self._access().require_write('outlook_mail_delete_message')
+        _require_modify(self._access(), 'outlook_mail_delete_message')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_delete_message')
-        request(self.IGlobal.auth, 'POST', f'{self._msg(message_id)}/move', json_body={'destinationId': 'deleteditems'})
+        request(self._auth(), 'POST', f'{self._msg(message_id)}/move', json_body={'destinationId': 'deleteditems'})
         return {'deleted': message_id, 'permanently': False}
 
     @tool_function(
@@ -458,11 +458,11 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_permanently_delete(self, args: dict) -> dict:
         """Permanently delete a message, bypassing Deleted Items. Requires modify + allowHardDelete."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_permanently_delete')
-        _require_modify(self.IGlobal.access, 'outlook_mail_permanently_delete')
+        self._access().require_write('outlook_mail_permanently_delete')
+        _require_modify(self._access(), 'outlook_mail_permanently_delete')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_permanently_delete')
-        self.IGlobal.access.require_flag('allowHardDelete', 'outlook_mail_permanently_delete')
-        request(self.IGlobal.auth, 'DELETE', self._msg(message_id))
+        self._access().require_flag('allowHardDelete', 'outlook_mail_permanently_delete')
+        request(self._auth(), 'DELETE', self._msg(message_id))
         return {'permanentlyDeleted': message_id}
 
     # =======================================================================
@@ -476,7 +476,7 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_list_folders(self, args: dict) -> dict:
         """List the top-level mail folders in the mailbox. Read-only."""
         normalize_tool_input(args, tool_name='tool_outlook_mail')
-        data = request(self.IGlobal.auth, 'GET', f'{self._base()}/mailFolders', params={'$top': 100})
+        data = request(self._auth(), 'GET', f'{self._base()}/mailFolders', params={'$top': 100})
         return {'folders': [clean_folder(f) for f in data.get('value') or []]}
 
     @tool_function(
@@ -496,12 +496,12 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_create_folder(self, args: dict) -> dict:
         """Create a new mail folder, optionally nested inside a parent. Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_create_folder')
-        _require_modify(self.IGlobal.access, 'outlook_mail_create_folder')
+        self._access().require_write('outlook_mail_create_folder')
+        _require_modify(self._access(), 'outlook_mail_create_folder')
         name = require_str(args, 'name', tool_name='outlook_mail_create_folder')
         parent = optional_str(args, 'parent', default='', tool_name='outlook_mail_create_folder') or ''
         path = f'{self._folder_path(parent)}/childFolders' if parent else f'{self._base()}/mailFolders'
-        data = request(self.IGlobal.auth, 'POST', path, json_body={'displayName': name})
+        data = request(self._auth(), 'POST', path, json_body={'displayName': name})
         return clean_folder(data)
 
     # =======================================================================
@@ -523,7 +523,7 @@ class IInstance(MicrosoftToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_list_attachments')
         data = request(
-            self.IGlobal.auth, 'GET', f'{self._msg(message_id)}/attachments', params={'$select': ATTACHMENT_SELECT}
+            self._auth(), 'GET', f'{self._msg(message_id)}/attachments', params={'$select': ATTACHMENT_SELECT}
         )
         return {'attachments': [clean_attachment_meta(a) for a in data.get('value') or []]}
 
@@ -546,7 +546,7 @@ class IInstance(MicrosoftToolInstanceBase):
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_get_attachment')
         attachment_id = require_str(args, 'attachment_id', tool_name='outlook_mail_get_attachment')
-        data = request(self.IGlobal.auth, 'GET', f'{self._msg(message_id)}/attachments/{_seg(attachment_id)}')
+        data = request(self._auth(), 'GET', f'{self._msg(message_id)}/attachments/{_seg(attachment_id)}')
         return {
             'name': data.get('name'),
             'contentType': data.get('contentType'),
@@ -571,8 +571,8 @@ class IInstance(MicrosoftToolInstanceBase):
     def outlook_mail_add_attachment(self, args: dict) -> dict:
         """Add a file attachment to a draft message. Requires the modify tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_mail')
-        self.IGlobal.access.require_write('outlook_mail_add_attachment')
-        _require_modify(self.IGlobal.access, 'outlook_mail_add_attachment')
+        self._access().require_write('outlook_mail_add_attachment')
+        _require_modify(self._access(), 'outlook_mail_add_attachment')
         message_id = require_str(args, 'message_id', tool_name='outlook_mail_add_attachment')
         name = require_str(args, 'name', tool_name='outlook_mail_add_attachment')
         content_b64 = require_str(args, 'content_base64', tool_name='outlook_mail_add_attachment')
@@ -587,7 +587,7 @@ class IInstance(MicrosoftToolInstanceBase):
                 'a Graph upload session, which this tool does not support — attach a smaller file.'
             )
         data = request(
-            self.IGlobal.auth,
+            self._auth(),
             'POST',
             f'{self._msg(message_id)}/attachments',
             json_body={'@odata.type': '#microsoft.graph.fileAttachment', 'name': name, 'contentBytes': content_b64},

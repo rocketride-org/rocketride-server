@@ -602,18 +602,15 @@ def test_engine_modules_import_and_register_tools():
 
 
 def test_iglobal_defaults_match_services_profile():
-    g = _gmod.IGlobal
-    assert g.base_url == 'https://app.guild.ai'
-    assert g.timeout == 300
-    assert g.max_sessions == 10
-    assert g.result_mode == 'wait'
+    assert _gmod.IGlobal.base_url == 'https://app.guild.ai'
+    # The per-call knobs default from the schema, on the call's settings
+    settings = _run_begin_global(_FULL_CONFIG).config.overlay(None)
+    assert (settings.timeout, settings.maxSessions, settings.resultMode) == (300, 10, 'wait')
 
 
 def _make_global(**over):
-    """An IGlobal instance with the config values the instances read, bypassing beginGlobal."""
-    g = _gmod.IGlobal()
-    g.max_sessions = over.get('max_sessions', 10)
-    return g
+    """An IGlobal instance with the endpoint and key the instances read, bypassing beginGlobal."""
+    return _gmod.IGlobal()
 
 
 def test_the_session_budget_is_the_requests(monkeypatch):
@@ -668,11 +665,15 @@ def _make_instance(monkeypatch, gclient, **global_over):
     g.key_secret = 'ksec'
     g.owner = 'acme'
     g.workspace = 'ws'
-    g.default_agent = global_over.get('default_agent', 'hello-agent')
-    g.result_mode = 'wait'
-    g.timeout = 300
-    g.verify_tls = True
     inst.IGlobal = g
+    # The agent, result mode, timeout, budget and TLS switch are this call's settings
+    inst.settings = types.SimpleNamespace(
+        agent=global_over.get('default_agent', 'hello-agent'),
+        resultMode='wait',
+        timeout=300,
+        maxSessions=global_over.get('max_sessions', 10),
+        verifyTls=True,
+    )
     inst._text_parts = []
     inst._documents = []
     # Swap the module-level guild_client the instance calls into; monkeypatch
@@ -984,7 +985,8 @@ def test_begin_global_reads_config():
         }
     )
     assert g.base_url == 'https://self.example.com'  # trailing slash stripped
-    assert (g.key_id, g.key_secret, g.owner, g.workspace, g.default_agent) == ('kid', 'ksec', 'acme', 'ws', 'bot')
+    assert (g.key_id, g.key_secret, g.owner, g.workspace) == ('kid', 'ksec', 'acme', 'ws')
+    assert g.config.overlay(None).agent == 'bot'  # the call's default agent
 
 
 def test_begin_global_has_no_process_env_fallback(monkeypatch):
@@ -1003,11 +1005,9 @@ def test_begin_global_has_no_process_env_fallback(monkeypatch):
 
 
 def test_begin_global_unset_numerics_mean_the_defaults():
-    g = _run_begin_global({**_FULL_CONFIG, 'agent': 'b'})
-    assert g.timeout == _gmod.DEFAULT_TIMEOUT
-    assert g.max_sessions == _gmod.DEFAULT_MAX_SESSIONS
-    assert g.result_mode == 'wait'
-    assert g.verify_tls is True
+    settings = _run_begin_global({**_FULL_CONFIG, 'agent': 'b'}).config.overlay(None)
+    assert (settings.timeout, settings.maxSessions, settings.resultMode) == (300, 10, 'wait')
+    assert settings.verifyTls is True
 
 
 @pytest.mark.parametrize(
@@ -1023,7 +1023,8 @@ def test_begin_global_rejects_values_outside_the_schema(key, value):
 
 
 def test_begin_global_reads_start_mode():
-    assert _run_begin_global({**_FULL_CONFIG, 'resultMode': 'start', 'agent': 'b'}).result_mode == 'start'
+    g = _run_begin_global({**_FULL_CONFIG, 'resultMode': 'start', 'agent': 'b'})
+    assert g.config.overlay(None).resultMode == 'start'
 
 
 @pytest.mark.parametrize('field', ['owner', 'workspace'])
@@ -1051,7 +1052,7 @@ def test_begin_global_requires_both_key_halves_owner_and_workspace():
 
 def test_run_agent_tool_resolves_wait_from_result_mode(monkeypatch):
     client = _StubClient()
-    inst = _make_instance(monkeypatch, client)  # result_mode='wait'
+    inst = _make_instance(monkeypatch, client)  # the call's resultMode is 'wait'
     out = inst.run_agent({'input': 'hi'})  # no 'wait' arg -> resolves to wait
     assert out['output'] == 'RR_MARKER ok'
     assert 'wait_for_session' in client.calls
@@ -1060,7 +1061,7 @@ def test_run_agent_tool_resolves_wait_from_result_mode(monkeypatch):
 def test_run_agent_tool_start_mode_does_not_wait(monkeypatch):
     client = _StubClient()
     inst = _make_instance(monkeypatch, client)
-    inst.IGlobal.result_mode = 'start'
+    inst.settings.resultMode = 'start'  # this call starts and returns
     out = inst.run_agent({'input': 'hi'})  # no 'wait' arg -> resolves to start
     assert out['status'] == client.RUNNING
     assert out['output'] is None

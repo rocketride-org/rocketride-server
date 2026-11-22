@@ -35,8 +35,6 @@ from __future__ import annotations
 from rocketlib import IGlobalBase
 
 DEFAULT_BASE_URL = 'https://app.guild.ai'
-DEFAULT_TIMEOUT = 300
-DEFAULT_MAX_SESSIONS = 10
 
 
 class IGlobal(IGlobalBase):
@@ -47,15 +45,11 @@ class IGlobal(IGlobalBase):
     key_secret: str = ''
     owner: str = ''
     workspace: str = ''
-    default_agent: str = ''
-    result_mode: str = 'wait'
-    timeout: int = DEFAULT_TIMEOUT
-    max_sessions: int = DEFAULT_MAX_SESSIONS
-    verify_tls: bool = True
 
     def beginGlobal(self) -> None:
         # The resolved config: the key halves, owner and workspace required by the
-        # schema, the integers within their ranges, no process-env fallback (the
+        # schema (agent, resultMode, timeout, maxSessions and verifyTls are per call),
+        # no process-env fallback (the
         # credentials arrive as ${ROCKETRIDE_GUILD_*} references resolved per call)
         cfg = self.config
 
@@ -76,12 +70,6 @@ class IGlobal(IGlobalBase):
         self.workspace = cfg.workspace.strip()
         if not self.workspace:
             raise ValueError('tool_guild: workspace must not be blank')
-        self.default_agent = str(cfg.agent or '').strip()
-
-        self.result_mode = cfg.resultMode
-        self.timeout = cfg.timeout
-        self.max_sessions = cfg.maxSessions
-        self.verify_tls = cfg.verifyTls
 
         # Guild bills per automation (100/month on the free tier), so the node
         # caps how many sessions one REQUEST may start (the instance keeps the

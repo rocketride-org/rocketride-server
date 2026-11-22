@@ -33,12 +33,19 @@ and inherits the whole beginGlobal / endGlobal lifecycle. Save-time
 validation lives in the sibling ``IValidator`` modules. Service-specific
 post-build state (e.g. drive's account-domain resolution) hooks in via
 :meth:`_after_begin`.
+
+The credential (``authType`` and its branch) is the control's. The access
+tier and the gate flags are per-call parameters: a service-account token is
+minted per scope set, so the control keeps one discovery service per tier,
+built on the first call that asks for it. The spec bounds the cache (two
+tiers for most services, six for Gmail).
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Mapping
+import threading
+from typing import Any, Dict, Mapping
 
 from rocketlib import IGlobalBase
 
@@ -46,13 +53,12 @@ from .google_client import GoogleService, access_spec, build_service
 
 
 class GoogleToolGlobalBase(IGlobalBase):
-    """Resolved access + built discovery service for one Workspace service."""
+    """The control's credential and one discovery service per access tier a call has used."""
 
     SERVICE: GoogleService  # set by each service subclass
     SPEC_NAME: str = ''  # AccessSpec attribute name in nodes.core.google_access
 
-    service: Any = None
-    access: Any = None
+    spec: Any = None
 
     def _after_begin(self, cfg: Mapping) -> None:
         """Hook for service-specific post-build state (default: none)."""
@@ -63,16 +69,30 @@ class GoogleToolGlobalBase(IGlobalBase):
         # The shared requirements.txt lives at the tool_google_workspace/ level.
         depends(os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt')
 
-        from nodes.core.google_access import resolve_google_access
+        # The service's tiers; the services themselves are built per tier on first use
+        self.spec = access_spec(self.SPEC_NAME)
+        self._services: Dict[str, Any] = {}
+        self._services_lock = threading.Lock()
+        self._after_begin(self.config)
 
-        # The resolved view holds the active authType branch flattened beside the
-        # gate flags (allowDelete, allowPublicSharing, allowHardDelete), which
-        # _resolve_flags reads next to 'access'.
-        cfg = self.config
-        self.access = resolve_google_access(cfg, access_spec(self.SPEC_NAME))
-        self.service = build_service(self.SERVICE, cfg['authType'], cfg, self.access.scopes)
-        self._after_begin(cfg)
+    def service_for(self, tier: str) -> Any:
+        """
+        The discovery service scoped to one access tier, built on first use.
+
+        Args:
+            tier: A tier of this service's AccessSpec (the call's resolved ``access``).
+
+        Returns:
+            The service whose credential carries that tier's scopes.
+        """
+        with self._services_lock:
+            service = self._services.get(tier)
+            if service is None:
+                cfg = self.config
+                service = build_service(self.SERVICE, cfg['authType'], cfg, self.spec.scopes[tier])
+                self._services[tier] = service
+            return service
 
     def endGlobal(self) -> None:
-        self.service = None
-        self.access = None
+        self._services = {}
+        self.spec = None

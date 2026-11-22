@@ -56,6 +56,7 @@ import types
 from pathlib import Path
 
 import pytest
+import rocketlib as _real_rocketlib
 
 _REPO = Path(__file__).resolve().parents[2]
 _AI_SRC = _REPO / 'packages' / 'ai' / 'src'
@@ -140,6 +141,15 @@ def _by_version(expected: dict):
     return expected[SERVER_AGE_VERSION]
 
 
+class _StubInstanceBase:
+    """Stand-in for IInstanceBase: ``settings`` is the call's view, which a test sets as ``_settings``."""
+
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them."""
+        return self._settings
+
+
 def _load_from_path(name: str, path: Path, *, is_package: bool = False):
     search = [str(path.parent)] if is_package else None
     spec = importlib.util.spec_from_file_location(name, path, submodule_search_locations=search)
@@ -187,8 +197,15 @@ def rr_env(_own_modules_isolated, monkeypatch):
     monkeypatch.setitem(sys.modules, 'depends', depends_mod)
 
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IGlobalBase = type('IGlobalBase', (), {})
-    rocketlib.IInstanceBase = type('IInstanceBase', (), {})
+    # The real base and service lookups: IGlobal.config and _resolved() resolve
+    # glb.connConfig through the engine's schema, and the graph base's
+    # converted/unconverted split reads the real definition.
+    rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
+    # IGlobal imports the save-time probe from IValidator, which subclasses this
+    rocketlib.IValidatorBase = _real_rocketlib.IValidatorBase
+    rocketlib.getServiceDefinition = _real_rocketlib.getServiceDefinition
+    rocketlib.getServiceSchema = _real_rocketlib.getServiceSchema
+    rocketlib.IInstanceBase = _StubInstanceBase
     rocketlib.tool_function = lambda **kwargs: lambda f: f
     rocketlib.debug = lambda *a, **kw: None
     rocketlib.error = lambda *a, **kw: None
@@ -293,23 +310,27 @@ class TestLifecycle:
         glb = _begin(rr_env)
         try:
             assert glb.age_version == SERVER_AGE_VERSION
-            assert glb.graph_name == GRAPH
-            assert set(glb.graph_schema['nodes']) == {'Person', 'Company'}
-            props = dict(glb.graph_schema['nodes']['Person'])
+            schema = glb.schema_for(glb._resolved())
+            assert set(schema['nodes']) == {'Person', 'Company'}
+            props = dict(schema['nodes']['Person'])
             assert props.get('name') == 'str'
             assert props.get('age') == 'int'
-            rel_types = {r['type'] for r in glb.graph_schema['relationships']}
+            rel_types = {r['type'] for r in schema['relationships']}
             assert rel_types == {'KNOWS', 'WORKS_AT'}
-            knows = next(r for r in glb.graph_schema['relationships'] if r['type'] == 'KNOWS')
+            knows = next(r for r in schema['relationships'] if r['type'] == 'KNOWS')
             assert knows['start'] == 'Person' and knows['end'] == 'Person'
         finally:
             glb.endGlobal()
 
-    def test_missing_graph_fails_fast(self, rr_env, age_graph):
+    def test_missing_graph_fails_the_first_call_that_names_it(self, rr_env, age_graph):
         glb = rr_env.iglobal_cls()
         glb.glb = types.SimpleNamespace(logicalType='rocketride_graph', connConfig={'graph': 'rr_graph_missing'})
-        with pytest.raises(RuntimeError, match='does not exist'):
-            glb.beginGlobal()
+        glb.beginGlobal()
+        try:
+            with pytest.raises(RuntimeError, match='does not exist'):
+                glb.schema_for(glb._resolved())
+        finally:
+            glb.endGlobal()
 
 
 class TestSessionNeverIdleInTransaction:
@@ -327,11 +348,12 @@ class TestSessionNeverIdleInTransaction:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             assert self._state(age_graph, glb) == 'idle', 'after beginGlobal (connect + schema reflection)'
-            glb._run_query('MATCH (p:Person) RETURN p.name AS name')
+            glb._run_query('MATCH (p:Person) RETURN p.name AS name', settings=glb._resolved())
             assert self._state(age_graph, glb) == 'idle', 'after a read'
-            glb._validate_query('MATCH (p:Person) RETURN p.name AS name')
+            glb._validate_query('MATCH (p:Person) RETURN p.name AS name', settings=glb._resolved())
             assert self._state(age_graph, glb) == 'idle', 'after validate'
             inst.execute({'query': "CREATE (d:Person {name: 'erin'}) RETURN d.name AS name"})
             assert self._state(age_graph, glb) == 'idle', 'after a write'
@@ -347,7 +369,8 @@ class TestSafePath:
         glb = _begin(rr_env)
         try:
             rows = glb._run_query(
-                'MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a.name AS who, r.since AS since, b ORDER BY r.since'
+                'MATCH (a:Person)-[r:KNOWS]->(b:Person) RETURN a.name AS who, r.since AS since, b ORDER BY r.since',
+                settings=glb._resolved(),
             )
             assert [r['who'] for r in rows] == ['alice', 'bob']
             assert rows[0]['since'] == 2019
@@ -359,7 +382,11 @@ class TestSafePath:
     def test_params_round_trip(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            rows = glb._run_query('MATCH (p:Person) WHERE p.name = $who RETURN p.age AS age', params={'who': 'carol'})
+            rows = glb._run_query(
+                'MATCH (p:Person) WHERE p.name = $who RETURN p.age AS age',
+                params={'who': 'carol'},
+                settings=glb._resolved(),
+            )
             assert rows == [{'age': 41}]
         finally:
             glb.endGlobal()
@@ -367,7 +394,7 @@ class TestSafePath:
     def test_limit_contract_returns_at_most_limit_plus_one(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            rows = glb._run_query('MATCH (p:Person) RETURN p.name AS name', limit=1)
+            rows = glb._run_query('MATCH (p:Person) RETURN p.name AS name', limit=1, settings=glb._resolved())
             assert len(rows) == 2  # limit + 1 => the base detects truncation
         finally:
             glb.endGlobal()
@@ -397,7 +424,7 @@ class TestSafePath:
         glb = _begin(rr_env)
         try:
             with pytest.raises(Exception, match='write_clause'):
-                glb._run_query("CREATE (n:Person {name: 'evil'})")
+                glb._run_query("CREATE (n:Person {name: 'evil'})", settings=glb._resolved())
         finally:
             glb.endGlobal()
 
@@ -405,7 +432,7 @@ class TestSafePath:
         glb = _begin(rr_env)
         try:
             with pytest.raises(Exception, match='datetime'):
-                glb._run_query('MATCH (n) RETURN datetime()')
+                glb._run_query('MATCH (n) RETURN datetime()', settings=glb._resolved())
         finally:
             glb.endGlobal()
 
@@ -415,6 +442,7 @@ class TestExecutePath:
         glb = _begin(rr_env, {'allow_execute': False})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             with pytest.raises(ValueError, match='execute tool is disabled'):
                 inst.execute({'query': 'MATCH (n) RETURN n.name'})
@@ -425,10 +453,13 @@ class TestExecutePath:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             written = inst.execute({'query': "CREATE (d:Person {name: 'dave', age: 8}) RETURN d.name AS name"})
             assert written['rows'] == [{'name': 'dave'}]
-            back = glb._run_query('MATCH (p:Person) WHERE p.name = $n RETURN p.age AS age', params={'n': 'dave'})
+            back = glb._run_query(
+                'MATCH (p:Person) WHERE p.name = $n RETURN p.age AS age', params={'n': 'dave'}, settings=glb._resolved()
+            )
             assert back == [{'age': 8}]
         finally:
             glb.endGlobal()
@@ -437,6 +468,7 @@ class TestExecutePath:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             with pytest.raises(Exception, match='unbounded_var_length'):
                 inst.execute({'query': 'MATCH (a)-[*]->(b) RETURN a'})
@@ -453,6 +485,7 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             for _ in range(3):
                 with pytest.raises(Exception, match='division by zero'):
@@ -472,6 +505,7 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True, 'max_execute_rows': 3})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             with pytest.raises(ValueError, match='max_execute_rows=3'):
                 inst.execute(
@@ -480,7 +514,7 @@ class TestExecuteParams:
                         'params': {'rows': [{'id': i} for i in range(5)]},
                     }
                 )
-            assert glb._run_query('MATCH (i:Item) RETURN count(i) AS n') == [{'n': 0}]
+            assert glb._run_query('MATCH (i:Item) RETURN count(i) AS n', settings=glb._resolved()) == [{'n': 0}]
         finally:
             glb.endGlobal()
 
@@ -490,6 +524,7 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute(
                 {
@@ -498,7 +533,7 @@ class TestExecuteParams:
                 }
             )
             nodes = _by_version({'1.5.0': 3, '1.6.0': 2})
-            assert glb._run_query('MATCH (u:U) RETURN count(u) AS n') == [{'n': nodes}]
+            assert glb._run_query('MATCH (u:U) RETURN count(u) AS n', settings=glb._resolved()) == [{'n': nodes}]
         finally:
             glb.endGlobal()
 
@@ -508,11 +543,12 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute(
                 {'query': 'UNWIND $rows AS r CREATE (:Item {id: r.id, name: r.name})', 'params': {'rows': rows}}
             )
-            count = glb._run_query('MATCH (i:Item) RETURN count(i) AS n')
+            count = glb._run_query('MATCH (i:Item) RETURN count(i) AS n', settings=glb._resolved())
             assert count == [{'n': 20_000}]
         finally:
             glb.endGlobal()
@@ -522,10 +558,11 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             written = inst.execute({'query': 'CREATE (n:Note {text: $t}) RETURN n.text AS text', 'params': {'t': text}})
             assert written['rows'] == [{'text': text}]
-            back = glb._run_query('MATCH (n:Note) RETURN n.text AS text')
+            back = glb._run_query('MATCH (n:Note) RETURN n.text AS text', settings=glb._resolved())
             assert back == [{'text': text}]
         finally:
             glb.endGlobal()
@@ -535,6 +572,7 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             out = inst.execute(
                 {'sql': 'MATCH (p:Person) WHERE p.name = $who RETURN p.age AS age', 'params': {'who': 'carol'}}
@@ -547,6 +585,7 @@ class TestExecuteParams:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             with pytest.raises(Exception, match='max_params_bytes'):
                 inst.execute({'query': 'CREATE (n:Note {text: $t})', 'params': {'t': 'x' * (9 * 1024 * 1024)}})
@@ -673,6 +712,7 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             if RULES_VERSION == '1.6.0':
                 inst.execute({'query': query})
@@ -688,6 +728,7 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute(
                 {
@@ -695,7 +736,9 @@ class TestAgeDataGaps:
                     'MERGE (a)-[r:MENTORS]->(c) SET a.mentor = true'
                 }
             )
-            assert glb._run_query("MATCH (a:Person {name:'alice'}) RETURN a.mentor AS m") == [{'m': True}]
+            assert glb._run_query("MATCH (a:Person {name:'alice'}) RETURN a.mentor AS m", settings=glb._resolved()) == [
+                {'m': True}
+            ]
         finally:
             glb.endGlobal()
 
@@ -750,6 +793,7 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             if RULES_VERSION == '1.6.0':
                 inst.execute({'query': query})
@@ -780,6 +824,7 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             with pytest.raises(Exception, match='separate execute call'):
                 inst.execute({'query': query})
@@ -795,11 +840,12 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute(
                 {'query': 'UNWIND $rows AS row MERGE (n:U {id: row.id}) SET n.x = row.x', 'params': {'rows': rows}}
             )
-            stored = glb._run_query('MATCH (n:U) RETURN n.id AS id, n.x AS x ORDER BY n.id')
+            stored = glb._run_query('MATCH (n:U) RETURN n.id AS id, n.x AS x ORDER BY n.id', settings=glb._resolved())
             assert stored == rows
         finally:
             glb.endGlobal()
@@ -810,6 +856,7 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute({'query': 'UNWIND [{id: 1}, {id: 2}, {id: 3}] AS row MERGE (:U {id: row.id})'})
             inst.execute(
@@ -818,7 +865,7 @@ class TestAgeDataGaps:
                     'MATCH (n:U {id: row.id}) SET n.x = row.x'
                 }
             )
-            stored = glb._run_query('MATCH (n:U) RETURN n.id AS id, n.x AS x ORDER BY n.id')
+            stored = glb._run_query('MATCH (n:U) RETURN n.id AS id, n.x AS x ORDER BY n.id', settings=glb._resolved())
             assert stored == rows
         finally:
             glb.endGlobal()
@@ -827,9 +874,10 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute({'query': 'MERGE (n:U {id: 7}) SET n.x = 1'})
-            assert glb._run_query('MATCH (n:U {id: 7}) RETURN n.x AS x') == [{'x': 1}]
+            assert glb._run_query('MATCH (n:U {id: 7}) RETURN n.x AS x', settings=glb._resolved()) == [{'x': 1}]
         finally:
             glb.endGlobal()
 
@@ -837,6 +885,7 @@ class TestAgeDataGaps:
         glb = _begin(rr_env, {'allow_execute': True})
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             inst.execute(
                 {
@@ -844,7 +893,7 @@ class TestAgeDataGaps:
                     'MERGE (a)-[r:MENTORS {since: 2024}]->(c)'
                 }
             )
-            rows = glb._run_query('MATCH ()-[r:MENTORS]->() RETURN r.since AS since')
+            rows = glb._run_query('MATCH ()-[r:MENTORS]->() RETURN r.since AS since', settings=glb._resolved())
             assert rows == [{'since': 2024}]
         finally:
             glb.endGlobal()
@@ -863,7 +912,9 @@ class TestAgeDataGaps:
     def test_empty_list_in_returns_correct_rows(self, rr_env, age_graph, where, expected):
         glb = _begin(rr_env)
         try:
-            rows = glb._run_query(f'MATCH (p:Person) WHERE {where} RETURN p.name AS name ORDER BY p.name')
+            rows = glb._run_query(
+                f'MATCH (p:Person) WHERE {where} RETURN p.name AS name ORDER BY p.name', settings=glb._resolved()
+            )
             assert [r['name'] for r in rows] == expected
         finally:
             glb.endGlobal()
@@ -872,7 +923,11 @@ class TestAgeDataGaps:
         # '$who IN []' is rewritten to 'false'; the supplied $who is still bound.
         glb = _begin(rr_env)
         try:
-            rows = glb._run_query('MATCH (p:Person) WHERE $who IN [] RETURN p.name AS name', params={'who': 'bob'})
+            rows = glb._run_query(
+                'MATCH (p:Person) WHERE $who IN [] RETURN p.name AS name',
+                params={'who': 'bob'},
+                settings=glb._resolved(),
+            )
             assert rows == []
         finally:
             glb.endGlobal()
@@ -880,7 +935,7 @@ class TestAgeDataGaps:
     def test_empty_list_in_projection(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            assert glb._run_query('RETURN 1 IN [] AS hit') == [{'hit': False}]
+            assert glb._run_query('RETURN 1 IN [] AS hit', settings=glb._resolved()) == [{'hit': False}]
         finally:
             glb.endGlobal()
 
@@ -889,7 +944,7 @@ class TestValidateQuery:
     def test_valid_query_passes(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            ok, err = glb._validate_query('MATCH (p:Person) RETURN p.name')
+            ok, err = glb._validate_query('MATCH (p:Person) RETURN p.name', settings=glb._resolved())
             assert ok, err
         finally:
             glb.endGlobal()
@@ -897,7 +952,7 @@ class TestValidateQuery:
     def test_syntax_error_reported_for_repair_loop(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            ok, err = glb._validate_query('MATCHX (p RETURN p')
+            ok, err = glb._validate_query('MATCHX (p RETURN p', settings=glb._resolved())
             assert not ok
             assert 'syntax error' in err
         finally:
@@ -906,7 +961,7 @@ class TestValidateQuery:
     def test_firewall_rejection_reported(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            ok, err = glb._validate_query('MATCH (a)-[*]->(b) RETURN a')
+            ok, err = glb._validate_query('MATCH (a)-[*]->(b) RETURN a', settings=glb._resolved())
             assert not ok
             assert 'unbounded_var_length' in err
         finally:
@@ -915,11 +970,11 @@ class TestValidateQuery:
     def test_validate_does_not_execute(self, rr_env, age_graph):
         glb = _begin(rr_env)
         try:
-            before = glb._run_query('MATCH (p:Person) RETURN count(p) AS n')[0]['n']
+            before = glb._run_query('MATCH (p:Person) RETURN count(p) AS n', settings=glb._resolved())[0]['n']
             # EXPLAIN of a read; graph must be unchanged afterwards.
-            ok, _ = glb._validate_query('MATCH (p:Person) RETURN p.name')
+            ok, _ = glb._validate_query('MATCH (p:Person) RETURN p.name', settings=glb._resolved())
             assert ok
-            after = glb._run_query('MATCH (p:Person) RETURN count(p) AS n')[0]['n']
+            after = glb._run_query('MATCH (p:Person) RETURN count(p) AS n', settings=glb._resolved())[0]['n']
             assert before == after
         finally:
             glb.endGlobal()
@@ -930,6 +985,7 @@ class TestInstanceTools:
         glb = _begin(rr_env)
         inst = rr_env.iinstance_cls()
         inst.IGlobal = glb
+        inst._settings = glb._resolved()
         try:
             assert inst.dialect({}) == {'dialect': 'age'}
             schema = inst.get_schema({})

@@ -28,6 +28,8 @@
 		"http_request.allowGET": {
 			"type": "boolean",
 			"title": "GET",
+			"param": true,
+			"tool": false,
 			"default": true,
 			"enum": [
 				[true, "Yes"],
@@ -37,6 +39,8 @@
 		"http_request.allowPOST": {
 			"type": "boolean",
 			"title": "POST",
+			"param": true,
+			"tool": false,
 			"default": true,
 			"enum": [
 				[true, "Yes"],
@@ -46,6 +50,8 @@
 		"http_request.allowPUT": {
 			"type": "boolean",
 			"title": "PUT",
+			"param": true,
+			"tool": false,
 			"default": true,
 			"enum": [
 				[true, "Yes"],
@@ -55,6 +61,8 @@
 		"http_request.allowPATCH": {
 			"type": "boolean",
 			"title": "PATCH",
+			"param": true,
+			"tool": false,
 			"default": true,
 			"enum": [
 				[true, "Yes"],
@@ -64,6 +72,8 @@
 		"http_request.allowDELETE": {
 			"type": "boolean",
 			"title": "DELETE",
+			"param": true,
+			"tool": false,
 			"default": true,
 			"enum": [
 				[true, "Yes"],
@@ -73,6 +83,8 @@
 		"http_request.allowHEAD": {
 			"type": "boolean",
 			"title": "HEAD",
+			"param": true,
+			"tool": false,
 			"default": false,
 			"enum": [
 				[true, "Yes"],
@@ -82,6 +94,8 @@
 		"http_request.allowOPTIONS": {
 			"type": "boolean",
 			"title": "OPTIONS",
+			"param": true,
+			"tool": false,
 			"default": false,
 			"enum": [
 				[true, "Yes"],
@@ -95,6 +109,8 @@
 			"default": ""
 		},
 		"http_request.urlWhitelist": {
+			"param": true,
+			"tool": false,
 			"title": "URL Whitelist",
 			"description": "Python regex patterns applied with match() to the final canonical URL after path substitution, regular query parameters, and query-based API-key auth. A request-time source recognizer accepts only exact literal/escaped hosts with supported numeric-port forms, or a deliberate [^/] whole-authority form, followed by an explicit authority boundary. Unsupported or ambiguous authority syntax fails closed even when the regex matches. [] or only blank placeholder rows allows all public destinations; non-public destinations remain blocked. Blank rows mixed with valid patterns are ignored; invalid non-empty regexes and malformed entries fail closed.",
 			"type": "array",
@@ -127,6 +143,8 @@
 			"optional": true
 		},
 		"http_request.authHeaderName": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "API key header name",
 			"description": "Header that carries the key, e.g. X-API-Key.",
@@ -151,6 +169,8 @@
 			"default": ""
 		},
 		"http_request.defaultHeaders": {
+			"param": true,
+			"tool": false,
 			"title": "Default headers",
 			"description": "Headers sent with every request, e.g. Accept or X-GitHub-Api-Version. A per-call header with the same name (case-insensitive) replaces the default. Authorization, Proxy-Authorization, Cookie, Host, Content-Type, Content-Length, and Transfer-Encoding are not allowed here; credentials belong in the Authentication fields. Non-empty default headers require the same pinned https whitelist as Authentication. Blank rows are ignored.",
 			"type": "array",
@@ -164,7 +184,9 @@
 		"http_request.rateLimitPerSecond": {
 			"type": "integer",
 			"title": "Max requests per second",
-			"description": "Maximum number of HTTP requests allowed per second. Uses a token-bucket algorithm for smooth enforcement. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"description": "Maximum number of HTTP requests allowed per second. Counted per clock second across every engine replica. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"param": true,
+			"tool": false,
 			"default": 10,
 			"minimum": 0
 		},
@@ -172,6 +194,8 @@
 			"type": "integer",
 			"title": "Max requests per minute",
 			"description": "Maximum number of HTTP requests allowed per minute. Provides a broader throttle beyond the per-second limit. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"param": true,
+			"tool": false,
 			"default": 100,
 			"minimum": 0
 		},
@@ -179,6 +203,8 @@
 			"type": "integer",
 			"title": "Max concurrent requests",
 			"description": "Maximum number of HTTP requests that can be in-flight simultaneously. 0 keeps the default; all three limits at 0 disable rate limiting.",
+			"param": true,
+			"tool": false,
 			"default": 5,
 			"minimum": 0
 		}
@@ -199,6 +225,8 @@
 			"type": "string",
 			"title": "Authentication",
 			"description": "Credential applied to every request this node sends. Set it here with a ${ROCKETRIDE_*} placeholder (resolved on the engine from the org, team, and user environment) instead of passing tokens per call. When set, the URL whitelist must be non-empty and every pattern must pin one exact https host, and per-call auth is rejected.",
+			"param": true,
+			"tool": false,
 			"default": "none",
 			"enum": {
 				"none": {

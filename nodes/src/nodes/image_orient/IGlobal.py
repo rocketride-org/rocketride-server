@@ -39,19 +39,19 @@ from .orient import build_orient
 
 class IGlobal(IGlobalBase):
     """
-    Process-wide setup: resolve config once, fetch the model once, bind the algorithm.
+    Process-wide setup: fetch the model once, bind the algorithm.
 
     Nothing here touches an image. Its job is to make ``orient`` available to every instance with
-    the tunables and the loaded detector already baked in, so per-object work never re-parses
-    config and never re-reads a model from disk.
+    the loaded detector already baked in, so per-object work never re-reads a model from disk.
+    The tunables are per-call parameters: each call hands ``orient`` its own settings.
     """
 
-    # orient(image_bytes, mime, want_image) -> (out_bytes | None, record) | None
+    # orient(image_bytes, mime, want_image, settings) -> (out_bytes | None, record) | None
     orient: Callable = None
 
     def beginGlobal(self) -> None:
-        """Bind the algorithm over the resolved tunables (defaults and bounds applied by the resolver)."""
-        self.orient = build_orient(self.config)
+        """Load the detector and bind the algorithm; the tunables arrive with each call."""
+        self.orient = build_orient()
 
     def endGlobal(self) -> None:
         """Release the detector the bound callable closes over."""

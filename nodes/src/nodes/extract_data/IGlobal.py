@@ -21,28 +21,15 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
-from rocketlib import IGlobalBase, warning
+"""
+Extract Data node - global state.
+
+The control holds nothing: the target fields are a per-call parameter the
+instance reads from its settings.
+"""
+
+from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    fields: List
-
-    def beginGlobal(self) -> None:
-        """Keep the well-formed field definitions from the resolved config."""
-        # Filter out fields with empty name or type
-        self.fields = []
-        for field in self.config.fields:
-            field_name = field.get('column', '')
-            field_type = field.get('type', '')
-            if not field_name or not field_type:
-                warning(f'Skipping incorrectly defined field with name "{field_name}" and type "{field_type}"')
-                continue
-            self.fields.append(field)
-
-    def field_definitions(self):
-        """The well-formed field definitions kept from the config."""
-        return self.fields
-
-    def endGlobal(self) -> None:
-        pass
+    """Nothing per control: the fields are read per call."""

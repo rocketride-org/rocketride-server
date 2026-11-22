@@ -73,7 +73,7 @@ class IInstance(IInstanceBase):
         )
 
         # Get the number of tokens per chunk
-        tokens = self.IGlobal.numberOfTokens
+        tokens = int(self.settings.numberOfTokens)  # this call's chunk size
         words = tokens * 0.75
 
         # Add the instruction for chunking
@@ -146,7 +146,7 @@ class IInstance(IInstanceBase):
         if not table_content.strip():
             return []
 
-        tokens = self.IGlobal.numberOfTokens
+        tokens = int(self.settings.numberOfTokens)  # this call's chunk size
         lines = table_content.split('\n')
         chunks = []
         current_chunk_lines = []

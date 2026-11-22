@@ -27,8 +27,8 @@
 # Sits on the shared store base like store_postgres, differing only in how it
 # connects: there are no host/user/password fields; the task engine delivers
 # the authorized DSN for this node's scope / target. The base supplies the
-# lifecycle (open the store from the resolved config, resolve the two tool
-# switches) and, through StoreInstanceBase, the agent tools.
+# lifecycle (open a store per call settings from the bounded cache; the tool
+# switches are read per call) and, through StoreInstanceBase, the agent tools.
 #
 # The table is the team's managed database, so the whole tool surface is
 # opt-in through the expose_tools setting (off by default), and the write tools
@@ -44,14 +44,14 @@ class IGlobal(StoreGlobalBase):
     serverName: str = 'rrvector'
 
     # Read by VectorStoreToolMixin when the engine lists or dispatches tools.
-    # The base resolves the expose_tools setting at start; this class default
+    # A call's expose_tools setting decides; this class default
     # keeps the tool surface off when nothing is configured, because objdir
     # and get together return the whole table of the team's managed database
     # to any caller of the pipeline's tool path.
     expose_tools: bool = False
 
-    # Read by VectorStoreToolMixin before a write tool runs. The base resolves
-    # the allow_write setting at start; this class default keeps writes off
+    # Read by VectorStoreToolMixin before a write tool runs. A call's
+    # allow_write setting decides; this class default keeps writes off
     # when nothing is configured.
     allow_write: bool = False
 

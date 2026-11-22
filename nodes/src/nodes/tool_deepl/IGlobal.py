@@ -43,9 +43,6 @@ class IGlobal(IGlobalBase):
     """Global state for tool_deepl."""
 
     apikey: str = ''
-    target_lang: str = 'EN-US'
-    formality: str = 'default'
-    model_type: str = ''
 
     def beginGlobal(self) -> None:
         config = self.config
@@ -60,18 +57,10 @@ class IGlobal(IGlobalBase):
 
         self.apikey = apikey
 
-        # The schema default is EN-US; a field cleared in the UI stores '' and
-        # falls back to it here, because the instance treats target_lang as required.
-        self.target_lang = config.targetLang.strip() or 'EN-US'
-
-        # formality / model_type are stored as the raw (stripped) config value,
-        # NOT coerced to a default: the resolution rule is "argument wins, config
-        # is the fallback, and an empty config means the parameter is omitted."
-        # Coercing an empty config back to a value would defeat a user who
-        # cleared the field in the UI. _resolve_enum on the instance side does
-        # the validity check at request time.
-        self.formality = config.formality.strip()
-        self.model_type = config.modelType.strip()
+        # targetLang, formality and modelType are per-call parameters the
+        # instance reads from its settings: an argument wins, the setting is the
+        # fallback (a cleared targetLang falls back to EN-US, a cleared
+        # formality or modelType omits the parameter).
 
     def endGlobal(self) -> None:
         self.apikey = ''
