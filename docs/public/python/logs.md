@@ -160,10 +160,13 @@ await client.log.delete('proj-1', 'chat_1', all=True)
 
 All methods use the single `rrext_log` DAP command, dispatched by a `subcommand`
 argument (`chapters`, `read`, `segment`, `delete`). Reads require `task.monitor`;
-`delete` requires `task.control`. The scope the request addresses picks whose
-streams those rights are resolved against: without `team_id` you access your OWN
-dev streams; with `team_id` the permission is checked against the TARGET team —
-membership is the read/write right. `open_event_stream()` is client-side
+`delete` requires `task.control`. Those rights are checked against the OWNER the
+request resolves to (`owner` when given, else `team_id`, else your own stream): your
+own streams need them on your account; a team's (a team id or `=team/<tid>`) need
+them on that team — membership is the read/write right; an org's (`=org/<oid>`, as
+`owner` or as `team_id`) are the active org's admins'; another user's personal
+streams are refused. A key with an `endpoints` scope also reaches only the streams
+of the addresses inside it. `open_event_stream()` is client-side
 composition: it issues `chapters` and `segment` calls under the hood and
 registers a live `rrext_monitor` subscription while open — it adds no wire
 surface of its own.
