@@ -336,8 +336,10 @@ async def _team_deploy_warning(client, team_id: Any, pipeline: Any) -> Optional[
         if not isinstance(pipeline, dict):
             return None
         from ai.common.model_gateway import wants_hosted_openai
+        from ai.modules.task import node_store
 
-        return TEAM_DEPLOY_WARNING if wants_hosted_openai(pipeline.get('pipeline', pipeline)) else None
+        keyless = wants_hosted_openai(pipeline.get('pipeline', pipeline), node_store.served)
+        return TEAM_DEPLOY_WARNING if keyless else None
     except Exception:
         return None
 

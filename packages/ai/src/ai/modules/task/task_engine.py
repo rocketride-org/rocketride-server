@@ -3496,6 +3496,12 @@ class Task(DAPBase):
             await self._terminated()
             self.debug_message(f'Task startup failed: {e}')
             raise
+        except asyncio.CancelledError:
+            # A cancelled start skips the handler above. Before the engine is
+            # launched nothing else ends this run's hosted models pass.
+            if self._engine_process is None:
+                await asyncio.shield(self._drop_model_pass())
+            raise
 
     async def stop_task(self, reason: str = 'user') -> None:
         """

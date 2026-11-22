@@ -706,6 +706,26 @@ def test_a_temperature_the_provider_rejects_is_dropped_on_the_pass_too(monkeypat
     assert {r['auth'] for r in gateway.requests} == {f'Bearer {TOKEN}'}
 
 
+class _TextThenCut(httpx.SyncByteStream):
+    """A Responses stream that shows some text, then loses the connection."""
+
+    def __iter__(self):
+        for event in _response_events()[:2]:
+            yield f'data: {json.dumps(event)}\n\n'.encode()
+        raise httpx.RemoteProtocolError('peer closed connection without sending complete message body')
+
+
+def test_a_hosted_stream_that_breaks_after_text_ends_with_the_sentence(monkeypatch, backend, hosted):
+    _with_pass(monkeypatch)
+    stream = lambda _r, _b: httpx.Response(200, headers={'content-type': 'text/event-stream'}, stream=_TextThenCut())  # noqa: E731
+    gateway = backend(stream, answer)
+
+    _result, error = _ask(_driver(monkeypatch, 'llm_openai', REASONING), _prompt(), True)
+
+    assert isinstance(error, HostedModelError) and str(error) == OTHER, repr(error)
+    assert len(gateway.requests) == 1
+
+
 def test_a_keyed_node_still_falls_back_after_a_failed_stream(monkeypatch, backend, hosted):
     gateway = backend(cut_stream, answer)
     result, error = _ask(_driver(monkeypatch, 'llm_openai', {**PLAIN, 'apikey': 'sk-user'}), _prompt(), True)
@@ -1053,6 +1073,31 @@ async def test_an_engine_that_ends_during_the_start_ends_the_pass_and_its_renewa
     assert t._model_pass_renewal is None and t._model_run_id is None
 
 
+async def test_a_start_cancelled_before_the_engine_launches_ends_the_pass(monkeypatch, account):
+    import ai.modules.task.task_engine as engine
+
+    t, _ = _startable_task(monkeypatch)
+    del t._build_subprocess_env
+    t._wants_hosted_openai = MagicMock(return_value=True)
+    launching = asyncio.Event()
+
+    async def never_launches(*_argv, **_kwargs):
+        launching.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', never_launches)
+    start = asyncio.create_task(Task.start_task(t))
+    await launching.wait()
+    renewal = t._model_pass_renewal
+    start.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await start
+    await asyncio.sleep(0)
+
+    assert renewal is not None and renewal.cancelled()
+    assert account.revoked == [account.issued[0]['run_id']] and t._model_run_id is None
+
+
 @pytest.mark.parametrize('opt_in', ['*', 'RR_*', 'RR_MODEL_GATEWAY_OPENAI_KEY', 'rr_model_gateway_openai_key'])
 def test_the_backend_model_key_never_reaches_a_task(opt_in):
     src = {'RR_SUBPROCESS_ENV': opt_in, 'RR_MODEL_GATEWAY_OPENAI_KEY': 'sk-platform', 'PATH': '/usr/bin'}
@@ -1208,6 +1253,19 @@ async def test_a_deploy_to_a_team_warns_about_an_openai_node_with_no_key(
     assert result['ok'] is True
     assert result.get('warnings') == ([TEAM_DEPLOY_WARNING] if warned else None)
     assert any(c['op'] == 'artifact' for c in engine.deploy_calls) is fetched
+
+
+async def test_a_deploy_warning_reads_a_node_the_engine_serves(decoder, monkeypatch):
+    from ai.modules.task import node_store
+
+    monkeypatch.setattr(config_module, 'getServiceDefinition', lambda name: None)
+    monkeypatch.setattr(node_store, 'served', lambda name: copy.deepcopy(_SERVICES.get(name)))
+    engine = _engine([TAG])
+    engine.deploy_results['artifact'] = _pipe(_node())
+
+    result = await _tool(capability, 'deploy_to_team', engine, {'project_id': 'p1', 'version': 2, 'team_id': 'team-1'})
+
+    assert result.get('warnings') == [TEAM_DEPLOY_WARNING]
 
 
 async def test_deploy_add_to_a_team_warns_too(decoder):

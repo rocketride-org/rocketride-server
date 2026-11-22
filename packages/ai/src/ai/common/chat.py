@@ -555,10 +555,11 @@ class ChatBase:
         except Exception as e:
             self._raise_if_terminal(e)
             warning(f'Reasoning streaming disabled for model={self._model} ({type(e).__name__}): {e}.')
+            # On hosted models the call ends here, with or without partial text
+            self._no_second_hosted_request(e)
             # Only retry non-streaming if nothing reached the UI; otherwise the full
             # fallback would arrive on top of the partial we already streamed.
             if emitted is None or not emitted['any']:
-                self._no_second_hosted_request(e)
                 adapter = LangChainAdapter(self._llm, stream_kwargs=_stop_kwargs())
                 try:
                     content_text, _items = adapter.collect(prompt)
