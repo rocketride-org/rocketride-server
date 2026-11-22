@@ -266,10 +266,11 @@ function typeCheck(files) {
 	return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
 }
 
-// A frozen floor of eight shapes: a record with an optional member, a generic,
+// A frozen floor of nine shapes: a record with an optional member, a generic,
 // a class, a literal union, a function type, a union of object types whose
 // branches share no key (the shape of MonitorKey), a union whose branches share
-// an optional key and a union discriminated by `kind`.
+// an optional key, a union discriminated by `kind` and one whose branches also
+// differ by a required member type.
 const FROZEN_FIXTURE = [
 	'export interface Rec { id: string; label?: string }',
 	'export interface Box<T> { value: T; note?: string }',
@@ -279,6 +280,8 @@ const FROZEN_FIXTURE = [
 	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number };',
 	'export type Pair = { a: string; x?: number } | { b: string; x?: number };',
 	"export type Wide = { kind: 'a'; x?: number } | { kind: 'b'; y?: number };",
+	"export type Valued = { kind: 'a'; value: string; x?: number } | " +
+		"{ kind: 'a'; value: number; y?: number } | { kind: 'b'; x?: number };",
 	'',
 ].join('\n');
 
@@ -292,6 +295,7 @@ const PINNED = [
 	['Key', 0],
 	['Pair', 0],
 	['Wide', 0],
+	['Valued', 0],
 ];
 
 /**
@@ -322,6 +326,8 @@ const LIVE_GROWN = [
 	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number; extra?: boolean };',
 	'export type Pair = { a: string; x?: number; added?: boolean } | { b: string; x?: number };',
 	"export type Wide = { kind: 'a'; x?: number } | { kind: 'b'; y?: number; added?: boolean };",
+	"export type Valued = { kind: 'a'; value: string; x?: number; added?: boolean } | " +
+		"{ kind: 'a'; value: number; y?: number } | { kind: 'b'; x?: number };",
 	'',
 ].join('\n');
 
@@ -389,6 +395,17 @@ test('typeFloorLines: removing a branch with a disjoint discriminant passes the 
 		"export type Wide = { kind: 'a'; x?: number };"
 	);
 	assert.deepEqual(typeCheck(conformanceProgram(removed, (lines) => lines.slice(4))), []);
+});
+
+test('typeFloorLines: removing a branch whose required member conflicts with every live branch passes', () => {
+	// The string-valued 'a' branch is gone: the number-valued one does not serve it
+	// (their intersection has value: never), so nothing serves it and it is narrowing
+	const removed = LIVE_GROWN.replace(
+		"export type Valued = { kind: 'a'; value: string; x?: number; added?: boolean } | " +
+			"{ kind: 'a'; value: number; y?: number } | { kind: 'b'; x?: number };",
+		"export type Valued = { kind: 'a'; value: number; y?: number } | { kind: 'b'; x?: number };"
+	);
+	assert.deepEqual(typeCheck(conformanceProgram(removed)), []);
 });
 
 test('typeFloorLines: a generic pin is applied at its frozen arity', () => {

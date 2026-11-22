@@ -233,20 +233,28 @@ function assignPinAliases(pins) {
  *
  *  - `_AllKeys<T>`: the keys of every branch of a union (`keyof` of a union is
  *    only the keys all its branches share).
- *  - `_Overlap<C, F>`: the live branches whose intersection with `F` is not
- *    `never` (a conflicting discriminant reduces it to `never`).
+ *  - `_NeverKeys<T>`: the properties of `T` whose type is `never` (a required
+ *    member both sides declare with incompatible types; an optional one keeps
+ *    `undefined`, so it never counts).
+ *  - `_Overlap<C, F>`: the live branches whose intersection with `F` is
+ *    satisfiable: not `never` (a conflicting discriminant reduces it to
+ *    `never`) and with no `never` property (TypeScript keeps an object whose
+ *    `value: string & number` is `never`, so that is checked here).
  *  - `_Served<C, F>`: the live branches that serve the frozen branch `F`: those
  *    assignable to it, else those that overlap it. A broad discriminant
  *    (`kind: 'a' | 'b'`) serves the `'a'` branch without being assignable to it.
  *  - `_DroppedKeys<F, C>`: per frozen branch the live type still serves, the
  *    keys no serving live branch declares. A frozen branch nothing serves (a
- *    literal dropped from a union, a branch with a disjoint discriminant
- *    removed) is narrowing, which `_t_` allows, and is skipped. `never` when
+ *    literal dropped from a union, a removed branch whose discriminant or
+ *    required member types conflict with every live branch) is narrowing,
+ *    which `_t_` allows, and is skipped. `never` when
  *    every served branch kept its keys.
  */
 const PIN_HELPER_TYPES = [
 	'type _AllKeys<T> = T extends unknown ? keyof T : never;',
-	'type _Overlap<C, F> = C extends unknown ? ([C & F] extends [never] ? never : C) : never;',
+	'type _NeverKeys<T> = Exclude<{ [K in keyof T]: [T[K]] extends [never] ? K : never }[keyof T], undefined>;',
+	'type _Overlap<C, F> = C extends unknown ? ([C & F] extends [never] ? never : ' +
+		'[_NeverKeys<C & F>] extends [never] ? C : never) : never;',
 	'type _Served<C, F> = [Extract<C, F>] extends [never] ? _Overlap<C, F> : Extract<C, F>;',
 	'type _DroppedKeys<F, C> = F extends unknown ? ([_Served<C, F>] extends [never] ? never : ' +
 		'Exclude<keyof F, _AllKeys<_Served<C, F>>>) : never;',

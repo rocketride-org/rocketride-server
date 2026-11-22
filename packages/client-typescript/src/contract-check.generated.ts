@@ -373,7 +373,8 @@ void _floor_v2_0;
 // frozen branch must keep its own keys (_b_, _DroppedKeys), so a key
 // dropped from one branch of a union type is caught too.
 type _AllKeys<T> = T extends unknown ? keyof T : never;
-type _Overlap<C, F> = C extends unknown ? ([C & F] extends [never] ? never : C) : never;
+type _NeverKeys<T> = Exclude<{ [K in keyof T]: [T[K]] extends [never] ? K : never }[keyof T], undefined>;
+type _Overlap<C, F> = C extends unknown ? ([C & F] extends [never] ? never : [_NeverKeys<C & F>] extends [never] ? C : never) : never;
 type _Served<C, F> = [Extract<C, F>] extends [never] ? _Overlap<C, F> : Extract<C, F>;
 type _DroppedKeys<F, C> = F extends unknown ? ([_Served<C, F>] extends [never] ? never : Exclude<keyof F, _AllKeys<_Served<C, F>>>) : never;
 const _t_DAPException: Frozen_DAPException = {} as Current_DAPException;
