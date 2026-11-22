@@ -170,13 +170,15 @@ It validates each safe candidate with `EXPLAIN` and feeds the database's
 rejection to the LLM for the next attempt. If the LLM decides a question is not a database query, its text
 answer is emitted instead of executing SQL.
 
-When the database cannot be reached, nothing goes back to the LLM: the
-`questions` lane fails the step with a generic message and writes nothing to
-`text`, `table` or `answers`, and the driver's own text is in the server log.
-The same holds when the generated query passes `EXPLAIN` and then fails when it
-runs. Failures that are not about the database (an `EXPLAIN` rejection after
-the last attempt, unsafe SQL, an LLM reply with neither a query nor an answer)
-are still reported as an error on the `text` and `answers` lanes. The `get_sql`
+When the database cannot be reached, or drops the connection while the query
+runs, nothing goes back to the LLM: the `questions` lane fails the step with a
+generic message and writes nothing to `text`, `table` or `answers`, and the
+driver's own text is in the server log. A generated query that passes `EXPLAIN`
+and is then refused by a database that is up (a row cast failure, a statement
+timeout) is reported as `Query execution failed` on the `text` and `answers`
+lanes, as are the other failures that are not an outage (an `EXPLAIN` rejection
+after the last attempt, unsafe SQL, an LLM reply with neither a query nor an
+answer). The `get_sql`
 and `get_data` tools never raise for an outage or a failed query: they return
 `valid: false` with an `error`, so check `valid`.
 

@@ -77,6 +77,10 @@ class IInstance(IInstanceBase):
                     'items': {'type': 'object'},
                 },
                 'aql': {'type': 'string', 'description': 'The generated AQL query that was executed.'},
+                'valid': {
+                    'type': 'boolean',
+                    'description': 'True when the query ran and rows holds its result; False on a failed read.',
+                },
                 'row_limit': {'type': 'integer', 'description': 'The row cap applied to this query.'},
                 'error': {'type': 'string', 'description': 'Error message if query generation or execution failed.'},
                 'answer': {
@@ -110,8 +114,8 @@ class IInstance(IInstanceBase):
         try:
             rows = self.IGlobal._run_query(aql)
         except Exception as e:
-            return {'error': str(e), 'aql': aql, 'rows': []}
-        return {'rows': rows[:limit], 'aql': aql, 'row_limit': limit}
+            return {'valid': False, 'error': str(e), 'aql': aql, 'rows': []}
+        return {'valid': True, 'rows': rows[:limit], 'aql': aql, 'row_limit': limit}
 
     @tool_function(
         input_schema={

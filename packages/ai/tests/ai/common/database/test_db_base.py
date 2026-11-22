@@ -920,23 +920,22 @@ def _executing_instance(rows, lanes):
     return inst, fake_instance
 
 
-def test_write_questions_fails_the_step_on_a_failed_execution_not_the_string_none():
-    """A query that passes EXPLAIN but fails to run fails the step; it never emits the text 'None' (#1925).
+def test_write_questions_reports_a_failed_execution_not_the_string_none():
+    """A query that passes EXPLAIN but fails to run reports the failure, not the text 'None' (#1925).
 
     ``_executeSQLQuery`` used to return None when the database rejected the statement
     at execution time, and writeQuestions wrote ``str(None)`` to the text and answers
-    lanes. It now raises ``DatabaseLaneError``, which the question handler's catch-all
-    must not turn into a lane error: nothing is written and the step fails.
+    lanes. It now raises ``DatabaseLaneError`` for a database that is up and refused
+    the statement, and writeQuestions keeps reporting it on the lanes (#2963).
     """
     inst, fake_instance = _executing_instance(None, ['text', 'table', 'answers'])
     question = Question()
     question.addQuestion('the answer')
 
-    with pytest.raises(DatabaseLaneError, match='query failed'):
-        inst.writeQuestions(question)
+    inst.writeQuestions(question)
 
-    assert fake_instance.text_written is None
-    assert fake_instance.answer_written is None
+    assert fake_instance.text_written == 'Query execution failed'
+    assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
     assert fake_instance.table_written is None
 
 
@@ -958,7 +957,7 @@ def test_write_questions_raises_a_failed_execution_when_no_lane_carries_errors()
     question = Question()
     question.addQuestion('the answer')
 
-    with pytest.raises(DatabaseLaneError, match='query failed'):
+    with pytest.raises(RuntimeError, match='Query execution failed'):
         inst.writeQuestions(question)
     assert fake_instance.table_written is None
 
@@ -1006,7 +1005,7 @@ def _ask(inst, text='the question'):
         ({'isValid': True, 'query': 'SELECT * FROM'}, False, None, 'syntax error near FROM'),
         ({'isValid': True, 'query': 'DELETE FROM users'}, True, None, 'Generated query contains unsafe SQL'),
         ({'isValid': False}, True, None, 'The LLM returned neither a query nor an answer'),
-        ({'isValid': True, 'query': 'SELECT 1'}, True, None, 'query failed'),
+        ({'isValid': True, 'query': 'SELECT 1'}, True, None, 'Query execution failed'),
     ],
     ids=['explain-exhausted', 'unsafe-sql', 'no-query', 'execution-failed'],
 )
@@ -1109,13 +1108,13 @@ def test_a_failing_lane_write_fails_the_question():
 
 def test_a_failing_lane_write_while_reporting_a_failure_passes_the_downstream_error_on():
     """Writing the error runs the downstream nodes too; their failure reaches the caller as they reported it."""
-    inst, _ = _question_instance({'isValid': True, 'query': 'DELETE FROM users'}, ['text', 'answers'])
+    inst, _ = _question_instance({'isValid': True, 'query': 'SELECT 1'}, ['text', 'answers'], rows=None)
     fake_instance = _FailingAnswersInstance(lanes=['text', 'answers'])
     inst.instance = fake_instance
 
     with pytest.raises(RuntimeError, match='answers sink is down'):
         _ask(inst)
-    assert fake_instance.text_written == 'Generated query contains unsafe SQL'
+    assert fake_instance.text_written == 'Query execution failed'
 
 
 class _RaisingDatabase:
@@ -1165,8 +1164,8 @@ def test_execute_sql_query_lets_a_non_database_error_through():
         inst._executeSQLQuery('SELECT 1')
 
 
-def test_write_questions_fails_the_step_on_a_clickhouse_failure():
-    """Through the real _executeSQLQuery, a ClickHouse runtime failure fails the step and writes nothing to the lanes."""
+def test_write_questions_reports_a_clickhouse_failure_on_the_lanes():
+    """Through the real _executeSQLQuery, a ClickHouse runtime failure reaches the lanes as the failure message."""
     fake_global = _FakeGlobal()
     fake_global._validateQuery = lambda sql: (True, None)
     fake_global.read_only_connection = _RaisingDatabase(
@@ -1184,11 +1183,10 @@ def test_write_questions_fails_the_step_on_a_clickhouse_failure():
     question = Question()
     question.addQuestion('widgets')
 
-    with pytest.raises(DatabaseLaneError):
-        inst.writeQuestions(question)
+    inst.writeQuestions(question)
 
-    assert fake_instance.text_written is None
-    assert fake_instance.answer_written is None
+    assert fake_instance.text_written == 'Query execution failed'
+    assert fake_instance.answer_written.getJson() == {'error': 'Query execution failed'}
 
 
 def _empty_widgets_global(base):

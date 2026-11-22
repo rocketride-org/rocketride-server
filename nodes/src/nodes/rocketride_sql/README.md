@@ -30,16 +30,17 @@ the sibling for Cypher graph queries.
 | questions | answers | Returns the query result on the answers lane. |
 
 A lane never reports success for a statement that failed. When the database
-cannot be reached or refuses the statement, the lane raises, the step and the
-task fail, and nothing is emitted: no empty answer, no `None` text, no error
-object on the answers lane. The failure message is generic and the driver's own
-text (host, port, statement fragment) is only in the engine log. This holds for
-a read on the questions lane and for an insert on the answers and table lanes.
-Pipelines that used to complete while the database was down now fail instead.
-The same holds for the validation step that checks a generated query before it
-runs: a database that cannot be reached fails the step (and the LLM is not asked
-to rewrite a query that was never at fault), while a query the database rejects
-is still reported as an error on the lanes. The `get_sql` and `get_data` tools
+cannot be reached (including a connection that drops while a query runs), or an
+insert is refused, the lane raises, the step and the task fail, and nothing is
+emitted: no empty answer, no `None` text, no error object on the answers lane.
+The failure message is generic and the driver's own text (host, port, statement
+fragment) is only in the engine log. Pipelines that used to complete while the
+database was down now fail instead. The same holds for the validation step that
+checks a generated query before it runs: a database that cannot be reached fails
+the step (and the LLM is not asked to rewrite a query that was never at fault).
+A query that a database that is up runs and refuses (a row cast failure, a
+statement timeout) keeps the `Query execution failed` error on the `text` and
+`answers` lanes, and so does a query `EXPLAIN` rejects. The `get_sql` and `get_data` tools
 report an outage as an explicit `valid: false` result.
 
 ## As a tool

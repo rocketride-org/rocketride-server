@@ -39,6 +39,7 @@ import { getDocs } from '../../docs';
 import { SidebarChrome } from 'shared/tools/core/chrome/SidebarChrome';
 import { ToolHostProvider, useArmedToolPeers } from 'shared/tools/core';
 import { useToolStrip } from 'shared/tools/core/chrome/useToolStrip';
+import { AGENT_ENABLED } from 'shared/tools/agent/enabled';
 import { toolDocUri } from 'shell';
 import { realmPrefsHub } from 'shell';
 import type { BuiltinToolServices } from 'shared/tools/core';
@@ -617,9 +618,10 @@ const SidebarProvider: React.FC = () => {
 	// the choice survives reload via workspace state. Agent is the startup
 	// default when no stored choice exists (requirement: default tab unless
 	// workspace state says otherwise).
-	// DELIBERATE per-host default: 'agent' on web, 'apps' in VS Code. A
+	// DELIBERATE per-host default: 'agent' on web ('apps' while AGENT_ENABLED
+	// is off), 'apps' in VS Code. A
 	// persisted mode whose tool is disabled falls back in SidebarChrome.
-	const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => (prefs?.sidebarMode as SidebarMode | undefined) ?? 'agent');
+	const [sidebarMode, setSidebarMode] = useState<SidebarMode>(() => (prefs?.sidebarMode as SidebarMode | undefined) ?? (AGENT_ENABLED ? 'agent' : 'apps'));
 	// The TRUE previous mode, mirrored from state — only a strip selection
 	// below emits the deactivation for the tab it replaces.
 	const prevSidebarModeRef = useRef<SidebarMode>(sidebarMode);

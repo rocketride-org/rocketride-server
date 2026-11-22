@@ -71,14 +71,14 @@ def _is_unavailable(exc: BaseException) -> bool:
     ``OperationalError`` with no server SQLSTATE was raised client-side (the link
     dropped); one with a SQLSTATE is the server answering, and only the
     connection-exception (08), insufficient-resources (53) and shutdown / cannot
-    connect now (57P01-57P03) codes mean unavailable. Anything else, a syntax
+    connect now (57P01-57P03) and idle session terminated (57P05) codes mean unavailable. Anything else, a syntax
     error above all, is the query.
     """
     if isinstance(exc, (OSError, psycopg2.InterfaceError)):
         return True
     if isinstance(exc, psycopg2.OperationalError):
         code = getattr(exc, 'pgcode', None)
-        return code is None or code[:2] in ('08', '53') or code in ('57P01', '57P02', '57P03')
+        return code is None or code[:2] in ('08', '53') or code in ('57P01', '57P02', '57P03', '57P05')
     return False
 
 

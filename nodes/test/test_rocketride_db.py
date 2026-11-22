@@ -984,6 +984,7 @@ class TestRocketrideGraphValidateQuery:
             ('OperationalError', None),
             ('OperationalError', '08006'),
             ('OperationalError', '57P03'),
+            ('OperationalError', '57P05'),
         ],
     )
     def test_a_lost_connection_raises(self, monkeypatch, name, pgcode):
@@ -1011,6 +1012,21 @@ class TestRocketrideGraphValidateQuery:
     def test_an_outage_on_a_closed_connection_still_raises_unavailable(self, monkeypatch):
         """A closed connection refuses the rollback too; the caller still gets the outage, not the rollback error."""
         failure = self._driver_error('InterfaceError')
+        glb, module, unavailable = self._glb(monkeypatch, failure)
+
+        def closed_rollback():
+            raise module.psycopg2.InterfaceError('connection already closed')
+
+        glb.client.rollback = closed_rollback
+
+        with pytest.raises(unavailable):
+            glb._validate_query('MATCH (n) RETURN n')
+
+    def test_an_idle_session_terminated_on_a_dead_connection_raises_unavailable_not_the_rollback_error(
+        self, monkeypatch
+    ):
+        """SQLSTATE 57P05 ends the session; the rollback then fails, and that must not hide the outage."""
+        failure = self._driver_error('OperationalError', '57P05')
         glb, module, unavailable = self._glb(monkeypatch, failure)
 
         def closed_rollback():

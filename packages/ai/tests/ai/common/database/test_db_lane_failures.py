@@ -31,14 +31,17 @@ refuses the statement. Before the fix:
 - a failed insert in ``writeTable`` / ``writeAnswers`` was logged and the lane
   returned normally, so the pipeline completed with the rows never written.
 
-Now each lane raises ``DatabaseLaneError`` and emits nothing. The message stays
-generic: the driver's sentence (host, port, statement fragment) is only in the
-engine log. A separate module from ``test_db_base.py`` on purpose: that file is
+Now a database that cannot be reached raises ``DatabaseUnavailableError`` and a
+failed insert raises ``DatabaseLaneError``; either way the lane emits nothing. A
+read the database runs and refuses keeps #2963's ``Query execution failed`` report
+on the lanes. The message stays generic: the driver's sentence (host, port,
+statement fragment) is only in the engine log. A separate module from ``test_db_base.py`` on purpose: that file is
 appended to by more than one open pull request.
 """
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 
@@ -160,16 +163,16 @@ def logged(monkeypatch):
     return entries
 
 
-def _assert_generic(exc: DatabaseLaneError):
+def _assert_generic(exc: RuntimeError):
     text = str(exc)
-    assert 'TestDB' in text
+    assert text
     assert '10.0.0.7' not in text and 'Connection refused' not in text and '5432' not in text
 
 
 def test_the_question_lane_fails_and_never_emits_none_when_the_read_fails(logged):
     inst = _make(_refusing_engine())
 
-    with pytest.raises(DatabaseLaneError) as raised:
+    with pytest.raises(DatabaseUnavailableError) as raised:
         inst.writeQuestions(_question())
 
     _assert_generic(raised.value)
@@ -183,7 +186,7 @@ def test_the_question_lane_fails_and_never_emits_none_when_the_read_fails(logged
 def test_the_question_lane_fails_whichever_lanes_are_wired(lanes):
     inst = _make(_refusing_engine(), lanes)
 
-    with pytest.raises(DatabaseLaneError):
+    with pytest.raises(DatabaseUnavailableError):
         inst.writeQuestions(_question())
 
     assert inst.instance.text == [] and inst.instance.answers == []
@@ -221,21 +224,114 @@ def test_a_statement_the_database_refuses_fails_the_write_lanes():
         inst.writeAnswers(_answer([{'who': None}]))
 
 
-def test_execute_sql_query_raises_instead_of_returning_none():
+def test_execute_sql_query_raises_unavailable_when_the_connection_is_refused():
     inst = _make(_refusing_engine())
 
-    with pytest.raises(DatabaseLaneError):
+    with pytest.raises(DatabaseUnavailableError):
         inst._executeSQLQuery('SELECT 1')
 
 
+def test_execute_sql_query_raises_a_lane_error_for_a_query_the_database_refuses():
+    """A database that is up and refuses the statement is not an outage."""
+    inst = _make(_healthy_engine())
+
+    with pytest.raises(DatabaseLaneError) as raised:
+        inst._executeSQLQuery('SELECT * FROM no_such_table')
+
+    assert not isinstance(raised.value, DatabaseUnavailableError)
+
+
+@pytest.mark.parametrize('exc', [TypeError('bug'), KeyError('bug'), ValueError('bug'), AttributeError('bug')])
+def test_execute_sql_query_lets_a_non_database_error_raised_on_connect_through(exc):
+    """A bug raised while the connection is opened is not an outage: it propagates unchanged."""
+    inst = _make(_healthy_engine())
+
+    @contextlib.contextmanager
+    def broken_connection():
+        raise exc
+        yield  # pragma: no cover
+
+    inst.IGlobal.read_only_connection = broken_connection
+
+    with pytest.raises(type(exc)) as raised:
+        inst._executeSQLQuery('SELECT 1')
+
+    assert not isinstance(raised.value, DatabaseUnavailableError)
+
+
+@pytest.mark.parametrize('exc', [TypeError('bug'), KeyError('bug'), ValueError('bug'), AttributeError('bug')])
+def test_validate_query_lets_a_non_database_error_raised_on_connect_through(exc):
+    """Same rule as ``_executeSQLQuery``: a bug while opening the connection is not an EXPLAIN rejection."""
+    inst = _make(_healthy_engine())
+
+    @contextlib.contextmanager
+    def broken_connection():
+        raise exc
+        yield  # pragma: no cover
+
+    inst.IGlobal.read_only_connection = broken_connection
+
+    with pytest.raises(type(exc)) as raised:
+        inst.IGlobal._validateQuery('SELECT 1')
+
+    assert not isinstance(raised.value, DatabaseUnavailableError)
+
+
+def test_validate_query_keeps_the_rejection_path_for_a_dialect_without_a_read_only_mode():
+    inst = _make(_healthy_engine())
+
+    @contextlib.contextmanager
+    def no_read_only_mode():
+        raise RuntimeError('no read-only mode')
+        yield  # pragma: no cover
+
+    inst.IGlobal.read_only_connection = no_read_only_mode
+
+    ok, message = inst.IGlobal._validateQuery('SELECT 1')
+
+    assert ok is False and 'no read-only mode' in message
+
+
+def test_a_query_the_database_refuses_is_reported_on_the_lanes_not_as_a_failed_step():
+    """#2963 behaviour: the step completes and the lanes carry ``Query execution failed``."""
+    inst = _make(_healthy_engine(), ('text', 'answers'))
+    inst._buildSQLQuery = lambda question_text: {'isValid': True, 'query': 'SELECT * FROM no_such_table'}
+
+    inst.writeQuestions(_question())  # does not raise
+
+    assert inst.instance.text == ['Query execution failed']
+    assert inst.instance.answers[0].getJson() == {'error': 'Query execution failed'}
+
+
+def test_a_connection_dropped_mid_query_fails_the_step_and_emits_nothing():
+    """The connection opened and the statement then lost it: an outage, not a refused query."""
+    engine = _engine_failing_execute_with(sqlite3.ProgrammingError('Cannot operate on a closed database.'))
+    inst = _make(engine, ('text', 'answers'))
+
+    with pytest.raises(DatabaseUnavailableError):
+        inst.writeQuestions(_question())
+
+    assert inst.instance.text == [] and inst.instance.answers == []
+
+
 def test_get_data_keeps_its_explicit_invalid_result_contract():
-    """The tool reports the failure as data; only the lanes rely on the raise."""
+    """The tool reports a failure as data, for an outage and for a refused query alike."""
     inst = _make(_refusing_engine())
     inst.get_sql = lambda args: {'valid': True, 'sql': 'SELECT 1 AS n'}
 
     result = inst.get_data({'question': 'how many?'})
 
-    assert result == {'valid': False, 'error': 'Query execution failed', 'sql': 'SELECT 1 AS n', 'rows': []}
+    assert result['valid'] is False and result['rows'] == [] and 'unavailable' in result['error']
+
+    refused = _make(_healthy_engine())
+    refused.get_sql = lambda args: {'valid': True, 'sql': 'SELECT * FROM no_such_table'}
+
+    assert refused.get_data({'question': 'how many?'}) == {
+        'valid': False,
+        'error': 'Query execution failed',
+        'sql': 'SELECT * FROM no_such_table',
+        'rows': [],
+    }
 
 
 def test_the_healthy_lanes_still_emit_and_insert():
@@ -432,6 +528,7 @@ def test_clickhouse_resource_limit_errors_are_known_rejections(code):
         ('53300', True),
         ('57P01', True),
         ('57P03', True),
+        ('57P05', True),  # idle_session_timeout: the server ended the session
         ('42601', False),
         ('42703', False),
         ('57014', False),  # statement timeout / query_canceled: about the query
@@ -525,3 +622,27 @@ def test_the_error_lane_write_is_not_swallowed_either():
 
     with pytest.raises(Exception, match='write failed'):
         inst.writeQuestions(_question())
+
+
+class _NonTransactionalInstance(_Instance):
+    """A node like db_clickhouse, whose sessions and batches are not transactions."""
+
+    def _sessionsAreTransactions(self):
+        return False
+
+
+def test_a_failed_write_says_no_rows_were_saved_only_on_a_transactional_database():
+    transactional = _make(_refusing_engine())
+    with pytest.raises(DatabaseLaneError, match='no rows were saved'):
+        transactional.writeAnswers(_answer([{'who': 'run-1'}]))
+
+    nontransactional = _make(_refusing_engine())
+    nontransactional.__class__ = _NonTransactionalInstance
+    with pytest.raises(DatabaseLaneError) as raised:
+        nontransactional.writeAnswers(_answer([{'who': 'run-1'}]))
+    assert 'no rows were saved' not in str(raised.value)
+    assert 'may already be saved' in str(raised.value)
+
+    with pytest.raises(DatabaseLaneError) as raised:
+        nontransactional.writeTable('| who |\n| --- |\n| run-1 |')
+    assert 'no rows were saved' not in str(raised.value)

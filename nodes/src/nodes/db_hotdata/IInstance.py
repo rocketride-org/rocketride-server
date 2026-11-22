@@ -721,8 +721,10 @@ ORDER BY table_schema, table_name, ordinal_position"""
                 # answered 200 truncated with 10,000 rows in 0.3s, and its run
                 # then ended failed with "query execution failed: Arrow error:
                 # Divide by zero error" - which a rewritten statement can fix.
-                # `failed` also covers a failed save, and only error_message
-                # tells the two apart, which is prose rather than contract.
+                # `failed` is the statement failing, and error_message says why.
+                # A result that could not be saved is not this case: it arrives as
+                # a `succeeded` run with a warning_message and no result_id, and
+                # _run_sql handles it.
                 raise SqlStatementError(f'db_hotdata: query failed: {message}')
             # On the status alone. `running` covers "still executing, or still
             # being saved", so a result_id on a run that is still running names a

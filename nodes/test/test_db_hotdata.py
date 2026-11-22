@@ -1370,6 +1370,25 @@ def test_a_run_that_outlives_the_job_timeout_is_a_run_failure():
     assert iinstance_mod._is_sql_fixable(iinstance_mod.RunFailedError('x')) is False
 
 
+def test_a_failed_run_is_the_statement_failing_even_when_it_carries_a_warning():
+    """`failed` is the statement failing (error_message says why); a warning_message does not turn it into a save failure.
+
+    A result that could not be saved arrives as a `succeeded` run with a
+    warning_message and no result_id, which _run_sql handles - never as `failed`.
+    """
+    g = _loaded_global()
+    g.client = SimpleNamespace(
+        get_query_run=lambda _run_id, database_id='': {
+            'status': 'failed',
+            'error_message': 'query execution failed: Arrow error: Divide by zero error',
+            'warning_message': 'result store unavailable',
+        }
+    )
+
+    with pytest.raises(iinstance_mod.SqlStatementError, match='Divide by zero'):
+        _instance(g)._await_run('run-1', 'db-1')
+
+
 def test_questions_lane_still_emits_an_error_for_a_statement_the_server_rejected():
     """A real SQL rejection (the server minted a query run id) is the statement's fault: reported on the lanes."""
     g = _loaded_global(max_attempts=1)

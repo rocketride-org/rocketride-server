@@ -57,7 +57,7 @@ class ArangoLaneError(RuntimeError):
     """A pipeline lane statement failed against ArangoDB; the step must fail."""
 
 
-_UNAVAILABLE_HTTP_CODES = frozenset({502, 503, 504})
+_UNAVAILABLE_HTTP_CODES = frozenset({401, 502, 503, 504})
 
 
 def _is_unavailable(exc: BaseException) -> bool:
@@ -66,10 +66,11 @@ def _is_unavailable(exc: BaseException) -> bool:
     python-arango's ``ServerConnectionError``, a socket-level ``OSError``
     (``requests``' ``ConnectionError`` and ``Timeout`` are ``OSError`` subclasses,
     so the HTTP transport is covered without importing it), or the server
-    answering HTTP 502, 503 or 504 (``ArangoServerError.http_code``: a proxy or
-    load balancer in front of it has no healthy backend or timed out, or the server
-    is starting up, shutting down or has no leader). A syntax error (400) or a
-    refused modification stays on the rejection path.
+    answering with an HTTP status that says the database cannot be used right now
+    (``ArangoServerError.http_code``): 502/503/504 (starting up, shutting down, no
+    leader, or a proxy in front of it that cannot reach it) and 401 (the
+    credentials were refused, which no rewrite of the query can fix; a 400 is the
+    AQL being wrong and stays a rejection).
     """
     return (
         isinstance(exc, (ServerConnectionError, OSError)) or getattr(exc, 'http_code', None) in _UNAVAILABLE_HTTP_CODES
