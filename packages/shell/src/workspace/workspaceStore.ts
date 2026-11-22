@@ -190,6 +190,10 @@ export class WorkspaceStore {
 	/** In-memory state, keyed by PARTITION (not by app id). */
 	private partitions: Record<Partition, AppWorkspaceState> = {};
 	private activeAppId: string;
+	/** The app most recently asked for: the latest navigation wins (see switchApp). */
+	private requestedAppId: string | null = null;
+	/** True while a switch runs; a newer request is taken up when it settles. */
+	private switching = false;
 	/** The shell partition's setting overrides (persisted in global.json). */
 	private shellSettings: Record<string, SettingValue> = {};
 	/** The `shell` partition's bag (persisted in global.json). */
@@ -461,15 +465,41 @@ export class WorkspaceStore {
 	// =========================================================================
 
 	/**
-	 * Switches the active app: flushes the outgoing partition immediately (no
-	 * debounce), clears the outgoing app's server monitors, loads the incoming
-	 * partition, then commits.
+	 * Switches the active app. The LATEST request wins: a switch awaits the
+	 * server twice before it commits, and a request made meanwhile (Back, a
+	 * second click) is recorded here and taken up when the running switch
+	 * settles, so the store always ends on the app asked for last and an
+	 * earlier target never commits over a later one.
 	 *
 	 * @param newAppId - The app to switch to.
 	 */
 	public switchApp = async (newAppId: string): Promise<void> => {
-		if (newAppId === this.activeAppId) return;
+		// Recorded before any await: the running switch reads it when it settles
+		this.requestedAppId = newAppId;
+		if (this.switching) return;
+		this.switching = true;
+		try {
+			while (this.requestedAppId !== null && this.requestedAppId !== this.activeAppId) {
+				await this.switchTo(this.requestedAppId);
+			}
+		} finally {
+			this.switching = false;
+		}
+	};
 
+	/**
+	 * One switch: flushes the outgoing partition immediately (no debounce),
+	 * clears the outgoing app's server monitors, loads the incoming partition,
+	 * then commits, unless another app was asked for meanwhile.
+	 *
+	 * A request for a THIRD app made during the awaits skips this commit (that
+	 * app commits next, and this one never appears). A request for the
+	 * OUTGOING app (Back) does not: its monitors are already cleared, so it is
+	 * left and entered again, which mounts it afresh with its subscriptions.
+	 *
+	 * @param newAppId - The app to switch to.
+	 */
+	private async switchTo(newAppId: string): Promise<void> {
 		// 1. Flush the outgoing partition now — no in-flight debounce is lost.
 		clearTimeout(this.appSaveTimers.get(this.activePartition));
 		this.appSaveTimers.delete(this.activePartition);
@@ -497,12 +527,17 @@ export class WorkspaceStore {
 			}
 		}
 
+		// Superseded by a request for another app: that one commits, this one
+		// never shows. (A request for the outgoing app still commits here; see
+		// the method comment.)
+		if (this.requestedAppId !== newAppId && this.requestedAppId !== this.activeAppId) return;
+
 		this.partitions = { ...this.partitions, [nextPartition]: this.withShellPrefs(slice ?? makeDefaultAppState()) };
 		this.activeAppId = newAppId;
 		this.notifyPrefs(nextPartition);
 		this.commit();
 		this.scheduleGlobalWrite();
-	};
+	}
 
 	/** Applies an updater to the active partition's slice and schedules a write. */
 	private updateActive(updater: (prev: AppWorkspaceState) => AppWorkspaceState): void {
