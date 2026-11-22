@@ -566,7 +566,22 @@ client.log.openEventStream(stream)                // → LogEventStream, the DVR
   projectId: string,
   source: string,
   teamId?: string,            // a team's deploy continuum
-  runKind?: "dev" | "deploy"  // your own stream: dev (default) or personal deploy
+  runKind?: "dev" | "deploy", // your own stream: dev (default) or personal deploy
+  owner?: string,             // the run's owner as a task row or a streams() entry carries it
+                              // ("=user/<uid>", "=team/<tid>", "=org/<oid>"), passed back unchanged;
+                              // wins over teamId (the only way to address an org stream)
+  version?: number            // a pinned run's version (its continuum is its own); omitted = published
+}
+```
+
+```ts
+// The org's stream, as streams() lists it for an org admin, read back by its owner
+const { streams } = await client.log.streams({ projectId, source });
+const org = streams.find((s) => s.owner.startsWith('=org/'));
+if (org) {
+  await client.log.chapters({ projectId, source, owner: org.owner });
+  // a pinned run of version 12 on that rung logs into a continuum of its own
+  await client.log.chapters({ projectId, source, owner: org.owner, version: 12 });
 }
 ```
 

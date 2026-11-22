@@ -718,6 +718,20 @@ interface LogStreamRef {
 	source: string;
 	teamId?: string;              // present = that team's DEPLOY continuum
 	runKind?: 'dev' | 'deploy';   // teamless only: 'dev' (default) or your personal @me deploy stream
+	owner?: string;               // the run's owner as a task row or a streams() entry carries it ('=user/<uid>',
+	                              // '=team/<tid>', '=org/<oid>'), passed back unchanged; wins over teamId
+	version?: number;             // a pinned run's version (its continuum is its own); omitted = published
+}
+```
+
+```typescript
+// The org's stream, as streams() lists it for an org admin, read back by its owner
+const { streams } = await client.log.streams({ projectId: 'proj-123', source: 'webhook_1' });
+const org = streams.find((s) => s.owner.startsWith('=org/'));
+if (org) {
+	await client.log.chapters({ projectId: 'proj-123', source: 'webhook_1', owner: org.owner });
+	// a pinned run of version 12 there has a continuum of its own
+	await client.log.chapters({ projectId: 'proj-123', source: 'webhook_1', owner: org.owner, version: 12 });
 }
 ```
 

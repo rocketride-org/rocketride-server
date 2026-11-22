@@ -11,7 +11,10 @@ team's DEPLOY continuum — [deploy runs](/clients/typescript/deploy) log into t
 team's tree, readable by any teammate with monitor rights — while omitting it
 addresses your own stream, where the optional `runKind` picks between your dev
 stream (the default) and your personal deploy stream: `'deploy'` without a
-`teamId` is the only way to address that continuum). Individual runs are
+`teamId` is the only way to address that continuum; `owner` — the run's owner as
+a task row or a `streams()` entry carries it, `=user/<uid>`, `=team/<tid>` or
+`=org/<oid>` — addresses that tree directly and wins over `teamId`, the only way
+to address an org stream; `version` opens a pinned run's continuum). Individual runs are
 **chapters** (tracks) inside the stream — there are no per-run log files. The log
 survives disconnects and server restarts, powers replay of past runs through the
 same panels that render live monitoring, and is retained on a ring (last ~1 GB)
@@ -83,7 +86,9 @@ starting sequence number and outcome, the activity spans for the timeline bar, t
 retained window, and the retention horizon.
 
 ```typescript
-// Own dev stream; add teamId: 'team-prod' to read a team's deploy continuum.
+// Own dev stream; add teamId: 'team-prod' to read a team's deploy continuum, or the
+// owner of a streams() entry (an org stream: owner: '=org/<oid>'), plus version: 12
+// for a pinned run of version 12.
 const stream = { projectId: 'proj-1', source: 'chat_1' };
 const timeline = await client.log.chapters(stream);
 for (const track of timeline.chapters) {

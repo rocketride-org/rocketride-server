@@ -11,7 +11,10 @@ team's DEPLOY continuum — [deploy runs](/clients/python/deploy) log into the
 team's tree, readable by any teammate with monitor rights — while omitting it
 addresses your own stream, where the optional `run_kind` picks between your dev
 stream (the default) and your personal deploy stream: `'deploy'` without a
-`team_id` is the only way to address that continuum). Individual runs are
+`team_id` is the only way to address that continuum; `owner` — the run's owner as
+a task row or a `streams()` entry carries it, `=user/<uid>`, `=team/<tid>` or
+`=org/<oid>` — addresses that tree directly and wins over `team_id`, the only way
+to address an org stream; `version` opens a pinned run's continuum). Individual runs are
 **chapters** (tracks) inside the stream — there are no per-run log files. The log
 survives disconnects and server restarts, powers replay of past runs through the
 same panels that render live monitoring, and is retained on a ring (last ~1 GB)
@@ -35,7 +38,9 @@ is 10×. Playing from a past position auto-pins to live on catching the wall clo
 live is just the position pinned to now (`seek('live')`), not a separate mode.
 
 ```python
-# Own dev stream; pass team_id='team-prod' for a team's deploy continuum.
+# Own dev stream; pass team_id='team-prod' for a team's deploy continuum, or the
+# owner of a streams() entry (an org stream: owner='=org/<oid>'), plus version=12
+# for a pinned run of version 12.
 session = client.log.open_event_stream('proj-1', 'chat_1')
 
 # Canonical startup: position, seed the panels, then roll.
