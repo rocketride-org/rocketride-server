@@ -30,9 +30,9 @@ RocketRide's Astra DB vector store integration without requiring a real Astra DB
 
 How Mock Injection Works:
 -------------------------
-1. The test framework sets ROCKETRIDE_MOCK environment variable to point to nodes/test/mocks/
+1. The test framework sets RR_MOCK environment variable to point to nodes/test/mocks/
 2. When the EAAS server starts a pipeline subprocess (node.py), it inherits this env var
-3. node.py detects ROCKETRIDE_MOCK and inserts that path at the FRONT of sys.path
+3. node.py detects RR_MOCK and inserts that path at the FRONT of sys.path
 4. When the astra_db node does `from astrapy import DataAPIClient`, Python finds
    THIS mock module first (because sys.path is searched in order)
 5. The real astrapy is never loaded - this mock completely shadows it
@@ -55,7 +55,7 @@ The mock is automatically loaded when running tests via:
     builder nodes:test --pytest="-k astra_db"
 
 Or manually:
-    set ROCKETRIDE_MOCK=C:\\Projects\\rocketride-server\\nodes\\test\\mocks
+    set RR_MOCK=C:\\Projects\\rocketride-server\\nodes\\test\\mocks
     python -m pytest nodes/test/test_dynamic.py -k astra_db -s -v
 """
 

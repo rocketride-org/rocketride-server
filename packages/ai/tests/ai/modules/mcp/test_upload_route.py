@@ -436,7 +436,7 @@ def _web_server(monkeypatch, tmp_path, built):
     monkeypatch.setattr(mcp_module, 'make_engine_client', _recording_factory(built))
 
     server = WebServer()
-    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH'):
+    for name in ('RR_MCP_ENGINE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH'):
         monkeypatch.delenv(name, raising=False)
 
     async def _accept_any(authorization):

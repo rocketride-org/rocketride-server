@@ -23,7 +23,7 @@
 # =============================================================================
 # OPEN-SOURCE ACCOUNT
 # Used when the `account/auth/` SaaS subpackage is not present.
-# Single shared secret from ROCKETRIDE_APIKEY — no database, no OAuth.
+# Single shared secret from RR_APIKEY — no database, no OAuth.
 # =============================================================================
 
 """
@@ -32,8 +32,9 @@ OSS (open-source) Account implementation.
 This module provides a minimal ``Account`` class used when the proprietary
 ``account/auth/`` subpackage has not been overlaid by a SaaS build.
 
-Authentication is performed against the ``ROCKETRIDE_APIKEY`` environment
-variable using a constant-time comparison to prevent timing attacks.  All
+Authentication is performed against the ``RR_APIKEY`` environment variable,
+the server's own setting (``ROCKETRIDE_APIKEY`` is the key a CLIENT sends;
+see ``ai.common.server_env``).  All
 account-management methods (user profile, API keys, organisations, teams,
 billing) raise ``NotImplementedError`` because they require the SaaS backend.
 
@@ -41,6 +42,7 @@ The single authenticated identity is a local "Developer" user who belongs to
 a synthetic ``local`` organisation and team with full admin permissions.
 """
 
+import hmac
 import os
 from depends import depends as _depends
 
@@ -151,12 +153,19 @@ def _merged_env(changes: Dict[str, Optional[str]], fold_case: bool) -> Tuple[Dic
 # task address and every published artifact on this install lives under it.
 CONST_DEVELOPER_ID = 'rocketride'
 
+# A server with the client's key name and not its own: configured for a key,
+# so it neither starts nor accepts a login until the operator names the key.
+_CLIENT_KEY_ONLY = (
+    'This server reads its API key from RR_APIKEY. ROCKETRIDE_APIKEY is the key a client '
+    'sends; set RR_APIKEY to the key this server requires (or unset both for an open local server).'
+)
+
 
 class Account(AccountBase):
     """
     Open-source authentication and account management.
 
-    Authentication:   ROCKETRIDE_APIKEY environment variable.
+    Authentication:   RR_APIKEY environment variable.
     Account mgmt:     Not available — all methods raise NotImplementedError.
     """
 
@@ -173,7 +182,7 @@ class Account(AccountBase):
 
     async def authenticate(self, credential: str) -> Union[Any, Tuple[int, str]]:
         """
-        Authenticate a credential against the ``ROCKETRIDE_APIKEY`` environment variable.
+        Authenticate a credential against the ``RR_APIKEY`` environment variable.
 
         Uses ``hmac.compare_digest`` for a constant-time comparison that avoids
         leaking the secret key length or content via timing side-channels.
@@ -185,20 +194,24 @@ class Account(AccountBase):
             AccountInfo: A fully-populated AccountInfo for the local developer
                 identity if the credential matches.
             Tuple[int, str]: A ``(401, message)`` error tuple if authentication
-                fails or no key has been configured.
+                fails, or when only the client's ``ROCKETRIDE_APIKEY`` is set
+                (``init_account`` refuses that start; this refuses it again).
         """
         # Import AccountInfo here (not at module level) to avoid a circular
         # import because ai.account.__init__ imports this module.
         from ai.account.models import AccountInfo
 
-        # Read the expected key from the environment; empty string means
-        # authentication has not been configured at all.
-        oss_key = os.environ.get('ROCKETRIDE_APIKEY', '')
+        # Step 1: the server's key; empty means authentication is not
+        # configured and every credential is accepted. Never fall open on the
+        # client's spelling: a server that has only ROCKETRIDE_APIKEY was
+        # configured for a key and must not start accepting anyone
+        oss_key = os.environ.get('RR_APIKEY', '')
+        if not oss_key and os.environ.get('ROCKETRIDE_APIKEY'):
+            return (401, _CLIENT_KEY_ONLY)
 
-        # OSS is a lot looser on the key -- whatever is specified in ROCKETRIDE_APIKEY
-        # on the server env is what we expect. Up to 3rd part and key rotation
-        if oss_key and oss_key != credential:
-            # Key is configured but the credential doesn't match — reject.
+        # Step 2: a configured key must match, compared in constant time.
+        # Whatever is in RR_APIKEY is the key; rotation is the operator's
+        if oss_key and not hmac.compare_digest(oss_key.encode('utf-8'), (credential or '').encode('utf-8')):
             return (401, 'Invalid API key')
 
         # The app list: a registry that cannot answer must never block
@@ -328,16 +341,26 @@ class Account(AccountBase):
 
     async def init_account(self, server) -> None:
         """
-        OSS startup: seed the built-in apps from apps.json into the registry.
+        OSS startup: refuse a server configured with only the client's key name, then seed the built-in apps.
 
         Single process, so seeding rides the init sequence directly (SaaS
         runs the shared seeder from its pod-deploy tool instead — many pods
-        must not race at boot). Failures never block startup: the engine is
-        useful without the app rail.
+        must not race at boot). Seeding failures never block startup: the
+        engine is useful without the app rail.
 
         Args:
             server: ``WebServer`` instance (unused by OSS).
+
+        Raises:
+            SystemExit: ``ROCKETRIDE_APIKEY`` is set and ``RR_APIKEY`` is not;
+                the server would otherwise accept every credential.
         """
+        # Step 1: a key configured under the client's name is the one start
+        # this server refuses; serving would accept everyone
+        if not os.environ.get('RR_APIKEY') and os.environ.get('ROCKETRIDE_APIKEY'):
+            raise SystemExit(_CLIENT_KEY_ONLY)
+
+        # Step 2: the built-in apps
         try:
             await self._seed_builtin_apps()
         except Exception as exc:

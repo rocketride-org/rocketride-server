@@ -444,8 +444,8 @@ class TestIGlobal:
         iglobal = self._make_iglobal(iglobal_mod)
 
         # _ensure_dependencies imports ``depends`` lazily. Confirm that
-        # ROCKETRIDE_MOCK short-circuits before that import even runs.
-        with patch.dict(os.environ, {'ROCKETRIDE_MOCK': 'nodes/test/mocks'}, clear=False):
+        # RR_MOCK short-circuits before that import even runs.
+        with patch.dict(os.environ, {'RR_MOCK': 'nodes/test/mocks'}, clear=False):
             # Hide depends from sys.modules so an attempted import would fail.
             saved_depends = sys.modules.pop('depends', None)
             try:

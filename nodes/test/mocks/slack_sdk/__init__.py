@@ -1,7 +1,7 @@
 """
 Mock slack_sdk package for tool_slack node integration tests.
 
-When ROCKETRIDE_MOCK is set, this replaces the real slack_sdk so dynamic
+When RR_MOCK is set, this replaces the real slack_sdk so dynamic
 node tests do not call the Slack API. Mirrors the pieces tool_slack imports:
 ``slack_sdk.WebClient``, ``slack_sdk.errors.SlackApiError``, and
 ``slack_sdk.webhook.WebhookClient``.

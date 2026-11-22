@@ -106,7 +106,7 @@ Automated node tests are declared in `services.json`:
 
 - **Mock group**: runs the `gpt-5.2`, `gpt-5.4`, `gpt-5.4-pro`, `gpt-5.4-mini`, and
   `gpt-5.4-nano` models against a mocked `langchain_openai`; no real API key needed.
-  `ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
+  `RR_MOCK` must point to `nodes/test/mocks`.
 - **Real group**: skipped unless `ROCKETRIDE_OPENAI_KEY` is set; calls the live API with
   the `gpt-4o-mini` model.
 

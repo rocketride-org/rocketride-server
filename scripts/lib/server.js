@@ -265,11 +265,21 @@ async function startServer(options) {
 		serverArgs.push(`--trace=${traceLevels.join(',')}`);
 	}
 
+	// The server requires RR_APIKEY; the tests this server is started for log in
+	// with the client's ROCKETRIDE_APIKEY. Give the server the key its own test
+	// client will send, unless the caller named the server's key itself. The
+	// server never reads ROCKETRIDE_APIKEY: this is the harness pairing its two
+	// ends, as CI pairs them with one literal.
+	const serverEnv = { ...process.env, ...env };
+	if (!serverEnv.RR_APIKEY && serverEnv.ROCKETRIDE_APIKEY) {
+		serverEnv.RR_APIKEY = serverEnv.ROCKETRIDE_APIKEY;
+	}
+
 	return new Promise((resolve, reject) => {
 		const serverProcess = spawn(serverExe, serverArgs, {
 			cwd: SERVER_DIR,
 			stdio: ['pipe', 'pipe', 'pipe'],
-			env: { ...process.env, ...env },
+			env: serverEnv,
 		});
 
 		let resolved = false;

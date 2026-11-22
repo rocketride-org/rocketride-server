@@ -130,7 +130,13 @@ function makeStartTestServerAction(options = {}) {
 			task.output = 'Starting server...';
 			let taskComplete = false;
 
-			// Set ROCKETRIDE_MOCK to enable mock modules for testing
+			// The .env the tests read, loaded BEFORE the server starts: its
+			// ROCKETRIDE_APIKEY is the key the test client sends, so startServer
+			// gives the server that key as its RR_APIKEY (loaded only after the
+			// start, the server and the tests would hold different keys)
+			require('dotenv').config({ path: path.join(PROJECT_ROOT, '.env') });
+
+			// Set RR_MOCK to enable mock modules for testing
 			const mocksPath = path.join(PACKAGE_DIR, 'test', 'mocks');
 
 			const result = await startServer({
@@ -140,7 +146,7 @@ function makeStartTestServerAction(options = {}) {
 				verbose: ctx.options?.verbose,
 				basePort: 40000, // Use 40000 range for node tests
 				env: {
-					ROCKETRIDE_MOCK: mocksPath,
+					RR_MOCK: mocksPath,
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;
@@ -186,7 +192,7 @@ function makeRunPytestAction(options = {}) {
 
 			const testEnv = {
 				...process.env,
-				ROCKETRIDE_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks'),
+				RR_MOCK: path.join(PACKAGE_DIR, 'test', 'mocks'),
 			};
 			if (mode === 'run') {
 				const bracket = ctx.brackets?.['node-test-server'];

@@ -64,7 +64,7 @@ class IGlobal(IGlobalBase):
 
     def _ensure_dependencies(self) -> None:
         """Install the real SDK unless the test runner has injected mocks."""
-        if os.environ.get('ROCKETRIDE_MOCK'):
+        if os.environ.get('RR_MOCK'):
             return
         from depends import depends
 

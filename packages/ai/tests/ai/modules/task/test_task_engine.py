@@ -1369,6 +1369,21 @@ def test_filter_subprocess_env_star_passes_everything():
     assert filter_subprocess_env(src) == src
 
 
+def test_filter_subprocess_env_passes_the_mocks_and_not_the_servers_own_keys():
+    """RR_MOCK is handed to every engine by name; the server's API key and its
+    MCP credential are RR_* names the allowlist never passes.
+    """
+    env = filter_subprocess_env(
+        {
+            'RR_MOCK': '/mocks',
+            'RR_APIKEY': 'server-key',
+            'RR_MCP_ENGINE_AUTH': 'mcp-key',
+            'RR_MCP_ENGINE_URI': 'wss://engine',
+        }
+    )
+    assert env == {'RR_MOCK': '/mocks'}
+
+
 # ---------------------------------------------------------------------------
 # resolve_parameter_tokens — the child gets values, not tokens it cannot read
 # ---------------------------------------------------------------------------

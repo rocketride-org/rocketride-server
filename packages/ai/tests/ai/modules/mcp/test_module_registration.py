@@ -24,7 +24,7 @@ async def test_webserver_use_mcp_does_not_raise_and_mounts_route(monkeypatch, fa
     Confirms the allowlist fix actually unblocks `server.use('mcp')` end to
     end (not just the membership check) and that the module mounts `/mcp`.
     Uses the module's own `make_engine_client` monkeypatch (as the other MCP
-    module tests do) so no real ROCKETRIDE_URI/AUTH is required.
+    module tests do) so no real RR_MCP_ENGINE_URI/AUTH is required.
     """
     pytest.importorskip('rocketlib')  # WebServer needs the engine env
     from ai.web.server import WebServer

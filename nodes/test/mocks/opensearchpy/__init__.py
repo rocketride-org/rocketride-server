@@ -5,7 +5,7 @@
 """
 Mock opensearchpy for index_search node tests.
 
-When ROCKETRIDE_MOCK is set, this module shadows the real opensearchpy package
+When RR_MOCK is set, this module shadows the real opensearchpy package
 so the OpenSearch client uses in-memory storage. Supports indices.exists/create/
 delete/get_mapping, index(), search(), helpers.scan(), ping(), and close().
 """

@@ -374,7 +374,7 @@ def content_hash(
         connections: Component id -> ``connections_of(component)``.
         source: The entry component id.
         avoid_mocks: The spec's ``avoidMocks`` flag. It changes the engine's
-            subprocess environment (``ROCKETRIDE_MOCK`` is stripped), so a
+            subprocess environment (``RR_MOCK`` is stripped), so a
             mocked and a real-model engine are two engines.
 
     Returns:

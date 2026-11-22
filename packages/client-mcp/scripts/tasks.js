@@ -214,7 +214,8 @@ function makeStartTestServerAction(options = {}) {
 				verbose: ctx.options?.verbose,
 				basePort: 20000,
 				env: {
-					ROCKETRIDE_APIKEY: apikey,
+					// The server's own key (RR_APIKEY); the tests send it as ROCKETRIDE_APIKEY
+					RR_APIKEY: apikey,
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;

@@ -3,7 +3,7 @@
 
 Rules, in order:
 
-1. Explicit ``rocketride_uri`` config / ``ROCKETRIDE_URI`` env wins, as-is.
+1. Explicit ``rocketride_uri`` config / ``RR_MCP_ENGINE_URI`` env wins, as-is.
 2. Loopback-only bind -> the engine's own local address (``ws://<host>:<port>``),
    so a laptop engine never silently drives RocketRide's cloud.
 3. Otherwise -> the public origin of ``MCP_RESOURCE_IDENTIFIER``
@@ -24,10 +24,10 @@ _UNSET = object()
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH', 'ROCKETRIDE_AUTH'):
+    for name in ('RR_MCP_ENGINE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH', 'RR_MCP_ENGINE_AUTH'):
         monkeypatch.delenv(name, raising=False)
     # The shared client still needs a credential; the URI is what is under test.
-    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'svc-key')
+    monkeypatch.setenv('RR_APIKEY', 'svc-key')
 
 
 def _init(monkeypatch, fake_web_server, *, host=_UNSET, port=_UNSET, config=None):
@@ -80,20 +80,27 @@ def _assert_wiring(captured, uri, origin):
 
 
 def test_explicit_env_uri_used_unchanged_even_on_public_bind(monkeypatch, fake_web_server):
-    monkeypatch.setenv('ROCKETRIDE_URI', 'wss://engine-host:5565')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'wss://engine-host:5565')
     captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     _assert_wiring(captured, 'wss://engine-host:5565', 'https://engine-host:5565')
 
 
+def test_the_clients_rocketride_uri_is_never_read(monkeypatch, fake_web_server):
+    """ROCKETRIDE_URI is where a CLIENT connects (.env.template ships it); the server's MCP reads RR_MCP_ENGINE_URI."""
+    monkeypatch.setenv('ROCKETRIDE_URI', 'wss://somewhere-else:5565')
+    captured = _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
+    _assert_wiring(captured, 'ws://127.0.0.1:5565', 'http://127.0.0.1:5565')
+
+
 def test_explicit_cleartext_loopback_uri_is_used_unchanged_on_a_loopback_bind(monkeypatch, fake_web_server):
     """A loopback engine never puts the credential on a wire anyone can read."""
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://127.0.0.1:5565')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'ws://127.0.0.1:5565')
     captured = _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
     _assert_wiring(captured, 'ws://127.0.0.1:5565', 'http://127.0.0.1:5565')
 
 
 def test_explicit_config_uri_beats_env_and_loopback_default(monkeypatch, fake_web_server):
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://from-env:1')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'ws://from-env:1')
     captured = _init(
         monkeypatch,
         fake_web_server,
@@ -171,7 +178,7 @@ def test_unset_uri_no_longer_raises_missing_engine_uri(monkeypatch, fake_web_ser
 
 
 def test_shared_client_still_requires_auth(monkeypatch, fake_web_server):
-    monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
+    monkeypatch.delenv('RR_APIKEY', raising=False)
     captured = _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     with pytest.raises(ValueError, match='Missing engine auth'):
         captured['factory']()
@@ -215,7 +222,7 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
     from ai.modules.mcp.tools import execution
 
     if env_uri:
-        monkeypatch.setenv('ROCKETRIDE_URI', env_uri)
+        monkeypatch.setenv('RR_MCP_ENGINE_URI', env_uri)
     captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
     # The real client the factory builds decides base_url; the fake only
     # stands in for the engine round-trip.
@@ -267,7 +274,7 @@ async def test_dropper_links_use_resolved_origin(monkeypatch, fake_web_server, f
 )
 def test_logs_one_startup_line_without_credentials(monkeypatch, fake_web_server, caplog, host, env_uri, rule, shown):
     if env_uri:
-        monkeypatch.setenv('ROCKETRIDE_URI', env_uri)
+        monkeypatch.setenv('RR_MCP_ENGINE_URI', env_uri)
     with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
         _init(monkeypatch, fake_web_server, host=host, port=5565)
     lines = [r.getMessage() for r in caplog.records if 'engine URI' in r.getMessage()]
@@ -290,11 +297,11 @@ def test_logs_one_startup_line_without_credentials(monkeypatch, fake_web_server,
 @pytest.mark.parametrize('host', ['0.0.0.0', 'engine.internal', '', None])
 @pytest.mark.parametrize('uri', ['ws://engine-host:5565', 'http://engine-host:5565'])
 def test_explicit_cleartext_uri_is_refused_on_a_non_loopback_bind(monkeypatch, fake_web_server, host, uri):
-    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', uri)
     with pytest.raises(RuntimeError) as excinfo:
         _init(monkeypatch, fake_web_server, host=host, port=5565)
     message = str(excinfo.value)
-    assert 'ROCKETRIDE_URI' in message, message  # names the variable it came from
+    assert 'RR_MCP_ENGINE_URI' in message, message  # names the variable it came from
     assert 'engine-host' in message, message  # names the offending value
 
 
@@ -335,13 +342,11 @@ def test_cleartext_to_a_loopback_target_is_kept_whatever_the_bind(monkeypatch, f
     """The rule keys on the TARGET, not the bind.
 
     A credential sent to `ws://127.0.0.1:5565` never reaches a wire anyone can
-    tap, so there is nothing to protect. Refusing it would break every
-    deployment whose image carries the shipped `dist/server/.env`
-    (`ROCKETRIDE_URI=http://localhost:5565`, copied in by
-    `docker/Dockerfile.engine`) -- the pod would fail to boot over a credential
-    that never leaves it.
+    tap, so there is nothing to protect. Refusing it would refuse an operator's
+    `RR_MCP_ENGINE_URI` that names this very host -- the pod would fail to boot
+    over a credential that never leaves it.
     """
-    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', uri)
     captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
     _assert_wiring(captured, uri, origin)
 
@@ -355,7 +360,7 @@ def test_cleartext_loopback_resource_identifier_is_kept_on_a_public_bind(monkeyp
 
 def test_a_non_loopback_target_is_still_refused_on_a_public_bind(monkeypatch, fake_web_server):
     """Narrowing the rule must not reopen the hole it was written to close."""
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine.internal:5565')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'ws://engine.internal:5565')
     with pytest.raises(RuntimeError) as excinfo:
         _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     assert 'engine.internal' in str(excinfo.value)
@@ -370,11 +375,11 @@ def test_explicit_cleartext_remote_uri_is_refused_on_a_loopback_bind(monkeypatch
     the caller's credential to `WsEngineClient`, which puts it on the network in
     the first DAP `auth` frame. The explicit branch must not skip the check.
     """
-    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', uri)
     with pytest.raises(RuntimeError) as excinfo:
         _init(monkeypatch, fake_web_server, host=host, port=5565)
     message = str(excinfo.value)
-    assert 'ROCKETRIDE_URI' in message, message
+    assert 'RR_MCP_ENGINE_URI' in message, message
     assert 'engine.remote' in message, message
 
 
@@ -390,7 +395,7 @@ def test_explicit_cleartext_remote_uri_from_config_is_refused_on_a_loopback_bind
 
 
 def test_explicit_cleartext_refusal_on_a_loopback_bind_stays_redacted(monkeypatch, fake_web_server):
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://user:secret@engine.remote:5565')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'ws://user:secret@engine.remote:5565')
     with pytest.raises(RuntimeError) as excinfo:
         _init(monkeypatch, fake_web_server, host='127.0.0.1', port=5565)
     assert 'secret' not in str(excinfo.value), 'the refusal must stay redacted'
@@ -398,7 +403,7 @@ def test_explicit_cleartext_refusal_on_a_loopback_bind_stays_redacted(monkeypatc
 
 @pytest.mark.parametrize('host', ['127.0.0.1', 'localhost', '::1', '0.0.0.0', None])
 def test_explicit_encrypted_remote_uri_is_accepted_on_any_bind(monkeypatch, fake_web_server, host):
-    monkeypatch.setenv('ROCKETRIDE_URI', 'wss://engine.remote:5565')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'wss://engine.remote:5565')
     captured = _init(monkeypatch, fake_web_server, host=host, port=5565)
     _assert_wiring(captured, 'wss://engine.remote:5565', 'https://engine.remote:5565')
 
@@ -413,7 +418,7 @@ def test_explicit_encrypted_remote_uri_is_accepted_on_any_bind(monkeypatch, fake
     ],
 )
 def test_hosts_that_only_look_loopback_are_still_refused(monkeypatch, fake_web_server, uri):
-    monkeypatch.setenv('ROCKETRIDE_URI', uri)
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', uri)
     with pytest.raises(RuntimeError) as excinfo:
         _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)
     assert 'secret' not in str(excinfo.value), 'the refusal must stay redacted'
@@ -482,7 +487,7 @@ def test_loopback_by_fallback_warns_that_nobody_configured_a_host(monkeypatch, f
 
 def test_bind_mode_is_logged_before_a_failing_engine_uri(monkeypatch, fake_web_server, caplog):
     """A refused engine URI must not swallow the line that explains the bind."""
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://engine-host:5565')
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'ws://engine-host:5565')
     with caplog.at_level(logging.INFO, logger='ai.modules.mcp'):
         with pytest.raises(RuntimeError):
             _init(monkeypatch, fake_web_server, host='0.0.0.0', port=5565)

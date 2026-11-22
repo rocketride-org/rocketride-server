@@ -569,8 +569,10 @@ async def test_oss_list_get_public_on_a_failed_inventory_write_nothing_then_seed
     ]
     write = await acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.sql'))
     assert write == {'success': False, 'message': 'The app catalog is unavailable; try again.'}
-    # authenticate() checks ROCKETRIDE_APIKEY: a developer with one set would
-    # get the 401 tuple here instead of the identity.
+    # authenticate() checks RR_APIKEY, and refuses a server holding only the
+    # client's ROCKETRIDE_APIKEY: a developer with either set would get the 401
+    # tuple here instead of the identity.
+    monkeypatch.delenv('RR_APIKEY', raising=False)
     monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
     signed_in = await acct.authenticate('')
     assert signed_in.apps == []
@@ -867,6 +869,9 @@ async def test_oss_sign_in_delivers_the_desktops_agents_through_the_payload(monk
     acct._deployments_backend = MagicMock()
     acct._deployments_backend.kinds_of = AsyncMock(return_value={BOT: 'pipe'})
     monkeypatch.setattr(pipe_deploy, 'reachable_pipe_entry', AsyncMock(return_value=dict(AGENT)))
+    # An open server: authenticate() checks RR_APIKEY, and refuses a server
+    # holding only the client's ROCKETRIDE_APIKEY
+    monkeypatch.delenv('RR_APIKEY', raising=False)
     monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
 
     signed_in = await acct.authenticate('')
