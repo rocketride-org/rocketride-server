@@ -46,7 +46,7 @@ import { Button, Card, InputField } from 'shell';
 import type { FrameOptions } from '../../templates';
 import type { NewAppIdentity } from '../../types';
 import { useDeveloperRegistration } from '../useDeveloperRegistration';
-import { isValidDeveloperId } from '../../namespaceAdoption';
+import { LOCAL_NAMESPACE, isValidDeveloperId } from '../../namespaceAdoption';
 
 // =============================================================================
 // TYPES
@@ -347,6 +347,34 @@ export function footerNote(state: IFooterNoteState): string {
 // The developer-id shape check is shared with namespace adoption (one grammar).
 export { isValidDeveloperId } from '../../namespaceAdoption';
 
+/**
+ * Why a typed developer id can't be registered, or null when it can (an
+ * empty field has no problem to show; it just can't be registered yet).
+ *
+ * @param slug - The trimmed id.
+ * @returns The message to show under the field, or null.
+ */
+export function developerIdProblem(slug: string): string | null {
+	if (slug === '') {
+		return null;
+	} else if (!isValidDeveloperId(slug)) {
+		return 'Must start with a lowercase letter; lowercase letters and underscores only.';
+	} else if (slug === LOCAL_NAMESPACE) {
+		return '"local" is reserved for apps created before registering; pick another id.';
+	}
+	return null;
+}
+
+/**
+ * Whether the typed developer id can be sent to the server.
+ *
+ * @param slug - The trimmed id.
+ * @returns True for a non-empty id with no problem.
+ */
+export function canRegisterDeveloperId(slug: string): boolean {
+	return slug !== '' && developerIdProblem(slug) === null;
+}
+
 /** How the Developer ID row renders: an editable field, the id chip, or "not confirmed". */
 export type DeveloperIdRow = 'field' | 'chip' | 'unconfirmed';
 
@@ -421,7 +449,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	const [displayTouched, setDisplayTouched] = useState(false);
 
 	/** The Developer ID register field (shared with the Deploy tab's form). */
-	const registration = useDeveloperRegistration(onRegisterDeveloper, isValidDeveloperId);
+	const registration = useDeveloperRegistration(onRegisterDeveloper, canRegisterDeveloperId);
 
 	// ── Derivations ──────────────────────────────────────────────────────
 	// step: validate the slug and check for a live folder collision
@@ -435,8 +463,9 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 	const row = developerIdRow(identity, !!onRegisterDeveloper);
 	const canRegister = row === 'field';
 	const regSlug = registration.slug.trim();
-	const regSlugValid = isValidDeveloperId(regSlug);
-	const isSlugInvalid = regSlug !== '' && !regSlugValid;
+	const regProblem = developerIdProblem(regSlug);
+	const regSlugValid = canRegisterDeveloperId(regSlug);
+	const isSlugInvalid = regProblem !== null;
 	// Text in the field that is not registered yet blocks Create (no silent local).
 	const pendingId = canRegister && regSlug !== '';
 	const canCreate = canCreateApp({ nameValid, collision, displayName, workspaceOpen, creating, registering: registration.busy, pendingId });
@@ -559,7 +588,7 @@ export const NewAppForm: React.FC<INewAppFormProps> = ({ identity, creating, err
 								</Button>
 							</div>
 							<div style={styles.devHint}>Every app id is &lt;developerId&gt;.&lt;name&gt;. Only an org admin can claim it, and it is permanent (lowercase letters and underscores, starting with a letter).</div>
-							{isSlugInvalid ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>Must start with a lowercase letter; lowercase letters and underscores only.</div> : null}
+							{isSlugInvalid ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>{regProblem}</div> : null}
 							{registration.error ? <div style={{ ...styles.fieldError, ...styles.devMsg }}>{registration.error}</div> : null}
 						</div>
 					) : (
