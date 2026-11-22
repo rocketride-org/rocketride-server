@@ -63,7 +63,8 @@ export async function downloadThenRename(dest: string, staging: string, download
 		await download(staging);
 		await renameRetrying(staging, dest);
 	} finally {
-		fs.rmSync(staging, { force: true });
+		// Async with retries, as in the installer; a cleanup failure must not hide the download's own error
+		await fs.promises.rm(staging, { force: true, maxRetries: 10, retryDelay: 1000 }).catch(() => undefined);
 	}
 }
 

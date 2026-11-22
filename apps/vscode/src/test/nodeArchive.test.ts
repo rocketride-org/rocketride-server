@@ -134,3 +134,17 @@ test('a download that fails leaves neither the file nor its staging copy', async
 	);
 	assert.deepEqual(fs.readdirSync(dir), []);
 });
+
+test('a staging copy Windows will not let go of does not hide why the download failed', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-nodes-'));
+	t.mock.method(fs.promises, 'rm', async () => {
+		throw Object.assign(new Error('EBUSY'), { code: 'EBUSY' });
+	});
+
+	await assert.rejects(
+		downloadThenRename(path.join(dir, 'a.zip'), path.join(dir, 'a.zip.download'), async () => {
+			throw new Error('connection reset');
+		}),
+		/connection reset/
+	);
+});
