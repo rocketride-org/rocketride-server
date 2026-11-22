@@ -1475,6 +1475,24 @@ def test_workspace_yaml_deeply_nested_catalog_is_a_build_failure_not_a_crash():
         _patched_workspace_yaml(source, 'apps/x', [])
 
 
+def _cyclic_alias_gadget(cycle_len: int, links: int) -> str:
+    """Stacked alias cycles: shallow by the measured height, deep for the dumper."""
+    out = ['g0: &g0 {v: "1"}']
+    for k in range(1, links + 1):
+        node = f'&c{k}_L {{n: *c{k}_1, t: *g{k - 1}}}'
+        for i in range(cycle_len - 1, 0, -1):
+            node = (f'&c{k}_1 ' if i == 1 else '') + '{n: ' + node + '}'
+        out.append(f'g{k}: &g{k} {{a: {node}, b: *c{k}_L}}')
+    out.append(f'overrides: {{x: *g{links}}}')
+    return '\n'.join(out) + '\n'
+
+
+def test_workspace_yaml_stacked_alias_cycles_are_a_build_failure_not_a_crash():
+    # Passes the depth cap but is too deep for the recursive walks and dump.
+    with pytest.raises(BuildFailure, match='nested'):
+        _patched_workspace_yaml(_cyclic_alias_gadget(30, 15), 'apps/x', [])
+
+
 def test_workspace_yaml_ordinary_aliases_and_catalogs_still_load():
     source = 'packages:\n  - "apps/*"\ncatalog: &base\n  react: ^18.2.0\ncatalogs:\n  next: *base\n'
     out = _patched_workspace_yaml(source, 'apps/x', [])
