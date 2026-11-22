@@ -180,10 +180,12 @@ export class LogEventStream {
 	 */
 	private monitorScope(): MonitorKey {
 		const { projectId, source, teamId, runKind, owner, version } = this.stream;
-		// The owner wins over teamId (LogStreamRef): an org or team run is
-		// subscribed by its audience, which the server takes in teamId; a
-		// user-owned run is the caller's own, selected by runKind
-		const scope = owner && (owner.startsWith('=org/') || owner.startsWith('=team/')) ? owner : teamId;
+		// The owner wins over teamId (LogStreamRef), as it does on the
+		// chapter and segment reads: an org or team run is subscribed by its
+		// audience, which the server takes in teamId; a user-owned run is the
+		// caller's own, selected by runKind, whatever team it was billed to
+		const userOwned = Boolean(owner) && !owner!.startsWith('=org/') && !owner!.startsWith('=team/');
+		const scope = userOwned ? '' : owner || teamId;
 		return {
 			projectId,
 			source,

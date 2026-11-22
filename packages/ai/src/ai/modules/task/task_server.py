@@ -1570,16 +1570,18 @@ class TaskServer(DAPBase):
         rung_plan = RungPlan((pin.rung,), (pin.deployment.team,) if pin.rung == 'team' else (), plan.root)
 
         # Step 3: the rung's published version is an ordinary call on that
-        # rung. The walk reads the pin again: a promotion in between serves
-        # another version, so what it answered is checked and, if it moved,
-        # the version is served pinned below
+        # rung. The walk reads the pin again, so it is held to this version:
+        # a promotion in between never lets it act on (or start) another one,
+        # and when nothing at this version answers there any more, the
+        # version is served pinned below
         if target.version == pin.version:
-            resolution = await self._resolve_on(account_info, target._replace(version=None), rung_plan, require, mode)
-            served = (
-                resolution.pin.version if resolution.pin is not None else getattr(resolution.control, 'version', None)
-            )
-            if served == target.version:
-                return resolution
+            try:
+                return await self._resolve_on(
+                    account_info, target._replace(version=None), rung_plan, require, mode, expect_version=pin.version
+                )
+            except TaskError as e:
+                if e.code != TaskError.NOT_REGISTERED:
+                    raise
 
         # Step 4: any other version is on the rail, needs task.control on a
         # team or the org rung, and on the store must be ready
@@ -1671,7 +1673,14 @@ class TaskServer(DAPBase):
         return Resolution(target, control, pinned_pin, started)
 
     async def _resolve_on(
-        self, account_info: AccountInfo, target: Target, plan: RungPlan, require: Optional[str], mode: str
+        self,
+        account_info: AccountInfo,
+        target: Target,
+        plan: RungPlan,
+        require: Optional[str],
+        mode: str,
+        *,
+        expect_version: Optional[int] = None,
     ) -> Resolution:
         """
         Resolve an unpinned ``target`` on exactly the rungs of ``plan``.
@@ -1691,17 +1700,27 @@ class TaskServer(DAPBase):
                 one rung a version picked.
             require: The permission the request needs.
             mode: ``start``, ``read`` or ``attach``.
+            expect_version: Hold the walk to this version (a ``:N`` call on
+                the rung's published version): a control or publication of
+                another version is passed over, never attached to or started.
 
         Returns:
             The ``Resolution``.
         """
+
+        def _held(candidate: Any) -> bool:
+            # A held refusal stands; otherwise the candidate's version must match
+            if expect_version is None or isinstance(candidate, TaskError):
+                return True
+            return getattr(candidate, 'version', None) == expect_version
+
         rungs: List[str] = []
         if mode == RESOLVE_ATTACH:
             for live_only in (True, False):
                 control = self._walk_rungs(
                     target.address, account_info, require, live_only, rungs, plan, unattended=True
                 )
-                if control is not None:
+                if control is not None and _held(control):
                     return Resolution(target, self._check_engine_available(control), None, False)
             raise self._not_registered(target.dotted, rungs, plan)
         # The candidates in the ladder's order; read answers the one a start
@@ -1710,7 +1729,7 @@ class TaskServer(DAPBase):
         # so discovery and execution pick the same publication. A held refusal
         # (an ambiguous rung) is raised where it stands
         state_epoch = time.monotonic()
-        candidates = await self._candidates(target.address, account_info, require, rungs, plan)
+        candidates = [c for c in await self._candidates(target.address, account_info, require, rungs, plan) if _held(c)]
         if mode == RESOLVE_READ:
             for candidate in candidates:
                 if isinstance(candidate, TaskError):
@@ -1935,13 +1954,21 @@ class TaskServer(DAPBase):
             return _pick(found, rung, owner_id if rung == 'team' else '')
 
         def _no_caller(rung: str, owner_id: str) -> Optional[TaskControl]:
-            """The run with no caller on ``rung`` under ``owner_id`` (a schedule, a run-now): an attach's fallback."""
+            """
+            The run with no caller on ``rung`` under ``owner_id`` (a schedule, a run-now) the caller may watch.
+
+            An attach's fallback. Visibility is checked before the source
+            choice, so runs the caller may not watch never make a
+            two-segment address ambiguous.
+            """
             if not unattended:
                 return None
             found = []
             for a in addresses:
                 usable = [
-                    c for c in registry.lookup(control_key(rung, owner_id, a, '')) if _usable(c) and not c.restarting
+                    c
+                    for c in registry.lookup(control_key(rung, owner_id, a, ''))
+                    if _usable(c) and not c.restarting and resolve_run_permissions(account_info, c)
                 ]
                 if usable:
                     found.append(usable[0])
@@ -1983,9 +2010,9 @@ class TaskServer(DAPBase):
             control = _exact('org', org_id) if org_id else None
             if control is None and org_id:
                 # The run with no caller answers only a caller who may watch it
-                # (the org's admins, plan 8.3); anyone else falls through
-                fallback = _no_caller('org', org_id)
-                control = fallback if fallback is not None and resolve_run_permissions(account_info, fallback) else None
+                # (the org's admins, plan 8.3; _no_caller filters by it); anyone
+                # else falls through
+                control = _no_caller('org', org_id)
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)

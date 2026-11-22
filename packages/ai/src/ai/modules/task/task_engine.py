@@ -2638,6 +2638,9 @@ class TaskEngine(DAPBase):
         # control's run log, then delivered opener first. Every append happens
         # before the first await so no other engine's stamp interleaves
         deliveries = []
+        # Controls of one continuum share one writer: the stream records each
+        # event (one logSeq) once, the first receiving control's copy
+        recorded: set = set()
         for key, opener, late in targets:
             copy = {**body, 'controlId': key} if isinstance(body, dict) else body
             writer = writers.get(key)
@@ -2659,7 +2662,8 @@ class TaskEngine(DAPBase):
             # A shared engine names nobody: the copy names its own control
             if self.shared:
                 self._name_control(key, event)
-            if writer is not None:
+            if writer is not None and id(writer) not in recorded:
+                recorded.add(id(writer))
                 try:
                     writer.append(event)
                 except Exception as e:
@@ -3633,10 +3637,14 @@ class TaskEngine(DAPBase):
             # The hosted policy, on the environment this start actually loaded:
             # the server checked the control's snapshot, and a private engine
             # reads its owner's values again here (a variable changed in
-            # between must not slip a refused node or transport through)
-            refusal = hosted_refusal(resolved)
-            if refusal:
-                raise ValueError(refusal)
+            # between must not slip a refused node or transport through). A
+            # shared engine's spec is its SHAPE (every config emptied), which
+            # cannot answer a per-config question such as the MCP transport;
+            # the server checks every control's own config before it holds it
+            if not self.shared:
+                refusal = hosted_refusal(resolved)
+                if refusal:
+                    raise ValueError(refusal)
 
             # Mark the start time
             self._status.startTime = time.time()

@@ -370,7 +370,9 @@ class DeployPipeCommands(_DeployBase):
 
         # The source must exist in the deployed artifact — a schedule for a
         # phantom source would fail on every tick.
-        await self._require_source_in_artifact(org_id, team_id, project_id, source_id, unattended=True)
+        # Setting a schedule makes an unattended run; clearing one makes none,
+        # so only a set meets the declared-roots refusal
+        await self._require_source_in_artifact(org_id, team_id, project_id, source_id, unattended=bool(cron))
 
         # The paused flag is NOT part of this call: editing cron/ttl keeps
         # it, and schedule_pause/schedule_resume own flipping it.

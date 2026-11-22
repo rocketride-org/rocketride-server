@@ -264,11 +264,17 @@ class LogEventStream:
                 'source': self._source,
                 'types': ['all'],
             }
-            # The owner wins over team_id: an org or team run is subscribed
-            # by its audience, which the server takes in teamId; a user-owned
-            # run is the caller's own, selected by run_kind
+            # The owner wins over team_id, as it does on the chapter and
+            # segment reads: an org or team run is subscribed by its audience,
+            # which the server takes in teamId; a user-owned run is the
+            # caller's own, selected by run_kind, whatever team it was billed to
             owner = self._owner or ''
-            scope = owner if owner.startswith(('=org/', '=team/')) else self._team_id
+            if owner.startswith(('=org/', '=team/')):
+                scope = owner
+            elif owner:
+                scope = ''
+            else:
+                scope = self._team_id
             if scope:
                 args['teamId'] = scope
             elif self._run_kind == 'deploy':

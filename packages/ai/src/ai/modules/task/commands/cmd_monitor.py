@@ -337,6 +337,13 @@ class MonitorCommands(DAPConn):
         project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
             merged_preference |= self._monitors[project_wildcard_key]
+        # A pinned run also reaches the all-sources subscription of its version
+        if control.pinned_version is not None:
+            versioned_wildcard_key = owner_key(
+                control.run_kind, control.owner_id, control.project_id, '*', control.pinned_version
+            )
+            if versioned_wildcard_key in self._monitors:
+                merged_preference |= self._monitors[versioned_wildcard_key]
 
         # Global wildcard check (all tasks)
         if '*' in self._monitors:

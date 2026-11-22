@@ -1159,6 +1159,12 @@ class TestPublicDeploy:
         with pytest.raises(ValueError, match='declare each as =team/<tid>'):
             await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '=team/team-1'})
         account_stub.deployments_schedule_set.assert_not_awaited()
+        # Clearing a schedule makes no unattended run: it never meets the refusal
+        await conn._deploy_schedule_set(
+            {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'schedule': 'manual'}
+        )
+        assert account_stub.deployments_schedule_set.await_args.args[4] is None
+        account_stub.deployments_schedule_set.reset_mock()
         account_stub.deployments_artifact.return_value = {
             'project_id': 'proj-1',
             'components': [{'id': 's1'}],

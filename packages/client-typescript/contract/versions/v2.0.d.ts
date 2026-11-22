@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: ef1c45f92d46d4fe56c1329cd7ba9e83fef62577
+// Source commit: 0768e137cea4c1677411d03505ba9d22340dd26a
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5056,13 +5056,14 @@ declare class DeployApi {
     /**
      * Starts one deployed source NOW (manual trigger).
      *
-     * The same trusted dispatch the scheduler uses — the run carries NO
-     * human identity, and who fired it is recorded only in the deployment's
-     * audit history. Attribution follows the rung it runs on (plan 8.3): a
-     * team publication runs as that team and bills it; an `@org` or
-     * `@public` one is the org's, with no ledger team; an `@me` one is the
-     * publisher's, billed to the team stamped when it was published. The
-     * deployment must be enabled.
+     * The same trusted dispatch the scheduler uses — the run has no CALLER:
+     * who fired it is recorded only in the deployment's audit history, never
+     * as the run's identity. Its owner and ledger follow the rung it runs on
+     * (plan 8.3): a team publication is that team's (billed to it, no ledger
+     * user); an `@org` or `@public` one is the org's, with no ledger team and
+     * no user; an `@me` one is the publisher's, who is its ledger user, billed
+     * to the team stamped when it was published. The deployment must be
+     * enabled.
      *
      * @param projectId - The deployed project.
      * @param sourceId - The pipeline source to fire.
