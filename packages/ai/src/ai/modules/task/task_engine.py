@@ -323,7 +323,8 @@ def _subprocess_env_opt_in(environ: Mapping[str, str]) -> Tuple[frozenset, Tuple
 # in (a prefix such as 'RR_' or a bare '*' would otherwise pass them). The task
 # token key would let pipeline code mint any run's private token. The fetch
 # signing key would let it mint a /task/fetch claim for any path under the store
-# root (#1070). The datacore grant key would let it mint a grant for any
+# root (#1070). The model server admin token would let it administer the
+# model server. The datacore grant key would let it mint a grant for any
 # tenant's database, and the broker token is the provisioner's bearer under the
 # name production sets today (ROCKETRIDE_DB_BROKER_TOKEN, also popped in
 # _build_subprocess_env) and the operator-only name it is moving to

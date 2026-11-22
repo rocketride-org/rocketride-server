@@ -136,3 +136,29 @@ async def test_a_path_the_task_cannot_read_itself_is_refused(store, arguments):
 async def test_an_anonymous_task_has_no_storage_to_sign_for(store):
     with pytest.raises(ChannelRefused):
         await _handler()(_task(client_id=''), {'path': 'secret.txt'}, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('owner_kind', ['', 'team'], ids=['user-run', 'team-run'])
+async def test_identity_and_root_come_from_the_task_not_the_request(store, owner_kind):
+    task = _task(owner_kind=owner_kind)
+    own_root = task._storage_root()
+    victim_root = 'users/victim/files'
+    # The victim has a file at the same relative path the task asks for.
+    await store._file_store(RequestContext.engine('victim'), client_id='victim', root=victim_root).write(
+        'secret.txt', b'victim data'
+    )
+    await store._file_store(RequestContext.engine('user-1'), client_id='user-1', root=own_root).write(
+        'secret.txt', b'own data'
+    )
+
+    reply = await _handler()(
+        task,
+        {'path': 'secret.txt', 'client_id': 'victim', 'root': victim_root, 'userId': 'victim'},
+        None,
+    )
+
+    claim = _claim(reply.body['url'])
+    assert claim['sub'] == 'user-1'
+    assert claim['path'].startswith('users/user-1/files/' if not owner_kind else 'teams/team-1/files/')
+    assert 'victim' not in claim['path']

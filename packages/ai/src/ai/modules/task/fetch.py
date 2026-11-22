@@ -41,22 +41,45 @@ from fastapi.responses import FileResponse, JSONResponse
 from rocketlib import warning
 
 
+def _store_presigns_fetch_urls() -> bool:
+    """Return True when the configured store presigns download URLs itself.
+
+    RR_STORE_URL may hold ``${VAR}`` or ``%VAR%`` placeholders, so it is
+    expanded as the store expands it before the scheme is read. Only a known
+    presigning scheme (s3, azureblob, azure) returns True; an unset, empty,
+    filesystem, unresolved or unknown value returns False.
+    """
+    raw = (os.environ.get('RR_STORE_URL') or '').strip()
+    if not raw:
+        return False
+    # Deferred, like this module's other ai.account imports.
+    from ai.account.store import Store
+
+    url = Store._expand_url_path(raw)
+    scheme = url.split('://', 1)[0].strip().lower() if '://' in url else ''
+    return scheme in ('s3', 'azureblob', 'azure')
+
+
 def warn_if_signing_key_is_ephemeral() -> None:
     """Validate the signing key and warn when fetch URLs will not survive a restart.
 
     Only the filesystem store backend signs /task/fetch URLs; S3 and Azure
-    presign, so the key is not validated for them. With RR_SIGNING_KEY unset the key is random per process, so a URL
-    stops verifying when the engine restarts, and on every other replica.
-    On the filesystem backend a configured weak key refuses task-module initialization before any
-    worker or public route is registered.
+    presign, so the key is not validated for them. With RR_SIGNING_KEY unset the
+    key is random per process, so a URL stops verifying when the engine restarts,
+    and on every other replica. On any store that does not presign, a configured
+    weak key refuses task-module initialization before any worker or public route
+    is registered.
+
+    RR_STORE_URL is judged by ``_store_presigns_fetch_urls``: only a known
+    presigning scheme skips the check; an unset, filesystem, unresolved or
+    unknown value is validated and, without a key, warned about.
     """
     from ai.account.file_store import fetch_signing_key
 
-    store_url = (os.environ.get('RR_STORE_URL') or '').lower()
-    cloud_store = bool(store_url) and not store_url.startswith('filesystem://')
-    if cloud_store:
+    if _store_presigns_fetch_urls():
         # S3/Azure presign and never sign with RR_SIGNING_KEY, so its length is irrelevant there.
         return
+    # Validates the length and raises on a weak key; never skip it on a set RR_SIGNING_KEY.
     fetch_signing_key()
     if os.environ.get('RR_SIGNING_KEY'):
         return
