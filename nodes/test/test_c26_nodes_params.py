@@ -440,6 +440,7 @@ class _SlowBritishModelClient(_RecordingModelClient):
 
 def test_audio_tts_a_slow_language_load_never_blocks_a_loaded_language(monkeypatch, tmp_path):
     import os
+    from concurrent.futures import ThreadPoolExecutor
 
     module = importlib.import_module('nodes.audio_tts.IGlobal')
     monkeypatch.setattr(module, 'get_model_server_address', lambda: 'ms:5590')
@@ -451,17 +452,17 @@ def test_audio_tts_a_slow_language_load_never_blocks_a_loaded_language(monkeypat
     os.remove(glb.synthesize('hello', 'af_heart')['path'])
 
     # A British call stalls on its first load; an American call on the loaded
-    # language is served meanwhile, and two British calls load it once
-    stalled = [threading.Thread(target=lambda: os.remove(glb.synthesize('hello', 'bf_emma')['path'])) for _ in range(2)]
-    for thread in stalled:
-        thread.start()
-    assert _SlowBritishModelClient.entered.wait(5), 'the British load never started'
-    started = time.monotonic()
-    os.remove(glb.synthesize('hello', 'af_bella')['path'])
-    assert time.monotonic() - started < 1
-    _SlowBritishModelClient.release.set()
-    for thread in stalled:
-        thread.join(5)
+    # language is served meanwhile, and two British calls load it once. Futures
+    # carry each worker's result or exception back to this thread
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        stalled = [pool.submit(glb.synthesize, 'hello', 'bf_emma') for _ in range(2)]
+        assert _SlowBritishModelClient.entered.wait(5), 'the British load never started'
+        started = time.monotonic()
+        os.remove(glb.synthesize('hello', 'af_bella')['path'])
+        assert time.monotonic() - started < 1
+        _SlowBritishModelClient.release.set()
+        for future in stalled:
+            os.remove(future.result(5)['path'])
     assert _SlowBritishModelClient.loaded == ['a', 'b']
     glb.endGlobal()
 
@@ -521,6 +522,7 @@ class _GatedEmbeddings(_RecordingEmbeddings):
 
 def test_embedding_openai_probes_a_cold_model_without_holding_up_a_built_one(monkeypatch):
     import threading
+    from concurrent.futures import ThreadPoolExecutor
 
     module = importlib.import_module('nodes.embedding_openai.OpenAIEmbeddingWrapper')
     monkeypatch.setattr(module, 'OpenAIEmbeddings', _GatedEmbeddings)
@@ -528,23 +530,19 @@ def test_embedding_openai_probes_a_cold_model_without_holding_up_a_built_one(mon
     wrapper = module.OpenAIEmbeddingWrapper('embedding_openai', {'apikey': 'k1'}, {})
     wrapper.getVectorSize('text-embedding-3-small')
 
-    # Two first calls of the large model; the first one's probe is held at the gate
-    cold = [threading.Thread(target=wrapper.getVectorSize, args=('text-embedding-3-large',)) for _ in range(2)]
-    for thread in cold:
-        thread.start()
-    assert _GatedEmbeddings.probing.wait(5)
-    warm = threading.Thread(target=wrapper.getVectorSize, args=('text-embedding-3-small',))
-    warm.start()
-    warm.join(2)
-    held_up = warm.is_alive()
-    _GatedEmbeddings.gate.set()
-    for thread in [*cold, warm]:
-        thread.join(5)
+    # Two first calls of the large model; the first one's probe is held at the gate.
+    # Futures carry each worker's result or exception back to this thread
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        cold = [pool.submit(wrapper.getVectorSize, 'text-embedding-3-large') for _ in range(2)]
+        assert _GatedEmbeddings.probing.wait(5)
+        warm = pool.submit(wrapper.getVectorSize, 'text-embedding-3-small')
+        # The built model answers while the large model's probe is held
+        assert warm.result(2) == 3
+        _GatedEmbeddings.gate.set()
+        assert [future.result(5) for future in cold] == [3, 3]
 
-    # The built model answered during the probe, and the large model was built once for both callers
-    assert not held_up
+    # The large model was built once for both callers
     assert _GatedEmbeddings.built == ['text-embedding-3-small', 'text-embedding-3-large']
-    assert wrapper.getVectorSize('text-embedding-3-large') == 3
 
 
 # ==== embedding_transformer ======================================================
