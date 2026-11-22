@@ -779,6 +779,24 @@ class TestFetchSigningKeyStaysInTheEngine:
         monkeypatch.setenv('RR_STORE_URL', store_url)
         task.warn_if_signing_key_is_ephemeral()
 
+    def test_placeholder_expanding_to_filesystem_refuses_short_key(self, monkeypatch):
+        """A denylist on the raw URL text treated '${STORE}:///srv' as cloud and skipped the length check."""
+        from ai.modules import task
+
+        monkeypatch.setenv('STORE', 'filesystem')
+        monkeypatch.setenv('RR_STORE_URL', '${STORE}:///srv')
+        monkeypatch.setenv('RR_SIGNING_KEY', 'short-legacy-key')
+        with pytest.raises(ValueError, match='RR_SIGNING_KEY must contain at least 32'):
+            task.warn_if_signing_key_is_ephemeral()
+
+    def test_percent_placeholder_expanding_to_s3_accepts_short_key(self, monkeypatch):
+        from ai.modules import task
+
+        monkeypatch.setenv('STORE', 's3')
+        monkeypatch.setenv('RR_STORE_URL', '%STORE%://bucket/prefix')
+        monkeypatch.setenv('RR_SIGNING_KEY', 'short-legacy-key')
+        task.warn_if_signing_key_is_ephemeral()
+
     @pytest.mark.parametrize('store_url', ['s3://bucket/prefix', 'azureblob://container'])
     def test_cloud_backend_short_key_fetch_claim_is_generic_401(self, monkeypatch, store_url):
         from ai.modules.task.fetch import _decode_fetch_claim
