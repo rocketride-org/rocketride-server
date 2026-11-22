@@ -266,10 +266,10 @@ function typeCheck(files) {
 	return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
 }
 
-// A frozen floor of seven shapes: a record with an optional member, a generic,
+// A frozen floor of eight shapes: a record with an optional member, a generic,
 // a class, a literal union, a function type, a union of object types whose
-// branches share no key (the shape of MonitorKey) and a union whose branches
-// share an optional key.
+// branches share no key (the shape of MonitorKey), a union whose branches share
+// an optional key and a union discriminated by `kind`.
 const FROZEN_FIXTURE = [
 	'export interface Rec { id: string; label?: string }',
 	'export interface Box<T> { value: T; note?: string }',
@@ -278,6 +278,7 @@ const FROZEN_FIXTURE = [
 	'export type Fn = (x: number) => string;',
 	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number };',
 	'export type Pair = { a: string; x?: number } | { b: string; x?: number };',
+	"export type Wide = { kind: 'a'; x?: number } | { kind: 'b'; y?: number };",
 	'',
 ].join('\n');
 
@@ -290,6 +291,7 @@ const PINNED = [
 	['Fn', 0],
 	['Key', 0],
 	['Pair', 0],
+	['Wide', 0],
 ];
 
 /**
@@ -319,6 +321,7 @@ const LIVE_GROWN = [
 	'export type Fn = (x: number) => string;',
 	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number; extra?: boolean };',
 	'export type Pair = { a: string; x?: number; added?: boolean } | { b: string; x?: number };',
+	"export type Wide = { kind: 'a'; x?: number } | { kind: 'b'; y?: number; added?: boolean };",
 	'',
 ].join('\n');
 
@@ -365,6 +368,27 @@ test('typeFloorLines: narrowing a literal union passes every pin', () => {
 	// allows, so the per-branch pin skips it
 	const narrowed = LIVE_GROWN.replace("export type Kind = 'a' | 'b';", "export type Kind = 'a';");
 	assert.deepEqual(typeCheck(conformanceProgram(narrowed)), []);
+});
+
+test('typeFloorLines: a key dropped behind a broad discriminant fails its pin', () => {
+	// No live branch is assignable to the frozen 'a' branch, but the first one
+	// still serves it (kind: 'a' | 'b') and no longer declares x
+	const dropped = LIVE_GROWN.replace(
+		"export type Wide = { kind: 'a'; x?: number } | { kind: 'b'; y?: number; added?: boolean };",
+		"export type Wide = { kind: 'a' | 'b'; y?: number } | { kind: 'b'; x?: number; y?: number };"
+	);
+	assert.deepEqual(typeCheck(conformanceProgram(dropped, (lines) => lines.slice(0, 4))), []);
+	assert.match(typeCheck(conformanceProgram(dropped)).join('\n'), /Type 'true' is not assignable to type '"x"'/);
+});
+
+test('typeFloorLines: removing a branch with a disjoint discriminant passes the branch pin', () => {
+	// Nothing serves the frozen 'b' branch any more: narrowing, which the branch
+	// pin skips (the pooled key pin still reports the keys that went with it)
+	const removed = LIVE_GROWN.replace(
+		"export type Wide = { kind: 'a'; x?: number } | { kind: 'b'; y?: number; added?: boolean };",
+		"export type Wide = { kind: 'a'; x?: number };"
+	);
+	assert.deepEqual(typeCheck(conformanceProgram(removed, (lines) => lines.slice(4))), []);
 });
 
 test('typeFloorLines: a generic pin is applied at its frozen arity', () => {

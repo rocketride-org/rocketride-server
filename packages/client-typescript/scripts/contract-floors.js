@@ -233,15 +233,23 @@ function assignPinAliases(pins) {
  *
  *  - `_AllKeys<T>`: the keys of every branch of a union (`keyof` of a union is
  *    only the keys all its branches share).
- *  - `_DroppedKeys<F, C>`: per frozen branch the live type still serves (some live
- *    branch is assignable to it), the keys no such live branch declares. A frozen
- *    branch no live branch serves is narrowing, which `_t_` allows, and is
- *    skipped. `never` when every served branch kept its keys.
+ *  - `_Overlap<C, F>`: the live branches whose intersection with `F` is not
+ *    `never` (a conflicting discriminant reduces it to `never`).
+ *  - `_Served<C, F>`: the live branches that serve the frozen branch `F`: those
+ *    assignable to it, else those that overlap it. A broad discriminant
+ *    (`kind: 'a' | 'b'`) serves the `'a'` branch without being assignable to it.
+ *  - `_DroppedKeys<F, C>`: per frozen branch the live type still serves, the
+ *    keys no serving live branch declares. A frozen branch nothing serves (a
+ *    literal dropped from a union, a branch with a disjoint discriminant
+ *    removed) is narrowing, which `_t_` allows, and is skipped. `never` when
+ *    every served branch kept its keys.
  */
 const PIN_HELPER_TYPES = [
 	'type _AllKeys<T> = T extends unknown ? keyof T : never;',
-	'type _DroppedKeys<F, C> = F extends unknown ? ([Extract<C, F>] extends [never] ? never : ' +
-		'Exclude<keyof F, _AllKeys<Extract<C, F>>>) : never;',
+	'type _Overlap<C, F> = C extends unknown ? ([C & F] extends [never] ? never : C) : never;',
+	'type _Served<C, F> = [Extract<C, F>] extends [never] ? _Overlap<C, F> : Extract<C, F>;',
+	'type _DroppedKeys<F, C> = F extends unknown ? ([_Served<C, F>] extends [never] ? never : ' +
+		'Exclude<keyof F, _AllKeys<_Served<C, F>>>) : never;',
 ].join('\n');
 
 /**
@@ -257,10 +265,11 @@ const PIN_HELPER_TYPES = [
  *    optionality removed, so a key the live type dropped is a missing
  *    required property; keys the live type added are extra properties, which
  *    assignment allows.
- *  - `_b_`: each frozen branch must keep its own keys. `_k_` pools the keys of
- *    all branches, so an optional key removed from one branch while another
- *    branch still declares it passes there; here the live branches assignable
- *    to that frozen branch must still declare it, and the error names the key.
+ *  - `_b_`: each frozen branch the live type serves must keep its own keys.
+ *    `_k_` pools the keys of all branches, so an optional key removed from one
+ *    branch while another branch still declares it passes there; here the live
+ *    branches that serve that frozen branch (`_Served`) must still declare it,
+ *    and the error names the key.
  *
  * @param {string} name - The exported type name (the `Current_` import).
  * @param {string} alias - The pin's fragment from assignPinAliases.
