@@ -11,6 +11,7 @@ same way a real service is, so this file doubles as the reference example.
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -287,10 +288,15 @@ def test_base_class_exposes_no_tools():
 
 def test_the_engine_stub_runs_rocketlib_s_own_tool_dispatch():
     """tool.query / tool.invoke below go through filters.py's real code, not a copy in the tests."""
+
+    def from_filters(fn):
+        # as_posix: the compiled file name uses "\\" on Windows.
+        return Path(fn.__code__.co_filename).as_posix().endswith('rocketlib/filters.py')
+
     for name in ('invoke', '_dispatch_tool', '_collect_tool_methods', '_build_tool_descriptors'):
-        assert getattr(IInstanceBase, name).__code__.co_filename.endswith('rocketlib/filters.py'), name
+        assert from_filters(getattr(IInstanceBase, name)), name
     # The decorator that stamps a tool is filters.py's own too, so a change to it shows here.
-    assert tool_function.__code__.co_filename.endswith('rocketlib/filters.py')
+    assert from_filters(tool_function)
 
 
 @pytest.mark.parametrize(

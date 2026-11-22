@@ -141,7 +141,7 @@ def test_old_preset_is_removed_and_the_protocol_is_declared_once():
     assert (nodes_dir / 'supabase' / 'supabase.svg').exists()
     # Two files with one protocol: the engine silently keeps the last one loaded.
     declaring = [
-        str(path.relative_to(nodes_dir))
+        path.relative_to(nodes_dir).as_posix()
         for path in nodes_dir.rglob('services*.json')
         if '"db_supabase://"' in path.read_text(encoding='utf-8')
     ]
