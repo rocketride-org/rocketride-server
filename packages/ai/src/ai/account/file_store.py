@@ -1179,7 +1179,12 @@ class FileStore:
         # deleted backend path with undefined behavior.
         self._assert_no_active_handles_under(full_prefix)
 
-        all_files = await self._store.list_files(full_prefix)
+        # Only the keys under the directory itself: the S3 and Azure backends
+        # build the listing prefix with normpath, which drops the trailing '/',
+        # so 'kb/' would also list 'kbx/...' and the loop below would delete it
+        # (and _full_path normalizes the separator away too, so it is restored)
+        directory = full_prefix.rstrip('/') + '/'
+        all_files = [f for f in await self._store.list_files(full_prefix) if f.startswith(directory)]
 
         # Ignore the dirmarker sentinel when checking emptiness
         non_marker = [f for f in all_files if not f.endswith('/' + DIR_MARKER)]

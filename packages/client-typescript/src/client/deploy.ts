@@ -394,10 +394,13 @@ export class DeployApi {
 	/**
 	 * Starts one deployed source NOW (manual trigger).
 	 *
-	 * The same trusted team dispatch the scheduler uses — the run executes
-	 * as the team and carries NO human identity; billing attributes to the
-	 * org and team, and who fired it is recorded only in the deployment's
-	 * audit history. The deployment must be enabled.
+	 * The same trusted dispatch the scheduler uses — the run carries NO
+	 * human identity, and who fired it is recorded only in the deployment's
+	 * audit history. Attribution follows the rung it runs on (plan 8.3): a
+	 * team publication runs as that team and bills it; an `@org` or
+	 * `@public` one is the org's, with no ledger team; an `@me` one is the
+	 * publisher's, billed to the team stamped when it was published. The
+	 * deployment must be enabled.
 	 *
 	 * @param projectId - The deployed project.
 	 * @param sourceId - The pipeline source to fire.
@@ -547,8 +550,10 @@ export class DeployApi {
 
 	/**
 	 * Sets (or clears) one source's schedule on a deployment: a team's,
-	 * `'@me'` or `'@public'` — any publication of the pipe can run on a
-	 * schedule, billed to the team stamped when it was published.
+	 * `'@me'`, `'@org'` or `'@public'` — any publication of the pipe can run
+	 * on a schedule. Attribution follows the rung, as for `run()`: a team's
+	 * schedule bills that team, an `@org` or `@public` one is the org's with
+	 * no ledger team, an `@me` one bills the team stamped when it was published.
 	 *
 	 * The paused flag is untouched — editing cron/ttl preserves it (a new
 	 * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}

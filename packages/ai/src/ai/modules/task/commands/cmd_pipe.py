@@ -62,7 +62,7 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from croniter import croniter
 
 from ai.account import account
-from ai.account.audience import PUBLIC_AUDIENCE, team_audience, user_audience
+from ai.account.audience import PUBLIC_AUDIENCE, org_audience, team_audience, user_audience
 from ai.account.file_store import normalize_path, parse_scope
 from ai.account.roots import KIND_TEAM
 from ai.account.pipe_deploy import listing_of
@@ -259,7 +259,8 @@ class DeployPipeCommands(_DeployBase):
 
         Visibility model: an org admin sees the WHOLE org — every team and
         every user's personal space. A regular user sees their own personal
-        space, the organization's store publications and the teams they are
+        space, the organization's store publications, its org-rung
+        publications (every member's rung, plan 3.2) and the teams they are
         a member of.
         """
         org_id = self._org_id()
@@ -277,6 +278,9 @@ class DeployPipeCommands(_DeployBase):
                 # The store rows are the organization's own publications:
                 # public by definition, so every member sees them
                 visible.add(PUBLIC_AUDIENCE)
+                # The org rung is every member's (plan 3.2), as a list scoped
+                # to '@org' already shows them
+                visible.add(org_audience(org_id))
                 deployments = [d for d in deployments if d.get('teamId') in visible]
         deployments = [self._describe(d) for d in deployments]
         # Standard list-API envelope ({rows,total,page,pageSize}): rows are

@@ -56,8 +56,16 @@ describe('mapTeamDeploymentRows', () => {
 		);
 	});
 
-	it('drops a row on a rung the panel does not draw', () => {
+	it('draws the org rung by its handle (the organisation publishes there, plan 8.3)', () => {
 		const rows = mapTeamDeploymentRows([{ projectId: 'acme.docBrain', teamId: '=org/o1', rung: 'org', handle: '@org', version: 1, state: 'enabled' }] as Deployment[], 'acme.docBrain', []);
+		assert.deepEqual(
+			rows.map((r) => [r.teamId, r.teamName, r.rung, r.version]),
+			[['=org/o1', '@org', 'org', 1]]
+		);
+	});
+
+	it('drops a row on a rung the panel does not draw', () => {
+		const rows = mapTeamDeploymentRows([{ projectId: 'acme.docBrain', teamId: '@spec', rung: 'spec', handle: '@spec', version: 1, state: 'enabled' }] as unknown as Deployment[], 'acme.docBrain', []);
 		assert.deepEqual(rows, []);
 	});
 });

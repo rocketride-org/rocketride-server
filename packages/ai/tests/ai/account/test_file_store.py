@@ -13,7 +13,7 @@ import pytest
 import tempfile
 import shutil
 
-from ai.account.store import Store, StorageError
+from ai.account.store import Store, StorageError, StorageNotFoundError
 from ai.account.file_store import FileStore, DIR_MARKER
 from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
@@ -519,6 +519,22 @@ class TestRmdirGuards:
         with pytest.raises(StorageError, match='non-empty path'):
             await fs.rmdir('/', recursive=True)
         assert await fs.read('survivor.txt') == b'stay'
+
+    @pytest.mark.asyncio
+    async def test_rmdir_never_deletes_a_sibling_sharing_its_name_prefix(self, fs, istore, monkeypatch):
+        """An object store lists 'kb/' by the raw prefix 'kb' (normpath drops the '/'): 'kbx/' must survive."""
+        await fs.write('kb/a.txt', b'gone')
+        await fs.write('kbx/b.txt', b'stay')
+        listed = istore.list_files
+
+        async def by_raw_prefix(prefix=''):
+            return [f for f in await listed('') if f.startswith(prefix.rstrip('/'))]
+
+        monkeypatch.setattr(istore, 'list_files', by_raw_prefix)
+        await fs.rmdir('kb', recursive=True)
+        assert await fs.read('kbx/b.txt') == b'stay'
+        with pytest.raises(StorageNotFoundError):
+            await fs.read('kb/a.txt')
 
     @pytest.mark.asyncio
     async def test_rmdir_refuses_when_writer_open(self, fs):

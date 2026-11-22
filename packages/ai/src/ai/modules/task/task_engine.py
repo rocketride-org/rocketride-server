@@ -639,7 +639,9 @@ def db_identity(
         user_id: The run's user ('' for a team-owned run).
         team_id: The run's team.
         run_kind: ``'dev'`` or ``'deploy'``.
-        owner_kind: ``'user'`` or ``'team'``.
+        owner_kind: ``'user'``, ``'team'`` or ``'org'`` (the account layer
+            decides what an org-owned run may reach; SaaS refuses it until
+            its database rule is defined).
         public_endpoint: Whether the pipeline exposes a public endpoint.
         task_id: The run's display id, for the audit trail.
 
@@ -1191,11 +1193,12 @@ class TaskEngine(DAPBase):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
         if trigger not in ('', 'manual', 'schedule', 'submit'):
             raise ValueError(f'invalid trigger: {trigger!r}')
-        # owner_kind picks the storage/run-log tree exactly like run_kind picks
-        # the continuum: any value outside the closed vocabulary ('Team',
-        # 'teams', ...) would silently take the user branch and write a
-        # team-owned deploy's files into the dispatcher's user tree.
-        if owner_kind not in ('', 'user', 'team'):
+        # owner_kind is a closed vocabulary ('Team', 'teams', ... are refused):
+        # the storage anchor and the run-log tree are chosen per CONTROL
+        # (storage_root_for, run_log.scope_paths), so here it reaches only the
+        # cloud-database identity, where the account layer decides; an
+        # org-owned run (the org rung, plan 8.3) is one of the kinds
+        if owner_kind not in ('', 'user', 'team', 'org'):
             raise ValueError(f'invalid owner_kind: {owner_kind!r}')
         # One run-log continuum per holding CONTROL (plan 7.5): writers by
         # control key, opened at start for the controls holding the engine and
@@ -2366,8 +2369,13 @@ class TaskEngine(DAPBase):
                 outcome = 'ok'
             else:
                 outcome = 'error'
-            # Every holding control's continuum completes with the engine's outcome
+            # Every holding control's continuum completes with the engine's
+            # outcome, once: controls of one continuum share one writer
+            ended: set = set()
             for key, writer in list(self._run_logs.items()):
+                if id(writer) in ended:
+                    continue
+                ended.add(id(writer))
                 try:
                     await writer.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
                 except Exception as e:
@@ -2833,6 +2841,10 @@ class TaskEngine(DAPBase):
                 # stream); this engine's own writer opens once that has closed
                 shared = await self._shared_run_log(key)
                 if shared is not None:
+                    # This engine's own writer is this control's too; another
+                    # engine's stays that engine's to end
+                    if shared in self._run_logs.values():
+                        self._run_logs[key] = shared
                     return shared
                 writer = await self._open_run_log(key)
         return writer
@@ -2867,8 +2879,13 @@ class TaskEngine(DAPBase):
         except (TypeError, ValueError):
             # A control whose identity is not string-shaped names no stream
             return None
-        if writer is None or writer in self._run_logs.values():
+        if writer is None:
             return None
+        # This engine's own writer of the continuum, opened for another control
+        # (two callers of one team publication name one stream): shared, as
+        # the stream has one writer
+        if writer in self._run_logs.values():
+            return writer
         if not writer.is_live and not await writer.wait_opened():
             return None
         self.raise_log_seq_floor(writer.last_seq + 1)

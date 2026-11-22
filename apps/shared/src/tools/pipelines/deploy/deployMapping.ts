@@ -86,7 +86,7 @@ export function mapHistoryRows(rows: DeployHistoryEntry[]): DeployHistoryRowDTO[
 // =============================================================================
 
 /** The rungs the where-live panel draws; the org rung arrives with C.35. */
-const DRAWN_RUNGS: ReadonlySet<string> = new Set<string>(['me', 'personal', 'team', 'public']);
+const DRAWN_RUNGS: ReadonlySet<string> = new Set<string>(['me', 'personal', 'team', 'org', 'public']);
 
 /**
  * Maps deployment rows into the file view's "where live" facts for ONE

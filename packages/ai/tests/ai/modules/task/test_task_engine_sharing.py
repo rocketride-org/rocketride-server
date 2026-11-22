@@ -2703,7 +2703,7 @@ async def test_a_two_segment_name_starts_the_artifacts_default_source(catalog, e
 
 
 async def test_a_resolve_touches_constant_entries_however_large_the_registry():
-    """100,000 controls at other addresses: a resolve probes O(1) + one per team."""
+    """100,000 controls at other addresses: a resolve probes O(1) + two per team."""
     ts = _server()
     registry = ts._task_control
     for n in range(100_000):
@@ -2727,11 +2727,13 @@ async def test_a_resolve_touches_constant_entries_however_large_the_registry():
     assert await _attach(ts, ADDRESS, _caller('user-a', teams=teams), 'task.data') is mine
     assert registry.probes == 1
 
-    # A miss on every rung, twice (live, then registered): spec + me + teams + org + public per walk
+    # A miss on every rung, twice (live, then registered). An attach also
+    # probes each team's and the org's run with no caller (plan 8.3 watchers):
+    # spec + me + 2 per team + 2 for the org + public per walk
     registry.probes = 0
     with pytest.raises(TaskError):
         await _attach(ts, 'acme.nowhere.webhook_1', _caller('user-a', teams=teams), 'task.data')
-    assert registry.probes == 2 * (4 + len(teams))
+    assert registry.probes == 2 * (1 + 1 + 2 * len(teams) + 2 + 1)
 
     # The forget path keeps the indexes exact
     del registry[mine.key]

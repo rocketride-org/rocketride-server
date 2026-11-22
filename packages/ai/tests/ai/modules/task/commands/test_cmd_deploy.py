@@ -586,6 +586,16 @@ class TestReads:
         assert [(r['rung'], r['handle']) for r in result['body']['rows']] == [('team', '@A'), ('me', '@me')]
 
     @pytest.mark.asyncio
+    async def test_list_shows_a_member_the_org_rung(self, account_stub):
+        # The org rung is every member's (plan 3.2): the unfiltered list shows
+        # its rows to a member, as a list scoped to '@org' already does
+        org_row = {'teamId': '=org/org-1', 'projectId': 'proj-5', 'state': 'enabled', 'version': 1, 'schedules': {}}
+        account_stub.deployments_list.return_value = [*self._ORG_ROWS, org_row]
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'A', 'permissions': []}]))
+        result = await conn._deploy_list({}, {})
+        assert [r['teamId'] for r in result['body']['rows']] == ['=team/team-1', '=user/user-1', '=org/org-1']
+
+    @pytest.mark.asyncio
     async def test_list_org_admin_sees_everything(self, account_stub):
         # An org admin sees anything deployed anywhere — every team and
         # every user's personal space.
