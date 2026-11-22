@@ -1038,7 +1038,7 @@ def test_retry_open_asks_the_supplied_predicate_whether_an_error_is_transient():
         _policy(clock), open_connection, (_SlowError,), lambda exc: isinstance(exc, _SlowError)
     )
 
-    assert result == 'open' and len(calls) == 2 and len(clock.sleeps) == 2
+    assert result == 'open' and len(calls) == 3 and len(clock.sleeps) == 2
     # without the predicate the message is read, and a timeout names no outage
     outcomes.append(_SlowError('Code: 209. Timeout'))
     with pytest.raises(_SlowError):
