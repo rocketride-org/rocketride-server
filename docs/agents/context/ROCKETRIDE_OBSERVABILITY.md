@@ -565,11 +565,13 @@ client.log.openEventStream(stream)                // → LogEventStream, the DVR
 {
   projectId: string,
   source: string,
-  teamId?: string,            // a team's deploy continuum
+  teamId?: string,            // a team's deploy continuum; also a deployment row's audience
+                              // unchanged ("=org/<oid>" the org's, your own "=user/<uid>" your
+                              // personal deploy stream)
   runKind?: "dev" | "deploy", // your own stream: dev (default) or personal deploy
   owner?: string,             // the run's owner as a task row or a streams() entry carries it
                               // ("=user/<uid>", "=team/<tid>", "=org/<oid>"), passed back unchanged;
-                              // wins over teamId (the only way to address an org stream)
+                              // wins over teamId
   version?: number            // a pinned run's version (its continuum is its own); omitted = published
 }
 ```

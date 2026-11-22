@@ -11,10 +11,12 @@ team's DEPLOY continuum — [deploy runs](/clients/python/deploy) log into the
 team's tree, readable by any teammate with monitor rights — while omitting it
 addresses your own stream, where the optional `run_kind` picks between your dev
 stream (the default) and your personal deploy stream: `'deploy'` without a
-`team_id` is the only way to address that continuum; `owner` — the run's owner as
-a task row or a `streams()` entry carries it, `=user/<uid>`, `=team/<tid>` or
-`=org/<oid>` — addresses that tree directly and wins over `team_id`, the only way
-to address an org stream; `version` opens a pinned run's continuum). Individual runs are
+`team_id` addresses that continuum, as does `team_id` set to your own `=user/<uid>`;
+`team_id` also takes a deployment row's audience unchanged, so `=org/<oid>`
+addresses the org's deploy stream; `owner` — the run's owner as a task row or a
+`streams()` entry carries it, `=user/<uid>`, `=team/<tid>` or `=org/<oid>` —
+addresses that tree directly and wins over `team_id`; `version` opens a pinned
+run's continuum). Individual runs are
 **chapters** (tracks) inside the stream — there are no per-run log files. The log
 survives disconnects and server restarts, powers replay of past runs through the
 same panels that render live monitoring, and is retained on a ring (last ~1 GB)
