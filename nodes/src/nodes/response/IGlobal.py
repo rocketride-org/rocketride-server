@@ -24,12 +24,27 @@
 from typing import Any, Dict
 from rocketlib import IGlobalBase, OPEN_MODE, warning
 
+# The key a result sums its text and JSON answers' token counts under. A plain string entry has no
+# room for them, and a turn entry carries its own. Not a lane: never in result_types, so chat-ui,
+# dropper-ui and the shell's chat never see it.
+TOKENS_RESULT_KEY = 'tokens'
+
 # Keys the result object holds for something other than a lane: the node writes
-# result_types, name, path, metadata and an agent's stop_reason; the data channel
-# adds objectId, and error when the object failed; the webhook adds status. A
-# lane's results are a list under its key, so a lane mapped to one of these would
+# result_types, name, path, metadata, tokens and an agent's stop_reason; the data
+# channel adds objectId, and error when the object failed; the webhook adds status.
+# A lane's results are a list under its key, so a lane mapped to one of these would
 # crash on append or be overwritten (#2438).
-RESERVED_RESULT_KEYS = ('result_types', 'name', 'path', 'metadata', 'stop_reason', 'objectId', 'error', 'status')
+RESERVED_RESULT_KEYS = (
+    'result_types',
+    'name',
+    'path',
+    'metadata',
+    'stop_reason',
+    'objectId',
+    'error',
+    'status',
+    TOKENS_RESULT_KEY,
+)
 
 
 def _configured_keys(config: Dict[str, Any]) -> tuple[str | None, Dict[str, str]]:

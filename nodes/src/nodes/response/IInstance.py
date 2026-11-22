@@ -21,7 +21,7 @@
 # SOFTWARE.
 # =============================================================================
 
-from typing import List
+from typing import Any, Dict, List, Optional
 import os
 import base64
 
@@ -30,7 +30,11 @@ from ai.common.schema import Doc, Question, Answer
 from ai.common.avi.descriptor import descriptor_from_payload, source_media_detail
 from rocketlib import AVI_ACTION, Entry
 
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, TOKENS_RESULT_KEY
+
+# The four disjoint billing counts report_llm_tokens writes (llm_adapter.py); `model`, `calls` and
+# `breakdown` are left out, so one answer and several sum to the same shape.
+_BILLING_COUNTS = ('input', 'output', 'cache_read', 'cache_creation')
 
 
 class IInstance(IInstanceBase):
@@ -227,11 +231,29 @@ class IInstance(IInstanceBase):
             self.instance.currentObject.response[key].append({k: v for k, v in turn.items() if v is not None})
             return
 
-        # Add the documents
+        # A text or JSON answer stays a plain entry: chat-ui keeps only strings. Its tokens go beside it.
         if answer.isJson():
             self.instance.currentObject.response[key].append(answer.getJson())
         else:
             self.instance.currentObject.response[key].append(answer.getText())
+        self._add_tokens(answer.tokens)
+
+    def _add_tokens(self, tokens: Optional[Dict[str, Any]]) -> None:
+        """Add one text or JSON answer's token counts to the result's TOKENS_RESULT_KEY.
+
+        Summed, since one result object can hold several answers. Nothing is written when the
+        answer has no counts (a cached or short-circuited answer, an LLM that reports none), so a
+        reader that finds no key knows the counts are missing, not zero. The `**LLM error**` answer
+        carries what the failed call billed (llm_base.py), and that is added too.
+
+        Args:
+            tokens: ``Answer.tokens``: ``{input, output, cache_read, cache_creation, model, ...}`` or None.
+        """
+        if not tokens:
+            return
+        response = self.instance.currentObject.response
+        total = response.get(TOKENS_RESULT_KEY) or {}
+        response[TOKENS_RESULT_KEY] = {k: int(total.get(k, 0)) + int(tokens.get(k) or 0) for k in _BILLING_COUNTS}
 
     def _write_media(self, lane: str, action: int, mimeType: str, data: bytes):
         """Shared handler for the image/audio/video stream lanes.

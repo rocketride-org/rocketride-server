@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV14 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-20T19:31:46.023Z
-// Source commit: f191288bc4061b8323d45c944acfa1bd82693a56
+// Generated:     2026-11-20T20:33:45.873Z
+// Source commit: 02ff0b3e799fb3d84357f57dea62b2b53995a205
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -182,6 +182,14 @@ export type LoginAttemptCancellationReason = "superseded" | "logout" | "detached
 export declare class LoginAttemptCancelledError extends Error {
     readonly reason: LoginAttemptCancellationReason;
     constructor(reason: LoginAttemptCancellationReason);
+}
+/**
+ * A command the server refused, such as starting or validating a pipeline.
+ *
+ * `code` says why, e.g. `NODE_NOT_ENTITLED`.
+ */
+export declare class CommandException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
 }
 /**
  * Exception raised for data pipe operations.
@@ -519,6 +527,29 @@ export declare class DocGroupHelper {
     static splitByChunkRange(group: DocGroup, chunkSize: number): DocGroup[];
 }
 /**
+ * MIT License
+ *
+ * Copyright (c) 2026 Aparavi Software AG
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+/**
  * Response structures from RocketRide pipeline data processing operations.
  *
  * These interfaces represent the different types of responses returned when data
@@ -551,11 +582,6 @@ export interface PIPELINE_RESULT {
      * - { "answers": "answers" } → look for response.answers containing AI-generated responses
      */
     result_types?: Record<string, string>;
-    /**
-     * Why the agent run that answered stopped. Only `done` is a finished answer; when
-     * several agents answered, the first reason other than `done`. Absent when no agent answered.
-     */
-    stop_reason?: AgentStopReason;
     /**
      * Dynamic fields containing processed data based on result_types mapping.
      *
@@ -646,15 +672,6 @@ export interface AssistantMessage {
 export type Message = UserMessage | AssistantMessage;
 export type StopReason = "end_turn" | "tool_use" | "max_tokens" | "stop_sequence" | "refusal";
 /**
- * Why an agent run stopped. Only `done` means the answer is the agent's finished one:
- * `max_steps` (it ran out of steps) and `empty_plan` (the Wave agent's model stopped
- * planning) answer with a best effort from the work so far, though the LlamaIndex
- * agent's `max_steps` answer only says that it stopped. `error` (the run failed, or its
- * answer was refused) answers with the error message or a best effort, and `unknown`
- * means the agent did not say how its run ended.
- */
-export type AgentStopReason = "done" | "max_steps" | "empty_plan" | "error" | "unknown";
-/**
  * Why a turn produced no message. `tools_unsupported` and `invalid_request` are decided
  * before any provider call. `invalid_request` means two tool names become the same provider
  * name, or a node changed the Question so it breaks a turn rule: fix it, do not retry.
@@ -725,18 +742,10 @@ export declare class Answer {
     error?: AnswerError;
     /** Token usage of the turn. */
     tokens?: Record<string, unknown>;
-    /**
-     * Why the agent run behind the answer stopped. From `Answer.fromResult` it is the result's
-     * `stop_reason`, which covers the whole result: when several agents answered, it is the
-     * first reason other than `done` and may belong to another agent's answer.
-     */
-    agentStopReason?: AgentStopReason;
     constructor(expectJson?: boolean);
     /**
      * Read the answer a turn-mode `client.chat()` call returned (the last entry under `key`).
      * A text entry, which an engine that predates turn mode returns, gives a text Answer.
-     * `agentStopReason` is the result's `stop_reason`, when an agent wrote one, and `unknown`
-     * when it is not a reason this client knows.
      */
     static fromResult(result: PIPELINE_RESULT, key?: string): Answer;
     /** The calls in this turn, in the order the model made them. Empty for a text answer. */
@@ -5397,7 +5406,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.source - Optional override for the source component ID
      * @returns Promise resolving to validation result with errors, warnings,
      *          and resolved component
-     * @throws Error if the server returns a validation error
+     * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+     *         a pipeline that fails validation resolves, with its problems in `errors`
      *
      * @example
      * ```typescript
@@ -6382,7 +6392,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param args    - Key/value arguments forwarded in the request.
      * @param options - Optional token (for task-scoped calls) and timeout in ms.
      * @returns The `body` field of a successful DAP response.
-     * @throws Error if the server signals failure.
+     * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
      */
     call<T = any>(command: string, args?: Record<string, unknown>, options?: {
         token?: string;

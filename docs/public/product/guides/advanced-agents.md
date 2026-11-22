@@ -29,8 +29,9 @@ manager-pipeline.pipe
 ```
 
 The [`agent_rocketride`](/nodes/agent_rocketride) node supports this pattern
-natively — expose any running pipeline as an MCP tool (see
-[MCP Server](/connect/mcp/stdio)) and the manager agent can call it.
+natively: add it as a tool of the manager agent and the manager calls it as
+`<nodeId>.run_agent` (see [As a tool](/nodes/agent_rocketride#as-a-tool)). To
+call a whole specialist pipeline instead, see [Agent-as-tool via MCP](#agent-as-tool-via-mcp).
 
 This is useful when different specialists need different models, memory, or
 tool sets. Keep each specialist pipeline small and single-purpose.
@@ -48,14 +49,17 @@ tool latencies.
 
 ## Agent-as-tool via MCP
 
-Any running RocketRide pipeline is automatically exposed as an MCP tool by the
-[MCP server](/connect/mcp/stdio). This means a Claude Desktop or Cursor session can
-invoke your pipeline as a tool, making your pipeline an agent capability in an
-external system.
+The engine's built-in [MCP server](/connect/mcp/http) lets any MCP client build,
+validate, run and observe pipelines. A Claude, Claude Code or Cursor session can
+start your pipeline with the `run_pipeline` tool and read its result, making your
+pipeline an agent capability in an external system.
 
-To use a pipeline as a tool in another RocketRide agent, expose it via MCP and
-configure the consuming agent's `tool_mcp_client` node to point at the MCP
-server.
+To run a pipeline from another RocketRide agent, add a `tool_mcp_client` node to
+the consuming agent, choose the Streamable HTTP transport, point it at the
+engine's `/mcp` endpoint and set an `rr_` API key as the bearer token. The agent
+then gets the engine's MCP tools (`run_pipeline`, `monitor` and the rest) and
+starts the specialist pipeline by passing its definition, or a template saved
+with `save_template`.
 
 ## Memory strategies
 
@@ -109,6 +113,6 @@ about and may make unexpected tool calls. Keep the tool set small and specific:
 ## Related
 
 - [Concepts: Agents & Tools](/concepts/agents-tools-skills): control connections, wiring.
-- [MCP Server](/connect/mcp/stdio): exposing pipelines as MCP tools.
+- [MCP Server](/connect/mcp/http): building and running pipelines over MCP.
 - [Concepts: Error Handling](/guides/error-handling): handling agent failures.
 - [Best Practices](/guides/best-practices): agents vs. direct LLM calls.

@@ -415,7 +415,9 @@ def test_duplicate_paths_in_one_manifest_rejected():
 @pytest.mark.parametrize(
     'path',
     [p for prefix in RESERVED_PREFIXES for p in (prefix, f'{prefix}/x')]
-    + ['/status', '/.well-known/openai-apps-challenge', '/auth/callback', '/webhook/abc'],
+    + ['/status', '/.well-known/openai-apps-challenge', '/auth/callback', '/webhook/abc']
+    # The SaaS extension's root routes, which the OSS route table never shows.
+    + ['/db/dsn', '/internal/google/oauth/tokens', '/marketplace/apps', '/oauth/token'],
 )
 def test_reserved_prefixes_rejected(path):
     pages, _, errors = check_manifest(ROOT_APP, {'publicPages': [_page(path)]})
@@ -423,11 +425,12 @@ def test_reserved_prefixes_rejected(path):
 
 
 def test_reserved_prefix_is_segment_aware():
-    # '/apis', '/tasks' and '/mcp-server' are NOT under '/api', '/task' and '/mcp'.
+    # '/apis', '/tasks' and '/mcp-server' are NOT under '/api', '/task' and '/mcp';
+    # '/marketplace' (the home app's own page) is NOT under '/marketplace/apps'.
     pages, _, errors = check_manifest(
-        ROOT_APP, {'publicPages': [_page('/apis'), _page('/tasks'), _page('/mcp-server')]}
+        ROOT_APP, {'publicPages': [_page('/apis'), _page('/tasks'), _page('/mcp-server'), _page('/marketplace')]}
     )
-    assert errors == [] and len(pages) == 3
+    assert errors == [] and len(pages) == 4
 
 
 def test_live_route_conflicts_rejected():
@@ -586,7 +589,6 @@ def test_duplicate_redirect_sources_rejected():
 
 
 def test_redirect_sources_on_live_routes_rejected():
-
     def live_conflict(candidate):
         if candidate == '/health':
             return 'GET /health'

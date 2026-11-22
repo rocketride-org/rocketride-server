@@ -88,6 +88,7 @@ _KEYS_THE_RESULT_ALREADY_HOLDS = (
     'objectId',
     'error',
     'status',
+    'tokens',
 )
 
 
