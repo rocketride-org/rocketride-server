@@ -390,6 +390,39 @@ def test_audio_tts_keeps_one_engine_per_language(monkeypatch, tmp_path):
     glb.endGlobal()
 
 
+class _UnloadableModelClient:
+    """Stands in for a model-server client that connects but cannot load its model, nor close cleanly."""
+
+    built = []
+
+    def __init__(self, address):
+        self.disconnected = False
+        type(self).built.append(self)
+
+    def load_model(self, repo, loader, options):
+        raise ConnectionError('Model load failed: no kokoro loader')
+
+    def disconnect(self):
+        self.disconnected = True
+        raise RuntimeError('the socket is already gone')
+
+
+def test_audio_tts_closes_a_client_whose_model_fails_to_load(monkeypatch):
+    module = importlib.import_module('nodes.audio_tts.IGlobal')
+    monkeypatch.setattr(module, 'get_model_server_address', lambda: 'ms:5590')
+    monkeypatch.setattr(module, 'ModelClient', _UnloadableModelClient)
+    _UnloadableModelClient.built = []
+    glb = _control('nodes.audio_tts', 'audio_tts')
+    for _ in range(2):
+        with pytest.raises(ConnectionError, match='no kokoro loader'):
+            glb.synthesize('hello', 'af_heart')
+
+    # Each failed load closed its own connection, a failing close did not mask the load error, nothing was cached
+    assert [client.disconnected for client in _UnloadableModelClient.built] == [True, True]
+    assert glb._clients == {}
+    glb.endGlobal()
+
+
 # ==== embedding_openai ===========================================================
 
 
@@ -428,6 +461,47 @@ def test_embedding_openai_embeds_each_call_with_its_own_model(monkeypatch):
     assert models == ['text-embedding-3-small', 'text-embedding-3-large', 'text-embedding-3-small']
     # One embedder per model, built on first use (no rebuild for the repeated model)
     assert _RecordingEmbeddings.built == ['text-embedding-3-small', 'text-embedding-3-large']
+
+
+class _GatedEmbeddings(_RecordingEmbeddings):
+    """A recording embedder whose large model's probe waits on a gate the test opens."""
+
+    probing = None  #: Set when the large model's probe starts.
+    gate = None  #: The probe returns once this is set.
+
+    def embed_query(self, text):
+        if text == 'dummy' and self.model == 'text-embedding-3-large':
+            type(self).probing.set()
+            type(self).gate.wait(5)
+        return super().embed_query(text)
+
+
+def test_embedding_openai_probes_a_cold_model_without_holding_up_a_built_one(monkeypatch):
+    import threading
+
+    module = importlib.import_module('nodes.embedding_openai.OpenAIEmbeddingWrapper')
+    monkeypatch.setattr(module, 'OpenAIEmbeddings', _GatedEmbeddings)
+    _GatedEmbeddings.built, _GatedEmbeddings.probing, _GatedEmbeddings.gate = [], threading.Event(), threading.Event()
+    wrapper = module.OpenAIEmbeddingWrapper('embedding_openai', {'apikey': 'k1'}, {})
+    wrapper.getVectorSize('text-embedding-3-small')
+
+    # Two first calls of the large model; the first one's probe is held at the gate
+    cold = [threading.Thread(target=wrapper.getVectorSize, args=('text-embedding-3-large',)) for _ in range(2)]
+    for thread in cold:
+        thread.start()
+    assert _GatedEmbeddings.probing.wait(5)
+    warm = threading.Thread(target=wrapper.getVectorSize, args=('text-embedding-3-small',))
+    warm.start()
+    warm.join(2)
+    held_up = warm.is_alive()
+    _GatedEmbeddings.gate.set()
+    for thread in [*cold, warm]:
+        thread.join(5)
+
+    # The built model answered during the probe, and the large model was built once for both callers
+    assert not held_up
+    assert _GatedEmbeddings.built == ['text-embedding-3-small', 'text-embedding-3-large']
+    assert wrapper.getVectorSize('text-embedding-3-large') == 3
 
 
 # ==== embedding_transformer ======================================================
@@ -608,6 +682,62 @@ def test_llamaparse_refuses_a_call_whose_advanced_block_is_not_an_object(llamapa
     instance = _call('nodes.llamaparse', llamaparse_node, {'configMode': 'advanced', 'advanced.advanced_config': '[1]'})
     with pytest.raises(RuntimeError, match='must be a JSON object'):
         instance._parser()
+
+
+class _TextLane:
+    """The instance's output lanes with only ``text`` listened to: records what the node writes there."""
+
+    def __init__(self):
+        self.text = []
+
+    def hasListener(self, lane):  # noqa: N802 (engine method name)
+        return lane == 'text'
+
+    def writeText(self, text):  # noqa: N802 (engine method name)
+        self.text.append(text)
+
+
+def _parse_on_the_tag_lane(glb, params, codes):
+    """
+    One call streaming a three-byte document through the tag lane, then closing its object.
+
+    Args:
+        glb: The llamaparse control.
+        params: The call's params.
+        codes: Collects every ``completionCode`` the object is failed with.
+
+    Returns:
+        What the call wrote to its text lane.
+    """
+    instance = _call('nodes.llamaparse', glb, params)
+    instance.instance = _TextLane()
+    instance.open(SimpleNamespace(fileName='scan.pdf', size=3, objectFailed=False, completionCode=codes.append))
+    for tag in (
+        SimpleNamespace(tagId='SBGN'),
+        SimpleNamespace(tagId='SDAT', asBytes=b'hdr' + b'pdf', size=3),
+        SimpleNamespace(tagId='SEND'),
+    ):
+        instance.writeTag(tag)
+    instance.close()
+    return instance.instance.text
+
+
+def test_llamaparse_fails_a_tag_lane_call_whose_advanced_block_is_not_json(llamaparse_node):
+    codes = []
+    params = {'configMode': 'advanced', 'advanced.advanced_config': '{not json'}
+
+    # The object fails with the configuration error; no error report goes out as parsed text
+    assert _parse_on_the_tag_lane(llamaparse_node, params, codes) == []
+    assert len(codes) == 1 and 'advanced configuration is not valid JSON' in codes[0]
+
+
+def test_llamaparse_parses_a_tag_lane_call_whose_configuration_is_valid(llamaparse_node, monkeypatch):
+    parser = importlib.import_module('nodes.llamaparse.parser')
+    monkeypatch.setattr(parser.Parser, 'parse', lambda self, file_data, file_name=None: {'text': f'{file_name} parsed'})
+    codes = []
+
+    assert _parse_on_the_tag_lane(llamaparse_node, {}, codes) == ['scan.pdf parsed']
+    assert codes == []
 
 
 # ==== reducto ====================================================================

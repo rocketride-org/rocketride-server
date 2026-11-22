@@ -28,6 +28,7 @@ for backend failures); they are never returned as error dicts.
 from __future__ import annotations
 
 import math
+import time
 from typing import Any, Dict, List
 
 from rocketlib import IInstanceBase, tool_function
@@ -86,8 +87,9 @@ class IInstance(IInstanceBase):
         namespace = self._namespace(args, 'remember')
         conversation = _opt_str(args, 'remember', 'conversation')
 
-        laser = self._laser('remember')
-        memory_id = self._run('remember', _remember_op(laser, namespace, content, conversation))
+        deadline = self._deadline()
+        laser = self._laser('remember', deadline)
+        memory_id = self._run('remember', _remember_op(laser, namespace, content, conversation), deadline)
 
         # The answer names the namespace as the caller knows it, so it can be
         # passed back to recall/improve/forget unchanged
@@ -157,7 +159,8 @@ class IInstance(IInstanceBase):
             args, 'limit', default=settings.recall_limit, lo=1, hi=MAX_RECALL_LIMIT, tool_name='laserdata.recall'
         )
 
-        laser = self._laser('recall')
+        deadline = self._deadline()
+        laser = self._laser('recall', deadline)
         items = self._run(
             'recall',
             _recall_op(
@@ -169,6 +172,7 @@ class IInstance(IInstanceBase):
                 conversation=conversation,
                 folded=settings.folded,
             ),
+            deadline,
         )
 
         results = _shape_items(items)
@@ -218,8 +222,11 @@ class IInstance(IInstanceBase):
         namespace = self._namespace(args, 'improve')
         conversation = _opt_str(args, 'improve', 'conversation')
 
-        laser = self._laser('improve')
-        feedback_id = self._run('improve', _improve_op(laser, namespace, memory_id, float(weight), conversation))
+        deadline = self._deadline()
+        laser = self._laser('improve', deadline)
+        feedback_id = self._run(
+            'improve', _improve_op(laser, namespace, memory_id, float(weight), conversation), deadline
+        )
         return {'feedback_id': str(feedback_id), 'memory_id': memory_id}
 
     @tool_function(
@@ -258,8 +265,9 @@ class IInstance(IInstanceBase):
         namespace = self._namespace(args, 'forget')
         conversation = _opt_str(args, 'forget', 'conversation')
 
-        laser = self._laser('forget')
-        self._run('forget', _forget_op(laser, namespace, memory_id, conversation))
+        deadline = self._deadline()
+        laser = self._laser('forget', deadline)
+        self._run('forget', _forget_op(laser, namespace, memory_id, conversation), deadline)
         return {'forgotten': True, 'memory_id': memory_id}
 
     # ------------------------------------------------------------------
@@ -293,19 +301,23 @@ class IInstance(IInstanceBase):
             )
         return ns
 
-    def _laser(self, tool_name: str) -> Any:
-        """Fetch the shared connection, mapping connect failures to RuntimeError."""
+    def _deadline(self) -> float:
+        """This tool call's deadline (``time.monotonic()``): its ``op_timeout`` from now, first connect included."""
+        return time.monotonic() + self.settings.op_timeout
+
+    def _laser(self, tool_name: str, deadline: float) -> Any:
+        """Fetch the shared connection by this call's deadline, mapping connect failures to RuntimeError."""
         try:
-            return self.IGlobal.get_laser()
+            return self.IGlobal.get_laser(timeout=deadline - time.monotonic())
         except RuntimeError:
             raise
         except Exception as exc:
             raise RuntimeError(f'laserdata.{tool_name}: connect failed: {_safe_error(self.IGlobal, exc)}') from None
 
-    def _run(self, tool_name: str, coro) -> Any:
-        """Run one SDK coroutine on the bridge loop within this call's op_timeout, mapping failures to RuntimeError."""
+    def _run(self, tool_name: str, coro, deadline: float) -> Any:
+        """Run one SDK coroutine on the bridge loop by this call's deadline, mapping failures to RuntimeError."""
         try:
-            return self.IGlobal.run(coro, timeout=self.settings.op_timeout)
+            return self.IGlobal.run(coro, timeout=deadline - time.monotonic())
         except (ValueError, RuntimeError):
             raise
         except Exception as exc:

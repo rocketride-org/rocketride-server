@@ -87,6 +87,9 @@ class IGlobal(IGlobalBase):
         """
         The model-server client bound to one language's Kokoro loader, connected on first use.
 
+        A client whose load fails is disconnected before the error propagates:
+        it is never cached, so ``endGlobal`` could not close it later.
+
         Args:
             lang: The Kokoro language code (the first letter of the voice).
 
@@ -97,7 +100,17 @@ class IGlobal(IGlobalBase):
             client = self._clients.get(lang)
             if client is None:
                 client = ModelClient(self._address)
-                client.load_model(_KOKORO_REPO_ID, _KOKORO_LOADER_TYPE, {'lang_code': lang, 'repo_id': _KOKORO_REPO_ID})
+                try:
+                    client.load_model(
+                        _KOKORO_REPO_ID, _KOKORO_LOADER_TYPE, {'lang_code': lang, 'repo_id': _KOKORO_REPO_ID}
+                    )
+                except Exception:
+                    # Close the half-open connection; the load error is the one the caller sees
+                    try:
+                        client.disconnect()
+                    except Exception:
+                        pass
+                    raise
                 self._clients[lang] = client
             return client
 

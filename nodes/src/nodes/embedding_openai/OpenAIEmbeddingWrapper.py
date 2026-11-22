@@ -65,7 +65,8 @@ class OpenAIEmbeddingWrapper:
         """
         # The key is a required leaf, so it is set
         self._apikey = config['apikey'].strip()
-        self._lock = threading.Lock()
+        self._lock = threading.Lock()  #: Guards the two maps below; held for a lookup, never for a request.
+        self._building: Dict[str, threading.Lock] = {}  #: One build lock per model, so each is built once.
         self._models: Dict[str, Dict[str, Any]] = {}
 
     def _model(self, model: str) -> Dict[str, Any]:
@@ -73,7 +74,10 @@ class OpenAIEmbeddingWrapper:
         The embedder of one model with its vector size and token limit, built on first use.
 
         The vector size has no API of its own, so the first use of a model embeds
-        one short probe sentence (one request per model per control).
+        one short probe sentence (one request per model per control). The probe
+        runs under that model's own build lock: concurrent first calls of one
+        model build it once, and calls of a model already built never wait for
+        another model's probe.
 
         Args:
             model: The call's OpenAI embedding model.
@@ -81,8 +85,17 @@ class OpenAIEmbeddingWrapper:
         Returns:
             ``{'embedding': OpenAIEmbeddings, 'vectorSize': int, 'tokenSize': int}``.
         """
+        # Step 1: a built model is a lookup; otherwise take that model's build lock
         with self._lock:
             entry = self._models.get(model)
+            if entry is not None:
+                return entry
+            building = self._building.setdefault(model, threading.Lock())
+
+        # Step 2: build it once; a caller that waited here finds the first caller's entry
+        with building:
+            with self._lock:
+                entry = self._models.get(model)
             if entry is None:
                 embedding = OpenAIEmbeddings(openai_api_key=self._apikey, model=model)
                 entry = {
@@ -90,7 +103,8 @@ class OpenAIEmbeddingWrapper:
                     'vectorSize': len(embedding.embed_query('dummy')),
                     'tokenSize': embedding.embedding_ctx_length,
                 }
-                self._models[model] = entry
+                with self._lock:
+                    self._models[model] = entry
 
                 # Output some debug info
                 debug(f'    Embedding model   : {model}')

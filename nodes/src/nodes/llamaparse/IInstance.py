@@ -287,7 +287,25 @@ class IInstance(IInstanceBase):
             )
 
     def _process_document(self, document_data: bytes, mime_type: str):
-        """Process document data using LlamaParse."""
+        """
+        Process document data using LlamaParse.
+
+        The call's parse configuration is resolved first: one that cannot build
+        a client (an advanced block that is not a JSON object, an argument the
+        SDK refuses) fails the object through ``completionCode``, as ``close()``
+        reports a parse error, and nothing is emitted for it. An error past that
+        point is written to the text lane as an error report.
+        """
+        # Step 1: this call's parser; a configuration error fails the object, it is never parsed text
+        try:
+            self._parser()
+        except Exception as e:
+            debug(f'LlamaParse Instance: Parse configuration refused: {e}')
+            if getattr(self, '_current_object', None):
+                self._current_object.completionCode(str(e))
+            return
+
+        # Step 2: parse the document and emit what it holds
         try:
             debug(f'LlamaParse Instance: Sending document to LlamaParse: {len(document_data)} bytes, MIME: {mime_type}')
 

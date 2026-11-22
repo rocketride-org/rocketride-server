@@ -69,7 +69,8 @@ def _ensure_rocketlib() -> None:
     """Install a minimal rocketlib stub so the node imports without the engine."""
     mod = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
     if not hasattr(mod, 'IInstanceBase'):
-        mod.IInstanceBase = type('IInstanceBase', (), {})
+        # The node reads its call's values through ``settings``, which ``_instance`` stores as ``_settings``
+        mod.IInstanceBase = type('IInstanceBase', (), {'settings': property(lambda self: self._settings)})
     if not hasattr(mod, 'IGlobalBase'):
         mod.IGlobalBase = type('IGlobalBase', (), {})
     if not hasattr(mod, 'tool_function'):

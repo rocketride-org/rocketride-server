@@ -21,6 +21,7 @@ import asyncio
 import concurrent.futures
 import os
 import threading
+import time
 from typing import Any, Coroutine
 
 from rocketlib import IGlobalBase, debug, error, warning
@@ -30,10 +31,6 @@ from rocketlib import IGlobalBase, debug, error, warning
 MAX_RECALL_LIMIT = 200
 # endGlobal must not hang a pipe teardown on a wedged connection close.
 _CLOSE_TIMEOUT = 5
-# The wait for the shared connection to open. Every other operation waits for its
-# call's op_timeout; the connect serves every call, so it has its own fixed budget
-# (the op_timeout default).
-_CONNECT_TIMEOUT = 30
 
 
 class IGlobal(IGlobalBase):
@@ -106,9 +103,9 @@ class IGlobal(IGlobalBase):
 
         Args:
             coro: The SDK coroutine.
-            timeout: Seconds to wait: the call's ``op_timeout`` (the connect has its own).
+            timeout: Seconds to wait: what is left of the calling tool's ``op_timeout``.
         """
-        budget = timeout
+        budget = max(timeout, 0)
         # The open-state check, the scheduling and the registration are one
         # step under the lock teardown takes to close and snapshot the set,
         # so a future is never scheduled after the snapshot it is missing from
@@ -126,20 +123,41 @@ class IGlobal(IGlobalBase):
             raise RuntimeError('laserdata: node is closing') from None
         except concurrent.futures.TimeoutError:
             future.cancel()
-            raise RuntimeError(f'laserdata: operation timed out after {budget}s') from None
+            raise RuntimeError(f'laserdata: operation timed out after {budget:.3g}s') from None
         finally:
             with self._pending_lock:
                 pending.discard(future)
 
-    def get_laser(self) -> Any:
-        """Return the shared Laser connection, opening it on first use."""
+    def get_laser(self, *, timeout: float) -> Any:
+        """Return the shared Laser connection, opening it on first use.
+
+        A cold call spends its own budget on the connect: the wait for another
+        call's connect in flight and its own connect both end within
+        ``timeout``, so one tool call's ``op_timeout`` bounds its first connect
+        and its operation together.
+
+        Args:
+            timeout: Seconds the calling tool may still wait (what is left of its ``op_timeout``).
+
+        Raises:
+            RuntimeError: The connection did not open within ``timeout``.
+        """
         laser = self._laser
         if laser is None:
-            with self._connect_lock:
+            # Step 1: wait for the connect lock no longer than the caller's budget
+            deadline = time.monotonic() + timeout
+            if not self._connect_lock.acquire(timeout=max(timeout, 0)):
+                raise RuntimeError(f'laserdata: connect timed out after {max(timeout, 0):.3g}s')
+            try:
+                # Step 2: connect in what is left of it, unless the call ahead of us already did
                 if self._laser is None:
-                    self._laser = self.run(_connect(self.connection_string, self.stream), timeout=_CONNECT_TIMEOUT)
+                    self._laser = self.run(
+                        _connect(self.connection_string, self.stream), timeout=deadline - time.monotonic()
+                    )
                     debug('laserdata: connected')
                 laser = self._laser
+            finally:
+                self._connect_lock.release()
         return laser
 
     def endGlobal(self) -> None:
