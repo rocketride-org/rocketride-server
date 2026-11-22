@@ -69,6 +69,7 @@ from abc import ABC, abstractmethod
 from typing import Any, Dict, Optional, Set, Tuple
 from urllib.parse import quote
 
+from ai.account.audience import AudienceError, parse_owner
 from ai.constants import (
     CONST_STATE_MAX_ENTRIES,
     CONST_STATE_MAX_KEY_LENGTH,
@@ -86,7 +87,7 @@ class StateError(ValueError):
 # ==== Keys and values ============================================================
 
 
-def state_scope(org_id: str, owner_id: str, address: str, node_id: str) -> str:
+def state_scope(org_id: str, owner: str, address: str, node_id: str) -> str:
     """
     The scope of one node's keys: the prefix every physical key of the node starts with.
 
@@ -94,9 +95,15 @@ def state_scope(org_id: str, owner_id: str, address: str, node_id: str) -> str:
     another owner's or another node's prefix. The per-node key limit is
     counted per scope.
 
+    The owner carries its kind (``=user/<uid>``, ``=team/<tid>``,
+    ``=org/<oid>``): a user, a team and an org are different owners even
+    when their ids are the same string (every id is ``local`` on a
+    standalone server), so a bare id is refused rather than trusted to be
+    unique across the three tables.
+
     Args:
         org_id: The control's organization.
-        owner_id: The user or team that owns the control.
+        owner: The control's owner (``TaskControl.owner``).
         address: The control's address.
         node_id: The node's component id in the pipeline.
 
@@ -104,37 +111,51 @@ def state_scope(org_id: str, owner_id: str, address: str, node_id: str) -> str:
         ``org/owner/address/nodeId``, each segment escaped (three ``/``).
 
     Raises:
-        StateError: The node id is not a non-empty string.
+        StateError: The owner is not ``=user/<uid>``, ``=team/<tid>`` or
+            ``=org/<oid>``, or the node id is not a non-empty string.
     """
+    # Step 1: the owner names its kind; parse_owner refuses a bare id and
+    # every other spelling
+    try:
+        parse_owner(str(owner or ''))
+    except AudienceError:
+        raise StateError(f'a state owner is =user/<uid>, =team/<tid> or =org/<oid>, got {owner!r}') from None
+
+    # Step 2: the node the scope belongs to
     if not isinstance(node_id, str) or not node_id:
         raise StateError('a node id is a non-empty string')
-    return '/'.join(quote(str(part or ''), safe='') for part in (org_id, owner_id, address, node_id))
+
+    # Step 3: every segment escaped, so none can carry a '/' into the next
+    return '/'.join(quote(str(part or ''), safe='') for part in (org_id, owner, address, node_id))
 
 
-def state_key(org_id: str, owner_id: str, address: str, node_id: str, key: str) -> str:
+def state_key(org_id: str, owner: str, address: str, node_id: str, key: str) -> str:
     """
     The physical key of a node's key, owned by (org, owner, address) and the node.
 
     Args:
         org_id: The control's organization.
-        owner_id: The user or team that owns the control.
+        owner: The control's owner, ``=user/<uid>``, ``=team/<tid>`` or ``=org/<oid>``.
         address: The control's address.
         node_id: The node's component id in the pipeline.
         key: The node's own key.
 
     Returns:
-        ``state_scope(org_id, owner_id, address, node_id) + '/' + key``, the
+        ``state_scope(org_id, owner, address, node_id) + '/' + key``, the
         key escaped like the scope's segments (four ``/`` in all).
 
     Raises:
-        StateError: The node id is not a non-empty string, or the node's key
-            is empty or longer than ``CONST_STATE_MAX_KEY_LENGTH``.
+        StateError: The owner or node id is refused by ``state_scope``, or
+            the node's key is empty or longer than ``CONST_STATE_MAX_KEY_LENGTH``.
     """
+    # Step 1: the node's own key, bounded
     if not isinstance(key, str) or not key:
         raise StateError('a state key is a non-empty string')
     if len(key) > CONST_STATE_MAX_KEY_LENGTH:
         raise StateError(f'a state key is at most {CONST_STATE_MAX_KEY_LENGTH} characters')
-    return state_scope(org_id, owner_id, address, node_id) + '/' + quote(key, safe='')
+
+    # Step 2: under the node's scope, escaped like its segments
+    return state_scope(org_id, owner, address, node_id) + '/' + quote(key, safe='')
 
 
 def check_write(scope: str, key: str, ttl: float, max_keys: int) -> float:
@@ -201,8 +222,9 @@ class StateStore(ABC):
     The arguments every method shares:
 
     - ``key`` is always the PHYSICAL key, ``state_key(org, owner, address,
-      node_id, key)``. It is opaque to a backend apart from one fact:
-      it starts with its scope followed by ``/``.
+      node_id, key)`` with the owner kind-qualified (``=team/<tid>``). It is
+      opaque to a backend apart from one fact: it starts with its scope
+      followed by ``/``.
     - ``scope`` is ``state_scope(org, owner, address, node_id)``, the node the
       key belongs to. The methods that add or remove a value take it so the
       backend can keep the scope's count of live values without parsing keys.

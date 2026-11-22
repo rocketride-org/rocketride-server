@@ -37,6 +37,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from ai.account.audience import compose_owner
 from ai.account.state_store import MemoryStateStore, install_state_store, state_key, state_scope
 from ai.account.store import Store
 from ai.account.store_providers.filesystem import FilesystemStore
@@ -65,7 +66,11 @@ def _control(**overrides):
     }
     fields.update(overrides)
     control = SimpleNamespace(**fields)
-    control.owner_id = control.teamId if control.owner_type == 'team' else control.userId
+    # The owner as TaskControl derives it: the id of the owning kind, and that
+    # id qualified by its kind (the state doors key by the qualified form)
+    owner_ids = {'team': control.teamId, 'org': control.orgId}
+    control.owner_id = owner_ids.get(control.owner_type, control.userId)
+    control.owner = compose_owner(control.owner_type, control.owner_id) if control.owner_id else ''
     return control
 
 
@@ -143,8 +148,8 @@ async def test_the_key_is_built_from_the_control_never_from_the_request(state):
         userId='user-2',
         orgId='org-2',
     )
-    assert await state.get(state_key('org-1', 'user-1', 'acme.monitor.webhook', NODE, 'series:cpu')) == '[1,2]'
-    assert await state.get(state_key('org-2', 'user-2', 'acme.monitor.webhook', NODE, 'series:cpu')) is None
+    assert await state.get(state_key('org-1', '=user/user-1', 'acme.monitor.webhook', NODE, 'series:cpu')) == '[1,2]'
+    assert await state.get(state_key('org-2', '=user/user-2', 'acme.monitor.webhook', NODE, 'series:cpu')) is None
 
 
 async def test_two_owners_naming_one_key_never_meet(state):
@@ -164,7 +169,26 @@ async def test_two_owners_naming_one_key_never_meet(state):
 async def test_a_team_owned_control_keys_by_its_team(state):
     engine = _Engine({'c1': _control(owner_type='team')})
     await _ask(engine, 'state.put', correlationId='c1', nodeId=NODE, key='k', value=1)
-    assert await state.get(state_key('org-1', 'team-1', 'acme.monitor.webhook', NODE, 'k')) == '1'
+    assert await state.get(state_key('org-1', '=team/team-1', 'acme.monitor.webhook', NODE, 'k')) == '1'
+
+
+async def test_a_user_a_team_and_an_org_of_one_id_keep_their_own_values(state):
+    # A standalone server names its one user, team and org 'local'; the @me,
+    # @team and @org controls of one address differ only in the owner's kind
+    engine = _Engine(
+        {
+            kind: _control(owner_type=kind, orgId='local', userId='local', teamId='local')
+            for kind in ('user', 'team', 'org')
+        }
+    )
+    for kind in ('user', 'team', 'org'):
+        await _ask(engine, 'state.put', correlationId=kind, nodeId=NODE, key='k', value=kind)
+    for kind in ('user', 'team', 'org'):
+        assert (await _ask(engine, 'state.get', correlationId=kind, nodeId=NODE, key='k'))[0] == {
+            'found': True,
+            'value': kind,
+        }
+    assert len(state._scopes) == 3
 
 
 async def test_an_unowned_binding_is_refused(state):
@@ -281,8 +305,8 @@ async def test_two_nodes_of_one_control_naming_one_key_never_meet(state):
 async def test_the_node_id_joins_the_key_after_the_address(state):
     engine = _Engine({'c1': ALICE})
     await _ask(engine, 'state.put', correlationId='c1', nodeId='anomaly/1', key='k', value=1)
-    assert await state.get(state_key('org-1', 'user-1', 'acme.monitor.webhook', 'anomaly/1', 'k')) == '1'
-    assert list(state._scopes) == [state_scope('org-1', 'user-1', 'acme.monitor.webhook', 'anomaly/1')]
+    assert await state.get(state_key('org-1', '=user/user-1', 'acme.monitor.webhook', 'anomaly/1', 'k')) == '1'
+    assert list(state._scopes) == [state_scope('org-1', '=user/user-1', 'acme.monitor.webhook', 'anomaly/1')]
 
 
 async def test_a_node_id_never_reaches_another_owner(state):
