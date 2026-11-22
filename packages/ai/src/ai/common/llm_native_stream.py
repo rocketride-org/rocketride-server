@@ -76,6 +76,29 @@ def apply_prompt_cache_breakpoint(payload: Dict[str, Any], prefix: Optional[str]
     return payload
 
 
+def apply_prompt_cache_parts(payload: Dict[str, Any], prefix: Optional[str]) -> Dict[str, Any]:
+    """Split the last user message as apply_prompt_cache_breakpoint does, but leave both parts unmarked.
+
+    For an OpenAI-compatible Chat Completions request: the endpoint takes no
+    ``cache_control``, and a gateway in front of it decides what to mark.
+
+    Args:
+        payload: A Chat Completions request body. Modified in place.
+        prefix: The start of the user message that may be cached, or None.
+
+    Returns:
+        *payload*, unchanged unless the last message is a user message whose text
+        starts with *prefix* and continues past it.
+    """
+    apply_prompt_cache_breakpoint(payload, prefix)
+    messages = payload.get('messages') or []
+    content = messages[-1].get('content') if messages else None
+    if isinstance(content, list):
+        for part in content:
+            part.pop('cache_control', None)
+    return payload
+
+
 # --- Anthropic: model id gates (vendor prefixes) ---
 
 _VENDOR_MODEL_PREFIXES = (
@@ -432,6 +455,10 @@ def try_openai_compat_reasoning_stream(
     stop = STOP_SEQUENCES_VAR.get() or None
     if stop:
         kwargs['stop'] = stop
+    if getattr(chat, 'SUPPORTS_PROMPT_CACHE_PREFIX', False):
+        # A driver that opted in (llm_openai_api with cachePrefixParts) gets the same
+        # split here as on its LangChain client, which this stream bypasses.
+        apply_prompt_cache_parts(kwargs, PROMPT_CACHE_PREFIX_VAR.get())
 
     parts: list[str] = []
     finish_reason: Optional[str] = None

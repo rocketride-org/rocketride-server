@@ -187,6 +187,26 @@ def test_a_streamed_request_is_split_too(endpoint):
     assert 'cache_control' not in json.dumps(_Recorder.bodies[0])
 
 
+@pytest.mark.parametrize('option', [True, False], ids=['option-on', 'option-off'])
+def test_a_reasoning_stream_is_split_only_with_the_option(endpoint, option):
+    # A reasoning model streams through the raw openai SDK, not the LangChain client.
+    question = _question(json_reply=False)
+    chat = _chat(endpoint, cachePrefixParts=option, capabilities={'reasoning': True})
+
+    chat.chat(question, on_chunk=lambda text: None)
+
+    assert chat._native_stream_provider == 'openai_compat_reasoning'
+    assert _Recorder.bodies[0]['stream'] is True
+    content = _content(_Recorder.bodies[0])
+    if option:
+        assert [p['type'] for p in content] == ['text', 'text']
+        assert content[0]['text'] + content[1]['text'] == question.getPrompt()
+        assert 'Scratch' not in content[0]['text'] and 'Scratch' in content[1]['text']
+    else:
+        assert content == question.getPrompt()
+    assert 'cache_control' not in json.dumps(_Recorder.bodies[0])
+
+
 def test_by_default_the_request_is_one_string(endpoint):
     question = _question()
     chat = _chat(endpoint)

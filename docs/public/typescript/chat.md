@@ -30,8 +30,9 @@ goals or questions changing (an agent loop does), set `question.cachePrefix = tr
 A provider that supports prompt caching (the Anthropic node, and Claude models on
 the Bedrock node) may then cache the unchanging start of the prompt. The
 OpenAI-Compatible API node with `cachePrefixParts` turned on sends that start as its
-own content part, so a gateway in front of the model can mark it. Other providers
-ignore the flag.
+own content part, so a gateway in front of the model can mark it (not for turn-mode
+questions, nor for models it sends to the Responses API). Other providers ignore the
+flag.
 
 `new Question({ type?, filter?, expectJson?, cachePrefix?, role? })` — `QuestionType` is one of
 `QUESTION`, `SEMANTIC`, `KEYWORD`, `GET`, `PROMPT` (default `QUESTION`). Steer the

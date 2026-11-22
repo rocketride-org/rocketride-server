@@ -10,7 +10,7 @@ from typing import Any, Dict, Iterator
 from rocketlib import warning
 from ai.common.chat import ChatBase
 from ai.common.config import Config
-from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, apply_prompt_cache_breakpoint
+from ai.common.llm_native_stream import PROMPT_CACHE_PREFIX_VAR, apply_prompt_cache_parts
 from ai.common.utils import parse_bool
 from langchain_openai import ChatOpenAI as _LangChainChatOpenAI
 from openai import APIError, APIStatusError, AuthenticationError, RateLimitError, APIConnectionError
@@ -160,13 +160,7 @@ class _CacheBoundaryChatOpenAI(ChatOpenAI):
 
     def _get_request_payload(self, input_, *, stop=None, **kwargs):
         payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        apply_prompt_cache_breakpoint(payload, PROMPT_CACHE_PREFIX_VAR.get())
-        messages = payload.get('messages') or []
-        content = messages[-1].get('content') if messages else None
-        if isinstance(content, list):
-            for part in content:
-                part.pop('cache_control', None)
-        return payload
+        return apply_prompt_cache_parts(payload, PROMPT_CACHE_PREFIX_VAR.get())
 
 
 class Chat(ChatBase):
