@@ -929,7 +929,7 @@ def _package_is_module(path: str, ws_dir: str) -> bool:
             try:
                 with open(candidate, 'r', encoding='utf-8-sig') as handle:
                     manifest = json.load(handle)
-            except (OSError, UnicodeDecodeError, ValueError):
+            except (OSError, UnicodeDecodeError, ValueError, RecursionError):
                 return False
             return isinstance(manifest, dict) and manifest.get('type') == 'module'
         if os.path.abspath(here) == root or os.path.dirname(here) == here:
@@ -986,20 +986,25 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
                 try:
                     with open(path, 'r', encoding='utf-8-sig') as handle:
                         manifest = json.load(handle)
+                except RecursionError:
+                    raise BuildFailure('materialize', f'{rel} is nested too deeply')
                 except (UnicodeDecodeError, ValueError) as exc:
                     # Another reader (pnpm) may parse what this one skips.
                     raise BuildFailure('materialize', f'{rel} is not valid UTF-8 JSON: {exc}')
                 if not isinstance(manifest, dict):
                     continue
                 package_dir = posixpath.dirname(rel) or '.'
-                for table in _DEPENDENCY_TABLES:
-                    _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
-                if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
-                    for key in _NEUTRALIZED_PACKAGE_KEYS:
-                        if manifest.pop(key, None) is not None:
-                            neutralized.append(f'{rel}:{key}')
-                    with open(path, 'w', encoding='utf-8') as handle:
-                        json.dump(manifest, handle, indent=2)
+                try:
+                    for table in _DEPENDENCY_TABLES:
+                        _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
+                    if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
+                        for key in _NEUTRALIZED_PACKAGE_KEYS:
+                            if manifest.pop(key, None) is not None:
+                                neutralized.append(f'{rel}:{key}')
+                        with open(path, 'w', encoding='utf-8') as handle:
+                            json.dump(manifest, handle, indent=2)
+                except RecursionError:
+                    raise BuildFailure('materialize', f'{rel} is nested too deeply')
     return neutralized
 
 

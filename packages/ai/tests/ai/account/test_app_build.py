@@ -1473,7 +1473,7 @@ def test_package_json_refuses_specs_escaping_the_workspace_root(tmp_path, rel, s
     'text',
     [
         '{"dependencies": ' + '{"a": ' * 5000 + '"1"' + '}' * 5000 + '}',
-        '{"a": ' + '[' * 200000,
+        '{"a": ' + '[' * 20000,
     ],
     ids=['deep-dependencies-table', 'deep-array'],
 )
