@@ -1020,7 +1020,8 @@ before it runs is different: when `EXPLAIN` validation rejects every attempt, or
 the safety check refuses the query, the node reports the error on the lanes
 and returns normally (`graph_arango` emits the validation error as its result,
 likewise without failing the step), so an app that reads those lanes must handle
-that error as well as a failed step.
+that error as well as a failed step. A graph pipeline with no `text` or `answers`
+lane has nowhere to report it: nothing is reported and the step still succeeds.
 
 ### Data in the RocketRide cloud databases
 

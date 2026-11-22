@@ -181,7 +181,7 @@ in its own words: an `EXPLAIN` rejection after the last attempt reports its
 final validation error, unsafe SQL reports `Generated query contains unsafe
 SQL`, and an LLM reply with neither a query nor an answer says so. A pipeline
 with only the `table` lane has no lane that carries an error, so every failure in this paragraph
-raise and fail the step. The `get_sql`
+raises and fails the step. The `get_sql`
 and `get_data` tools never raise for an outage or a failed query: they return
 `valid: false` with an `error`, so check `valid`.
 
