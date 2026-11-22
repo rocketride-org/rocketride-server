@@ -547,6 +547,18 @@ export interface AppManifestEntry {
 
 	/** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
 	features?: string[];
+
+	/** `'pipe'` on an agent entry: a published pipeline in the catalog or on the desktop. Absent on an app. */
+	kind?: 'app' | 'pipe';
+
+	/** An agent entry's address `developerId.pipeId`; `id` carries the same name. Absent on an app. */
+	pipe?: string;
+
+	/**
+	 * The app an agent entry opens, bound to it with `?pipe=<address>`;
+	 * `moduleId` is that app's module. Absent on an app.
+	 */
+	hostAppId?: string;
 }
 
 /**

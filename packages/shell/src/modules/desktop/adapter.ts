@@ -16,6 +16,7 @@
 
 import { ConnectionManager } from '../../connection/connection';
 import { getAppVersionOverride, applyAppVersionOverride } from '../../util/versionOverride';
+import { switchAppRequestOf, type LaunchableEntry } from './launch';
 import type { DesktopAdapter, DesktopVersionRow } from './types';
 
 /** Rail rung audience types -> the display handles the drop list shows. */
@@ -112,4 +113,13 @@ export function createShellDesktopAdapter(): DesktopAdapter {
  */
 export function defaultLaunch(appId: string): void {
 	ConnectionManager.getInstance().emit('shell:switchApp', { appId });
+}
+
+/**
+ * Open an agent tile: its host app, bound to its address (plan 9.1, G3).
+ *
+ * @param entry - The agent entry (`hostAppId` and `pipe` carry the launch).
+ */
+export function launchAgent(entry: LaunchableEntry): void {
+	ConnectionManager.getInstance().emit('shell:switchApp', switchAppRequestOf(entry));
 }

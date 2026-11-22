@@ -157,11 +157,14 @@ class PublicCommands(DAPConn):
         """
         Browse the catalog with pagination and filtering.
 
-        ``kind`` picks what is browsed. ``'app'`` (the default) is the app
-        catalog: available to both authenticated and unauthenticated
+        ``kind`` picks what is browsed. ``'app'`` (the default) is the
+        Catalog: available to both authenticated and unauthenticated
         connections, enriched with subscription status per app for a
         signed-in caller, and delegated to ``account.handle_public()``
-        (SaaS: the catalog DB; OSS: the public publish rung).
+        (SaaS: the catalog DB; OSS: the public publish rung). A signed-in
+        caller's Catalog also lists the agents: every listed pipe they reach
+        as a ``kind: 'pipe'`` entry carrying ``pipe`` (the address) and
+        ``hostAppId`` (the app that opens it), plan 9.1.
 
         ``'pipe'`` is the pipe picker's feed (plan 3.6), edition-neutral
         over the one publish table and signed-in only. Without a search

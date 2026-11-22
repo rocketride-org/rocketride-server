@@ -417,6 +417,12 @@ import { OAUTH_ROOT_URL } from './auth/oauth';
 import { ITaskState, IServiceCapabilities, DEFAULT_TOOLCHAIN_STATE } from './types/project';
 import { getAppVersionOverride, applyAppVersionOverride, versionedEntryUrl } from './util/versionOverride';
 export type { AppVersionOverride } from './util/versionOverride';
+// How a launcher opens an entry: an app by its id, an agent (a published
+// pipeline, plan 9.1) through its host app with `params: { pipe }`. The one
+// rule the shell's own desktop and picker launch by, for hosts that draw
+// their own tiles (home-ui).
+import { isAgent, switchAppRequestOf } from './modules/desktop/launch';
+export type { LaunchableEntry } from './modules/desktop/launch';
 
 export {
 	Button, StatusBadge, StatusDot, EmptyState, Banner, InputField,
@@ -746,6 +752,10 @@ export const shellApi = {
 	// Stable versioned entry URL (constructed, never minted — the server
 	// enforces entitlement per request on the /apps/<id>/v<N>/ route)
 	get versionedEntryUrl() { return versionedEntryUrl; },
+	// Launching an entry: the agent test and the shell:switchApp request
+	// (an agent opens its host app bound to its pipe)
+	get isAgent() { return isAgent; },
+	get switchAppRequestOf() { return switchAppRequestOf; },
 } as const;
 
 // =============================================================================
@@ -792,6 +802,8 @@ export {
 	TelemetryProvider, useReport, useConsent, openConsentBanner,
 	// Module-level consent/experiment seams (roulette, signup attribution, replay resume)
 	getConsentState, subscribeConsent, consentExpiresAt, getConsentedCapture, setAttributionGate, resumeSignedOutCapture,
+	// Launching an entry: the agent test and the shell:switchApp request
+	isAgent, switchAppRequestOf,
 };
 
 /**

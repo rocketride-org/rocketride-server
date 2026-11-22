@@ -45,6 +45,16 @@ export interface DesktopApp {
 	registryVersion?: number;
 	/** True when the entry is a dev-overlay override (live watch build). */
 	dev?: boolean;
+	/**
+	 * `'pipe'` on an AGENT tile: a published pipeline (plan 9.1). The tile
+	 * opens `hostAppId` bound to `pipe` (`?pipe=<address>`); `id` is the
+	 * address and `moduleId` the host's module. Absent on an app.
+	 */
+	kind?: 'app' | 'pipe';
+	/** An agent tile's address `developerId.pipeId`. */
+	pipe?: string;
+	/** The app an agent tile opens. */
+	hostAppId?: string;
 }
 
 // =============================================================================
@@ -132,8 +142,11 @@ export interface DesktopViewProps {
 	/** Apps to show, in render order (hosts filter/sort before passing). */
 	apps: DesktopApp[];
 	/**
-	 * Launch handler. Default: emit `shell:switchApp` on the connection
-	 * manager — correct for every in-shell host.
+	 * Launch handler for APP tiles. Default: emit `shell:switchApp` on the
+	 * connection manager — correct for every in-shell host. An agent tile
+	 * always opens its host app bound to its pipe (`shell:switchApp` with
+	 * `{ appId: hostAppId, params: { pipe } }`): an app id alone cannot
+	 * carry the binding.
 	 */
 	onLaunch?: (appId: string) => void;
 	/** First name for the greeting; omitted → the nameless greeting pools. */

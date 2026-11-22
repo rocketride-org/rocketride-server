@@ -52,11 +52,17 @@ an ``endpoints`` scope is refused outside it (plan 2.4).
 
 A pure read: nothing is started, written or cached here; the task server
 attaches to a live control or starts one from the pinned artifact.
+
+The same resolver serves the Catalog and the desktop (plan 9.1, Step 6b.4):
+every listed pipe the caller reaches is a catalog entry and, once added, an
+agent tile that opens the one host app (``CONST_PIPE_HOST_APP_ID``) bound to
+the pipe's address.
 """
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Sequence, Tuple
 
+from rocketlib import debug
 
 from ai.account.audience import (
     PUBLIC_AUDIENCE,
@@ -68,6 +74,7 @@ from ai.account.audience import (
 )
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
 from ai.account.models import team_order
+from ai.constants import CONST_PIPE_HOST_APP_ID
 
 if TYPE_CHECKING:
     from ai.account.models import AccountInfo
@@ -762,3 +769,222 @@ async def search_public_pipes(account: Any, account_info: 'AccountInfo', search:
         seen.add(pipe_name)
         out.append(_picker_entry(row, 'public'))
     return sorted(out, key=lambda e: (e['name'].lower(), e['id']))
+
+
+# ==== The Catalog and the desktop (plan 9.1, Step 6b.4) ========================
+
+
+def desktop_kind(kinds: Dict[str, str], name: str) -> str:
+    """
+    What one desktop entry is: ``'pipe'`` when its name row says so, else ``'app'``.
+
+    A desktop holds fully qualified names (``rocketride.chat``,
+    ``acme.supportBot``); B37 keeps an app and a pipe from sharing one. The
+    kind is the name row's, looked up and never stored beside the entry
+    (G2, 2026-11-21): a name with no row is an app.
+
+    Args:
+        kinds: ``AccountBase.deployments_kinds`` for the desktop's names.
+        name: One desktop entry.
+
+    Returns:
+        ``'pipe'`` or ``'app'``.
+    """
+    return 'pipe' if kinds.get(name) == 'pipe' else 'app'
+
+
+def pipe_catalog_entry(pipe_name: str, entry: Optional[Dict[str, Any]], rung: str) -> Optional[Dict[str, Any]]:
+    """
+    One listed pipe version as the Catalog and the desktop show it, or None when it is unlisted.
+
+    The catalog row (:func:`pipe_catalog_row`) in an app entry's shape, plus
+    what launches it: ``kind: 'pipe'``, the address in ``pipe``, and the one
+    host app in ``hostAppId`` (``CONST_PIPE_HOST_APP_ID``), whose module the
+    entry names as its ``moduleId``. The row's registry version number is
+    dropped: an app entry's ``version`` is a semver, and a
+    ``registryVersion`` would make a client register the entry as a Module
+    Federation remote of its own; an agent tile is a launcher of its host,
+    never a remote. ``appStatus`` and ``onDesktop`` are the undecorated
+    defaults each edition overlays.
+
+    Args:
+        pipe_name: The registry name ``developerId.pipeId``.
+        entry: The registry entry of the version that answers the caller
+            (None reads as unlisted).
+        rung: The rung that answers: ``'me'``, ``'team'`` or ``'public'``.
+
+    Returns:
+        The entry, or None for an unlisted (or missing) version.
+    """
+    row = pipe_catalog_row(pipe_name, entry) if isinstance(entry, dict) else None
+    if row is None:
+        return None
+    row.pop('version', None)
+    row.update(
+        {
+            'kind': 'pipe',
+            'pipe': pipe_name,
+            'hostAppId': CONST_PIPE_HOST_APP_ID,
+            'moduleId': CONST_PIPE_HOST_APP_ID.replace('.', '_'),
+            # The rung spelling app entries carry (resolve_app_pins)
+            'rung': 'personal' if rung == 'me' else rung,
+            'public': rung == 'public',
+            'appStatus': 'free',
+            'onDesktop': False,
+        }
+    )
+    return row
+
+
+async def _version_entry(account: Any, org_id: str, pipe_name: str, version: int) -> Optional[Dict[str, Any]]:
+    """The registry entry of one version, or None when the registry holds no such version (a failure raises)."""
+    for entry in await account.deployments_versions(org_id, pipe_name):
+        if isinstance(entry, dict) and entry.get('version') == version:
+            return entry
+    return None
+
+
+async def reachable_pipe_entry(account: Any, account_info: 'AccountInfo', address: str) -> Optional[Dict[str, Any]]:
+    """
+    The Catalog entry of ``address`` as it serves this caller now, or None when nothing serves it to them.
+
+    The desktop's gate and its tiles (plan 9.1): ``address`` must be a
+    registry name ``developerId.pipeId`` (a source address names no tile);
+    the ONE resolver (:func:`resolve_pins`) picks the rung and the version
+    that answer the caller, and that version must be listed. The caller's
+    own faults (the grammar, the key's scope, no session) are a None; a
+    storage failure raises, so a pipe is never refused as unknown because
+    the database was down.
+
+    Args:
+        account: The account singleton.
+        account_info: The caller.
+        address: The registry name.
+
+    Returns:
+        The entry (:func:`pipe_catalog_entry`), or None.
+    """
+    from ai.modules.task.address import validate_pipe_name
+    from ai.modules.task.types import TaskError
+
+    # Step 1: a registry name, resolved by the one resolver
+    try:
+        validate_pipe_name(address, 'appId')
+        pin = (await resolve_pins('pipe', account_info, address)).first
+    except (TaskError, PermissionError):
+        return None
+    if pin is None:
+        return None
+
+    # Step 2: the listing of the version that answers
+    entry = await _version_entry(account, pin.deployment.org_id, address, pin.version)
+    return pipe_catalog_entry(address, entry, pin.rung)
+
+
+async def catalog_pipe_entries(account: Any, account_info: 'AccountInfo') -> List[Dict[str, Any]]:
+    """
+    Every listed pipe the caller can reach, as the Catalog lists it (plan 9.1, G2).
+
+    The caller's OWN publications first, ``@me`` then ``@team`` in team order
+    (:func:`own_pipe_publications`), then the store's ``@public`` rows of
+    every org, each pipe ONCE at the rung that answers the caller for it (the
+    resolver's order, plan 3.2), so a tile never opens a version the
+    resolver would pass over. Only serving rows count; a key's ``endpoints``
+    scope drops the pipes it may not call; a version without a store block
+    is unlisted and never shown. There is no entry-point filter: every
+    listed pipe opens in the one host app. A version whose registry entry
+    cannot be read is left off (logged), as an app whose artifact cannot be
+    read is.
+
+    Args:
+        account: The account singleton.
+        account_info: The request's account.
+
+    Returns:
+        Catalog entries (:func:`pipe_catalog_entry`), own rungs first.
+
+    Raises:
+        PermissionError: Unauthenticated.
+        Exception: A failing publish table, propagated (never read as "no pipes").
+    """
+    # Step 1: the caller's own rungs, then the store's rows
+    own = await own_pipe_publications(account, account_info)
+    org_id, _ = _org_of(account_info)
+    endpoints = getattr(account_info, 'endpoints', None)
+    public = await account.publish_list(org_id, 'pipe', [audience_fields(PUBLIC_AUDIENCE)])
+
+    # Step 2: each pipe once, at the rung that answers it. A stray duplicate
+    # public row goes to the lowest publisher org, the app walk's tie rule
+    picks: List[Tuple[str, str, int, str]] = [(e['pipe'], org_id, int(e['version']), e['rung']) for e in own]
+    seen = {pick[0] for pick in picks}
+    for row in sorted(public, key=lambda r: str(r.get('orgId') or '')):
+        pipe_name = _name_of(row)
+        if not pipe_name or pipe_name in seen or not _serves(row, public=True):
+            continue
+        if not _in_scope(endpoints, pipe_name):
+            continue
+        seen.add(pipe_name)
+        picks.append((pipe_name, str(row.get('orgId') or org_id), int(row['version']), 'public'))
+
+    # Step 3: the listed versions, as entries
+    out: List[Dict[str, Any]] = []
+    for pipe_name, publisher_org, version, rung in picks:
+        try:
+            entry = await _version_entry(account, publisher_org, pipe_name, version)
+        except Exception as exc:
+            debug(f'[pipe_deploy] catalog: {pipe_name} v{version} could not be read: {exc}')
+            continue
+        listed = pipe_catalog_entry(pipe_name, entry, rung)
+        if listed is not None:
+            out.append(listed)
+    return out
+
+
+async def desktop_pipe_tiles(
+    account: Any, account_info: 'AccountInfo', desktop_ids: Sequence[str]
+) -> List[Dict[str, Any]]:
+    """
+    The agent tiles of a desktop: its pipe entries, each as the caller reaches it now.
+
+    The desktop holds names; which of them are pipes is the name rows'
+    answer (``deployments_kinds`` read through :func:`desktop_kind`), never a
+    stored kind. Each pipe resolves through :func:`reachable_pipe_entry`,
+    so a pipe the caller no longer reaches (unpublished, its version
+    unlisted, outside the key's scope) has no tile, as an unreachable app
+    has none; the entry stays on the stored desktop and returns with the
+    publication. Every tile is ``onDesktop``; ``appStatus`` is the free
+    default an edition overlays. One pipe that cannot be read is left off
+    (logged): a desktop never fails for one pipe.
+
+    Args:
+        account: The account singleton.
+        account_info: The caller.
+        desktop_ids: The desktop's names, in stored order.
+
+    Returns:
+        The tiles, in desktop order.
+
+    Raises:
+        Exception: The name-row lookup failed (the sign-in callers catch it).
+    """
+    # Step 1: the desktop's names and their kinds, one lookup
+    names = [name for name in dict.fromkeys(desktop_ids) if name]
+    org_id, _ = _org_of(account_info)
+    if not names or not org_id:
+        return []
+    kinds = await account.deployments_kinds(org_id, names)
+
+    # Step 2: each pipe as the caller reaches it now
+    tiles: List[Dict[str, Any]] = []
+    for name in names:
+        if desktop_kind(kinds, name) != 'pipe':
+            continue
+        try:
+            tile = await reachable_pipe_entry(account, account_info, name)
+        except Exception as exc:
+            debug(f'[pipe_deploy] desktop: {name} could not be resolved: {exc}')
+            continue
+        if tile is not None:
+            tile['onDesktop'] = True
+            tiles.append(tile)
+    return tiles

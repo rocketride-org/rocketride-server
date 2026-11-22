@@ -199,6 +199,15 @@ CONST_STATE_MAX_LEASE_SECONDS = 300.0  # the longest a node may hold a state loc
 CONST_STATE_MAX_ENTRIES = 100_000  # values the in-process (OSS) state store keeps
 
 # =============================================================================
+# Desktop (plan 9.1, Step 6b)
+# =============================================================================
+# The one app every agent (published pipe) tile opens, bound to its pipe with
+# ?pipe=<address>: the Playground, which opens any pipe a caller can send to.
+# Fixed here, never chosen per pipe and never checked (G2, 2026-11-21); a
+# per-pipe host waits until a second host app exists.
+CONST_PIPE_HOST_APP_ID = 'rocketride.playground'
+
+# =============================================================================
 # HTTP/Stream Configuration
 # =============================================================================
 CONST_HTTP_CHUNK_SIZE = 64 * 1024  # bytes per chunk for streaming data (64KB)

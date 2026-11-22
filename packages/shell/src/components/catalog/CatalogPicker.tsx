@@ -7,8 +7,10 @@
 // CATALOG PICKER — the one catalog-to-desktop picker, both editions
 // =============================================================================
 //
-// The catalog of apps the caller can reach, each tile in one of three states:
-// ON THE DESKTOP (Open), NOT YET (Add), or ADDING (the add is in flight).
+// The catalog of apps and agents (published pipelines, plan 9.1) the caller
+// can reach, each tile in one of three states: ON THE DESKTOP (Open), NOT
+// YET (Add), or ADDING (the add is in flight). An agent opens its host app
+// bound to its address and adds by that address; its row reads "Agent".
 // It reads the catalog through `rrext_public_catalog`, adds through
 // `rrext_app desktop_add`, and learns the desktop membership from the live
 // identity (`useSubscriptions`), which the server refreshes after every
@@ -30,6 +32,8 @@ import { Button } from '../button/Button';
 import { EmptyState } from '../empty-state/EmptyState';
 import { InputField } from '../input-field/InputField';
 import type { AppManifestEntry } from '../workspace/types';
+import { launchAgent } from '../../modules/desktop/adapter';
+import { AGENT_LABEL, isAgent } from '../../modules/desktop/launch';
 import { CATALOG_PAGE_LIMIT, fetchCatalogPages, reconcileAdded } from './catalogLogic';
 
 // =============================================================================
@@ -76,15 +80,17 @@ export interface ICatalogPickerProps {
 	/** App ids never shown (the host launcher itself, e.g. 'rocketride.hello'). */
 	excludeIds?: string[];
 	/**
-	 * Launch handler for a tile that is already on the desktop. Default:
-	 * emit `shell:switchApp` on the connection manager.
+	 * Launch handler for an APP tile that is already on the desktop. Default:
+	 * emit `shell:switchApp` on the connection manager. An agent tile always
+	 * opens its host app bound to its address (`shell:switchApp` with
+	 * `params`): an app id alone cannot carry the binding.
 	 */
 	onLaunch?: (appId: string) => void;
 	/** Called once the server accepted an add (the identity push follows). */
 	onAdded?: (appId: string) => void;
 	/** Heading above the grid (default 'Catalog'); an empty string hides it. */
 	title?: string;
-	/** Line under the heading (default 'Add apps to your desktop.'). */
+	/** Line under the heading (default 'Add apps and agents to your desktop.'). */
 	subtitle?: string;
 	/** Show the search field (default true). */
 	showSearch?: boolean;
@@ -269,7 +275,7 @@ interface CatalogTileProps {
 	state: 'desktop' | 'adding' | 'available';
 	/** The last add failure for this app, if any. */
 	error?: string;
-	onOpen: (appId: string) => void;
+	onOpen: (app: AppManifestEntry) => void;
 	onAdd: (app: AppManifestEntry) => void;
 }
 
@@ -278,7 +284,8 @@ interface CatalogTileProps {
  */
 const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, onAdd }) => {
 	const [hover, setHover] = useState(false);
-	const category = app.categories?.[0] ? formatCategory(app.categories[0]) : null;
+	// An agent row reads "Agent" whatever its categories say (plan 9.1).
+	const category = isAgent(app) ? AGENT_LABEL : app.categories?.[0] ? formatCategory(app.categories[0]) : null;
 	const surface = hover ? 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))' : 'var(--rr-bg-paper)';
 
 	return (
@@ -312,7 +319,7 @@ const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, on
 			<div style={S.cardBottom}>
 				<span style={S.cardError} title={error}>{error ?? ''}</span>
 				{state === 'desktop' && (
-					<Button variant="secondary" small onClick={() => onOpen(app.id)} title={`Open ${app.name}`}>
+					<Button variant="secondary" small onClick={() => onOpen(app)} title={`Open ${app.name}`}>
 						Open
 					</Button>
 				)}
@@ -346,7 +353,7 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 	onLaunch,
 	onAdded,
 	title = 'Catalog',
-	subtitle = 'Add apps to your desktop.',
+	subtitle = 'Add apps and agents to your desktop.',
 	showSearch = true,
 	style,
 }) => {
@@ -433,9 +440,12 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 	}, [isOnDesktop, added]);
 
 	// -- Actions ---------------------------------------------------------------
-	const open = useCallback((appId: string) => {
-		if (onLaunch) onLaunch(appId);
-		else ConnectionManager.getInstance().emit('shell:switchApp', { appId });
+	// An agent opens its host app bound to its address (launchAgent); the
+	// host's onLaunch takes app ids only, which cannot carry the binding.
+	const open = useCallback((app: AppManifestEntry) => {
+		if (isAgent(app)) launchAgent(app);
+		else if (onLaunch) onLaunch(app.id);
+		else ConnectionManager.getInstance().emit('shell:switchApp', { appId: app.id });
 	}, [onLaunch]);
 
 	const add = useCallback(async (app: AppManifestEntry) => {
@@ -489,8 +499,8 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 							type="search"
 							value={search}
 							onChange={(e) => setSearch(e.target.value)}
-							placeholder="Search apps"
-							aria-label="Search apps"
+							placeholder="Search apps and agents"
+							aria-label="Search apps and agents"
 							style={S.search}
 						/>
 					)}
@@ -511,8 +521,8 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 			) : visible.length === 0 ? (
 				<div style={S.status}>
 					<EmptyState
-						title={search.trim() ? 'No apps match.' : 'No apps in the catalog.'}
-						description={search.trim() ? 'Try a different search.' : 'Apps published to this server appear here.'}
+						title={search.trim() ? 'Nothing matches.' : 'Nothing in the catalog yet.'}
+						description={search.trim() ? 'Try a different search.' : 'Apps and agents published to this server appear here.'}
 					/>
 				</div>
 			) : (

@@ -1035,6 +1035,41 @@ class FileDeploymentBackend:
             rows.append(row)
         return rows
 
+    async def kinds_of(self, org_id: str, project_ids: List[str]) -> Dict[str, str]:
+        """The registry kind of each name that has a name row (plan 9.1, G2).
+
+        The meta IS the name row: its ``kind`` was fixed at the first deploy
+        (B37); a pre-C.17 meta without one reads as its newest version's
+        kind, the rule ``publish`` applies. A name with no meta, or one that
+        is no valid registry name, has no row and is absent from the answer
+        (a desktop entry with no row is an app). A storage failure raises:
+        a pipe is never read as an app because the store was down.
+
+        Args:
+            org_id: The org whose registry is read (the caller's org; the
+                DB edition reads every org's name rows).
+            project_ids: The registry names to look up.
+
+        Returns:
+            ``{name: kind}`` for the names that have a row.
+        """
+        _safe_id(org_id, 'org_id')
+        kinds: Dict[str, str] = {}
+        for project_id in dict.fromkeys(project_ids):
+            try:
+                _safe_id(project_id, 'project_id')
+            except ValueError:
+                continue
+            meta = await self._read_meta(org_id, project_id)
+            if meta is None:
+                continue
+            kind = str(meta.get('kind') or '')
+            if not kind and meta['versions']:
+                kind = str(meta['versions'][-1].get('kind') or 'pipe')
+            if kind:
+                kinds[project_id] = kind
+        return kinds
+
     # =========================================================================
     # PUBLISHES — audience pointers (PUBLISH = bind a deployment to an audience)
     # =========================================================================

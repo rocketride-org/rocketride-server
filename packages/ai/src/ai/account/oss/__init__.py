@@ -211,7 +211,7 @@ class Account(AccountBase):
 
         # Credential matched — synthesise a local AccountInfo that grants the
         # connecting developer full admin access to the single 'local' team.
-        return AccountInfo(
+        info = AccountInfo(
             auth=credential,
             userToken=credential,
             userId='local',
@@ -267,6 +267,14 @@ class Account(AccountBase):
             apps=apps,
             capabilities=self.capabilities,
         )
+        # The desktop's agents (plan 9.1, Step 6b.4): the pipe addresses on
+        # the stored list, each as this identity reaches it now. Resolved
+        # with the identity itself (the one resolver needs the caller), so
+        # appended once it exists; never fails the sign-in.
+        tiles = await self.desktop_pipe_tiles(info)
+        if tiles:
+            info.apps = [*info.apps, *tiles]
+        return info
 
     async def _assemble_apps(self) -> List[Dict]:
         """The full OSS app list — registry-only (single source of truth).

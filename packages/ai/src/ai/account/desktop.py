@@ -45,8 +45,9 @@ from rocketlib import error
 
 from .store import IStore, StorageNotFoundError
 
-# Document format, for a future shape change (the pipe tiles of Step 6b.4
-# add fields to each row; a reader that meets a newer version re-seeds).
+# Document format, for a future shape change (a reader that meets a newer
+# version re-seeds). A published pipe's address rides the list as one more
+# name beside the app ids; its kind is looked up, never stored (plan 9.1, G2).
 DESKTOP_FORMAT_VERSION = 1
 
 # An id that is safe as ONE path segment of the store key: no separators,

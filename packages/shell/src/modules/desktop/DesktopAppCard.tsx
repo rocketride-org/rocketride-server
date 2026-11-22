@@ -20,6 +20,7 @@
 
 import React, { useState, useRef, useEffect, type CSSProperties } from 'react';
 import { X } from 'lucide-react';
+import { AGENT_LABEL, isAgent } from './launch';
 import type { DesktopApp, DesktopAdapter, DesktopVersionRow, DesktopVersionOverride } from './types';
 
 // =============================================================================
@@ -210,7 +211,9 @@ export const DesktopAppCard: React.FC<DesktopAppCardProps> = ({
 	const isSubscribed = status === 'subscribed' || status === 'trialing';
 	const canRemove = allowRemove && (typeof adapter.removeApp === 'function' || typeof adapter.unsubscribeApp === 'function');
 
-	const category = app.categories?.[0] ? formatCategory(app.categories[0]) : null;
+	// An agent (a published pipeline) reads as one, whatever its categories
+	// say: the external naming rule (plan 9.1).
+	const category = isAgent(app) ? AGENT_LABEL : app.categories?.[0] ? formatCategory(app.categories[0]) : null;
 
 	// Effective source — an explicit session override outranks the dev
 	// overlay (matching resolveServerEntry's precedence): the user picked a

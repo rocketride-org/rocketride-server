@@ -55,8 +55,9 @@ async def push_account(server: Any, user_id: str) -> None:
                 continue
             try:
                 # The OSS authenticate() decoration already rode in with the
-                # rebuilt list (free + the user's real desktop membership).
-                info.apps = [a for a in apps if a.get('id')]
+                # rebuilt list (free + the user's real desktop membership);
+                # the desktop's agents follow, as authenticate() appends them.
+                info.apps = [a for a in apps if a.get('id')] + await account.desktop_pipe_tiles(info)
                 await conn.send_event('apaext_account', body=info.to_push_result())
             except Exception as exc:
                 debug(f'[manifest_push] OSS account push failed: {exc}')

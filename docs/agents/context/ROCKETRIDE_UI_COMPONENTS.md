@@ -1349,7 +1349,7 @@ Event catalog (`out` = the shell emits it; `in` = an app emits it):
 | `shell:appsUpdated` | `{ apps: ShellAppEntry[] }` | out | App catalog changed (full replacement). |
 | `shell:login` / `shell:logout` | `{ user: ConnectResult }` / `void` | out | Authenticated / identity cleared. |
 | `shell:loginRequest` / `shell:logoutRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` / `void` | in | UI-initiated sign-in / sign-out; `auto` is set only by the shell's auth gate; `signupProperties` is optional consent-gated sign-up credential context. |
-| `shell:switchApp` | `{ appId }` | in | Switch the active app. |
+| `shell:switchApp` | `{ appId, params? }` | in | Switch the active app; `params` (`Record<string, string>`) are written into the URL before the app mounts (an agent tile opens its host with `{ pipe }`). |
 | `shell:openOverlay` | `{ id: 'account' \| 'settings' \| 'environment' }` | in | Open a shell overlay (guarded allowlist). |
 | `shell:subscribe` / `shell:unsubscribe` | `{ app, plan?, promo? }` / `{ appId }` | in | Open checkout for a paid app / subscription cancelled. |
 | `shell:myApps` | `void` | in | Navigate to the My Apps launcher. |

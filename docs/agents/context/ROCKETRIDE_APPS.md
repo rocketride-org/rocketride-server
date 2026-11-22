@@ -841,7 +841,7 @@ from `'shell'`). The full set:
 | `shell:logout` | `{}` | User signed out. |
 | `shell:loginRequest` | `{ appId?, register?, auto?, signupProperties?: SignupProperties }` | UI requests sign-in; `auto` is set only by the shell's auth gate. |
 | `shell:logoutRequest` | `{}` | UI requests sign-out. |
-| `shell:switchApp` | `{ appId }` | Switch the active app. |
+| `shell:switchApp` | `{ appId, params? }` | Switch the active app; `params` (`Record<string, string>`) are written into the URL before the app mounts (an agent tile opens its host as `{ appId: hostAppId, params: { pipe } }`). |
 | `shell:subscribe` | `{ app, plan?, promo? }` | Open subscription checkout; `plan` skips the picker. |
 | `shell:unsubscribe` | `{ appId }` | Subscription cancelled — refresh entitlement views. |
 | `shell:myApps` | `{}` | Navigate to the My Apps launcher. |
