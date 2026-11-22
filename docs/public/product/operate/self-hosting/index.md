@@ -46,7 +46,9 @@ directory's `nodes/`: a `nodes/<name>/` folder an older release left there is
 loaded instead of the node in the archive, and nothing replaces it. Copy only the
 nodes you wrote yourself into the new runtime directory's `nodes/`, from the old
 runtime directory's `nodes/` and from `local_nodes/` or the folder you passed with
-`--node_path`, which the engine no longer reads.
+`--node_path`, which the engine no longer reads. A node from either of those was
+imported as `local_nodes.<name>`: set the `path` in its `services.json` to
+`nodes.<name>`, and change its absolute `local_nodes.` imports to `nodes.`.
 
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
