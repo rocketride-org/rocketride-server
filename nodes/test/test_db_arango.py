@@ -874,6 +874,7 @@ class TestLanesFailClosed:
             inst.writeQuestions(self._question(_QTYPE.EXECUTE, text='FOR u IN users REMOVE u IN users'))
 
         assert '10.0.0.5' not in str(raised.value) and 'REMOVE' not in str(raised.value)
+        assert 'FOR u IN users RETURN u' not in str(raised.value)  # the driver's own message is not echoed
         assert not (inst.instance.texts or inst.instance.tables or inst.instance.answers)
         assert any('10.0.0.5' in e for e in _ERROR_CALLS)  # the cause is in the log
 
