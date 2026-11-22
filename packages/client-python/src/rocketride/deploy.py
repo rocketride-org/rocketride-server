@@ -41,10 +41,10 @@ Teams-as-environments deployments over two DAP commands (dispatched by
 
 Usage:
     result = await client.deploy.add(my_pipeline, comment='v2 prompt fix')
-    await client.deploy.deploy('proj-1', result['artifact']['version'], 'team-staging')
+    await client.deploy.deploy('proj-1', result['artifact']['version'], '@Staging')
     live = await client.deploy.list()
-    await client.deploy.set_schedule('proj-1', 'webhook_1', '*/15 * * * *', team_id='team-staging')
-    await client.deploy.pause_schedule('proj-1', 'webhook_1', 'team-staging')
+    await client.deploy.set_schedule('proj-1', 'webhook_1', '*/15 * * * *', team_id='@Staging')
+    await client.deploy.pause_schedule('proj-1', 'webhook_1', '@Staging')
 """
 
 from __future__ import annotations
