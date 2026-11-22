@@ -698,11 +698,14 @@ def _patched_workspace_yaml(
                         f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree',
                     )
         seen: set = set()
-        for table in ('overrides', 'catalog'):
-            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
-        catalogs = data.get('catalogs')
-        for named in catalogs.values() if isinstance(catalogs, dict) else ():
-            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
+        try:
+            for table in ('overrides', 'catalog'):
+                _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
+            catalogs = data.get('catalogs')
+            for named in catalogs.values() if isinstance(catalogs, dict) else ():
+                _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
     else:
         packages = [app_root or '.'] + [inc for inc in include_roots if inc]
         data = {'packages': packages}
@@ -724,7 +727,12 @@ def _patched_workspace_yaml(
     overrides['shell'] = f'file:{_SHELL_REL}'
     overrides['rocketride'] = f'file:{_ROCKETRIDE_REL}'
     data['overrides'] = overrides
-    return yaml.safe_dump(data, sort_keys=False)
+    try:
+        return yaml.safe_dump(data, sort_keys=False)
+    except RecursionError:
+        # Aliased cycles can be shallow by _refuse_deep_yaml's measure and
+        # still too deep for the dumper (it recurses in a different order).
+        raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
 
 
 _YAML_MAX_DEPTH = 64
@@ -736,6 +744,9 @@ def _refuse_deep_yaml(data: Any, where: str) -> None:
     ``yaml.safe_load`` accepts nesting far deeper than the recursive code that
     follows (``yaml.safe_dump`` of the patched workspace) can walk, and that
     would surface as a RecursionError, retried as an infrastructure fault.
+    This is the fast first check, not a guarantee: aliased cycles can pass it
+    and still outrun the recursive walks, so those also turn RecursionError
+    into a BuildFailure.
     Only depth is capped. Aliases are fine: a node reachable under several keys
     is measured once (by identity), and a self-referential anchor is a back edge
     that adds no depth, so neither is refused. The walk is iterative.
@@ -1401,7 +1412,10 @@ def _refuse_lockfile_paths(lock_text: str) -> None:
     for data in documents:
         if not isinstance(data, dict):
             raise BuildFailure('materialize', 'pnpm-lock.yaml is not a mapping')
-        _refuse_lockfile_document_paths(data)
+        try:
+            _refuse_lockfile_document_paths(data)
+        except RecursionError:
+            raise BuildFailure('materialize', 'pnpm-lock.yaml is nested too deeply')
 
 
 def _refuse_lockfile_document_paths(data: Dict[str, Any]) -> None:
