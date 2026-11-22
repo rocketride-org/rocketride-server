@@ -39,7 +39,7 @@ Usage:
 
 from typing import Dict, Any, Optional
 
-from ..core import DAPClient
+from ..core import CommandException, DAPClient
 from ..types.pipeline import PipelineConfig
 from ..types.service import CONVERT_RESULT, SERVICES_RESPONSE, SERVICE_DEFINITION, VALIDATION_RESULT
 
@@ -175,7 +175,9 @@ class ServicesMixin(DAPClient):
             absent.
 
         Raises:
-            RuntimeError: If the server returns a validation error.
+            CommandException: If the server refuses the command (``code`` says why, when it
+                sends one); a pipeline that fails validation returns, with its problems in
+                ``errors``.
 
         Example:
             result = await client.validate(
@@ -195,6 +197,9 @@ class ServicesMixin(DAPClient):
             result.setdefault('errors', [])
             result.setdefault('warnings', [])
             return result
+        except CommandException as err:
+            # Keep the server's code with the message
+            raise CommandException({**err.dap_result, 'message': f'Pipeline validation failed: {err}'}) from err
         except Exception as err:
             raise RuntimeError(f'Pipeline validation failed: {err}') from err
 

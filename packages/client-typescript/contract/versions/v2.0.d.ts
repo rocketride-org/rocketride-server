@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: d34aafa30b25a80c7593958b9883416d05296f0c
+// Source commit: 7257e7c359f843956324bbe5a0823e254922867e
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -128,6 +128,14 @@ export type LoginAttemptCancellationReason = "superseded" | "logout" | "detached
 export declare class LoginAttemptCancelledError extends Error {
     readonly reason: LoginAttemptCancellationReason;
     constructor(reason: LoginAttemptCancellationReason);
+}
+/**
+ * A command the server refused, such as starting or validating a pipeline.
+ *
+ * `code` says why, e.g. `NODE_NOT_ENTITLED`.
+ */
+export declare class CommandException extends RocketRideException {
+    constructor(dapResult: Record<string, unknown>);
 }
 /**
  * Exception raised for data pipe operations.
@@ -6000,7 +6008,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.source - Optional override for the source component ID
      * @returns Promise resolving to validation result with errors, warnings,
      *          and resolved component
-     * @throws Error if the server returns a validation error
+     * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+     *         a pipeline that fails validation resolves, with its problems in `errors`
      *
      * @example
      * ```typescript
@@ -7154,7 +7163,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param args    - Key/value arguments forwarded in the request.
      * @param options - Optional token (for task-scoped calls) and timeout in ms.
      * @returns The `body` field of a successful DAP response.
-     * @throws Error if the server signals failure.
+     * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
      */
     call<T = any>(command: string, args?: Record<string, unknown>, options?: {
         token?: string;

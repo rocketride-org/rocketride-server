@@ -36,7 +36,7 @@ import { BillingApi } from './billing.js';
 import { DatabaseApi } from './database.js';
 import { DeployApi } from './deploy.js';
 import { LogApi } from './log.js';
-import { AuthenticationException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
+import { AuthenticationException, CommandException, ConnectionException, DAPException, LoginAttemptCancelledError, type LoginAttemptCancellationReason, PipeException } from './exceptions/index.js';
 
 // Exact text the server sends when it receives an empty credential.
 const NO_AUTH_MESSAGE = 'No authorization provided';
@@ -1506,7 +1506,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.source - Optional override for the source component ID
 	 * @returns Promise resolving to validation result with errors, warnings,
 	 *          and resolved component
-	 * @throws Error if the server returns a validation error
+	 * @throws CommandException if the server refuses the command (`code` says why, when it sends one);
+	 *         a pipeline that fails validation resolves, with its problems in `errors`
 	 *
 	 * @example
 	 * ```typescript
@@ -1535,7 +1536,10 @@ export class RocketRideClient extends DAPClient {
 			// never need null guards on a passing validation.
 			return { ...result, errors: result?.errors ?? [], warnings: result?.warnings ?? [] };
 		} catch (err) {
-			throw new Error(`Pipeline validation failed: ${err instanceof Error ? err.message : err}`);
+			const message = `Pipeline validation failed: ${err instanceof Error ? err.message : err}`;
+			// Keep the server's code with the message
+			if (err instanceof CommandException) throw new CommandException({ ...err.dapResult, message });
+			throw new Error(message);
 		}
 	}
 
@@ -1951,6 +1955,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline restart failed: ${errorMsg}`);
+			if (err instanceof CommandException) throw err;
 			throw new Error(errorMsg);
 		}
 	}
@@ -3962,7 +3967,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param args    - Key/value arguments forwarded in the request.
 	 * @param options - Optional token (for task-scoped calls) and timeout in ms.
 	 * @returns The `body` field of a successful DAP response.
-	 * @throws Error if the server signals failure.
+	 * @throws CommandException if the server signals failure; `code` says why, when the server sends one.
 	 */
 	async call<T = any>(command: string, args?: Record<string, unknown>, options?: { token?: string; timeout?: number }): Promise<T> {
 		// Build the raw DAP request
@@ -3979,7 +3984,7 @@ export class RocketRideClient extends DAPClient {
 		// Throw on server-reported failure
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
-			throw new Error(response.message ?? `${command} failed`);
+			throw new CommandException({ ...response, message: response.message || `${command} failed` });
 		}
 
 		// Trace: success response

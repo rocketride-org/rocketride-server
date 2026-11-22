@@ -31,6 +31,8 @@ import type { LoginAttemptCancellationReason as Frozen_LoginAttemptCancellationR
 import type { LoginAttemptCancellationReason as Current_LoginAttemptCancellationReason } from './client/index.js';
 import type { LoginAttemptCancelledError as Frozen_LoginAttemptCancelledError } from '../contract/versions/v2.0';
 import type { LoginAttemptCancelledError as Current_LoginAttemptCancelledError } from './client/index.js';
+import type { CommandException as Frozen_CommandException } from '../contract/versions/v2.0';
+import type { CommandException as Current_CommandException } from './client/index.js';
 import type { PipeException as Frozen_PipeException } from '../contract/versions/v2.0';
 import type { PipeException as Current_PipeException } from './client/index.js';
 import type { ExecutionException as Frozen_ExecutionException } from '../contract/versions/v2.0';
@@ -437,6 +439,12 @@ const _k_LoginAttemptCancelledError: { [K in _AllKeys<Frozen_LoginAttemptCancell
 void _k_LoginAttemptCancelledError;
 const _b_LoginAttemptCancelledError: [_DroppedKeys<Frozen_LoginAttemptCancelledError, Current_LoginAttemptCancelledError>] extends [never] ? true : _DroppedKeys<Frozen_LoginAttemptCancelledError, Current_LoginAttemptCancelledError> = true;
 void _b_LoginAttemptCancelledError;
+const _t_CommandException: Frozen_CommandException = {} as Current_CommandException;
+void _t_CommandException;
+const _k_CommandException: { [K in _AllKeys<Frozen_CommandException>]-?: K } = {} as { [K in _AllKeys<Current_CommandException>]-?: K };
+void _k_CommandException;
+const _b_CommandException: [_DroppedKeys<Frozen_CommandException, Current_CommandException>] extends [never] ? true : _DroppedKeys<Frozen_CommandException, Current_CommandException> = true;
+void _b_CommandException;
 const _t_PipeException: Frozen_PipeException = {} as Current_PipeException;
 void _t_PipeException;
 const _k_PipeException: { [K in _AllKeys<Frozen_PipeException>]-?: K } = {} as { [K in _AllKeys<Current_PipeException>]-?: K };
