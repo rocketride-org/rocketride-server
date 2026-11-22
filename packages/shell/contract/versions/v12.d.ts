@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-22T03:48:32.708Z
-// Source commit: 9cfd1bbb81cd8db25ed46e6467ab75196e05cbd3
+// Generated:     2026-11-22T04:41:25.739Z
+// Source commit: 4009db84a5c549ab84c98d0c41ae2b6b67e80416
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -6983,7 +6983,8 @@ export declare class RocketRideClient extends DAPClient {
      * @example
      * ```typescript
      * const { artifact } = await client.deploy.add({ pipeline, comment: 'v2' });
-     * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
+     * // A team by name, or a row's `audience` (=team/<tid>) as the server returned it
+     * await client.deploy.deploy('proj-1', artifact.version!, '@Staging');
      * ```
      */
     get deploy(): DeployApi;
