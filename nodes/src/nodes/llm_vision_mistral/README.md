@@ -47,6 +47,13 @@ sent to Mistral as each request's output cap; the node lowers it to the context
 limit, requires at least 1,024, and reports it to nodes that ask for the model's
 output length.
 
+When the output limit is empty (always, for a listed model), each request carries
+an output cap of 4,096 tokens and a longer reply stops there; choose **Custom model**
+and set a higher output limit when you expect long answers. The output cap and the
+input (the image and the prompt) share the context window: keep the output limit
+below the context length, leaving room for the input, or the provider refuses the
+request.
+
 ### Lane behavior
 
 On the `image` lane, incoming image bytes are buffered across chunks, base64-encoded
