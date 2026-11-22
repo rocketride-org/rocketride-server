@@ -65,7 +65,7 @@ from ai.constants import CONST_DEFAULT_MAX_THREADS, CONST_ENGINE_IDLE_TTL
 from ai.modules.task import deploy_events, task_control, task_engine, task_server
 from ai.modules.task.commands.cmd_data import DataCommands
 from ai.modules.task.commands.cmd_task import TaskCommands
-from ai.modules.task.task_control import RESOLVE_ATTACH, DeploymentRef, TaskControl, TeamContext
+from ai.modules.task.task_control import RESOLVE_ATTACH, DeploymentRef, TaskControl
 from ai.modules.task.engine_key import (
     engine_content,
     key_owner,
@@ -277,8 +277,15 @@ async def _start(
     deployment=None,
     **arguments,
 ):
-    """Start (or attach) a control as ``user``, the way on_execute does."""
+    """
+    Start (or attach) a control as ``user``, the way on_execute does.
+
+    A deployment run is stamped with the rung its owner answers on (the
+    trusted dispatch stamps it from the audience): a user-owned one on
+    ``@me``, a team-owned one on its team's rung.
+    """
     request = {'command': 'execute', 'arguments': {'pipeline': copy.deepcopy(pipeline), **arguments}}
+    rung = '' if run_kind == 'dev' else {'user': 'me', 'team': 'team', 'org': 'org'}[owner_kind or 'team']
     result = await ts.start_task(
         request,
         MagicMock(),
@@ -290,6 +297,7 @@ async def _start(
         owner_kind=owner_kind,
         developer_id='acme',
         deployment=deployment,
+        rung=rung,
     )
     # The token slot carries the control id: the registry key
     return ts._task_control[result['token']]
@@ -551,7 +559,7 @@ async def test_threads_off_policy_on_a_spec_call_key_an_engine_of_their_own(cata
 # =============================================================================
 
 
-async def _publish(ts, pipeline, *, user, rung='public', team='team-1', org='org-1', env_source=None, **arguments):
+async def _publish(ts, pipeline, *, user, rung='public', team='team-1', org='org-1', **arguments):
     """Start (or attach) ``user``'s own control on a published rung, the way the trusted dispatch does."""
     request = {'command': 'execute', 'arguments': {'pipeline': copy.deepcopy(pipeline), **arguments}}
     result = await ts.start_task(
@@ -561,12 +569,12 @@ async def _publish(ts, pipeline, *, user, rung='public', team='team-1', org='org
         user_id=user,
         team_id=team,
         org_id=org,
-        env_source=env_source,
         run_kind='deploy',
         owner_kind='user',
         rung=rung,
         developer_id='acme',
         deployment=DeploymentRef(org_id=org, team_id=f'=user/{user}', project_id=pipeline['project_id']),
+        caller_id=user,
     )
     return ts._task_control[result['token']]
 
@@ -758,8 +766,11 @@ async def test_a_shared_engine_carries_no_user_identity_and_no_user_env(catalog,
     monkeypatch.setattr(task_engine, 'CONST_TASK_DATA_PATH', str(tmp_path))
     ts = _server()
     env_source = AsyncMock(return_value={'ROCKETRIDE_TONE': 'secret-of-a'})
+    import ai.account
+
+    monkeypatch.setattr(ai.account.account, 'get_merged_env', env_source)
     spec = _pipeline(instructions=['Be brief.'], parameters={'tone': 'prompt_1.instructions'})
-    control = await _publish(ts, spec, user='user-a', env_source=env_source, pipelineTraceLevel='full')
+    control = await _publish(ts, spec, user='user-a', pipelineTraceLevel='full')
     engine = control.task
 
     assert engine.shared and engine._env_source is not env_source and await engine._env_source() == {}
@@ -1619,6 +1630,7 @@ async def test_a_deployment_revoked_while_its_run_started_is_never_registered(ca
             org_id='org-1',
             run_kind='deploy',
             owner_kind='team',
+            rung='team',
             developer_id='acme',
             deployment=deployment,
             deployment_epoch=state_epoch,
@@ -1797,12 +1809,12 @@ async def test_a_restart_carries_the_predecessors_deployment_epoch(catalog, engi
     old_engine = run.task
     resolve_env = ts._resolve_control_env
 
-    async def revoked_during_setup(control):
+    async def revoked_during_setup(control, chain):
         # The kill switch lands while the successor is set up: the predecessor
         # has already left the registry, so the release pass never saw it
         await asyncio.sleep(0.05)  # a monotonic tick is 15 ms on Windows
         ts._deployment_revoked[deployment] = time.monotonic()
-        return await resolve_env(control)
+        return await resolve_env(control, chain)
 
     ts._resolve_control_env = revoked_during_setup
 
@@ -1867,12 +1879,12 @@ async def test_a_restarts_predecessor_stays_registered_while_its_successor_is_se
     seen = {}
     resolve_env = ts._resolve_control_env
 
-    async def during_setup(control):
+    async def during_setup(control, chain):
         # The successor's start is under way: the predecessor is still the
         # registered control of its key, marked for the lookup to pass over
         seen['registered'] = ts._task_control.get(dev.key) is dev
         seen['restarting'] = dev.restarting
-        return await resolve_env(control)
+        return await resolve_env(control, chain)
 
     ts._resolve_control_env = during_setup
     conn = MagicMock()
@@ -2241,10 +2253,18 @@ def test_no_engine_names_a_user(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_start_task_builds_an_owner_qualified_engine_with_the_owners_env(catalog, engines):
-    """A @spec engine is its owner's: the owner's client id, env source and trace level."""
+async def test_start_task_builds_an_owner_qualified_engine_with_the_owners_env(catalog, engines, monkeypatch):
+    """A @spec engine is its owner's: the owner's client id, trace level and environment chain (plan 6.2)."""
+    import ai.account
+
+    asked = []
+
+    async def merged(user_id, org_id, team_id):
+        asked.append((user_id, org_id, team_id))
+        return {'ROCKETRIDE_TONE': 'secret-of-a'}
+
+    monkeypatch.setattr(ai.account.account, 'get_merged_env', merged)
     ts = _server()
-    env_source = AsyncMock(return_value={'ROCKETRIDE_TONE': 'secret-of-a'})
     request = {'command': 'execute', 'arguments': {'pipeline': _pipeline(), 'pipelineTraceLevel': 'full'}}
     await ts.start_task(
         request,
@@ -2254,14 +2274,17 @@ async def test_start_task_builds_an_owner_qualified_engine_with_the_owners_env(c
         team_id='team-1',
         org_id='org-1',
         developer_id='acme',
-        env_source=env_source,
+        caller_env={'ROCKETRIDE_MINE': 'x'},
     )
     (control,) = ts._task_control.values()
     engine = control.task
 
     assert not engine.shared and engine.client_id == 'user-a'
     assert engine._pipelineTraceLevel == 'full' and control.trace_level == 'full'
-    assert engine._env_source is env_source
+    # One chain: the engine's default is the owner's org, home team and user,
+    # with the @spec call's own values on top
+    assert await engine._env_source() == {'ROCKETRIDE_TONE': 'secret-of-a', 'ROCKETRIDE_MINE': 'x'}
+    assert asked == [('user-a', 'org-1', 'team-1')]
 
 
 def test_metrics_accumulate_per_trace_for_their_own_control():
@@ -2452,12 +2475,17 @@ async def test_without_a_personal_deployment_the_team_answers(catalog, engines, 
 
     control = await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data')
 
-    assert control.rung == 'team' and control.index_key == f'team.team-1.{ADDRESS}'
-    assert (control.owner_kind, control.owner_id) == ('team', 'team-1')
+    assert control.rung == 'team' and control.index_key == f'team.team-1.user-a.{ADDRESS}'
+    assert (control.owner_kind, control.owner_id, control.caller_id) == ('team', 'team-1', 'user-a')
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='acme.docBrain')
 
-    # A teammate resolves the same team control through the owner index
-    assert await _attach(ts, ADDRESS, _caller('user-b'), 'task.data') is control
+    # A teammate gets a control of their own (plan 8.3: one control per caller)
+    with pytest.raises(TaskError) as err:
+        await _attach(ts, ADDRESS, _caller('user-b'), 'task.data')
+    assert err.value.code == TaskError.NOT_REGISTERED
+    other = await _resolve(ts, ADDRESS, _caller('user-b'), 'task.data')
+    assert other is not control and other.index_key == f'team.team-1.user-b.{ADDRESS}'
+    assert (other.owner_id, other.userId, other.teamId) == ('team-1', 'user-b', 'team-1')
 
 
 @pytest.mark.asyncio
@@ -2486,7 +2514,8 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
     assert control.rung == 'public' and control.index_key == f'public.user-z.{ADDRESS}'
     assert control.address == ADDRESS
     assert (control.owner_kind, control.owner_id, control.userId) == ('user', 'user-z', 'user-z')
-    assert (control.orgId, control.teamId) == ('org-2', 'team-z')
+    # The caller's org pays; the store bills no team (plan 8.3); the caller's home team is the environment's
+    assert (control.orgId, control.teamId, control.env_team) == ('org-2', '', 'team-z')
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='@public', project_id='acme.docBrain')
     assert control.trigger == 'submit'
     assert await _attach(ts, ADDRESS, stranger, 'task.data') is control
@@ -2530,8 +2559,8 @@ async def test_not_registered_lists_the_rungs_actually_tried(catalog, engines, d
     """not_found names the rungs walked; a scoped key never tried @spec."""
     ts = _server()
     for account, rungs in (
-        (_caller('user-a'), ['@spec', '@me', '@team', '@public']),
-        (_caller('user-a', endpoints=[ADDRESS]), ['@me', '@team', '@public']),
+        (_caller('user-a'), ['@spec', '@me', '@team', '@org', '@public']),
+        (_caller('user-a', endpoints=[ADDRESS]), ['@me', '@team', '@org', '@public']),
     ):
         with pytest.raises(TaskError) as err:
             await _resolve(ts, ADDRESS, account, 'task.data')
@@ -2606,7 +2635,8 @@ async def test_a_key_frozen_to_production_ignores_its_owners_order(catalog, engi
     control = await _resolve(ts, ADDRESS, key, 'task.data')
 
     assert (control.owner_id, control.version) == ('production', 4)
-    assert control.team_context == TeamContext('production', 'key')
+    # The frozen team stands in for the home team: environment and ledger agree
+    assert (control.env_team, control.teamId, control.userId) == ('production', 'production', 'user-a')
 
     # A scoped key not pinned to one team resolves no team at all
     unpinned = _order('staging', endpoints=['acme.otherPipe.webhook_1'])
@@ -2616,21 +2646,32 @@ async def test_a_key_frozen_to_production_ignores_its_owners_order(catalog, engi
 
 
 @pytest.mark.asyncio
-async def test_the_team_context_is_the_answering_team_and_home_elsewhere(catalog, engines, deployments):
-    """@team runs with the answering team's context; Play and @public with the caller's home team."""
+async def test_the_environment_is_the_callers_home_team_and_the_ledger_the_serving_rung(catalog, engines, deployments):
+    """Plan 8.3: the environment's team is always the caller's home team; the ledger team is the serving rung's."""
     ts = _server()
     _two_environments(deployments)
 
+    # Production first: it answers, and it is also the home team
     answered = await _resolve(ts, ADDRESS, _order('production', teams=('production', 'staging')), 'task.data')
-    assert answered.team_context == TeamContext('production', 'answering')
+    assert (answered.env_team, answered.teamId, answered.userId) == ('production', 'production', 'user-a')
+
+    # A Staging-first member calling Production's publication by root: the
+    # ledger row is Production's, the environment Staging's
+    member = _caller('user-b', dev_team='staging', teams=('staging', 'production'))
+    rooted = await _resolve(ts, f'@production/{ADDRESS}', member, 'task.data')
+    assert (rooted.env_team, rooted.teamId, rooted.userId, rooted.orgId) == ('staging', 'production', 'user-b', 'org-1')
+    assert rooted is not answered
 
     played = await _start(ts, _pipeline(), user='user-a', team='staging')
-    assert played.team_context == TeamContext('staging', 'home')
+    assert (played.env_team, played.teamId) == ('staging', 'staging')
 
+    # A caller from another org on the store: their org pays, no ledger team,
+    # their home team's environment
     deployments.publish(org='org-1')
     stranger = _caller('user-z', dev_team='team-z', teams=('team-y', 'team-z'), org='org-2', developer_id='globex')
     public = await _resolve(ts, ADDRESS, stranger, 'task.data')
-    assert public.team_context == TeamContext('team-z', 'home') and public.teamId == 'team-z'
+    assert (public.owner_kind, public.owner_id) == ('user', 'user-z')
+    assert (public.env_team, public.teamId, public.orgId, public.userId) == ('team-z', '', 'org-2', 'user-z')
 
 
 @pytest.mark.asyncio
@@ -2662,7 +2703,7 @@ async def test_a_two_segment_name_starts_the_artifacts_default_source(catalog, e
 
 
 async def test_a_resolve_touches_constant_entries_however_large_the_registry():
-    """100,000 controls at other addresses: a resolve probes O(1) + one per team."""
+    """100,000 controls at other addresses: a resolve probes O(1) + two per team."""
     ts = _server()
     registry = ts._task_control
     for n in range(100_000):
@@ -2686,15 +2727,18 @@ async def test_a_resolve_touches_constant_entries_however_large_the_registry():
     assert await _attach(ts, ADDRESS, _caller('user-a', teams=teams), 'task.data') is mine
     assert registry.probes == 1
 
-    # A miss on every rung, twice (live, then registered): spec + me + teams + public per walk
+    # A miss on every rung, twice (live, then registered). An attach also
+    # probes each team's and the org's run with no caller (plan 8.3 watchers):
+    # spec + me + 2 per team + 2 for the org + public per walk
     registry.probes = 0
     with pytest.raises(TaskError):
         await _attach(ts, 'acme.nowhere.webhook_1', _caller('user-a', teams=teams), 'task.data')
-    assert registry.probes == 2 * (3 + len(teams))
+    assert registry.probes == 2 * (1 + 1 + 2 * len(teams) + 2 + 1)
 
     # The forget path keeps the indexes exact
     del registry[mine.key]
-    assert registry.owned(ADDRESS, 'user-a') == [] and registry.sources_of('acme', 'docBrain') == []
+    assert registry.lookup(mine.index_key) == [] and registry.sources_of('acme', 'docBrain') == []
+    assert registry.for_owner('=user/user-a') == []
 
 
 @pytest.fixture
@@ -2774,14 +2818,14 @@ async def test_a_restart_releases_the_engine_the_predecessor_holds_at_commit(cat
     resolve_env = ts._resolve_control_env
     moved = {}
 
-    async def during_setup(control):
+    async def during_setup(control, chain):
         # An id-based request reaches the dormant predecessor while its
         # successor is being set up: ensure_engine starts the key again and
         # the predecessor's hold moves onto the replacement engine
         if not moved:
             moved['engine'] = await ts.ensure_engine(dev)
             assert dev.task is moved['engine'] and moved['engine'] is not stopped
-        return await resolve_env(control)
+        return await resolve_env(control, chain)
 
     ts._resolve_control_env = during_setup
     conn = MagicMock()

@@ -261,12 +261,11 @@ async def test_on_execute_foreign_team_secrets_resolve_to_dev_team(monkeypatch):
 
     await TaskCommands.on_execute(conn, {'arguments': {'teamId': 'team-foreign'}})
 
-    # The task loads its env when it starts; load it as the task would.
-    await server.start_task.await_args.kwargs['env_source']()
-
-    # The secret merge used the session's default team, not the foreign one.
-    assert merged_env.await_args.kwargs['team_id'] == 'team-1'
-    assert server.start_task.await_args.kwargs['team_id'] == 'team-1'
+    # The control's environment chain (resolved by start_task, plan 6.2) has
+    # the session's home team as its team layer, never the foreign one.
+    kwargs = server.start_task.await_args.kwargs
+    assert (kwargs['team_id'], kwargs['env_team']) == ('team-1', 'team-1')
+    merged_env.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -289,45 +288,50 @@ async def test_on_execute_run_kind_cannot_be_spoofed_via_dap(monkeypatch):
         conn, {'arguments': {'pipeline': {'components': []}, 'run_kind': 'deploy', 'trigger': 'schedule'}}
     )
 
+    # A client's own run is always a @spec run: nothing it sends classifies it
     kwargs = server.start_task.call_args.kwargs
-    assert kwargs['run_kind'] == 'dev'
-    assert kwargs['trigger'] == ''
+    assert 'run_kind' not in kwargs and 'trigger' not in kwargs and 'rung' not in kwargs
 
 
 @pytest.mark.asyncio
 async def test_on_execute_trusted_attributes_classify_deploy_runs(monkeypatch):
-    """The in-process dispatch sets _trusted_run_kind/_trusted_trigger on its
-    connection; on_execute forwards them to start_task and SKIPS the user
-    env layer (a deployment's config must not depend on who deployed it).
+    """The in-process dispatch sets the run's row of the rung table on its
+    connection (plan 8.3); on_execute forwards it to start_task whole: an
+    unattended team run has no user layer, no caller and no caller env.
     """
-    from ai.account import account as account_singleton
-
-    merged = AsyncMock(return_value={})
-    monkeypatch.setattr(account_singleton, 'get_merged_env', merged)
+    from ai.modules.task.task_control import unattended_attribution
 
     server = MagicMock()
     server.start_task = AsyncMock(return_value={'token': 'acme.pipe.new'})
     conn = _make_conn(account_info=_account_info(), server=server)
-    conn._trusted_run_kind = 'deploy'
+    conn._trusted_attribution = unattended_attribution('=team/team-1', org_id='org-1')
     conn._trusted_trigger = 'schedule'
 
-    await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
+    await TaskCommands.on_execute(
+        conn, {'arguments': {'pipeline': {'components': []}, 'env': {'ROCKETRIDE_X': 'spoofed'}}}
+    )
 
     kwargs = server.start_task.call_args.kwargs
-    assert kwargs['run_kind'] == 'deploy'
-    assert kwargs['trigger'] == 'schedule'
-    # No user layer for deploy runs.
-    await kwargs['env_source']()
-    assert merged.await_args.kwargs['user_id'] == ''
+    assert (kwargs['run_kind'], kwargs['trigger'], kwargs['rung']) == ('deploy', 'schedule', 'team')
+    assert (kwargs['owner_kind'], kwargs['user_id'], kwargs['team_id'], kwargs['org_id']) == (
+        'team',
+        '',
+        'team-1',
+        'org-1',
+    )
+    assert (kwargs['caller_id'], kwargs['env_team']) == ('', 'team-1')
+    assert 'caller_env' not in kwargs
+    conn.verify_team_permission.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_on_execute_hands_the_task_a_loader_not_the_values(monkeypatch):
-    """on_execute decrypts nothing itself: the task gets a loader and calls it
-    at each (re)start, so the values are current and not kept on the task.
+    """on_execute decrypts nothing itself: the server's ONE chain loads the
+    values at each (re)start, so they are current and not kept on the task.
     Caller ROCKETRIDE_* values still override the saved ones.
     """
     from ai.account import account as account_mod
+    from ai.modules.task.task_server import TaskServer
 
     merged = AsyncMock(side_effect=[{'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'saved'}, {'ROCKETRIDE_A': 'v2'}])
     monkeypatch.setattr(account_mod, 'get_merged_env', merged)
@@ -342,11 +346,13 @@ async def test_on_execute_hands_the_task_a_loader_not_the_values(monkeypatch):
     )
 
     kwargs = server.start_task.await_args.kwargs
-    assert 'env' not in kwargs
+    assert 'env' not in kwargs and 'env_source' not in kwargs
+    assert kwargs['caller_env'] == {'ROCKETRIDE_B': 'caller'}
     merged.assert_not_awaited()
 
-    assert await kwargs['env_source']() == {'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'caller'}
-    assert await kwargs['env_source']() == {'ROCKETRIDE_A': 'v2', 'ROCKETRIDE_B': 'caller'}
+    chain = TaskServer._env_chain(kwargs['org_id'], kwargs['env_team'], kwargs['user_id'], kwargs['caller_env'])
+    assert await chain() == {'ROCKETRIDE_A': 'v1', 'ROCKETRIDE_B': 'caller'}
+    assert await chain() == {'ROCKETRIDE_A': 'v2', 'ROCKETRIDE_B': 'caller'}
 
 
 @pytest.mark.asyncio
@@ -748,6 +754,7 @@ async def test_on_rrext_get_tasks_filters_to_caller_and_running_only():
             owner_kind=owner_kind,
             owner_id=owner_id,
             owner=f'={owner_kind}/{owner_id}',
+            pinned_version=None,
             audience=f'=team/{team_id}' if run_kind == 'deploy' else '',
             source='src',
             pipeline={'name': 'my-pipeline', 'description': 'desc'},
@@ -806,6 +813,7 @@ async def test_on_rrext_get_tasks_falls_back_to_source_name():
         owner_kind='user',
         owner_id='user-1',
         owner='=user/user-1',
+        pinned_version=None,
         audience='',
         source='my-source',
         pipeline=None,
@@ -1175,6 +1183,9 @@ async def test_on_execute_never_exposes_server_settings_to_sys_admin(monkeypatch
 
     await TaskCommands.on_execute(conn, {'arguments': {'pipeline': {'components': []}}})
 
-    env = await server.start_task.await_args.kwargs['env_source']()
+    from ai.modules.task.task_server import TaskServer
+
+    kwargs = server.start_task.await_args.kwargs
+    env = await TaskServer._env_chain(kwargs['org_id'], kwargs['env_team'], kwargs['user_id'], kwargs['caller_env'])()
     assert env == {'ROCKETRIDE_SAVED': 'ok'}
     assert 'must-not-leak' not in env.values()

@@ -43,7 +43,7 @@ import { addDeployConnectionOptions, connectDeploy, promptLine, runCliCommand, f
 
 /**
  * A typed `--team` as the wire takes it: passed through, for the server to
- * resolve ('@me', '@public', '@<team>' by name in any case, '=team/<tid>',
+ * resolve ('@me', '@public', '@<team>' by name in any case, '=team/<tid>', '@org',
  * or a row's audience; a bare team id is refused there).
  *
  * @param team - The typed team ('' = unscoped).

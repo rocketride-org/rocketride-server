@@ -551,7 +551,7 @@ Both SDKs expose it as `client.log` (it rides the `rrext_log` DAP command
 under the hood). TypeScript signatures; Python mirrors them in snake_case:
 
 ```ts
-client.log.streams({ projectId, source })         // every continuum of a source you may read, with chapters
+client.log.streams({ projectId, source })         // each readable scope's continuum of a source, with chapters
 client.log.chapters(stream)                       // the whole timeline in one read
 client.log.read(stream, params?)                  // paged event-range read
 client.log.segment(stream, segmentId, params?)    // raw JSONL chunks of one segment (bulk replay)
@@ -565,16 +565,35 @@ client.log.openEventStream(stream)                // → LogEventStream, the DVR
 {
   projectId: string,
   source: string,
-  teamId?: string,            // a team's deploy continuum
-  runKind?: "dev" | "deploy"  // your own stream: dev (default) or personal deploy
+  teamId?: string,            // a team's deploy continuum; also a deployment row's audience
+                              // unchanged ("=org/<oid>" the org's, your own "=user/<uid>" your
+                              // personal deploy stream)
+  runKind?: "dev" | "deploy", // your own stream: dev (default) or personal deploy
+  owner?: string,             // the run's owner as a task row or a streams() entry carries it
+                              // ("=user/<uid>", "=team/<tid>", "=org/<oid>"), passed back unchanged;
+                              // wins over teamId
+  version?: number            // a pinned run's version (its continuum is its own); omitted = published
 }
 ```
 
-- **`streams`** takes only `projectId` + `source` and lists every continuum of
-  that source you may read (own dev, own `@me` deploy, each team deploy you can
-  monitor), tagged with `teamId`, `teamName`, `runKind`, `ownerKind` and carrying the
-  `chapters` body. A scheduled team run and your dev run log into different
-  places; `chapters` reads one, this lists them all.
+```ts
+// The org's stream, as streams() lists it for an org admin, read back by its owner
+const { streams } = await client.log.streams({ projectId, source });
+const org = streams.find((s) => s.owner.startsWith('=org/'));
+if (org) {
+  await client.log.chapters({ projectId, source, owner: org.owner });
+  // a pinned run of version 12 on that rung logs into a continuum of its own
+  await client.log.chapters({ projectId, source, owner: org.owner, version: 12 });
+}
+```
+
+- **`streams`** takes only `projectId` + `source` and lists the published-version
+  continuum of that source in each scope you may read (own dev, own `@me` deploy,
+  each team deploy you can monitor, the org's for an org admin), tagged with
+  `teamId`, `teamName`, `runKind`, `ownerKind` and carrying the `chapters` body. A
+  scheduled team run and your dev run log into different places; `chapters` reads
+  one, this lists them all. A pinned version's run (`:<version>`) logs into a
+  continuum of its own that is not listed: open it with `version`.
 - **`chapters`** returns per-run `beginTime`, `beginSeq`, `endTime` (null
   while the run is live), `outcome` (`"ok" | "error" | "cancelled"`, null
   while live), and `traceLevel`, plus segment activity spans and the

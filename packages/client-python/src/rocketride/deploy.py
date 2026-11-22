@@ -445,9 +445,11 @@ class DeployApi:
         audience is always explicit: a team (requires ``task.control`` on
         it), ``'@me'`` (your own space), or ``'@public'`` (the store: on a
         server that reviews, only an approved ``'ready'`` version; your
-        organization needs a developer id). A pointer on ``'@me'`` or
-        ``'@public'`` is billed to your development team when its schedules
-        or a run-now fire it.
+        organization needs a developer id). When its schedules or a run-now
+        fire a pointer, the run is billed by its rung (plan 8.3): an
+        ``'@me'`` pointer to your development team as stamped when you
+        published it; a team's to that team; an ``'@public'`` (or ``'@org'``)
+        one to the organization, with no ledger team.
 
         Args:
             project_id: The project whose artifact to deploy.
@@ -546,10 +548,14 @@ class DeployApi:
         """
         Start one deployed source NOW (manual trigger).
 
-        The same trusted team dispatch the scheduler uses — the run
-        executes as the team and carries NO human identity; billing
-        attributes to the org and team, and who fired it is recorded only
-        in the deployment's audit history. The deployment must be enabled.
+        The same trusted dispatch the scheduler uses — the run has no
+        CALLER: who fired it is recorded only in the deployment's audit
+        history, never as the run's identity. Its owner and ledger follow
+        the rung it runs on (plan 8.3): a team publication is that team's
+        (billed to it, no ledger user); an ``@org`` or ``@public`` one is the
+        org's, with no ledger team and no user; an ``@me`` one is the
+        publisher's, who is its ledger user, billed to the team stamped when
+        it was published. The deployment must be enabled.
 
         Args:
             project_id: The deployed project.
@@ -709,10 +715,13 @@ class DeployApi:
         ttl: int | None = None,
     ) -> Deployment:
         """
-        Set (or clear) one source's schedule on a deployment: a team's, ``'@me'`` or ``'@public'``.
+        Set (or clear) one source's schedule on a deployment: a team's, ``'@me'``, ``'@org'`` or ``'@public'``.
 
-        Any publication of the pipe can run on a schedule, billed to the team
-        stamped when it was published. The paused flag is untouched — editing
+        Any publication of the pipe can run on a schedule. Attribution follows
+        the rung, as for :meth:`run`: a team's schedule bills that team, an
+        ``@org`` or ``@public`` one is the org's with no ledger team, an
+        ``@me`` one bills the team stamped when it was published. The paused
+        flag is untouched — editing
         cron/ttl preserves it (a new schedule starts unpaused);
         :meth:`pause_schedule` / :meth:`resume_schedule` own it.
 

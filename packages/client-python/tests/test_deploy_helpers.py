@@ -124,6 +124,28 @@ def test_resolve_deploy_teams_rosterless_derives_from_the_team_rows_by_rung():
     ]
 
 
+def test_resolve_deploy_teams_lists_the_org_rung_last_by_its_audience():
+    # C.35: the organisation carries the org rung's audience; only an org admin controls it
+    member = {'userId': 'u1', 'organization': {'audience': '=org/o', 'permissions': [], 'teams': []}}
+    assert resolve_deploy_teams(_Identity(member), []) == [
+        {'id': '@me', 'name': 'Me', 'canControl': True},
+        {'id': '=org/o', 'name': 'Org', 'canControl': False},
+    ]
+    admin = {
+        'userId': 'u1',
+        'organization': {
+            'audience': '=org/o',
+            'permissions': ['org.admin'],
+            'teams': [{'id': 't', 'name': 'T', 'audience': '=team/t'}],
+        },
+    }
+    assert [(t['id'], t['canControl']) for t in resolve_deploy_teams(_Identity(admin), [])] == [
+        ('@me', True),
+        ('=team/t', True),
+        ('=org/o', True),
+    ]
+
+
 def test_resolve_deploy_teams_admin_controls_every_team():
     admin = _Identity(
         {

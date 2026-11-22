@@ -100,8 +100,11 @@ class LogStreamEntry(LogChaptersResult):
     teamId: str  # '' = your own tree
     teamName: str
     runKind: LogRunKind
-    # Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind.
-    ownerKind: Literal['user', 'team']
+    # Who owns the runs: 'user' (dev or @me deploy), 'team' or 'org' (an
+    # org admin's view). Matches TASK_CONTROL.owner_kind.
+    ownerKind: Literal['user', 'team', 'org']
+    # The owner string to pass back as ``owner`` to the log verbs.
+    owner: str
 
 
 class LogStreamsResult(TypedDict):

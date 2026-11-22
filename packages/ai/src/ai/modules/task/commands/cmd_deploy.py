@@ -64,12 +64,12 @@ from rocketlib import debug
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required, publish_block_of
 from ai.account.audience import (
-    ORG_TARGET_NOT_YET,
     PUBLIC_AUDIENCE,
     Audience,
     compose_audience,
     compose_handle,
     describe,
+    org_audience,
     parse_audience,
     parse_target,
     team_audience,
@@ -285,9 +285,9 @@ class _DeployBase(DAPConn):
         ConnectResult carried (``=team/<tid>``, ``=user/<uid>``, passed back
         unchanged). A bare team id is refused like every other bare word, as
         are the retired ``@team/<...>`` and ``@user`` (each names its
-        replacement); ``@org`` and ``=org/<oid>`` parse and are refused until
-        the org rung serves (C.35). This is the ONE place the door reads the
-        argument; everything after it holds a decoded audience.
+        replacement). ``@org`` and ``=org/<oid>`` name the caller's ACTIVE
+        org only. This is the ONE place the door reads the argument;
+        everything after it holds a decoded audience.
 
         Args:
             args: The verb's arguments.
@@ -297,9 +297,10 @@ class _DeployBase(DAPConn):
 
         Raises:
             ValueError: No ``teamId``, a form that is no target (a bare team
-                id included), a retired spelling, or the org rung.
-            PermissionError: ``@me`` with no authenticated user, or a team
-                name that names none (or more than one) of the caller's teams.
+                id included), or a retired spelling.
+            PermissionError: ``@me`` with no authenticated user, a team name
+                that names none (or more than one) of the caller's teams, or
+                an org other than the active one.
         """
         value = args.get('teamId')
         if not value:
@@ -312,7 +313,10 @@ class _DeployBase(DAPConn):
         if target.kind == 'public':
             return parse_audience(PUBLIC_AUDIENCE)
         if target.kind == 'org':
-            raise ValueError(ORG_TARGET_NOT_YET)
+            org_id = self._org_id()
+            if not org_id or (target.by_id and target.ref != org_id):
+                raise PermissionError('An org target names your active organization only')
+            return Audience('org', org_id)
         if not target.by_id:
             # A team by name: the caller's own membership, ignoring case
             team_id = team_id_of_name(self._account_info, target.ref)
@@ -321,7 +325,7 @@ class _DeployBase(DAPConn):
             return Audience('team', team_id)
         return Audience(target.kind, target.ref)
 
-    def _require_team(self, args: Dict[str, Any], perm: str) -> str:
+    def _require_team(self, args: Dict[str, Any], perm: str, *, unattended: bool = False) -> str:
         """Extract the REQUIRED deploy target and verify ``perm`` on it.
 
         Deploy targets are always explicit — there is deliberately no fallback
@@ -344,7 +348,15 @@ class _DeployBase(DAPConn):
         organization registered as a developer, on a name in its own
         namespace (``_registry_id``); no team grant applies.
 
+        ``@org`` (or the active org's ``=org/<oid>``) targets the org rung
+        (plan 3.2): published, disabled, removed and scheduled by org admins
+        only, whatever ``perm`` says.
+
         A team (``=team/<tid>`` or its id) needs ``perm`` on that team.
+
+        ``unattended`` marks the verbs that start or plan a run with no
+        caller (a schedule, a run-now): on ``@public`` those are org admins'
+        only too, because such a run is the org's (plan 8.3).
         """
         audience = self._audience_arg(args)
         if audience.kind == 'user':
@@ -354,7 +366,13 @@ class _DeployBase(DAPConn):
         if audience.kind == 'public':
             if not _developer_id_of(self):
                 raise ValueError('Public publishing requires the organization to be registered as a developer')
+            if unattended and not self._is_org_admin():
+                raise PermissionError('Only org admins schedule or run a @public publication')
             return PUBLIC_AUDIENCE
+        if audience.kind == 'org':
+            if not self._is_org_admin():
+                raise PermissionError('The org rung is published, disabled, removed and scheduled by org admins only')
+            return org_audience(audience.id)
         if audience.kind != 'team':
             raise ValueError(f'Not a deploy target: {compose_audience(*audience)}')
         self.verify_team_permission(audience.id, perm)
@@ -399,8 +417,8 @@ class _DeployBase(DAPConn):
         ``add``'s ``deployTo``).
 
         Raises:
-            ValueError: The version is not on the rail, is an app's, or the
-                gate refuses it.
+            ValueError: The version is not on the rail, is an app's, declares
+                roots, or the gate refuses it.
         """
         entries = await account.deployments_versions(org_id, project_id)
         entry = next((e for e in entries if int(e.get('version', 0)) == version), None)
@@ -421,24 +439,38 @@ class _DeployBase(DAPConn):
         if refusal:
             raise ValueError(refusal)
 
+        # A pipeline that declares roots reaches team or org trees of its
+        # publisher's org: the store serves callers of every org, so it is
+        # refused there (plan 2.5)
+        artifact = await account.deployments_artifact(org_id, project_id, version)
+        if isinstance(artifact, dict) and artifact.get('roots'):
+            raise ValueError(
+                f'Version {version} of {project_id} declares roots ({", ".join(map(str, artifact["roots"]))}): '
+                'a pipeline that reaches team or org files cannot be published to @public'
+            )
+
     def _billing_team_of(self, team_id: str) -> str:
-        """The ABSOLUTE billing/secrets team stamped onto a publish at pointer time.
+        """The ABSOLUTE billing team stamped onto a publish at pointer time (plan 8.3).
 
         A team audience bills itself — unambiguous by construction. A
-        personal audience and the store bill the PUBLISHER's dev team, which
-        must be one of their membership teams in the session org; without
-        one the @me or @public publish REFUSES — billing never guesses, and
-        runs only ever read the stamp (they never resolve). On the store the
-        stamp pays only for the publisher's own runs of the publication (its
-        schedules, run-now); every caller of a public pipe pays for their
-        own calls.
+        personal (@me) audience bills the PUBLISHER's development team, which
+        must be one of their membership teams in the session org; without one
+        the @me publish REFUSES — billing never guesses, and runs only ever
+        read the stamp (they never resolve). The org rung and the store bill
+        no team (their runs are the org's, and every caller of them pays for
+        their own calls with no ledger team), so they carry no stamp.
 
         Args:
             team_id: The target's audience (``_require_team``'s result).
+
+        Returns:
+            The stamp; '' for an org or store audience.
         """
         audience = parse_audience(team_id)
         if audience.kind == 'team':
             return audience.id
+        if audience.kind in ('org', 'public'):
+            return ''
         dev_team = getattr(self._account_info, 'devTeam', '') or ''
         if not dev_team or dev_team not in self._member_team_ids():
             handle = compose_handle(team_id, caller_id=str(self._account_info.userId or ''))
@@ -463,6 +495,8 @@ class _DeployBase(DAPConn):
         audience = self._audience_arg(args)
         if audience.kind == 'public':
             return PUBLIC_AUDIENCE
+        if audience.kind == 'org':
+            return org_audience(audience.id)
         if audience.kind == 'user':
             if audience.id == self._account_info.userId or self._is_org_admin():
                 return user_audience(audience.id)

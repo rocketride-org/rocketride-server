@@ -325,6 +325,13 @@ export interface OrgInfo {
 	teams: TeamInfo[];
 
 	/**
+	 * The org rung's audience as the server composes it (`=org/<oid>`): the
+	 * target to pass back unchanged to publish to the organisation (org
+	 * admins only). Never parse it.
+	 */
+	audience?: string;
+
+	/**
 	 * Id of the organisation's default development team — the team invites
 	 * pre-select for new members. Null/absent when the organisation has none.
 	 */

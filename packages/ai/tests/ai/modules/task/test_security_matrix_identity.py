@@ -50,7 +50,7 @@ from ai.modules.task.address import (
 )
 from ai.modules.task.commands.cmd_misc import MiscCommands
 from ai.modules.task.commands.cmd_monitor import MonitorCommands, owner_key
-from ai.modules.task.task_control import RESOLVE_ATTACH, TaskControl, mint_control_id, rung_of
+from ai.modules.task.task_control import RESOLVE_ATTACH, TaskControl, mint_control_id
 from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
 from ai.modules.task.types import TaskError
 from ai.modules.task.trace_owner import TraceOwners
@@ -123,12 +123,19 @@ def _control(
     project_id='docBrain',
     source='parsePDF',
     rung='',
+    caller_id=None,
 ) -> TaskControl:
-    """Register a live control on ``ts`` the way start_task stamps one (``rung`` = a trusted dispatch's stamp)."""
+    """
+    Register a live control on ``ts`` the way start_task stamps one (``rung`` = a trusted dispatch's stamp).
+
+    The caller is the ledger user unless given: a team control with no user
+    is a run with no caller (a schedule), which no caller's walk answers.
+    """
     control = TaskControl()
     control.run_kind = run_kind
     control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
     control.userId = user_id
+    control.caller_id = user_id if caller_id is None else caller_id
     control.teamId = team_id
     control.orgId = 'org-1'
     control.developer_id = developer_id
@@ -136,7 +143,10 @@ def _control(
     control.source = source
     control.address = build_address(developer_id, project_id, source)
     control.id = control.address
-    control.rung = rung or rung_of(control.run_kind, control.owner_kind)
+    # The rung is stamped from the audience; these tests stamp the one each owner kind answers on
+    control.rung = rung or (
+        'spec' if run_kind == 'dev' else {'user': 'me', 'team': 'team', 'org': 'org'}[control.owner_kind]
+    )
     control.control_id = control.key = mint_control_id()
     control.task = MagicMock()
     control.task.is_task_complete.return_value = False
@@ -237,7 +247,7 @@ async def test_s4_resolution_requires_the_permission_on_every_call():
     assert await _attach(ts, control.address, viewer, 'task.control') is control
     # ... but a TEAM-owned run resolves through membership, and the viewer has
     # none: the run is simply not on any rung they can reach (no existence leak).
-    team_run = _control(ts, run_kind='deploy', owner_kind='team', user_id='', project_id='nightly')
+    team_run = _control(ts, run_kind='deploy', owner_kind='team', project_id='nightly')
     with pytest.raises(TaskError) as denied:
         await _attach(ts, team_run.address, viewer, 'task.monitor')
     assert denied.value.code == TaskError.NOT_REGISTERED
@@ -266,8 +276,8 @@ async def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_orde
     for one call, and there is no ambiguity error: the order is total.
     """
     ts = _server()
-    run_1 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
-    run_2 = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-2')
+    run_1 = _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1')
+    run_2 = _control(ts, run_kind='deploy', owner_kind='team', team_id='team-2')
     perms = ['task.control', 'task.data', 'task.monitor']
 
     def member(dev_team: str, team_order: 'list[str] | None' = None) -> AccountInfo:
@@ -306,18 +316,19 @@ async def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_orde
 
 
 async def test_s4_a_store_pointers_deploy_rail_run_never_answers_the_team_rung():
-    """A store schedule or run-now is team-owned by the stamped billing team but sits on the public rung:
-    a member of that team calling the address is never served through it on @team (nor on @public, which
-    answers only the caller's own control).
+    """A store schedule or run-now is org-owned with no caller (plan 8.3) and sits on the public rung: a
+    member of the publishing team calling the address is never served through it on @team, nor on @org
+    (only the org's admins watch an unattended org run), nor on @public (which answers only the caller's
+    own control).
     """
     ts = _server()
-    store = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1', rung='public')
+    store = _control(ts, run_kind='deploy', owner_kind='org', user_id='', caller_id='', team_id='', rung='public')
     member = _account(user_id='user-a', team_id='team-1')
     with pytest.raises(TaskError) as err:
         await _attach(ts, store.address, member, 'task.monitor')
-    assert err.value.rungsTried == ['@spec', '@me', '@team', '@public']
+    assert err.value.rungsTried == ['@spec', '@me', '@team', '@org', '@public']
     # The team's own deploy of the address still answers on @team
-    own = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
+    own = _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1')
     assert await _attach(ts, own.address, member, 'task.monitor') is own
 
 
@@ -362,7 +373,7 @@ async def test_s4_a_stopped_dev_control_does_not_shadow_a_live_team_control():
     """
     ts = _server()
     dev_run = _finish(_control(ts, source='webhook_1'))
-    team_run = _control(ts, run_kind='deploy', owner_kind='team', user_id='', source='webhook_1')
+    team_run = _control(ts, run_kind='deploy', owner_kind='team', source='webhook_1')
     account = _account()
 
     for permission in ('task.control', 'task.data', 'task.monitor'):
@@ -386,7 +397,7 @@ async def test_s4_a_dead_source_never_makes_a_two_segment_address_ambiguous():
 async def test_s4_a_finished_run_stays_readable_when_nothing_live_answers():
     """With no live control on any rung, the finished run answers its address."""
     ts = _server()
-    finished = _finish(_control(ts, run_kind='deploy', owner_kind='team', user_id=''))
+    finished = _finish(_control(ts, run_kind='deploy', owner_kind='team'))
 
     assert await _attach(ts, finished.address, _account(), 'task.monitor') is finished
 
@@ -399,7 +410,7 @@ async def test_s4_terminating_a_dev_control_removes_it_after_teardown():
     """
     ts = _server()
     dev_run = _control(ts)
-    team_run = _control(ts, run_kind='deploy', owner_kind='team', user_id='', project_id='nightly')
+    team_run = _control(ts, run_kind='deploy', owner_kind='team', project_id='nightly')
 
     await ts.stop_task(dev_run.key)
     dev_run.task.stop_task.assert_any_await('user')

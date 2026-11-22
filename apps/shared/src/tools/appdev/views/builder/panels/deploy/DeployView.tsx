@@ -344,11 +344,12 @@ const styles: Record<string, React.CSSProperties> = {
 // =============================================================================
 
 /** Uppercase audience chip from a pin — the pipe deploy card's pattern:
- * chips NAME the audiences serving this version (ME / <TEAM NAME> / STORE),
+ * chips NAME the audiences serving this version (ME / <TEAM NAME> / ORG / STORE),
  * never a generic kind. */
 function chipLabelOf(pin: RungPin): string {
 	if (pin.rung === 'personal') return 'ME';
 	if (pin.rung === 'public') return 'STORE';
+	if (pin.rung === 'org') return 'ORG';
 	// The server composes the handle ('@Development', or '=team/<tid>' for a
 	// team the caller cannot name); the chip shows it as given, parsed by no one
 	return pin.handle.toUpperCase();
@@ -423,6 +424,8 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	const [publishFor, setPublishFor] = useState<AppVersionInfo | null>(null);
 	// The caller's team roster for the publish dialog (null = not loaded).
 	const [teams, setTeams] = useState<Array<{ id: string; name: string; audience: string }> | null>(null);
+	/** The org rung's target for an org admin ('' for anyone else, or until loaded). */
+	const [orgTarget, setOrgTarget] = useState<string>('');
 	// The pin awaiting soft-remove confirmation (null = none).
 	const [removePin, setRemovePin] = useState<RungPin | null>(null);
 	// A publish chosen in the dialog, awaiting its confirmation (decided
@@ -623,6 +626,12 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 					.then(setTeams)
 					.catch(() => setTeams([]));
 			}
+			if (host.orgTarget) {
+				void host
+					.orgTarget()
+					.then(setOrgTarget)
+					.catch(() => setOrgTarget(''));
+			}
 		},
 		[host, teams]
 	);
@@ -690,18 +699,20 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	);
 
 	/** The "Publish v<N> to…" rows and the move each one stages: Me, each
-	 * team, then the store. A team row's target is the team's audience as the
-	 * server composed it; nothing here builds an audience string. */
+	 * team, the org (org admins only), then the store. A team's and the
+	 * org's target is the audience the server composed; nothing here builds
+	 * an audience string. */
 	const publishMovesOf = useCallback(
 		(v: AppVersionInfo): Array<{ row: IPublishTarget; move: { target: string; label: string } }> => [
 			{ row: { id: '@me', label: 'Me', note: pinStateOf('@me', v) }, move: { target: '@me', label: 'Me' } },
 			...(teams ?? []).map((t) => ({ row: { id: t.audience, label: t.name, note: pinStateOf(t.audience, v) }, move: { target: t.audience, label: t.name } })),
+			...(orgTarget ? [{ row: { id: orgTarget, label: 'Org: every member', note: pinStateOf(orgTarget, v) }, move: { target: orgTarget, label: 'the org' } }] : []),
 			// Without a review ladder on the host (OSS — the server accepts
 			// any servable version on @public) the store row is as open as the
 			// internal rows; with one, only 'ready' unlocks it.
 			{ row: storeTargetOf({ label: 'Public: the app store', state: v.state, needsApproval: Boolean(host.submitForReview), note: pinStateOf('@public', v) }), move: { target: '@public', label: 'the app store' } },
 		],
-		[host, teams, pinStateOf]
+		[host, teams, orgTarget, pinStateOf]
 	);
 
 	/** Submit a deployed version for public store review (private → submit). */

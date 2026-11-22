@@ -68,7 +68,7 @@ from ai.account.audience import (
     PUBLIC_AUDIENCE,
     audience_fields,
     audience_of_fields,
-    parse_audience,
+    org_audience,
     team_audience,
     user_audience,
 )
@@ -85,7 +85,7 @@ if TYPE_CHECKING:
 # ==== Shapes ===================================================================
 
 #: The published rungs, in resolution order, as ``resolve_pins`` walks them.
-PUBLISHED_RUNGS = ('me', 'team', 'public')
+PUBLISHED_RUNGS = ('me', 'team', 'org', 'public')
 
 
 @dataclass(frozen=True)
@@ -121,10 +121,11 @@ class Pin:
     One rung's serving publication of an address, as the caller may see it.
 
     Attributes:
-        rung: ``'me'``, ``'team'`` or ``'public'``.
+        rung: ``'me'``, ``'team'``, ``'org'`` or ``'public'``.
         deployment: Where the publication lives: the publisher's org, the
-            audience (``=user/<uid>``, ``=team/<tid>`` or ``@public``) and the
-            registry name ``developerId.pipeId``. Stamped on the control; disable/remove of this
+            audience (``=user/<uid>``, ``=team/<tid>``, ``=org/<oid>`` or
+            ``@public``) and the registry name ``developerId.pipeId``.
+            Stamped on the control; disable/remove of this
             publication releases the control's hold. On ``@team`` its
             audience names the ANSWERING team (``DeploymentRef.team``).
         version: The registry version the publication points at.
@@ -149,7 +150,8 @@ class Pins:
     Attributes:
         address: The parsed address.
         pins: The serving pins, in precedence order (``@me``, then at most
-            one ``@team`` pin, then ``@public``); the first one answers.
+            one ``@team`` pin, then ``@org``, then ``@public``); the first one
+            answers.
     """
 
     address: 'Address'
@@ -259,37 +261,6 @@ def _slot_of(row: Dict[str, Any]) -> str:
     return audience_of_fields(row.get('audience') or {})
 
 
-def pointer_run_owner(audience: str) -> Tuple[str, str, str, str]:
-    """
-    Who owns an unattended run of a pipe pointer (a schedule fire, a run-now).
-
-    A personal pointer's run is USER-owned; a team pointer's is owned by the
-    team and bills it unless the pointer carries a stamp; the store pointer's
-    run is team-owned by its billing stamp, on the public rung.
-
-    Args:
-        audience: The pointer's audience.
-
-    Returns:
-        ``(owner_kind, owner_user_id, default_billing_team, rung)``: the
-        billing team a pointer with no stamp falls back to ('' when it has
-        none) and the rung the run is forced onto ('' to derive it).
-
-    Raises:
-        AudienceError: The text is not an audience.
-        ValueError: The audience is an organization: the org rung serves no
-            runs yet.
-    """
-    decoded = parse_audience(audience)
-    if decoded.kind == 'user':
-        return 'user', decoded.id, '', ''
-    if decoded.kind == 'team':
-        return 'team', '', decoded.id, ''
-    if decoded.kind == 'public':
-        return 'team', '', '', 'public'
-    raise ValueError('The org audience serves no runs yet')
-
-
 async def publish_rows(account: Any, org_id: str, project_id: str, slots: Sequence[str]) -> List[PublishRow]:
     """
     THE row source: every live publish row of ``project_id`` for ``slots``.
@@ -369,20 +340,22 @@ async def resolve_pins(
     """
     The published rungs of ``address`` that serve the caller, in precedence order.
 
-    ``@me`` and ``@team`` are publications in the caller's own org, so they
-    are read only when the address is in the caller's namespace; ``@public``
-    is the publisher's ``@public`` row, found through the org that owns the
-    address namespace. ``@team`` yields at most ONE pin: the first team in
-    the probe order holding a serving row. A rooted address reads only its
-    root's rung (``rungs``) and, on ``@team``, only its one team (``teams``).
-    A pure read.
+    ``@me``, ``@team`` and ``@org`` are publications in the caller's own
+    org, so they are read only when the address is in the caller's
+    namespace; ``@public`` is the publisher's ``@public`` row, found through
+    the org that owns the address namespace (the one rung that crosses
+    orgs). ``@team`` yields at most ONE pin: the first team in the probe
+    order holding a serving row. ``@org`` is the active org's own
+    publication, served to every active member with no review step. A
+    rooted address reads only its root's rung (``rungs``) and, on ``@team``,
+    only its one team (``teams``). A pure read.
 
     Args:
         kind: The artifact kind to resolve (``'pipe'``).
         account_info: The request's account (required).
         address: ``developerId.pipelineId[.source]``.
-        rungs: The published rungs to read (``me``, ``team``, ``public``),
-            every one by default.
+        rungs: The published rungs to read (``me``, ``team``, ``org``,
+            ``public``), every one by default.
         teams: The team ids ``@team`` probes, in order, already checked
             against the caller (``teams_to_probe``); None for the caller's
             team order.
@@ -415,10 +388,12 @@ async def resolve_pins(
     own_namespace = bool(developer_id) and parsed.developer_id == developer_id and bool(org_id)
     pins: List[Pin] = []
 
-    # Step 2: @me, then @team in the probe order: the caller's own org
-    if own_namespace and ('me' in rungs or probe):
+    # Step 2: @me, then @team in the probe order, then @org: the caller's own org
+    org_slot = org_audience(org_id) if org_id and 'org' in rungs else ''
+    if own_namespace and ('me' in rungs or probe or org_slot):
         me_slot = user_audience(user_id) if user_id and 'me' in rungs else ''
         slots = ([me_slot] if me_slot else []) + [team_audience(team_id) for team_id in probe]
+        slots += [org_slot] if org_slot else []
         rows = await publish_rows(account, org_id, pipe_name, slots)
         if me_slot:
             pin = _serving_pin(rows, kind, 'me', me_slot)
@@ -429,6 +404,10 @@ async def resolve_pins(
             if pin is not None:
                 pins.append(pin)
                 break
+        if org_slot:
+            pin = _serving_pin(rows, kind, 'org', org_slot)
+            if pin is not None:
+                pins.append(pin)
 
     # Step 3: @public, the publisher's store publication
     if 'public' not in rungs:
@@ -605,7 +584,7 @@ def _picker_entry(row: Dict[str, Any], rung: str, team_name: str = '') -> Dict[s
 
     Args:
         row: The publish row (``publish_list`` shape).
-        rung: ``'me'``, ``'team'`` or ``'public'``.
+        rung: ``'me'``, ``'team'``, ``'org'`` or ``'public'``.
         team_name: The answering team's display name (``@team`` only).
 
     Returns:
@@ -658,7 +637,8 @@ async def own_pipe_publications(account: Any, account_info: 'AccountInfo') -> Li
     The pipe publications the caller reaches in their OWN org, as the picker lists them.
 
     The ``@me`` rows first, then the ``@team`` rows in the caller's team
-    order (``teams_to_probe``: a scoped key probes its frozen team only).
+    order (``teams_to_probe``: a scoped key probes its frozen team only),
+    then the org's own ``@org`` rows.
     Each pipe appears ONCE, at the rung that answers the caller for it (the
     ladder's order, plan 3.2), so the list never shows a publication the
     resolver would pass over. Only serving rows are listed; rows of another
@@ -672,8 +652,8 @@ async def own_pipe_publications(account: Any, account_info: 'AccountInfo') -> Li
         account_info: The request's account.
 
     Returns:
-        Picker entries: ``@me`` first, then team by team in team order, each
-        group by display name.
+        Picker entries: ``@me`` first, then team by team in team order, then
+        ``@org``, each group by display name.
 
     Raises:
         PermissionError: Unauthenticated.
@@ -694,6 +674,7 @@ async def own_pipe_publications(account: Any, account_info: 'AccountInfo') -> Li
     slots: List[Tuple[str, str, str]] = ([('me', user_audience(user_id), '')] if user_id else []) + [
         ('team', team_audience(t), t) for t in probe
     ]
+    slots.append(('org', org_audience(org_id), ''))
     if not slots:
         return []
     rows = await account.publish_list(org_id, 'pipe', [audience_fields(slot) for _, slot, _ in slots])

@@ -126,7 +126,7 @@ export interface ClientOpMap extends ShellOpMap {
 	//    `log.event.<sessionId>` as ITS op; the broker's play loop emits
 	//    items into it (registration-is-routing — no new push machinery).
 	//    A reused id releases its old stream first (leak guard). ─────────────
-	'client.log.openStream': ShellOpSpec<{ sessionId: string; projectId: string; source: string; teamId?: string }, void>;
+	'client.log.openStream': ShellOpSpec<{ sessionId: string; projectId: string; source: string; teamId?: string; owner?: string; version?: number }, void>;
 	/** seek/getStatus/getTrace — gated on the runtime allowlist (the typed
 	 *  map gives NO runtime guarantee at a process boundary). Result stays
 	 *  `unknown`: it is the union of three methods' returns, dispatched by a
@@ -205,7 +205,18 @@ export function registerClientOps(bus: IOpBus, source: IClientOpsSource, options
 			// A reused session id must release its old stream first — the
 			// overwrite would otherwise leak the stream and its monitor.
 			logSessions.get(p.sessionId)?.closeEventStream();
-			logSessions.set(p.sessionId, client().log.openEventStream({ projectId: p.projectId, source: p.source, ...(p.teamId ? { teamId: p.teamId } : {}) }));
+			// The owner names the tree an org- or team-owned run logs in, and the
+			// version a pinned run's own stream: both ride the ref unchanged
+			logSessions.set(
+				p.sessionId,
+				client().log.openEventStream({
+					projectId: p.projectId,
+					source: p.source,
+					...(p.teamId ? { teamId: p.teamId } : {}),
+					...(p.owner ? { owner: p.owner } : {}),
+					...(p.version !== undefined ? { version: p.version } : {}),
+				})
+			);
 		},
 		'client.log.streamCall': async (p) => {
 			const session = logSessions.get(p.sessionId);

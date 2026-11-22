@@ -181,10 +181,10 @@ def mint(
         'controlId': control.control_id,
         # Who: the authenticated account, never a client field
         'userId': getattr(account_info, 'userId', '') or '',
-        # The team whose environment applies (the answering team, a key's
-        # frozen team, the deploying team or the home team, plan 6.2); never
-        # billing, which rides the control
-        'teamId': control.team_context.team_id,
+        # The team whose environment applies (the caller's home team; a run
+        # with no caller, the publication's team, plan 6.2); never billing,
+        # which rides the control
+        'teamId': control.env_team,
         'orgId': str(organization.get('id') or control.orgId or ''),
         # Through which control: the address and the rung that answered
         'address': control.address,

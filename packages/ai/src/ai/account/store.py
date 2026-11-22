@@ -592,7 +592,9 @@ class Store:
         return self._store
 
     @classmethod
-    def file_store(cls, ctx, client_id: Optional[str] = None, root: Optional[str] = None) -> 'FileStore':
+    def file_store(
+        cls, ctx, client_id: Optional[str] = None, root: Optional[str] = None, declared: tuple = ()
+    ) -> 'FileStore':
         """
         The one-liner every call site uses: an identity-bound FileStore view
         over the process singleton.
@@ -607,15 +609,25 @@ class Store:
                  and must pass it explicitly.
             root: ENGINE contexts only — the storage anchor all plain paths
                  resolve under; see FileStore.__init__.
+            declared: ENGINE contexts only — the pipeline's declared roots
+                 (``file_store.declared_roots``); see FileStore.__init__.
 
         Returns:
             A new FileStore bound to (singleton store, client_id, ctx).
         """
-        return cls.instance()._file_store(ctx, client_id, root)
+        return cls.instance()._file_store(ctx, client_id, root, declared)
 
     @classmethod
     def file_store_for_caller(
-        cls, *, owner_kind: str, user_id: str, team_id: str, project_id: str, conn_id: str
+        cls,
+        *,
+        owner_kind: str,
+        user_id: str,
+        team_id: str,
+        project_id: str,
+        conn_id: str,
+        org_id: str = '',
+        declared: tuple = (),
     ) -> 'FileStore':
         """The FileStore behind a node's ``self.files``: rooted at the CALLER's owner tree (plan 5.7).
 
@@ -623,16 +635,19 @@ class Store:
         binding, never from anything the engine subprocess says: the
         identifiers come from the control record, so a node can neither name
         nor reach another owner's tree. The engine context is the most
-        restricted one: plain relative paths only, every scoped (``@``) path
-        and system tree refused.
+        restricted one: plain relative paths land in the anchor, a team or
+        org path only under a root the pipeline declared (``declared``),
+        every other scoped path and every system tree refused.
 
         Args:
-            owner_kind: ``'team'`` or ``'user'``: who owns the control.
-            user_id: The control's user (the launcher of a team-owned run).
-            team_id: The control's team.
-            project_id: The control's pipeline id (a team run's subtree).
+            owner_kind: ``'user'``, ``'team'`` or ``'org'``: who owns the control.
+            user_id: The control's user.
+            team_id: The control's team (the owner of a team-owned run).
+            project_id: The control's pipeline id (a team or org run's subtree).
             conn_id: Whose handles these are: the engine they were opened
                 from, so they close with it.
+            org_id: The control's org (the owner of an org-owned run).
+            declared: The control's declared roots, resolved when it started.
 
         Returns:
             An engine-context FileStore anchored at ``storage_root_for`` the owner.
@@ -643,9 +658,11 @@ class Store:
         from .file_store import storage_root_for
         from .models import RequestContext
 
-        root = storage_root_for(owner_kind, user_id, team_id, project_id)
-        client_id = user_id or team_id
-        return cls.file_store(RequestContext.engine(client_id, conn_id=conn_id), client_id=client_id, root=root)
+        root = storage_root_for(owner_kind, user_id, team_id, project_id, org_id)
+        client_id = user_id or team_id or org_id
+        return cls.file_store(
+            RequestContext.engine(client_id, conn_id=conn_id), client_id=client_id, root=root, declared=declared
+        )
 
     # =========================================================================
     # Public Static Methods
@@ -732,7 +749,9 @@ class Store:
         # Wrap backend in Store instance
         return Store(backend)
 
-    def _file_store(self, ctx, client_id: 'Optional[str]' = None, root: 'Optional[str]' = None) -> 'FileStore':
+    def _file_store(
+        self, ctx, client_id: 'Optional[str]' = None, root: 'Optional[str]' = None, declared: tuple = ()
+    ) -> 'FileStore':
         """
         Construct an identity-bound FileStore view (see Store.file_store).
 
@@ -780,7 +799,7 @@ class Store:
         elif not client_id:
             raise ValueError('internal/engine contexts must pass an explicit client_id')
 
-        return FileStore(self, client_id, ctx, root)
+        return FileStore(self, client_id, ctx, root, declared)
 
     async def close_all_handles(self, connection_id) -> None:
         """

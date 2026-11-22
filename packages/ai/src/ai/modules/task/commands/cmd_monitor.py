@@ -53,14 +53,14 @@ hub that respects access permissions and client preferences.
 """
 
 import time
-from typing import TYPE_CHECKING, Dict, Any, List
+from typing import TYPE_CHECKING, Dict, Any, List, Optional
 from ai.common.dap import DAPConn, TransportBase
-from ai.account.audience import deploy_scope_of
-from ai.account.models import resolve_run_permissions, resolve_task_permissions
+from ai.account.audience import deploy_scope_of, parse_audience
+from ai.account.models import resolve_org_permissions, resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
 from ai.account.app_deploy import _developer_id_of
-from ai.account.roots import KIND_ME, KIND_SPEC, KIND_TEAM, format_root
+from ai.account.roots import KIND_ME, KIND_ORG, KIND_SPEC, KIND_TEAM, format_root
 from ai.modules.task.address import ENDPOINT_ANY_SOURCE, build_address
 from ai.modules.task.task_control import RESOLVE_ATTACH
 from ai.modules.task.types import TaskError
@@ -72,7 +72,7 @@ if TYPE_CHECKING:
     from ..task_server import TaskServer
 
 
-def owner_key(run_kind: str, owner_id: str, project_id: str, source: str) -> str:
+def owner_key(run_kind: str, owner_id: str, project_id: str, source: str, version: Optional[int] = None) -> str:
     """
     Build the owner-scoped monitor subscription key for a run.
 
@@ -87,17 +87,25 @@ def owner_key(run_kind: str, owner_id: str, project_id: str, source: str) -> str
     run_kind is a REQUIRED leading argument (mirroring the key layout) so
     a call site can never silently omit it and collapse the continua.
 
+    A PINNED run (a version other than its rung's published one, plan 3.2)
+    appends ``:<version>`` to the source, so its subscribers and the
+    published-version run's never alias; the project wildcard
+    (``owner_wildcard_key``) matches both.
+
     Args:
         run_kind (str): 'dev' | 'deploy' — the run's continuum
-        owner_id (str): The run's owner — teamId for @team deploys, userId
-            for dev runs and @me deploys
+        owner_id (str): The run's owner — teamId for @team deploys, the org
+            id for @org (and unattended @public) runs, userId for dev runs,
+            @me deploys and a caller's @public run
         project_id (str): Project identity of the run
         source (str): Source component id of the run
+        version (Optional[int]): The pinned version, or None
 
     Returns:
-        str: The subscription key ``p.{runKind}.{ownerId}.{projectId}.{source}``
+        str: The subscription key ``p.{runKind}.{ownerId}.{projectId}.{source}[:{version}]``
     """
-    return f'p.{run_kind}.{owner_id}.{project_id}.{source}'
+    pinned = '' if version is None else f':{int(version)}'
+    return f'p.{run_kind}.{owner_id}.{project_id}.{source}{pinned}'
 
 
 def owner_wildcard_key(run_kind: str, owner_id: str, project_id: str) -> str:
@@ -281,17 +289,17 @@ class MonitorCommands(DAPConn):
         # Get the task by its registry key
         control = self._server.control_by_key(key)
 
-        # Verify we are allowed to receive events for this task - for SSE events, it requires data
-        # access, for all others, it's monitor access
-        if event_type == EVENT_TYPE.SSE:
-            self.verify_permission('task.data')
-        else:
-            self.verify_permission('task.monitor')
-
-        # Verify the caller may see this run (run-scoped: a user-owned run
-        # delivers only to its owner; a team-owned run to team members; a key
-        # with an endpoints scope receives only the runs inside it)
-        if not resolve_run_permissions(self._account_info, control):
+        # SSE events need data access, every other event monitor access, and
+        # both the credential and the run must grant it. The credential check
+        # holds a scoped key to its own permissions; the run check follows the
+        # run's owner (plan 8.3): a user-owned run delivers only to its owner,
+        # a team-owned run to the members holding the permission on that team,
+        # an org-owned run's monitor events to the org admins, while the
+        # caller it runs for holds task.data on it and receives its SSE only.
+        # A key with an endpoints scope receives only the runs inside it.
+        required = 'task.data' if event_type == EVENT_TYPE.SSE else 'task.monitor'
+        self.verify_permission(required)
+        if required not in resolve_run_permissions(self._account_info, control):
             return
         if not in_endpoint_scope(getattr(self._account_info, 'endpoints', None), control.address):
             return
@@ -305,7 +313,9 @@ class MonitorCommands(DAPConn):
         # run's OWNER (team for @team deploys, user for dev and @me), so a
         # dev run, an @me deploy, and a @team deploy of the same pipeline
         # never alias in the keyspace.
-        project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+        project_key = owner_key(
+            control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
+        )
 
         # Gather all matching subscription keys and merge their preferences
         # so each subscriber receives the event at most once.
@@ -327,6 +337,13 @@ class MonitorCommands(DAPConn):
         project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
         if project_wildcard_key != project_key and project_wildcard_key in self._monitors:
             merged_preference |= self._monitors[project_wildcard_key]
+        # A pinned run also reaches the all-sources subscription of its version
+        if control.pinned_version is not None:
+            versioned_wildcard_key = owner_key(
+                control.run_kind, control.owner_id, control.project_id, '*', control.pinned_version
+            )
+            if versioned_wildcard_key in self._monitors:
+                merged_preference |= self._monitors[versioned_wildcard_key]
 
         # Global wildcard check (all tasks)
         if '*' in self._monitors:
@@ -338,25 +355,31 @@ class MonitorCommands(DAPConn):
 
         return
 
-    def _may_monitor(self) -> bool:
+    def _may_monitor(self, control: 'TaskControl | None' = None) -> bool:
         """
-        Return True when this connection holds ``task.monitor``.
+        Return True when this connection holds ``task.monitor``, on the given run when one is named.
 
         Catch-up events carry the same payloads as the live SUMMARY and TASK
-        events, so they are held to the permission ``send_task_event`` checks
-        for those types. A credential without it is skipped quietly, the way
-        ``broadcast_task_event`` skips it for live events: the subscription
-        still stands (a machine key scoped to ``task.data`` subscribes for
-        its data pipe's SSE and nothing else).
+        events, so they are held to the rule ``send_task_event`` applies to
+        those types: the credential holds ``task.monitor``, and so does the
+        caller on the run (``resolve_run_permissions``; the caller of an org
+        run holds ``task.data`` on it and nothing more). A credential without
+        it is skipped quietly, the way ``broadcast_task_event`` skips it for
+        live events: the subscription still stands (a machine key scoped to
+        ``task.data`` subscribes for its data pipe's SSE and nothing else).
+
+        Args:
+            control: The run the catch-up describes; None checks the
+                credential alone.
 
         Returns:
-            bool: True if the connection may receive monitor events.
+            bool: True if the connection may receive monitor events (of that run).
         """
         try:
             self.verify_permission('task.monitor')
         except PermissionError:
             return False
-        return True
+        return control is None or 'task.monitor' in resolve_run_permissions(self._account_info, control)
 
     async def _send_updates(
         self,
@@ -407,7 +430,7 @@ class MonitorCommands(DAPConn):
                 if control:
                     # Task is running: send current status, under the same
                     # permission as a live status update
-                    if self._may_monitor():
+                    if self._may_monitor(control):
                         # The same projection the live status carries (plan 7.5)
                         await self.send_event(
                             event='apaevt_status_update',
@@ -437,10 +460,11 @@ class MonitorCommands(DAPConn):
                 tasks: List[Dict[str, Any]] = []
                 endpoints = getattr(self._account_info, 'endpoints', None)
                 for token, target in self._server._task_control.items():
-                    # Skip runs the caller may not see (run-scoped: user-owned
-                    # runs are owner-only; team runs need team membership; a
-                    # scoped key sees only the runs inside its endpoints)
-                    if not resolve_run_permissions(self._account_info, target):
+                    # Skip runs the caller may not monitor (run-scoped:
+                    # user-owned runs are owner-only; team runs need the
+                    # permission on their team; org runs are their admins';
+                    # a scoped key sees only the runs inside its endpoints)
+                    if 'task.monitor' not in resolve_run_permissions(self._account_info, target):
                         continue
                     if not in_endpoint_scope(endpoints, target.address):
                         continue
@@ -472,6 +496,11 @@ class MonitorCommands(DAPConn):
                                 # run with no team.
                                 'runKind': target.run_kind,
                                 'teamId': target.teamId if target.run_kind == 'deploy' else '',
+                                # Where the run lives (plan 7.5): the owner a
+                                # log reader passes back unchanged, and the
+                                # pinned version of a pinned run (C.36)
+                                'owner': target.owner,
+                                'version': target.pinned_version,
                             }
                         )
 
@@ -498,6 +527,8 @@ class MonitorCommands(DAPConn):
         type: EVENT_TYPE = EVENT_TYPE.NONE,
         team_id: str = '',
         run_kind: str = '',
+        org_id: str = '',
+        version: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Configure event monitoring subscription for a specific task.
@@ -526,6 +557,8 @@ class MonitorCommands(DAPConn):
                 caller's dev runs; 'deploy' = the caller's personal @me
                 deploy runs. Ignored when team_id is set (a team scope is
                 always the deploy continuum).
+            org_id (str): The active org — subscribe to the org's deploy
+                runs (@org, an unattended @public), its admins only.
 
         Returns:
             Dict[str, Any]: Status information about the subscription change
@@ -574,7 +607,9 @@ class MonitorCommands(DAPConn):
 
             # Build the key from the resolved run's OWNER so subscribe and
             # delivery agree regardless of how the subscription was addressed
-            event_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+            event_key = owner_key(
+                control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
+            )
             event_id = control.id
             filter_name = control.id
 
@@ -589,6 +624,12 @@ class MonitorCommands(DAPConn):
             # synthetic 'local' team grants monitor.)
             if team_id and 'task.monitor' not in resolve_task_permissions(self._account_info, team_id):
                 raise PermissionError('Access denied: no permissions for this team')
+            # The org's runs are watched by its admins (plan 8.3), in the active org only
+            organization = getattr(self._account_info, 'organization', None) or {}
+            if org_id and (
+                str(organization.get('id') or '') != org_id or not resolve_org_permissions(self._account_info)
+            ):
+                raise PermissionError("Access denied: the org's runs are watched by its admins")
 
             # run_kind, when supplied, must name a real continuum — but ONLY on
             # the teamless path. A team scope is always the deploy continuum
@@ -608,9 +649,11 @@ class MonitorCommands(DAPConn):
             # continuum) so an existing team subscription can never be
             # accidentally re-keyed into the dev continuum. The key is
             # derivable without the control so subscribe-before-launch works.
-            owner_id = team_id if team_id else self._account_info.userId
-            key_kind = 'deploy' if team_id else (run_kind or 'dev')
-            event_key = owner_key(key_kind, owner_id, project_id, source)
+            owner_id = team_id or org_id or self._account_info.userId
+            key_kind = 'deploy' if (team_id or org_id) else (run_kind or 'dev')
+            # A pinned run (a version other than its rung's published one,
+            # plan 3.2) publishes under its own key; ``version`` subscribes it
+            event_key = owner_key(key_kind, owner_id, project_id, source, version)
 
             # It is ok if the task doesn't exist at this point in time (a
             # subscription before the launch). When it does, ONE resolver
@@ -626,11 +669,15 @@ class MonitorCommands(DAPConn):
                 if developer_id and source != ENDPOINT_ANY_SOURCE
                 else ''
             )
+            if address and version is not None:
+                address = f'{address}:{int(version)}'
             try:
                 if not address:
                     raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
                 if team_id:
                     target = format_root(KIND_TEAM, team_id, True, address)
+                elif org_id:
+                    target = format_root(KIND_ORG, org_id, True, address)
                 else:
                     target = format_root(KIND_ME if key_kind == 'deploy' else KIND_SPEC, rest=address)
                 resolution = await self._server.resolve_target(
@@ -788,11 +835,24 @@ class MonitorCommands(DAPConn):
         pipe_id = args.get('pipeId', None)
         team_id = str(args.get('teamId') or '')
         run_kind = args.get('runKind') or ''
+        # The pinned version of a pinned run (plan 3.2), or absent
+        raw_version = args.get('version')
+        if raw_version is not None and (
+            isinstance(raw_version, bool) or not isinstance(raw_version, int) or raw_version < 1
+        ):
+            raise ValueError('version must be a positive integer, or omitted')
+        version = raw_version
 
         # A deployment row's audience passed back unchanged (plan 2.5): a
-        # team's deploy run, or the caller's own personal one
+        # team's deploy run, the org's (its admins watch it, plan 8.3), or
+        # the caller's own personal one
+        org_id = ''
         if team_id.startswith(('@', '=')):
-            team_id, run_kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
+            audience = parse_audience(team_id)
+            if audience.kind == 'org':
+                org_id, team_id, run_kind = audience.id, '', 'deploy'
+            else:
+                team_id, run_kind = deploy_scope_of(team_id, str(self._account_info.userId or ''))
 
         # Determine the desired event subscription level
         types = args.get('types', None)
@@ -821,6 +881,8 @@ class MonitorCommands(DAPConn):
             type=event_type,
             team_id=team_id,
             run_kind=run_kind,
+            org_id=org_id,
+            version=version,
         )
 
         # Acknowledge successful subscription setup

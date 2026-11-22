@@ -234,6 +234,9 @@ class OrgInfo(TypedDict):
             organisation registers as a marketplace developer (always absent on OSS).
         permissions (list[str]): Permission strings granted at the org level.
         teams (list[TeamInfo]): Teams within this organisation that the user is a member of.
+        audience (str): The org rung's audience as the server composes it
+            (``=org/<oid>``): the target to pass back unchanged to publish to
+            the organisation (org admins only). Never parse it.
     """
 
     id: str
@@ -241,6 +244,7 @@ class OrgInfo(TypedDict):
     developerId: NotRequired[str | None]
     permissions: list[str]
     teams: list[TeamInfo]
+    audience: NotRequired[str]
 
 
 class DevEntry(TypedDict):

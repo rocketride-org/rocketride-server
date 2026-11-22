@@ -70,10 +70,10 @@ from urllib.parse import quote
 
 from rocketlib import debug
 
-from ai.account.audience import ORG_TARGET_NOT_YET, AudienceError, audience_of_fields, compose_handle, parse_target
+from ai.account.audience import AudienceError, audience_of_fields, compose_handle, parse_target
 from ai.account.base import InventoryUnavailableError
 from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, artifact_content_dir
-from ai.account.models import team_id_of_name
+from ai.account.models import resolve_org_permissions, team_id_of_name
 from ai.account.pipe_deploy import pipe_serving_block_of
 from ai.account.roots import KIND_ORG, format_root
 
@@ -185,12 +185,12 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
     Resolve a publish target (plan 2.5) to the audience dict the backends store.
 
     The targets: ``@me`` (the caller's personal space), ``@<team>`` (one of
-    the caller's teams, by name ignoring case), ``@public`` (the store), and
-    any audience a row or the ConnectResult carried, passed back unchanged
-    (``=team/<tid>``, the caller's own ``=user/<uid>``). The retired
-    ``@team/<name-or-id>`` and ``@user`` are refused naming their
-    replacement (``audience.parse_target``). The org rung is not served
-    yet: ``@org`` and ``=org/<oid>`` are refused until it is (C.35).
+    the caller's teams, by name ignoring case), ``@org`` (the caller's
+    active org, org admins only), ``@public`` (the store), and any audience
+    a row or the ConnectResult carried, passed back unchanged
+    (``=team/<tid>``, the caller's own ``=user/<uid>``, the active org's
+    ``=org/<oid>``). The retired ``@team/<name-or-id>`` and ``@user`` are
+    refused naming their replacement (``audience.parse_target``).
     ``@public`` requires the caller's org to hold a registered developer id
     (SaaS store track).
 
@@ -200,8 +200,9 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
 
     Raises:
         ValueError: Not a target, a retired spelling, another user's space,
-            a team the caller is not in, the org rung, or ``@public``
-            without a registered developer org.
+            a team the caller is not in, an org other than the active one or
+            a caller who is not its admin, or ``@public`` without a
+            registered developer org.
     """
     info = conn._account_info
     try:
@@ -225,9 +226,15 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
             raise ValueError('Public publishing requires the organization to be registered as a developer')
         return _enrich_audience(conn, {'type': 'public', 'id': ''})
 
-    # Step 3: the org rung is not served yet
+    # Step 3: the org rung: the active org, published by its admins only
     if decoded.kind == 'org':
-        raise ValueError(ORG_TARGET_NOT_YET)
+        org = getattr(info, 'organization', None) or {}
+        org_id = str(org.get('id') or '') if isinstance(org, dict) else str(getattr(org, 'id', '') or '')
+        if not org_id or (decoded.by_id and decoded.ref != org_id):
+            raise ValueError('An org target names your active organization only')
+        if not resolve_org_permissions(info):
+            raise ValueError('The org rung is published, disabled and removed by org admins only')
+        return _enrich_audience(conn, {'type': 'org', 'id': org_id})
 
     # Step 4: one of the caller's teams: an id compares exactly, a name ignoring case
     if decoded.by_id:
@@ -240,9 +247,12 @@ def _resolve_target(conn: Any, target: str) -> Dict[str, str]:
 
 
 def _audiences_of(conn: Any) -> List[Dict[str, str]]:
-    """The caller's scope-walk audiences: public, member teams, self."""
+    """The caller's scope-walk audiences: public, the active org, member teams, self."""
     user_id = conn._account_info.userId
+    org = getattr(conn._account_info, 'organization', None) or {}
+    org_id = str(org.get('id') or '') if isinstance(org, dict) else str(getattr(org, 'id', '') or '')
     audiences: List[Dict[str, str]] = [{'type': 'public', 'id': ''}]
+    audiences += [{'type': 'org', 'id': org_id}] if org_id else []
     audiences += [{'type': 'team', 'id': tid} for tid in sorted(set(_team_ids_of(conn).values()))]
     if user_id:
         audiences.append({'type': 'user', 'id': user_id})
@@ -272,8 +282,9 @@ async def _visible_rows_of(conn: Any, account: Any, org_id: str, app_id: Optiona
     return rows
 
 
-# Audience precedence for cross-publisher arbitration (most specific wins).
-_RUNG_RANK = {'public': 0, 'team': 1, 'user': 2}
+# Audience precedence for cross-publisher arbitration (most specific wins):
+# the ladder of plan 3.2 read from its far end (me, a team, the org, the store).
+_RUNG_RANK = {'public': 0, 'org': 1, 'team': 2, 'user': 3}
 
 
 async def _home_org_of(conn: Any, account: Any, org_id: str, app_id: str) -> 'tuple[str, bool]':
@@ -1516,7 +1527,7 @@ def _precedence_sorted(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     Publish rows ordered so the scope-walk WINNER of each app id lands last.
 
-    MORE-SPECIFIC audience wins (user > team > public); on a same-rung tie
+    MORE-SPECIFIC audience wins (user > team > org > public); on a same-rung tie
     the LOWEST org id wins — the same rule _home_org_of uses, so a stray
     duplicate public row can never let a higher-UUID org displace a lower
     one (the seeded platform org, at the minimum UUID, always holds its
@@ -1544,8 +1555,9 @@ async def resolve_app_pins(
 ) -> List[Dict[str, Any]]:
     """
     Resolves the caller's published apps via the scope walk over the binding
-    rows: public first, then each team, then the user row — most specific
-    WINS on id collisions (user > team > public; ties across publisher orgs
+    rows: public first, then the caller's org, then each team, then the user
+    row — most specific WINS on id collisions (user > team > org > public;
+    an org publication is on every member's desktop; ties across publisher orgs
     break on the lowest org id). SERVING GATE (the review state lives on the
     DEPLOYMENT): a public binding serves only when its deployment is 'ready';
     an internal (team/user) binding serves any internal-eligible deployment
@@ -1569,6 +1581,7 @@ async def resolve_app_pins(
     from ai.account import account
 
     audiences: List[Dict[str, str]] = [{'type': 'public', 'id': ''}]
+    audiences += [{'type': 'org', 'id': org_id}] if org_id else []
     audiences += [{'type': 'team', 'id': tid} for tid in team_ids]
     if user_id:
         audiences.append({'type': 'user', 'id': user_id})

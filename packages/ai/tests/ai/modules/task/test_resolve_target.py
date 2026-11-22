@@ -27,8 +27,8 @@ reads its root through ``roots.parse_root``: every root a task address takes,
 the refused and retired ones, and every bad version form. The resolver walks
 the whole ladder for a bare address and exactly one rung for a rooted one,
 never falling through; a scoped key's frozen team refuses every other team
-root; the org rung and pinned versions parse and are checked, then refused
-until C.35 and C.36 serve them.
+root; the org rung walks the active org only (C.35), and a pinned version
+is served by a control of its own beside the published one (C.36).
 """
 
 from __future__ import annotations
@@ -192,7 +192,7 @@ async def test_each_root_walks_only_its_rung_and_never_falls_through():
     ts = _server()
     spec = _control(ts, run_kind='dev')
     me = _control(ts, run_kind='deploy', owner_kind='user')
-    team = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
+    team = _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1')
     caller = _account()
     address = spec.address
 
@@ -219,7 +219,7 @@ async def test_a_rooted_miss_names_the_one_rung_as_written():
 
 async def test_a_team_root_needs_membership():
     ts = _server()
-    _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-2')
+    _control(ts, run_kind='deploy', owner_kind='team', team_id='team-2')
     with pytest.raises(PermissionError, match='not a member'):
         await _attach(ts, '=team/team-2/acme.docBrain.parsePDF', _account())
     with pytest.raises(PermissionError, match='not a member'):
@@ -229,8 +229,8 @@ async def test_a_team_root_needs_membership():
 async def test_a_scoped_keys_frozen_team_refuses_any_other_team_root():
     """A key with an endpoints scope resolves through its frozen team only, by id or by name."""
     ts = _server()
-    own = _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1')
-    _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-2')
+    own = _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1')
+    _control(ts, run_kind='deploy', owner_kind='team', team_id='team-2')
     scoped = _account(endpoints=[own.address])
 
     assert await _attach(ts, f'=team/team-1/{own.address}', scoped, 'task.data') is own
@@ -249,13 +249,16 @@ async def test_a_scoped_key_never_reaches_spec_even_by_root():
     assert excinfo.value.code == TaskError.NOT_REGISTERED and excinfo.value.rungsTried == ['@spec']
 
 
-async def test_org_roots_parse_but_the_org_rung_is_not_yet_served():
-    """``@org/`` and the active org's ``=org/<oid>/`` are refused as not yet supported; another org is refused."""
+async def test_org_roots_walk_the_org_rung_of_the_active_org_only():
+    """``@org/`` and the active org's ``=org/<oid>/`` walk the org rung alone (C.35); another org is refused."""
     ts = _server()
-    for root in ('@org', '=org/org-1'):
-        with pytest.raises(TaskError) as excinfo:
-            await _attach(ts, f'{root}/acme.docBrain.parsePDF', _account())
-        assert excinfo.value.code == TaskError.INVALID_ARGUMENT and 'not yet supported' in str(excinfo.value)
+    org = _control(ts, run_kind='deploy', owner_kind='org', team_id='')
+    assert org.index_key == f'org.org-1.user-a.{org.address}'
+    for root in ('@org', '@ORG', '=org/org-1'):
+        assert await _attach(ts, f'{root}/{org.address}', _account(), 'task.data') is org
+    with pytest.raises(TaskError) as excinfo:
+        await _attach(ts, '@org/acme.docBrain.other', _account(), 'task.data')
+    assert excinfo.value.code == TaskError.NOT_REGISTERED and excinfo.value.rungsTried == ['@org']
     with pytest.raises(PermissionError, match='active org'):
         await _attach(ts, '=org/org-9/acme.docBrain.parsePDF', _account())
 
@@ -282,7 +285,7 @@ async def test_an_unknown_mode_is_a_programming_error():
 
 
 # =============================================================================
-# VERSIONS: checked on the rung, then not yet served (C.36)
+# VERSIONS: pinned on the rung the target picks (C.36)
 # =============================================================================
 
 
@@ -299,40 +302,123 @@ async def test_a_version_on_spec_is_refused(catalog, engines, deployments):
     assert excinfo.value.field == 'version' and 'no version' in str(excinfo.value)
 
 
-async def test_the_published_version_is_an_ordinary_call_then_not_yet_served(catalog, engines, deployments):
+def _rail(deployments, version, state='ready'):
+    """Put ``version`` of acme.docBrain on the registry rail in ``state``, with its artifact."""
+    deployments.states[('org-1', 'acme.docBrain', version)] = state
+    deployments.artifacts[('org-1', 'acme.docBrain', version)] = _pipeline(instructions=[f'v{version}'])
+
+
+async def test_the_published_version_is_an_ordinary_call(catalog, engines, deployments):
+    """Plan 3.2: the rung's published version is the rung's own control, unpinned."""
     deployments.deploy('=team/team-1', version=2)
     ts = _server()
+    published = await _resolve(ts, ADDRESS, _team_reader(['task.data']), 'task.data')
     for target in (f'{ADDRESS}:2', f'=team/team-1/{ADDRESS}:2', f'@Team-1/{ADDRESS}:2'):
-        with pytest.raises(TaskError) as excinfo:
-            await _resolve(ts, target, _team_reader(['task.data']), 'task.data')
-        assert (excinfo.value.field, excinfo.value.version) == ('version', 2), target
-        assert 'not yet supported' in str(excinfo.value)
-    assert list(ts._task_control) == []
+        assert await _resolve(ts, target, _team_reader(['task.data']), 'task.data') is published, target
+    assert (published.version, published.pinned, published.index_key) == (2, False, f'team.team-1.user-a.{ADDRESS}')
 
 
 async def test_another_version_needs_task_control_on_the_team(catalog, engines, deployments):
+    """C.36: a pinned version is a control of its own beside the published one, under the rung's deployment."""
     deployments.deploy('=team/team-1', version=2)
-    deployments.states[('org-1', 'acme.docBrain', 1)] = 'private'
+    _rail(deployments, 1, 'private')
     ts = _server()
     with pytest.raises(PermissionError, match='task.control'):
         await _resolve(ts, f'{ADDRESS}:1', _team_reader(['task.data']), 'task.data')
-    with pytest.raises(TaskError, match='not yet supported'):
-        await _resolve(ts, f'{ADDRESS}:1', _team_reader(['task.data', 'task.control']), 'task.data')
+    controller = _team_reader(['task.data', 'task.control'])
+    pinned = await _resolve(ts, f'{ADDRESS}:1', controller, 'task.data')
+    assert (pinned.version, pinned.pinned, pinned.rung) == (1, True, 'team')
+    assert pinned.index_key == f'team.team-1.user-a.{ADDRESS}:1'
+    assert pinned.deployment.team_id == '=team/team-1' and pinned.pipeline['components'][1]['config'] == {
+        'instructions': ['v1']
+    }
+    # The rung table's attribution, as the published control's
+    assert (pinned.owner_id, pinned.userId, pinned.teamId, pinned.env_team) == ('team-1', 'user-a', 'team-1', 'team-1')
+
+    # It coexists with the published-version control and attaches on the next call
+    published = await _resolve(ts, ADDRESS, controller, 'task.data')
+    assert published is not pinned and not published.pinned and published.version == 2
+    assert await _resolve(ts, f'{ADDRESS}:1', controller, 'task.data') is pinned
+    assert await _attach(ts, f'{ADDRESS}:1', controller, 'task.data') is pinned
+    assert await _attach(ts, ADDRESS, controller, 'task.data') is published
+
     with pytest.raises(TaskError) as excinfo:
-        await _resolve(ts, f'{ADDRESS}:9', _team_reader(['task.data', 'task.control']), 'task.data')
+        await _resolve(ts, f'{ADDRESS}:9', controller, 'task.data')
     assert excinfo.value.code == TaskError.NOT_REGISTERED and 'no version 9' in str(excinfo.value)
 
 
 async def test_the_store_serves_only_ready_versions(catalog, engines, deployments):
     deployments.publish(version=2)
-    deployments.states[('org-1', 'acme.docBrain', 1)] = 'private'
-    deployments.states[('org-1', 'acme.docBrain', 3)] = 'ready'
+    _rail(deployments, 1, 'private')
+    _rail(deployments, 3, 'ready')
     stranger = _caller('user-z', dev_team='team-z', teams=('team-z',), org='org-2', developer_id='globex')
     ts = _server()
     with pytest.raises(PermissionError, match='only ready versions'):
         await _resolve(ts, f'@public/{ADDRESS}:1', stranger, 'task.data')
-    with pytest.raises(TaskError, match='not yet supported'):
+    pinned = await _resolve(ts, f'@public/{ADDRESS}:3', stranger, 'task.data')
+    assert pinned.index_key == f'public.user-z.{ADDRESS}:3' and pinned.pinned
+    assert (pinned.owner_id, pinned.orgId, pinned.teamId) == ('user-z', 'org-2', '')
+
+
+async def test_the_store_never_runs_a_version_that_declares_roots(catalog, engines, deployments):
+    """Plan 2.5: a version selector reaches the store's ready versions, never one that declares roots."""
+    deployments.publish(version=2)
+    _rail(deployments, 3, 'ready')
+    deployments.artifacts[('org-1', 'acme.docBrain', 3)]['roots'] = ['@Development/kb']
+    stranger = _caller('user-z', dev_team='team-z', teams=('team-z',), org='org-2', developer_id='globex')
+    ts = _server()
+    with pytest.raises(PermissionError, match='declares roots'):
         await _resolve(ts, f'@public/{ADDRESS}:3', stranger, 'task.data')
+    assert list(ts._task_control) == []
+
+
+async def test_a_scoped_key_reads_a_pinned_version_only_on_its_endpoints(catalog, engines, deployments):
+    """A read of a pinned version (the interface map) holds a scoped key to its endpoints, as a start does."""
+    deployments.deploy('=team/team-1', version=2)
+    _rail(deployments, 1, 'private')
+    controller = _team_reader(['task.data', 'task.control'])
+    controller.endpoints = ['acme.other.webhook_1']
+    ts = _server()
+    with pytest.raises(PermissionError):
+        await ts.resolve_target(controller, f'{ADDRESS}:1', 'task.data', mode=RESOLVE_READ)
+    controller.endpoints = [ADDRESS]
+    resolution = await ts.resolve_target(controller, f'{ADDRESS}:1', 'task.data', mode=RESOLVE_READ)
+    assert resolution.pin.version == 1 and resolution.artifact is not None
+
+
+async def test_a_version_on_a_bare_address_is_pinned_on_the_rung_the_ladder_picks(catalog, engines, deployments):
+    """Plan 3.2: the ladder picks the rung (skipping @spec) and pins the version there; a refusal there is final."""
+    deployments.deploy('=user/user-a', version=2, billing='team-1')
+    _rail(deployments, 1, 'private')
+    ts = _server()
+    played = await sharing._start(ts, _pipeline(), user='user-a')
+    pinned = await _resolve(ts, f'{ADDRESS}:1', _caller(), 'task.data')
+    assert pinned is not played and pinned.index_key == f'me.user-a.{ADDRESS}:1'
+    assert (pinned.teamId, pinned.env_team) == ('team-1', 'team-1')
+
+    # Team-1 serves v2 and the store serves v1 ready: a member without
+    # task.control on team-1 is refused there, never sent on to the store
+    other = _server()
+    deployments.deployments.clear()
+    deployments.deploy('=team/team-1', version=2)
+    deployments.publish(version=1)
+    with pytest.raises(PermissionError, match='task.control'):
+        await _resolve(other, f'{ADDRESS}:1', _team_reader(['task.data']), 'task.data')
+    assert list(other._task_control) == []
+
+
+async def test_a_pinned_version_on_the_org_rung_needs_an_org_admin(catalog, engines, deployments):
+    deployments.deploy('=org/org-1', version=2)
+    _rail(deployments, 1, 'private')
+    ts = _server()
+    member = _caller(teams=('team-1',))
+    assert (await _resolve(ts, f'@org/{ADDRESS}:2', member, 'task.data')).rung == 'org'
+    with pytest.raises(PermissionError, match='task.control'):
+        await _resolve(ts, f'@org/{ADDRESS}:1', member, 'task.data')
+    admin = _caller(teams=('team-1',))
+    admin.organization['permissions'] = ['org.admin']
+    pinned = await _resolve(ts, f'@org/{ADDRESS}:1', admin, 'task.data')
+    assert pinned.index_key == f'org.org-1.user-a.{ADDRESS}:1' and pinned.owner_kind == 'org'
 
 
 async def test_a_version_on_a_rung_with_nothing_published_is_not_registered(catalog, engines, deployments):
@@ -363,6 +449,26 @@ def _without(source):
     pipeline = _pipeline()
     pipeline['components'] = [c for c in pipeline['components'] if c['id'] != source]
     return pipeline
+
+
+async def test_a_pinned_version_read_carries_its_artifact_and_takes_the_start_decision(catalog, engines, deployments):
+    """A read of a pinned version answers with that version's artifact (the interfaces verb reads it), and a
+    version without the named source is not served on read as on start.
+    """
+    deployments.deploy('=team/team-1', version=2)
+    _rail(deployments, 1, 'private')
+    ts = _server()
+    controller = _team_reader(['task.data', 'task.control'])
+    resolution = await ts.resolve_target(controller, f'{ADDRESS}:1', 'task.data', mode=RESOLVE_READ)
+    assert resolution.control is None and resolution.pin.version == 1
+    assert resolution.artifact['components'][1]['config'] == {'instructions': ['v1']}
+    assert list(ts._task_control) == []
+
+    deployments.artifacts[('org-1', 'acme.docBrain', 1)] = _without('prompt_1')
+    for mode in (RESOLVE_READ, RESOLVE_START):
+        with pytest.raises(TaskError) as excinfo:
+            await ts.resolve_target(controller, 'acme.docBrain.prompt_1:1', 'task.data', mode=mode)
+        assert excinfo.value.code == TaskError.NOT_REGISTERED, mode
 
 
 async def test_a_publication_without_the_named_source_yields_on_read_as_on_start(catalog, engines, deployments):
@@ -402,9 +508,9 @@ async def test_a_source_no_publication_has_is_not_registered_on_read_as_on_start
 
 
 def _two_live_team_sources(ts):
-    """Two live team-1 controls of acme.docBrain, one per source: a two-segment address is ambiguous there."""
+    """The caller's two live team-1 controls of acme.docBrain, one per source: a two-segment address is ambiguous there."""
     for source in ('webhook_1', 'prompt_1'):
-        _control(ts, run_kind='deploy', owner_kind='team', user_id='', team_id='team-1', source=source)
+        _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1', source=source)
 
 
 async def test_an_ambiguous_team_rung_that_answers_first_needs_a_source(catalog, engines, deployments):
@@ -417,6 +523,40 @@ async def test_an_ambiguous_team_rung_that_answers_first_needs_a_source(catalog,
             await ts.resolve_target(_caller(), 'acme.docBrain', 'task.data', mode=mode)
         assert excinfo.value.code == TaskError.SOURCE_REQUIRED, mode
         assert excinfo.value.sources == ['prompt_1', 'webhook_1']
+
+
+async def test_a_version_call_passes_over_another_versions_live_sources(catalog, engines, deployments):
+    """A source-less ``:2`` on the rung's published version: version 1's two live sources are passed over before
+    a source is chosen, and never answer it. While version 1 still runs under the address the start is refused,
+    naming it (a promotion does not repoint, plan 7.2); once it is gone version 2 starts.
+    """
+    deployments.deploy('=team/team-1', version=2)
+    ts = _server()
+    old = [
+        _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1', source=s)
+        for s in ('webhook_1', 'prompt_1')
+    ]
+    for control in old:
+        control.version = 1
+    reader = _team_reader(['task.data'])
+
+    resolution = await ts.resolve_target(reader, 'acme.docBrain:2', 'task.data', mode=RESOLVE_READ)
+    assert resolution.control is None and resolution.pin.version == 2
+
+    with pytest.raises(TaskError) as excinfo:
+        await _resolve(ts, 'acme.docBrain:2', reader, 'task.data')
+    assert excinfo.value.code == TaskError.ENGINE_UNAVAILABLE and excinfo.value.reason == 'superseded'
+    assert str(excinfo.value).startswith(f'Version 1 of {ADDRESS!r} still runs on the team rung')
+
+    # Without a version the rung's two live sources stand
+    with pytest.raises(TaskError) as excinfo:
+        await ts.resolve_target(reader, '=team/team-1/acme.docBrain', 'task.data', mode=RESOLVE_READ)
+    assert excinfo.value.code == TaskError.SOURCE_REQUIRED
+
+    for control in old:
+        ts._unregister_control(control)
+    control = await _resolve(ts, 'acme.docBrain:2', reader, 'task.data')
+    assert (control.version, control.pinned, control.address) == (2, False, ADDRESS)
 
 
 async def test_an_ambiguous_later_rung_never_blocks_an_earlier_publication(catalog, engines, deployments):

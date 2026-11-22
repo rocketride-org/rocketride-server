@@ -114,6 +114,13 @@ export interface PipelineConfig {
 	/** Per-call params: public name -> `nodeId.configKey` */
 	parameters?: Record<string, string>;
 
+	/** The storage roots beyond its run's anchor this pipeline's nodes reach
+	    through `self.files` (`'@Development/kb'`, `'=team/<tid>/kb'`,
+	    `'@org/shared'`). Resolved through the run's owner when it starts: a
+	    root the owner cannot reach refuses the start. A pipeline that
+	    declares roots cannot be published to `@public`. */
+	roots?: string[];
+
 	/** UI viewport settings for visual editors */
 	viewport?: { x: number; y: number; zoom: number };
 
@@ -149,8 +156,8 @@ export interface SUBMIT_RESULT {
 	/** The address that answered: `developerId.pipelineId.source` (the stable identity, beside the id) */
 	address?: string;
 
-	/** The rung that answered */
-	resolved: '@spec' | '@me' | '@team' | '@public';
+	/** The rung that answered (`'@org'` is the org rung, plan 3.2) */
+	resolved: '@spec' | '@me' | '@team' | '@org' | '@public';
 
 	/** On `@team`: the answering team */
 	team?: string;
@@ -197,8 +204,8 @@ export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]
 export interface PipeInterfaces {
 	/** The pipe address (`developerId.pipelineId`). */
 	address: string;
-	/** The rung that answers you: `spec` (your own live control, no publication), `me`, `team` or `public`. */
-	rung: 'spec' | 'me' | 'team' | 'public';
+	/** The rung that answers you: `spec` (your own live control, no publication), `me`, `team`, `org` or `public`. */
+	rung: 'spec' | 'me' | 'team' | 'org' | 'public';
 	/** The registry version that publication points at; null when your own `spec` control answered (it has none). */
 	version: number | null;
 	/** The answering team on the `team` rung. */

@@ -118,6 +118,8 @@ async def _start(ts, user_id='user-1', run_kind='dev', owner_kind='', **argument
         org_id='org-1',
         run_kind=run_kind,
         owner_kind=owner_kind,
+        # The rung is stamped from the audience; a personal deploy answers on @me
+        rung='' if run_kind == 'dev' else {'user': 'me', 'team': 'team'}[owner_kind or 'team'],
         developer_id='acme',
     )
 

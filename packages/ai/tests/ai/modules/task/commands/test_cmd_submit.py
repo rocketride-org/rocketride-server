@@ -160,7 +160,11 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
     """The round trip's tree is the submitting control's, this connection first, and counts in its stats (plan 7.5)."""
     ts = _server()
     deployments.deploy('=team/team-1')
-    conn = _conn(ts, _caller())
+    # The caller's home team (team-0) is not the team whose publication
+    # serves (team-1), so the billing assertion tells the two apart
+    caller = _caller(dev_team='team-0', teams=('team-0', 'team-1'))
+    caller.teamOrder = ['team-0', 'team-1']
+    conn = _conn(ts, caller)
     claims: List[tuple] = []
     real_claim = ts.trace_owners.claim
 
@@ -170,13 +174,14 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
 
     ts.trace_owners.claim = claim
     await _submit(conn, name=ADDRESS, data=b'hello')
-    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
+    control = await _attach(ts, ADDRESS, caller, 'task.data')
     assert claims == [('99', control.key, conn._connection_id)]
     # Released at the close: the owner lingers for the grace, stamped late
     owner = ts.trace_owners.owner('99')
     assert owner is not None and owner.control_key == control.key and owner.late is True
-    # The tree is paid by the CALLER (plan 8.3): their org and user, their home team
-    assert (owner.billing.org_id, owner.billing.user_id, owner.address) == ('org-1', 'user-a', ADDRESS)
+    # The tree is paid by the CALLER's control (plan 8.3): their org and user, and the team whose publication served
+    assert (owner.billing.org_id, owner.billing.user_id, owner.billing.team_id) == ('org-1', 'user-a', 'team-1')
+    assert owner.address == ADDRESS
     assert (control.stats.totalCount, control.stats.completedCount, control.stats.completedSize) == (1, 1, 5)
 
 
@@ -222,7 +227,7 @@ async def test_rung_order_and_the_rungs_tried(catalog, engines, deployments):
     with pytest.raises(TaskError) as err:
         await _submit(_conn(_server(), _caller()), name=ADDRESS)
     assert err.value.code == TaskError.NOT_REGISTERED
-    assert err.value.rungsTried == ['@spec', '@me', '@team', '@public']
+    assert err.value.rungsTried == ['@spec', '@me', '@team', '@org', '@public']
 
 
 @pytest.mark.asyncio
@@ -268,17 +273,17 @@ async def test_a_rooted_name_never_falls_through(catalog, engines, deployments, 
 
 
 @pytest.mark.asyncio
-async def test_a_version_is_checked_then_not_yet_served(catalog, engines, deployments, data_path):
-    """:<version> parses and is checked on its rung, then refused until pinned versions are served (C.36)."""
+async def test_a_version_is_served_on_the_rung_the_ladder_picks(catalog, engines, deployments, data_path):
+    """:<version> is checked and served on its rung (C.36): the published version is the rung's own control."""
     ts = _server()
     deployments.deploy('=team/team-1', billing='team-1')
     conn = _conn(ts, _caller())
 
-    # The published version on the rung the ladder picks: checked, then not yet supported
-    with pytest.raises(TaskError) as err:
-        await _submit(conn, name=f'{ADDRESS}:1')
-    assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'version')
-    assert 'not yet supported' in str(err.value)
+    # The published version on the rung the ladder picks: an ordinary call
+    body = await _submit(conn, name=f'{ADDRESS}:1', data=b'hello')
+    assert (body['resolved'], body['version']) == ('@team', 1)
+    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
+    assert (control.version, control.pinned) == (1, False)
 
     # @spec has no versions; a rung with nothing published is not registered
     with pytest.raises(TaskError) as err:
@@ -293,7 +298,7 @@ async def test_a_version_is_checked_then_not_yet_served(catalog, engines, deploy
         with pytest.raises(TaskError) as err:
             await _submit(conn, name=f'{ADDRESS}{bad}')
         assert err.value.code == TaskError.INVALID_ARGUMENT, bad
-    assert list(ts._task_control) == []
+    assert list(ts._task_control) == [control.key]
 
 
 @pytest.mark.asyncio

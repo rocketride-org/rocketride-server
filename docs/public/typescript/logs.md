@@ -11,7 +11,12 @@ team's DEPLOY continuum — [deploy runs](/clients/typescript/deploy) log into t
 team's tree, readable by any teammate with monitor rights — while omitting it
 addresses your own stream, where the optional `runKind` picks between your dev
 stream (the default) and your personal deploy stream: `'deploy'` without a
-`teamId` is the only way to address that continuum). Individual runs are
+`teamId` addresses that continuum, as does `teamId` set to your own `=user/<uid>`;
+`teamId` also takes a deployment row's audience unchanged, so `=org/<oid>`
+addresses the org's deploy stream; `owner` — the run's owner as a task row or a
+`streams()` entry carries it, `=user/<uid>`, `=team/<tid>` or `=org/<oid>` —
+addresses that tree directly and wins over `teamId`; `version` opens a pinned
+run's continuum). Individual runs are
 **chapters** (tracks) inside the stream — there are no per-run log files. The log
 survives disconnects and server restarts, powers replay of past runs through the
 same panels that render live monitoring, and is retained on a ring (last ~1 GB)
@@ -68,10 +73,13 @@ paces delivery.
 
 ## `streams()`
 
-Every continuum of one source you may read, each with its chapters: a dev run logs
-into your own tree, a team deploy (a scheduled run, for instance) into that team's
-tree, an `@me` deploy into your tree again. `chapters()` reads one of them;
-`streams()` names them all, tagged with the scope to pass on to `read()`.
+The continuum of one source in each scope you may read, each with its chapters: a
+dev run logs into your own tree, a team deploy (a scheduled run, for instance) into
+that team's tree, an `@me` deploy into your tree again, an org run into the org's
+tree (listed for org admins). `chapters()` reads one of them; `streams()` names them
+all, tagged with the scope to pass on to `read()`. A pinned version's run
+(`:<version>`) logs into a continuum of its own, which `streams()` does not list:
+open it with `version`.
 
 ## `chapters()`
 
@@ -80,7 +88,9 @@ starting sequence number and outcome, the activity spans for the timeline bar, t
 retained window, and the retention horizon.
 
 ```typescript
-// Own dev stream; add teamId: 'team-prod' to read a team's deploy continuum.
+// Own dev stream; add teamId: 'team-prod' to read a team's deploy continuum, or the
+// owner of a streams() entry (an org stream: owner: '=org/<oid>'), plus version: 12
+// for a pinned run of version 12.
 const stream = { projectId: 'proj-1', source: 'chat_1' };
 const timeline = await client.log.chapters(stream);
 for (const track of timeline.chapters) {
@@ -153,10 +163,16 @@ await client.log.delete(stream, { all: true });
 
 All methods use the single `rrext_log` DAP command, dispatched by a `subcommand`
 argument (`chapters`, `read`, `segment`, `delete`). Reads require `task.monitor`;
-`delete` requires `task.control`. The scope the request addresses picks whose
-streams those rights are resolved against: without `teamId` you access your OWN
-dev streams; with `teamId` the permission is checked against the TARGET team —
-membership is the read/write right. `openEventStream()` is client-side
+`delete` requires `task.control`. Those rights are checked against the OWNER the
+request resolves to (`owner` when given, else `teamId`, else your own stream): your
+own streams need them on your account; a team's (a team id or `=team/<tid>`) need
+them among the permissions you hold on that team — a member with `task.monitor`
+there reads its logs, deleting needs `task.control` there, and an org admin holds
+every team permission; an org's (`=org/<oid>`, as `owner` or as `teamId`) are the
+active org's admins'. Another user's personal streams, and another org's, are
+refused, except to `sys.admin` and `internal` identities, which pass the owner
+check. A key with an `endpoints` scope reaches only the streams of the addresses
+inside it, whoever holds it. `openEventStream()` is client-side
 composition: it issues `chapters` and `segment` calls under the hood and
 registers a live monitor subscription while open (released by
 `closeEventStream()`) — it adds no wire surface of its own.

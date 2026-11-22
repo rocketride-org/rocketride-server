@@ -90,6 +90,20 @@ describe('teams', () => {
 		]);
 	});
 
+	it('resolveDeployTeams lists the org rung last by its audience, controlled by an org admin only', () => {
+		const member = withIdentity({ userId: 'u1', organization: { id: 'o', name: 'Org', permissions: [], teams: [], audience: '=org/o' } as unknown as ConnectResult['organization'] });
+		expect(resolveDeployTeams(member, [])).toEqual([
+			{ id: '@me', name: 'Me', canControl: true },
+			{ id: '=org/o', name: 'Org', canControl: false },
+		]);
+		const admin = withIdentity({ userId: 'u1', organization: { id: 'o', name: 'Org', permissions: ['org.admin'], teams: [{ id: 't', name: 'T', permissions: [], audience: '=team/t' }], audience: '=org/o' } as unknown as ConnectResult['organization'] });
+		expect(resolveDeployTeams(admin, []).map((t) => [t.id, t.canControl])).toEqual([
+			['@me', true],
+			['=team/t', true],
+			['=org/o', true],
+		]);
+	});
+
 	it('resolveDeployTeams skips a team with no audience', () => {
 		const info = withIdentity({ userId: 'u1', organization: { id: 'o', name: 'Org', permissions: [], teams: [{ id: 't', name: 'T', permissions: [] }] } as unknown as ConnectResult['organization'] });
 		expect(resolveDeployTeams(info, []).map((t) => t.id)).toEqual(['@me']);

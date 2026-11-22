@@ -63,7 +63,7 @@ export interface IRowServing {
 // =============================================================================
 
 /** Display order of the rungs: the caller's own space first, the store last. */
-const RUNG_ORDER: Record<DeploymentRung, number> = { me: 0, personal: 1, team: 2, public: 3 };
+const RUNG_ORDER: Record<DeploymentRung, number> = { me: 0, personal: 1, team: 2, org: 3, public: 4 };
 
 /** The store as an audience the Publish dialog's choice stages (its row label is 'Public: the store'). */
 export const STORE_AUDIENCE: DeployTeamRef = { id: STORE_TARGET_ID, name: 'the store', canControl: true };
@@ -72,9 +72,10 @@ export const STORE_AUDIENCE: DeployTeamRef = { id: STORE_TARGET_ID, name: 'the s
 // RULES
 // =============================================================================
 
-/** The rung's label ('Me', a team name, 'Store'). */
+/** The rung's label ('Me', a team name, 'Org', 'Store'). */
 function labelOf(row: TeamDeploymentRow): string {
 	if (row.rung === 'me') return 'Me';
+	if (row.rung === 'org') return 'Org';
 	if (row.rung === 'public') return 'Store';
 	return row.teamName;
 }
@@ -111,12 +112,16 @@ export function whereLiveRungsOf(rows: readonly TeamDeploymentRow[], teams: read
  * The publication an audience points at now.
  *
  * @param rows - This project's publication rows.
- * @param targetId - The audience as the dialog names it: '@me', '@public', or a team's audience.
+ * @param targetId - The audience as the dialog names it: '@me', '@public', or a team's or the org's audience.
  * @returns The live row, or undefined when the audience has none.
  */
 export function rowOfTarget(rows: readonly TeamDeploymentRow[], targetId: string): TeamDeploymentRow | undefined {
-	const rung: DeploymentRung = targetId === '@me' ? 'me' : targetId === STORE_TARGET_ID ? 'public' : 'team';
-	return rows.find((row) => row.state !== 'removed' && row.rung === rung && (rung !== 'team' || row.teamId === targetId));
+	if (targetId === '@me' || targetId === STORE_TARGET_ID) {
+		const rung: DeploymentRung = targetId === '@me' ? 'me' : 'public';
+		return rows.find((row) => row.state !== 'removed' && row.rung === rung);
+	}
+	// A team's or the org's row carries its audience as teamId, the same string the dialog stages
+	return rows.find((row) => row.state !== 'removed' && (row.rung === 'team' || row.rung === 'org') && row.teamId === targetId);
 }
 
 /**

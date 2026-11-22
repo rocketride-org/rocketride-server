@@ -109,21 +109,24 @@ from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
+from ai.account.audience import org_audience, team_audience, user_audience
 from ai.account.base import OutOfCreditsError
 from ai.account.models import (
     AccountInfo,
-    home_team,
+    resolve_org_permissions,
     resolve_run_permissions,
     resolve_task_permissions,
     team_id_of_name,
 )
 from ai.account.pipe_deploy import Pin, listing_of, resolve_pins, teams_to_probe
 from ai.account.roots import KIND_CONTROL, KIND_ME, KIND_NONE, KIND_ORG, KIND_PUBLIC, KIND_SPEC, KIND_TEAM
+from ai.account.file_store import declared_roots
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .trace_owner import TraceOwners
 from . import store_gate
 from .task_control import (
+    OWNER_KINDS,
     RESOLVE_ATTACH,
     RESOLVE_READ,
     RESOLVE_START,
@@ -132,12 +135,11 @@ from .task_control import (
     DeploymentRef,
     Listing,
     TaskControl,
-    TeamContext,
+    caller_attribution,
     config_hash,
     control_key,
     is_control_id,
     mint_control_id,
-    rung_of,
 )
 from .engine_key import EngineContent, engine_content, key_owner, properties_digest
 from .node_id import node_id
@@ -421,18 +423,20 @@ class ControlRegistry(MutableMapping):
     (``__setitem__``) and its ONE forget path (``__delitem__``, which ``pop``
     goes through):
 
-    - ``_by_index[<rung>.<ownerId>.<address>]``: the owner-filtered index a
-      NAME resolves through (``control_key``); on ``spec`` one owner may
-      hold several controls under one key (one ``project_id``, several
-      configs), the most recently touched answering first;
-    - ``_by_address_owner[(address, ownerId)]``: the controls of one owner at
-      one address, across rungs. ``@team`` probes it once per team the
-      caller belongs to;
+    - ``_by_index[<index key>]``: the owner-filtered index a NAME resolves
+      through (``control_key``: ``<rung>.<ownerId>.<address>``, with the
+      caller on the team and org rungs and ``:<version>`` for a pinned
+      run); on ``spec`` one owner may hold several controls under one key
+      (one ``project_id``, several configs), the most recently touched
+      answering first. ``@team`` probes it once per team in the caller's
+      order, with the caller in the key;
     - ``_sources[(developerId, pipeId)]``: the sources registered for a pipe,
       with the number of controls at each, so a two-segment address finds
       its sources without a walk;
-    - ``_by_owner[ownerId]``: every control of one owner (user or team), so
-      an owner-scoped lookup never walks the registry.
+    - ``_by_owner[owner]``: every control of one owner (``=user/<uid>``,
+      ``=team/<tid>`` or ``=org/<oid>``: the kind keeps the OSS ``local``
+      user, team and org apart), so an owner-scoped lookup never walks the
+      registry.
 
     ALB seam 2: callers outside the registry use ``get`` / ``remove`` /
     ``for_owner`` (and the counted resolver probes below), never an
@@ -451,7 +455,6 @@ class ControlRegistry(MutableMapping):
         """
         self._by_key: Dict[str, TaskControl] = {}
         self._by_index: Dict[str, List[TaskControl]] = {}
-        self._by_address_owner: Dict[Tuple[str, str], List[TaskControl]] = {}
         self._sources: Dict[Tuple[str, str], Dict[str, int]] = {}
         self._by_owner: Dict[str, Dict[str, TaskControl]] = {}
         self._by_deployment: Dict[DeploymentRef, Dict[str, TaskControl]] = {}
@@ -488,10 +491,9 @@ class ControlRegistry(MutableMapping):
         # pipe's sources
         self._by_key[key] = control
         self._by_index.setdefault(control.index_key, []).append(control)
-        self._by_address_owner.setdefault((control.address, control.owner_id), []).append(control)
         sources = self._sources.setdefault((control.developer_id, control.project_id or ''), {})
         sources[control.source or ''] = sources.get(control.source or '', 0) + 1
-        self._by_owner.setdefault(control.owner_id, {})[key] = control
+        self._by_owner.setdefault(control.owner, {})[key] = control
         if control.deployment is not None:
             self._by_deployment.setdefault(control.deployment, {})[key] = control
 
@@ -505,19 +507,13 @@ class ControlRegistry(MutableMapping):
             if not through:
                 self._by_deployment.pop(control.deployment, None)
 
-        # Step 2: the name index entry and the owner index entry, by identity
+        # Step 2: the name index entry, by identity
         index = control.index_key
         under = [c for c in self._by_index.get(index, []) if c is not control]
         if under:
             self._by_index[index] = under
         else:
             self._by_index.pop(index, None)
-        owner = (control.address, control.owner_id)
-        held = [c for c in self._by_address_owner.get(owner, []) if c is not control]
-        if held:
-            self._by_address_owner[owner] = held
-        else:
-            self._by_address_owner.pop(owner, None)
 
         # Step 3: the pipe's source count
         pipe = (control.developer_id, control.project_id or '')
@@ -531,10 +527,10 @@ class ControlRegistry(MutableMapping):
                 self._sources.pop(pipe, None)
 
         # Step 4: the owner index
-        owned = self._by_owner.get(control.owner_id, {})
+        owned = self._by_owner.get(control.owner, {})
         owned.pop(key, None)
         if not owned:
-            self._by_owner.pop(control.owner_id, None)
+            self._by_owner.pop(control.owner, None)
 
     # ==== Interface (ALB seam 2) =================================================
 
@@ -558,19 +554,19 @@ class ControlRegistry(MutableMapping):
         del self[key]
         return control
 
-    def for_owner(self, owner_id: str) -> List[TaskControl]:
-        """Every control one owner (a user or a team) holds, in registration order."""
+    def for_owner(self, owner: str) -> List[TaskControl]:
+        """Every control one owner (``=user/<uid>``, ``=team/<tid>`` or ``=org/<oid>``) holds, in registration order."""
         self.probes += 1
-        return list(self._by_owner.get(owner_id, {}).values())
+        return list(self._by_owner.get(owner, {}).values())
 
     # ==== Resolver lookups (counted) ==============================================
 
     def lookup(self, index_key: str) -> List[TaskControl]:
         """
-        One name-index probe (``@spec``, ``@me``, ``@public``): the caller's controls under ``index_key``.
+        One name-index probe: the caller's controls under ``index_key``.
 
         Args:
-            index_key: ``control_key(rung, ownerId, address)``.
+            index_key: ``control_key(rung, ownerId, address, callerId, version)``.
 
         Returns:
             Those controls, the most recently touched first (plan 3.2: when
@@ -579,11 +575,6 @@ class ControlRegistry(MutableMapping):
         """
         self.probes += 1
         return sorted(self._by_index.get(index_key, ()), key=lambda c: c.last_activity, reverse=True)
-
-    def owned(self, address: str, owner_id: str) -> List[TaskControl]:
-        """One owner-index probe: ``owner_id``'s controls at ``address``."""
-        self.probes += 1
-        return list(self._by_address_owner.get((address, owner_id), ()))
 
     def sources_of(self, developer_id: str, pipe_id: str) -> List[str]:
         """One source-index probe: the sources registered for a pipe, sorted."""
@@ -596,6 +587,16 @@ class ControlRegistry(MutableMapping):
 # =============================================================================
 
 
+#: What owns a run on each rung (plan 8.3): its run kind and the owner kinds that fit.
+_RUNG_OWNERS: Dict[str, Tuple[str, Tuple[str, ...]]] = {
+    'spec': ('dev', ('user',)),
+    'me': ('deploy', ('user',)),
+    'team': ('deploy', ('team',)),
+    'org': ('deploy', ('org',)),
+    'public': ('deploy', ('user', 'org')),
+}
+
+
 @dataclass(frozen=True)
 class RungPlan:
     """
@@ -603,7 +604,8 @@ class RungPlan:
 
     Attributes:
         rungs: The rungs, in the fixed order (``spec``, ``me``, ``team``,
-            ``public``): all of them for a bare address, one for a rooted one.
+            ``org``, ``public``): all of them for a bare address, one for a
+            rooted one.
         teams: The team ids ``@team`` probes, in order: the caller's team
             order (a scoped key's frozen team), or the one team a team root
             names; empty when ``team`` is not walked.
@@ -1183,20 +1185,86 @@ class TaskServer(DAPBase):
             raise PermissionError(f'Permission {require!r} denied for this task')
         return control
 
-    async def _resolve_control_env(self, control: TaskControl) -> Dict[str, str]:
+    @staticmethod
+    def _env_chain(
+        org_id: str, team_id: str, user_id: str, overrides: Optional[Dict[str, str]] = None
+    ) -> Callable[[], Awaitable[Dict[str, str]]]:
+        """
+        THE environment chain (plan 6.2): org, then a team layer, then a user layer, then a ``@spec`` call's overrides.
+
+        One function answers both questions the plan asks of it: the values a
+        CONTROL's bindings run with (``_resolve_control_env``) and a private
+        engine's DEFAULT values, what its bindings without a caller read
+        (``_owner_chain``). The decrypted values are loaded when asked and
+        kept by neither.
+
+        Args:
+            org_id: The org layer.
+            team_id: The team layer ('' for none).
+            user_id: The user layer ('' for none: a run with no caller never
+                borrows one).
+            overrides: A ``@spec`` call's own ``ROCKETRIDE_*`` values, on top.
+
+        Returns:
+            A coroutine function returning the merged ``{name: value}``.
+        """
+        fixed = dict(overrides or {})
+
+        async def chain() -> Dict[str, str]:
+            # Deferred: the account singleton loads after this module
+            from ai.account import account
+
+            merged = dict(await account.get_merged_env(user_id=user_id, org_id=org_id, team_id=team_id))
+            merged.update(fixed)
+            return merged
+
+        return chain
+
+    def _control_chain(
+        self, control: TaskControl, overrides: Optional[Dict[str, str]] = None
+    ) -> Callable[[], Awaitable[Dict[str, str]]]:
+        """
+        A control's environment (plan 6.2, 8.3): its org, its environment team, its user.
+
+        With a caller that is the caller's org, home team and user layer on
+        every rung, so a user whose keys are only at user level brings them to
+        any pipe; with no caller, the publication's (``Attribution``).
+        """
+        return self._env_chain(control.orgId, control.env_team, control.userId, overrides)
+
+    def _owner_chain(
+        self, control: TaskControl, overrides: Optional[Dict[str, str]] = None
+    ) -> Callable[[], Awaitable[Dict[str, str]]]:
+        """
+        A private engine's DEFAULT environment: its OWNER's (plan 6.2).
+
+        A user-owned engine (``@spec``, ``@me``, a caller's ``@public``) is its
+        one caller's, so its default is that caller's own chain. A team-owned
+        private engine serves every caller of the team publication, and an
+        org-owned one every caller of the org's: its default is the owner's
+        chain with no user layer (org and that team; the org alone), so a
+        team-rung engine never carries a caller's environment; each caller's
+        values ride their own control's opens.
+        """
+        if control.owner_type == 'team':
+            return self._env_chain(control.orgId, control.teamId, '')
+        if control.owner_type == 'org':
+            return self._env_chain(control.orgId, '', '')
+        return self._control_chain(control, overrides)
+
+    async def _resolve_control_env(
+        self, control: TaskControl, chain: Callable[[], Awaitable[Dict[str, str]]]
+    ) -> Dict[str, str]:
         """
         The ``ROCKETRIDE_*`` values a control's bindings run with (plan 6.2).
 
-        The team layer is the control's TEAM CONTEXT: the team whose
-        publication answered a ``@team`` call, a scoped key's frozen team, the
-        deploying team on the deploy rail, the caller's home team otherwise. A
-        team-owned run applies no user layer (a deployment's configuration
-        never depends on which human deployed it). Only the names the spec
-        references are kept (least privilege): a pipeline using
-        ``${ROCKETRIDE_OPENAI_KEY}`` never sees the caller's other variables.
+        Only the names the spec references are kept (least privilege): a
+        pipeline using ``${ROCKETRIDE_OPENAI_KEY}`` never sees the caller's
+        other variables.
 
         Args:
-            control: The control, with its pipeline and team context set.
+            control: The control, with its pipeline set.
+            chain: The control's environment chain (``_control_chain``).
 
         Returns:
             ``{name: value}``; empty when the spec references nothing or the
@@ -1205,14 +1273,8 @@ class TaskServer(DAPBase):
         pipeline = control.pipeline or {}
         if not substituted_env(pipeline, {}) and not references_env(pipeline):
             return {}
-        from ai.account import account
-
         try:
-            merged = await account.get_merged_env(
-                user_id='' if control.owner_kind == 'team' else control.userId,
-                org_id=control.orgId,
-                team_id=control.team_context.team_id,
-            )
+            merged = await chain()
         except Exception as e:
             self.debug_message(f'Environment for {control.key} could not be resolved: {e}')
             return {}
@@ -1307,20 +1369,23 @@ class TaskServer(DAPBase):
         - A control id is one registry hit, the caller re-checked
           (``control_by_id``).
         - A bare address walks the ladder in the fixed order (``@spec``, then
-          ``@me``, then each team in the caller's team order, then
-          ``@public``); ``@spec`` is attach-only and skipped for a key with an
-          ``endpoints`` scope (a production webhook never lands on the
-          owner's Play'd run).
+          ``@me``, then each team in the caller's team order, then ``@org``,
+          then ``@public``); ``@spec`` is attach-only and skipped for a key
+          with an ``endpoints`` scope (a production webhook never lands on
+          the owner's Play'd run).
         - A rooted address walks ONLY its root's rung and never falls
           through: nothing serving there is ``TASK_NOT_REGISTERED`` naming
           that one rung. ``@<team>/`` and ``=team/<tid>/`` need membership,
           and a scoped key's frozen team refuses any other team root.
-          ``@org/`` and ``=org/<oid>/`` name the active org only; the org
-          rung is not served yet (C.35) and is refused with a clear error.
-        - A ``:<version>`` is checked as plan 3.2 says (``@spec`` refuses
-          it; a version other than the rung's published one needs
-          ``task.control`` there, and ``@public`` serves only ``ready``
-          versions) and then refused: serving pinned versions is C.36.
+          ``@org/`` and ``=org/<oid>/`` name the active org only.
+        - A ``:<version>`` pins a registry version on a published rung (plan
+          3.2, ``_resolve_version``): the rung the root names, or on a bare
+          address the rung the ladder picks for the publications (``@spec``
+          refuses a version). The rung's published version is an ordinary
+          call there; any other needs ``task.control`` on that rung, and
+          ``@public`` serves only ``ready`` versions. A refusal on that rung
+          is final. A pinned run is a control of its own (``:<version>`` in
+          its index key), never the rung's published-version control.
 
         On each rung the live control answers, else (``start``/``read``) a
         publication that can start one; candidates are ordered by rung, so a
@@ -1362,7 +1427,7 @@ class TaskServer(DAPBase):
 
         Raises:
             TaskError: TASK_INVALID_ARGUMENT (grammar, a refused or retired
-                root, a version, the org rung), TASK_SOURCE_REQUIRED, or
+                root, a ``@spec`` version), TASK_SOURCE_REQUIRED, or
                 TASK_NOT_REGISTERED (with ``rungsTried``) when nothing answers.
             PermissionError: Unauthenticated, no permission, a team root the
                 caller is not a member of (or not a scoped key's frozen
@@ -1387,54 +1452,14 @@ class TaskServer(DAPBase):
                 await store_gate.require_access(control, account_info)
             return Resolution(parsed, control, None, False)
 
-        # Step 3: the rungs this target walks, and a version's checks
+        # Step 3: the rungs this target walks; a version pins one of them
         plan = self._rung_plan(account_info, parsed)
         if parsed.version is not None:
-            await self._refuse_version(account_info, parsed, plan, require)
-        rungs: List[str] = []
+            return await self._resolve_version(account_info, parsed, plan, require, mode)
 
-        # Step 4: attach: registered controls only, live first
-        if mode == RESOLVE_ATTACH:
-            for live_only in (True, False):
-                control = self._walk_rungs(parsed.address, account_info, require, live_only, rungs, plan)
-                if control is not None:
-                    return Resolution(parsed, self._check_engine_available(control), None, False)
-            raise self._not_registered(parsed.dotted, rungs, plan)
-
-        # Step 5: the candidates in the ladder's order; read answers the one a
-        # start would act on, without acting: a pinned artifact without the
-        # named source yields to the next candidate in both modes
-        # (_artifact_source), so discovery and execution pick the same
-        # publication. A held refusal (an ambiguous rung) is raised where it stands
-        candidates = await self._candidates(parsed.address, account_info, require, rungs, plan)
-        if mode == RESOLVE_READ:
-            for candidate in candidates:
-                if isinstance(candidate, TaskError):
-                    raise candidate
-                if isinstance(candidate, TaskControl):
-                    return Resolution(parsed, candidate, None, False)
-                artifact = await self._read_pin(candidate, parsed.address)
-                if artifact is not None:
-                    return Resolution(parsed, None, candidate, False, artifact)
-            raise self._not_registered(parsed.dotted, rungs, plan)
-
-        # Step 6: start acts on the first candidate that can serve, and the
-        # store gate stands on whichever answers (plan 0 S9/S10, 8.4): a live
-        # control answers from the verdict it holds, a publication is checked
-        # with its listing in hand before any engine starts. A pinned
-        # artifact without the named source yields nothing; the next answers,
-        # and a held refusal stands once every earlier candidate yielded nothing
-        for candidate in candidates:
-            if isinstance(candidate, TaskError):
-                raise candidate
-            if isinstance(candidate, TaskControl):
-                control = self._check_engine_available(candidate)
-                await store_gate.require_access(control, account_info)
-                return Resolution(parsed, control, None, False)
-            control, started = await self._start_from_pin(candidate, parsed.address, account_info, require)
-            if control is not None:
-                return Resolution(parsed, control, candidate, started)
-        raise self._not_registered(parsed.dotted, rungs, plan)
+        # Step 4: the walk: attach (registered controls only, live first),
+        # read (what a start would act on) or start (act on it)
+        return await self._resolve_on(account_info, parsed, plan, require, mode)
 
     @staticmethod
     def _rung_plan(account_info: AccountInfo, target: Target) -> RungPlan:
@@ -1452,8 +1477,7 @@ class TaskServer(DAPBase):
             PermissionError: A team root the caller is not a member of (or
                 not a scoped key's frozen team), or an org root naming
                 another org.
-            TaskError: TASK_INVALID_ARGUMENT for the org rung (not served
-                yet, C.35).
+            TaskError: TASK_INVALID_ARGUMENT for a root that names no rung.
         """
         # Step 1: a bare address walks the ladder, the caller's team order on @team
         if target.root == KIND_NONE:
@@ -1473,44 +1497,53 @@ class TaskServer(DAPBase):
                 raise PermissionError(f'You are not a member of a team named {target.ref!r}')
             return RungPlan(('team',), tuple(teams_to_probe(account_info, team_id)), label)
 
-        # Step 4: the org rung: the active org only, and not served yet
+        # Step 4: the org rung: the active org only
         if target.root == KIND_ORG:
             org = getattr(account_info, 'organization', None) or {}
             if target.by_id and target.ref != str(org.get('id') or ''):
                 raise PermissionError(f'{label} is not your active organization: an org root names the active org only')
-            raise TaskError(
-                TaskError.INVALID_ARGUMENT,
-                f'The org rung is not yet supported: {label}/{target.dotted} cannot be resolved yet',
-                field='token',
-                root=label,
-            )
+            return RungPlan(('org',), (), label)
         raise TaskError(TaskError.INVALID_ARGUMENT, f'{label} is not a task root', field='token')
 
-    async def _refuse_version(
-        self, account_info: AccountInfo, target: Target, plan: RungPlan, require: Optional[str]
-    ) -> None:
+    async def _resolve_version(
+        self,
+        account_info: AccountInfo,
+        target: Target,
+        plan: RungPlan,
+        require: Optional[str],
+        mode: str,
+    ) -> Resolution:
         """
-        A pinned ``:<version>``: checked as plan 3.2 says, then refused (serving it is C.36).
+        A ``:<version>`` call (plan 3.2, C.36): the version pinned on the rung the target picks.
 
         ``@spec`` refuses a version. Otherwise the version pins the rung the
         root names, or on a bare address the rung the ladder picks for the
         publications (``@spec`` skipped); nothing there is
-        ``TASK_NOT_REGISTERED`` naming the rungs. The rung's published
-        version is an ordinary call; any other version must be on the
-        publication's registry rail, needs ``task.control`` on a team rung,
-        and on ``@public`` must be ``ready``. A refusal on that rung is final.
+        ``TASK_NOT_REGISTERED`` naming the rungs, and a refusal on that rung
+        is final. The rung's published version is an ordinary call: the
+        rung's own control answers. Any other version must be on the
+        publication's registry rail, needs ``task.control`` on a team or the
+        org rung, and on ``@public`` must be ``ready``; it is served by a
+        control of its own, keyed ``...:<version>`` (``control_key``), under
+        the rung's deployment and the rung table's attribution, so it
+        coexists with the published-version control and never shares its
+        identity.
 
         Args:
             account_info: The request's account.
             target: The parsed target, its ``version`` set.
             plan: The rungs the target walks.
             require: The permission the request needs.
+            mode: ``start``, ``read`` or ``attach`` (``resolve_target``).
+
+        Returns:
+            The ``Resolution``.
 
         Raises:
-            TaskError: TASK_INVALID_ARGUMENT (``field='version'``) always: a
-                ``@spec`` version, or (after the checks pass) "not yet
-                supported"; TASK_NOT_REGISTERED when no publication serves
-                the rung, or the version is not on its rail.
+            TaskError: TASK_INVALID_ARGUMENT (``field='version'``) for a
+                ``@spec`` version; TASK_NOT_REGISTERED when no publication
+                serves the rung, the version is not on its rail, or (attach)
+                no control runs it; TASK_SOURCE_REQUIRED.
             PermissionError: The caller may not reach the version.
         """
         # Deferred: the account singleton loads after this module
@@ -1529,41 +1562,219 @@ class TaskServer(DAPBase):
         # Step 2: the publication the version pins: the rung the root names,
         # or the one the ladder picks (skipping @spec)
         published = RungPlan(plan.published, plan.teams, plan.root)
+        state_epoch = time.monotonic()
         pins = await resolve_pins('pipe', account_info, target.dotted, rungs=published.rungs, teams=published.teams)
         pin = pins.first
         if pin is None:
             raise self._not_registered(target.dotted, [f'@{rung}' for rung in published.rungs], published)
+        rung_plan = RungPlan((pin.rung,), (pin.deployment.team,) if pin.rung == 'team' else (), plan.root)
 
-        # Step 3: any version but the published one is on the rail, needs
-        # task.control on a team rung, and on the store must be ready
-        if target.version != pin.version:
-            deployment = pin.deployment
-            entries = await account.deployments_versions(deployment.org_id, deployment.project_id)
-            entry = next((e for e in entries if int(e.get('version', 0)) == target.version), None)
-            if entry is None:
-                raise TaskError(
-                    TaskError.NOT_REGISTERED,
-                    f'{deployment.project_id} has no version {target.version}',
-                    address=target.dotted,
-                    rungsTried=[f'@{pin.rung}'],
+        # Step 3: the rung's published version is an ordinary call on that
+        # rung. The walk reads the pin again, so it is held to this version:
+        # a promotion in between never lets it act on (or start) another one,
+        # and when nothing at this version answers there any more, the
+        # version is served pinned below
+        if target.version == pin.version:
+            try:
+                return await self._resolve_on(
+                    account_info, target._replace(version=None), rung_plan, require, mode, expect_version=pin.version
                 )
-            if pin.rung == 'team':
-                perms = resolve_task_permissions(account_info, deployment.team)
-                if 'task.control' not in perms or (require and require not in perms):
-                    raise PermissionError(
-                        f'Version {target.version} is not the published one: it needs task.control on the team'
-                    )
-            elif pin.rung == 'public' and str(entry.get('state') or '') != 'ready':
-                raise PermissionError(f'@public serves only ready versions; version {target.version} is not one')
+            except TaskError as e:
+                if e.code != TaskError.NOT_REGISTERED:
+                    raise
 
-        # Step 4: the checks passed; serving it is C.36
-        raise TaskError(
-            TaskError.INVALID_ARGUMENT,
-            f'Pinned versions are not yet supported: {text!r} cannot be served yet; '
-            f'call {format_target(target._replace(version=None))!r} for the published version',
-            field='version',
-            version=target.version,
+        # Step 4: any other version is on the rail, needs task.control on a
+        # team or the org rung, and on the store must be ready
+        deployment = pin.deployment
+        entries = await account.deployments_versions(deployment.org_id, deployment.project_id)
+        entry = next((e for e in entries if int(e.get('version', 0)) == target.version), None)
+        if entry is None:
+            raise TaskError(
+                TaskError.NOT_REGISTERED,
+                f'{deployment.project_id} has no version {target.version}',
+                address=target.dotted,
+                rungsTried=[f'@{pin.rung}'],
+            )
+        if pin.rung in ('team', 'org'):
+            perms = (
+                resolve_task_permissions(account_info, deployment.team)
+                if pin.rung == 'team'
+                else resolve_org_permissions(account_info)
+            )
+            if 'task.control' not in perms or (require and require not in perms):
+                raise PermissionError(
+                    f'Version {target.version} is not the published one: it needs task.control on the {pin.rung}'
+                )
+        elif pin.rung == 'public' and str(entry.get('state') or '') != 'ready':
+            raise PermissionError(f'@public serves only ready versions; version {target.version} is not one')
+
+        # Step 5: the caller's pinned control, attached when registered
+        attribution = caller_attribution(
+            pin.rung, account_info, deployment=deployment, billing_stamp=pin.billing_team_id
         )
+        pinned_pin = Pin(
+            rung=pin.rung,
+            deployment=deployment,
+            version=int(target.version),
+            billing_team_id=pin.billing_team_id,
+            state=pin.state,
+            artifact_state=str(entry.get('state') or ''),
+        )
+        address = target.address
+        if address.source is not None:
+            addresses = [build_address(*address)]
+        else:
+            sources = self._task_control.sources_of(address.developer_id, address.pipe_id)
+            addresses = [build_address(address.developer_id, address.pipe_id, source) for source in sources if source]
+        registered = [
+            c
+            for a in addresses
+            for c in self._task_control.lookup(
+                control_key(pin.rung, attribution.owner_id, a, attribution.caller_id, target.version)
+            )
+            if not c.restarting
+        ]
+        live = [c for c in registered if c.live] or (registered if mode == RESOLVE_ATTACH else [])
+        if live:
+            if len({c.source for c in live}) > 1:
+                sources = sorted({c.source for c in live})
+                raise TaskError(
+                    TaskError.SOURCE_REQUIRED,
+                    f'{build_address(*address)!r} has several live sources ({", ".join(sources)}); name one',
+                    address=build_address(*address),
+                    sources=sources,
+                )
+            control = self._verify_control(live[0], account_info, require)
+            check_endpoint_scope(getattr(account_info, 'endpoints', None), control.address)
+            control = self._check_engine_available(control)
+            if mode == RESOLVE_START:
+                await store_gate.require_access(control, account_info)
+            return Resolution(target, control, None, False)
+        if mode == RESOLVE_ATTACH:
+            raise self._not_registered(target.dotted, [f'@{pin.rung}'], rung_plan)
+        # A scoped key reaches only its endpoints, on a read (the interface map)
+        # as on a start
+        check_endpoint_scope(getattr(account_info, 'endpoints', None), build_address(*address))
+        if mode == RESOLVE_READ:
+            # A read takes the source decision the start below takes: a version
+            # without the named source is not served, and the artifact rides the
+            # resolution so the interfaces verb reads what was decided on
+            artifact = await self._read_pin(pinned_pin, address)
+            if artifact is None:
+                raise self._not_registered(target.dotted, [f'@{pin.rung}'], rung_plan)
+            return Resolution(target, None, pinned_pin, False, artifact)
+
+        # Step 6: start it from the version's artifact
+        control, started = await self._start_from_pin(
+            pinned_pin, address, account_info, require, pinned=True, state_epoch=state_epoch
+        )
+        if control is None:
+            raise self._not_registered(target.dotted, [f'@{pin.rung}'], rung_plan)
+        return Resolution(target, control, pinned_pin, started)
+
+    async def _resolve_on(
+        self,
+        account_info: AccountInfo,
+        target: Target,
+        plan: RungPlan,
+        require: Optional[str],
+        mode: str,
+        *,
+        expect_version: Optional[int] = None,
+    ) -> Resolution:
+        """
+        Resolve an unpinned ``target`` on exactly the rungs of ``plan``.
+
+        ``attach`` reads registered controls only, live first, then one still
+        registered so a run that just finished keeps its final status
+        readable. ``read`` answers the candidate a start would act on, a
+        control or a publication, without acting. ``start`` acts on the
+        first candidate that can serve, and the store gate stands on the
+        control it returns. In both modes a pinned artifact without the
+        named source yields, and the next answers.
+
+        Args:
+            account_info: The request's account.
+            target: The parsed target, no version.
+            plan: The rungs (and teams) to walk: the target's own, or the
+                one rung a version picked.
+            require: The permission the request needs.
+            mode: ``start``, ``read`` or ``attach``.
+            expect_version: Hold the walk to this version (a ``:N`` call on
+                the rung's published version): a control or publication of
+                another version is passed over, never attached to or started.
+
+        Returns:
+            The ``Resolution``.
+        """
+
+        def _held(candidate: Any) -> bool:
+            # A held refusal stands; otherwise the candidate's version must
+            # match (the walk already passed over controls of another version
+            # before it chose a source; this holds the publications)
+            if expect_version is None or isinstance(candidate, TaskError):
+                return True
+            return getattr(candidate, 'version', None) == expect_version
+
+        rungs: List[str] = []
+        if mode == RESOLVE_ATTACH:
+            for live_only in (True, False):
+                control = self._walk_rungs(
+                    target.address,
+                    account_info,
+                    require,
+                    live_only,
+                    rungs,
+                    plan,
+                    unattended=True,
+                    expect_version=expect_version,
+                )
+                if control is not None and _held(control):
+                    return Resolution(target, self._check_engine_available(control), None, False)
+            raise self._not_registered(target.dotted, rungs, plan)
+        # The candidates in the ladder's order; read answers the one a start
+        # would act on, without acting: a pinned artifact without the named
+        # source yields to the next candidate in both modes (_artifact_source),
+        # so discovery and execution pick the same publication. A held refusal
+        # (an ambiguous rung) is raised where it stands
+        state_epoch = time.monotonic()
+        candidates = [
+            c
+            for c in await self._candidates(
+                target.address, account_info, require, rungs, plan, expect_version=expect_version
+            )
+            if _held(c)
+        ]
+        if mode == RESOLVE_READ:
+            for candidate in candidates:
+                if isinstance(candidate, TaskError):
+                    raise candidate
+                if isinstance(candidate, TaskControl):
+                    return Resolution(target, candidate, None, False)
+                artifact = await self._read_pin(candidate, target.address)
+                if artifact is not None:
+                    return Resolution(target, None, candidate, False, artifact)
+            raise self._not_registered(target.dotted, rungs, plan)
+
+        # Start acts on the first candidate that can serve, and the store gate
+        # stands on whichever answers (plan 0 S9/S10, 8.4): a live control
+        # answers from the verdict it holds, a publication is checked with its
+        # listing in hand before any engine starts. A pinned artifact without
+        # the named source yields nothing; the next answers, and a held
+        # refusal stands once every earlier candidate yielded nothing
+        for candidate in candidates:
+            if isinstance(candidate, TaskError):
+                raise candidate
+            if isinstance(candidate, TaskControl):
+                control = self._check_engine_available(candidate)
+                await store_gate.require_access(control, account_info)
+                return Resolution(target, control, None, False)
+            control, started = await self._start_from_pin(
+                candidate, target.address, account_info, require, state_epoch=state_epoch
+            )
+            if control is not None:
+                return Resolution(target, control, candidate, started)
+        raise self._not_registered(target.dotted, rungs, plan)
 
     async def _candidates(
         self,
@@ -1572,6 +1783,8 @@ class TaskServer(DAPBase):
         require: Optional[str],
         rungs: List[str],
         plan: RungPlan,
+        *,
+        expect_version: Optional[int] = None,
     ) -> List[Union[TaskControl, Pin, TaskError]]:
         """
         What answers ``parsed`` for this caller on the plan's rungs, in the ladder's order. A pure read.
@@ -1580,9 +1793,10 @@ class TaskServer(DAPBase):
           one, is the whole answer: ``@spec`` has no publication to compare
           with, and nothing outranks ``@me``.
         - Otherwise the serving publications and the caller's registered
-          control (``@team`` or ``@public``) are merged by rung rank — ``@me``,
-          each team in the plan's order, ``@public`` — a pin before a control
-          of a LATER rung, the control before any pin of a later rung. A
+          control (``@team``, ``@org`` or ``@public``) are merged by rung rank
+          — ``@me``, each team in the plan's order, ``@org``, ``@public`` — a
+          pin before a control of a LATER rung, the control before any pin
+          of a later rung. A
           dormant control (engine stopped on its idle timer) counts as
           registered: its spec stays readable and its next request restarts it.
         - A rung whose live sources are ambiguous (``TASK_SOURCE_REQUIRED``
@@ -1597,6 +1811,9 @@ class TaskServer(DAPBase):
             require: The permission the request needs.
             rungs: Filled with the rungs the control walk tried.
             plan: The rungs the target walks.
+            expect_version: A ``:N`` call's version: the control walk passes
+                over controls of every other version before it chooses a
+                source (``_walk_rungs``).
 
         Returns:
             The candidates in answer order, each a ``TaskControl``, a ``Pin``
@@ -1612,7 +1829,7 @@ class TaskServer(DAPBase):
         # nothing precedes, raises at once)
         held: Optional[TaskError] = None
         try:
-            live = self._walk_rungs(parsed, account_info, require, True, rungs, plan)
+            live = self._walk_rungs(parsed, account_info, require, True, rungs, plan, expect_version=expect_version)
         except TaskError as e:
             if e.code != TaskError.SOURCE_REQUIRED or getattr(e, 'rung', '') == 'spec':
                 raise
@@ -1631,12 +1848,14 @@ class TaskServer(DAPBase):
         probe = list(plan.teams)
 
         def _rank(rung: str, team_id: str) -> int:
-            """Position of a rung slot in the fixed order (me, each team, public)."""
+            """Position of a rung slot in the fixed order (me, each team, org, public)."""
             if rung == 'me':
                 return 0
             if rung == 'team':
                 return 1 + (probe.index(team_id) if team_id in probe else len(probe))
-            return 2 + len(probe)
+            if rung == 'org':
+                return 2 + len(probe)
+            return 3 + len(probe)
 
         # The control, or the held refusal, takes the control's place
         entry: Optional[Union[TaskControl, TaskError]] = live if live is not None else held
@@ -1670,18 +1889,28 @@ class TaskServer(DAPBase):
         live_only: bool,
         rungs: List[str],
         plan: RungPlan,
+        unattended: bool = False,
+        expect_version: Optional[int] = None,
     ) -> Optional[TaskControl]:
         """
         One walk of the plan's rungs over the registry indexes: the first hit, verified, or None.
 
         Every probe is an index lookup (plan 3.2), never a registry walk:
         ``@spec``/``@me``/``@public`` are one name-index probe each
-        (``<rung>.<userId>.<address>``), ``@team`` is one owner-index probe
-        per team in the plan (first hit wins; the order is total, so there is
-        no ambiguity), and a two-segment address first reads the pipe's
-        registered sources. The cost is O(caller's teams x sources) whatever
-        the registry holds. A two-segment address resolves when exactly one
-        source answers; several raise ``TASK_SOURCE_REQUIRED``.
+        (``<rung>.<userId>.<address>``), ``@team`` is one probe per team in
+        the plan (``team.<teamId>.<userId>.<address>``: the caller's OWN
+        control of that team's publication; first hit wins, the order is
+        total, so there is no ambiguity), ``@org`` one probe
+        (``org.<orgId>.<userId>.<address>``), and a two-segment address first
+        reads the pipe's registered sources. The cost is O(caller's teams x
+        sources) whatever the registry holds. A two-segment address resolves
+        when exactly one source answers; several raise
+        ``TASK_SOURCE_REQUIRED``. A run with no caller (a schedule, a
+        run-now) is under ``-`` in its key and never answers a caller's data
+        request; an attach (``unattended``: a monitor, a stop) falls back to
+        it on the team and org rungs when the caller has no control of their
+        own there, for a caller who may watch that run (plan 8.3: the team's
+        members with ``task.monitor``, the org's admins).
 
         Args:
             parsed: The parsed address.
@@ -1690,6 +1919,12 @@ class TaskServer(DAPBase):
             live_only: Consider only live (or dormant) controls.
             rungs: Filled with the rungs this walk tried, in order.
             plan: The rungs (and, on ``@team``, the teams) to walk.
+            unattended: An attach: on the team and org rungs, fall back to the
+                run with no caller (a schedule, a run-now).
+            expect_version: A ``:N`` call's version (the rung's published
+                one): controls of any other version are passed over before
+                the source is chosen, so version 1's live sources never make
+                a source-less call on version 2 ambiguous.
 
         Returns:
             The control the first answering rung resolved, or None.
@@ -1712,7 +1947,11 @@ class TaskServer(DAPBase):
             addresses = [build_address(parsed.developer_id, parsed.pipe_id, source) for source in sources if source]
 
         def _usable(control: Optional[TaskControl]) -> bool:
-            return control is not None and (control.live or not live_only)
+            return (
+                control is not None
+                and (control.live or not live_only)
+                and (expect_version is None or control.version == expect_version)
+            )
 
         def _pick(candidates: List[TaskControl], rung: str, team_id: str = '') -> Optional[TaskControl]:
             """One control, or the source-required error (naming its rung and team) when several sources answer."""
@@ -1730,58 +1969,87 @@ class TaskServer(DAPBase):
                 )
             return candidates[0]
 
-        def _exact(rung: str) -> Optional[TaskControl]:
-            """The caller's own control on ``rung``: one index probe per full address, the most recent usable one."""
+        def _exact(rung: str, owner_id: str) -> Optional[TaskControl]:
+            """The caller's own control on ``rung`` under ``owner_id``: one index probe per full address, the most recent usable one."""
             found = []
             for a in addresses:
-                usable = [c for c in registry.lookup(control_key(rung, user_id, a)) if _usable(c)]
+                usable = [
+                    c
+                    for c in registry.lookup(control_key(rung, owner_id, a, user_id))
+                    if _usable(c) and not c.restarting
+                ]
                 if usable:
                     found.append(usable[0])
-            return _pick(found, rung)
+            return _pick(found, rung, owner_id if rung == 'team' else '')
+
+        def _no_caller(rung: str, owner_id: str) -> Optional[TaskControl]:
+            """
+            The run with no caller on ``rung`` under ``owner_id`` (a schedule, a run-now) the caller may watch.
+
+            An attach's fallback. Visibility is checked before the source
+            choice, so runs the caller may not watch never make a
+            two-segment address ambiguous.
+            """
+            if not unattended:
+                return None
+            found = []
+            for a in addresses:
+                usable = [
+                    c
+                    for c in registry.lookup(control_key(rung, owner_id, a, ''))
+                    if _usable(c) and not c.restarting and resolve_run_permissions(account_info, c)
+                ]
+                if usable:
+                    found.append(usable[0])
+            return _pick(found, rung, owner_id if rung == 'team' else '')
 
         # Step 2: @spec, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
         if endpoints is None and 'spec' in plan.rungs:
             rungs.append('@spec')
-            control = _exact('spec')
+            control = _exact('spec', user_id)
             if control is not None:
                 return self._verify_control(control, account_info, require)
 
         # Step 3: @me, the caller's personal (user-owned) deployment run
         if 'me' in plan.rungs:
             rungs.append('@me')
-            control = _exact('me')
+            control = _exact('me', user_id)
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
         # Step 4: @team, the plan's teams in order (the caller's team order,
-        # a rooted address's one team, or a scoped key's frozen team) with a
-        # team-owned run of the address: one owner-index probe per team and
-        # address. A store pointer's deploy-rail run is team-owned too (its
-        # billing team) but sits on the public rung, and never answers here
+        # a rooted address's one team, or a scoped key's frozen team): the
+        # caller's own control of each team's publication, one probe per team
+        # and address; the team's other callers and its unattended runs are
+        # under other keys and never answer
         if 'team' in plan.rungs:
             rungs.append('@team')
             for team_id in plan.teams:
-                runs = [
-                    c
-                    for a in addresses
-                    for c in registry.owned(a, team_id)
-                    if c.run_kind == 'deploy'
-                    and c.owner_kind != 'user'
-                    and c.rung != 'public'
-                    and _usable(c)
-                    and resolve_run_permissions(account_info, c)
-                ]
-                control = _pick(runs, 'team', team_id)
-                if control is not None:
+                control = _exact('team', team_id) or _no_caller('team', team_id)
+                if control is not None and resolve_run_permissions(account_info, control):
                     check_endpoint_scope(endpoints, control.address)
                     return self._verify_control(control, account_info, require)
 
-        # Step 5: @public, the caller's own control on a store publication
+        # Step 5: @org, the caller's own control of the active org's publication
+        if 'org' in plan.rungs:
+            rungs.append('@org')
+            org_id = str((getattr(account_info, 'organization', None) or {}).get('id') or '')
+            control = _exact('org', org_id) if org_id else None
+            if control is None and org_id:
+                # The run with no caller answers only a caller who may watch it
+                # (the org's admins, plan 8.3; _no_caller filters by it); anyone
+                # else falls through
+                control = _no_caller('org', org_id)
+            if control is not None:
+                check_endpoint_scope(endpoints, control.address)
+                return self._verify_control(control, account_info, require)
+
+        # Step 6: @public, the caller's own control on a store publication
         if 'public' in plan.rungs:
             rungs.append('@public')
-            control = _exact('public')
+            control = _exact('public', user_id)
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
@@ -1905,29 +2173,40 @@ class TaskServer(DAPBase):
         parsed: Address,
         account_info: AccountInfo,
         require: Optional[str],
+        *,
+        pinned: bool = False,
+        state_epoch: Optional[float] = None,
     ) -> Tuple[Optional[TaskControl], bool]:
         """
         The caller's control on ``pin``'s rung: attached when live, else started from the artifact.
 
         The start reuses the deploy-run dispatch (``start_server_task_as_team``,
         the path ``cmd_pipe``'s ``deploy.run`` and the scheduler take) with
-        ``trigger='submit'``. The control is owned by the CALLER: the user
-        on ``@me`` and ``@public``, the answering team on ``@team``; its index
-        key is ``<rung>.<owner>.<address>``, its ``rung`` the pin's rung, its
-        ``DeploymentRef`` the pinned publication's (so the publisher's
-        disable/remove releases it) and its ``version`` the pinned version.
-        Its TEAM CONTEXT (plan 6.2) is the answering team on ``@team``, the
-        frozen team of a scoped key, and the caller's home team otherwise.
-        ``@public`` bills the caller's home team (plan 8.3); ``@me`` and
-        ``@team`` read the row's billing stamp until C.13 moves attribution
-        to the caller. The ttl is policy (``CONST_DEFAULT_TTL``): a name call
-        never sets it (plan 1).
+        ``trigger='submit'``. Every control runs for exactly ONE caller, and
+        its row of the rung table (``caller_attribution``, plan 8.3) decides
+        everything else: the owner (the caller on ``@me`` and ``@public``, the
+        answering team on ``@team``, the org on ``@org``), the payer (the
+        caller's org), the ledger user (the caller) and team (the billing
+        stamp on ``@me``, the answering team on ``@team``, none on ``@org``
+        and ``@public``), and the environment (the caller's org, home team
+        and user on every rung). Its index key names the caller on the team
+        and org rungs, so two members calling one team publication hold two
+        controls, each with its own environment. Its ``DeploymentRef`` is the
+        pinned publication's (so the publisher's disable/remove releases it)
+        and its ``version`` the pinned version. The ttl is policy
+        (``CONST_DEFAULT_TTL``): a name call never sets it (plan 1).
 
         Args:
-            pin: The serving publication.
+            pin: The serving publication (its ``version`` the one to run).
             parsed: The parsed address.
             account_info: The request's account.
             require: The permission the request needs.
+            pinned: True when ``pin.version`` was named by the call and is not
+                the rung's published version (plan 3.2): the control's index
+                key carries it.
+            state_epoch: When the caller read ``pin`` as enabled (before any
+                await that followed); a disable or remove since then refuses
+                the control at registration. None: now.
 
         Returns:
             The control (None when the pinned artifact has no such source)
@@ -1936,9 +2215,9 @@ class TaskServer(DAPBase):
         Raises:
             TaskError: TASK_SOURCE_REQUIRED (two-segment address, several
                 sources and no default).
-            PermissionError: No permission on the team, no home team for a
-                public run, outside the key's endpoints scope, or a scoped
-                key on a publication that is not free.
+            PermissionError: No permission on the team, outside the key's
+                endpoints scope, or a scoped key on a publication that is not
+                free.
             SubscriptionRequiredError: The caller's org has no subscription
                 to a subscription-priced publication.
             ValueError: A personal deployment without its billing stamp.
@@ -1953,8 +2232,17 @@ class TaskServer(DAPBase):
         # pin was read as enabled before this moment; a disable/remove from
         # here on refuses the control at registration (plan 7.2)
         deployment = pin.deployment
-        state_epoch = time.monotonic()
+        if state_epoch is None:
+            state_epoch = time.monotonic()
         pipeline = dict(await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version))
+        # The store serves callers of every org, so a pipeline that declares
+        # roots (team or org trees of its publisher) never runs there, however
+        # the version was chosen (plan 2.5; the publish door refuses it too)
+        if pin.rung == 'public' and pipeline.get('roots'):
+            raise PermissionError(
+                f'Version {pin.version} of {deployment.project_id} declares roots '
+                f'({", ".join(map(str, pipeline["roots"]))}): @public does not run a pipeline that reaches team or org files'
+            )
         components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
         source, present = self._artifact_source(pipeline, parsed)
         if source is None:
@@ -1971,33 +2259,17 @@ class TaskServer(DAPBase):
         endpoints = getattr(account_info, 'endpoints', None)
         check_endpoint_scope(endpoints, address)
 
-        # Step 2: the owner, the paying team and the team context on this rung
-        user_id = account_info.userId
-        home = home_team(account_info)
+        # Step 2: the run's row of the rung table, and a team member's permission
+        attribution = caller_attribution(
+            pin.rung, account_info, deployment=deployment, billing_stamp=pin.billing_team_id
+        )
         if pin.rung == 'team':
-            # The answering team is the id inside the deployment's audience
-            answering = deployment.team
-            owner_kind, owner_id, owner_user = 'team', answering, ''
-            billing_team = answering
-            context = TeamContext(answering, 'key' if endpoints is not None else 'answering')
-            perms = resolve_task_permissions(account_info, answering)
+            perms = resolve_task_permissions(account_info, attribution.owner_id)
             if not perms or (require and require not in perms):
                 raise PermissionError(f'Permission {require or "task"!r} denied for this task')
-        elif pin.rung == 'me':
-            owner_kind, owner_id, owner_user = 'user', user_id, user_id
-            billing_team = pin.billing_team_id
-            context = TeamContext(home, 'key' if endpoints is not None else 'home')
-            if not billing_team:
-                raise ValueError('This deployment has no billing team; re-publish it')
-        else:
-            owner_kind, owner_id, owner_user = 'user', user_id, user_id
-            billing_team = home
-            context = TeamContext(home, 'key' if endpoints is not None else 'home')
-            if not billing_team:
-                raise PermissionError('Running a published pipeline needs a team; you are not a member of one')
-        org = getattr(account_info, 'organization', None) or {}
-        org_id = str(org.get('id') or deployment.org_id)
-        key = control_key(pin.rung, owner_id, address)
+        key = control_key(
+            pin.rung, attribution.owner_id, address, attribution.caller_id, pin.version if pinned else None
+        )
 
         # Step 3: the store gate, with the publication in hand and before any
         # engine starts (plan 0 S9/S10): the listing of the pinned version
@@ -2006,7 +2278,7 @@ class TaskServer(DAPBase):
         # never taken for the publisher's
         listing = await listing_of(account, deployment.org_id, deployment.project_id, pin.version)
         store_gate.require_account_key(listing, endpoints, address)
-        caller_org = str(org.get('id') or '')
+        caller_org = attribution.org_id
         asked = store_gate.needs_subscription(listing, pin.rung, caller_org, deployment.org_id)
         refusal = await store_gate.subscription_refusal(
             listing,
@@ -2020,27 +2292,42 @@ class TaskServer(DAPBase):
             raise refusal
         confirmed_at = time.monotonic() if asked else 0.0
 
-        # Step 4: one start per index key; a concurrent request attaches
+        # Step 4: one start per index key; a concurrent request attaches. Only
+        # a control of the version this pin runs answers. The published
+        # version's key carries no version (plan 7.5) and a promotion does not
+        # repoint the runs already under it (plan 7.2's lazy repoint is not
+        # built), so the previous version's run keeps the key until it stops
+        # or idles out: a call held to the new version is refused meanwhile,
+        # never answered by the old one
         async with self._engines.control_start_lock(key):
-            existing = next((c for c in self._task_control.lookup(key) if c.live), None)
+            running = [c for c in self._task_control.lookup(key) if c.live and not c.restarting]
+            existing = next((c for c in running if c.version == pin.version), None)
             if existing is not None:
                 return self._check_engine_available(self._verify_control(existing, account_info, require)), False
+            if running:
+                superseded = running[0]
+                raise TaskError(
+                    TaskError.ENGINE_UNAVAILABLE,
+                    f'Version {superseded.version} of {address!r} still runs on the {pin.rung} rung; '
+                    f'version {pin.version} answers once that run stops or idles out',
+                    address=address,
+                    engineKey=getattr(superseded.task, 'engine_key', '') or '',
+                    reason='superseded',
+                    version=superseded.version,
+                )
             pipeline['source'] = source
             started = await start_server_task_as_team(
                 self,
                 pipeline,
-                org_id=org_id,
-                team_id=billing_team,
+                attribution=attribution,
                 deployment=deployment,
                 deployment_epoch=state_epoch,
                 trigger='submit',
                 ttl=CONST_DEFAULT_TTL,
-                owner_kind=owner_kind,
-                owner_user_id=owner_user,
-                rung=pin.rung,
                 developer_id=parsed.developer_id,
                 version=pin.version,
-                team_context=context,
+                pinned=pinned,
+                caller_account=account_info,
                 listing=listing,
             )
 
@@ -2428,13 +2715,25 @@ class TaskServer(DAPBase):
         # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
         # key whose prefix (everything before the last dot) IS that key —
         # never a prefix test, which a longer sibling source could satisfy.
-        # The subscriptions stay while another control of the owner still
-        # answers to the same key (another config of one project_id, plan
-        # 3.4): they are its subscriptions too.
-        project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
-        for sibling in self._task_control.for_owner(control.owner_id):
-            if owner_key(sibling.run_kind, sibling.owner_id, sibling.project_id, sibling.source) == project_key:
-                return
+        # The subscriptions stay while another control still answers to the
+        # same key (another config of one project_id, plan 3.4): they are its
+        # subscriptions too. The key carries the BARE owner id, which a user,
+        # a team and an org may share (on OSS all three are 'local'), so a
+        # sibling of any owner kind under that id counts.
+        project_key = owner_key(
+            control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
+        )
+        owner_id = str(control.owner_id or '')
+        owners = {user_audience(owner_id), team_audience(owner_id), org_audience(owner_id)} if owner_id else set()
+        for owner in owners:
+            for sibling in self._task_control.for_owner(owner):
+                if sibling is control:
+                    continue
+                sibling_key = owner_key(
+                    sibling.run_kind, sibling.owner_id, sibling.project_id, sibling.source, sibling.pinned_version
+                )
+                if sibling_key == project_key:
+                    return
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
                 keys_to_remove = [k for k in conn._monitors if k == project_key or k.rsplit('.', 1)[0] == project_key]
@@ -2779,8 +3078,7 @@ class TaskServer(DAPBase):
         user_id: str = '',
         team_id: str = '',
         org_id: str = '',
-        env: Dict[str, str] | None = None,
-        env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]] = None,
+        caller_env: Optional[Dict[str, str]] = None,
         run_kind: str = 'dev',
         owner_kind: str = '',
         trigger: str = '',
@@ -2788,7 +3086,10 @@ class TaskServer(DAPBase):
         deployment: Optional[DeploymentRef] = None,
         rung: str = '',
         version: Optional[int] = None,
-        team_context: Optional[TeamContext] = None,
+        pinned: bool = False,
+        caller_id: Optional[str] = None,
+        env_team: Optional[str] = None,
+        owner_account: Optional[AccountInfo] = None,
         deployment_epoch: Optional[float] = None,
         listing: Optional[Listing] = None,
     ) -> Dict[str, Any]:
@@ -2814,20 +3115,33 @@ class TaskServer(DAPBase):
                   that id and is not a credential
                 - command: Launch type (launch/execute) determining task behavior
             conn (TaskConn, optional): Connection to associate with task for monitoring
-            env_source: Loads the values for ${...} placeholders at each (re)start (see Task)
+            user_id / team_id / org_id: The run's row of the rung table (plan
+                8.3): the ledger user ('' for a run with no caller but an
+                unattended ``@me``), the ledger team ('' on ``@org`` and
+                ``@public``) and the paying org. The owner is one of them, by
+                ``owner_kind``.
+            caller_env: A ``@spec`` call's own ``ROCKETRIDE_*`` values, the
+                top layer of its environment chain.
             developer_id: The owner org's developer id — the address namespace.
                 Required: the address exists from the first run.
             deployment: The deployment a deployment run resolved through
                 (trusted dispatch only); its disable/remove releases the hold.
-            rung: The published rung a ``submit(name)`` start answered on
-                (trusted dispatch only): ``'me'``, ``'team'`` or ``'public'``.
-                Empty derives it from ``run_kind``/``owner_kind``. A
-                ``@public`` control is a user-owned deployment run that only
-                this stamp tells apart from ``@me``.
+            rung: The rung that answered, stamped from the audience (trusted
+                dispatch only for a deployment run): ``'me'``, ``'team'``,
+                ``'org'`` or ``'public'``; a dev run is ``'spec'``. It must fit
+                the run: ``@me`` is user-owned, ``@team`` team-owned, ``@org``
+                org-owned, ``@public`` user-owned (a caller's) or org-owned
+                (unattended).
             version: The artifact version a published rung started from.
-            team_context: The team whose environment the control runs with
-                (plan 6.2). Default: ``team_id`` as the home team of a dev
-                run, the deploying team of a deployment run.
+            pinned: ``version`` was named by the call and is not the rung's
+                published version (plan 3.2): its own identity.
+            caller_id: The caller the control runs for. Default: ``user_id``
+                on a dev run, none on a deployment run.
+            env_team: The environment's team layer (plan 6.2). Default:
+                ``team_id``.
+            owner_account: The session the pipeline's declared ``roots`` are
+                resolved through (plan 2.5): the caller's. None for a run with
+                no caller, whose team names cannot be resolved.
             deployment_epoch: Monotonic time the trusted dispatch READ the
                 deployment's state, before it loaded the artifact. A
                 disable/remove after that moment refuses the control instead
@@ -2924,12 +3238,15 @@ class TaskServer(DAPBase):
             validate_segment(token_override, 'token')
 
         # Identity boundary: the ids that enter the registry key, the monitor
-        # keys and the storage tree carry no path or audience characters.
-        # A deploy run owned by its team carries no user id.
+        # keys and the storage tree carry no path or audience characters. A
+        # run with no caller carries no ledger user (but an unattended @me,
+        # whose publisher is its user), and @org and @public no ledger team
         control.client_id = client_id
         control.userId = validate_identity(user_id, 'userId') if (user_id or run_kind == 'dev') else ''
-        control.teamId = validate_identity(team_id, 'teamId')
-        control.orgId = org_id
+        control.teamId = validate_identity(team_id, 'teamId') if (team_id or run_kind == 'dev') else ''
+        control.orgId = validate_identity(org_id, 'orgId') if (org_id or owner_kind == 'org') else ''
+        control.caller_id = (user_id if run_kind == 'dev' else '') if caller_id is None else caller_id
+        control.env_team = team_id if env_team is None else env_team
         # Run classification MUST be set before the key is built below: the
         # registry key scopes by the run's OWNER (user for dev, team for
         # deploy), which is derived from run_kind.
@@ -2947,9 +3264,11 @@ class TaskServer(DAPBase):
         # building and monitor-key building — both scope by the owner.
         # A team-owned DEV run is rejected outright: no launch path produces
         # it, and its key would collide with the same team's deploy run.
-        if owner_kind == 'team' and run_kind == 'dev':
-            raise ValueError('owner_kind="team" is only valid for deploy runs')
+        if owner_kind in ('team', 'org') and run_kind == 'dev':
+            raise ValueError(f'owner_kind={owner_kind!r} is only valid for deploy runs')
         control.owner_kind = owner_kind or ('team' if run_kind == 'deploy' else 'user')
+        if control.owner_kind not in OWNER_KINDS:
+            raise ValueError(f'invalid owner_kind: {owner_kind!r}')
         # The address namespace: every run has one from its first start.
         if not developer_id:
             raise TaskError(
@@ -3031,22 +3350,26 @@ class TaskServer(DAPBase):
         if not control.provider:
             raise ValueError(f'Source "{control.source}" not found in pipeline')
 
-        # The rung and the handle. The owner FIELD (user for spec and @me,
-        # team for @team) rides owner_id, and the rung separates a user's
-        # spec run from their @me deploy of the same pipeline — the only pair
-        # that shares an owner. A published rung stamped by the trusted
-        # dispatch must fit the run: @me is a user-owned deployment run,
-        # @team a team-owned one, and @public either: a caller's own control
-        # on a store publication is user-owned, the publisher's deploy-rail
-        # run of its store pointer (a schedule, run-now) team-owned by the
-        # stamped billing team. The control id is minted here and is the
+        # The rung and the handle. The rung is STAMPED from the audience that
+        # answered (plan 8.3), never derived from the owner: a dev run is
+        # @spec; a deployment run's rung comes from the trusted dispatch and
+        # must fit its owner: @me is user-owned, @team team-owned, @org
+        # org-owned, and @public either a caller's own (user-owned) control
+        # or the unattended run of the store pointer (a schedule, a run-now),
+        # which the org owns. The control id is minted here and is the
         # registry key; it leaves with the result only when this call creates
         # the control (plan section 1)
-        derived = rung_of(control.run_kind, control.owner_kind)
-        fits = ('me', 'team') if rung == 'public' else (rung,)
-        if rung and (rung not in RUNGS or derived not in fits or derived == 'spec'):
+        rung = rung or ('spec' if control.run_kind == 'dev' else '')
+        fits = _RUNG_OWNERS.get(rung, ('', ()))
+        if fits[0] != control.run_kind or control.owner_kind not in fits[1]:
             raise ValueError(f'rung {rung!r} does not fit a {control.owner_kind}-owned {control.run_kind} run')
-        control.rung = rung or derived
+        if not control.owner_id:
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                f'A {control.owner_kind}-owned run needs its {control.owner_kind} id',
+                field='owner',
+            )
+        control.rung = rung
         control.control_id = control.key = mint_control_id()
 
         # Caller-side settings: they belong to the control and never enter
@@ -3055,15 +3378,28 @@ class TaskServer(DAPBase):
         control.ttl = CONST_DEFAULT_TTL if ttl is None else int(ttl)
         control.trace_level = args.get('pipelineTraceLevel')
         control.setup_declared_parameters()
+        # The declared roots (plan 2.5), resolved through the run's OWNER:
+        # a root the owner could not reach in a session refuses the start
+        try:
+            control.roots = declared_roots(
+                control.pipeline.get('roots'),
+                owner_kind=control.owner_type,
+                owner_id=control.owner_id,
+                org_id=control.orgId,
+                account_info=owner_account,
+            )
+        except ValueError as exc:
+            raise TaskError(TaskError.INVALID_ARGUMENT, f'The pipeline cannot start: {exc}', field='roots') from exc
         control.deployment = deployment
         control.version = version
         control.listing = listing or Listing()
-        control.team_context = team_context or TeamContext(
-            control.teamId, 'home' if control.run_kind == 'dev' else 'deploying'
-        )
-        # The values this control's bindings run with, from its team context
-        # (plan 6.2): resolved once here, carried on every frame's _caller
-        control.env = await self._resolve_control_env(control)
+        control.pinned = bool(pinned and version is not None and control.rung != 'spec')
+        # The values this control's bindings run with, from its environment
+        # chain (plan 6.2): resolved once here, carried on every frame's
+        # _caller; a private engine this control starts defaults to its
+        # owner's chain (``_owner_chain``), resolved by the same function
+        overrides = dict(caller_env or {}) if control.rung == 'spec' else {}
+        control.env = await self._resolve_control_env(control, self._control_chain(control, overrides))
         # Credit, before anything launches (plan 0 S9): a dev run's paying
         # unit is its control's org; a published rung's callers are checked
         # per request by the data path
@@ -3112,8 +3448,12 @@ class TaskServer(DAPBase):
         shared = not key_owner(key)
 
         def _same_spec(existing: TaskControl) -> bool:
-            """Whether ``existing`` runs this call's spec: its configuration on the engine of this shape."""
-            return existing.config_hash == control.config_hash and existing.task.engine_key == key
+            """Whether ``existing`` runs this call's spec: its configuration and roots on the engine of this shape."""
+            return (
+                existing.config_hash == control.config_hash
+                and existing.roots == control.roots
+                and existing.task.engine_key == key
+            )
 
         # The caller's controls under the same index key (rung, owner,
         # address): on @spec the one with the same configuration ON THE
@@ -3210,8 +3550,7 @@ class TaskServer(DAPBase):
                     shared=shared,
                     threads=threads,
                     launch_args=args,
-                    env=None if shared else env or {},
-                    env_source=None if shared else env_source,
+                    env_source=None if shared else self._owner_chain(control, overrides),
                 ),
                 _register,
             )
@@ -3417,7 +3756,6 @@ class TaskServer(DAPBase):
         shared: bool,
         threads: int,
         launch_args: Dict[str, Any],
-        env: Optional[Dict[str, str]],
         env_source: Optional[Callable[[], Awaitable[Dict[str, str]]]],
     ) -> TaskEngine:
         """
@@ -3428,7 +3766,11 @@ class TaskServer(DAPBase):
         rides per call), traces nothing by default and is built from the
         spec's shape alone: ``TaskEngine`` drops whatever of ``control`` it
         would otherwise keep. A private engine (``hash:ownerId``) is its
-        owner's.
+        OWNER's: a user-owned one is its one caller's; a team- or org-owned
+        one serves every caller of the publication, so it names no user, its
+        default environment is the owner's (``_owner_chain``) and its own
+        usage is the owner's (plan 8.3: the team whose publication does the
+        work carries its cost).
 
         Args:
             control: The control the engine is started for.
@@ -3436,8 +3778,7 @@ class TaskServer(DAPBase):
             shared: True for a shared engine (its key names no owner).
             threads: The engine's thread count.
             launch_args: The launch arguments (``name``, ``args``).
-            env: Fixed values for ${...} placeholders (private engines).
-            env_source: Loads those values at each start (private engines).
+            env_source: Loads the default values at each start (private engines).
 
         Returns:
             The new, not yet started engine.
@@ -3456,10 +3797,9 @@ class TaskServer(DAPBase):
             shared=shared,
             threads=threads,
             trace_level='none' if shared else control.trace_level,
-            client_id='' if shared else control.client_id,
+            client_id=control.client_id if not shared and control.owner_type == 'user' else '',
             team_id=control.teamId,
             org_id=control.orgId,
-            env=env,
             env_source=env_source,
             run_kind=control.run_kind,
             owner_kind=control.owner_kind,
@@ -3584,7 +3924,6 @@ class TaskServer(DAPBase):
                     shared=stopped.shared,
                     threads=stopped._threads,
                     launch_args=stopped._launch_args or {},
-                    env=None,
                     env_source=None if stopped.shared else stopped._env_source,
                 ),
                 _hold,
@@ -3652,6 +3991,10 @@ class TaskServer(DAPBase):
             if not pipeline:
                 raise ValueError('Missing pipeline configuration in restart request')
 
+            # The restart request's own ROCKETRIDE_* values: a restart is a
+            # spec call, the top layer of the successor's environment chain
+            caller_env = {k: v for k, v in (args.get('env') or {}).items() if str(k).startswith('ROCKETRIDE_')}
+
             # Step 1: the control by its id, re-checked against the caller with
             # task.control (run-scoped: a user-owned run restarts only for its owner)
             account_info = getattr(conn, '_account_info', None) if conn else None
@@ -3702,28 +4045,38 @@ class TaskServer(DAPBase):
                 },
             }
             try:
-                result = await self.start_task(
-                    successor,
-                    conn,
-                    wait_for_running=wait_for_running,
-                    client_id=control.client_id,
-                    user_id=control.userId,
-                    team_id=control.teamId,
-                    org_id=control.orgId,
-                    env_source=None if old_engine is None or old_engine.shared else old_engine._env_source,
-                    run_kind=control.run_kind,
-                    owner_kind=control.owner_kind,
-                    trigger=control.trigger,
-                    developer_id=control.developer_id,
-                    deployment=control.deployment,
-                    rung='' if control.rung == 'spec' else control.rung,
-                    version=control.version,
-                    team_context=control.team_context,
-                    listing=control.listing,
-                    # The predecessor's state epoch carries over: a deployment
-                    # revoked since it registered refuses the successor too
-                    deployment_epoch=control.registered_at,
-                )
+                # One start per index key (plan 3.2): a name start of the same key
+                # waits here, then attaches to the successor instead of registering
+                # a second live control beside it
+                async with self._engines.control_start_lock(control.index_key):
+                    result = await self.start_task(
+                        successor,
+                        conn,
+                        wait_for_running=wait_for_running,
+                        client_id=control.client_id,
+                        user_id=control.userId,
+                        team_id=control.teamId,
+                        org_id=control.orgId,
+                        caller_env=caller_env,
+                        run_kind=control.run_kind,
+                        owner_kind=control.owner_kind,
+                        trigger=control.trigger,
+                        developer_id=control.developer_id,
+                        deployment=control.deployment,
+                        rung=control.rung,
+                        version=control.version,
+                        pinned=control.pinned,
+                        caller_id=control.caller_id,
+                        env_team=control.env_team,
+                        listing=control.listing,
+                        # The declared roots resolve through the owner's session, as at
+                        # the predecessor's start: the restarting one (verified above)
+                        # for a run with a caller, none for an unattended run
+                        owner_account=account_info if (control.caller_id or control.owner_kind == 'user') else None,
+                        # The predecessor's state epoch carries over: a deployment
+                        # revoked since it registered refuses the successor too
+                        deployment_epoch=control.registered_at,
+                    )
             except Exception:
                 # Step 3b: a predecessor whose deployment was revoked meanwhile
                 # is not kept: it goes the way the kill switch takes every hold

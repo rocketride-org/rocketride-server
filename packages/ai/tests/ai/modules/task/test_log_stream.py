@@ -48,7 +48,7 @@ from rocketride.log_stream import LogEventStream
 
 # Shared helpers from the writer test module.
 from .test_run_log import (
-    CLIENT,
+    OWNER,
     KIND,
     PROJECT,
     SOURCE,
@@ -86,10 +86,12 @@ class _StubLogApi:
     def __init__(self, reader):
         self._reader = reader
 
-    async def chapters(self, project_id, source, *, team_id='', run_kind=''):
+    async def chapters(self, project_id, source, *, team_id='', run_kind='', owner='', version=None):
         return await self._reader.chapters()
 
-    async def segment(self, project_id, source, segment, *, team_id='', run_kind='', offset=0, max_bytes=None):
+    async def segment(
+        self, project_id, source, segment, *, team_id='', run_kind='', owner='', version=None, offset=0, max_bytes=None
+    ):
         if max_bytes is None:
             return await self._reader.segment_raw(segment, offset=offset)
         return await self._reader.segment_raw(segment, offset=offset, max_bytes=max_bytes)
@@ -154,7 +156,7 @@ async def seed_rich(istore, spool_root, monkeypatch):
     await writer.end_run('ok')
     return run_log.RunLogReader(
         make_file_store(istore),
-        CLIENT,
+        OWNER,
         PROJECT,
         SOURCE,
         KIND,
@@ -378,7 +380,7 @@ class TestSeededReads:
         await writer.end_run('ok')
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -462,7 +464,7 @@ class TestSeededReads:
         writer.append(stamp(flow_op('end', pid=3, component='x')))
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -505,7 +507,7 @@ class TestLiveIngest:
         writer.append(stamp(output_event('boot')))
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -550,7 +552,7 @@ class TestLiveIngest:
         writer.append(stamp(output_event('boot')))
         reader = run_log.RunLogReader(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,

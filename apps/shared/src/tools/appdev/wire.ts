@@ -31,7 +31,7 @@
  * maps the SDK's rows directly — one implementation, no drift.
  */
 
-import type { AppHistoryEntry, AppVersionInfo, RungPin } from './types';
+import type { AppHistoryEntry, AppVersionInfo, RungKind, RungPin } from './types';
 
 // =============================================================================
 // WIRE SHAPES
@@ -64,7 +64,7 @@ export interface WireRailEntry {
 
 /** One where-live pin as the SDK returns it (client.whereApp). */
 export interface WirePin {
-	/** Rung name ('personal' | 'team' | 'public'). */
+	/** Rung name ('personal' | 'team' | 'org' | 'public'). */
 	rung: string;
 	/** The display handle the server composed for this reader ('@me', '@<team>', '=team/<tid>', '@public'). */
 	handle: string;
@@ -131,7 +131,7 @@ export function toVersionInfos(rail: WireRailEntry[]): AppVersionInfo[] {
 		publishedAt: v.publishedAt,
 		sha: v.sha256,
 		message: v.message,
-		rungs: (v.rungs ?? []).filter((r): r is 'personal' | 'team' | 'public' => r === 'personal' || r === 'team' || r === 'public'),
+		rungs: (v.rungs ?? []).filter((r): r is RungKind => r === 'personal' || r === 'team' || r === 'org' || r === 'public'),
 		state: (v.state || undefined) as AppVersionInfo['state'],
 		buildStatus: v.buildStatus,
 		// The server's own delete check; a row without it (an older row
@@ -149,7 +149,7 @@ export function toVersionInfos(rail: WireRailEntry[]): AppVersionInfo[] {
  */
 export function toRungPins(pins: WirePin[], hasReviewLadder: boolean): RungPin[] {
 	return pins.map((p) => {
-		const rung = (p.rung === 'personal' || p.rung === 'team' || p.rung === 'public' ? p.rung : 'personal') as 'personal' | 'team' | 'public';
+		const rung = (p.rung === 'personal' || p.rung === 'team' || p.rung === 'org' || p.rung === 'public' ? p.rung : 'personal') as RungKind;
 		// p.state is the bound DEPLOYMENT's review state
 		// (private|submit|ready|rejected). Internal rungs serve live;
 		// on a review-ladder server the public rung shows the gate —
@@ -168,7 +168,7 @@ export function toRungPins(pins: WirePin[], hasReviewLadder: boolean): RungPin[]
 			// fallback text here would render as a bogus pill.
 			version: p.appVersion || '',
 			state,
-			audience: rung === 'personal' ? 'on your desktop' : rung === 'public' ? 'the app store' : 'team members',
+			audience: rung === 'personal' ? 'on your desktop' : rung === 'public' ? 'the app store' : rung === 'org' ? 'every member of the organization' : 'team members',
 			deployedAt: p.deployedAt,
 			// The server's serving truth (#2461): whether a browser in this
 			// audience is actually served, why not, and whether this is the

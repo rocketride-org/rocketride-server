@@ -78,9 +78,9 @@ export interface AppSummary {
 // DEPLOY — versions + rungs
 // =============================================================================
 
-/** The rungs of the publish ladder: @me (personal), @team, @public.
- * (There is no org rung — "org-wide" is an org-admin-maintained team.) */
-export type RungKind = 'personal' | 'team' | 'public';
+/** The rungs of the publish ladder: @me (personal), @team, @org (every
+ * member's desktop, published by org admins), @public. */
+export type RungKind = 'personal' | 'team' | 'org' | 'public';
 
 /** One immutable published version, as rendered on the version rail. */
 export interface AppVersionInfo {
@@ -398,6 +398,9 @@ export interface IAppBuilderHost {
 	/** The caller's team roster — the publish picker's team rows; each team's
 	 * `audience` is the server-composed publish target ('=team/<tid>'). */
 	listTeams?: () => Promise<Array<{ id: string; name: string; audience: string }>>;
+	/** The org rung's publish target (the organisation's server-composed
+	 * `audience`, '=org/<oid>') when the caller is an org admin, else ''. */
+	orgTarget?: () => Promise<string>;
 	/** The reverse index for the Where-live panel. */
 	getWhereLive?: () => Promise<RungPin[]>;
 	/** One version's durable server build log — the full phase output the

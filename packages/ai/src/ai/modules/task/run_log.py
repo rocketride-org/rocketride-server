@@ -69,7 +69,8 @@ from ai.constants import (
     CONST_LOG_KF_OPEN_CEILING,
 )
 
-from ai.account.roots import KIND_TEAM, format_root
+from ai.account.audience import parse_owner
+from ai.account.roots import format_root
 from ai.account.store import StorageNotFoundError
 
 if TYPE_CHECKING:
@@ -124,69 +125,77 @@ def _sanitize(part: str) -> str:
     return re.sub(r'[^A-Za-z0-9_\-]', '_', part or '')
 
 
-def stream_name(project_id: str, source: str, run_kind: str) -> str:
-    """Build the stream's base name: '{projectId}.{source}.{runKind}'."""
-    return f'{_sanitize(project_id)}.{_sanitize(source)}.{_sanitize(run_kind)}'
+def _version_segment(version: Optional[int]) -> str:
+    """The pinned-version segment of a stream (plan 7.5, C.36): ``.v000012``, or '' for the published version."""
+    return '' if version is None else f'.v{int(version):06d}'
 
 
-def control_store_path(project_id: str, source: str, run_kind: str) -> str:
+def stream_name(project_id: str, source: str, run_kind: str, version: Optional[int] = None) -> str:
+    """Build the stream's base name: '{projectId}.{source}.{runKind}', plus '.v{NNNNNN}' for a pinned version."""
+    return f'{_sanitize(project_id)}.{_sanitize(source)}.{_sanitize(run_kind)}{_version_segment(version)}'
+
+
+def control_store_path(project_id: str, source: str, run_kind: str, version: Optional[int] = None) -> str:
     """FileStore-relative path of a stream's control file (per stream)."""
-    return f'.logs/{_sanitize(project_id)}/{_sanitize(source)}.{_sanitize(run_kind)}.json'
+    return f'.logs/{_sanitize(project_id)}/{_sanitize(source)}.{_sanitize(run_kind)}{_version_segment(version)}.json'
 
 
-def segment_store_path(project_id: str, source: str, run_kind: str, segment_id: int) -> str:
+def segment_store_path(
+    project_id: str, source: str, run_kind: str, segment_id: int, version: Optional[int] = None
+) -> str:
     """FileStore-relative path of one sealed segment object."""
-    return f'.logs/{_sanitize(project_id)}/{_sanitize(source)}.{_sanitize(run_kind)}.{segment_id:06d}.jsonl'
+    return (
+        f'.logs/{_sanitize(project_id)}/{_sanitize(source)}.{_sanitize(run_kind)}'
+        f'{_version_segment(version)}.{segment_id:06d}.jsonl'
+    )
 
 
-# Spool filename pattern (startup sweep) — 6-digit segment id + our runKind
-# token; anchored so the sweep can NEVER touch anything but our own files in
-# the shared temp dir.
-_SPOOL_FILE_RE = re.compile(r'^[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*\.(?:dev|deploy)\.\d{6}\.jsonl$')
+# Spool filename pattern (startup sweep) — our runKind token, an optional
+# pinned-version segment, then the 6-digit segment id; anchored so the sweep
+# can NEVER touch anything but our own files in the shared temp dir.
+_SPOOL_FILE_RE = re.compile(r'^[A-Za-z0-9_\-]+(?:\.[A-Za-z0-9_\-]+)*\.(?:dev|deploy)(?:\.v\d{6})?\.\d{6}\.jsonl$')
 
 
 def spool_path(spool_root: str, scope_id: str, stream: str, segment_id: int) -> str:
     """Flat local spool file for one segment: '{scopeId}.{stream}.{id}.jsonl'.
 
-    The scope id (owner user id for dev, team id for deploy — see
-    scope_paths) qualifies the flat name so equal streams in different
-    scopes never collide on one host.
+    The scope id (the owner's kind and id — see scope_paths) qualifies the
+    flat name so equal streams in different scopes never collide on one host.
     """
     return os.path.join(spool_root, f'{_sanitize(scope_id)}.{stream}.{segment_id:06d}.jsonl')
 
 
-def scope_paths(run_kind: str, client_id: str, team_id: str) -> 'tuple[str, str]':
-    """The continuum's scope: (store path prefix, scope id) — ONE helper.
+def scope_paths(owner: str) -> 'tuple[str, str]':
+    """The continuum's scope: (store path prefix, scope id) — ONE helper, from the run's OWNER (plan 7.5).
 
-    Dev runs live in the OWNER's user tree ('' prefix: the FileStore's
-    client anchor). Deploy runs live in the TEAM tree so teammates can
-    watch/replay — the prefix is the team's id root ('=team/<tid>/',
-    plan 2.5), resolved by the store to teams/<id>/files/.
+    A run's log lives in its OWNER's tree: ``=user/<uid>/`` for a user-owned
+    run (a dev run, a personal @me deploy, a caller's own @public run),
+    ``=team/<tid>/`` for a team-owned one (teammates with monitor rights
+    watch and replay it), ``=org/<oid>/`` for an org-owned one (@org, an
+    unattended @public run; the org's admins watch it). The prefix is the
+    owner's id root (plan 2.5), which the internal identity the writer and
+    the reader act through resolves by id. The dev and deploy continua of
+    one owner are told apart by the run kind already in every stream name.
 
-    The scope id qualifies SPOOL filenames and the writer registry so the
-    same stream name in two scopes (Staging vs Production deploying one
-    project) can never collide on one host.
+    The scope id (``<kind>-<id>``) qualifies SPOOL filenames and the writer
+    registry so the same stream name in two scopes (Staging vs Production
+    deploying one project; the OSS user, team and org, all ``local``) can
+    never collide on one host.
 
     Both RunLogWriter and RunLogReader derive their paths from this single
-    function — writer and reader cannot disagree about where a stream lives.
+    function, and a reader of a completed run passes the owner string its
+    task row carried — writer and reader cannot disagree about where a
+    stream lives.
+
+    Args:
+        owner: ``=user/<uid>``, ``=team/<tid>`` or ``=org/<oid>``.
 
     Raises:
-        ValueError: The team id is not usable as a path segment.
+        ValueError: The text is no owner, or its id is not usable as a path
+            segment (AudienceError and RootError are ValueErrors).
     """
-    if run_kind == 'deploy':
-        # A deploy continuum is team-scoped only when the run is TEAM-owned
-        # (@team). A user-owned deploy (@me) passes team_id='' and lives in
-        # the OWNER's user tree like a dev run — private — distinguished from
-        # the dev continuum by the '.deploy.' segment already in every
-        # stream name and store path.
-        if not team_id:
-            return ('', client_id)
-        # The root is composed by the one writer of the grammar, which
-        # refuses an id that could escape its segment (RootError is a
-        # ValueError). Upstream callers validate membership, so this is
-        # defense in depth.
-        return (format_root(KIND_TEAM, team_id, by_id=True) + '/', team_id)
-    return ('', client_id)
+    decoded = parse_owner(owner)
+    return (format_root(decoded.kind, decoded.id, by_id=True) + '/', f'{decoded.kind}-{decoded.id}')
 
 
 def history_seconds(run_kind: str) -> int:
@@ -263,7 +272,7 @@ def writer_key(scope_id: str, stream: str) -> str:
 
 
 def live_writer(
-    run_kind: str, client_id: str, team_id: str, owner_kind: str, project_id: str, source: str
+    owner: str, project_id: str, source: str, run_kind: str, version: Optional[int] = None
 ) -> 'Optional[RunLogWriter]':
     """
     The writer currently open on a control's continuum, whoever opened it, or None.
@@ -276,19 +285,17 @@ def live_writer(
     lastSeq).
 
     Args:
-        run_kind: The control's run kind.
-        client_id: The store anchor (the team of a team-owned run, else the user).
-        team_id: The control's team.
-        owner_kind: ``'team'`` or ``'user'``.
+        owner: The control's owner string (``scope_paths``).
         project_id: The control's project.
         source: The control's source.
+        run_kind: The control's run kind.
+        version: The control's pinned version, or None.
 
     Returns:
         The open writer, or None.
     """
-    scope_team = team_id if owner_kind == 'team' else ''
-    _prefix, scope_id = scope_paths(run_kind, client_id, scope_team)
-    writer = WRITERS.get(writer_key(scope_id, stream_name(project_id, source, run_kind)))
+    _prefix, scope_id = scope_paths(owner)
+    writer = WRITERS.get(writer_key(scope_id, stream_name(project_id, source, run_kind, version)))
     return writer if writer is not None and (writer.is_live or writer.is_opening) else None
 
 
@@ -423,7 +430,7 @@ class RunLogWriter:
     def __init__(
         self,
         store: 'FileStore',
-        client_id: str,
+        owner: str,
         project_id: str,
         source: str,
         run_kind: str,
@@ -431,8 +438,8 @@ class RunLogWriter:
         raise_seq_floor: Any,
         *,
         team_id: str = '',
-        owner_kind: str = 'team',
         org_id: str = '',
+        version: Optional[int] = None,
         spool_root: Optional[str] = None,
         debug: Any = None,
     ) -> None:
@@ -440,23 +447,22 @@ class RunLogWriter:
         Bind the writer to a task identity and its stamping callbacks.
 
         Args:
-            store: The account-scoped FileStore (Store.get_file_store) — all
-                store paths here are relative ('.logs/…'); the FileStore puts
-                them under the calling user itself.
-            client_id: Owning user id (spool filenames + writer registry —
-                never in store paths; the FileStore owns that scoping).
+            store: An internal-identity FileStore (the run-log writer is the
+                only legal writer of .logs content); every store path here is
+                the owner's id root plus '.logs/…' (``scope_paths``).
+            owner: The run's OWNER (``=user/<uid>``, ``=team/<tid>`` or
+                ``=org/<oid>``): the tree the continuum lives in, the spool
+                filenames and the writer registry.
             project_id: Pipeline project id.
             source: Source component id.
             run_kind: 'dev' or 'deploy' — separate continua per kind.
-            team_id: The run's BILLING/secrets team — recorded verbatim as the
-                control record's team provenance, ALWAYS (even for an @me
-                deploy, whose billing team is real). It does NOT decide where
-                logs live; owner_kind does. Ignored for provenance on dev runs.
-            owner_kind: 'team' | 'user' — the STORAGE scope selector. A
-                team-owned deploy writes the team tree (teammates watch/replay);
-                a user-owned (@me) deploy writes the owner's private user tree.
-                Kept SEPARATE from team_id so a private @me log never lands in
-                the billing team's tree AND its billing provenance is not lost.
+            team_id: The run's LEDGER team — recorded verbatim as the control
+                record's team provenance (the billing stamp of an @me deploy,
+                the serving team of a team run, '' on @org and @public). It
+                does NOT decide where logs live; the owner does.
+            version: The pinned registry version of a pinned run (plan 3.2):
+                its continuum is a stream of its own (``.v{NNNNNN}``), never
+                the published-version run's.
             stamp: Callable(message, *, event_time=None) -> message; the
                 task's stamp_log_event (synthetic events go through it too).
             raise_seq_floor: Callable(int); the task's raise_log_seq_floor —
@@ -465,13 +471,13 @@ class RunLogWriter:
             debug: Optional debug-message callable.
         """
         self._store = store
-        self._client_id = client_id
+        self._owner = owner
         self._project_id = project_id
         self._source = source
         self._run_kind = run_kind
-        # Provenance stamps for the control record (B14): the org+team
-        # context the stream's runs resolve secrets/billing under. team_id is
-        # the REAL billing team for every run kind, including @me deploys.
+        self._version = version
+        # Provenance stamps for the control record (B14): the org and the
+        # ledger team the stream's runs are billed under (plan 8.3).
         self._team_id = team_id
         self._org_id = org_id
         self._stamp = stamp
@@ -483,14 +489,13 @@ class RunLogWriter:
         self._opening = False
         self._opened = asyncio.Event()
 
-        # Identity-derived names/paths. STORAGE scope is chosen by owner_kind,
-        # NOT by the billing team: a team-owned deploy lives in the team tree
-        # (teammates watch/replay); a user-owned (@me) deploy scopes to '' so
-        # its logs stay in the owner's private user tree even though its
-        # billing team above is real. The scope id qualifies spool + registry.
-        scope_team = team_id if owner_kind == 'team' else ''
-        self._scope_prefix, self._scope_id = scope_paths(run_kind, client_id, scope_team)
-        self._stream = stream_name(project_id, source, run_kind)
+        # Identity-derived names/paths. STORAGE scope is the OWNER's tree,
+        # NOT the ledger team's: a team-owned deploy lives in the team tree
+        # (teammates watch/replay), a user-owned run in the owner's private
+        # tree, an org-owned run in the org tree. The scope id qualifies
+        # spool + registry.
+        self._scope_prefix, self._scope_id = scope_paths(owner)
+        self._stream = stream_name(project_id, source, run_kind, version)
         self._spool_root = spool_root or default_spool_root()
 
         # Control state (authoritative in-memory; persisted to the store).
@@ -546,11 +551,13 @@ class RunLogWriter:
 
     def _control_path(self) -> str:
         """Store path of this stream's control file (scope prefix applied)."""
-        return self._scope_prefix + control_store_path(self._project_id, self._source, self._run_kind)
+        return self._scope_prefix + control_store_path(self._project_id, self._source, self._run_kind, self._version)
 
     def _segment_path(self, seg_id: int) -> str:
         """Store path of one sealed segment (scope prefix applied)."""
-        return self._scope_prefix + segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
+        return self._scope_prefix + segment_store_path(
+            self._project_id, self._source, self._run_kind, seg_id, self._version
+        )
 
     # =========================================================================
     # OPEN / RECOVERY
@@ -763,6 +770,10 @@ class RunLogWriter:
                 'projectId': self._project_id,
                 'source': self._source,
                 'runKind': self._run_kind,
+                # The owner whose tree holds the stream (plan 7.5) and the
+                # pinned version of a pinned run's stream (C.36)
+                'owner': self._owner,
+                'version': self._version,
                 # Secret/billing provenance: which org+team context the
                 # stream's runs resolved under (B14) — auditable after an
                 # org switch changes what a re-run would resolve.
@@ -1398,37 +1409,38 @@ class RunLogReader:
     def __init__(
         self,
         store: 'FileStore',
-        client_id: str,
+        owner: str,
         project_id: str,
         source: str,
         run_kind: str,
         *,
-        team_id: str = '',
+        version: Optional[int] = None,
         spool_root: Optional[str] = None,
     ) -> None:
         """
         Bind the reader to a stream identity.
 
         Args:
-            store: The CALLER's account-scoped FileStore — store paths are
-                relative ('.logs/…'); scoping to the authenticated user is
-                the FileStore's job, never built from input here.
-            client_id: Caller's user id (spool filenames + writer registry).
+            store: An internal-identity FileStore — store paths are the
+                owner's id root plus '.logs/…' (``scope_paths``); the command
+                layer verifies the caller may read the owner's logs first.
+            owner: The run's OWNER (``=user/<uid>``, ``=team/<tid>`` or
+                ``=org/<oid>``), as the task row carried it.
             project_id: Pipeline project id.
             source: Source component id.
             run_kind: 'dev' or 'deploy'.
-            team_id: REQUIRED for deploy streams — reads the TEAM continuum
-                (the command layer verifies team permissions first).
+            version: The pinned version of a pinned run's stream, or None.
             spool_root: Override spool root (tests).
         """
         self._store = store
-        self._client_id = client_id
+        self._owner = owner
         self._project_id = project_id
         self._source = source
         self._run_kind = run_kind
+        self._version = version
         # Same single scope helper as the writer — they cannot diverge.
-        self._scope_prefix, self._scope_id = scope_paths(run_kind, client_id, team_id)
-        self._stream = stream_name(project_id, source, run_kind)
+        self._scope_prefix, self._scope_id = scope_paths(owner)
+        self._stream = stream_name(project_id, source, run_kind, version)
         self._spool_root = spool_root or default_spool_root()
 
     def _spool_path(self, seg_id: int) -> str:
@@ -1437,11 +1449,13 @@ class RunLogReader:
 
     def _control_path(self) -> str:
         """Store path of this stream's control file (scope prefix applied)."""
-        return self._scope_prefix + control_store_path(self._project_id, self._source, self._run_kind)
+        return self._scope_prefix + control_store_path(self._project_id, self._source, self._run_kind, self._version)
 
     def _segment_path(self, seg_id: int) -> str:
         """Store path of one sealed segment (scope prefix applied)."""
-        return self._scope_prefix + segment_store_path(self._project_id, self._source, self._run_kind, seg_id)
+        return self._scope_prefix + segment_store_path(
+            self._project_id, self._source, self._run_kind, seg_id, self._version
+        )
 
     # -------------------------------------------------------------------------
     # CONTROL ACCESS

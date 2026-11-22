@@ -42,7 +42,7 @@ from pydantic import BaseModel
 
 from rocketride.types.client import AppManifestEntry
 
-from .audience import AudienceError, team_audience
+from .audience import AudienceError, org_audience, team_audience
 from .roots import team_name_key
 
 
@@ -179,7 +179,8 @@ class AccountInfo(BaseModel):
 
         Each team entry carries its ``audience`` (plan 2.5): the string a
         client passes back unchanged wherever a deploy verb takes ``teamId``,
-        so no client composes or parses one.
+        so no client composes or parses one; the organization carries its
+        own (``=org/<oid>``, the org rung's audience, C.35).
 
         Returns:
             dict: All AccountInfo fields except ``auth``, suitable for sending
@@ -193,6 +194,11 @@ class AccountInfo(BaseModel):
         # the grammar cannot carry gets none: it is addressable by no client.
         org = data.get('organization')
         if isinstance(org, dict):
+            try:
+                if org.get('id'):
+                    org['audience'] = org_audience(str(org['id']))
+            except AudienceError:
+                org.pop('audience', None)
             for team in org.get('teams') or []:
                 if isinstance(team, dict) and team.get('id'):
                     try:
@@ -393,12 +399,21 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
     CONTRACT — RETURNS ``[]`` on no access (never raises), like
     ``resolve_task_permissions``.
 
-    USER-owned runs (interactive dev runs and personal @me deploys) are
-    PRIVATE: the owner holds full permissions, everyone else none — the
-    run's billing ``teamId`` NEVER grants visibility into a personal run.
-    TEAM-owned runs resolve through team membership exactly as before.
+    The watchers of plan 8.3 follow the run's OWNER:
+
+    - USER-owned runs (interactive dev runs, personal @me deploys, a caller's
+      own @public control) are PRIVATE: the owner holds full permissions,
+      everyone else none — the run's billing ``teamId`` NEVER grants
+      visibility into a personal run.
+    - TEAM-owned runs resolve through team membership: members with
+      ``task.monitor`` on the team watch every caller's control of it.
+    - ORG-owned runs (@org, an unattended @public run) are watched by the
+      org's admins (full permissions); the caller a control runs for holds
+      ``task.data`` on it and nothing more, so a member calls an org
+      publication without watching anyone else's run of it.
+
     sys.admin and internal (pod service) credentials keep full access to
-    both (resolved here for user-owned runs, inside
+    every kind (resolved here for user- and org-owned runs, inside
     ``resolve_task_permissions`` for team-owned ones).
 
     The key's ``endpoints`` scope is NOT applied here — it binds a
@@ -410,7 +425,8 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
     Args:
         account_info: The authenticated caller's session.
         control: The run's TaskControl (or any object carrying
-            ``owner_kind``/``owner_id``/``run_kind``/``teamId``).
+            ``owner_kind``/``owner_id``/``run_kind``/``teamId``, and
+            ``caller_id`` for an org-owned run).
 
     Returns:
         Effective permission list, or empty list if the caller may not
@@ -419,14 +435,49 @@ def resolve_run_permissions(account_info: AccountInfo, control: Any) -> list[str
     # Every control carries its owner (plan 1): the kind decides the rule
     owner_kind = control.owner_kind
     owner_id = control.owner_id
+    if owner_kind not in ('user', 'org'):
+        return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
+    sys_perms = getattr(account_info, 'sysPermissions', []) or []
+    if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+        return list(_FULL_TEAM_PERMISSIONS)
+    user_id = getattr(account_info, 'userId', None)
     if owner_kind == 'user':
-        sys_perms = getattr(account_info, 'sysPermissions', []) or []
-        if 'sys.admin' in sys_perms or 'internal' in sys_perms:
-            return list(_FULL_TEAM_PERMISSIONS)
-        if owner_id == getattr(account_info, 'userId', None):
-            return list(_FULL_TEAM_PERMISSIONS)
+        return list(_FULL_TEAM_PERMISSIONS) if owner_id == user_id else []
+
+    # An org-owned run: the active org's admins watch it, its caller uses it
+    org = getattr(account_info, 'organization', None) or {}
+    if not owner_id or str(org.get('id') or '') != owner_id:
         return []
-    return resolve_task_permissions(account_info, getattr(control, 'teamId', ''))
+    if 'org.admin' in (org.get('permissions') or []):
+        return list(_FULL_TEAM_PERMISSIONS)
+    caller_id = getattr(control, 'caller_id', '')
+    return ['task.data'] if caller_id and caller_id == user_id else []
+
+
+def resolve_org_permissions(account_info: AccountInfo) -> list[str]:
+    """
+    Return the caller's permissions on the ORG rung of their active org (plan 3.2, 8.3).
+
+    CONTRACT — RETURNS ``[]`` when the caller is no org admin (never raises).
+    The org rung is published, disabled, removed, scheduled and run-now'd by
+    org admins only, and a version other than its published one needs
+    ``task.control`` there: an org admin (and sys.admin, internal) holds the
+    full set, every other member none. Calling an org publication needs no
+    permission beyond membership, so the data path does not ask this.
+
+    Args:
+        account_info: The authenticated caller's session.
+
+    Returns:
+        Effective permission list, or empty list.
+    """
+    sys_perms = getattr(account_info, 'sysPermissions', []) or []
+    if 'sys.admin' in sys_perms or 'internal' in sys_perms:
+        return list(_FULL_TEAM_PERMISSIONS)
+    org = getattr(account_info, 'organization', None) or {}
+    if org.get('id') and 'org.admin' in (org.get('permissions') or []):
+        return list(_FULL_TEAM_PERMISSIONS)
+    return []
 
 
 def resolve_team_permissions(account_info: AccountInfo, team_id: str) -> list[str]:
@@ -489,9 +540,10 @@ def team_order(account_info: AccountInfo) -> list[str]:
 
     The first team in the order that holds a name answers for it; teams that
     hold nothing are skipped; the order is total, so there is no tie rule. The
-    first entry is the caller's HOME team (``home_team``): the team context of
-    ``@spec``, ``@me`` and a cross-org ``@public`` run, and the team every
-    ledger row is attributed to.
+    first entry is the caller's HOME team (``home_team``): the team layer of
+    the caller's environment on every rung, and the ledger team of a
+    ``@spec`` run (plan 8.3; the other rungs bill the team whose publication
+    served).
 
     Source of the order: the STORED order on the membership
     (``org_members.team_order``, carried as ``AccountInfo.teamOrder``), with

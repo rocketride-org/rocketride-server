@@ -37,7 +37,7 @@ import pytest
 
 from ai.modules.task import caller_stamp
 from ai.modules.task.pipeline import validate_placeholders
-from ai.modules.task.task_control import TeamContext, typed_caller_config
+from ai.modules.task.task_control import typed_caller_config
 from ai.modules.task.types import TaskError
 
 from . import test_task_engine_sharing as sharing
@@ -103,10 +103,10 @@ async def test_start_refuses_a_pipeline_with_a_placeholder_outside_a_config_valu
 
 
 @pytest.mark.asyncio
-async def test_a_controls_env_is_its_referenced_values_from_its_team_context(
+async def test_a_controls_env_is_its_referenced_values_from_its_environment_chain(
     catalog, engines, deployments, monkeypatch
 ):
-    """Only the names the spec references, resolved with the control's team as the team layer."""
+    """Only the names the spec references, resolved with the caller's home team as the team layer."""
     asked = []
 
     async def merged(user_id, org_id, team_id):
@@ -118,8 +118,8 @@ async def test_a_controls_env_is_its_referenced_values_from_its_team_context(
     control = await _start(ts, _pipeline(instructions=['${ROCKETRIDE_TONE}']))
 
     assert control.env == {'ROCKETRIDE_TONE': 'dry'}
-    assert asked == [('user-a', 'org-1', control.team_context.team_id)]
-    assert control.team_context == TeamContext('team-1', 'home')
+    assert asked == [('user-a', 'org-1', 'team-1')]
+    assert control.env_team == 'team-1'
 
 
 @pytest.mark.asyncio

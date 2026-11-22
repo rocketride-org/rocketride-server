@@ -90,9 +90,6 @@ TEAM_TARGET_RETIRED = '@team/ is retired: publish to @<name> or =team/<tid>'
 #: The refusal of the retired ``@user`` publish target (plan 11.1 B43).
 USER_TARGET_RETIRED = '@user is retired: publish to @me'
 
-#: The refusal of an org target until the org rung serves (C.35): it parses, nothing publishes there yet.
-ORG_TARGET_NOT_YET = 'Publishing to the org (@org, =org/<oid>) is not yet supported: publish to @me, a team or @public'
-
 
 # ==== Errors =====================================================================
 
@@ -525,7 +522,6 @@ __all__ = [
     'Audience',
     'AudienceError',
     'HANDLE_PERSONAL',
-    'ORG_TARGET_NOT_YET',
     'OWNER_KINDS',
     'Owner',
     'PUBLIC_AUDIENCE',

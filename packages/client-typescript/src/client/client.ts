@@ -462,9 +462,12 @@ export class DataPipe {
  *
  * teamId present always addresses the team's deploy continuum (runKind is
  * ignored there); absent, the optional runKind selects between your dev
- * run (default) and your personal deploy run.
+ * run (default) and your personal deploy run. teamId also takes a row's
+ * audience as the server returned it (`=org/<oid>` watches the org's run).
+ * `version` subscribes a PINNED run (a version other than its rung's
+ * published one), which publishes under its own key.
  */
-export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number; runKind?: 'dev' | 'deploy' };
+export type MonitorKey = { token: string } | { teamId?: string; projectId: string; source: string; pipeId?: number; runKind?: 'dev' | 'deploy'; version?: number };
 
 type LifecyclePriority = 'foreground' | 'background';
 
@@ -2627,6 +2630,10 @@ export class RocketRideClient extends DAPClient {
 			} else if (key.runKind === 'deploy') {
 				args.runKind = key.runKind;
 			}
+			// A pinned run publishes under its own key
+			if (key.version !== undefined) {
+				args.version = key.version;
+			}
 			await this.call('rrext_monitor', args);
 		}
 	}
@@ -2691,9 +2698,10 @@ export class RocketRideClient extends DAPClient {
 				throw new Error(`invalid runKind ${JSON.stringify(runKind)} — expected 'dev' or 'deploy'`);
 			}
 		}
-		// runKind rides LAST so a registry string written before the field
-		// existed still parses (missing element -> '' -> dev).
-		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, teamId, runKind])}`;
+		// runKind and then version ride LAST so a registry string written
+		// before either existed still parses (missing element -> '' -> dev,
+		// and no pinned version).
+		return `p:${JSON.stringify([key.projectId, key.source, key.pipeId ?? null, teamId, runKind, key.version ?? null])}`;
 	}
 
 	/**
@@ -2705,13 +2713,14 @@ export class RocketRideClient extends DAPClient {
 		}
 		if (keyStr.startsWith('p:')) {
 			try {
-				const [projectId, source, pipeId, teamId, runKind] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string, string | undefined];
+				const [projectId, source, pipeId, teamId, runKind, version] = JSON.parse(keyStr.slice(2)) as [string, string, number | null, string, string | undefined, number | null | undefined];
 				return {
 					projectId,
 					source,
 					...(pipeId !== null ? { pipeId } : {}),
 					...(teamId ? { teamId } : {}),
 					...(runKind === 'deploy' ? { runKind } : {}),
+					...(typeof version === 'number' ? { version } : {}),
 				};
 			} catch {
 				// A malformed registry string has no valid key — skip it.
@@ -3236,7 +3245,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param registryVersion - Registry version number from the rail
 	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
 	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-	 *                 and '@user' are refused; '@org' is refused until the org rung serves
+	 *                 and '@user' are refused; '@org' (org admins) is the org rung
 	 * @returns The binding row ({audience, version, state, artifactState, ...})
 	 */
 	async publishApp(appId: string, registryVersion: number, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3251,7 +3260,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param appId - App id
 	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
 	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-	 *                 and '@user' are refused; '@org' is refused until the org rung serves
+	 *                 and '@user' are refused; '@org' (org admins) is the org rung
 	 * @returns The final binding row (state 'removed')
 	 */
 	async removeAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3267,7 +3276,7 @@ export class RocketRideClient extends DAPClient {
 	 * @param appId - App id
 	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
 	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-	 *                 and '@user' are refused; '@org' is refused until the org rung serves
+	 *                 and '@user' are refused; '@org' (org admins) is the org rung
 	 * @returns The binding row (state 'disabled')
 	 */
 	async disableAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {

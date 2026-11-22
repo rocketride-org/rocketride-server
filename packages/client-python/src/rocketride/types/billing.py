@@ -332,7 +332,7 @@ class PublicationUsage(TypedDict):
 
     Attributes:
         pipe: Published pipe name, ``developerId.pipeId``.
-        rung: Rung that answered: ``dev``, ``me``, ``team`` or ``public``.
+        rung: Rung that answered: ``dev``, ``me``, ``team``, ``org`` or ``public``.
         team: Answering team (the publication's audience slot), or None for a
             development run.
         teamName: Display name of the answering team when it is one of the
