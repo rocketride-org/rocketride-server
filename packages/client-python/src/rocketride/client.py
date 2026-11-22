@@ -478,7 +478,7 @@ class RocketRideClient(
             response = await client.request(message, timeout=timeout)
 
             if client.did_fail(response):
-                raise RuntimeError(response.get('message', 'Server info request failed'))
+                raise CommandException({**response, 'message': response.get('message') or 'Server info request failed'})
 
             # `or {}` (not a default) — a present-but-None body must also
             # normalize, exactly like call() and the TS SDK's `?? {}`.

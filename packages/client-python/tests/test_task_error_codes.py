@@ -163,13 +163,64 @@ async def test_a_refused_restart_keeps_the_code():
 
 
 def test_a_refusal_crosses_a_process_boundary():
+    import copy
     import pickle
 
     from rocketride.core.exceptions import CommandException
 
-    e = pickle.loads(
-        pickle.dumps(CommandException({'message': 'acme.echo is not published to you', 'code': 'NODE_NOT_ENTITLED'}))
-    )
-    assert (
-        type(e) is CommandException and e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
-    )
+    refusal = CommandException({'message': 'acme.echo is not published to you', 'code': 'NODE_NOT_ENTITLED'})
+    for e in (pickle.loads(pickle.dumps(refusal)), copy.copy(refusal)):
+        assert type(e) is CommandException
+        assert e.code == 'NODE_NOT_ENTITLED' and str(e) == 'acme.echo is not published to you'
+
+
+def test_command_exception_is_exported_from_the_package():
+    from rocketride import CommandException
+    from rocketride.core.exceptions import CommandException as Defined
+
+    assert CommandException is Defined
+
+
+async def test_refused_store_reads_keep_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    client = _refusing_client(code='STORE_DENIED', message='denied')
+    for read in (lambda: client.fs_read('h1'), lambda: client.fs_read_many(['a.txt'])):
+        try:
+            await read()
+        except CommandException as e:
+            assert e.code == 'STORE_DENIED' and str(e) == 'denied'
+        else:
+            raise AssertionError('the read did not raise')
+
+
+def test_a_refused_store_command_keeps_the_code():
+    from rocketride.core.exceptions import CommandException
+
+    try:
+        _refusing_client()._check_response({'success': False, 'message': 'denied', 'code': 'STORE_DENIED'})
+    except CommandException as e:
+        assert e.code == 'STORE_DENIED' and str(e) == 'denied'
+    else:
+        raise AssertionError('_check_response did not raise')
+
+
+async def test_a_refused_server_info_probe_keeps_the_code(monkeypatch):
+    from rocketride import RocketRideClient
+    from rocketride.core.exceptions import CommandException
+
+    async def request(self, message_, timeout=None):
+        return {'success': False, 'message': 'probe refused', 'code': 'PROBE_DENIED'}
+
+    async def noop(self, *a, **k):
+        return None
+
+    monkeypatch.setattr(RocketRideClient, 'connect', noop)
+    monkeypatch.setattr(RocketRideClient, 'disconnect', noop)
+    monkeypatch.setattr(RocketRideClient, 'request', request)
+    try:
+        await RocketRideClient.get_server_info('http://localhost:1')
+    except CommandException as e:
+        assert e.code == 'PROBE_DENIED' and str(e) == 'probe refused'
+    else:
+        raise AssertionError('get_server_info() did not raise')

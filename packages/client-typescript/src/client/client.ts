@@ -581,7 +581,7 @@ export class RocketRideClient extends DAPClient {
 			const response = await client.request(message, timeout);
 
 			if (response.success === false) {
-				throw new Error(response.message || 'Server info request failed');
+				throw new CommandException({ ...response, message: response.message || 'Server info request failed' });
 			}
 
 			const body = (response.body ?? {}) as unknown as ServerInfoResult;
@@ -1290,7 +1290,10 @@ export class RocketRideClient extends DAPClient {
 		try {
 			await this.call('rrext_ping', undefined, { token });
 		} catch (err) {
-			throw new Error(`Ping failed: ${err instanceof Error ? err.message : err}`);
+			const message = `Ping failed: ${err instanceof Error ? err.message : err}`;
+			// Keep the server's code with the message
+			if (err instanceof CommandException) throw new CommandException({ ...err.dapResult, message });
+			throw new Error(message);
 		}
 	}
 
@@ -1564,6 +1567,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline termination failed: ${errorMsg}`);
+			if (err instanceof CommandException) throw err;
 			throw new Error(errorMsg);
 		}
 	}
@@ -1631,6 +1635,7 @@ export class RocketRideClient extends DAPClient {
 		} catch (err) {
 			const errorMsg = err instanceof Error ? err.message : String(err);
 			this.debugMessage(`Pipeline status retrieval failed: ${errorMsg}`);
+			if (err instanceof CommandException) throw err;
 			throw new Error(errorMsg);
 		}
 	}
@@ -2121,7 +2126,10 @@ export class RocketRideClient extends DAPClient {
 		try {
 			await this.call('rrext_monitor', args, { token });
 		} catch (err) {
-			throw new Error(`Event subscription failed: ${err instanceof Error ? err.message : err}`);
+			const message = `Event subscription failed: ${err instanceof Error ? err.message : err}`;
+			// Keep the server's code with the message
+			if (err instanceof CommandException) throw new CommandException({ ...err.dapResult, message });
+			throw new Error(message);
 		}
 	}
 
@@ -2590,7 +2598,7 @@ export class RocketRideClient extends DAPClient {
 		const response = await this.request(message);
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, redactProtocolMessage(response));
-			throw new Error(response.message ?? 'fs_read failed');
+			throw new CommandException({ ...response, message: response.message || 'fs_read failed' });
 		}
 		const traceResponse = response.arguments?.data instanceof Uint8Array ? { ...response, arguments: { ...response.arguments, data: `<${response.arguments.data.length} bytes>` } } : response;
 		this._onTrace?.(TraceType.Success, redactProtocolMessage(traceResponse));
@@ -2748,7 +2756,7 @@ export class RocketRideClient extends DAPClient {
 		const response = await this.request(message);
 		if (response.success === false) {
 			this._onTrace?.(TraceType.Error, response);
-			throw new Error(response.message ?? 'fs_read_many failed');
+			throw new CommandException({ ...response, message: response.message || 'fs_read_many failed' });
 		}
 		this._onTrace?.(TraceType.Success, response);
 

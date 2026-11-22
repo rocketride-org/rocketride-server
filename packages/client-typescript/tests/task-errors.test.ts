@@ -206,3 +206,57 @@ describe('RocketRideClient.validate() and restart() failure', () => {
 		expect((caught as CommandException).code).toBe('NODE_NOT_ENTITLED');
 	});
 });
+
+describe('every refused command keeps the server code', () => {
+	const refusal = { success: false, message: 'refused', code: 'TASK_NOT_REGISTERED' };
+
+	function refusingClient(): RocketRideClient {
+		const client = new RocketRideClient({ env: {} });
+		(client as unknown as Record<string, unknown>).request = async () => refusal;
+		return client;
+	}
+
+	async function refusedBy(run: () => Promise<unknown>): Promise<CommandException> {
+		const caught = await run().catch((e: unknown) => e);
+		expect(caught).toBeInstanceOf(CommandException);
+		expect((caught as CommandException).code).toBe('TASK_NOT_REGISTERED');
+		return caught as CommandException;
+	}
+
+	it('terminate()', async () => {
+		expect((await refusedBy(() => refusingClient().terminate('tk'))).message).toBe('refused');
+	});
+
+	it('getTaskStatus()', async () => {
+		expect((await refusedBy(() => refusingClient().getTaskStatus('tk'))).message).toBe('refused');
+	});
+
+	it('ping()', async () => {
+		expect((await refusedBy(() => refusingClient().ping('tk'))).message).toBe('Ping failed: refused');
+	});
+
+	it('setEvents()', async () => {
+		expect((await refusedBy(() => refusingClient().setEvents('tk', ['summary']))).message).toBe('Event subscription failed: refused');
+	});
+
+	it('fsRead()', async () => {
+		expect((await refusedBy(() => refusingClient().fsRead('h1'))).message).toBe('refused');
+	});
+
+	it('fsReadMany()', async () => {
+		expect((await refusedBy(() => refusingClient().fsReadMany(['a.txt']))).message).toBe('refused');
+	});
+
+	it('getServerInfo()', async () => {
+		const proto = RocketRideClient.prototype as unknown as Record<string, unknown>;
+		const saved = { attach: proto.attach, request: proto.request, disconnect: proto.disconnect };
+		proto.attach = async () => undefined;
+		proto.request = async () => refusal;
+		proto.disconnect = async () => undefined;
+		try {
+			expect((await refusedBy(() => RocketRideClient.getServerInfo('http://localhost:1'))).message).toBe('refused');
+		} finally {
+			Object.assign(proto, saved);
+		}
+	});
+});
