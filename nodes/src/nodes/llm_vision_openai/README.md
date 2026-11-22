@@ -25,7 +25,7 @@ Choose a model from the **Model** selector, then provide the API key and prompts
 analysis task. Each listed model pins its model id and context limit. The default is
 **GPT-4.1** (`gpt-4.1`).
 
-The model settings (the selector, a custom model id and its token limits), the system prompt and the prompt are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which keeps one API key and sends each request on the call's model. The call's output limit is not sent. A caller may choose the model, its limits and the system prompt; an LLM may set only the prompt, through a tool call.
+The model settings (the selector, a custom model id and its token limits), the system prompt and the prompt are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which keeps one API key and sends each request on the call's model. The call's output limit is sent to the provider as the request's output cap. A caller may choose the model, its limits and the system prompt; an LLM may set only the prompt, through a tool call.
 
 ### Models
 
@@ -43,7 +43,7 @@ The model settings (the selector, a custom model id and its token limits), the s
 Select **Custom model** to enter an OpenAI model id exactly as OpenAI names it, its
 total context length in tokens (default 1,047,576), and optionally its output token
 limit (at least 1,024). Choose a model that accepts image input. The output limit is
-not sent to OpenAI (requests carry no output cap); the node lowers it to the context
+sent to OpenAI as each request's output cap; the node lowers it to the context
 limit, requires at least 1,024, and reports it to nodes that ask for the model's
 output length.
 
