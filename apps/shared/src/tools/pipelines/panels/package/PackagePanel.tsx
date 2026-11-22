@@ -33,16 +33,15 @@
  *   id (`project_id`, dot-free — the publisher namespace is DERIVED at
  *   publish, never typed), display name, description and the default source
  *   (the `.pipe` root `source`), plus the listing words of the `store` block
- *   (tagline, categories, tags, links). Every change writes the document like
- *   the params page does (a `docRevision` bump), so the canvas, Save and the
- *   dirty state are the editor's as usual; the page itself holds no draft.
- * - API Params hosts the {@link ParamsPanel} map editor (plan §5.5).
+ *   (tagline, categories, tags, links).
+ * - API Params hosts the {@link ParamsPanel} map editor (plan §5.5), its call
+ *   examples pinned at the bottom of the pane.
  * - Store edits the `store` block's commerce posture (mode, plans) — the same
- *   card an app's Store tab shows, written through the document.
+ *   card an app's Store tab shows.
  * - Assets is the shared {@link AssetsPane}: the icon tile, the README
  *   edited in place with a store preview, the files the README references;
- *   the pane writes the files beside the pipe through the host and the
- *   block's icon/readme paths through the document.
+ *   the pane writes the files beside the pipe and the block's icon/readme
+ *   paths.
  * - Requirements (2.10) is the only checklist, read-only: what deploying
  *   needs, what callers need, the public parameters, the store ladder — the
  *   pure derivation lives in `requirements.ts`, the rows in the shared
@@ -53,9 +52,19 @@
  *   adapters); absent the adapter (a readonly host, an unsaved document) the
  *   tab says so.
  *
- * The `store` block (plan §9, C.17b) is what makes a pipeline LISTABLE: with
- * it absent the panes show the default block, and the first write (or a save)
- * Store each offer the one button that stamps the SDK's default block.
+ * THE DRAFT. What Identity, API Params, Assets and Store change is PENDING
+ * until Save: the panes read the document with the draft applied and write
+ * into the draft (`packageDraft.ts`), the Assets pane's files included. A bar
+ * at the bottom of the page appears while anything is pending: Save writes
+ * the pending files, applies the draft to the document (a `docRevision` bump,
+ * like the canvas) and runs the host's own save; Cancel drops the draft.
+ * Requirements reads the draft, so it shows what Save will produce. The draft
+ * lives as long as the page is mounted, across its side tabs and the view's
+ * top tabs; DEPLOY refuses while it is pending.
+ *
+ * Every pipeline has a `store` block (plan §9): the panes show the SDK's
+ * default block where the document has none, and Save writes the block into
+ * the document.
  */
 
 import React, { CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -65,12 +74,15 @@ import type { BillingPlan, PipeStoreBlock, StoreMode, ServiceParamDescriptor } f
 import { defaultStoreBlock, pipeReadmeStub, STORE_MODES } from 'rocketride';
 import { AssetsPane } from '../../../../components/assets';
 import type { IAssetPaths, IAssetsHost } from '../../../../components/assets';
+import { README_WRITE_DEBOUNCE_MS } from '../../../../components/assets/assetsModel';
 import { RequirementsChecklist } from '../../../../components/requirements';
 import { PlanPanel } from '../../../appdev/views/builder/panels/store/PlanPanel';
 import { ReviewView } from '../../../appdev/views/builder/panels/review/ReviewView';
 import type { IReviewHost } from '../../../appdev/views/builder/panels/review/ReviewView';
 import { ParamsPanel } from '../params';
 import type { IParamsProject } from '../params';
+import { applyPatch, isEmptyPatch, overlayAssetsHost, patchOf, prunePatch } from './packageDraft';
+import type { PackagePatch, PendingFiles } from './packageDraft';
 import { callerNeedsOf, deployRequirements, isShortId, publicParametersOf, requirementsLead, SHORT_ID_PATTERN, storeLadder } from './requirements';
 import type { IRequirementsVersion } from './requirements';
 
@@ -89,7 +101,7 @@ export interface IPackageProject extends IParamsProject {
 	description?: string;
 	/** Default source component id (the `.pipe` root `source`, plan §9). */
 	source?: string;
-	/** The store manifest (the `.pipe` root `store`, plan §9): present = listable. */
+	/** The store listing (the `.pipe` root `store`, plan §9); the SDK's default block stands in where the document has none. */
 	store?: PipeStoreBlock;
 }
 
@@ -109,8 +121,12 @@ export interface IPackagePanelProps {
 	servicesJson: Record<string, { title?: string; params?: ServiceParamDescriptor[] } | undefined>;
 	/** Resolves a node's schema on demand (the params page). */
 	getNodeSchema?: (provider: string) => Promise<Record<string, unknown> | undefined>;
-	/** Writes the document; absent on readonly hosts. */
+	/** Writes the document; absent on readonly hosts. The page calls it at Save, with the draft applied. */
 	onContentChanged?: (project: IPackageProject) => void;
+	/** The host's own document save (the canvas Save button's): the page runs it once the document holds the saved draft. */
+	onSave?: () => void;
+	/** Tells the view whether the page holds pending changes (DEPLOY refuses while it does). */
+	onPendingChange?: (pending: boolean) => void;
 	/** The org's developer id, or '' until one is claimed (plan §2.1). */
 	developerId: string;
 	/** The server host, for the HTTP call example. */
@@ -118,7 +134,7 @@ export interface IPackagePanelProps {
 	/** Which side tab opens first. */
 	initialSection?: PackageSection;
 	/**
-	 * The files beside the pipeline (`./README.md`, `./icon.svg`, `assets/`):
+	 * The files beside the pipeline (`./README.md`, an icon, `assets/`):
 	 * read, written, picked and opened through the host. Absent on a host
 	 * that cannot reach the pipe's folder: Assets then says so.
 	 */
@@ -149,6 +165,9 @@ const SECTION_MENU: ViewMenu = {
 	],
 };
 
+/** How long Save waits for the document to hold the draft before it reports the failure (ms). */
+const APPLY_TIMEOUT_MS = 5000;
+
 /** The store modes as the select shows them (the SDK owns the values). */
 const MODE_LABELS: Record<StoreMode, string> = { free: 'Free', subscription: 'Subscription', paywall: 'Paywall' };
 
@@ -164,6 +183,14 @@ const PLAN_GROUPS: Array<{ key: string; label: string }> = [
 // =============================================================================
 
 const styles = {
+	// The page: the side tabs and the active pane above, the save bar below.
+	page: {
+		display: 'flex',
+		flexDirection: 'column',
+		flex: 1,
+		minHeight: 0,
+		height: '100%',
+	} as CSSProperties,
 	layout: {
 		display: 'flex',
 		alignItems: 'stretch',
@@ -183,6 +210,37 @@ const styles = {
 		minWidth: 0,
 		padding: '4px 28px 48px 20px',
 		overflowY: 'auto',
+	} as CSSProperties,
+	// A pane that lays out its own height (API Params pins its call examples
+	// to the bottom): it never scrolls as a whole, its content does.
+	paneFixed: {
+		flex: 1,
+		minWidth: 0,
+		minHeight: 0,
+		padding: '4px 28px 12px 20px',
+		display: 'flex',
+		flexDirection: 'column',
+		overflow: 'hidden',
+	} as CSSProperties,
+	// ── Save bar: pinned under the panes while the draft holds a change ───
+	saveBar: {
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'flex-end',
+		gap: 8,
+		padding: '12px 20px',
+		borderTop: '1px solid var(--rr-border)',
+		flexShrink: 0,
+		backgroundColor: 'var(--rr-bg-default)',
+	} as CSSProperties,
+	saveBarNote: {
+		flex: 1,
+		minWidth: 0,
+		fontSize: 12,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+	saveBarError: {
+		color: 'var(--rr-color-error)',
 	} as CSSProperties,
 	formRow: {
 		display: 'flex',
@@ -344,9 +402,11 @@ function freeLinkLabel(rows: Array<[string, string]>): string {
 }
 
 /**
- * The one document-write path every pane uses: the patch lands on the root
- * with a `docRevision` bump, like the params page. Root-only writes never
- * touch `components`, so the canvas takes the revision without a reload.
+ * The one write path every pane uses: the change lands on the root of the
+ * document the pane was handed and goes to `onContentChanged` whole, with a
+ * `docRevision` bump, like the params page. On this page that callback is
+ * the draft's intake ({@link PackagePanel}), which keeps the root keys that
+ * differ from the document.
  */
 function documentWriter({ project, onContentChanged }: IPackagePanelProps): { readonly: boolean; write: (patch: Partial<IPackageProject>) => void; writeStore: (patch: Partial<PipeStoreBlock>) => void } {
 	const write = (patch: Partial<IPackageProject>): void => {
@@ -558,9 +618,10 @@ function StoreSection(props: IPackagePanelProps): React.ReactElement {
 
 /**
  * The Assets pane: the shared {@link AssetsPane} over the block's icon and
- * readme paths. The pane writes the files beside the pipe through the host;
- * the paths it declares land in the `store` block through the document
- * (the default block applies when the document has none yet).
+ * readme paths. The pane writes the files beside the pipe through the host
+ * it is handed (the draft's overlay, which holds them until Save); the paths
+ * it declares land in the `store` block (the default block applies when the
+ * document has none yet).
  *
  * @param props - The panel props.
  * @returns The Assets pane.
@@ -596,7 +657,7 @@ function AssetsSection(props: IPackagePanelProps): React.ReactElement {
 	return (
 		<Card header="Assets">
 			{assetsHost ? (
-				<AssetsPane kind="pipeline" host={assetsHost} docStem={project.project_id || 'pipeline'} paths={{ icon: store.icon ?? '', readme: store.readme ?? '' }} onPathsChange={onPathsChange} readmeStub={readmeStub} readonly={readonly} />
+				<AssetsPane kind="pipeline" host={assetsHost} docStem={project.project_id || 'pipeline'} paths={{ icon: store.icon ?? '', readme: store.readme ?? '' }} onPathsChange={onPathsChange} readmeStub={readmeStub} readonly={readonly} deferred />
 			) : (
 				<EmptyState title="No files on this host" description="This host cannot reach the files beside the pipeline, so the icon and README cannot be shown or edited here." />
 			)}
@@ -737,45 +798,188 @@ function ReviewSection({ review, onContentChanged }: IPackagePanelProps): React.
 // =============================================================================
 
 /**
- * The PACKAGE page: side tabs on the left, the active tab's pane on the right.
+ * The PACKAGE page: side tabs on the left, the active tab's pane on the
+ * right, and the save bar under both while the draft holds a change.
  *
  * @param props - {@link IPackagePanelProps}.
  * @returns The panel.
  */
 const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
-	const { project, servicesJson, getNodeSchema, onContentChanged, developerId, serverHost, initialSection = 'identity' } = props;
+	const { project, servicesJson, getNodeSchema, onContentChanged, onSave, onPendingChange, developerId, serverHost, assetsHost, initialSection = 'identity' } = props;
 	const [section, setSection] = useState<PackageSection>(initialSection);
 
-	const address = useMemo(() => `${developerId || '{developerId}'}.${project.project_id ?? '{pipeId}'}`, [developerId, project.project_id]);
+	// ── The draft ────────────────────────────────────────────────────────
+	// The document half: the root keys the panes changed. The file half: what
+	// the Assets pane wrote, held in memory behind the overlay host.
+	const [patch, setPatch] = useState<PackagePatch>({});
+	// Cancel replaces the map: the overlay is rebuilt over the new one, so a
+	// write still in flight in the pane that just closed lands in the map
+	// Cancel threw away.
+	const [files, setFiles] = useState<PendingFiles>(() => new Map());
+	const [pendingFiles, setPendingFiles] = useState(0);
+	// Bumped by Cancel: the panes that keep local state remount on it.
+	const [epoch, setEpoch] = useState(0);
+	// 'saving' = the files are being written; 'applied' = the document was
+	// handed the draft and the host's save runs once it holds it.
+	const [phase, setPhase] = useState<'idle' | 'saving' | 'applied'>('idle');
+	const [saveError, setSaveError] = useState('');
+
+	// The document catching up with the draft (after a Save, or an edit made
+	// elsewhere that agrees with it) empties the patch by itself.
+	const pending = useMemo(() => prunePatch(project, patch), [project, patch]);
+	useEffect(() => {
+		if (pending !== patch) setPatch(pending);
+	}, [pending, patch]);
+	const drafted = useMemo(() => applyPatch(project, pending), [project, pending]);
+	const dirty = !isEmptyPatch(pending) || pendingFiles > 0;
+
+	// The latest document, draft, section and host save, for work that
+	// completes after a render (the Save's awaits).
+	const latest = useRef({ project, pending, files, section, onSave });
+	latest.current = { project, pending, files, section, onSave };
+
+	/** The draft's intake: a pane hands the whole document with its change; the keys that differ from the document are kept. */
+	const draftChanged = useCallback((next: IPackageProject): void => {
+		setSaveError('');
+		setPatch(patchOf(latest.current.project, next));
+	}, []);
+
+	// The Assets pane's host: its writes are held in `files` until Save. A
+	// write into a map Cancel replaced changes nothing the page counts.
+	const draftHost = useMemo(() => {
+		if (!assetsHost) return undefined;
+		return overlayAssetsHost(assetsHost, files, () => {
+			if (latest.current.files !== files) return;
+			setSaveError('');
+			setPendingFiles(files.size);
+		});
+	}, [assetsHost, files]);
+
+	useEffect(() => {
+		onPendingChange?.(dirty);
+	}, [dirty, onPendingChange]);
+	// A page that closes takes its draft with it: nothing is pending any more
+	useEffect(() => () => onPendingChange?.(false), [onPendingChange]);
+
+	/** Cancel: the draft is dropped; the panes show the document and the files as they are. */
+	const cancel = useCallback((): void => {
+		setFiles(new Map());
+		setPendingFiles(0);
+		setPatch({});
+		setSaveError('');
+		setEpoch((n) => n + 1);
+	}, []);
+
+	/**
+	 * Save: the pending files reach the host, then the document takes the
+	 * draft. The host's own save runs from the effect below, once the
+	 * document it would save holds the draft.
+	 */
+	const save = useCallback(async (): Promise<void> => {
+		if (!onContentChanged) return;
+		setSaveError('');
+		setPhase('saving');
+		try {
+			// Step 1: the README's last keystrokes are still in the pane's debounce; let them reach the draft
+			if (latest.current.section === 'assets') await new Promise((resolve) => setTimeout(resolve, README_WRITE_DEBOUNCE_MS + 50));
+			// Step 2: the files, each leaving the draft as it lands, so a retry writes only what is left
+			const held = latest.current.files;
+			for (const [relPath, data] of assetsHost ? [...held] : []) {
+				await assetsHost?.writeFile(relPath, data);
+				held.delete(relPath);
+				setPendingFiles(held.size);
+			}
+			// Step 3: the document. A pipeline without a store block gets one here;
+			// the block being added names a README only when that file exists.
+			const document = latest.current.project;
+			let next = prunePatch(document, latest.current.pending);
+			if (!document.store) {
+				const block: PipeStoreBlock = { ...((next.store as PipeStoreBlock | undefined) ?? defaultStoreBlock()) };
+				const readme = block.readme;
+				const present = readme && assetsHost ? await assetsHost.readFile(readme).then((text) => text !== null, () => true) : false;
+				if (!present) delete block.readme;
+				next = { ...next, store: block };
+				setPatch(next);
+			}
+			if (isEmptyPatch(next)) {
+				setPhase('idle');
+				return;
+			}
+			onContentChanged({ ...applyPatch(document, next), docRevision: (document.docRevision ?? 0) + 1 });
+			setPhase('applied');
+		} catch (err) {
+			setSaveError(`Could not save: ${err instanceof Error ? err.message : String(err)}. Nothing was discarded; Save tries again.`);
+			setPhase('idle');
+		}
+	}, [onContentChanged, assetsHost]);
+
+	// The document now holds the draft (the patch emptied): the host saves it.
+	// Waiting for that matters: a host saves the document it was last
+	// rendered with, which is the one before the draft until it re-renders.
+	useEffect(() => {
+		if (phase !== 'applied') return undefined;
+		if (isEmptyPatch(pending)) {
+			setPhase('idle');
+			latest.current.onSave?.();
+			return undefined;
+		}
+		// A document that never takes the draft must not leave the bar saving forever
+		const timer = setTimeout(() => {
+			setPhase('idle');
+			setSaveError('The pipeline did not take the changes. Nothing was discarded; Save tries again.');
+		}, APPLY_TIMEOUT_MS);
+		return () => clearTimeout(timer);
+	}, [phase, pending]);
+
+	// ── The panes ────────────────────────────────────────────────────────
+	// Every pane reads the drafted document and writes into the draft.
+	const paneProps: IPackagePanelProps = { ...props, project: drafted, ...(onContentChanged ? { onContentChanged: draftChanged } : {}), ...(draftHost ? { assetsHost: draftHost } : {}) };
+	const address = useMemo(() => `${developerId || '{developerId}'}.${drafted.project_id ?? '{pipeId}'}`, [developerId, drafted.project_id]);
 
 	let pane: React.ReactNode;
 	switch (section) {
 		case 'identity':
-			pane = <IdentitySection {...props} />;
+			pane = <IdentitySection key={epoch} {...paneProps} />;
 			break;
 		case 'api-params':
-			pane = <ParamsPanel project={project} servicesJson={servicesJson} getNodeSchema={getNodeSchema} onContentChanged={onContentChanged} address={address} serverHost={serverHost} />;
+			pane = <ParamsPanel key={epoch} project={drafted} servicesJson={servicesJson} getNodeSchema={getNodeSchema} onContentChanged={paneProps.onContentChanged} address={address} serverHost={serverHost} />;
 			break;
 		case 'assets':
-			pane = <AssetsSection {...props} />;
+			pane = <AssetsSection key={epoch} {...paneProps} />;
 			break;
 		case 'store':
-			pane = <StoreSection {...props} />;
+			pane = <StoreSection key={epoch} {...paneProps} />;
 			break;
 		case 'requirements':
-			pane = <RequirementsSection {...props} onOpenSection={setSection} />;
+			pane = <RequirementsSection {...paneProps} onOpenSection={setSection} />;
 			break;
 		case 'review':
-			pane = <ReviewSection {...props} />;
+			pane = <ReviewSection {...paneProps} />;
 			break;
 	}
 
+	const busy = phase !== 'idle';
 	return (
-		<div style={styles.layout}>
-			<nav style={styles.nav} aria-label="Package sections">
-				<SidebarMenu menu={SECTION_MENU} activeId={section} onSelect={(id) => setSection(id as PackageSection)} collapsed={false} />
-			</nav>
-			<div style={styles.pane}>{pane}</div>
+		<div style={styles.page}>
+			<div style={styles.layout}>
+				<nav style={styles.nav} aria-label="Package sections">
+					<SidebarMenu menu={SECTION_MENU} activeId={section} onSelect={(id) => setSection(id as PackageSection)} collapsed={false} />
+				</nav>
+				<div style={section === 'api-params' ? styles.paneFixed : styles.pane}>{pane}</div>
+			</div>
+			{onContentChanged && (dirty || busy || saveError) && (
+				<div style={styles.saveBar} role="group" aria-label="Unsaved package changes">
+					<span style={{ ...styles.saveBarNote, ...(saveError ? styles.saveBarError : {}) }} role={saveError ? 'alert' : 'status'}>
+						{saveError || (busy ? 'Saving…' : 'Unsaved changes. Save writes them to the pipeline; Cancel discards them.')}
+					</span>
+					<Button variant="secondary" onClick={cancel} disabled={busy}>
+						Cancel
+					</Button>
+					<Button variant="primary" onClick={() => void save()} disabled={busy || !dirty}>
+						Save
+					</Button>
+				</div>
+			)}
 		</div>
 	);
 };

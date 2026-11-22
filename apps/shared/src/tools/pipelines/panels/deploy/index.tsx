@@ -125,6 +125,8 @@ export interface IDeployTabProps {
 	/** Document state drives publish gating (never-saved blocks; dirty saves). */
 	isDirty: boolean;
 	isNew: boolean;
+	/** The PACKAGE page holds changes its own Save has not written: deploying waits for that Save or its Cancel. */
+	packagePending?: boolean;
 	/** Only needed when `deploy.fetchArtifact` is present. */
 	artifactContext: IDeployArtifactContext;
 }
@@ -142,7 +144,7 @@ export interface IDeployTabProps {
  *
  * @param props - See {@link IDeployTabProps}.
  */
-export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipelineName, isReadonly, isDirty, isNew, artifactContext }) => {
+export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipelineName, isReadonly, isDirty, isNew, packagePending = false, artifactContext }) => {
 	// Source lines = pipeline sources ∪ schedule records (a schedule on a
 	// renamed/removed source still shows, id-named).
 	const rows: TeamDeploymentRow[] = useMemo(() => {
@@ -194,9 +196,9 @@ export const DeployTab: React.FC<IDeployTabProps> = ({ deploy, sources, pipeline
 			{...(deploy.setSchedulePaused ? { onSetSchedulePaused: deploy.setSchedulePaused } : {})}
 			{...(deploy.fetchArtifact ? { fetchArtifact: deploy.fetchArtifact, servicesJson, handleValidatePipeline, isConnected, isSubscribed, serverHost, ...(onOpenLink ? { onOpenLink } : {}) } : {})}
 			{...(deploy.previewSchedule ? { previewSchedule: deploy.previewSchedule } : {})}
-			canPublish={!isDirty && !isNew}
-			{...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : {})}
-			requiresSave={isDirty && !isNew}
+			canPublish={!isDirty && !isNew && !packagePending}
+			{...(isNew ? { publishDisabledReason: 'Save the pipeline first' } : packagePending ? { publishDisabledReason: 'PACKAGE has unsaved changes: Save or Cancel them first' } : {})}
+			requiresSave={isDirty && !isNew && !packagePending}
 			{...(deploy.saveDocument ? { onSaveDocument: deploy.saveDocument } : {})}
 			onPublish={deploy.publish}
 			onDeploy={deploy.deployVersion}

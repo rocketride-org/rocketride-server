@@ -127,6 +127,12 @@ interface EditorState {
 	isDisposed: boolean;
 	isReady: boolean;
 	cachedStatuses: Record<string, TaskStatus>;
+	/**
+	 * The realm's content edits being applied to the document, in order.
+	 * The bus runs op handlers concurrently, so a save sent right behind a
+	 * content change waits on this before it saves.
+	 */
+	pendingEdits: Promise<void>;
 }
 
 // =============================================================================
@@ -391,7 +397,14 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				const document = editorState.document;
 				if (p.project === undefined || p.project === null) return;
 				const content = typeof p.project === 'string' ? p.project : JSON.stringify(p.project);
-				const { applied } = await this.applyDocumentEdit(document, content);
+				// Edits apply in the order they arrived, and a save that follows
+				// one waits for it (host.pipeline.save reads pendingEdits)
+				const edit = editorState.pendingEdits.then(() => this.applyDocumentEdit(document, content));
+				editorState.pendingEdits = edit.then(
+					() => undefined,
+					() => undefined
+				);
+				const { applied } = await edit;
 				// Auto-backup untitled pipelines so in-progress work survives a
 				// VS Code restart (hot exit does not preserve custom-editor
 				// untitled documents). Cleared when the editor closes.
@@ -431,8 +444,10 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 				// Same save flow as the Ctrl+S keybinding: in place for titled
 				// files, the native OS Save dialog for untitled ones. Reveal
 				// first so the revert-and-close inside the untitled branch
-				// targets this editor.
+				// targets this editor. A content change the realm sent just
+				// before the save (the PACKAGE page's Save) lands first.
 				const editorState = stateFor(p.doc);
+				await editorState.pendingEdits;
 				editorState.webviewPanel.reveal(undefined, false);
 				await savePipelineDocument(editorState.document);
 			},
@@ -505,7 +520,7 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 					if (error instanceof Error && error.message.endsWith('Choose another name.')) throw error;
 				}
 				// Step 1: the SDK scaffold — the same files the CLI writes: the pipe
-				// with its default store block, icon.svg, README.md and assets/.
+				// with its default store block, README.md and assets/.
 				const scaffolded = scaffoldPipe(folder.uri.fsPath, p.name, { name: p.displayName, ...(dir ? { dir } : {}) });
 				const pipeFile = vscode.Uri.file(scaffolded.pipePath);
 				// Step 2: the untitled document's content rides along (its
@@ -841,6 +856,7 @@ export class PipelineProvider implements vscode.CustomTextEditorProvider {
 			// No handshake: the realm pulls host.pipeline.load when it boots.
 			isReady: true,
 			cachedStatuses: {},
+			pendingEdits: Promise.resolve(),
 		};
 
 		this.editorStates.set(webviewPanel, editorState);
