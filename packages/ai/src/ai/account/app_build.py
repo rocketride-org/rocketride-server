@@ -916,22 +916,30 @@ def _place_platform_tgzs(ws_dir: str) -> None:
         shutil.copyfile(src, dest)
 
 
-def _package_is_module(path: str, ws_dir: str) -> bool:
+def _package_is_module(path: str, ws_dir: str, cache: Optional[Dict[str, bool]] = None) -> bool:
     """True when the nearest package.json at or above ``path`` (within
     ``ws_dir``) sets ``"type": "module"`` — Node then loads a ``.js`` file as
     ESM, where ``module.exports`` is a ReferenceError.
+
+    ``cache`` memoizes the answer per package.json path, so a manifest that
+    owns many configs is parsed once, not once per config.
     """
     here = os.path.dirname(path)
     root = os.path.abspath(ws_dir)
     while True:
         candidate = os.path.join(here, 'package.json')
         if os.path.isfile(candidate):
+            if cache is not None and candidate in cache:
+                return cache[candidate]
             try:
                 with open(candidate, 'r', encoding='utf-8-sig') as handle:
                     manifest = json.load(handle)
+                result = isinstance(manifest, dict) and manifest.get('type') == 'module'
             except (OSError, UnicodeDecodeError, ValueError, RecursionError):
-                return False
-            return isinstance(manifest, dict) and manifest.get('type') == 'module'
+                result = False
+            if cache is not None:
+                cache[candidate] = result
+            return result
         if os.path.abspath(here) == root or os.path.dirname(here) == here:
             return False
         here = os.path.dirname(here)
@@ -974,12 +982,13 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     """
     names = set(_NEUTRALIZED_CONFIGS)
     neutralized: List[str] = []
+    module_cache: Dict[str, bool] = {}
     for dirpath, _dirs, files in os.walk(ws_dir):
         for name in files:
             path = os.path.join(dirpath, name)
             if name in names:
                 with open(path, 'w', encoding='utf-8') as handle:
-                    handle.write(_inert_config(name, _package_is_module(path, ws_dir)))
+                    handle.write(_inert_config(name, _package_is_module(path, ws_dir, module_cache)))
                 neutralized.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
             elif name == 'package.json':
                 rel = os.path.relpath(path, ws_dir).replace(os.sep, '/')
