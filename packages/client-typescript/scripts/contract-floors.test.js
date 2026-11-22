@@ -64,7 +64,7 @@ const {
 	extractBundleBody,
 	assignPinAliases,
 	typeFloorLines,
-	ALL_KEYS_TYPE,
+	PIN_HELPER_TYPES,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,
@@ -266,9 +266,10 @@ function typeCheck(files) {
 	return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
 }
 
-// A frozen floor of six shapes: a record with an optional member, a generic,
-// a class, a literal union, a function type and a union of object types whose
-// branches share no key (the shape of MonitorKey).
+// A frozen floor of seven shapes: a record with an optional member, a generic,
+// a class, a literal union, a function type, a union of object types whose
+// branches share no key (the shape of MonitorKey) and a union whose branches
+// share an optional key.
 const FROZEN_FIXTURE = [
 	'export interface Rec { id: string; label?: string }',
 	'export interface Box<T> { value: T; note?: string }',
@@ -276,6 +277,7 @@ const FROZEN_FIXTURE = [
 	"export type Kind = 'a' | 'b';",
 	'export type Fn = (x: number) => string;',
 	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number };',
+	'export type Pair = { a: string; x?: number } | { b: string; x?: number };',
 	'',
 ].join('\n');
 
@@ -287,6 +289,7 @@ const PINNED = [
 	['Kind', 0],
 	['Fn', 0],
 	['Key', 0],
+	['Pair', 0],
 ];
 
 /**
@@ -302,7 +305,7 @@ function conformanceProgram(live, pick = (lines) => lines) {
 		check.push(`import type { ${name} as Frozen_${name} } from './frozen';`);
 		check.push(`import type { ${name} as Current_${name} } from './live';`);
 	}
-	check.push(ALL_KEYS_TYPE);
+	check.push(PIN_HELPER_TYPES);
 	for (const [name, arity] of PINNED) check.push(...pick(typeFloorLines(name, name, arity)));
 	return { 'frozen.d.ts': FROZEN_FIXTURE, 'live.ts': live, 'check.ts': `${check.join('\n')}\nexport {};\n` };
 }
@@ -315,6 +318,7 @@ const LIVE_GROWN = [
 	"export type Kind = 'a' | 'b';",
 	'export type Fn = (x: number) => string;',
 	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number; extra?: boolean };',
+	'export type Pair = { a: string; x?: number; added?: boolean } | { b: string; x?: number };',
 	'',
 ].join('\n');
 
@@ -349,6 +353,13 @@ test('typeFloorLines: a key dropped from one branch of a union fails its pin', (
 	assert.match(typeCheck(conformanceProgram(dropped)).join('\n'), /Property 'pipeId' is missing/);
 });
 
+test('typeFloorLines: a key moved off one branch of a union fails its pin', () => {
+	// The other branch still declares x, so the pooled key set is unchanged
+	const dropped = LIVE_GROWN.replace('{ a: string; x?: number; ', '{ a: string; ');
+	assert.deepEqual(typeCheck(conformanceProgram(dropped, (lines) => lines.slice(0, 4))), []);
+	assert.match(typeCheck(conformanceProgram(dropped)).join('\n'), /Type 'true' is not assignable to type '"x"'/);
+});
+
 test('typeFloorLines: a generic pin is applied at its frozen arity', () => {
 	assert.deepEqual(typeFloorLines('Box', 'Box__v2_1', 1), [
 		'const _t_Box__v2_1: Frozen_Box__v2_1<any> = {} as Current_Box<any>;',
@@ -356,6 +367,9 @@ test('typeFloorLines: a generic pin is applied at its frozen arity', () => {
 		'const _k_Box__v2_1: { [K in _AllKeys<Frozen_Box__v2_1<any>>]-?: K } = ' +
 			'{} as { [K in _AllKeys<Current_Box<any>>]-?: K };',
 		'void _k_Box__v2_1;',
+		'const _b_Box__v2_1: [_DroppedKeys<Frozen_Box__v2_1<any>, Current_Box<any>>] extends [never] ? true : ' +
+			'_DroppedKeys<Frozen_Box__v2_1<any>, Current_Box<any>> = true;',
+		'void _b_Box__v2_1;',
 	]);
 });
 

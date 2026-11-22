@@ -125,7 +125,7 @@ const {
 	extractBundleBody,
 	assignPinAliases,
 	typeFloorLines,
-	ALL_KEYS_TYPE,
+	PIN_HELPER_TYPES,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,
@@ -953,9 +953,10 @@ function generateConformance(keys) {
 	lines.push('// so a dropped optional member is a missing property).');
 	lines.push('// Generic floors are emitted APPLIED (<any, …> at the frozen arity):');
 	lines.push('// a bare generic is TS2314, and an arity change surfaces as one here.');
-	lines.push('// Keys are collected across every branch of a union (_AllKeys), so a');
-	lines.push('// key dropped from one branch of a union type is caught too.');
-	lines.push(ALL_KEYS_TYPE);
+	lines.push('// Keys are collected across every branch of a union (_AllKeys), and each');
+	lines.push('// frozen branch must keep its own keys (_b_, _DroppedKeys), so a key');
+	lines.push('// dropped from one branch of a union type is caught too.');
+	lines.push(PIN_HELPER_TYPES);
 	for (const [name, pins] of names) {
 		pins.forEach(({ arity }, i) => {
 			lines.push(...typeFloorLines(name, aliases.get(name)[i], arity));

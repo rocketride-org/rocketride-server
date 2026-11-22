@@ -229,24 +229,35 @@ function assignPinAliases(pins) {
 }
 
 /**
- * The distributive key helper the type pins use. A key assertion collects
- * keys across every branch of a union, so a key dropped from one branch of a
- * union type is caught too. Declared once per checker file.
+ * The helper types the type pins use, declared once per checker file.
+ *
+ *  - `_AllKeys<T>`: the keys of every branch of a union (`keyof` of a union is
+ *    only the keys all its branches share).
+ *  - `_DroppedKeys<F, C>`: per frozen branch, the keys no live branch assignable
+ *    to that branch still declares. `never` when every branch kept its keys.
  */
-const ALL_KEYS_TYPE = 'type _AllKeys<T> = T extends unknown ? keyof T : never;';
+const PIN_HELPER_TYPES = [
+	'type _AllKeys<T> = T extends unknown ? keyof T : never;',
+	'type _DroppedKeys<F, C> = F extends unknown ? Exclude<keyof F, _AllKeys<Extract<C, F>>> : never;',
+].join('\n');
 
 /**
- * The two assertions of one type pin. Generic floors are applied at the
+ * The three assertions of one type pin. Generic floors are applied at the
  * frozen arity (`<any, …>`): a bare generic is TS2314, and an arity change
  * surfaces as one here.
  *
  *  - `_t_`: the live type must be assignable to the frozen one. This catches
  *    a removed or narrowed required member, but not a removed OPTIONAL one:
  *    `{ id: string }` still assigns to `{ id: string; label?: string }`.
- *  - `_k_`: the live type must keep every key the frozen one declares. Both
- *    sides map their keys to themselves with optionality removed, so a key
- *    the live type dropped is a missing required property; keys the live
- *    type added are extra properties, which assignment allows.
+ *  - `_k_`: the live type must keep every key the frozen one declares, across
+ *    every branch of a union. Both sides map their keys to themselves with
+ *    optionality removed, so a key the live type dropped is a missing
+ *    required property; keys the live type added are extra properties, which
+ *    assignment allows.
+ *  - `_b_`: each frozen branch must keep its own keys. `_k_` pools the keys of
+ *    all branches, so an optional key removed from one branch while another
+ *    branch still declares it passes there; here the live branches assignable
+ *    to that frozen branch must still declare it, and the error names the key.
  *
  * @param {string} name - The exported type name (the `Current_` import).
  * @param {string} alias - The pin's fragment from assignPinAliases.
@@ -262,6 +273,9 @@ function typeFloorLines(name, alias, arity) {
 		`void _t_${alias};`,
 		`const _k_${alias}: { [K in _AllKeys<${frozen}>]-?: K } = {} as { [K in _AllKeys<${current}>]-?: K };`,
 		`void _k_${alias};`,
+		`const _b_${alias}: [_DroppedKeys<${frozen}, ${current}>] extends [never] ? true : ` +
+			`_DroppedKeys<${frozen}, ${current}> = true;`,
+		`void _b_${alias};`,
 	];
 }
 
@@ -366,7 +380,7 @@ module.exports = {
 	extractBundleBody,
 	assignPinAliases,
 	typeFloorLines,
-	ALL_KEYS_TYPE,
+	PIN_HELPER_TYPES,
 	readFloorsIn,
 	readFloorsAt,
 	releasedFloorEdits,
