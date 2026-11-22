@@ -1062,9 +1062,10 @@ def _reports_failure(result: Any, _seen: Optional[set] = None) -> bool:
     ``{"ok": false, "error": "conflict"}``. MCP tools mark a failed call with
     ``"isError": true``; tool_http_request returns an error status (400 and up) as
     a normal response; an agent called as a tool returns its crash or its tripped
-    guard as an answer whose stack says so, and a run that ended in an error (its
-    model call failed, say) as ``meta.stop_reason``; and code runners (tool_python,
-    tool_daytona) report a run that failed or was cut off with a non-zero
+    guard as an answer whose stack says so, and a run that did not finish (its model
+    call failed, or it ran out of steps) as a ``meta.stop_reason`` other than
+    ``done``; and code runners (tool_python, tool_daytona) report a run that failed
+    or was cut off with a non-zero
     ``exit_code`` or ``"timed_out": true``. tool_python also returns the script's
     own ``result`` (a dict or a list), which is checked the same way (a check
     written in Python reports its verdict there), and tool_vertex_search reports a
@@ -1095,9 +1096,11 @@ def _reports_failure(result: Any, _seen: Optional[set] = None) -> bool:
         status = result.get('status_code')
         return isinstance(status, int) and not isinstance(status, bool) and status >= 400
     if isinstance(result.get('stack'), list) and isinstance(result.get('meta'), dict) and 'content' in result:
-        # A run that ended in an error answers normally, with only the stop reason to
-        # say so: a checking agent whose model call failed checked nothing.
-        if result['meta'].get('stop_reason') == 'error':
+        # A run that did not finish answers normally, with only the stop reason to say
+        # so: a checking agent that failed or ran out of steps reached no verdict. No
+        # reason at all says nothing either way, since not every driver reports one.
+        stop_reason = result['meta'].get('stop_reason')
+        if stop_reason and stop_reason != 'done':
             return True
         return any(isinstance(entry, dict) and entry.get('kind') in _AGENT_FAILURE_KINDS for entry in result['stack'])
     if any(k in result for k in _RUNNER_OUTPUT) and ('exit_code' in result or 'timed_out' in result):
