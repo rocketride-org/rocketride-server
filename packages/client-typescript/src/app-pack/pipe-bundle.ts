@@ -32,15 +32,17 @@
 // laid out as they sit relative to the pipe file's directory. There is no
 // folder rule: two pipes in one folder are two pipes and may share files.
 // Nothing unreferenced is packed; every packed file must really live inside
-// the pipe file's directory tree. Without a `store` block the pack is the
-// pipe alone (an UNLISTED artifact). Node.js only, like the app packer; the
-// rules themselves are the pure `client/pipe-store.ts`.
+// the pipe file's directory tree. Every packed pipe carries a `store` block:
+// a pipe written without one is packed WITH the default block (its `readme`
+// kept only when README.md sits beside the pipe), and the file on disk is
+// left as it is. Node.js only, like the app packer; the rules themselves are
+// the pure `client/pipe-store.ts`.
 // =============================================================================
 
 import * as fs from 'fs';
 import * as path from 'path';
 import AdmZip from 'adm-zip';
-import { defaultStoreBlock, normalizePosixPath, PIPE_ICON_SVG, pipeReadmeStub, pipeStoreFiles, validateStoreBlock } from '../client/pipe-store.js';
+import { defaultStoreBlock, normalizePosixPath, pipeReadmeStub, pipeStoreFiles, validateStoreBlock } from '../client/pipe-store.js';
 import type { PipeStoreBlock } from '../client/pipe-store.js';
 import { MAX_ICON_BYTES, MAX_README_IMAGE_BYTES } from './scan.js';
 
@@ -50,15 +52,15 @@ import { MAX_ICON_BYTES, MAX_README_IMAGE_BYTES } from './scan.js';
 
 /** The result of {@link packPipe}. */
 export interface PackedPipe {
-	/** The pipeline dict (the `.pipe` JSON, display `name` filled). */
+	/** The pipeline dict (the packed `.pipe` JSON, display `name` filled). */
 	pipeline: Record<string, unknown>;
-	/** The validated store block, or null when the pipe carries none (unlisted). */
+	/** The validated store block, always set: the pipe's own, or the default block the packer added. */
 	store: PipeStoreBlock | null;
 	/** Paths packed, relative to the pipe file's directory, in zip order. */
 	files: string[];
 	/** The zip bytes to pass as `deploy.add({ kind: 'pipe', pipeline, data })`. */
 	data: Uint8Array;
-	/** Advisory notes (an undeclared icon or readme). */
+	/** Advisory notes (an undeclared readme). */
 	warnings: string[];
 }
 
@@ -123,11 +125,33 @@ function readContained(pipeDir: string, rel: string, cap: number): Buffer {
 // =============================================================================
 
 /**
+ * The store block the packer adds to a pipe that has none: the default
+ * block, its `readme` kept only when that file sits beside the pipe (nobody
+ * declared it, so its absence is not an error). It names no icon.
+ *
+ * @param pipeDir - The pipe file's directory.
+ * @returns The block to add.
+ */
+function addedStoreBlock(pipeDir: string): PipeStoreBlock {
+	const block = defaultStoreBlock();
+	if (block.readme !== undefined) {
+		const readme = path.join(pipeDir, ...normalizePosixPath(block.readme).split('/'));
+		if (!fs.existsSync(readme) || !fs.statSync(readme).isFile()) delete block.readme;
+	}
+	return block;
+}
+
+/**
  * Packs one pipeline into the deploy zip.
  *
  * Entries: the `.pipe` at the root under its own basename, then — in
  * code-point order — the declared readme and icon and every file the README
  * references, each at its path relative to the pipe file's directory.
+ *
+ * A pipe with a `store` block is packed as its bytes on disk. A pipe without
+ * one is packed with the default block appended as its last key, serialized
+ * with two-space indentation and a trailing newline; the returned dict
+ * carries the same block, so the dict and the zip's `.pipe` are one pipeline.
  *
  * @param pipePath - The `.pipe` file.
  * @returns The pipeline dict, the store block, the zip, and any warnings.
@@ -151,24 +175,30 @@ export function packPipe(pipePath: string): PackedPipe {
 	if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error(`${base} must hold a JSON object`);
 	const pipe = parsed as Record<string, unknown>;
 	const stem = base.slice(0, -'.pipe'.length);
-	const pipeline: Record<string, unknown> = { ...pipe, name: String(pipe.name || stem) };
 
-	// Step 2: the store block — present = listable, absent = unlisted
-	const store = pipe.store === undefined ? null : validateStoreBlock(pipe.store);
+	// Step 2: the store block — every packed pipe carries one. An authored
+	// block rides in the file's own bytes; a pipe without one is packed with
+	// the default block appended, so the zip's .pipe and the dict sent beside
+	// it are the same pipeline (the display-name fill stays the dict's alone:
+	// the server fills the bundle's name before it compares)
+	const authored = pipe.store !== undefined;
+	const packedPipe = authored ? pipe : { ...pipe, store: addedStoreBlock(pipeDir) };
+	const packedBytes = authored ? pipeBytes : Buffer.from(`${JSON.stringify(packedPipe, null, 2)}\n`, 'utf8');
+	const store = validateStoreBlock(packedPipe.store);
+	const pipeline: Record<string, unknown> = { ...packedPipe, name: String(pipe.name || stem) };
 	const warnings: string[] = [];
-	if (store && !store.icon) warnings.push('store.icon is not declared, so tiles show a generic glyph');
-	if (store && !store.readme) warnings.push('store.readme is not declared, so the listing has no page');
+	if (!store.readme) warnings.push('store.readme is not declared, so the listing has no page');
 
 	// Step 3: the declared files, each under its cap (checked before the read)
 	const entries = new Map<string, Buffer>();
-	const readmeRel = store?.readme ? normalizePosixPath(store.readme) : null;
+	const readmeRel = store.readme ? normalizePosixPath(store.readme) : null;
 	let readmeText: string | null = null;
 	if (readmeRel) {
 		const readme = readContained(pipeDir, readmeRel, MAX_PIPE_README_BYTES);
 		entries.set(readmeRel, readme);
 		readmeText = readme.toString('utf8');
 	}
-	if (store?.icon) {
+	if (store.icon) {
 		const iconRel = normalizePosixPath(store.icon);
 		entries.set(iconRel, readContained(pipeDir, iconRel, MAX_ICON_BYTES));
 	}
@@ -193,7 +223,7 @@ export function packPipe(pipePath: string): PackedPipe {
 		if (entry) entry.header.time = ZIP_EPOCH;
 		files.push(rel);
 	};
-	add(base, pipeBytes);
+	add(base, packedBytes);
 	for (const rel of [...entries.keys()].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))) add(rel, entries.get(rel) as Buffer);
 	return { pipeline, store, files, data: new Uint8Array(zip.toBuffer()), warnings };
 }
@@ -205,8 +235,8 @@ export function packPipe(pipePath: string): PackedPipe {
 /**
  * Scaffolds a new pipeline — the ONE scaffold behind `rocketride pipe new`
  * and `client.deploy.createPipe()`. Writes `<dir>/<pipeId>/<pipeId>.pipe`
- * with the default `store` block, the placeholder `icon.svg` the app
- * scaffold ships, a `README.md` stub, and an empty `assets/` directory.
+ * with the default `store` block, a `README.md` stub, and an empty `assets/`
+ * directory. No icon file is written: the default block names none.
  *
  * @param workspaceRoot - The workspace folder that owns `<dir>`.
  * @param pipeId - The pipeline id: one dot-free segment of letters, digits,
@@ -238,12 +268,11 @@ export function scaffoldPipe(workspaceRoot: string, pipeId: string, options: { n
 	const pipe = { components: [], project_id: pipeId, name, description: '', store: defaultStoreBlock() };
 	const files: Array<[string, string]> = [
 		[`${pipeId}.pipe`, `${JSON.stringify(pipe, null, 2)}\n`],
-		['icon.svg', PIPE_ICON_SVG],
 		['README.md', pipeReadmeStub(name)],
 	];
 	// step: every output is checked before the first write, and each is
-	// created exclusively — an existing README or icon is never replaced
-	// (two pipes may share a folder; a fresh scaffold in an empty one is fine)
+	// created exclusively — an existing README is never replaced (two pipes
+	// may share a folder; a fresh scaffold in an empty one is fine)
 	for (const [rel] of files) {
 		if (fs.existsSync(path.join(folderAbs, rel))) throw new Error(`"${folderRel}/${rel}" already exists — pick another id or remove the file.`);
 	}

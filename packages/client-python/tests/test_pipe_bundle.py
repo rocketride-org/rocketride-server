@@ -65,7 +65,30 @@ def _pipe_json(store=None) -> str:
     return json.dumps(pipe)
 
 
-STORE = {**default_store_block(), 'tagline': 'Reads documents'}
+STORE = {**default_store_block(), 'tagline': 'Reads documents', 'icon': './icon.svg'}
+
+
+def _default_block_without_readme() -> dict:
+    """The default block without its readme: what the packer adds when no README.md sits beside the pipe."""
+    block = dict(default_store_block())
+    del block['readme']
+    return block
+
+
+def test_the_default_block_names_a_readme_and_no_icon_and_is_fresh_each_call():
+    assert default_store_block() == {
+        'tagline': '',
+        'categories': ['pipeline'],
+        'tags': [],
+        'readme': './README.md',
+        'links': {},
+        'mode': 'free',
+        'billing': {'plans': []},
+    }
+    assert 'icon' not in default_store_block()
+    assert default_store_block() is not default_store_block()
+    # The placeholder stays in the module for a pipeline that wants one
+    assert PIPE_ICON_SVG == PLACEHOLDER_ICON_SVG
 
 
 def test_validate_accepts_the_default_block_and_names_bad_keys_modes_and_paths():
@@ -227,7 +250,8 @@ def test_pack_preserves_the_layout_of_a_nested_readme_climbing_to_a_sibling_fold
     )
     packed = pack_pipe(os.path.join(folder, 'docBrain.pipe'))
     assert packed.files == ['docBrain.pipe', 'docs/README.md', 'images/a.png']
-    assert packed.warnings == ['store.icon is not declared, so tiles show a generic glyph']
+    # A block without an icon is the normal case: nothing to warn about
+    assert packed.warnings == []
 
 
 def test_two_pipes_in_one_folder_pack_independently_and_share_the_icon(tmp_path):
@@ -241,17 +265,81 @@ def test_two_pipes_in_one_folder_pack_independently_and_share_the_icon(tmp_path)
             'icon.svg': '<svg/>',
         },
     )
-    assert pack_pipe(os.path.join(folder, 'a.pipe')).files == ['a.pipe', 'icon.svg']
+    a = pack_pipe(os.path.join(folder, 'a.pipe'))
+    assert a.files == ['a.pipe', 'icon.svg']
+    assert a.warnings == ['store.readme is not declared, so the listing has no page']
     assert pack_pipe(os.path.join(folder, 'b.pipe')).files == ['b.pipe', 'b.md', 'icon.svg']
 
 
-def test_pack_without_a_store_block_is_the_pipe_alone_named_after_its_stem(tmp_path):
-    folder = _folder(tmp_path, 'bare', {'bare.pipe': json.dumps({'components': []}), 'README.md': 'ignored'})
+def test_pack_adds_the_default_block_to_a_pipe_without_one_with_the_readme_beside_it(tmp_path):
+    source = json.dumps({'components': [], 'project_id': 'bare'})
+    folder = _folder(
+        tmp_path,
+        'bare',
+        {
+            'bare.pipe': source,
+            'README.md': '# Bare\n![flow](assets/flow.png)\n',
+            'assets/flow.png': b'\x01',
+            'icon.svg': '<svg/>',
+        },
+    )
     packed = pack_pipe(os.path.join(folder, 'bare.pipe'))
-    assert packed.store is None
-    assert packed.files == ['bare.pipe']
-    assert packed.pipeline['name'] == 'bare'
+    block = default_store_block()
+    assert packed.store == block
+    # The README and what it references are packed as for an authored block; no icon is
+    assert packed.files == ['bare.pipe', 'README.md', 'assets/flow.png']
     assert packed.warnings == []
+    # The zip's .pipe is the pipe plus the block as its last key: two-space JSON, a trailing newline
+    with zipfile.ZipFile(io.BytesIO(packed.data)) as zf:
+        entry = zf.read('bare.pipe').decode('utf-8')
+    assert entry == json.dumps({'components': [], 'project_id': 'bare', 'store': block}, indent=2) + '\n'
+    # The dict sent beside the zip is that pipe; only the dict has its display name filled (from the stem)
+    assert 'name' not in json.loads(entry)
+    assert packed.pipeline == {**json.loads(entry), 'name': 'bare'}
+    # The file on disk is left as it is, and two packs are the same bytes
+    with open(os.path.join(folder, 'bare.pipe'), encoding='utf-8') as handle:
+        assert handle.read() == source
+    assert pack_pipe(os.path.join(folder, 'bare.pipe')).data == packed.data
+
+
+def test_pack_adds_the_default_block_without_a_readme_when_no_readme_sits_beside_the_pipe(tmp_path):
+    folder = _folder(
+        tmp_path, 'lone', {'lone.pipe': json.dumps({'components': [], 'name': 'Lone'}), 'icon.svg': '<svg/>'}
+    )
+    packed = pack_pipe(os.path.join(folder, 'lone.pipe'))
+    block = _default_block_without_readme()
+    assert packed.store == block
+    assert packed.files == ['lone.pipe']
+    assert packed.warnings == ['store.readme is not declared, so the listing has no page']
+    with zipfile.ZipFile(io.BytesIO(packed.data)) as zf:
+        entry = json.loads(zf.read('lone.pipe').decode('utf-8'))
+    assert entry == {'components': [], 'name': 'Lone', 'store': block}
+    assert list(entry)[-1] == 'store'
+    assert packed.pipeline == entry
+    # A folder named README.md is not the file the block would name
+    as_dir = _folder(tmp_path, 'dir', {'dir.pipe': json.dumps({'components': []}), 'README.md/notes.txt': 'x'})
+    assert pack_pipe(os.path.join(as_dir, 'dir.pipe')).store == block
+
+
+def test_pack_writes_an_added_block_as_utf8_text_not_escapes(tmp_path):
+    """The rewritten pipe keeps non-ASCII text as written (the TypeScript packer's JSON.stringify does)."""
+    folder = _folder(tmp_path, 'utf', {'utf.pipe': json.dumps({'components': [], 'name': 'Café ☕'})})
+    packed = pack_pipe(os.path.join(folder, 'utf.pipe'))
+    with zipfile.ZipFile(io.BytesIO(packed.data)) as zf:
+        raw = zf.read('utf.pipe')
+    assert '"name": "Café ☕"'.encode('utf-8') in raw and raw.endswith(b'}\n')
+
+
+def test_pack_keeps_a_pipe_that_has_a_store_block_as_its_bytes_on_disk(tmp_path):
+    # Compact, oddly spaced JSON: an authored pipe is never re-serialized
+    source = '{"components":[],  "project_id":"docBrain","name":"Doc Brain","store":{"tagline":"As written"}}'
+    folder = _folder(tmp_path, 'raw', {'raw.pipe': source, 'README.md': 'not declared, not packed'})
+    packed = pack_pipe(os.path.join(folder, 'raw.pipe'))
+    with zipfile.ZipFile(io.BytesIO(packed.data)) as zf:
+        assert zf.read('raw.pipe') == source.encode('utf-8')
+    assert packed.files == ['raw.pipe']
+    assert packed.pipeline == json.loads(source)
+    assert packed.store == {'tagline': 'As written'}
 
 
 def test_pack_refuses_missing_declared_missing_referenced_and_upward_escape_by_name(tmp_path):
@@ -313,12 +401,12 @@ def test_pack_refuses_a_non_pipe_invalid_json_an_invalid_block_and_an_oversized_
         pack_pipe(os.path.join(folder, 'big.pipe'))
 
 
-def test_scaffold_writes_the_pipe_with_the_default_block_the_shared_icon_a_readme_and_assets(tmp_path):
+def test_scaffold_writes_the_pipe_with_the_default_block_a_readme_and_assets_and_no_icon(tmp_path):
     created = scaffold_pipe(str(tmp_path), 'ingest', name='Document ingest')
     assert created == {
         'folder': 'pipelines/ingest',
         'pipePath': 'pipelines/ingest/ingest.pipe',
-        'files': ['pipelines/ingest/ingest.pipe', 'pipelines/ingest/icon.svg', 'pipelines/ingest/README.md'],
+        'files': ['pipelines/ingest/ingest.pipe', 'pipelines/ingest/README.md'],
     }
     pipe = json.loads((tmp_path / 'pipelines' / 'ingest' / 'ingest.pipe').read_text(encoding='utf-8'))
     assert pipe == {
@@ -328,13 +416,16 @@ def test_scaffold_writes_the_pipe_with_the_default_block_the_shared_icon_a_readm
         'description': '',
         'store': default_store_block(),
     }
-    assert (tmp_path / 'pipelines' / 'ingest' / 'icon.svg').read_text(encoding='utf-8') == PLACEHOLDER_ICON_SVG
-    assert PIPE_ICON_SVG == PLACEHOLDER_ICON_SVG
+    # No icon: the block names none and the folder holds none
+    assert 'icon' not in pipe['store']
+    assert sorted(os.listdir(tmp_path / 'pipelines' / 'ingest')) == ['README.md', 'assets', 'ingest.pipe']
     readme = (tmp_path / 'pipelines' / 'ingest' / 'README.md').read_text(encoding='utf-8')
     assert readme.startswith('# Document ingest\n') and 'store listing' in readme
     assert (tmp_path / 'pipelines' / 'ingest' / 'assets').is_dir()
-    # The scaffold packs as-is: the block's declared files resolve
-    assert pack_pipe(str(tmp_path / created['pipePath'])).files == ['ingest.pipe', 'README.md', 'icon.svg']
+    # The scaffold packs as-is: the block's declared file resolves
+    packed = pack_pipe(str(tmp_path / created['pipePath']))
+    assert packed.files == ['ingest.pipe', 'README.md']
+    assert packed.warnings == []
 
 
 def test_scaffold_refuses_an_invalid_id_and_an_existing_pipe_and_honours_dir(tmp_path):
@@ -347,7 +438,7 @@ def test_scaffold_refuses_an_invalid_id_and_an_existing_pipe_and_honours_dir(tmp
 
 
 def test_scaffold_never_replaces_an_existing_asset_and_stays_inside_the_workspace(tmp_path):
-    """An existing README or icon beside a new pipe is kept (two pipes may share a folder); a dir outside the workspace is refused."""
+    """An existing README beside a new pipe is kept (two pipes may share a folder); a dir outside the workspace is refused."""
     folder = tmp_path / 'pipelines' / 'shared'
     folder.mkdir(parents=True)
     (folder / 'README.md').write_text('# Mine\n', encoding='utf-8')
@@ -355,6 +446,15 @@ def test_scaffold_never_replaces_an_existing_asset_and_stays_inside_the_workspac
         scaffold_pipe(str(tmp_path), 'shared')
     assert (folder / 'README.md').read_text(encoding='utf-8') == '# Mine\n'
     assert not (folder / 'shared.pipe').exists()
+    # An icon already in the folder is no output of the scaffold: it is left as it is
+    branded = tmp_path / 'pipelines' / 'branded'
+    branded.mkdir(parents=True)
+    (branded / 'icon.svg').write_text('<svg id="mine"/>', encoding='utf-8')
+    assert scaffold_pipe(str(tmp_path), 'branded')['files'] == [
+        'pipelines/branded/branded.pipe',
+        'pipelines/branded/README.md',
+    ]
+    assert (branded / 'icon.svg').read_text(encoding='utf-8') == '<svg id="mine"/>'
     with pytest.raises(ValueError, match='must resolve to a folder inside the workspace'):
         scaffold_pipe(str(tmp_path / 'ws'), 'ingest', dir='../outside')
     assert not (tmp_path / 'outside').exists()

@@ -491,9 +491,9 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 		const existingNames = entries.map((e) => (e.type === 'dir' ? e.name : (pipeStemOf(e.name) ?? e.name)));
 		return { developerId, workspaceOpen: true, existingNames };
 	}, [client, isConnected, projectVfs, settingDefaultDir]);
-	/** Scaffolds `<dir>/<name>/` (the pipe with its store block, icon.svg,
-	 *  README.md, assets/) with the name as the id, retires this untitled
-	 *  document and opens the pipe. */
+	/** Scaffolds `<dir>/<name>/` (the pipe with its store block, README.md,
+	 *  assets/) with the name as the id, retires this untitled document and
+	 *  opens the pipe. */
 	const handleCreatePipeline = useCallback(
 		async (name: string, displayName: string, project: unknown): Promise<void> => {
 			if (!client || !isConnected) throw new Error('Not connected to server');

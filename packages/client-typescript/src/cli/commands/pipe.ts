@@ -90,7 +90,7 @@ Examples:
 	// ── pipe new ─────────────────────────────────────────────────────────
 	pipeCmd
 		.command('new <id>')
-		.description('Scaffold a new pipeline under ./pipelines/<id>/: the .pipe with its store block, icon.svg, README.md and assets/')
+		.description('Scaffold a new pipeline under ./pipelines/<id>/: the .pipe with its store block, README.md and assets/')
 		.option('--name <text>', 'Display name (default: the id)')
 		.option('--dir <dir>', 'Pipelines directory, relative to the workspace (default: pipelines)')
 		.option('--workspace <dir>', 'Workspace root (default: current directory)')

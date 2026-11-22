@@ -107,8 +107,9 @@ export interface PipelineConfig {
 	project_id?: string;
 
 	/** The store listing (tagline, categories, tags, icon, readme, links,
-	    mode, billing). Present = the pipeline is listable; absent = it
-	    deploys unlisted. The engine never sees it. */
+	    mode, billing). Every deployed pipeline carries one: the packers and
+	    the deploy door add the default block to a pipe that has none. The
+	    engine never sees it. */
 	store?: PipeStoreBlock;
 
 	/** Per-call params: public name -> `nodeId.configKey` */

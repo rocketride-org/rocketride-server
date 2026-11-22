@@ -120,11 +120,12 @@ class PipeStoreBilling(TypedDict):
 
 class PipeStoreBlock(TypedDict, total=False):
     """
-    The ``store`` block of a ``.pipe``: the pipeline's store listing. Present
-    = the pipeline is listable; absent = it deploys unlisted. Mirrors an
-    app's ``appManifest`` listing fields; ``project_id``, ``name``,
-    ``description`` and ``source`` stay at the pipe's root and are never
-    duplicated here. The engine never sees the block.
+    The ``store`` block of a ``.pipe``: the pipeline's store listing. Every
+    deployed pipeline carries one: the packer and the deploy door add the
+    default block to a pipe that has none. Mirrors an app's ``appManifest``
+    listing fields; ``project_id``, ``name``, ``description`` and ``source``
+    stay at the pipe's root and are never duplicated here. The engine never
+    sees the block.
     """
 
     tagline: str  # One-line tagline for the store card
@@ -177,7 +178,7 @@ class PipelineConfig(TypedDict, total=False):
     components: list[PipelineComponent]  # Array of pipeline components - REQUIRED
     source: Optional[str]  # ID of the component that serves as the pipeline entry point
     project_id: str  # Project identifier for organization and permissions
-    store: PipeStoreBlock  # The store listing; present = listable, absent = deploys unlisted
+    store: PipeStoreBlock  # The store listing; a pipe deployed without one gets the default block
     parameters: dict[str, str]  # Per-call params: public name -> 'nodeId.configKey'
     # The storage roots beyond its run's anchor this pipeline's nodes reach
     # through self.files ('@Development/kb', '=team/<tid>/kb', '@org/shared');

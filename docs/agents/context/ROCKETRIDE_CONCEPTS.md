@@ -107,10 +107,11 @@ future). Learn it once:
   pipe's root). `icon` and `readme` are paths relative to the pipe file, and
   the pack carries them with every file the README references, laid out as
   they sit beside the pipe; two pipes in one folder are two pipes and may
-  share files. The block present = the pipeline is **listable**; without it
-  the pipe still runs and deploys as an unlisted artifact (`rocketride pipe
-  new` writes the block, `rocketride deploy add <pipe>` and the DEPLOY card
-  publish the pipe). A short id is one thing per
+  share files. Every deployed pipeline carries the block: `rocketride pipe
+  new` writes it, and a pipe deployed without one (`rocketride deploy add
+  <pipe>`, the DEPLOY card, a pipeline dict sent to `deploy.add`) gets the
+  default block. `icon` is optional: a pipeline without one leaves it
+  unset. A short id is one thing per
   developer id across apps, pipes and nodes: the first deploy fixes the
   kind, and version numbers are never reused.
 - **Publish** — bind one deployed version to one **audience rung**. The same

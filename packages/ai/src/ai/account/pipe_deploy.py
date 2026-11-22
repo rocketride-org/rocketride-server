@@ -516,8 +516,9 @@ def pipe_catalog_row(pipe_name: str, entry: Dict[str, Any]) -> Optional[Dict[str
     One pipe version as the store catalog lists it, or None when the version is unlisted.
 
     A pipe is listed when its ``metadata.manifest`` was shaped from a store
-    block (``pipe_bundle.is_listed``): a dict deploy without the block is an
-    artifact the registry holds and the catalog never shows. The row carries
+    block (``pipe_bundle.is_listed``). The deploy door gives every pipe a
+    block; a version deployed without one before the door did is an artifact
+    the registry holds and the catalog never shows. The row carries
     the same field names an app's catalog row exposes (``resolve_app_pins``):
     pricing surfaces as ``mode`` alone, as it does for an app (the plans
     stay on ``metadata.manifest.billing`` for the approve path); ``icon``
@@ -871,8 +872,8 @@ async def catalog_pipe_entries(account: Any, account_info: 'AccountInfo') -> Lis
     every org, each pipe ONCE at the rung that answers the caller for it (the
     resolver's order, plan 3.2), so a tile never opens a version the
     resolver would pass over. Only serving rows count; a key's ``endpoints``
-    scope drops the pipes it may not call; a version without a store block
-    is unlisted and never shown. There is no entry-point filter: every
+    scope drops the pipes it may not call; a version stored without a store
+    block is unlisted and never shown. There is no entry-point filter: every
     listed pipe opens in the one host app. A version whose registry entry
     cannot be read is left off (logged), as an app whose artifact cannot be
     read is.

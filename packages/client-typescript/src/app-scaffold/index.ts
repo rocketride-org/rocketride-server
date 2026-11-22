@@ -540,8 +540,9 @@ export default App;
  * The scaffolded placeholder icon — a neutral rounded tile with an abstract
  * rocket mark. Deliberately generic: it exists so the PACKAGE tab's icon
  * readiness starts green and tiles never render the bare fallback glyph;
- * replacing it is the developer's first branding act. Apps and pipelines
- * (`PIPE_ICON_SVG`) scaffold the same bytes. The Python scaffold
+ * replacing it is the developer's first branding act. The app scaffold
+ * writes it; the pipeline scaffold writes no icon (`PIPE_ICON_SVG` names the
+ * same bytes). The Python scaffold
  * (packages/client-python/src/rocketride/_app_scaffold.py, PLACEHOLDER_ICON_SVG)
  * mirrors it.
  */

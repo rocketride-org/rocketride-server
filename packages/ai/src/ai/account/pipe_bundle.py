@@ -25,10 +25,11 @@
 A pipe's store manifest is the root ``store`` block INSIDE the pipeline JSON
 (:data:`STORE_KEYS`): display facts only, beside the pipe's own root keys
 (``project_id``, ``name``, ``description``, ``source``), which are never
-duplicated. The block makes the pipe PUBLISHABLE: a dict deploy without one
-is an unlisted artifact (no content dir, no store row); a deploy with one
-is listed, its ``metadata.manifest`` shaped from the block plus the root
-keys (:func:`pipe_manifest`).
+duplicated. Every pipe version carries the block: a pipe deployed without
+one gets the default block at the door (:func:`default_store_block`), and
+the version's ``metadata.manifest`` is shaped from the block plus the root
+keys (:func:`pipe_manifest`). ``icon`` is optional: a pipe without one
+leaves it unset; a declared icon must be in the bundle.
 
 The client packs the pipe's folder into one zip and sends it as the binary
 ``data`` frame of ``rrext_deploy add kind='pipe'`` beside the pipeline dict:
@@ -140,7 +141,8 @@ def validate_store_block(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
     Returns:
         The block with its paths normalised (``icon``/``readme`` relative,
-        forward slashes), or None for an unlisted deploy.
+        forward slashes), or None for a pipe without one (the deploy door
+        gives it :func:`default_store_block`).
 
     Raises:
         ValueError: The block is not an object, carries an unknown key, a
@@ -182,6 +184,28 @@ def validate_store_block(pipeline: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     if 'billing' in block:
         out['billing'] = _check_billing(block['billing'])
     return out
+
+
+def default_store_block() -> Dict[str, Any]:
+    """The block the deploy door gives a pipe that carries none: a fresh dict each call.
+
+    The SDK scaffolds' default block without its file keys: no ``icon`` (a
+    pipe without one leaves it unset) and no ``readme`` (the server cannot
+    know of a file nobody declared). It lists the pipe as free, with nothing
+    to store beside the artifact.
+
+    Returns:
+        The block: ``tagline``, ``categories``, ``tags``, ``links``, ``mode``
+        and ``billing``.
+    """
+    return {
+        'tagline': '',
+        'categories': ['pipeline'],
+        'tags': [],
+        'links': {},
+        'mode': 'free',
+        'billing': {'plans': []},
+    }
 
 
 def declared_files(block: Optional[Dict[str, Any]]) -> Dict[str, str]:
@@ -263,7 +287,7 @@ def pipe_manifest(pipeline: Dict[str, Any], block: Dict[str, Any]) -> Dict[str, 
     ``tags``, ``icon``, ``readme`` (relative paths; the catalog row turns
     them into URLs), ``links`` and ``mode`` from the block, and the pricing
     EXACTLY as an app manifest stores it: ``billing: {plans: [...]}``, present
-    only when authored (the SaaS approve path and review listing read
+    only when the block carries it (the SaaS approve path and review listing read
     ``manifest.billing`` for both kinds). Never a publisher or author
     (derived at publish, plan S7).
 

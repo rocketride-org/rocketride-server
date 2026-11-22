@@ -160,7 +160,7 @@ export function withStoreBlock(text: string): string | undefined {
 
 /**
  * The starter content a genuinely new, empty file receives: the minted id,
- * the default store block (plan §9: the block present = listable) and no
+ * the default store block (plan §9: every pipeline carries one) and no
  * components.
  */
 export function emptyPipelineSkeleton(projectId: string): string {

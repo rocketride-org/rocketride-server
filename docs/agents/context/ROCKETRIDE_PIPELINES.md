@@ -66,7 +66,7 @@ bottom. This is the canonical layout the editor tooling expects and every shippe
 | `version` | yes | bottom | Pipeline format version; write `1` |
 | `source` | optional | — | ID of the entry-point component; see Source Nodes |
 | `name`, `description` | optional | — | Display name (the registry's `pipelineName`; the file stem when absent) and store description |
-| `store` | optional | — | The store listing block; present = the pipeline is listable (see below) |
+| `store` | optional | — | The store listing block; a pipe deployed without one gets the default block (see below) |
 | `roots` | optional | — | Storage roots beyond the run's own anchor that its nodes' `self.files` may reach (see below) |
 
 **`project_id`** is the permanent identity of the pipeline (runtime events and deploy history
@@ -112,7 +112,7 @@ listing fields and carries exactly these keys (an unknown key is an error naming
 | `tagline` | string | One line for the store card |
 | `categories` | string[] | Store categories |
 | `tags` | string[] | Free tags |
-| `icon` | relative path | The icon, relative to the pipe file's directory |
+| `icon` | relative path | The icon, relative to the pipe file's directory. Optional: a pipeline without an icon leaves it unset |
 | `readme` | relative path | The store page (markdown), relative to the pipe file's directory |
 | `links` | `{ label: url }` | Links the listing shows |
 | `mode` | `free` \| `subscription` \| `paywall` | Monetization mode |
@@ -121,12 +121,19 @@ listing fields and carries exactly these keys (an unknown key is an error naming
 `rocketride pipe new <id>` stamps the default block:
 
 ```json
-"store": { "tagline": "", "categories": ["pipeline"], "tags": [], "icon": "./icon.svg",
+"store": { "tagline": "", "categories": ["pipeline"], "tags": [],
            "readme": "./README.md", "links": {}, "mode": "free", "billing": { "plans": [] } }
 ```
 
-**Present = listable.** Without the block a pipe still validates, runs and deploys — as an
-UNLISTED artifact. The engine never sees the block (the server drops it from the task file).
+The default block names no icon, and the scaffold writes no icon file. Declare `icon` only
+when the file is beside the pipe: a declared icon must be in the pack.
+
+**Every deployed pipeline carries the block.** A pipe without one still validates and runs.
+When it is deployed, the packer (`rocketride deploy add`, `addPipe` / `add_pipe`, the DEPLOY
+card) adds the default block, keeping `readme` only when `README.md` sits beside the pipe;
+the file on disk is not rewritten. A pipeline dict sent to `deploy.add` without a block gets
+the default block on the server, without `readme`. The engine never sees the block (the
+server drops it from the task file).
 
 **What a deploy packs** (`rocketride deploy add pipelines/<id>/<id>.pipe`,
 `client.deploy.addPipe(pipePath)` / `add_pipe(pipe_path)`): the `.pipe` itself, the declared
@@ -137,8 +144,9 @@ relative to the README and laid out as the files sit relative to the pipe (a rea
 `http(s)://`, `data:`, `mailto:`, `#anchor` and protocol-relative references are skipped.
 Nothing unreferenced is packed; two pipes in one folder are two pipes and may share files.
 A declared or referenced file that is missing, or whose real location is outside the pipe
-file's directory tree, fails the pack with an error naming it; an undeclared icon or readme
-is only a warning. Caps: readme 1 MiB, icon 256 KiB, each referenced file 10 MiB.
+file's directory tree, fails the pack with an error naming it; an undeclared readme is only
+a warning, and an undeclared icon is not reported at all. Caps: readme 1 MiB, icon 256 KiB,
+each referenced file 10 MiB.
 
 ---
 
