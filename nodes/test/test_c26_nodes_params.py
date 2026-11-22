@@ -40,6 +40,8 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import threading
+import time
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -420,6 +422,44 @@ def test_audio_tts_closes_a_client_whose_model_fails_to_load(monkeypatch):
     # Each failed load closed its own connection, a failing close did not mask the load error, nothing was cached
     assert [client.disconnected for client in _UnloadableModelClient.built] == [True, True]
     assert glb._clients == {}
+    glb.endGlobal()
+
+
+class _SlowBritishModelClient(_RecordingModelClient):
+    """A model-server client whose British loader blocks until released."""
+
+    release = None
+
+    def load_model(self, repo, loader, options):
+        if options['lang_code'] == 'b':
+            type(self).release.wait(5)
+        super().load_model(repo, loader, options)
+
+
+def test_audio_tts_a_slow_language_load_never_blocks_a_loaded_language(monkeypatch, tmp_path):
+    import os
+
+    module = importlib.import_module('nodes.audio_tts.IGlobal')
+    monkeypatch.setattr(module, 'get_model_server_address', lambda: 'ms:5590')
+    monkeypatch.setattr(module, 'ModelClient', _SlowBritishModelClient)
+    _SlowBritishModelClient.loaded = []
+    _SlowBritishModelClient.release = threading.Event()
+    glb = _control('nodes.audio_tts', 'audio_tts')
+    os.remove(glb.synthesize('hello', 'af_heart')['path'])
+
+    # A British call stalls on its first load; an American call on the loaded
+    # language is served meanwhile, and two British calls load it once
+    stalled = [threading.Thread(target=lambda: os.remove(glb.synthesize('hello', 'bf_emma')['path'])) for _ in range(2)]
+    for thread in stalled:
+        thread.start()
+    time.sleep(0.1)
+    started = time.monotonic()
+    os.remove(glb.synthesize('hello', 'af_bella')['path'])
+    assert time.monotonic() - started < 1
+    _SlowBritishModelClient.release.set()
+    for thread in stalled:
+        thread.join(5)
+    assert _SlowBritishModelClient.loaded == ['a', 'b']
     glb.endGlobal()
 
 

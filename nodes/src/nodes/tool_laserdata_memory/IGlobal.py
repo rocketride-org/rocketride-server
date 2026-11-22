@@ -105,7 +105,13 @@ class IGlobal(IGlobalBase):
             coro: The SDK coroutine.
             timeout: Seconds to wait: what is left of the calling tool's ``op_timeout``.
         """
-        budget = max(timeout, 0)
+        # A budget already spent (the connect used it all) is refused before the
+        # coroutine is submitted: work that has started cannot be undone by
+        # cancelling it, so the caller would see a timeout for a write that ran
+        if timeout <= 0:
+            coro.close()
+            raise RuntimeError("laserdata: operation timed out (the call's op_timeout was spent before it started)")
+        budget = timeout
         # The open-state check, the scheduling and the registration are one
         # step under the lock teardown takes to close and snapshot the set,
         # so a future is never scheduled after the snapshot it is missing from

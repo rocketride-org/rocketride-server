@@ -19,7 +19,7 @@ import os
 import tempfile
 import threading
 import wave
-from typing import Any, Dict
+from typing import Any, Dict, Tuple
 
 import numpy as np
 
@@ -60,11 +60,23 @@ class IGlobal(IGlobalBase):
         self._address = get_model_server_address()
         self._pipelines: Dict[str, Any] = {}
         self._clients: Dict[str, Any] = {}
+        self._build_locks: Dict[Tuple[str, str], threading.Lock] = {}
 
         if not self._address:
             from depends import depends  # type: ignore
 
             depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
+
+    def _build_lock(self, kind: str, lang: str) -> threading.Lock:
+        """
+        The lock one language's build of ``kind`` (``pipeline`` or ``client``) runs under.
+
+        ``self._lock`` guards only the maps; a build runs under its own
+        language's lock, so a call for a language already built never waits on
+        another language's load (a remote load retries for minutes).
+        """
+        with self._lock:
+            return self._build_locks.setdefault((kind, lang), threading.Lock())
 
     def _pipeline_for(self, lang: str) -> Any:
         """
@@ -78,9 +90,16 @@ class IGlobal(IGlobalBase):
         """
         with self._lock:
             pipeline = self._pipelines.get(lang)
+        if pipeline is not None:
+            return pipeline
+        with self._build_lock('pipeline', lang):
+            # Another call for this language may have built it while we waited
+            with self._lock:
+                pipeline = self._pipelines.get(lang)
             if pipeline is None:
                 pipeline = _PIPELINES.acquire((_KOKORO_REPO_ID, lang), lambda: self._load_pipeline(lang))
-                self._pipelines[lang] = pipeline
+                with self._lock:
+                    self._pipelines[lang] = pipeline
             return pipeline
 
     def _client_for(self, lang: str) -> Any:
@@ -98,6 +117,12 @@ class IGlobal(IGlobalBase):
         """
         with self._lock:
             client = self._clients.get(lang)
+        if client is not None:
+            return client
+        with self._build_lock('client', lang):
+            # Another call for this language may have connected it while we waited
+            with self._lock:
+                client = self._clients.get(lang)
             if client is None:
                 client = ModelClient(self._address)
                 try:
@@ -111,7 +136,8 @@ class IGlobal(IGlobalBase):
                     except Exception:
                         pass
                     raise
-                self._clients[lang] = client
+                with self._lock:
+                    self._clients[lang] = client
             return client
 
     def _load_pipeline(self, lang: str) -> Any:
@@ -218,6 +244,7 @@ class IGlobal(IGlobalBase):
         for lang in pipelines:
             _PIPELINES.release((_KOKORO_REPO_ID, lang))
         clients, self._clients = getattr(self, '_clients', None) or {}, {}
+        self._build_locks = {}
         for client in clients.values():
             try:
                 client.disconnect()

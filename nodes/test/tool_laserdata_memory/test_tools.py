@@ -457,6 +457,21 @@ def test_run_timeout_maps_to_runtime_error(bridge):
         glb.run(slow(), timeout=0.05)
 
 
+@pytest.mark.parametrize('timeout', [0, -0.5])
+def test_run_refuses_a_spent_budget_before_the_operation_starts(bridge, timeout):
+    # A write submitted with no budget left could run while the caller sees a timeout
+    glb = bridge()
+    started = []
+
+    async def write():
+        started.append(True)
+
+    with pytest.raises(RuntimeError, match='spent before it started'):
+        glb.run(write(), timeout=timeout)
+    time.sleep(0.05)
+    assert started == []
+
+
 def test_run_when_not_open_raises():
     glb = IGlobal()
 
