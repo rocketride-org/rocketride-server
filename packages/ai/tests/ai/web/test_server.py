@@ -1,6 +1,7 @@
 """Tests for ALLOWED_MODULES allowlist and WebServer.use() validation."""
 
 import logging
+import os
 import signal
 import sys
 from types import SimpleNamespace
@@ -70,7 +71,7 @@ _inject('dotenv', MagicMock())
 _inject('uvicorn', MagicMock())
 
 # Now we can safely import the module under test
-from ai.web.server import WebServer, _build_signal_safe_capture
+from ai.web.server import WebServer, _build_bound_port_publisher, _build_signal_safe_capture
 from ai.modules import ALL as ALLOWED_MODULES
 
 
@@ -252,3 +253,81 @@ class TestSignalCapture:
             pass
 
         assert calls == [(handled_signal, fake_server.handle_exit)]
+
+
+# ============================================================================
+# The bound port and RR_BASE_URL with port 0
+# ============================================================================
+
+#: The port the fake bind below "assigns".
+BOUND_PORT = 54321
+
+
+def _bound_servers(port: int = BOUND_PORT) -> list:
+    """What uvicorn's Server.servers holds after a bind: servers with sockets that name their address."""
+    return [SimpleNamespace(sockets=[SimpleNamespace(getsockname=lambda: ('127.0.0.1', port))])]
+
+
+class _FakeUvicornServer:
+    """uvicorn.Server as WebServer uses it: startup binds, then servers holds the sockets."""
+
+    def __init__(self, config):
+        self.config = config
+        self.servers = []
+
+    async def startup(self, sockets=None):
+        self.servers = _bound_servers()
+
+
+@pytest.fixture
+def no_base_url(monkeypatch):
+    """RR_BASE_URL unset for the test, and whatever the test sets removed afterwards."""
+    monkeypatch.setenv('RR_BASE_URL', 'placeholder')
+    monkeypatch.delenv('RR_BASE_URL')
+
+
+class TestBoundPortPublisher:
+    """With port 0 the port is resolved, and RR_BASE_URL published, as soon as uvicorn has bound."""
+
+    async def test_on_bound_runs_after_the_original_startup_returns(self):
+        order = []
+        fake = SimpleNamespace(servers=[])
+
+        async def startup(sockets=None):
+            order.append(('startup', sockets))
+            fake.servers = _bound_servers()
+
+        fake.startup = startup
+        await _build_bound_port_publisher(fake, lambda: order.append('bound'))(sockets=None)
+        assert order == [('startup', None), 'bound']
+
+    async def test_a_startup_that_bound_nothing_publishes_nothing(self):
+        bound = MagicMock()
+        fake = SimpleNamespace(servers=[])
+
+        async def startup(sockets=None):
+            return None
+
+        fake.startup = startup
+        await _build_bound_port_publisher(fake, bound)()
+        bound.assert_not_called()
+
+    async def test_a_port_0_server_publishes_rr_base_url_once_bound(self, monkeypatch, no_base_url):
+        monkeypatch.setattr('ai.web.server.uvicorn.Server', _FakeUvicornServer)
+        web = WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
+
+        # Nothing is bound yet, so nothing is published
+        assert 'RR_BASE_URL' not in os.environ
+
+        await web.server.startup()
+        assert os.environ['RR_BASE_URL'] == f'http://127.0.0.1:{BOUND_PORT}'
+        assert web.get_port() == BOUND_PORT
+
+    async def test_an_operators_rr_base_url_is_kept(self, monkeypatch):
+        monkeypatch.setenv('RR_BASE_URL', 'https://files.example.com')
+        monkeypatch.setattr('ai.web.server.uvicorn.Server', _FakeUvicornServer)
+        web = WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
+
+        await web.server.startup()
+        assert os.environ['RR_BASE_URL'] == 'https://files.example.com'
+        assert web.get_port() == BOUND_PORT
