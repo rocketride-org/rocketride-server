@@ -121,8 +121,13 @@ export interface LogStreamEntry extends LogChaptersResult {
 	teamId: string;
 	teamName: string;
 	runKind: LogRunKind;
-	/** Who owns the runs: 'user' (dev or @me deploy), 'team' or 'org' (an org admin's view). Matches TASK_CONTROL.owner_kind. */
-	ownerKind: 'user' | 'team' | 'org';
+	/**
+	 * Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind.
+	 * An org-owned stream (the org rung, C.35) arrives as 'org', which this union cannot name:
+	 * the shell contract re-exports it and is append-only, so the union stays as frozen. Read
+	 * `owner` (`=org/<oid>`) to tell an org stream.
+	 */
+	ownerKind: 'user' | 'team';
 	/** The owner string to pass back as `LogStreamRef.owner`. */
 	owner: string;
 }

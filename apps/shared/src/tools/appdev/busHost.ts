@@ -65,8 +65,20 @@ export interface IAppBuilderBus {
 	/** Realm-local event stream (mirror.event → shell:event). */
 	on(event: 'shell:event', listener: (payload: ShellEventPayload) => void): () => void;
 	/** The mirrored account snapshot (retained shell:account topic). Each team
-	 *  carries its server-composed `audience` ('=team/<tid>', plan 2.5). */
-	getAccountInfo(): { organization?: { teams?: Array<{ id: string; name: string; audience?: string }>; developerId?: string | null } | null } | undefined;
+	 *  carries its server-composed `audience` ('=team/<tid>', plan 2.5); the
+	 *  organization carries its own ('=org/<oid>', C.35) and the caller's org
+	 *  permissions, beside the caller's `sysPermissions`. */
+	getAccountInfo():
+		| {
+				sysPermissions?: string[];
+				organization?: {
+					teams?: Array<{ id: string; name: string; audience?: string }>;
+					developerId?: string | null;
+					permissions?: string[];
+					audience?: string;
+				} | null;
+		  }
+		| undefined;
 }
 
 /** The client members this adapter reaches — the narrowing view over

@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 7b19bc3fc8b3c7ed185ef193e4b23eed340b8a64
+// Source commit: 9cfd1bbb81cd8db25ed46e6467ab75196e05cbd3
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1318,6 +1318,12 @@ export interface PipelineConfig {
     store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
+    /** The storage roots beyond its run's anchor this pipeline's nodes reach
+        through `self.files` (`'@Development/kb'`, `'=team/<tid>/kb'`,
+        `'@org/shared'`). Resolved through the run's owner when it starts: a
+        root the owner cannot reach refuses the start. A pipeline that
+        declares roots cannot be published to `@public`. */
+    roots?: string[];
     /** UI viewport settings for visual editors */
     viewport?: {
         x: number;
@@ -1352,8 +1358,8 @@ export interface SUBMIT_RESULT {
     token: string;
     /** The address that answered: `developerId.pipelineId.source` (the stable identity, beside the id) */
     address?: string;
-    /** The rung that answered */
-    resolved: "@spec" | "@me" | "@team" | "@public";
+    /** The rung that answered (`'@org'` is the org rung, plan 3.2) */
+    resolved: "@spec" | "@me" | "@team" | "@org" | "@public";
     /** On `@team`: the answering team */
     team?: string;
     /** The artifact version (absent on `@spec`) */
@@ -1387,8 +1393,8 @@ export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]
 export interface PipeInterfaces {
     /** The pipe address (`developerId.pipelineId`). */
     address: string;
-    /** The rung that answers you: `spec` (your own live control, no publication), `me`, `team` or `public`. */
-    rung: "spec" | "me" | "team" | "public";
+    /** The rung that answers you: `spec` (your own live control, no publication), `me`, `team`, `org` or `public`. */
+    rung: "spec" | "me" | "team" | "org" | "public";
     /** The registry version that publication points at; null when your own `spec` control answered (it has none). */
     version: number | null;
     /** The answering team on the `team` rung. */
@@ -1631,6 +1637,14 @@ export interface LogStreamRef {
      * teamId is set (a team scope is always the deploy continuum).
      */
     runKind?: LogRunKind;
+    /**
+     * The run's owner as its task row carried it (`=user/<uid>`,
+     * `=team/<tid>`, `=org/<oid>`), passed back unchanged: the tree the
+     * run's log lives in, whatever team it was billed to. Wins over teamId.
+     */
+    owner?: string;
+    /** The pinned version of a pinned run (its stream is its own); omitted = the published version's. */
+    version?: number;
 }
 /** One chapter (track) — a run inside the continuum. */
 export interface LogChapter {
@@ -1678,8 +1692,15 @@ export interface LogStreamEntry extends LogChaptersResult {
     teamId: string;
     teamName: string;
     runKind: LogRunKind;
-    /** Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind. */
+    /**
+     * Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind.
+     * An org-owned stream (the org rung, C.35) arrives as 'org', which this union cannot name:
+     * the shell contract re-exports it and is append-only, so the union stays as frozen. Read
+     * `owner` (`=org/<oid>`) to tell an org stream.
+     */
     ownerKind: "user" | "team";
+    /** The owner string to pass back as `LogStreamRef.owner`. */
+    owner: string;
 }
 /** Response of `client.log.streams()`; never-logged scopes are absent. */
 export interface LogStreamsResult {
@@ -2048,6 +2069,12 @@ export interface OrgInfo {
      * Each entry includes team-scoped permissions.
      */
     teams: TeamInfo[];
+    /**
+     * The org rung's audience as the server composes it (`=org/<oid>`): the
+     * target to pass back unchanged to publish to the organisation (org
+     * admins only). Never parse it.
+     */
+    audience?: string;
     /**
      * Id of the organisation's default development team — the team invites
      * pre-select for new members. Null/absent when the organisation has none.
@@ -6544,7 +6571,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param registryVersion - Registry version number from the rail
      * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
      *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-     *                 and '@user' are refused; '@org' is refused until the org rung serves
+     *                 and '@user' are refused; '@org' (org admins) is the org rung
      * @returns The binding row ({audience, version, state, artifactState, ...})
      */
     publishApp(appId: string, registryVersion: number, target: string): Promise<{
@@ -6558,7 +6585,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param appId - App id
      * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
      *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-     *                 and '@user' are refused; '@org' is refused until the org rung serves
+     *                 and '@user' are refused; '@org' (org admins) is the org rung
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
@@ -6573,7 +6600,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param appId - App id
      * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
      *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-     *                 and '@user' are refused; '@org' is refused until the org rung serves
+     *                 and '@user' are refused; '@org' (org admins) is the org rung
      * @returns The binding row (state 'disabled')
      */
     disableAppPublish(appId: string, target: string): Promise<{
@@ -7022,6 +7049,8 @@ export interface DeployTeamRef {
  *   exists even with zero team memberships.
  * - Each team of the roster is addressed by the `audience` the server
  *   stamped on it; a team without one is not addressable and is skipped.
+ * - The org rung follows the teams, addressed by the organisation's
+ *   `audience`; only org admins (and sys.admin) control it.
  * - org.admin (and sys.admin) implies the FULL team permission set — the
  *   server resolver's documented expansion; per-team rows only carry
  *   explicit task.* grants for regular members.
