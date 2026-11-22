@@ -57,7 +57,7 @@ def warn_if_signing_key_is_ephemeral() -> None:
         return
     raw = (os.environ.get('RR_STORE_URL') or '').strip()
     if raw:
-        # Deferred: ai.account.store imports this package's siblings at load time.
+        # Deferred, like this module's other ai.account imports.
         from ai.account.store import Store
 
         url = Store._expand_url_path(raw)

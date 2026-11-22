@@ -18,6 +18,7 @@
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
 
 """
 The engine warns at start when /task/fetch URLs are signed with a per-process key.
@@ -39,7 +40,7 @@ def warnings_seen(monkeypatch):
     """Record warning() calls and start each case with a clean environment."""
     seen = []
     monkeypatch.setattr(fetch, 'warning', seen.append)
-    for name in ('RR_SIGNING_KEY', 'RR_STORE_URL', 'STORE_BACKEND', 'UNSET_VAR'):
+    for name in ('RR_SIGNING_KEY', 'RR_STORE_URL', 'STORE_URL', 'STORE_BACKEND', 'UNSET_VAR'):
         monkeypatch.delenv(name, raising=False)
     return seen
 
@@ -69,6 +70,14 @@ def test_warns_when_store_is_filesystem_or_unknown(monkeypatch, warnings_seen, s
     assert 'RR_SIGNING_KEY' in warnings_seen[0]
 
 
+def test_warns_when_only_legacy_store_url_is_set(monkeypatch, warnings_seen):
+    monkeypatch.setenv('STORE_URL', 's3://b')
+
+    fetch.warn_if_signing_key_is_ephemeral()
+
+    assert len(warnings_seen) == 1
+
+
 @pytest.mark.parametrize(
     'store_url, backend',
     [
@@ -77,6 +86,7 @@ def test_warns_when_store_is_filesystem_or_unknown(monkeypatch, warnings_seen, s
         ('azure://c/p', None),
         ('S3://b', None),
         ('${STORE_BACKEND}://b', 's3'),
+        ('%STORE_BACKEND%://b', 's3'),
     ],
 )
 def test_silent_for_presigning_backends(monkeypatch, warnings_seen, store_url, backend):
