@@ -150,6 +150,26 @@ use `begin` followed by `execute` with its session ID when several statements
 must share a transaction. Enable it only for trusted callers that need writes
 or dialect-specific SQL; use `get_data` for ordinary read-only retrieval.
 
+### Connection resilience
+
+All of these are optional node config keys.
+
+- `pool_pre_ping`: the pool checks a pooled connection before handing it out and
+  replaces one the server closed, so the first statement after a pooler restart
+  or a failover does not fail on a dead connection.
+- `connect_timeout` (seconds, default 5, at most 60): bounds the TCP connect and
+  each handshake read and write separately, so a slow handshake can take several
+  multiples of it. It is lifted once the connection is open, and takes precedence
+  over one written in the connection URL.
+- `connect_retries` (default 3, at most 10) and `connect_retry_budget` (seconds,
+  default 10, at most 60): an attempt that fails because the server is unreachable
+  or not ready is retried with exponential backoff and jitter within these limits.
+  A bad role, password or database is reported at once.
+- Application SQL is never retried: only the opening of a connection is, so a
+  statement that was sent is never sent again.
+- The `pool_pre_ping` health check has no watchdog on this node: the ping watchdog
+  runs on PostgreSQL on POSIX only.
+
 ## Limitations
 
 This node declares the `noremote` capability, so it cannot run in a remote

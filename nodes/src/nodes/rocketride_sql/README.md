@@ -209,9 +209,13 @@ replaces one the server has closed, so the first statement after a pooler restar
 or a failover does not fail on a dead connection. What is bounded in time, and
 what is not:
 
-- **Opening a connection**, handshake and authentication included: each attempt
-  gives up after `connect_timeout` seconds per host or IP address (default 5, at most 60;
-  a hostname that resolves to several addresses can take that long for each one). An attempt that
+- **Opening a connection**: each attempt gives up after `connect_timeout` seconds
+  (default 5, at most 60). On PostgreSQL that bounds the whole attempt, handshake
+  and authentication included, per host or IP address (a hostname that resolves to
+  several addresses can take that long for each one), and libpq treats a value
+  below 2 as 2 seconds. On MySQL and MariaDB it bounds the TCP connect and each
+  handshake read and write separately, so a slow handshake can take several
+  multiples of it. An attempt that
   fails because the server is unreachable or not ready (connection refused, timed
   out, the pooler at its client limit or unable to reach its backend, a user,
   role, database or server at its connection limit, the database starting up) is

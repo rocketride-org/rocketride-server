@@ -131,6 +131,28 @@ Off by default — leave it off unless a trusted application explicitly needs to
 issue SQL directly, because enabled callers bypass the LLM translation, the
 SELECT-only check and the read-only transaction.
 
+### Connection resilience
+
+All of these are optional node config keys.
+
+- `pool_pre_ping`: the pool checks a pooled connection before handing it out and
+  replaces one the server closed, so the first statement after a pooler restart
+  or a failover does not fail on a dead connection.
+- `connect_timeout` (seconds, default 5, at most 60): bounds one connection
+  attempt, handshake and authentication included, per host or IP address. libpq
+  treats a value below 2 as 2 seconds. It takes precedence over one written in the
+  connection URL.
+- `connect_retries` (default 3, at most 10) and `connect_retry_budget` (seconds,
+  default 10, at most 60): an attempt that fails because the server is unreachable
+  or not ready is retried with exponential backoff and jitter within these limits.
+  A bad role, password or database is reported at once.
+- Application SQL is never retried: only the opening of a connection is, so a
+  statement that was sent is never sent again.
+- The ping watchdog (`ping_timeout`, default 5 s) bounds the `pool_pre_ping`
+  health check, including a pooler that keeps acknowledging but has stopped
+  answering. It runs on PostgreSQL on POSIX only; on Windows the ping is not
+  bounded.
+
 ## Limitations
 
 Declared `noremote`: this node runs on the local engine host only and is not
