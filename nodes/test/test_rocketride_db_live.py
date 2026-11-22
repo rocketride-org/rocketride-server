@@ -519,13 +519,12 @@ class TestRocketrideSqlE2E:
         self, rr_env, monkeypatch, sql_table
     ):
         glb, inst = self._begin(monkeypatch, {'table': sql_table})
-        lane_error = sys.modules['ai.common.database.db_instance_base'].DatabaseLaneError
         try:
             self._refuse_connections(glb)
             sink = self._lanes(inst, ('text', 'answers'))
             inst._buildSQLQuery = lambda question_text: {'isValid': True, 'query': f'SELECT * FROM {sql_table}'}
             question = types.SimpleNamespace(questions=[types.SimpleNamespace(text='what is in stock?')])
-            with pytest.raises(lane_error):
+            with pytest.raises(self._unavailable_error()):
                 inst.writeQuestions(question)
             assert sink.text == [] and sink.answers == []
         finally:
