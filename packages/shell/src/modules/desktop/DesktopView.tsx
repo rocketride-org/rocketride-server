@@ -20,7 +20,8 @@ import { useSubscriptions } from '../../hooks/useSubscriptions';
 import { DesktopAppCard } from './DesktopAppCard';
 import { RevealText } from './RevealText';
 import { useStaggerReveal } from './useStaggerReveal';
-import { createShellDesktopAdapter, defaultLaunch } from './adapter';
+import { createShellDesktopAdapter, defaultLaunch, launchAgent } from './adapter';
+import { isAgent } from './launch';
 import { getGreeting } from './greeting';
 import { DESKTOP_QUOTES, currentQuoteIndex } from './quotes';
 import type { DesktopViewProps } from './types';
@@ -134,6 +135,17 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 	const adapter = useMemo(() => adapterProp ?? createShellDesktopAdapter(), [adapterProp]);
 	const launch = onLaunch ?? defaultLaunch;
 
+	// An agent tile (a published pipeline, plan 9.1) opens its host app bound
+	// to its address (launchAgent; an app id alone cannot carry the binding).
+	// It keeps remove and unsubscribe — both take its address — but never the
+	// version rail or session overrides: those repoint a Module Federation
+	// container, and an agent's module is its HOST app's.
+	const agentAdapter = useMemo(() => ({
+		removeApp: adapter.removeApp?.bind(adapter),
+		unsubscribeApp: adapter.unsubscribeApp?.bind(adapter),
+		getStatus: adapter.getStatus?.bind(adapter),
+	}), [adapter]);
+
 	// Subscription status — the shell's live view of identity.apps; an
 	// adapter override wins when the host supplies one.
 	const { getStatus } = useSubscriptions();
@@ -203,8 +215,8 @@ export const DesktopView: React.FC<DesktopViewProps> = ({
 						<DesktopAppCard
 							key={app.id}
 							app={app}
-							onLaunch={launch}
-							adapter={adapter}
+							onLaunch={isAgent(app) ? () => launchAgent(app) : launch}
+							adapter={isAgent(app) ? agentAdapter : adapter}
 							status={statusOf(app.id)}
 							allowRemove={allowRemove}
 							resolveIcon={resolveIcon}

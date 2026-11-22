@@ -64,6 +64,8 @@ export interface ServerAppEntry {
 	public?: boolean;
 	/** Resolved app version (semver) — built-in package version, marketplace active version, or deployed pin. */
 	version?: string;
+	/** `'pipe'` on an agent entry (a published pipeline): a launcher of its host app, never a remote. */
+	kind?: string;
 	// (entry / dev / devEntries are RETIRED: the server carries no dev rows —
 	// dev previews are LOCAL-FIRST, registered client-side in the preview
 	// page. Published versions resolve by registryVersion alone.)
@@ -754,10 +756,16 @@ export function resetRemote(moduleId: string): void {
  * (push or URL convention) owns its container via devRemoteModules, which
  * this resolution path never touches.
  *
+ * An agent entry (`kind: 'pipe'`, plan 9.1) never resolves: it is a
+ * launcher of its host app, whose own entry carries the load URL, and its
+ * `moduleId` IS the host's — registering it would repoint the host's
+ * container at the pipe's address.
+ *
  * @param a - The server app entry.
- * @returns The load URL, or null when nothing resolves (no built UI yet).
+ * @returns The load URL, or null when nothing resolves (no built UI yet, or an agent).
  */
 export function resolveServerEntry(a: ServerAppEntry): string | null {
+	if (a.kind === 'pipe') return null;
 	const o = getAppVersionOverrides()[a.id];
 	if (o) return versionedEntryUrl(a.id, o.version);
 	return typeof a.registryVersion === 'number' ? versionedEntryUrl(a.id, a.registryVersion) : null;

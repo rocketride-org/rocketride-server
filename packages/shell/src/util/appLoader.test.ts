@@ -28,7 +28,7 @@
 import assert from 'node:assert/strict';
 import test, { afterEach, mock } from 'node:test';
 import { init } from '@module-federation/runtime';
-import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, setDescriptorInvalidator } from './appLoader';
+import { devPreviewHoldRemainingMs, isDevPreviewPending, isRemoteLoaded, isRemotePending, loadAppModule, registerAndMapApps, registerDevRemote, registerLocalApp, resolveServerEntry, setDescriptorInvalidator } from './appLoader';
 import { resetDevGateForTests } from './devGate';
 import type { AppDescriptor } from '../components/workspace/types';
 
@@ -132,6 +132,16 @@ test('a later registration batch (the apps a sign-in adds) keeps the earlier bat
 	registerAndMapApps([{ id: 'org.gated', moduleId: 'gated_mod', name: 'Gated', registryVersion: 1 }]);
 	assert.deepEqual(await loadAppModule('org.probe', 'telemetry'), { default: 'probe_mod/telemetry' }, 'the probe catalog app still resolves');
 	assert.deepEqual(await loadAppModule('org.gated', 'telemetry'), { default: 'gated_mod/telemetry' });
+});
+
+test('an agent entry is never a remote: it resolves to no load URL and registers nothing over its host', () => {
+	stubPage('', false);
+	const agent = { id: 'acme.supportBot', moduleId: 'rocketride_playground', name: 'Support Bot', kind: 'pipe', registryVersion: 4 };
+	assert.equal(resolveServerEntry(agent), null);
+	assert.deepEqual(registerAndMapApps([agent]), []);
+	// The app beside it resolves as before
+	const app = { id: 'rocketride.chat', moduleId: 'rocketride_chat', name: 'Chat', registryVersion: 4 };
+	assert.equal(resolveServerEntry(app), '/apps/rocketride.chat/v4/remoteEntry.js');
 });
 
 test('a module load of an unknown app resolves null and marks nothing', async () => {

@@ -272,8 +272,17 @@ export interface ShellConnectionEventMap {
 
 	// ── UI coordination ──────────────────────────────────────────────────
 
-	/** Switch the active app without going through the workspace dispatch. */
-	'shell:switchApp': { appId: string };
+	/**
+	 * Switch the active app without going through the workspace dispatch.
+	 *
+	 * Optional `params` are query parameters the app reads from its location
+	 * at mount: the shell writes them into the URL before it mounts the app
+	 * (an agent tile opens its host as `{ appId: hostAppId, params: { pipe } }`,
+	 * landing on `?pipe=<address>`). Keys a previous switch wrote are dropped,
+	 * so one launch's binding never reaches the next app. An app already on
+	 * screen is not remounted: the URL changes, the app does not.
+	 */
+	'shell:switchApp': { appId: string; params?: Record<string, string> };
 
 	/**
 	 * User clicked "Subscribe" on a paid app in the marketplace.

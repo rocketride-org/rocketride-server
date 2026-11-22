@@ -527,7 +527,7 @@ useEffect(() => {
 | `shell:logout` | `{}` | Shell → Apps | User logged out |
 | `shell:loginRequest` | `{ appId?: string; register?: boolean; auto?: boolean; signupProperties?: SignupProperties }` | Apps → Shell | Request OAuth login (optionally targeting an app); `register` marks a sign-up intent; `auto` is set only by the shell's own auth gate, apps leave it unset |
 | `shell:logoutRequest` | `{}` | Apps → Shell | Request logout |
-| `shell:switchApp` | `{ appId: string }` | Apps → Shell | Switch the active app |
+| `shell:switchApp` | `{ appId: string; params?: Record<string, string> }` | Apps → Shell | Switch the active app; `params` are written into the URL before the app mounts (an agent tile opens its host app as `{ appId: hostAppId, params: { pipe } }`) |
 | `shell:subscribe` | `{ app: AppManifestEntry, plan?: CheckoutPlan }` | Apps → Shell | Open subscription checkout for an app; optional `plan` preselects a tier and skips the picker (straight to payment) |
 | `shell:myApps` | `{}` | Apps → Shell | Navigate to My Apps |
 | `shell:accountUpdate` | `ConnectResult` | Server → Shell | Server-pushed account/subscription change |
@@ -886,7 +886,7 @@ Server interactions (version rails, session overrides, desktop remove, unsubscri
 
 | Prop | Purpose |
 |---|---|
-| `onLaunch` | Replace the default launch (`shell:switchApp`) |
+| `onLaunch` | Replace the default launch of an app tile (`shell:switchApp`); an agent tile always opens its host app bound to its pipe |
 | `greetingName` / `greetingOverride` | Personalize or pin the greeting |
 | `showQuote` | Hide the rotating quote column (default shown) |
 | `allowRemove` | Disable the hover X + remove/unsubscribe popover |

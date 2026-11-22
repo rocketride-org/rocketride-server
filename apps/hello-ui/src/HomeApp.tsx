@@ -380,7 +380,7 @@ const HomeApp: React.FC<ShellAppProps> = ({ identity }) => {
 						apps={apps}
 						greetingOverride={!identity ? 'Welcome to RocketRide' : undefined}
 						showQuote={!!identity}
-						emptyMessage={identity ? 'No apps on your desktop yet. Add some from the catalog below.' : undefined}
+						emptyMessage={identity ? 'No apps or agents on your desktop yet. Add some from the catalog below.' : undefined}
 					/>
 				) : (
 					// Degraded fallback for a pre-v7 host: a minimal name+launch

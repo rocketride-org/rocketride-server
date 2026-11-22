@@ -977,6 +977,31 @@ class TestNameRow:
         assert [v['version'] for v in await backend.versions('org-1', 'acme.proj-1')] == [1]
 
     @pytest.mark.asyncio
+    async def test_the_kind_lookup_reads_each_names_row(self, backend):
+        """A pipe row is a pipe, an app row an app; a name with no row, or no valid name, is absent (plan 9.1, G2)."""
+        await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+
+        kinds = await backend.kinds_of('org-1', ['acme.proj-1', 'acme.brandy', 'acme.unknown', '../x', 'acme.proj-1'])
+
+        assert kinds == {'acme.proj-1': 'pipe', 'acme.brandy': 'app'}
+        # Another org's tree holds neither name
+        assert await backend.kinds_of('org-2', ['acme.proj-1']) == {}
+
+    @pytest.mark.asyncio
+    async def test_the_kind_lookup_reads_a_legacy_meta_by_its_versions(self, backend, store):
+        """A pre-C.17 meta without a top-level kind answers its newest version's kind, as publish reads it."""
+        import json
+
+        await backend.publish('org-1', 'acme.brandy', APP, ACTOR)
+        path = backend._meta_path('org-1', 'acme.brandy')
+        meta = json.loads(await store.read_file(path))
+        del meta['kind']
+        await store.write_file(path, json.dumps(meta))
+
+        assert await backend.kinds_of('org-1', ['acme.brandy']) == {'acme.brandy': 'app'}
+
+    @pytest.mark.asyncio
     async def test_versions_come_from_the_name_row(self, backend, store):
         """The meta IS the name row: its nextVersion hands out the numbers and is never decremented."""
         import json
@@ -1122,6 +1147,9 @@ class TestNameRow:
             await backend.publish_of_app('org-1', 'pipe', 'acme.proj-1')
         with pytest.raises(StorageError, match='storage unavailable'):
             await backend.get('org-1', '=team/team-1', 'acme.proj-1')
+        # A desktop never reads a pipe as an app because the store was down
+        with pytest.raises(StorageError, match='storage unavailable'):
+            await backend.kinds_of('org-1', ['acme.proj-1'])
         # A publish never treats a broken read as a fresh project
         with pytest.raises(StorageError, match='storage unavailable'):
             await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)

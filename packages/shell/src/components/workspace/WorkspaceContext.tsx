@@ -40,6 +40,7 @@ import { ConnectionManager } from '../../connection/connection';
 import { HOME_APP_ID, HELLO_APP_ID } from '../../constants';
 import { resetRemote, setDescriptorInvalidator, isDevPreviewPage, previewLockedAppId, waitForDevRemote, isDevRemote, fallbackSkippedRemote, devPreviewHoldRemainingMs, DEV_REMOTE_TIMEOUT_MS } from '../../util/appLoader';
 import { getAppVersionOverride, clearAppVersionOverride } from '../../util/versionOverride';
+import { LAUNCH_PARAMS_STATE_KEY, launchKeysOf, launchSearch } from '../../util/launchParams';
 import { sessionScopedStore } from '../../util/devGate';
 import { SHELL_API_VERSION } from '../../apiver';
 
@@ -85,16 +86,24 @@ let _suppressPush = false;
  * Pushes a browser history entry for the given app so that the
  * back/forward buttons navigate between apps.
  *
+ * The entry's URL carries the switch's launch parameters (`shell:switchApp`
+ * `params`, e.g. an agent tile's `?pipe=<address>`), with the keys the
+ * previous switch wrote dropped; the entry's state records the keys written
+ * (see util/launchParams). Called BEFORE the app commits, so the app reads
+ * its parameters from the location when it mounts.
+ *
  * @param appId - The app being navigated to.
+ * @param params - The switch's launch parameters, if any.
  */
-function pushAppHistory(appId: string): void {
+function pushAppHistory(appId: string, params?: Record<string, string>): void {
 	if (_suppressPush) return;
 	try {
+		const { search, keys } = launchSearch(window.location.search, launchKeysOf(window.history.state), params);
 		// `history.state` is SHARED with the home-ui remote, which keeps its own
 		// navigation snapshot under an `rrHome` key. Always MERGE — replacing the
 		// state object wholesale drops `rrHome` and desyncs the URL from the page
 		// the remote renders on back/forward.
-		window.history.pushState({ ...(window.history.state ?? {}), appId }, '', window.location.pathname + window.location.search);
+		window.history.pushState({ ...(window.history.state ?? {}), appId, [LAUNCH_PARAMS_STATE_KEY]: keys }, '', window.location.pathname + search);
 	} catch { /* sandboxed iframe or similar */ }
 }
 
@@ -612,7 +621,7 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 	useEffect(() => {
 		/** Allows non-React code to switch the active app without having
 		 *  access to WorkspaceContext dispatch. */
-		return ConnectionManager.getInstance().on('shell:switchApp', async ({ appId }) => {
+		return ConnectionManager.getInstance().on('shell:switchApp', async ({ appId, params }) => {
 			// Claim a sequence number FIRST: even an instant (already-loaded)
 			// switch must invalidate any older in-flight load-before-switch.
 			const mySeq = ++switchSeqRef.current;
@@ -626,12 +635,17 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			}
 			const resolved = known ? target : defaultAppId;
 			const entry = apps.find((a) => a.id === resolved);
+			// The launch parameters belong to the app they were sent for: a
+			// switch that fell back to the default app carries none.
+			const launchParams = resolved === target ? params : undefined;
 
-			// Already loaded → instant switch, exactly as before.
+			// Already loaded → instant switch. The history entry (and with it
+			// the launch parameters in the URL) lands BEFORE the app commits,
+			// so the app reads its parameters when it mounts.
 			if (loadedAppsRef.current[resolved]) {
+				pushAppHistory(resolved, launchParams);
 				switchApp(resolved);
 				persistActiveApp(resolved);
-				pushAppHistory(resolved);
 				return;
 			}
 
@@ -650,9 +664,9 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 			if (mySeq !== switchSeqRef.current) return;
 
 			if (ok) {
+				pushAppHistory(resolved, launchParams);
 				switchApp(resolved);
 				persistActiveApp(resolved);
-				pushAppHistory(resolved);
 			} else {
 				// Stay on the current app; surface the failure as a modal over it.
 				setLoadFailure({ appId: resolved, name: entry?.name ?? resolved });
@@ -677,6 +691,11 @@ export const WorkspaceProvider: React.FC<IWorkspaceProviderProps> = ({ apps, wor
 		const onPopState = (e: PopStateEvent) => {
 			const appId = e.state?.appId as string | undefined;
 			if (!appId) return;
+
+			// Back (or Forward) supersedes a launch that is still loading: its
+			// sequence goes stale, so the load's completion commits nothing and
+			// the user stays on the entry they navigated to.
+			switchSeqRef.current++;
 
 			// Suppress pushState — we're restoring, not navigating forward
 			_suppressPush = true;

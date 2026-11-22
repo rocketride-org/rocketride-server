@@ -382,3 +382,275 @@ async def test_a_store_search_respects_a_keys_endpoints_scope():
     entries = await pipe_deploy_mod.search_public_pipes(account, _caller(endpoints=['zeta.docB.chat']), 'doc')
 
     assert [e['pipe'] for e in entries] == ['zeta.docB']
+
+
+# ==== The Catalog and the desktop (plan 9.1, Step 6b.4) ========================
+
+
+def _listed(version, name='Support Bot', **manifest):
+    """A registry entry whose version was deployed with a store block (listed)."""
+    return {
+        'version': version,
+        'metadata': {'manifest': {'name': name, 'mode': 'free', 'categories': ['support'], **manifest}},
+    }
+
+
+def _unlisted(version):
+    """A registry entry deployed as a plain dict: the backends' name-only manifest."""
+    return {'version': version, 'metadata': {'manifest': {'name': 'Plain'}}}
+
+
+def test_the_host_app_is_one_named_constant():
+    """Every agent tile opens rocketride.playground (G2): one constant, never chosen per pipe."""
+    from ai.constants import CONST_PIPE_HOST_APP_ID
+
+    assert CONST_PIPE_HOST_APP_ID == 'rocketride.playground'
+    assert pipe_deploy_mod.CONST_PIPE_HOST_APP_ID is CONST_PIPE_HOST_APP_ID
+
+
+def test_the_kind_lookup_a_pipe_row_is_a_pipe_an_app_row_an_app_an_unknown_name_an_app():
+    """The desktop's kinds are the name rows' (G2): only a 'pipe' row makes an entry a pipe."""
+    kinds = {'acme.supportBot': 'pipe', 'rocketride.chat': 'app', 'acme.someNode': 'node'}
+    assert pipe_deploy_mod.desktop_kind(kinds, 'acme.supportBot') == 'pipe'
+    assert pipe_deploy_mod.desktop_kind(kinds, 'rocketride.chat') == 'app'
+    assert pipe_deploy_mod.desktop_kind(kinds, 'acme.unknown') == 'app'
+    assert pipe_deploy_mod.desktop_kind(kinds, 'acme.someNode') == 'app'
+
+
+def test_a_catalog_entry_is_the_catalog_row_with_its_launcher():
+    """kind, address and host ride the row; the registry number is dropped (no semver, no MF remote)."""
+    entry = pipe_deploy_mod.pipe_catalog_entry('acme.supportBot', _listed(4, icon='icon.svg'), 'me')
+
+    assert entry == {
+        'id': 'acme.supportBot',
+        'name': 'Support Bot',
+        'publisher': 'acme',
+        'description': '',
+        'defaultSource': '',
+        'tagline': '',
+        'categories': ['support'],
+        'tags': [],
+        'links': {},
+        'mode': 'free',
+        'icon': '/pipelines/acme.supportBot/v4/icon.svg',
+        'kind': 'pipe',
+        'pipe': 'acme.supportBot',
+        'hostAppId': 'rocketride.playground',
+        'moduleId': 'rocketride_playground',
+        'rung': 'personal',
+        'public': False,
+        'appStatus': 'free',
+        'onDesktop': False,
+    }
+    assert 'registryVersion' not in entry and 'version' not in entry
+    public = pipe_deploy_mod.pipe_catalog_entry('acme.supportBot', _listed(4), 'public')
+    assert (public['rung'], public['public']) == ('public', True)
+
+
+def test_an_unlisted_or_missing_version_is_no_catalog_entry():
+    assert pipe_deploy_mod.pipe_catalog_entry('acme.supportBot', _unlisted(4), 'team') is None
+    assert pipe_deploy_mod.pipe_catalog_entry('acme.supportBot', None, 'team') is None
+
+
+def _pin(org='org-1', name='acme.supportBot', version=4, rung='team'):
+    """A serving pin as resolve_pins answers it."""
+    return SimpleNamespace(
+        rung=rung,
+        version=version,
+        deployment=SimpleNamespace(org_id=org, team_id='=team/team-b', project_id=name),
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_reachable_pipe_is_its_answering_versions_entry(monkeypatch):
+    """The one resolver picks the rung and version; that version's listing is the entry."""
+    resolve = AsyncMock(return_value=SimpleNamespace(first=_pin(org='org-9', version=6, rung='public')))
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', resolve)
+    account = AsyncMock()
+    account.deployments_versions = AsyncMock(return_value=[_listed(7), _listed(6, name='Six')])
+    caller = _caller()
+
+    entry = await pipe_deploy_mod.reachable_pipe_entry(account, caller, 'zeta.supportBot')
+
+    resolve.assert_awaited_once_with('pipe', caller, 'zeta.supportBot')
+    account.deployments_versions.assert_awaited_once_with('org-9', 'zeta.supportBot')
+    assert (entry['id'], entry['name'], entry['rung'], entry['hostAppId']) == (
+        'zeta.supportBot',
+        'Six',
+        'public',
+        'rocketride.playground',
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_unreachable_pipe_is_nothing_and_a_failing_store_raises(monkeypatch):
+    """No pin, an unlisted version, a source address, a scope refusal: None. A store failure raises."""
+    account = AsyncMock()
+    account.deployments_versions = AsyncMock(return_value=[_unlisted(4)])
+    caller = _caller()
+
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(return_value=SimpleNamespace(first=None)))
+    assert await pipe_deploy_mod.reachable_pipe_entry(account, caller, 'acme.supportBot') is None
+
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(return_value=SimpleNamespace(first=_pin())))
+    assert await pipe_deploy_mod.reachable_pipe_entry(account, caller, 'acme.supportBot') is None
+
+    for bad in ('acme.supportBot.chat', 'acme', 'not a name'):
+        assert await pipe_deploy_mod.reachable_pipe_entry(account, caller, bad) is None
+
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(side_effect=PermissionError('scope')))
+    assert await pipe_deploy_mod.reachable_pipe_entry(account, caller, 'acme.supportBot') is None
+
+    monkeypatch.setattr(pipe_deploy_mod, 'resolve_pins', AsyncMock(side_effect=RuntimeError('db down')))
+    with pytest.raises(RuntimeError, match='db down'):
+        await pipe_deploy_mod.reachable_pipe_entry(account, caller, 'acme.supportBot')
+
+
+def _catalog_account(own_rows, public_rows, versions):
+    """An account whose publish table answers the own slots and the store, and whose registry holds ``versions``."""
+    account = AsyncMock()
+
+    async def publish_list(org_id, kind, audiences):
+        return list(public_rows) if audiences == [PUBLIC] else list(own_rows)
+
+    async def deployments_versions(org_id, name):
+        found = versions.get((org_id, name))
+        if isinstance(found, Exception):
+            raise found
+        return list(found or [])
+
+    account.publish_list = AsyncMock(side_effect=publish_list)
+    account.deployments_versions = AsyncMock(side_effect=deployments_versions)
+    return account
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_lists_own_rungs_then_the_store_each_pipe_once_at_its_answering_rung():
+    """@me, then @team in team order, then @public of every org; a pipe answered by a nearer rung is not listed again."""
+    account = _catalog_account(
+        own_rows=[_pub('acme.teamPipe', TEAM_A, version=2), _pub('acme.mine', ME, version=3)],
+        public_rows=[
+            _pub('acme.mine', PUBLIC, version=1, artifact_state='ready'),
+            _pub('zeta.storePipe', PUBLIC, org='org-9', version=5, artifact_state='ready'),
+            _pub('zeta.inReview', PUBLIC, org='org-9', version=1, artifact_state='submit'),
+        ],
+        versions={
+            ('org-1', 'acme.mine'): [_listed(3, name='Mine'), _listed(1, name='Mine v1')],
+            ('org-1', 'acme.teamPipe'): [_listed(2, name='Team pipe')],
+            ('org-9', 'zeta.storePipe'): [_listed(5, name='Store pipe')],
+            ('org-9', 'zeta.inReview'): [_listed(1, name='In review')],
+        },
+    )
+
+    entries = await pipe_deploy_mod.catalog_pipe_entries(account, _caller())
+
+    assert [(e['id'], e['name'], e['rung'], e['public']) for e in entries] == [
+        ('acme.mine', 'Mine', 'personal', False),
+        ('acme.teamPipe', 'Team pipe', 'team', False),
+        ('zeta.storePipe', 'Store pipe', 'public', True),
+    ]
+    assert all(
+        e['kind'] == 'pipe' and e['pipe'] == e['id'] and e['hostAppId'] == 'rocketride.playground' for e in entries
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_never_shows_an_unlisted_version_and_skips_an_unreadable_one():
+    """A plain dict deploy is no listing; one registry read that fails drops that pipe alone."""
+    account = _catalog_account(
+        own_rows=[_pub('acme.plain', TEAM_A)],
+        public_rows=[
+            _pub('zeta.broken', PUBLIC, org='org-9', artifact_state='ready'),
+            _pub('zeta.fine', PUBLIC, org='org-9', artifact_state='ready'),
+        ],
+        versions={
+            ('org-1', 'acme.plain'): [_unlisted(1)],
+            ('org-9', 'zeta.broken'): RuntimeError('registry down'),
+            ('org-9', 'zeta.fine'): [_listed(1, name='Fine')],
+        },
+    )
+
+    entries = await pipe_deploy_mod.catalog_pipe_entries(account, _caller())
+
+    assert [e['id'] for e in entries] == ['zeta.fine']
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_keeps_a_keys_scope_and_gives_a_stray_duplicate_to_the_lowest_org():
+    """A scoped key lists only what it may call; two orgs' public rows of one name: the lowest org id answers."""
+    account = _catalog_account(
+        own_rows=[],
+        public_rows=[
+            _pub('zeta.dup', PUBLIC, org='org-9', version=2, artifact_state='ready'),
+            _pub('zeta.dup', PUBLIC, org='org-3', version=1, artifact_state='ready'),
+            _pub('zeta.hidden', PUBLIC, org='org-3', artifact_state='ready'),
+        ],
+        versions={
+            ('org-3', 'zeta.dup'): [_listed(1, name='From org 3')],
+            ('org-9', 'zeta.dup'): [_listed(2, name='From org 9')],
+            ('org-3', 'zeta.hidden'): [_listed(1)],
+        },
+    )
+
+    entries = await pipe_deploy_mod.catalog_pipe_entries(
+        account, _caller(endpoints=['zeta.dup.*'], teams=('team-a',), order=('team-a',))
+    )
+
+    assert [(e['id'], e['name']) for e in entries] == [('zeta.dup', 'From org 3')]
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_refuses_an_anonymous_caller_and_raises_a_failing_publish_table():
+    with pytest.raises(PermissionError):
+        await pipe_deploy_mod.catalog_pipe_entries(AsyncMock(), None)
+    account = AsyncMock()
+    account.publish_list = AsyncMock(side_effect=RuntimeError('db down'))
+    with pytest.raises(RuntimeError, match='db down'):
+        await pipe_deploy_mod.catalog_pipe_entries(account, _caller())
+
+
+@pytest.mark.asyncio
+async def test_desktop_tiles_are_the_pipe_names_the_caller_still_reaches(monkeypatch):
+    """One kind lookup; app names and unknown names are skipped, an unreachable pipe has no tile, order is kept."""
+    account = AsyncMock()
+    account.deployments_kinds = AsyncMock(
+        return_value={
+            'acme.b': 'pipe',
+            'rocketride.chat': 'app',
+            'acme.a': 'pipe',
+            'acme.gone': 'pipe',
+            'acme.broken': 'pipe',
+        }
+    )
+
+    async def reachable(acct, info, name):
+        if name == 'acme.gone':
+            return None
+        if name == 'acme.broken':
+            raise RuntimeError('db down')
+        return {'id': name, 'kind': 'pipe', 'onDesktop': False}
+
+    monkeypatch.setattr(pipe_deploy_mod, 'reachable_pipe_entry', reachable)
+
+    tiles = await pipe_deploy_mod.desktop_pipe_tiles(
+        account,
+        _caller(),
+        ['acme.b', 'rocketride.chat', 'acme.unknown', 'acme.gone', 'acme.broken', 'acme.a', 'acme.b'],
+    )
+
+    account.deployments_kinds.assert_awaited_once_with(
+        'org-1', ['acme.b', 'rocketride.chat', 'acme.unknown', 'acme.gone', 'acme.broken', 'acme.a']
+    )
+    assert tiles == [
+        {'id': 'acme.b', 'kind': 'pipe', 'onDesktop': True},
+        {'id': 'acme.a', 'kind': 'pipe', 'onDesktop': True},
+    ]
+
+
+@pytest.mark.asyncio
+async def test_an_empty_desktop_or_a_caller_without_an_org_has_no_tiles_and_no_lookup():
+    account = AsyncMock()
+    assert await pipe_deploy_mod.desktop_pipe_tiles(account, _caller(), []) == []
+    no_org = SimpleNamespace(userId='u-1', endpoints=None, teamOrder=[], organization=None)
+    assert await pipe_deploy_mod.desktop_pipe_tiles(account, no_org, ['acme.a']) == []
+    account.deployments_kinds.assert_not_awaited()

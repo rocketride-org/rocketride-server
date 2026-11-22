@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-22T17:51:22.607Z
-// Source commit: d2a2bb9ad2c3e6367657cd4852a5d306c1a5654c
+// Generated:     2026-11-22T19:11:44.171Z
+// Source commit: 67d6b43864d16dcd016d1620233db14e8ed2aeea
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -2275,6 +2275,15 @@ interface AppManifestEntry {
     seatsUsed?: number;
     /** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
     features?: string[];
+    /** `'pipe'` on an agent entry: a published pipeline in the catalog or on the desktop. Absent on an app. */
+    kind?: "app" | "pipe";
+    /** An agent entry's address `developerId.pipeId`; `id` carries the same name. Absent on an app. */
+    pipe?: string;
+    /**
+     * The app an agent entry opens, bound to it with `?pipe=<address>`;
+     * `moduleId` is that app's module. Absent on an app.
+     */
+    hostAppId?: string;
 }
 /**
  * A Stripe pricing tier for a paid app.
@@ -7873,6 +7882,16 @@ interface AppManifestEntry$1 {
     /** Whether this app is on the user's desktop. */
     onDesktop?: boolean;
     /**
+     * `'pipe'` on an AGENT entry: a published pipeline in the catalog or on
+     * the desktop (plan 9.1). It is no app of its own: it opens `hostAppId`
+     * bound to `pipe`. Absent on an app.
+     */
+    kind?: "app" | "pipe";
+    /** An agent entry's address `developerId.pipeId` (`id` carries the same name). */
+    pipe?: string;
+    /** The app an agent entry opens with `?pipe=<address>`; `moduleId` is that app's module. */
+    hostAppId?: string;
+    /**
      * The shell-api contract version this app was built against (stamped into
      * apps.json by the registration step from shell's apiver.ts). The lowest
      * value across all registered apps is the oldest frozen version still in use,
@@ -8859,9 +8878,19 @@ interface ShellConnectionEventMap {
     };
     /** Sign-out request initiated by the UI (e.g. "Sign Out" button). */
     "shell:logoutRequest": Record<string, never>;
-    /** Switch the active app without going through the workspace dispatch. */
+    /**
+     * Switch the active app without going through the workspace dispatch.
+     *
+     * Optional `params` are query parameters the app reads from its location
+     * at mount: the shell writes them into the URL before it mounts the app
+     * (an agent tile opens its host as `{ appId: hostAppId, params: { pipe } }`,
+     * landing on `?pipe=<address>`). Keys a previous switch wrote are dropped,
+     * so one launch's binding never reaches the next app. An app already on
+     * screen is not remounted: the URL changes, the app does not.
+     */
     "shell:switchApp": {
         appId: string;
+        params?: Record<string, string>;
     };
     /**
      * User clicked "Subscribe" on a paid app in the marketplace.
@@ -15785,6 +15814,37 @@ export declare function getAppVersionOverride(appId: string): AppVersionOverride
  * @returns 'ready' when the switch can proceed in-place, else 'reload-required'.
  */
 export declare function applyAppVersionOverride(appId: string, moduleId: string, override: AppVersionOverride | null): "ready" | "reload-required";
+/** The entry facts a launch reads (an app entry, a catalog entry, a desktop tile). */
+export interface LaunchableEntry {
+    /** The app id, or the agent's address. */
+    id: string;
+    /** `'pipe'` on an agent. */
+    kind?: string;
+    /** An agent's address. */
+    pipe?: string;
+    /** The app an agent opens. */
+    hostAppId?: string;
+}
+/**
+ * Whether an entry is an agent (a published pipeline) rather than an app.
+ *
+ * @param entry - The entry.
+ * @returns True for `kind: 'pipe'`.
+ */
+export declare function isAgent(entry: Pick<LaunchableEntry, "kind">): boolean;
+/**
+ * The `shell:switchApp` request that opens an entry.
+ *
+ * An app opens by its id. An agent opens its host app with `params.pipe`
+ * set to its address, which the shell writes into the location before the
+ * host mounts. An agent entry missing either fact opens nothing better than
+ * its id (the shell warns about an unknown app), never a host bound to
+ * nothing.
+ *
+ * @param entry - The entry to open.
+ * @returns The event payload.
+ */
+export declare function switchAppRequestOf(entry: LaunchableEntry): ShellConnectionEventMap["shell:switchApp"];
 /**
  * Formatting utilities for the Server Monitor module.
  */
@@ -16026,6 +16086,16 @@ export interface DesktopApp {
     registryVersion?: number;
     /** True when the entry is a dev-overlay override (live watch build). */
     dev?: boolean;
+    /**
+     * `'pipe'` on an AGENT tile: a published pipeline (plan 9.1). The tile
+     * opens `hostAppId` bound to `pipe` (`?pipe=<address>`); `id` is the
+     * address and `moduleId` the host's module. Absent on an app.
+     */
+    kind?: "app" | "pipe";
+    /** An agent tile's address `developerId.pipeId`. */
+    pipe?: string;
+    /** The app an agent tile opens. */
+    hostAppId?: string;
 }
 /** One rotating header quote with its attribution. */
 export interface DesktopQuote {
@@ -16092,8 +16162,11 @@ export interface DesktopViewProps {
     /** Apps to show, in render order (hosts filter/sort before passing). */
     apps: DesktopApp[];
     /**
-     * Launch handler. Default: emit `shell:switchApp` on the connection
-     * manager — correct for every in-shell host.
+     * Launch handler for APP tiles. Default: emit `shell:switchApp` on the
+     * connection manager — correct for every in-shell host. An agent tile
+     * always opens its host app bound to its pipe (`shell:switchApp` with
+     * `{ appId: hostAppId, params: { pipe } }`): an app id alone cannot
+     * carry the binding.
      */
     onLaunch?: (appId: string) => void;
     /** First name for the greeting; omitted → the nameless greeting pools. */
@@ -16150,15 +16223,17 @@ export interface ICatalogPickerProps {
     /** App ids never shown (the host launcher itself, e.g. 'rocketride.hello'). */
     excludeIds?: string[];
     /**
-     * Launch handler for a tile that is already on the desktop. Default:
-     * emit `shell:switchApp` on the connection manager.
+     * Launch handler for an APP tile that is already on the desktop. Default:
+     * emit `shell:switchApp` on the connection manager. An agent tile always
+     * opens its host app bound to its address (`shell:switchApp` with
+     * `params`): an app id alone cannot carry the binding.
      */
     onLaunch?: (appId: string) => void;
     /** Called once the server accepted an add (the identity push follows). */
     onAdded?: (appId: string) => void;
     /** Heading above the grid (default 'Catalog'); an empty string hides it. */
     title?: string;
-    /** Line under the heading (default 'Add apps to your desktop.'). */
+    /** Line under the heading (default 'Add apps and agents to your desktop.'). */
     subtitle?: string;
     /** Show the search field (default true). */
     showSearch?: boolean;
@@ -16596,6 +16671,8 @@ export declare const shellApi: {
     readonly getAppVersionOverride: typeof getAppVersionOverride;
     readonly applyAppVersionOverride: typeof applyAppVersionOverride;
     readonly versionedEntryUrl: typeof versionedEntryUrl;
+    readonly isAgent: typeof isAgent;
+    readonly switchAppRequestOf: typeof switchAppRequestOf;
     readonly BxPlusSquare: IconComponent;
     readonly BxPlusSquareSolid: IconComponent;
     readonly BxLock: IconComponent;

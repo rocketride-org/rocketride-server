@@ -13,18 +13,22 @@ and the account-layer behaviour built on it.
 - Concurrency: the per-user lock keeps two adds from losing one another.
 - Seeding: the public catalog seeds from the whole reachable inventory; a
   failed registry resolution never writes a desktop.
+- Agents (Step 6b.4): the catalog lists the reachable pipes beside the apps;
+  the desktop verbs take a pipe's address, the add gated by the name's kind;
+  sign-in and the push deliver the desktop's agent tiles.
 """
 
 from __future__ import annotations
 
 import asyncio
 from typing import Any, Dict, List
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from ai.account import manifest_push
 from ai.account.base import AccountBase, InventoryUnavailableError
+from ai.account.deployment_backend import FileDeploymentBackend
 from ai.account.desktop import DESKTOP_FORMAT_VERSION, FileDesktopBackend
 from ai.account.store_providers.memory import MemoryStore
 
@@ -35,12 +39,20 @@ from ai.account.store_providers.memory import MemoryStore
 
 
 class _Account(AccountBase):
-    """AccountBase made instantiable, with a MemoryStore-backed desktop and a
-    fixed reachable inventory (two apps).
+    """AccountBase made instantiable, with a MemoryStore-backed desktop, a
+    fixed reachable inventory (two apps) and fixed name rows for the kind
+    lookup (none unless given).
     """
 
-    def __init__(self, inventory: List[Dict[str, Any]] | None = None):
+    def __init__(
+        self,
+        inventory: List[Dict[str, Any]] | None = None,
+        kinds: Dict[str, str] | None = None,
+        agents: List[Dict[str, Any]] | None = None,
+    ):
         self._desktop_backend_instance = FileDesktopBackend(MemoryStore())
+        # The catalog's agents (the pipe walk has its own suite): none unless given
+        self._agents = [dict(a) for a in (agents or [])]
         self._inventory = (
             inventory
             if inventory is not None
@@ -49,9 +61,16 @@ class _Account(AccountBase):
                 {'id': 'rocketride.sql', 'name': 'SQL', 'shells': ['oss']},
             ]
         )
+        self._kinds = dict(kinds or {})
 
     async def authenticate(self, credential: str):
         return None
+
+    async def deployments_kinds(self, org_id, project_ids):
+        return {p: self._kinds[p] for p in project_ids if p in self._kinds}
+
+    async def catalog_pipes(self, account_info):
+        return [dict(a) for a in self._agents]
 
     async def get_apps_for_user(self, user_id, organizations):
         return [dict(a) for a in self._inventory]
@@ -326,6 +345,9 @@ async def test_oss_account_push_carries_the_decorated_list(monkeypatch):
                 {'name': 'no id'},
             ]
 
+        async def desktop_pipe_tiles(self, info):
+            return [{'id': 'rocketride.supportBot', 'kind': 'pipe', 'appStatus': 'free', 'onDesktop': True}]
+
     # ``push_account`` reads the live account object off the package.
     monkeypatch.setattr('ai.account.account', _Acct())
 
@@ -351,6 +373,8 @@ async def test_oss_account_push_carries_the_decorated_list(monkeypatch):
     assert sent[0]['body']['apps'] == [
         {'id': 'rocketride.chat', 'appStatus': 'free', 'onDesktop': False},
         {'id': 'rocketride.sql', 'appStatus': 'free', 'onDesktop': True},
+        # The desktop's agents follow the apps, as authenticate() appends them
+        {'id': 'rocketride.supportBot', 'kind': 'pipe', 'appStatus': 'free', 'onDesktop': True},
     ]
 
 
@@ -503,6 +527,8 @@ def _oss_account(monkeypatch, state: Dict[str, Any]):
     monkeypatch.setattr(app_deploy, 'resolve_app_pins', pins)
     acct = Account.__new__(Account)
     acct._desktop_backend_instance = FileDesktopBackend(MemoryStore())
+    # The registry the kind lookup reads: empty, in memory
+    acct._deployments_backend = FileDeploymentBackend(MemoryStore())
     return acct
 
 
@@ -669,3 +695,188 @@ async def test_resolver_empty_publish_list_is_an_empty_inventory_even_when_stric
 
     monkeypatch.setattr(live_account, 'publish_list', publish_list, raising=False)
     assert await resolve_app_pins('local', 'local', ['local'], strict=True) == []
+
+
+# ---------------------------------------------------------------------------
+# Step 6b.4: agents (published pipes) in the Catalog and on the desktop. The
+# address rides the one desktop list; the kind is the name row's (G2)
+# ---------------------------------------------------------------------------
+
+BOT = 'rocketride.supportBot'
+
+#: One agent as the pipe walk lists it (pipe_deploy.pipe_catalog_entry's shape).
+AGENT = {
+    'kind': 'pipe',
+    'id': BOT,
+    'pipe': BOT,
+    'hostAppId': 'rocketride.playground',
+    'moduleId': 'rocketride_playground',
+    'name': 'Support Bot',
+    'mode': 'free',
+    'appStatus': 'free',
+    'onDesktop': False,
+}
+
+
+def _agent_account(**kwargs) -> _Account:
+    """The two-app account whose registry also holds one listed pipe, BOT."""
+    return _Account(kinds={BOT: 'pipe', 'rocketride.chat': 'app'}, agents=[AGENT], **kwargs)
+
+
+@pytest.mark.asyncio
+async def test_the_catalog_lists_the_agents_beside_the_apps_decorated_alike():
+    acct = _agent_account()
+    await acct._desktop_backend().write('local', 'local', ['rocketride.chat', BOT])
+    result = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog', 'arguments': {'shell': 'oss'}})
+    assert result['body']['total'] == 3
+    by_id = {a['id']: a for a in result['body']['apps']}
+    # The shell filter keeps an agent (it names no shells); membership is the stored list's
+    assert (by_id[BOT]['kind'], by_id[BOT]['hostAppId'], by_id[BOT]['appStatus'], by_id[BOT]['onDesktop']) == (
+        'pipe',
+        'rocketride.playground',
+        'free',
+        True,
+    )
+    assert by_id['rocketride.sql']['onDesktop'] is False
+
+
+@pytest.mark.asyncio
+async def test_an_anonymous_catalog_lists_no_agents():
+    acct = _agent_account()
+    result = await acct.handle_public(_conn(authenticated=False), {'command': 'rrext_public_catalog'})
+    assert [a['id'] for a in result['body']['apps']] == ['rocketride.chat', 'rocketride.sql']
+
+
+@pytest.mark.asyncio
+async def test_an_agent_never_seeds_a_first_desktop():
+    """The first desktop is the app inventory; an agent goes on it only by an add."""
+    acct = _agent_account()
+    result = await acct.handle_public(_conn(), {'command': 'rrext_public_catalog'})
+    assert {a['id']: a['onDesktop'] for a in result['body']['apps']}[BOT] is False
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat', 'rocketride.sql']
+
+
+@pytest.mark.asyncio
+async def test_a_catalog_whose_pipe_walk_fails_still_lists_the_apps(monkeypatch):
+    """AccountBase.catalog_pipes logs a failed walk and lists no agents."""
+    from ai.account import pipe_deploy
+
+    monkeypatch.setattr(pipe_deploy, 'catalog_pipe_entries', AsyncMock(side_effect=RuntimeError('db down')))
+    assert await AccountBase.catalog_pipes(_Account(), MagicMock()) == []
+
+
+@pytest.mark.asyncio
+async def test_desktop_add_takes_a_reachable_agents_address_and_pushes(monkeypatch, pushes):
+    from ai.account import pipe_deploy
+
+    reachable = AsyncMock(return_value=dict(AGENT))
+    monkeypatch.setattr(pipe_deploy, 'reachable_pipe_entry', reachable)
+    acct = _agent_account()
+    conn = _conn()
+
+    added = await acct.handle_app(conn, _req('desktop_add', appId=BOT))
+
+    assert added['body'] == {'added': True, 'appId': BOT}
+    reachable.assert_awaited_once_with(acct, conn._account_info, BOT)
+    # The first write seeded the app inventory, then the address joined it
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat', 'rocketride.sql', BOT]
+    assert pushes == ['local']
+
+
+@pytest.mark.asyncio
+async def test_desktop_add_refuses_an_agent_the_caller_does_not_reach(monkeypatch, pushes):
+    from ai.account import pipe_deploy
+
+    monkeypatch.setattr(pipe_deploy, 'reachable_pipe_entry', AsyncMock(return_value=None))
+    acct = _agent_account()
+    result = await acct.handle_app(_conn(), _req('desktop_add', appId=BOT))
+    assert result == {'success': False, 'message': 'Agent not found'}
+    assert await acct._desktop_backend().read('local', 'local') is None
+    assert pushes == []
+
+
+@pytest.mark.asyncio
+async def test_desktop_add_of_a_name_without_a_pipe_row_takes_the_app_gate(monkeypatch, pushes):
+    """An unknown name is an app: the app catalog decides, and the pipe resolver is never asked."""
+    from ai.account import pipe_deploy
+
+    reachable = AsyncMock(return_value=dict(AGENT))
+    monkeypatch.setattr(pipe_deploy, 'reachable_pipe_entry', reachable)
+    acct = _agent_account()
+    result = await acct.handle_app(_conn(), _req('desktop_add', appId='acme.unknown'))
+    assert result == {'success': False, 'message': 'App not found'}
+    reachable.assert_not_awaited()
+    assert pushes == []
+
+
+@pytest.mark.asyncio
+async def test_desktop_add_refuses_while_the_name_rows_do_not_answer(pushes):
+    class _DownRows(_Account):
+        async def deployments_kinds(self, org_id, project_ids):
+            raise RuntimeError('registry down')
+
+    acct = _DownRows()
+    result = await acct.handle_app(_conn(), _req('desktop_add', appId=BOT))
+    assert result == {'success': False, 'message': 'The app catalog is unavailable; try again.'}
+    assert await acct._desktop_backend().read('local', 'local') is None
+    assert pushes == []
+
+
+@pytest.mark.asyncio
+async def test_desktop_remove_takes_an_agents_address(pushes):
+    acct = _agent_account()
+    await acct._desktop_backend().write('local', 'local', ['rocketride.chat', BOT])
+    removed = await acct.handle_app(_conn(), _req('desktop_remove', appId=BOT))
+    assert removed['body'] == {'removed': True, 'appId': BOT}
+    assert await acct._desktop_backend().read('local', 'local') == ['rocketride.chat']
+    assert pushes == ['local']
+
+
+@pytest.mark.asyncio
+async def test_the_base_tiles_read_the_stored_list_and_never_fail_the_sign_in(monkeypatch):
+    from ai.account import pipe_deploy
+
+    seen: List[Any] = []
+
+    async def tiles(account, info, ids):
+        seen.append(list(ids))
+        return [dict(AGENT, onDesktop=True)]
+
+    monkeypatch.setattr(pipe_deploy, 'desktop_pipe_tiles', tiles)
+    acct = _agent_account()
+    await acct._desktop_backend().write('local', 'local', ['rocketride.chat', BOT])
+    info = MagicMock(userId='local', organization={'id': 'local'})
+
+    assert [t['id'] for t in await acct.desktop_pipe_tiles(info)] == [BOT]
+    assert await acct.desktop_pipe_tiles(info, ['given']) == [dict(AGENT, onDesktop=True)]
+    assert seen == [['rocketride.chat', BOT], ['given']]
+
+    monkeypatch.setattr(pipe_deploy, 'desktop_pipe_tiles', AsyncMock(side_effect=RuntimeError('db down')))
+    assert await acct.desktop_pipe_tiles(info) == []
+
+
+@pytest.mark.asyncio
+async def test_oss_sign_in_delivers_the_desktops_agents_through_the_payload(monkeypatch):
+    """authenticate() appends the agent tiles; kind, pipe and hostAppId survive the identity's serialization."""
+    from ai.account import pipe_deploy
+
+    acct = _oss_account(
+        monkeypatch, {'pins': [{'id': 'rocketride.chat', 'moduleId': 'rocketride_chat', 'name': 'Chat'}]}
+    )
+    await acct._desktop_backend().write('local', 'local', ['rocketride.chat', BOT])
+    acct._deployments_backend = MagicMock()
+    acct._deployments_backend.kinds_of = AsyncMock(return_value={BOT: 'pipe'})
+    monkeypatch.setattr(pipe_deploy, 'reachable_pipe_entry', AsyncMock(return_value=dict(AGENT)))
+    monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
+
+    signed_in = await acct.authenticate('')
+
+    assert [(a['id'], a['onDesktop']) for a in signed_in.apps] == [('rocketride.chat', True), (BOT, True)]
+    pushed = {a['id']: a for a in signed_in.to_push_result()['apps']}
+    assert (pushed[BOT]['kind'], pushed[BOT]['pipe'], pushed[BOT]['hostAppId'], pushed[BOT]['moduleId']) == (
+        'pipe',
+        BOT,
+        'rocketride.playground',
+        'rocketride_playground',
+    )
+    assert 'kind' not in pushed['rocketride.chat']

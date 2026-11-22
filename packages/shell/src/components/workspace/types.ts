@@ -300,6 +300,16 @@ export interface AppManifestEntry {
 	/** Whether this app is on the user's desktop. */
 	onDesktop?: boolean;
 	/**
+	 * `'pipe'` on an AGENT entry: a published pipeline in the catalog or on
+	 * the desktop (plan 9.1). It is no app of its own: it opens `hostAppId`
+	 * bound to `pipe`. Absent on an app.
+	 */
+	kind?: 'app' | 'pipe';
+	/** An agent entry's address `developerId.pipeId` (`id` carries the same name). */
+	pipe?: string;
+	/** The app an agent entry opens with `?pipe=<address>`; `moduleId` is that app's module. */
+	hostAppId?: string;
+	/**
 	 * The shell-api contract version this app was built against (stamped into
 	 * apps.json by the registration step from shell's apiver.ts). The lowest
 	 * value across all registered apps is the oldest frozen version still in use,

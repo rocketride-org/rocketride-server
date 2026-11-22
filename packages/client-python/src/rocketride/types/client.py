@@ -308,6 +308,13 @@ class AppManifestEntry(TypedDict, total=False):
         devEntries (list[DevEntry]): Every live dev-server registration
             for this app — one per editor session, newest first; ``entry``
             already carries the newest.
+        kind (str): ``'pipe'`` on an agent entry: a published pipeline in
+            the catalog or on the desktop. Absent on an app.
+        pipe (str): An agent entry's address ``developerId.pipeId``; ``id``
+            carries the same name. Absent on an app.
+        hostAppId (str): The app an agent entry opens, bound to it with
+            ``?pipe=<address>``; ``moduleId`` is that app's module. Absent
+            on an app.
     """
 
     id: str
@@ -332,6 +339,9 @@ class AppManifestEntry(TypedDict, total=False):
     features: list[str]
     dev: bool
     devEntries: list[DevEntry]
+    kind: str
+    pipe: str
+    hostAppId: str
 
 
 class ConnectResult(TypedDict, total=False):

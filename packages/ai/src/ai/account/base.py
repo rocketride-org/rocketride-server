@@ -37,6 +37,8 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Callable, NamedTuple, Optional
 
+from rocketlib import debug
+
 # What clients see in place of a stored environment value. A secret is
 # written once and never read back; sending the mask back keeps the value.
 # The SDKs export the same string as CONST_ENV_MASK.
@@ -926,6 +928,59 @@ class AccountBase(ABC):
             entry['onDesktop'] = entry.get('id') in desktop
         return apps
 
+    async def catalog_pipes(self, account_info) -> list:
+        """
+        The listed pipes the caller reaches, as Catalog entries (plan 9.1, Step 6b.4).
+
+        Both editions' ``rrext_public_catalog`` add these to the apps for a
+        signed-in caller, undecorated (``pipe_deploy.catalog_pipe_entries``:
+        ``kind: 'pipe'``, the address in ``pipe``, the host in
+        ``hostAppId``). A publish table that does not answer is logged and
+        lists no agents, so the apps of the Catalog still load.
+
+        Args:
+            account_info: The signed-in caller.
+
+        Returns:
+            The entries, or an empty list when the walk failed.
+        """
+        from .pipe_deploy import catalog_pipe_entries
+
+        try:
+            return await catalog_pipe_entries(self, account_info)
+        except Exception as exc:
+            debug(f'[account] the catalog lists no agents: {exc}')
+            return []
+
+    async def desktop_pipe_tiles(self, account_info, desktop_ids: Optional[list] = None) -> list:
+        """
+        The agent tiles of the caller's desktop, for the sign-in payload and its pushes.
+
+        The desktop holds pipe addresses beside app ids; this answers the
+        pipes as the caller reaches them now (``pipe_deploy.desktop_pipe_tiles``),
+        each ``onDesktop`` with the free status an edition overlays. Never
+        raises: a sign-in never fails for its agents (logged, no tiles).
+
+        Args:
+            account_info: The caller.
+            desktop_ids: The desktop as the edition read it (SaaS: its
+                ``app_desktop`` rows). Omitted, the stored OSS list is read
+                and never seeded: the app assembly seeds it.
+
+        Returns:
+            The tiles, in desktop order.
+        """
+        from .pipe_deploy import desktop_pipe_tiles
+
+        try:
+            if desktop_ids is None:
+                user_id = str(getattr(account_info, 'userId', '') or '')
+                desktop_ids = await self.desktop_app_ids_stored(user_id, self._org_id_of(account_info))
+            return await desktop_pipe_tiles(self, account_info, desktop_ids)
+        except Exception as exc:
+            debug(f'[account] the desktop shows no agents: {exc}')
+            return []
+
     async def deployments_deploy(
         self, org_id: str, team_id: str, project_id: str, version: int, actor: dict, billing_team_id: str = ''
     ) -> dict:
@@ -1107,6 +1162,28 @@ class AccountBase(ABC):
         """The registry entries for a project, newest first (version strip)."""
         return await self._deployment_backend().versions(org_id, project_id)
 
+    async def deployments_kinds(self, org_id: str, project_ids: list) -> dict:
+        """
+        The registry kind of each name that has a name row (plan 9.1, G2).
+
+        A desktop holds apps and pipes alike under their fully qualified
+        names, and the kind is never stored beside them: it is the name
+        row's (``deployment_projects.kind`` on SaaS, the project meta on
+        OSS), fixed at the first deploy (B37). Names without a row are
+        absent from the answer; :func:`desktop_kind` reads such a name as an
+        app.
+
+        Args:
+            org_id: The caller's org (the file edition reads its tree; the DB
+                edition reads every org's rows, the developer-id prefix
+                belonging to one org).
+            project_ids: The names to look up.
+
+        Returns:
+            ``{name: kind}`` for the names that have a row.
+        """
+        return await self._deployment_backend().kinds_of(org_id, list(project_ids))
+
     async def deployments_history(
         self, org_id: str, project_id: str, team_id: 'str | None' = None, list_args: 'dict | None' = None
     ) -> dict:
@@ -1184,7 +1261,9 @@ class AccountBase(ABC):
         stored desktop — the catalog and the handshake can never disagree).
         The desktop WRITES (``desktop_add`` / ``desktop_remove``) change the
         per-user desktop list and push the refreshed identity to the user's
-        connections, as SaaS does (plan 9.1, B41). The rest of the catalog
+        connections, as SaaS does (plan 9.1, B41); either takes an app id or
+        a published pipe's address, the add gated by the name's kind (Step
+        6b.4). The ``list``/``get`` reads stay apps only. The rest of the catalog
         (``list_mine``/``admin_*``/``pricing_*`` — developer rails, the
         review ladder, Stripe) is genuinely SaaS-only and raises
         NotImplementedError. ``rrext_deploy_app`` is
@@ -1279,7 +1358,10 @@ class AccountBase(ABC):
             # The desktop writes: change the user's stored list, then push the
             # refreshed identity to every connection of the user (the SaaS
             # handler's shape — ``push_account_update`` after the row change).
+            # ``appId`` is an app id or a pipe's address (plan 9.1): both are
+            # fully qualified names on the one list.
             from .manifest_push import push_account
+            from .pipe_deploy import desktop_kind, reachable_pipe_entry
 
             app_id = args.get('appId', '')
             if not app_id:
@@ -1301,8 +1383,21 @@ class AccountBase(ABC):
                 # No gate without the registry — and no first desktop written
                 # from an outage either.
                 return conn.build_error(request, 'The app catalog is unavailable; try again.')
-            if sub == 'desktop_add' and app_id not in reachable:
-                return conn.build_error(request, 'App not found')
+            if sub == 'desktop_add':
+                # The gate by kind, the name row's answer (G2): a pipe must
+                # serve the caller a listed version through the one resolver;
+                # an app must be in the reachable catalog. Removal needs no
+                # gate: any name leaves the list.
+                try:
+                    kind = desktop_kind(await self.deployments_kinds(org_id, [app_id]), app_id)
+                except Exception as exc:
+                    debug(f'[account] desktop_add: the name rows did not answer: {exc}')
+                    return conn.build_error(request, 'The app catalog is unavailable; try again.')
+                if kind == 'pipe':
+                    if await reachable_pipe_entry(self, info, app_id) is None:
+                        return conn.build_error(request, 'Agent not found')
+                elif app_id not in reachable:
+                    return conn.build_error(request, 'App not found')
             async with self._desktop_lock(org_id, user_id):
                 desktop = await self._desktop_ids_unlocked(user_id, org_id, reachable)
                 changed = [*desktop, app_id] if sub == 'desktop_add' else [a for a in desktop if a != app_id]
@@ -1344,8 +1439,10 @@ class AccountBase(ABC):
         authenticated caller with ``appStatus`` and the real ``onDesktop``
         (``decorate_desktop``) so the catalog picker needs no reconciliation;
         anonymous callers see ``appStatus: 'auth'`` and nothing on a desktop.
-        SaaS queries the catalog DB with pagination and optional
-        subscription overlay for authenticated callers.
+        A signed-in caller's page also lists the agents: every listed pipe
+        they reach, as a ``kind: 'pipe'`` entry (``catalog_pipes``, plan 9.1),
+        decorated the same way. SaaS queries the catalog DB with pagination
+        and optional subscription overlay for authenticated callers.
 
         Args:
             conn:    ``TaskConn`` instance.
@@ -1358,6 +1455,10 @@ class AccountBase(ABC):
         info = getattr(conn, '_account_info', None)
         user_id = getattr(info, 'userId', None) if info else None
         if user_id:
+            # The agents beside the apps, signed in only (the pipe feed's
+            # rule). They never seed a first desktop: the seed below is the
+            # app inventory alone.
+            apps = apps + await self.catalog_pipes(info)
             # The public rung is a SUBSET of what the caller can reach: a
             # first desktop seeded from it would leave the team-only apps
             # off, so the seed is the caller's whole reachable inventory.

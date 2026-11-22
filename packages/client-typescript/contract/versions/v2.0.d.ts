@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: d2a2bb9ad2c3e6367657cd4852a5d306c1a5654c
+// Source commit: 67d6b43864d16dcd016d1620233db14e8ed2aeea
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -2249,6 +2249,15 @@ export interface AppManifestEntry {
     seatsUsed?: number;
     /** Feature flags enabled by the subscribed plan (only for subscribed paid apps). */
     features?: string[];
+    /** `'pipe'` on an agent entry: a published pipeline in the catalog or on the desktop. Absent on an app. */
+    kind?: "app" | "pipe";
+    /** An agent entry's address `developerId.pipeId`; `id` carries the same name. Absent on an app. */
+    pipe?: string;
+    /**
+     * The app an agent entry opens, bound to it with `?pipe=<address>`;
+     * `moduleId` is that app's module. Absent on an app.
+     */
+    hostAppId?: string;
 }
 /**
  * A Stripe pricing tier for a paid app.
