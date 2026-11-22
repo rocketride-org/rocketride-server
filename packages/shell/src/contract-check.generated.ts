@@ -871,6 +871,8 @@ import type { ConvertResult as Frozen_ConvertResult } from '../contract/versions
 import type { ConvertResult as Current_ConvertResult } from './api';
 import type { CreatedPipe as Frozen_CreatedPipe } from '../contract/versions/v12';
 import type { CreatedPipe as Current_CreatedPipe } from './api';
+import type { LaunchableEntry as Frozen_LaunchableEntry } from '../contract/versions/v12';
+import type { LaunchableEntry as Current_LaunchableEntry } from './api';
 import type { ICatalogPickerProps as Frozen_ICatalogPickerProps } from '../contract/versions/v12';
 import type { ICatalogPickerProps as Current_ICatalogPickerProps } from './api';
 
@@ -1749,5 +1751,7 @@ const _t_ConvertResult: Frozen_ConvertResult = {} as Current_ConvertResult;
 void _t_ConvertResult;
 const _t_CreatedPipe: Frozen_CreatedPipe = {} as Current_CreatedPipe;
 void _t_CreatedPipe;
+const _t_LaunchableEntry: Frozen_LaunchableEntry = {} as Current_LaunchableEntry;
+void _t_LaunchableEntry;
 const _t_ICatalogPickerProps: Frozen_ICatalogPickerProps = {} as Current_ICatalogPickerProps;
 void _t_ICatalogPickerProps;
