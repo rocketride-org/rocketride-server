@@ -28,6 +28,7 @@ import type { ShellApiV10 } from '../contract/versions/v10';
 import type { ShellApiV11 } from '../contract/versions/v11';
 import type { ShellApiV12 } from '../contract/versions/v12';
 import type { ShellApiV13 } from '../contract/versions/v13';
+import type { ShellApiV14 } from '../contract/versions/v14';
 import type { DAPException as Frozen_DAPException } from '../contract/versions/v0';
 import type { DAPException as Current_DAPException } from './api';
 import type { RocketRideException as Frozen_RocketRideException } from '../contract/versions/v0';
@@ -892,6 +893,8 @@ const _floor_v12: ShellApiV12 = {} as ShellApiShape;
 void _floor_v12;
 const _floor_v13: ShellApiV13 = {} as ShellApiShape;
 void _floor_v13;
+const _floor_v14: ShellApiV14 = {} as ShellApiShape;
+void _floor_v14;
 
 // TYPE floors — each frozen exported type must still be satisfied.
 // Generic floors are emitted APPLIED (<any, …> at the frozen arity):
