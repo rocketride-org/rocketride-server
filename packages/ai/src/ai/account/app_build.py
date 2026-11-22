@@ -680,7 +680,7 @@ def _patched_workspace_yaml(
             raise BuildFailure('materialize', 'pnpm-workspace.yaml is nested too deeply')
         except Exception as exc:
             raise BuildFailure('materialize', f'pnpm-workspace.yaml is not valid YAML: {exc}')
-        _refuse_yaml_cycles(data, 'pnpm-workspace.yaml')
+        _refuse_deep_yaml(data, 'pnpm-workspace.yaml')
         data = data if isinstance(data, dict) else {}
         for key in [k for k in data if k not in _WORKSPACE_YAML_KEYS]:
             data.pop(key)
@@ -697,11 +697,12 @@ def _patched_workspace_yaml(
                         'materialize',
                         f'pnpm-workspace.yaml packages entry {entry!r} reaches outside the source tree',
                     )
+        seen: set = set()
         for table in ('overrides', 'catalog'):
-            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}')
+            _refuse_unsafe_specs(data.get(table), f'pnpm-workspace.yaml {table}', '.', seen)
         catalogs = data.get('catalogs')
         for named in catalogs.values() if isinstance(catalogs, dict) else ():
-            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs')
+            _refuse_unsafe_specs(named, 'pnpm-workspace.yaml catalogs', '.', seen)
     else:
         packages = [app_root or '.'] + [inc for inc in include_roots if inc]
         data = {'packages': packages}
@@ -726,41 +727,51 @@ def _patched_workspace_yaml(
     return yaml.safe_dump(data, sort_keys=False)
 
 
-_YAML_NODE_BUDGET = 100_000
 _YAML_MAX_DEPTH = 64
 
 
-def _refuse_yaml_cycles(data: Any, where: str) -> None:
-    """Raise BuildFailure for a recursive, too-deep or exponentially aliased YAML graph.
+def _refuse_deep_yaml(data: Any, where: str) -> None:
+    """Raise BuildFailure when a parsed YAML tree is nested too deeply.
 
-    ``yaml.safe_load`` happily builds a mapping that contains itself (``&a`` /
-    ``*a``); walking or dumping it then raises RecursionError, which would be
-    retried as an infrastructure fault. Ordinary aliases and merge keys that
-    share a node without a cycle still load. The walk is iterative and counts
-    every visit and caps nesting depth (_YAML_MAX_DEPTH), so an alias fan-out
-    bomb and a deeply nested acyclic table are bounded too (the final dump
-    would otherwise raise RecursionError).
+    ``yaml.safe_load`` accepts nesting far deeper than the recursive code that
+    follows (``yaml.safe_dump`` of the patched workspace) can walk, and that
+    would surface as a RecursionError, retried as an infrastructure fault.
+    Only depth is capped. Aliases are fine: a node reachable under several keys
+    is measured once (by identity), and a self-referential anchor is a back edge
+    that adds no depth, so neither is refused. The walk is iterative.
     """
-    visits = 0
-    path: set = set()
-    stack: List[Tuple[Any, bool, int]] = [(data, False, 0)]
+    heights: dict = {}
+    on_path: set = set()
+    stack: List[Tuple[Any, bool]] = [(data, False)]
     while stack:
-        node, leaving, depth = stack.pop()
+        node, leaving = stack.pop()
         if leaving:
-            path.discard(id(node))
+            on_path.discard(id(node))
+            children = list(node.keys()) + list(node.values()) if isinstance(node, dict) else list(node)
+            heights[id(node)] = 1 + max(
+                (heights.get(id(c), 0) for c in children if isinstance(c, (dict, list))), default=0
+            )
+            if heights[id(node)] > _YAML_MAX_DEPTH:
+                raise BuildFailure('materialize', f'{where} is nested too deeply')
             continue
-        if not isinstance(node, (dict, list)):
+        if not isinstance(node, (dict, list)) or id(node) in heights or id(node) in on_path:
             continue
-        visits += 1
-        if id(node) in path or visits > _YAML_NODE_BUDGET or depth > _YAML_MAX_DEPTH:
-            raise BuildFailure('materialize', f'{where} has a recursive, oversized or too deeply nested structure')
-        path.add(id(node))
-        stack.append((node, True, depth))
+        on_path.add(id(node))
+        stack.append((node, True))
         children = list(node.keys()) + list(node.values()) if isinstance(node, dict) else list(node)
-        stack.extend((child, False, depth + 1) for child in children)
+        stack.extend((c, False) for c in children if isinstance(c, (dict, list)))
 
 
-def _unsafe_spec(spec: Any, base: str = '') -> bool:
+# Only the schemes pnpm resolves away from the local disk are exempt from the
+# path check: http(s) goes to the tarball resolver and the git protocols to the
+# git resolver. Any other scheme (including one pnpm does not know) that holds a
+# '/' falls through to the local resolver, which joins it onto the project
+# directory, so it is decided by its shape like any other spec. A prefix such as
+# 'git+' or 'github:' alone proves nothing either.
+_REMOTE_URL_SCHEME = re.compile(r'^(?:https?|git|git\+http|git\+https|git\+ssh|git\+rsync|git\+ftp|ssh)://')
+
+
+def _unsafe_spec(spec: Any, base: str = '.') -> bool:
     """True when a dependency spec reaches outside the source tree.
 
     ``base`` is the workspace-relative directory of the declaring importer
@@ -771,56 +782,72 @@ def _unsafe_spec(spec: Any, base: str = '') -> bool:
 
     ``link:`` (any target) is refused. A local path spec — ``file:``,
     ``workspace:<path>``, ``git+file:``, or a bare path (pnpm reads a spec
-    that starts with ``.``, ``/``, ``~`` or a drive letter, or ends in
-    ``.tgz``/``.tar``/``.tar.gz``, as a local path) — is refused when it is
-    absolute, a drive or home path, or resolves (from the declaring importer's
-    directory) above the workspace root, since it would pull developer-chosen
-    directories (the toolchain env, other jobs' scratch, pod files) into
-    the install.
+    that starts with ``.``, ``/``, ``~`` or a drive letter, ends in
+    ``.tgz``/``.tar``/``.tar.gz``, or holds a path separator without starting
+    with an http(s) or git URL scheme, as a local path) — is refused when it is
+    absolute, home-relative, or, resolved against ``base`` (the declaring
+    package's directory relative to the workspace root), lands above the
+    workspace root. A ``..`` that stays inside the tree is allowed, so a
+    package under ``apps/x`` can name ``file:../../.rocketride/shell/shell.tgz``.
+    A ``workspace:`` path is also resolved against the root, since which of
+    the two pnpm uses is not worth guessing.
     """
     text = str(spec).strip().lower()
     if text.startswith(('link:', 'git+file:')):
         return True
+    bases = [base]
     for prefix in ('file:', 'workspace:'):
         if text.startswith(prefix):
             target = text[len(prefix) :].strip()
             # workspace:^ / workspace:~ / workspace:* / workspace:1.2.3 are
             # version ranges; only a path-shaped target is a local path.
-            if prefix == 'workspace:' and not (
-                target.startswith(('.', '/')) or re.match(r'^[a-z]:', target) is not None
-            ):
-                return False
+            if prefix == 'workspace:':
+                if not (target.startswith(('.', '/')) or re.match(r'^[a-z]:', target) is not None):
+                    return False
+                bases = [base, '.']
             break
     else:
+        if _REMOTE_URL_SCHEME.match(text):
+            return False
         # '~' alone or '~/...' is a home path; '~1.2.3' is a version range.
         bare = (
             text.startswith(('.', '/'))
             or text in ('~',)
             or text.startswith('~/')
             or re.match(r'^[a-z]:', text) is not None
+            or '/' in text
+            or '\\' in text
         )
         if not (bare or text.endswith(('.tgz', '.tar', '.tar.gz'))):
             return False
         target = text
-    target = target.replace('\\', '/')
-    if target == '~' or target.startswith('~/'):
-        return True
-    if target.startswith('/') or re.match(r'^[a-z]:', target) is not None:
-        return True
-    resolved = posixpath.normpath(posixpath.join(base or '.', target))
-    return resolved == '..' or resolved.startswith('../')
+    return any(_lock_path_escapes(target, b) for b in bases)
 
 
-def _refuse_unsafe_specs(table: Any, where: str, base: str = '') -> None:
+def _refuse_unsafe_specs(table: Any, where: str, base: str = '.', _seen: Optional[set] = None) -> None:
     """Raise BuildFailure when a dependency table holds an unsafe spec.
 
-    Nested tables (npm-style nested overrides) are walked.
+    Nested tables (npm-style nested overrides) are walked. A table object
+    already walked is skipped: YAML aliases hand the same mapping out under
+    several keys (or, for a self-referential anchor, back to itself), so an
+    unmarked walk is exponential or unbounded.
     """
     if not isinstance(table, dict):
         return
+    seen = _seen if _seen is not None else set()
+    if id(table) in seen:
+        return
+    seen.add(id(table))
     for name, spec in table.items():
         if isinstance(spec, dict):
-            _refuse_unsafe_specs(spec, where, base)
+            _refuse_unsafe_specs(spec, where, base, seen)
+        elif not (spec is None or isinstance(spec, (str, int, float, bool))):
+            # pnpm specs are strings. A list (or any other container) is never
+            # stringified: str() would expand every shared alias in it.
+            raise BuildFailure(
+                'materialize',
+                f'{where}: dependency {str(name)!r} must be a version string or a nested table',
+            )
         elif _unsafe_spec(spec, base):
             raise BuildFailure(
                 'materialize',
@@ -878,9 +905,36 @@ def _place_platform_tgzs(ws_dir: str) -> None:
         shutil.copyfile(src, dest)
 
 
-def _inert_config(name: str) -> str:
-    """Inert content for one neutralized config name (by its loader)."""
+def _package_is_module(path: str, ws_dir: str) -> bool:
+    """True when the nearest package.json at or above ``path`` (within
+    ``ws_dir``) sets ``"type": "module"`` — Node then loads a ``.js`` file as
+    ESM, where ``module.exports`` is a ReferenceError.
+    """
+    here = os.path.dirname(path)
+    root = os.path.abspath(ws_dir)
+    while True:
+        candidate = os.path.join(here, 'package.json')
+        if os.path.isfile(candidate):
+            try:
+                with open(candidate, 'r', encoding='utf-8-sig') as handle:
+                    manifest = json.load(handle)
+            except (OSError, UnicodeDecodeError, ValueError):
+                return False
+            return isinstance(manifest, dict) and manifest.get('type') == 'module'
+        if os.path.abspath(here) == root or os.path.dirname(here) == here:
+            return False
+        here = os.path.dirname(here)
+
+
+def _inert_config(name: str, module_package: bool = False) -> str:
+    """Inert content for one neutralized config name (by its loader).
+
+    A ``.js`` file follows its package's ``type``: ESM syntax under
+    ``"type": "module"``, CommonJS otherwise.
+    """
     ext = os.path.splitext(name)[1] if name not in ('.postcssrc', '.babelrc') else ''
+    if ext == '.js' and module_package:
+        return 'export default {};\n'
     if ext in ('.js', '.cjs', '.cts'):
         return 'module.exports = {};\n'
     if ext in ('.mjs', '.ts', '.mts'):
@@ -914,7 +968,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
             path = os.path.join(dirpath, name)
             if name in names:
                 with open(path, 'w', encoding='utf-8') as handle:
-                    handle.write(_inert_config(name))
+                    handle.write(_inert_config(name, _package_is_module(path, ws_dir)))
                 neutralized.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
             elif name == 'package.json':
                 rel = os.path.relpath(path, ws_dir).replace(os.sep, '/')
@@ -926,8 +980,9 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
                     raise BuildFailure('materialize', f'{rel} is not valid UTF-8 JSON: {exc}')
                 if not isinstance(manifest, dict):
                     continue
+                package_dir = posixpath.dirname(rel) or '.'
                 for table in _DEPENDENCY_TABLES:
-                    _refuse_unsafe_specs(manifest.get(table), rel, posixpath.dirname(rel))
+                    _refuse_unsafe_specs(manifest.get(table), rel, package_dir)
                 if any(k in manifest for k in _NEUTRALIZED_PACKAGE_KEYS):
                     for key in _NEUTRALIZED_PACKAGE_KEYS:
                         if manifest.pop(key, None) is not None:
@@ -1985,9 +2040,16 @@ class AppBuildWorker:
         log_parts.append(f'== install ==\n$ {" ".join(argv)}\n{out}')
         if code != 0:
             raise BuildFailure('install', f'pnpm install failed (exit {code})', _tail_errors('install', out))
-        if pins_before and os.path.isfile(lock_path):
-            with open(lock_path, 'r', encoding='utf-8') as handle:
-                drift = _drift_of(pins_before, _lockfile_importer_pins(handle.read()))
+        # The install wrote the lockfile the typecheck and bundle will use;
+        # it must resolve nothing outside the tree (the packed one was checked
+        # above, but the install re-resolves). Missing = fail closed.
+        if not os.path.isfile(lock_path):
+            raise BuildFailure('install', 'pnpm install did not write pnpm-lock.yaml')
+        with open(lock_path, 'r', encoding='utf-8') as handle:
+            installed_lock = handle.read()
+        _refuse_lockfile_paths(installed_lock)
+        if pins_before:
+            drift = _drift_of(pins_before, _lockfile_importer_pins(installed_lock))
             if drift:
                 raise BuildFailure(
                     'install',
