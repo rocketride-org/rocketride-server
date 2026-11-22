@@ -176,9 +176,12 @@ generic message and writes nothing to `text`, `table` or `answers`, and the
 driver's own text is in the server log. A generated query that passes `EXPLAIN`
 and is then refused by a database that is up (a row cast failure, a statement
 timeout) is reported as `Query execution failed` on the `text` and `answers`
-lanes, as are the other failures that are not an outage (an `EXPLAIN` rejection
-after the last attempt, unsafe SQL, an LLM reply with neither a query nor an
-answer). The `get_sql`
+lanes. The other failures that are not an outage are reported there too, each
+in its own words: an `EXPLAIN` rejection after the last attempt reports its
+final validation error, unsafe SQL reports `Generated query contains unsafe
+SQL`, and an LLM reply with neither a query nor an answer says so. A pipeline
+with only the `table` lane has no lane that carries an error, so every failure in this paragraph
+raise and fail the step. The `get_sql`
 and `get_data` tools never raise for an outage or a failed query: they return
 `valid: false` with an `error`, so check `valid`.
 
