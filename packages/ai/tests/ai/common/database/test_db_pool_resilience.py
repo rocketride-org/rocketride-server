@@ -479,17 +479,26 @@ def test_the_abort_shuts_down_the_socket_so_a_blocked_read_returns():
 
     ours, theirs = socket.socketpair()  # `theirs` never writes: a peer that keeps the link open and says nothing
     received = []
-    reader = threading.Thread(target=lambda: received.append(ours.recv(10)))
+    reader = threading.Thread(target=lambda: received.append(ours.recv(10)), daemon=True)
     reader.start()
-    time.sleep(0.1)
-    assert reader.is_alive()
+    try:
+        time.sleep(0.1)
+        assert reader.is_alive()
 
-    _abort_connection(types.SimpleNamespace(fileno=ours.fileno))
-    reader.join(2)
+        _abort_connection(types.SimpleNamespace(fileno=ours.fileno))
+        reader.join(2)
 
-    assert not reader.is_alive() and received == [b'']
-    ours.close()
-    theirs.close()
+        assert not reader.is_alive() and received == [b'']
+    finally:
+        # a failed assert must not leave a thread blocked in recv or a socket open
+        for sock in (ours, theirs):
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        reader.join(2)
+        ours.close()
+        theirs.close()
 
 
 def test_the_abort_ignores_a_connection_with_no_descriptor():
@@ -778,17 +787,19 @@ def test_begin_global_installs_the_watchdog_on_a_postgres_engine_except_on_windo
 # ---------------------------------------------------------------------------
 
 
-def _registry_engine(connect_seconds, fail=True):
+def _registry_engine(fail=True):
+    """An engine whose connect, once ``state['down']`` is set, signals ``entered`` and blocks until ``release`` is set."""
     engine = create_engine(
         'sqlite:///file:rr789reg?mode=memory&cache=shared&uri=true', poolclass=QueuePool, pool_size=5
     )
-    state = {'down': False, 'connects': 0}
+    state = {'down': False, 'connects': 0, 'entered': threading.Event(), 'release': threading.Event()}
     real_connect = engine.dialect.connect
 
     def connect(*args, **kwargs):
         if state['down']:
             state['connects'] += 1
-            time.sleep(connect_seconds)
+            state['entered'].set()
+            state['release'].wait(10)
             if fail:
                 raise sqlite3.OperationalError(REFUSED)
         return real_connect(*args, **kwargs)
@@ -798,7 +809,7 @@ def _registry_engine(connect_seconds, fail=True):
 
 
 def test_a_healthy_session_is_not_blocked_behind_another_callers_connect_retry():
-    engine, state = _registry_engine(0.5)
+    engine, state = _registry_engine()
     registry = TransactionRegistry(engine, max_rows=100)
     healthy = registry.begin()
     state['down'] = True
@@ -812,19 +823,21 @@ def test_a_healthy_session_is_not_blocked_behind_another_callers_connect_retry()
 
     thread = threading.Thread(target=newcomer)
     thread.start()
-    time.sleep(0.1)  # the newcomer is inside its slow connect now
-    started = time.monotonic()
-    registry.execute(healthy, 'SELECT 1')
-    blocked = time.monotonic() - started
-    thread.join(5)
+    try:
+        assert state['entered'].wait(5)  # the newcomer is inside its connect now, and stays there
+        registry.execute(healthy, 'SELECT 1')
+        # before: it waited out the newcomer's whole connect, which only `release` ends
+        assert not state['release'].is_set()
+    finally:
+        state['release'].set()
+        thread.join(5)
 
-    assert blocked < 0.1  # before: it waited out the newcomer's whole connect
     assert newcomer_error and isinstance(newcomer_error[0], OperationalError)
     registry.rollback(healthy)
 
 
 def test_a_begin_that_is_still_connecting_holds_its_slot_and_a_failed_one_gives_it_back():
-    engine, state = _registry_engine(0.4)
+    engine, state = _registry_engine()
     registry = TransactionRegistry(engine, max_sessions=1, max_rows=100)
     state['down'] = True
     first_error = []
@@ -837,10 +850,13 @@ def test_a_begin_that_is_still_connecting_holds_its_slot_and_a_failed_one_gives_
 
     thread = threading.Thread(target=first)
     thread.start()
-    time.sleep(0.1)
-    with pytest.raises(RuntimeError, match='too many open DB transactions'):
-        registry.begin()  # the only slot is reserved by the begin that is still connecting
-    thread.join(5)
+    try:
+        assert state['entered'].wait(5)
+        with pytest.raises(RuntimeError, match='too many open DB transactions'):
+            registry.begin()  # the only slot is reserved by the begin that is still connecting
+    finally:
+        state['release'].set()
+        thread.join(5)
     assert first_error  # its connect failed ...
 
     state['down'] = False
@@ -850,9 +866,9 @@ def test_a_begin_that_is_still_connecting_holds_its_slot_and_a_failed_one_gives_
 
 def test_a_begin_that_finishes_connecting_after_close_all_releases_its_connection():
     """close_all never saw the connection (it was opened outside the lock), so begin must not register it."""
-    engine, state = _registry_engine(0.4, fail=False)
+    engine, state = _registry_engine(fail=False)
     registry = TransactionRegistry(engine, max_rows=100)
-    state['down'] = True  # the connect takes 0.4 s, and succeeds
+    state['down'] = True  # the connect blocks until released, then succeeds
     outcome = []
 
     def begin():
@@ -863,9 +879,12 @@ def test_a_begin_that_finishes_connecting_after_close_all_releases_its_connectio
 
     thread = threading.Thread(target=begin)
     thread.start()
-    time.sleep(0.1)  # begin is connecting outside the lock
-    registry.close_all()  # endGlobal
-    thread.join(5)
+    try:
+        assert state['entered'].wait(5)  # begin is connecting outside the lock
+        registry.close_all()  # endGlobal
+    finally:
+        state['release'].set()
+        thread.join(5)
 
     assert isinstance(outcome[0], RuntimeError) and 'closed' in str(outcome[0])
     assert len(registry._sessions) == 0
