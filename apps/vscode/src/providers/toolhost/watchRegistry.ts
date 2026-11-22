@@ -31,14 +31,16 @@
 // boot it belongs to. pageOf() splits on the LAST '-', so the page part's
 // random suffix must stay dash-free.
 //
-// resetForPageBoot() runs on the page's view:ready and drops every page's
-// watchers EXCEPT the newest page's. It must spare the newest page because
-// React runs child effects first: a tool's watch can reach the host BEFORE
-// the page's view:ready, and a blind reset there dropped the live page's own
-// watcher (the MY APPS list then never refreshed after New App). When
-// view:ready comes first, the newest is still the previous page, so the
-// reset leaves a boot pending: the new page's first watch then retires every
-// older page's watchers at once.
+// resetForPageBoot(page) runs on the page's view:ready, which names the page
+// (its watch prefix): the registry keeps exactly that page's watchers and
+// drops every other page's, whether the page's first watch arrived before
+// view:ready (React runs child effects first) or comes after it. A blind
+// reset there once dropped the live page's own watcher (the MY APPS list
+// then never refreshed after New App).
+//
+// Fallback, for a view:ready without a page id: keep the newest page that
+// has watched. That spares the live page when its watch came first, but when
+// view:ready comes first the old page's watchers survive until the next boot.
 //
 // Invariant: one webview page watches through this registry (the sidebar).
 // The host.fs.* handlers sit on the root bus, which every attached realm can
@@ -78,13 +80,6 @@ export class WatchRegistry {
 	 *  pruned, because a dead page's late watch must still read as old. */
 	private seenPages = new Set<string>();
 
-	/** view:ready arrived before the new page's first watch: that watch
-	 *  retires every older page's watchers. */
-	private bootPending = false;
-
-	/** The newest page at the last view:ready (detects whether a new page
-	 *  watched in between). */
-	private newestAtLastBoot: string | undefined;
 
 	/**
 	 * Starts (or replaces) one subscription.
@@ -97,12 +92,6 @@ export class WatchRegistry {
 		if (this.isNewPage(page)) {
 			this.seenPages.add(page);
 			this.newestPage = page;
-			if (this.bootPending) {
-				// This page completes the pending boot: it is now the booted page.
-				this.bootPending = false;
-				this.newestAtLastBoot = page;
-				this.dropOtherPages(page);
-			}
 		}
 		this.remove(sub);
 		this.watchers.set(sub, start());
@@ -121,24 +110,20 @@ export class WatchRegistry {
 	}
 
 	/**
-	 * Page boot (view:ready): stops every subscription except the newest
-	 * page's. A boot is left pending only when no new page has watched since
-	 * the last view:ready (the new page's watch comes after this one); in the
-	 * usual order (watch, then view:ready) the new page is already the newest
-	 * and nothing is left to retire.
+	 * Page boot (view:ready): keeps exactly `page`'s subscriptions and stops
+	 * every other page's. Without a page id, keeps the newest page that has
+	 * watched (see the header for that fallback's limit).
 	 *
-	 * Known limit: view:ready carries no page id, so if a page watches and is
-	 * then reloaded before its own view:ready, the next page's view:ready can't
-	 * tell the two apart, and that page's watchers linger until the next boot
-	 * (their events go to a page that ignores them; the live page is never
-	 * affected). Sending the page id with view:ready would close it.
+	 * @param page - The booting page's watch prefix, from its view:ready.
 	 */
-	public resetForPageBoot(): void {
+	public resetForPageBoot(page?: string): void {
+		if (page !== undefined) {
+			this.seenPages.add(page);
+			this.newestPage = page;
+		}
 		if (this.newestPage !== undefined) {
 			this.dropOtherPages(this.newestPage);
 		}
-		this.bootPending = this.newestPage === this.newestAtLastBoot;
-		this.newestAtLastBoot = this.newestPage;
 	}
 
 	/** Stops every subscription (provider teardown). */
@@ -146,8 +131,6 @@ export class WatchRegistry {
 		for (const sub of [...this.watchers.keys()]) this.remove(sub);
 		this.newestPage = undefined;
 		this.seenPages.clear();
-		this.bootPending = false;
-		this.newestAtLastBoot = undefined;
 	}
 
 	/** The live subscription keys, oldest first (used by the tests). */

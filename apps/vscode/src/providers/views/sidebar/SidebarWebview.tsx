@@ -31,7 +31,7 @@ import { SidebarChrome, ToolPanel } from 'shared/tools/core/chrome/SidebarChrome
 import { ToolHostProvider, useArmedToolPeers } from 'shared/tools/core';
 import { useToolStrip } from 'shared/tools/core/chrome/useToolStrip';
 import type { BuiltinToolServices } from 'shared/tools/core';
-import { ConnectionManager, SidebarFooter, SidebarFooterExtras, realmPrefsHub, createSidebarBusPeer, createWorkspaceFs } from 'shell';
+import { ConnectionManager, SidebarFooter, SidebarFooterExtras, realmPrefsHub, createSidebarBusPeer, createWorkspaceFs, watchPrefixOf } from 'shell';
 import { appPartition } from 'shell/src/workspace/workspaceStore';
 import { applyContainerOrder, containerIdOf, readDevToolPins, DEV_TOOL_PINS_KEY } from 'shell/src/workspace/devToolPins';
 import { registerBuiltinTools } from 'shared/tools/builtins';
@@ -117,7 +117,10 @@ const SidebarViewWebview: React.FC = () => {
 	// The ONLY remaining postMessage traffic is sidebar:command (unrestricted
 	// executeCommand — a deliberate host decision) and the view:ready boot
 	// signal (the page-lifecycle marker the host's watcher reset keys off).
-	const { sendMessage } = useMessaging<SidebarWebviewToHost, SidebarHostToWebview>({});
+	// view:ready names this page's watch-key prefix (the one WorkspaceFs client
+	// per bus, so the same instance the tools watch through below).
+	const watchPage = useMemo(() => watchPrefixOf(createWorkspaceFs(ConnectionManager.getInstance())), []);
+	const { sendMessage } = useMessaging<SidebarWebviewToHost, SidebarHostToWebview>({ readyMessage: { type: 'view:ready', page: watchPage } });
 
 	// The clients below are created ONCE and capture the latest sendMessage
 	// through this ref — their identities (and every peer/capability they
