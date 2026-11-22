@@ -196,6 +196,31 @@ def test_drift_names_the_reresolved_package():
     assert drift == ['apps/foo-ui: react 18.2.0 -> 18.3.1']
 
 
+def test_unterminated_patch_hash_run_is_scanned_in_linear_time():
+    """A hostile ``version:`` of repeated ``(patch_hash=`` with no closing
+    paren must not make the pin parser quadratic (it runs on the event loop).
+    """
+    import time
+
+    hostile = '1.0.0' + '(patch_hash=' * 90_000
+    lock = f"""
+lockfileVersion: '9.0'
+importers:
+  apps/foo-ui:
+    dependencies:
+      left-pad:
+        specifier: ^1.3.0
+        version: '{hostile}'
+      react-dom:
+        specifier: ^18.2.0
+        version: 18.2.0(patch_hash=def456)(react@18.2.0)
+"""
+    start = time.monotonic()
+    pins = _lockfile_importer_pins(lock)
+    assert time.monotonic() - start < 2.0
+    assert pins['apps/foo-ui']['react-dom'] == '18.2.0(react@18.2.0)'
+
+
 def test_patch_hash_is_not_drift():
     """The build drops the developer's patch config, so a patched direct
     dependency reinstalls as the bare version. The patch hash is stripped
