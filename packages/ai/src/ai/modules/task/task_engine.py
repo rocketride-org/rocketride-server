@@ -3975,6 +3975,11 @@ class TaskEngine(DAPBase):
             for key in list(self._holds):
                 await self._run_log_for(key)
 
+            # The engine may end during the awaits above: its stdout reader
+            # then started _terminated(), which ends the run
+            if self._terminated_called:
+                return
+
             # Initialize metrics tracking (uses default sample_interval from constants)
             try:
                 # Fresh metrics per engine start. The per-trace accumulators
