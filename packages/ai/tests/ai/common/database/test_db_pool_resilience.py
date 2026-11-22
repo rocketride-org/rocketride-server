@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import threading
 import time
 import types
@@ -1016,6 +1017,70 @@ def test_clickhouse_does_not_retry_a_configuration_error():
         dbapi.transport.execute('SELECT 1')
 
     assert transport.connects == 1 and sent == [] and clock.sleeps == []
+
+
+class _SlowError(Exception):
+    """A driver error whose message names no outage."""
+
+
+def test_retry_open_asks_the_supplied_predicate_whether_an_error_is_transient():
+    clock = _Clock()
+    outcomes = [_SlowError('Code: 209. Timeout'), _SlowError('Code: 209. Timeout')]
+    calls = []
+
+    def open_connection():
+        calls.append(1)
+        if outcomes:
+            raise outcomes.pop(0)
+        return 'open'
+
+    result = connect_retry_module._retry_open(
+        _policy(clock), open_connection, (_SlowError,), lambda exc: isinstance(exc, _SlowError)
+    )
+
+    assert result == 'open' and len(calls) == 2 and len(clock.sleeps) == 2
+    # without the predicate the message is read, and a timeout names no outage
+    outcomes.append(_SlowError('Code: 209. Timeout'))
+    with pytest.raises(_SlowError):
+        connect_retry_module._retry_open(_policy(_Clock()), open_connection, (_SlowError,))
+
+
+def test_clickhouse_retries_a_socket_timeout_by_type_but_not_another_driver_error(monkeypatch):
+    """The driver reports a connect timeout as ``SocketTimeoutError`` (message: no outage wording); stub its module."""
+
+    class DriverError(Exception):
+        pass
+
+    class SocketTimeoutError(DriverError):
+        pass
+
+    fake_errors = types.ModuleType('clickhouse_driver.errors')
+    fake_errors.Error = DriverError
+    fake_errors.SocketTimeoutError = SocketTimeoutError
+    fake_package = types.ModuleType('clickhouse_driver')
+    fake_package.errors = fake_errors
+    monkeypatch.setitem(sys.modules, 'clickhouse_driver', fake_package)
+    monkeypatch.setitem(sys.modules, 'clickhouse_driver.errors', fake_errors)
+
+    def run(failure):
+        clock = _Clock()
+        engine = create_engine('sqlite://')
+        install_clickhouse_connect_retry(engine, _policy(clock))
+        transport = _FakeClickhouseConnection([failure])
+        client = types.SimpleNamespace(connection=transport, connections=[])
+        engine.dialect.connect = lambda *args, **kwargs: types.SimpleNamespace(transport=client)
+        dbapi = _do_connect_hook(engine)(engine.dialect, None, (), {})
+        return dbapi, transport, clock
+
+    dbapi, transport, clock = run(SocketTimeoutError('Code: 209. Socket timeout (db:9000)'))
+    client_connection = dbapi.transport.connection
+    client_connection.connect()
+    assert transport.connects == 2 and len(clock.sleeps) == 1  # retried once, then opened
+
+    dbapi, transport, clock = run(DriverError('Code: 999. Something else'))
+    with pytest.raises(DriverError):
+        dbapi.transport.connection.connect()
+    assert transport.connects == 1 and clock.sleeps == []
 
 
 def test_a_driver_connection_without_a_transport_is_returned_unchanged():

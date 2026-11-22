@@ -490,8 +490,15 @@ def install_connect_retry(engine: Any, policy: Optional[ConnectRetryPolicy] = No
         return _retry_open(policy, lambda: dialect.connect(*cargs, **cparams), (dialect.loaded_dbapi.Error,))
 
 
-def _retry_open(policy: ConnectRetryPolicy, open_connection: Callable[[], Any], driver_errors: tuple) -> Any:
+def _retry_open(
+    policy: ConnectRetryPolicy,
+    open_connection: Callable[[], Any],
+    driver_errors: tuple,
+    is_transient: Callable[[BaseException], bool] = is_transient_connect_error,
+) -> Any:
     """Call ``open_connection`` until it succeeds, a non-transient error, or the attempts or budget run out.
+
+    ``is_transient`` decides whether a driver error is worth another attempt; the default reads the message.
 
     The budget is checked again after each wait and before the next attempt, so a
     sleep that overran it (a slow clock, a loaded host) never starts another
@@ -503,7 +510,7 @@ def _retry_open(policy: ConnectRetryPolicy, open_connection: Callable[[], Any], 
         try:
             return open_connection()
         except driver_errors as exc:
-            if attempt >= policy.attempts or not is_transient_connect_error(exc):
+            if attempt >= policy.attempts or not is_transient(exc):
                 raise
             wait = policy.delay(attempt)
             if policy.clock() - started + wait >= policy.budget:
@@ -544,18 +551,32 @@ def install_clickhouse_connect_retry(engine: Any, policy: Optional[ConnectRetryP
             from clickhouse_driver import errors as driver_errors_module
 
             driver_errors = (driver_errors_module.Error,)
+            socket_timeout = getattr(driver_errors_module, 'SocketTimeoutError', None)
         except ImportError:  # pragma: no cover - the driver is installed whenever this is called
             return dbapi_connection
+
+        def is_transient(exc: BaseException) -> bool:
+            # The driver reports a connect timeout as ``SocketTimeoutError`` with a
+            # message that names no outage, so classify it by type.
+            if socket_timeout is not None and isinstance(exc, socket_timeout):
+                return True
+            return is_transient_connect_error(exc)
+
         for connection in [first, *getattr(client, 'connections', [])]:
-            _retry_connect_step(connection, policy, driver_errors)
+            _retry_connect_step(connection, policy, driver_errors, is_transient)
         return dbapi_connection
 
 
-def _retry_connect_step(connection: Any, policy: ConnectRetryPolicy, driver_errors: tuple) -> None:
+def _retry_connect_step(
+    connection: Any,
+    policy: ConnectRetryPolicy,
+    driver_errors: tuple,
+    is_transient: Callable[[BaseException], bool] = is_transient_connect_error,
+) -> None:
     """Replace ``connection.connect`` with a version that retries under ``policy``."""
     connect = connection.connect
 
     def connect_with_retry():
-        return _retry_open(policy, connect, driver_errors)
+        return _retry_open(policy, connect, driver_errors, is_transient)
 
     connection.connect = connect_with_retry
