@@ -107,7 +107,10 @@ When the pipeline starts, the node's Endpoint Info shows its address,
 Every request carries an account API key (`rr_...`) in the
 `Authorization: Bearer <key>` header, and the server checks on every call that
 the key's account may send to that address. Whose key is on the request is who
-pays. A URL never carries a credential: `?auth=` is not accepted.
+pays. A URL never carries a credential: `?auth=` is not accepted. The URL may
+root the address at one rung (`<server>/webhook/=team/<tid>/<address>`); the
+root is a selector, never a way out of a key's scope, and an endpoint-scoped
+key's frozen team refuses every other team root.
 
 - **Endpoint-scoped key** - minted from the Endpoint Info panel: permission
   `task.data` on that one address, frozen to your home team. Hand this one to

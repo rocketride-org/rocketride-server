@@ -116,9 +116,13 @@ future). Learn it once:
 - **Publish** — bind one deployed version to one **audience rung**. The same
   verb covers first release, update, promotion, and rollback: publishing is
   *repointing*, never rebuilding.
-- **Rungs** — `@me` (only you), `@team/<name>` (a team in your org),
-  `@public` (the store). There is no org-wide rung. Internal rungs serve
-  immediately; the public rung adds a **review ladder**.
+- **Rungs** — `@me` (only you), `@<team>` (a team in your org, by name in
+  any case; `=team/<tid>` by id), `@public` (the store). `@org` parses but
+  nothing publishes there yet. Internal rungs serve immediately; the public
+  rung adds a **review ladder**. The retired `@team/<name>` and `@user` are
+  refused, naming their replacement. A row's `audience` (`=user/<uid>`,
+  `=team/<tid>`, `@public`) is a valid target too: pass it back unchanged and
+  show its `handle`.
 - **Review state vs build status — two independent axes.** Review state is
   the human ladder: `private` → `submit` → `ready` (approved) or `rejected`, with a
   two-way message thread between developer and reviewer. Build status is the
@@ -156,7 +160,7 @@ an app package can never be scheduled) can run on a schedule:
 | registry version | server-assigned integer (v1, v2 …) | your package semver |
 | review state | private / submit / ready / rejected | build status |
 | build status | queued / building / ok / failed | review state |
-| rung | `@me`, `@team/<name>`, `@public` | orgs (no org rung exists) |
+| rung | `@me`, `@<team>` / `=team/<tid>`, `@public` | orgs (the `@org` rung is not served yet) |
 | pipeline component | a node in a `.pipe` (`provider`) | UI component |
 | UI component | a shell React component in an app | pipeline component |
 | `.pipe` | the pipeline file format (JSON) | `client.use()` — the verb that runs one |
@@ -176,7 +180,7 @@ or requesting signed entry URLs, it predates the current platform.
 - **Engines are shared by shape.** An engine process is keyed by the
   pipeline's SHAPE (its nodes, wiring and source), never by configuration.
   Your own runs (`@spec`: Play, `use(spec)`) get an engine per shape that is
-  yours alone. A published pipe (`@me`, `@team/<name>`, `@public`) runs on
+  yours alone. A published pipe (`@me`, `@<team>`, `@public`) runs on
   ONE engine per shape for every caller: each caller has their own control,
   configuration, environment and billing, and each control its own set of
   node globals inside that process. Two exceptions keep an engine per owner

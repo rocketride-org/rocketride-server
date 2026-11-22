@@ -14,6 +14,9 @@ import pytest
 from rocketride import RocketRideClient
 from test_deploy import SERVER_URI, TEAM, fresh_project, make_pipeline
 
+# The team TEAM publishes to: a log stream reports the raw team id, not the target
+TEAM_ID = 'local'
+
 SOURCE = 'webhook_1'
 
 
@@ -60,7 +63,7 @@ class TestLogStreams:
 
             assert [(s['teamId'], s['runKind'], s['ownerKind']) for s in streams] == [
                 ('', 'dev', 'user'),
-                (TEAM, 'deploy', 'team'),
+                (TEAM_ID, 'deploy', 'team'),
             ]
             assert all(len(s['chapters']) == 1 for s in streams)
             # The single-stream read sees only its own continuum: that is the gap streams() closes.

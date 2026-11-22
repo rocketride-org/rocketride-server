@@ -41,6 +41,29 @@ import { AuthenticationException, ConnectionException, DAPException, LoginAttemp
 // Global counter for generating unique client IDs
 let clientId = 0;
 
+/** The refusal of the retired per-call `team` option (plan 11.1 B44); the server words it the same way. */
+const TEAM_OPTION_RETIRED = 'team= is retired: write a rooted address, @<team>/... or =team/<tid>/...';
+
+/**
+ * Refuse the retired per-call `team` option.
+ *
+ * The positional `team` parameter of `pipe()`, `send()` and the `DataPipe`
+ * constructor stays in the signature until the 2.0 floors let it go; a rooted
+ * address names the rung now (`@<team>/...`, `=team/<tid>/...`), so any value
+ * is a caller still writing the old form and is told what to write instead.
+ * `submit()`, `tool()` and `interfaces()` lost the option from their types,
+ * and refuse it too when an untyped caller still sends it, rather than drop
+ * it and land on another rung.
+ *
+ * @param team - What the caller passed in the retired slot
+ * @throws Error when `team` is anything but `undefined`, `null` or `''`
+ */
+function refuseTeamOption(team: unknown): void {
+	if (team !== undefined && team !== null && team !== '') {
+		throw new Error(TEAM_OPTION_RETIRED);
+	}
+}
+
 /**
  * Streaming data pipe for sending large datasets to RocketRide pipelines.
  *
@@ -79,7 +102,6 @@ export class DataPipe {
 	private _opened = false;
 	private _closed = false;
 	private _onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>;
-	private _team?: string;
 	private _params?: Record<string, unknown>;
 
 	/**
@@ -93,29 +115,21 @@ export class DataPipe {
 	 * @param provider - Optional provider name for the data source
 	 * @param onSSE - Optional async callback invoked for each SSE event emitted by
 	 *                the pipeline node for this specific pipe
-	 * @param team - Resolve the address through this one of your teams on every
-	 *               request of the pipe (what submit() passes on from the team
-	 *               that answered it)
+	 * @param team - Retired: pass `undefined`. A rooted address in `token` names the rung
+	 *               (`@<team>/...`, `=team/<tid>/...`); any value throws
 	 * @param params - Per-call parameter values by public name; they ride the open,
 	 *                 the one door every per-call value enters by
+	 * @throws Error if `team` is passed (the per-call team option is retired)
 	 */
 	constructor(client: RocketRideClient, token: string, objinfo: Record<string, unknown> = {}, mimeType = 'application/octet-stream', provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>) {
+		refuseTeamOption(team);
 		this._client = client;
 		this._token = token;
 		this._objinfo = objinfo;
 		this._mimeType = mimeType;
 		this._provider = provider;
 		this._onSSE = onSSE;
-		this._team = team;
 		this._params = params && Object.keys(params).length > 0 ? { ...params } : undefined;
-	}
-
-	/** The request arguments, with the pipe's team when it has one. */
-	private _arguments(arguments_: Record<string, unknown>): Record<string, unknown> {
-		if (this._team !== undefined) {
-			arguments_.team = this._team;
-		}
-		return arguments_;
 	}
 
 	/**
@@ -168,13 +182,13 @@ export class DataPipe {
 		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: this._arguments({
+			arguments: {
 				subcommand: 'open',
 				object: this._objinfo,
 				mimeType: this._mimeType,
 				provider: this._provider,
 				...(this._params ? { params: this._params } : {}),
-			}),
+			},
 			token: this._token,
 		});
 
@@ -250,11 +264,11 @@ export class DataPipe {
 		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: this._arguments({
+			arguments: {
 				subcommand: 'write',
 				pipeId: this._pipeId,
 				data: buffer,
-			}),
+			},
 			token: this._token,
 		});
 
@@ -303,10 +317,10 @@ export class DataPipe {
 		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: this._arguments({
+			arguments: {
 				subcommand: 'cancel',
 				pipeId: this._pipeId,
-			}),
+			},
 			token: this._token,
 		});
 
@@ -337,10 +351,10 @@ export class DataPipe {
 
 		try {
 			const request = this._client.buildRequest('rrext_process', {
-				arguments: this._arguments({
+				arguments: {
 					subcommand: 'close',
 					pipeId: this._pipeId,
-				}),
+				},
 				token: this._token,
 			});
 
@@ -390,13 +404,13 @@ export class DataPipe {
 		}
 
 		const request = this._client.buildRequest('rrext_process', {
-			arguments: this._arguments({
+			arguments: {
 				subcommand: 'tool',
 				tool,
 				nodeId,
 				input,
 				pipeId: this._pipeId,
-			}),
+			},
 			token: this._token,
 		});
 
@@ -1712,11 +1726,12 @@ export class RocketRideClient extends DAPClient {
 	 * Run ONE request through a named or inline pipeline: `use()` plus one `send()`.
 	 *
 	 * Exactly one of `name`, `pipeline` or `filepath`. A `name` is the address
-	 * `developerId.pipelineId[.source]` and resolves through the fixed rungs: your
-	 * live `@spec` control (attach only), your `@me` deployment, the first team in
-	 * your team order that publishes it (`team` overrides the order for this call),
-	 * then `@public`; a published rung starts from its artifact when nothing is
-	 * live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
+	 * `[<root>/]developerId.pipelineId[.source]`. A bare address resolves through the
+	 * fixed rungs: your live `@spec` control (attach only), your `@me` deployment, the
+	 * first team in your team order that publishes it, then `@public`. A rooted one
+	 * walks only the rung its root names and never falls through: `@me/`, `@spec/`,
+	 * `@public/`, `@<team>/` or `=team/<tid>/` (one of your teams). A published rung
+	 * starts from its artifact when nothing is live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
 	 * with the same `project_id` and resolved configuration is reused, otherwise
 	 * one is created (`converged: 'started'`); a different configuration under
 	 * the same `project_id` is a new control on the same engine. `project_id`
@@ -1742,9 +1757,8 @@ export class RocketRideClient extends DAPClient {
 	 * @param options.ttl - Idle ttl in seconds (spec calls only)
 	 * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
 	 * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
-	 * @param options.team - Answer `@team` from this one of your teams
 	 * @returns The pipe close body plus `token` (the control id: opaque, transient, valid for the life of the control; never persist it), `address`, `resolved`, `team`, `version`, `engineKey`, `converged` and `ignored`
-	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
+	 * @throws Error when not exactly one of name/pipeline/filepath is given, when the retired `team` option is passed, when the server refuses, or when the server does not support `submit`
 	 *
 	 * @example
 	 * ```typescript
@@ -1768,10 +1782,11 @@ export class RocketRideClient extends DAPClient {
 			ttl?: number;
 			env?: Record<string, string>;
 			pipelineTraceLevel?: 'none' | 'metadata' | 'summary' | 'full';
-			team?: string;
 		} = {}
 	): Promise<SUBMIT_RESULT> {
-		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel, team } = options;
+		// Step 0: the retired team option, from an untyped caller, is refused before any request
+		refuseTeamOption((options as Record<string, unknown>).team);
+		const { name, pipeline, filepath, source, params, objinfo, mimetype, onSSE, threads, args, ttl, env, pipelineTraceLevel } = options;
 
 		// Step 1: exactly one of name / pipeline / filepath
 		if ([name, pipeline, filepath].filter((value) => value !== undefined).length !== 1) {
@@ -1797,7 +1812,7 @@ export class RocketRideClient extends DAPClient {
 			}
 			arguments_.pipeline = JSON.parse(JSON.stringify(spec));
 		}
-		const optional: Record<string, unknown> = { source, team, params, objinfo, mimetype, threads, args, ttl, pipelineTraceLevel };
+		const optional: Record<string, unknown> = { source, params, objinfo, mimetype, threads, args, ttl, pipelineTraceLevel };
 		for (const [key, value] of Object.entries(optional)) {
 			if (value !== undefined) arguments_[key] = value;
 		}
@@ -1843,8 +1858,8 @@ export class RocketRideClient extends DAPClient {
 
 		// Step 4: stream on the control the server answered with: its id rides
 		// the token slot, so the data path lands on that control without a
-		// second resolution (the team stamp rides along for the record).
-		const result = await this.send(stamps.token, data, objinfo ?? {}, mimetype, onSSE, stamps.team, params);
+		// second resolution.
+		const result = await this.send(stamps.token, data, objinfo ?? {}, mimetype, onSSE, undefined, params);
 		return { ...(result ?? {}), ...stamps };
 	}
 
@@ -1983,23 +1998,28 @@ export class RocketRideClient extends DAPClient {
 	 * One pure read — no engine is started, no hold is taken, nothing is
 	 * billed. The address resolves the way `submit()` resolves a name (your
 	 * `@me` publication, your teams in team order, the publisher's `@public`
-	 * one) and the pinned version's spec is projected server-side, so the spec
+	 * one; a rooted address such as `@Production/acme.docBrain` reads only that
+	 * rung) and the pinned version's spec is projected server-side, so the spec
 	 * never leaves the server. Sources sit under their own address
 	 * (`acme.docBrain.chat`), every other node under the pipe address
 	 * (`acme.docBrain`, the default source). A front end filters with plain
 	 * equality on the classType word: `chat`, `dropper`, `database`.
 	 *
-	 * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
-	 * @param options.team - Resolve the `@team` rung through this one of your teams (`@<team>` by name in any case, `=team/<tid>` or a team id; the server resolves it).
+	 * @param address - `[<root>/]developerId.pipelineId[.source]`; a source segment resolves as it does for
+	 *                  `submit()`, and the map covers the whole pipe whichever source is named.
+	 * @param retired - The retired options slot (`{ team }`): any value throws; root the address instead
+	 *                  (`@<team>/...`, `=team/<tid>/...`).
 	 * @returns The answering rung and version, and the interface map.
 	 * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
-	 *         address is outside a scoped key's endpoints.
+	 *         address is outside a scoped key's endpoints, or when `retired` is passed.
 	 */
-	async interfaces(address: string, options: { team?: string } = {}): Promise<PipeInterfaces> {
+	async interfaces(address: string, retired?: unknown): Promise<PipeInterfaces> {
+		if (retired !== undefined) {
+			throw new Error(TEAM_OPTION_RETIRED);
+		}
 		return this.call<PipeInterfaces>('rrext_deploy_pipe', {
 			subcommand: 'interfaces',
 			address,
-			...(options.team ? { team: options.team } : {}),
 		});
 	}
 
@@ -2015,8 +2035,10 @@ export class RocketRideClient extends DAPClient {
 	/**
 	 * Create a data pipe for streaming operations.
 	 *
-	 * `token` is the control id, or an address the open resolves the way `submit()`
-	 * resolves a name, starting a published rung when nothing is live.
+	 * `token` is the control id, or an address (bare or rooted, `@<team>/...`) the open
+	 * resolves the way `submit()` resolves a name, starting a published rung when
+	 * nothing is live. `team` is retired: pass `undefined` (any value throws); a
+	 * rooted address names the rung.
 	 */
 	async pipe(token: string, objinfo: Record<string, unknown> = {}, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe> {
 		return new DataPipe(this, token, objinfo, mimeType, provider, onSSE, team, params);
@@ -2024,8 +2046,12 @@ export class RocketRideClient extends DAPClient {
 
 	/**
 	 * Send data to a running pipeline.
+	 *
+	 * `token` is the control id, or an address (bare or rooted) resolved by the open.
+	 * `team` is retired: pass `undefined` (any value throws); a rooted address names the rung.
 	 */
 	async send(token: string, data: string | Uint8Array, objinfo: Record<string, unknown> = {}, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<PIPELINE_RESULT | undefined> {
+		refuseTeamOption(team);
 		// Convert string to bytes if needed
 		let buffer: Uint8Array;
 		if (typeof data === 'string') {
@@ -3204,11 +3230,13 @@ export class RocketRideClient extends DAPClient {
 	 * Bind a deployment to an audience — first publish, update, promote, and
 	 * rollback are all this one verb ("repoint, never rebuild"). The binding
 	 * is a pure pointer; '@public' requires the deployment be 'ready'
-	 * (approved), '@me'/'@team' accept any non-'failed' deployment.
+	 * (approved), '@me' and a team accept any non-'failed' deployment.
 	 *
 	 * @param appId - App id
 	 * @param registryVersion - Registry version number from the rail
-	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+	 *                 and '@user' are refused; '@org' is refused until the org rung serves
 	 * @returns The binding row ({audience, version, state, artifactState, ...})
 	 */
 	async publishApp(appId: string, registryVersion: number, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3221,7 +3249,9 @@ export class RocketRideClient extends DAPClient {
 	 * to the audience again revives it.
 	 *
 	 * @param appId - App id
-	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+	 *                 and '@user' are refused; '@org' is refused until the org rung serves
 	 * @returns The final binding row (state 'removed')
 	 */
 	async removeAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3235,7 +3265,9 @@ export class RocketRideClient extends DAPClient {
 	 * the binding.
 	 *
 	 * @param appId - App id
-	 * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+	 * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+	 *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+	 *                 and '@user' are refused; '@org' is refused until the org rung serves
 	 * @returns The binding row (state 'disabled')
 	 */
 	async disableAppPublish(appId: string, target: string): Promise<{ publish: Record<string, unknown> }> {
@@ -3246,9 +3278,10 @@ export class RocketRideClient extends DAPClient {
 	 * The reverse index: which audiences serve which version of an app.
 	 *
 	 * @param appId - App id
-	 * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+	 * @returns Pin rows ({rung, handle, audience, version, appVersion, state, deployedAt}): show `handle`,
+	 *          pass `audience` back unchanged as the publish/remove target
 	 */
-	async whereApp(appId: string): Promise<Array<{ rung: string; handle: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
+	async whereApp(appId: string): Promise<Array<{ rung: string; handle: string; audience: string; version: number; appVersion: string; state: string; deployedAt?: number }>> {
 		const body = await this.call('rrext_deploy_app', { subcommand: 'where', appId });
 		return (body as any)?.pins ?? [];
 	}
@@ -3836,7 +3869,8 @@ export class RocketRideClient extends DAPClient {
 	 * @example
 	 * ```typescript
 	 * const { artifact } = await client.deploy.add({ pipeline, comment: 'v2' });
-	 * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
+	 * // A team by name, or a row's `audience` (=team/<tid>) as the server returned it
+	 * await client.deploy.deploy('proj-1', artifact.version!, '@Staging');
 	 * ```
 	 */
 	get deploy(): DeployApi {
@@ -3923,22 +3957,23 @@ export class RocketRideClient extends DAPClient {
 	 * dormant, so a front end may call a node of a pipe nobody has used
 	 * recently. A node the entry source did not load fails at the engine.
 	 *
-	 * @param options.address - The pipe's address (`developerId.pipelineId[.source]`),
+	 * @param options.address - The pipe's address (`[<root>/]developerId.pipelineId[.source]`),
 	 *                          or the `address` a `use()`/`submit()` result returned beside
-	 *                          its control id
+	 *                          its control id. Pass the same address an `interfaces()` call
+	 *                          was made with (a rooted `@<team>/...` one included), so
+	 *                          discovery and execution land on the same publication
 	 * @param options.token - Deprecated spelling of `address`; one of the two is required
 	 * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
 	 * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
 	 *                         tool-lane nodes; the first node that owns the tool handles it.
 	 * @param options.input - Arguments forwarded to the tool function
-	 * @param options.team - Resolve the `@team` rung through this one of your teams — the same
-	 *                       team an `interfaces()` call was made with, so discovery and execution
-	 *                       land on the same publication
 	 * @param options.timeout - Optional per-request timeout in ms
 	 * @returns The tool's return value (typically a record/object)
-	 * @throws Error if the server signals failure or no node handles the requested tool
+	 * @throws Error if the retired `team` option is passed, the server signals failure or no node handles the requested tool
 	 */
-	async tool<T = any>(options: { address?: string; token?: string; tool: string; nodeId?: string; input?: Record<string, unknown>; team?: string; timeout?: number }): Promise<T> {
+	async tool<T = any>(options: { address?: string; token?: string; tool: string; nodeId?: string; input?: Record<string, unknown>; timeout?: number }): Promise<T> {
+		// The retired team option, from an untyped caller, is refused before any request
+		refuseTeamOption((options as Record<string, unknown>).team);
 		const address = options.address ?? options.token;
 		if (!address) {
 			throw new Error('tool() needs the pipe address (options.address)');
@@ -3950,7 +3985,6 @@ export class RocketRideClient extends DAPClient {
 				tool: options.tool,
 				nodeId: options.nodeId ?? '',
 				input: options.input ?? {},
-				...(options.team ? { team: options.team } : {}),
 			},
 			{
 				token: address,

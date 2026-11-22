@@ -60,7 +60,7 @@ from rocketlib import error
 
 from ai.common.list_rows import paginate_rows
 
-from .audience import audience_fields, audience_of_fields, is_audience, normalize_audience
+from .audience import audience_fields, audience_of_fields, compose_handle, is_audience, normalize_audience
 from .legacy_audience import translate_legacy_audience
 from .store import IStore, StorageError, StorageNotFoundError, VersionMismatchError
 
@@ -140,34 +140,60 @@ def _actor_record(actor: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def audience_display(audience: Dict[str, str]) -> Dict[str, str]:
-    """The self-describing audience payload for a history row.
+    """The self-describing audience payload a history row stores.
 
     History rows are rendered without a second lookup — every id they carry
     must ride with its dereferenced display form (the same denormalization
-    rule as the actor identity above). Command-layer callers resolve the
-    real display facts before the write (team names live in their session);
-    this fallback composes the handle from the audience type alone so a
-    bare ``{'type','id'}`` dict — the seeder, a legacy caller — still
-    yields a readable row instead of a raw id.
+    rule as the actor identity above). The pair goes through ``audience.py``
+    (an unknown type raises, the store's id is dropped) and keeps the
+    display ``name`` the resolver stamped ('' when none). No handle is
+    stored: a handle depends on its reader (``@me`` for the owner,
+    ``Personal`` for an org admin), so it is composed when the row is read
+    (``audience_handle``), and a handle an older row stored is dropped here.
 
     Args:
-        audience: ``{'type','id'}`` plus optional ``name``/``handle``
-                  display keys stamped by the resolver.
+        audience: ``{'type','id'}`` plus an optional ``name`` display key
+                  stamped by the resolver.
 
     Returns:
-        A copy with ``handle`` guaranteed present ('@me' | '@public' |
-        '@team/<name-or-id>'); resolver-stamped keys pass through verbatim.
+        ``{'type', 'id', 'name'}``.
+
+    Raises:
+        AudienceError: The pair names no audience.
     """
-    out = dict(audience)
-    if not out.get('handle'):
-        kind = out.get('type')
-        if kind == 'user':
-            out['handle'] = '@me'
-        elif kind == 'public':
-            out['handle'] = '@public'
-        else:
-            out['handle'] = f'@team/{out.get("name") or out.get("id", "")}'
-    return out
+    return {**audience_fields(audience_of_fields(audience)), 'name': str(audience.get('name') or '')}
+
+
+def audience_handle(
+    audience: Dict[str, str],
+    caller_id: str = '',
+    team_names: Optional[Dict[str, str]] = None,
+    org_id: str = '',
+) -> str:
+    """
+    The handle of a stored audience pair for one reader (``audience.compose_handle``).
+
+    A handle an older row stored is ignored. A team the reader cannot name
+    is named by the display name the row stored, else by ``=team/<tid>``.
+    With no reader (a backend's own refusal message) a personal space reads
+    ``Personal``.
+
+    Args:
+        audience: ``{'type','id'}`` plus an optional ``name``.
+        caller_id: The reader's user id ('' for no reader).
+        team_names: The team names the reader can see, by team id.
+        org_id: The reader's active org.
+
+    Returns:
+        The handle.
+
+    Raises:
+        AudienceError: The pair names no audience.
+    """
+    names = dict(team_names or {})
+    if audience.get('type') == 'team' and audience.get('name') and str(audience.get('id')) not in names:
+        names[str(audience.get('id'))] = str(audience['name'])
+    return compose_handle(audience_of_fields(audience), caller_id, names, org_id)
 
 
 # The app review lifecycle on the DEPLOYMENT (deployment_artifacts.state).
@@ -359,14 +385,14 @@ def delete_block_of(entry: Dict[str, Any], pins: List[Dict[str, Any]]) -> str:
     Args:
         entry: The registry version row.
         pins: The live publish rows pointing at it (``{'audience': ...}``
-              dicts; the audience may carry resolver-stamped display keys).
+              dicts; the audience may carry its stored display name).
 
     Returns:
         The refusal sentence, or '' when the version may be deleted.
     """
     version = int(entry.get('version', 0))
     if pins:
-        handles = sorted({audience_display(dict(pin.get('audience') or {}))['handle'] for pin in pins})
+        handles = sorted({audience_handle(dict(pin.get('audience') or {})) for pin in pins})
         return f'v{version} is published to {", ".join(handles)}; unpublish it first'
     if str(entry.get('state') or DEFAULT_REVIEW_STATE) == 'submit':
         return f'v{version} is in review; withdraw it first'
@@ -1811,4 +1837,11 @@ class FileDeploymentBackend:
         }
 
 
-__all__ = ['FileDeploymentBackend', 'artifact_path', 'artifact_sha256', 'delete_block_of']
+__all__ = [
+    'FileDeploymentBackend',
+    'artifact_path',
+    'artifact_sha256',
+    'audience_display',
+    'audience_handle',
+    'delete_block_of',
+]

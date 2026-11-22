@@ -158,12 +158,15 @@ class AppsMixin(DAPClient):
         Bind a deployment to an audience (first publish / promote / rollback).
 
         The binding is a pure pointer; '@public' requires the deployment be
-        'ready' (approved), '@me'/'@team' accept any non-'failed' deployment.
+        'ready' (approved), '@me' and a team accept any non-'failed' deployment.
 
         Args:
             app_id:           App id.
             registry_version: Registry version number from the rail.
-            target:           '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias).
+            target:           '@me', '@<team>' (a team of yours by name), '@public', or an
+                              audience a row or the ConnectResult carried ('=team/<tid>'),
+                              passed back unchanged. The retired '@team/...' and '@user' are
+                              refused; '@org' is refused until the org rung serves.
 
         Returns:
             Dict with the ``publish`` binding row ({audience, version, state,
@@ -186,7 +189,7 @@ class AppsMixin(DAPClient):
 
         Args:
             app_id: App id.
-            target: '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias).
+            target: The audience, as for :meth:`publish_app` (a pin's ``audience``, passed back unchanged).
 
         Returns:
             Dict with the final ``publish`` binding row (state 'removed').
@@ -207,7 +210,7 @@ class AppsMixin(DAPClient):
 
         Args:
             app_id: App id.
-            target: '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias).
+            target: The audience, as for :meth:`publish_app` (a pin's ``audience``, passed back unchanged).
 
         Returns:
             Dict with the ``publish`` binding row (state 'disabled').
@@ -227,7 +230,9 @@ class AppsMixin(DAPClient):
             app_id: App id.
 
         Returns:
-            Pin rows ({rung, handle, version, appVersion, state, deployedAt}).
+            Pin rows ({rung, handle, audience, version, appVersion, state,
+            deployedAt}): show ``handle``, pass ``audience`` back unchanged as
+            the publish/remove target.
         """
         body = await self.call('rrext_deploy_app', subcommand='where', appId=app_id)
         return body.get('pins', [])

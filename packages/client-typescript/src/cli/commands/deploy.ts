@@ -44,7 +44,7 @@ import { addDeployConnectionOptions, connectDeploy, promptLine, runCliCommand, f
 /**
  * A typed `--team` as the wire takes it: passed through, for the server to
  * resolve ('@me', '@public', '@<team>' by name in any case, '=team/<tid>',
- * a row's audience, or a team id).
+ * or a row's audience; a bare team id is refused there).
  *
  * @param team - The typed team ('' = unscoped).
  * @returns The value to send.
@@ -194,7 +194,8 @@ Every verb uses the deployment target (ROCKETRIDE_DEPLOY_URI / ROCKETRIDE_DEPLOY
 and never falls back to the development connection.
 
 --team and --deploy-to take @me (your personal space), @<team> (a team by name, in any case),
-=team/<tid>, @public (the store), or a team id; the server resolves them.
+=team/<tid> (a team by id, as a row's teamId carries it), or @public (the store); the server
+resolves them, and refuses a bare team id and the retired @team/... and @user.
 Output shows each row's handle (@me, @<team>, @public); --json keeps teamId and adds teamName.
 
 Examples:
@@ -211,7 +212,7 @@ Examples:
 		.description('Deploy a pipeline (.pipe) or a node package as the next registry version (deploying activates nothing)')
 		.option('--kind <kind>', 'Artifact kind: pipe or node', 'pipe')
 		.option('--comment <text>', 'What-changed note kept in the registry')
-		.option('--deploy-to <team>', 'Also point this team (@me, @<team>, =team/<tid>, @public, or an id) at the new version in the same call')
+		.option('--deploy-to <team>', 'Also point this team (@me, @<team>, =team/<tid>, or @public) at the new version in the same call')
 		.action(async (file, options) => {
 			await runCliCommand(options, async (out) => {
 				if (options.kind !== 'pipe' && options.kind !== 'node') {
@@ -251,7 +252,7 @@ Examples:
 	const listCmd = deployCmd
 		.command('list')
 		.description('List deployments')
-		.option('--team <team>', 'Scope to one team (@me, @<team>, =team/<tid>, @public, or an id)')
+		.option('--team <team>', 'Scope to one team (@me, @<team>, =team/<tid>, or @public)')
 		.action(async (options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
@@ -278,7 +279,7 @@ Examples:
 	const getCmd = deployCmd
 		.command('get <project>')
 		.description("Show one deployment's state")
-		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
+		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, or @public)', '')
 		.action(async (project, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
@@ -326,7 +327,7 @@ Examples:
 	const historyCmd = deployCmd
 		.command('history <project>')
 		.description("Show a project's deploy/publish audit trail")
-		.option('--team <team>', 'Scope to one team (@me, @<team>, =team/<tid>, @public, or an id)')
+		.option('--team <team>', 'Scope to one team (@me, @<team>, =team/<tid>, or @public)')
 		.action(async (project, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
@@ -353,7 +354,7 @@ Examples:
 	const publishCmd = deployCmd
 		.command('publish <project> <version>')
 		.description('Bind a team to a registry version (first publish, update, promote, rollback)')
-		.option('--team <team>', 'Team to bind (@me, @<team>, =team/<tid>, @public, or an id)', '')
+		.option('--team <team>', 'Team to bind (@me, @<team>, =team/<tid>, or @public)', '')
 		.action(async (project, version, options) => {
 			await runCliCommand(options, async (out) => {
 				const versionNum = parseInt(version, 10);
@@ -375,7 +376,7 @@ Examples:
 	const runCmd = deployCmd
 		.command('run <project> <source>')
 		.description("Trigger a deployment's source to run now")
-		.option('--team <team>', 'Team whose deployment runs (@me, @<team>, =team/<tid>, @public, or an id)', '')
+		.option('--team <team>', 'Team whose deployment runs (@me, @<team>, =team/<tid>, or @public)', '')
 		.action(async (project, source, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
@@ -416,18 +417,15 @@ Examples:
 	// on the server — no engine is started, nothing is billed.
 	const interfacesCmd = deployCmd
 		.command('interfaces <address>')
-		.description("The callable nodes of the publication that answers an address, by classType (no engine started)")
-		.option('--team <team>', 'Resolve the @team rung through this one of your teams (@<team>, =team/<tid>, or an id)')
+		.description("The callable nodes of the publication that answers an address, by classType (no engine started); a rooted address (@<team>/..., =team/<tid>/...) reads one rung")
 		.action(async (address, options) => {
 			await runCliCommand(options, async (out) => {
 				const client = await connectDeploy(options, out);
 				if (!client) return 1;
-				// `--team` is passed through for the server to resolve to one of
-				// your teams, as the sibling verbs' is (the per-call team option
-				// gives way to a rooted address in C.32); an omitted override
-				// stays omitted (the caller's team order decides)
-				const team = options.team ? teamArgOf(String(options.team)) : '';
-				const answer = await client.interfaces(address, team ? { team } : {});
+				// The address carries its own rung: a root such as
+				// @Production/acme.docBrain names one team, a bare address
+				// walks the caller's ladder
+				const answer = await client.interfaces(address);
 				if (!out.jsonRequested) {
 					const where = answer.rung === 'team' ? `@team ${answer.teamId}` : `@${answer.rung}`;
 					out.line(`${answer.address}  v${answer.version}  ${where}`);
@@ -453,7 +451,7 @@ Examples:
 		const cmd = deployCmd
 			.command(`${verb} <project>`)
 			.description(description)
-			.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
+			.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, or @public)', '')
 			.action(async (project, options) => {
 				await runCliCommand(options, async (out) => {
 					const client = await connectDeploy(options, out);
@@ -486,7 +484,7 @@ Examples:
 	const sourceConfigCmd = deployCmd
 		.command('source-config <project> <source>')
 		.description("Set one source's run settings: trace level and full debug output")
-		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
+		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, or @public)', '')
 		.option('--trace-level <level>', 'none, metadata, summary, or full (default: full)')
 		.option('--debug-out', 'Turn full task debug output on')
 		.option('--no-debug-out', 'Turn full task debug output off')
@@ -525,7 +523,7 @@ Examples:
 	const scheduleSetCmd = scheduleCmd
 		.command('set <project> <source> <cron>')
 		.description("Set a source's schedule (5-field cron), or 'none' to clear it")
-		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
+		.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, or @public)', '')
 		.option('--ttl <seconds>', 'Run window in seconds (fixed window)')
 		.action(async (project, source, cron, options) => {
 			await runCliCommand(options, async (out) => {
@@ -549,7 +547,7 @@ Examples:
 		const cmd = scheduleCmd
 			.command(`${verb} <project> <source>`)
 			.description(description)
-			.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, @public, or an id)', '')
+			.option('--team <team>', 'Team the deployment belongs to (@me, @<team>, =team/<tid>, or @public)', '')
 			.action(async (project, source, options) => {
 				await runCliCommand(options, async (out) => {
 					const client = await connectDeploy(options, out);

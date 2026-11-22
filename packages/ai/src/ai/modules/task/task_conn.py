@@ -820,7 +820,7 @@ class TaskConn(
         through ``TaskServer.control_by_id``, which re-checks the caller on
         EVERY call (the owner, team membership, sys.admin) and enforces a
         scoped key's endpoints. An address in the slot is refused: a name is
-        resolved by ``resolve_control_or_start`` for ``submit()`` and for the
+        resolved by ``TaskServer.resolve_target`` for ``submit()`` and for the
         frames that start a binding (a data ``open``, a standalone ``tool``
         borrow), whose answer carries the control id (plan section 1).
 
@@ -837,36 +837,6 @@ class TaskConn(
                 endpoints scope.
         """
         return self._server.control_by_id(self.get_token_slot(request), self._account_info, permissions or None)
-
-    async def resolve_control_or_start(self, request: Dict[str, Any], permissions: str = '') -> 'TaskControl':
-        """
-        Resolve the ADDRESS a request names, starting its publication when nothing is live.
-
-        A data ``open`` by address (the HTTP door, ``send``/``pipe`` given a
-        name), a standalone ``tool`` borrow (plan 3.6) and ``submit(name)``
-        resolve the same way (plan 3.2, one resolver for every verb): the caller's
-        rungs in order, ``@spec`` attach-only, a published rung answered by
-        its live control or started from its artifact. ``team`` in the
-        arguments overrides the caller's team order for the call.
-
-        Args:
-            request (Dict[str, Any]): The command request.
-            permissions (str): The permission the command needs.
-
-        Returns:
-            TaskControl: The resolved control, live.
-
-        Raises:
-            TaskError: Bad address grammar, no rung answered, or the start failed.
-            PermissionError: Unauthenticated, no permission, or outside the
-                key's endpoints scope.
-        """
-        address = self.get_token_slot(request)
-        arguments = request.get('arguments')
-        team = arguments.get('team') if isinstance(arguments, dict) else None
-        return await self._server.resolve_or_start(
-            address, self._account_info, permissions or None, team=str(team) if team else None
-        )
 
     def get_task(self, request: Dict[str, Any], permissions: str = '') -> 'TaskEngine':
         """

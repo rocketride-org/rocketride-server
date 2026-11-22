@@ -278,38 +278,38 @@ const ACTION_LABEL: Record<string, string> = {
 };
 
 /**
- * The audience handle a publish row bound to. Rows written since the
- * self-describing-history contract carry the server-dereferenced handle
- * ('@team/Engineering'); legacy rows fall back to a generic spelling
- * composed from the type alone.
+ * The audience handle a publish row bound to: the one the server composed
+ * for this reader when it served the row ('@me', '@Engineering',
+ * '=team/<tid>', 'Personal', '@public'); the client composes none.
  *
  * @param audience - The row's audience payload.
  * @returns The display handle, '' when absent.
  */
 function audienceHandle(audience: { type?: string; handle?: string } | undefined): string {
-	if (audience?.handle) return audience.handle;
-	if (!audience?.type) return '';
-	if (audience.type === 'user') return '@me';
-	if (audience.type === 'public') return '@public';
-	return '@team';
+	return audience?.handle ?? '';
 }
 
 /**
  * The timeline title verb for one history row. A 'publish' row carrying an
  * audience is the PUBLISH (bind to a rung) — with the version it repointed
  * OFF of when the row records one; without an audience it is the registry
- * write — the DEPLOY. The binding-lifecycle rows name their rung the same
- * way — "v15 removed" alone reads like the VERSION vanished.
+ * write — the DEPLOY. A publish row whose audience the server could not
+ * name for this reader (a legacy pair it decodes to no audience, so no
+ * handle) is still a publish, told without the rung. The binding-lifecycle
+ * rows name their rung the same way — "v15 removed" alone reads like the
+ * VERSION vanished.
  *
  * @param entry - The history row.
  * @returns The verb phrase after "vN ".
  */
 export function streamLabel(entry: AppHistoryEntry): string {
-	const handle = audienceHandle(entry.data?.audience);
+	const audience = entry.data?.audience;
+	const handle = audienceHandle(audience);
 	if (entry.action === 'publish') {
-		if (!handle) return 'deployed to the server';
+		if (!audience?.type) return 'deployed to the server';
 		const prev = entry.data?.previousVersion;
-		return prev ? `published to ${handle} (was v${prev})` : `published to ${handle}`;
+		const where = handle ? `published to ${handle}` : 'published';
+		return prev ? `${where} (was v${prev})` : where;
 	}
 	if (handle) {
 		if (entry.action === 'removed' || entry.action === 'remove') return `removed from ${handle}`;

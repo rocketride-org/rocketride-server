@@ -270,6 +270,15 @@ def config_hash(configs: List[Dict[str, Any]]) -> str:
 #: produced only by the published-rung resolver.
 RUNGS = ('spec', 'me', 'team', 'public')
 
+#: ``TaskServer.resolve_target`` acts on the first candidate: a publication starts its control.
+RESOLVE_START = 'start'
+
+#: ``TaskServer.resolve_target`` decides without acting: the first candidate, a control or a publication.
+RESOLVE_READ = 'read'
+
+#: ``TaskServer.resolve_target`` reads registered controls only and never starts one.
+RESOLVE_ATTACH = 'attach'
+
 
 def rung_of(run_kind: str, owner_kind: str) -> str:
     """

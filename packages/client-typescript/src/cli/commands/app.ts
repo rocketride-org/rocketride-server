@@ -114,17 +114,21 @@ export function splitAppVersion(app?: string, version?: string): { app?: string;
 }
 
 /**
- * Normalizes a publish target: '@me', '@public', '@team/<name-or-id>'. The
- * leading '@' may be omitted.
+ * A typed publish target as the wire takes it (plan 2.5): '@me', '@<team>'
+ * (a team by name, any case), '=team/<tid>', '@public', or any audience a
+ * row carried. The two words 'me' and 'public' may be typed without their
+ * '@'; every other value passes through unchanged, for the server to read:
+ * the server owns the grammar and refuses the retired '@team/...' and
+ * '@user' by naming their replacement.
  *
  * @param target - The typed target.
  * @returns The wire target.
- * @throws Error on anything else.
+ * @throws Error when nothing was typed.
  */
 export function normalizePublishTarget(target: string): string {
-	const wire = target.startsWith('@') ? target : `@${target}`;
-	if (wire === '@me' || wire === '@public' || /^@team\/.+/.test(wire)) return wire;
-	throw new Error(`Unknown publish target '${target}' — use @me, @team/<name>, or @public`);
+	const typed = target.trim();
+	if (!typed) throw new Error('A publish target is required: @me, @<team>, =team/<tid> or @public');
+	return typed === 'me' || typed === 'public' ? `@${typed}` : typed;
 }
 
 /**
@@ -181,7 +185,7 @@ async function waitForBuild(client: RocketRideClient, appId: string, registryVer
  * @param client - Connected deploy client.
  * @param appId - App id.
  * @param registryVersion - The version to publish.
- * @param target - Wire target ('@me', '@team/<x>', '@public').
+ * @param target - Wire target ('@me', '@<team>', '=team/<tid>', '@public').
  * @param out - Command output.
  * @returns The binding row.
  */
@@ -583,7 +587,7 @@ Examples:
   rocketride app verify clock --store                local checks, incl. the store bar
   rocketride app deploy clock --publish @me          deploy, wait for the build, publish
   rocketride app versions clock                      version rail and where each is live
-  rocketride app publish clock 2 --to @team/QA       publish a version to a team
+  rocketride app publish clock 2 --to @QA            publish a version to a team (by name, or =team/<tid>)
   rocketride app unpublish clock --from @me          take it off your desktop
   rocketride app developer status                    your org's developer id
 
@@ -649,7 +653,7 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 		.command('deploy [app]')
 		.description("Pack an app's source and deploy it as the next registry version")
 		.option('--comment <text>', 'What-changed note kept in the registry')
-		.option('--publish <target>', 'After the server build finishes, publish to @me, @team/<name>, or @public')
+		.option('--publish <target>', 'After the server build finishes, publish to @me, @<team>, =team/<tid>, or @public')
 		.option('--verbose', 'Narrate every pack step (include checks, per-file adds, totals)')
 		.option(workspaceOption, workspaceHelp)
 		.action(async (app, options) => {
@@ -661,7 +665,7 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 	const publishCmd = appCmd
 		.command('publish [app] [version]')
 		.description('Publish a version to an audience (default: newest version, to @me; waits for its build)')
-		.option('--to <target>', '@me, @team/<name>, or @public', '@me')
+		.option('--to <target>', '@me, @<team>, =team/<tid>, or @public', '@me')
 		.option(workspaceOption, workspaceHelp)
 		.action(async (app, version, options) => {
 			await runCliCommand(options, (out) => executeAppPublish(app, version, options, out));
@@ -676,7 +680,7 @@ serving the app; a team or @public binding can keep it on your desktop.`,
 		const cmd = appCmd
 			.command(`${verb} [app]`)
 			.description(description)
-			.option('--from <target>', '@me, @team/<name>, or @public')
+			.option('--from <target>', '@me, @<team>, =team/<tid>, or @public')
 			.option(workspaceOption, workspaceHelp)
 			.action(async (app, options) => {
 				await runCliCommand(options, (out) => executeAppUnbind(verb, app, options, out));

@@ -36,7 +36,14 @@ import tempfile
 
 import pytest
 
-from ai.account.deployment_backend import FileDeploymentBackend, artifact_content_dir, artifact_path, delete_block_of
+from ai.account.deployment_backend import (
+    FileDeploymentBackend,
+    artifact_content_dir,
+    artifact_path,
+    audience_display,
+    audience_handle,
+    delete_block_of,
+)
 from ai.account.store import StorageError, StorageNotFoundError
 from ai.account.store_providers.filesystem import FilesystemStore
 
@@ -191,15 +198,16 @@ class TestPublishes:
         rows = await backend.publish_of_app('org-1', 'app', 'acme.brandy')
         assert len(rows) == 1 and rows[0]['snapshot']['name'] == 'Brandy v2'
 
-        # History rows are self-describing: the audience rides with a display
-        # handle (composed from the type when the caller passed a bare dict),
-        # and a repoint records the version it moved OFF of.
+        # History rows are self-describing: the audience pair rides with its
+        # display name ('' when the caller passed a bare dict) and never a
+        # handle (composed per reader when the row is read), and a repoint
+        # records the version it moved OFF of.
         binds = [
             r
             for r in (await backend.history('org-1', 'acme.brandy'))['rows']
             if r['action'] == 'publish' and (r.get('data') or {}).get('audience')
         ]
-        assert [b['data']['audience']['handle'] for b in binds] == ['@team/team-1', '@team/team-1']
+        assert [b['data']['audience'] for b in binds] == [{'type': 'team', 'id': 'team-1', 'name': ''}] * 2
         assert binds[0]['data']['previousVersion'] == 1  # newest first: the repoint
         assert 'previousVersion' not in binds[1]['data']  # the first bind moved off nothing
 
@@ -266,8 +274,8 @@ class TestPublishes:
         # Unbind rows say WHICH rung was touched — "v1 removed" alone would
         # read as the version vanishing from the registry.
         by_action = {r['action']: r for r in (await backend.history('org-1', 'acme.brandy'))['rows']}
-        assert by_action['disabled']['data']['audience']['handle'] == '@public'
-        assert by_action['removed']['data']['audience']['handle'] == '@me'
+        assert by_action['disabled']['data']['audience'] == {'type': 'public', 'id': '', 'name': ''}
+        assert by_action['removed']['data']['audience'] == {'type': 'user', 'id': 'user-1', 'name': ''}
 
     @pytest.mark.asyncio
     async def test_set_artifact_state_review_lifecycle(self, backend):
@@ -661,7 +669,9 @@ class TestDeleteVersion:
         await _write_content(store, v1)
         await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_TEAM, 1, {'name': 'B'}, ACTOR)
         await backend.publish_set('org-1', 'app', 'acme.brandy', AUD_PUBLIC, 1, {'name': 'B'}, ACTOR)
-        with pytest.raises(ValueError, match=r'v1 is published to @public, @team/team-1; unpublish it first'):
+        # Each rung by the handle the server composes; with no reader a team
+        # it cannot name reads by id
+        with pytest.raises(ValueError, match=r'v1 is published to =team/team-1, @public; unpublish it first'):
             await backend.delete_version('org-1', 'acme.brandy', 1, ACTOR)
         # Nothing moved: the bytes and the entry are intact.
         assert await store.read_file(v1['artifactPath'])
@@ -670,7 +680,7 @@ class TestDeleteVersion:
         # A pipe's team pointer pins the same way; a soft-removed pointer does not.
         p1 = await backend.publish('org-1', 'acme.proj-1', PIPE, ACTOR)
         await backend.deploy('org-1', '=team/team-1', 'acme.proj-1', 1, ACTOR, 'team-1')
-        with pytest.raises(ValueError, match='@team/team-1'):
+        with pytest.raises(ValueError, match='=team/team-1'):
             await backend.delete_version('org-1', 'acme.proj-1', 1, ACTOR)
         await backend.set_state('org-1', '=team/team-1', 'acme.proj-1', 'removed', ACTOR)
         assert (await backend.delete_version('org-1', 'acme.proj-1', 1, ACTOR))['deleted'] is True
@@ -836,13 +846,34 @@ class TestDeleteVersion:
         """Both editions refuse through this one function (the saas twin imports it)."""
         free = {'version': 5, 'state': 'private', 'metadata': {'build': {'status': 'ok'}}}
         assert delete_block_of(free, []) == ''
+        # A stored handle is ignored; the stored display name names the team
         pin = {'audience': {'type': 'team', 'id': 't-1', 'name': 'Production', 'handle': '@team/Production'}}
-        assert delete_block_of(free, [pin]) == 'v5 is published to @team/Production; unpublish it first'
+        assert delete_block_of(free, [pin]) == 'v5 is published to @Production; unpublish it first'
+        personal = {'audience': {'type': 'user', 'id': 'u-1'}}
+        assert delete_block_of(free, [personal]) == 'v5 is published to Personal; unpublish it first'
         assert delete_block_of({**free, 'state': 'submit'}, []) == 'v5 is in review; withdraw it first'
         building = {**free, 'metadata': {'build': {'status': 'building'}}}
         assert delete_block_of(building, []) == 'v5 is still building; wait for the build to finish'
         # The pin outranks the other reasons: unpublishing is the first step.
         assert 'unpublish' in delete_block_of({**building, 'state': 'submit'}, [pin])
+
+    def test_audience_display_stores_the_pair_and_name_and_never_a_handle(self):
+        """The stored payload goes through audience.py: a stored handle is dropped, the store's id too."""
+        stored = audience_display({'type': 'team', 'id': 't-1', 'name': 'Production', 'handle': '@team/Production'})
+        assert stored == {'type': 'team', 'id': 't-1', 'name': 'Production'}
+        assert audience_display({'type': 'public', 'id': 'x'}) == {'type': 'public', 'id': '', 'name': ''}
+        with pytest.raises(ValueError):
+            audience_display({'type': 'everyone', 'id': 'x'})
+
+    def test_audience_handle_is_composed_for_the_reader(self):
+        """The owner reads @me, anyone else Personal; a team by the reader's name, the stored one, or its id."""
+        user = {'type': 'user', 'id': 'u-1'}
+        assert audience_handle(user, caller_id='u-1') == '@me'
+        assert audience_handle(user, caller_id='u-2') == 'Personal'
+        team = {'type': 'team', 'id': 't-1', 'name': 'Old name', 'handle': '@team/Old name'}
+        assert audience_handle(team, team_names={'t-1': 'Production'}) == '@Production'
+        assert audience_handle({'type': 'team', 'id': 't-1'}) == '=team/t-1'
+        assert audience_handle({'type': 'public', 'id': ''}) == '@public'
 
 
 # ============================================================================

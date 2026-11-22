@@ -63,7 +63,7 @@ def _make_pipe(results):
     transport = ScriptedTransport(results)
     client = DataMixin(module='TEST', transport=transport)
     transport.client = client
-    pipe = DataMixin.DataPipe(client, token='tok', mime_type='text/plain', team='team-1')
+    pipe = DataMixin.DataPipe(client, token='@Production/acme.docBrain', mime_type='text/plain')
     return pipe, transport
 
 
@@ -75,9 +75,16 @@ def _run(coro):
         loop.close()
 
 
+CONTROL_ID = '=control/' + '1234abcd' * 4
+
+
 def test_cancel_sends_one_frame_on_the_open_pipe_and_leaves_it_open():
-    """The frame names the pipe and rides the pipe's team; nothing about the pipe's state changes."""
-    pipe, transport = _make_pipe([('ok', {'pipeId': 7}), ('ok', {'pipeId': 7, 'cancelled': True}), ('ok', {})])
+    """The open names the address, the cancel names the pipe on the control id the open answered with
+    (a frame on an open pipe takes a control id only); nothing about the pipe's state changes.
+    """
+    pipe, transport = _make_pipe(
+        [('ok', {'pipeId': 7, 'controlId': CONTROL_ID}), ('ok', {'pipeId': 7, 'cancelled': True}), ('ok', {})]
+    )
 
     async def run():
         await pipe.open()
@@ -86,9 +93,11 @@ def test_cancel_sends_one_frame_on_the_open_pipe_and_leaves_it_open():
         await pipe.close()
 
     _run(run())
+    assert transport.sent[0]['arguments']['subcommand'] == 'open'
+    assert transport.sent[0]['arguments']['token'] == '@Production/acme.docBrain'
     cancel = transport.sent[1]
     assert cancel['command'] == 'rrext_process'
-    assert cancel['arguments'] == {'subcommand': 'cancel', 'pipeId': 7, 'team': 'team-1', 'token': 'tok'}
+    assert cancel['arguments'] == {'subcommand': 'cancel', 'pipeId': 7, 'token': CONTROL_ID}
     assert transport.sent[2]['arguments']['subcommand'] == 'close'
 
 

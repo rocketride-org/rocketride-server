@@ -89,6 +89,17 @@ webhook door and the chat and dropper apps reach a pipe they know only by name.
 The server tells the two apart by form: a control id always starts with
 `=control/`, which no address can.
 
+An address may start with a **root** that names one rung: `@me/acme.docBrain`
+(your personal deployment), `@spec/acme.docBrain` (your own Play'd run),
+`@public/acme.docBrain` (the store), `@Production/acme.docBrain` (a team of
+yours by name, in any case) or `=team/<tid>/acme.docBrain` (by id, which
+survives a rename). A rooted address walks only that rung and never falls
+through: nothing serving there is `TASK_NOT_REGISTERED` naming that one rung.
+A bare address walks the ladder (`@spec`, `@me`, your teams in team order,
+`@public`). There is no per-call `team` option: write the root instead. A
+`:<version>` suffix (`acme.docBrain:12`) and `@org/` parse but are refused as
+not yet supported.
+
 ## Watch progress
 
 Poll `get_task_status(token)` — it returns `completedCount`, `totalCount`,

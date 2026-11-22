@@ -118,11 +118,15 @@ describe('argument helpers', () => {
 		expect(splitAppVersion('clock', '3')).toEqual({ app: 'clock', version: '3' });
 	});
 
-	it('normalizePublishTarget accepts the three audiences, with or without @', () => {
+	it('normalizePublishTarget adds the @ to me and public and passes every other target through for the server', () => {
 		expect(normalizePublishTarget('me')).toBe('@me');
+		expect(normalizePublishTarget('public')).toBe('@public');
 		expect(normalizePublishTarget('@public')).toBe('@public');
+		expect(normalizePublishTarget('@QA')).toBe('@QA');
+		expect(normalizePublishTarget(' =team/t-qa ')).toBe('=team/t-qa');
+		// The server owns the grammar: a retired spelling reaches it and is refused there, naming its replacement
 		expect(normalizePublishTarget('@team/QA')).toBe('@team/QA');
-		expect(() => normalizePublishTarget('@everyone')).toThrow(/Unknown publish target/);
+		expect(() => normalizePublishTarget('  ')).toThrow(/publish target is required/);
 	});
 });
 
@@ -215,10 +219,10 @@ describe('executeAppPublish', () => {
 	it('takes an explicit version and target', async () => {
 		const client = stubClient();
 
-		await executeAppPublish('acme.clock', '1', { ...target, workspace: ws, to: '@team/QA' }, new Output(undefined));
+		await executeAppPublish('acme.clock', '1', { ...target, workspace: ws, to: '@QA' }, new Output(undefined));
 
 		expect(client.listDeployments).not.toHaveBeenCalled();
-		expect(client.publishApp).toHaveBeenCalledWith('acme.clock', 1, '@team/QA');
+		expect(client.publishApp).toHaveBeenCalledWith('acme.clock', 1, '@QA');
 	});
 
 	it('fails clearly when no version can be published', async () => {

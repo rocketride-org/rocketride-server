@@ -97,6 +97,23 @@ class RootError(ValueError):
     """A text is not in the root grammar, or a root cannot be written."""
 
 
+class RetiredRootError(RootError):
+    """
+    A text opens with a retired root word, ``@team`` or ``@user``.
+
+    Each grammar that reads roots names the replacement in its own terms (a
+    publish target says "publish to", a task address "write"), so the word
+    rides on the error and the reader composes its own message.
+
+    Attributes:
+        word: ``team`` or ``user``, the retired word as the grammar keys it.
+    """
+
+    def __init__(self, word: str, message: str):
+        super().__init__(message)
+        self.word = word
+
+
 # ==== The parsed root ============================================================
 
 
@@ -288,9 +305,9 @@ def parse_root(text: str) -> Root:
         # The words a team can never be named are no roots either: '@team/x'
         # and '@user' are the retired spellings, refused by name
         if key == KIND_TEAM:
-            raise RootError("'@team' is not a root: name the team (@<name>) or write =team/<tid>")
+            raise RetiredRootError(KIND_TEAM, "'@team' is not a root: name the team (@<name>) or write =team/<tid>")
         if key == KIND_USER:
-            raise RootError("'@user' is not a root: write @me")
+            raise RetiredRootError(KIND_USER, "'@user' is not a root: write @me")
         return Root(KIND_TEAM, check_team_name(name), False, '/'.join(tail))
 
     # Step 3: an = root names its kind, then its id

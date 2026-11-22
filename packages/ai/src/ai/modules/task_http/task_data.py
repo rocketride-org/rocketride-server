@@ -6,7 +6,7 @@ from pydantic import BaseModel
 from rocketlib import Entry, getObject
 from ai.constants import CONST_HTTP_CHUNK_SIZE
 from ai.web import WebServer, exception, response, Request, Header, formatException
-from ai.modules.task.address import check_endpoint_scope, parse_address
+from ai.modules.task.address import Target, check_endpoint_scope, format_target, parse_target
 from ai.modules.task.types import TaskError
 from fastapi.responses import Response
 from starlette.datastructures import UploadFile
@@ -38,7 +38,7 @@ class RequestProcessing:
 
         Args:
             client: Connected RocketRideClient instance for processing data
-            address: The task address (``developerId.pipelineId.source``) the
+            address: The task target (``[<root>/]developerId.pipelineId.source``) the
                 data goes to — what the SDK sends in the token slot
             params: The caller's per-call parameters from the query string,
                 already filtered of reserved names. Held on the processor;
@@ -446,38 +446,41 @@ class RequestProcessing:
 
 # Query-string names that are NOT parameters: addressing and credentials
 # never ride the query string on this door. ``teamId``/``runKind`` (rung
-# selectors) are unreachable by design — the resolver walks the caller's rungs
-# — ``auth`` is retired (log-exposed) and ``token`` is the path segment.
+# selectors) are unreachable by design — a root in the path names the rung
+# — ``auth`` is retired (log-exposed) and ``token`` is the path.
 RESERVED_QUERY_NAMES = frozenset({'teamId', 'runKind', 'auth', 'token'})
 
 
-def _address_of(request: Request) -> str:
+def _target_of(request: Request) -> Target:
     """
-    The task address this request names: the path segment, else the ONE
-    endpoint a scoped key carries.
+    The task target this request names: the path, else the ONE endpoint a scoped key carries.
 
-    ``/webhook/{address}`` and ``/task/data/{address}`` carry the dotted
-    address in a single path segment. The bare ``/webhook`` is allowed ONLY
-    when the key carries exactly one exact ``endpoints`` entry: the key
-    already names the pipe, so the path need not repeat it; a full key (or
-    an any-source scope) must give the address.
+    ``/webhook/{address:path}`` and ``/task/data/{address:path}`` take the
+    whole target grammar (plan 3.5): a bare dotted address
+    (``acme.docBrain.parsePDF``) walks the key owner's ladder, a rooted one
+    names its rung (``@Production/acme.billing.webhook_1``,
+    ``=team/<tid>/acme.billing.webhook_1``; ``@`` and ``=`` are legal in a
+    URL path, and the path converter keeps the root's ``/``). The bare
+    ``/webhook`` is allowed ONLY when the key carries exactly one exact
+    ``endpoints`` entry: the key already names the pipe, so the path need
+    not repeat it; a full key (or an any-source scope) must give the address.
 
     Args:
         request: The authenticated request (``request.state.account`` set).
 
     Returns:
-        The address as a string (validated by the resolver downstream).
+        The parsed target (resolved by the DAP side, under the caller).
 
     Raises:
-        TaskError: ``TASK_INVALID_ARGUMENT`` when neither names an address.
+        TaskError: ``TASK_INVALID_ARGUMENT`` when neither names an address,
+            or the path is not a target.
     """
-    address = request.path_params.get('address')
-    if address:
-        parse_address(address)
-        return str(address)
+    path = request.path_params.get('address')
+    if path:
+        return parse_target(str(path))
     endpoints = getattr(request.state.account, 'endpoints', None)
     if endpoints and len(endpoints) == 1 and not str(endpoints[0]).endswith('.*'):
-        return str(endpoints[0])
+        return parse_target(str(endpoints[0]))
     raise TaskError(
         TaskError.INVALID_ARGUMENT,
         'A task address is required: POST /webhook/{developerId.pipelineId.source} '
@@ -527,11 +530,12 @@ async def task_Data(
     r"""
     Process data uploads through RocketRide pipelines.
 
-    ONE path form: the dotted task address in a single segment
-    (``/task/data/{address}``, alias ``/webhook/{address}``). The door runs
-    the same account -> resolver -> permission path as the DAP ``send``: the
-    caller's account resolves the address across its rungs, a scoped key is
-    held to its ``endpoints``, and the caller is who pays.
+    ONE path form: the task target, bare or rooted (``/task/data/{address:path}``,
+    alias ``/webhook/{address:path}``). The door runs the same account ->
+    resolver -> permission path as the DAP ``send``: the caller's account
+    resolves the target (``TaskServer.resolve_target``: the ladder for a
+    bare address, one rung for a rooted one), a scoped key is held to its
+    ``endpoints``, and the caller is who pays.
 
     This endpoint handles two types of uploads:
     1. Multipart form data with files and text fields
@@ -553,20 +557,26 @@ async def task_Data(
         # Raw stream upload (PUT or POST)
         curl -X PUT "http://localhost:8000/task/data/acme.docBrain.parsePDF"              -H "Authorization: Bearer $ROCKETRIDE_APIKEY"              -H "Content-Type: application/pdf"              -H "Content-Disposition: attachment; filename=document.pdf"              --data-binary @document.pdf
 
+        # A rooted address names one rung: the Production team's publication only
+        curl -X POST "http://localhost:8000/webhook/@Production/acme.billing.webhook_1"              -H "Authorization: Bearer $ROCKETRIDE_APIKEY"              -H "Content-Type: text/plain"              -d "Some text content"
+
         # A key scoped to exactly one endpoint may omit the address
         curl -X POST "http://localhost:8000/webhook"              -H "Authorization: Bearer $ROCKETRIDE_APIKEY"              -H "Content-Type: text/plain"              -d "Some text content"
     """
     client = None
 
     try:
-        # Step 1: the address (path, or the scoped key's one endpoint) and
+        # Step 1: the target (path, or the scoped key's one endpoint) and
         # the per-call parameters — both refused before any connection opens
-        address = _address_of(request)
+        target = _target_of(request)
         params = _params_of(request)
 
         # Step 2: a scoped key is bound to its endpoints here, before the
-        # request ever reaches the engine
-        check_endpoint_scope(getattr(request.state.account, 'endpoints', None), address)
+        # request ever reaches the engine: the dotted address, a root being a
+        # selector (a control id is re-checked by its own lookup)
+        if target.address is not None:
+            check_endpoint_scope(getattr(request.state.account, 'endpoints', None), target.dotted)
+        address = format_target(target)
 
         # Get the WebServer instance from application state
         server: WebServer = request.app.state.server

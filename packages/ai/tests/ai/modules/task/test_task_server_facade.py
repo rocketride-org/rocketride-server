@@ -77,12 +77,12 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
 
     # The server's live registry, by control id. The facade must look its run
     # up by the id the execute answered with and never walk the caller rungs
-    # (resolve_control).
+    # (resolve_target).
     if controls is None:
         controls = {CONTROL_ID: SimpleNamespace(key=CONTROL_ID)}
     server = MagicMock()
     server.control_by_key = MagicMock(side_effect=lambda key: controls[key])
-    server.resolve_control = MagicMock(side_effect=AssertionError('the facade must not resolve through the rungs'))
+    server.resolve_target = AsyncMock(side_effect=AssertionError('the facade must not resolve through the rungs'))
 
     # The connection constructor needs a real server; stub it out entirely —
     # this is a wire-shape test, not a TaskConn test. The org's developer id
@@ -157,7 +157,7 @@ async def test_team_deploy_returns_the_key_of_the_run_it_started():
     captured = await _dispatch(None)
     assert captured['key'] == CONTROL_ID
     captured['server'].control_by_key.assert_called_once_with(CONTROL_ID)
-    captured['server'].resolve_control.assert_not_called()
+    captured['server'].resolve_target.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -171,7 +171,7 @@ async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipe
     captured = await _dispatch(None, owner_kind='user', owner_user_id='user-7', controls=controls)
     assert captured['key'] == CONTROL_ID
     assert captured['account_info'].userId == 'user-7'
-    captured['server'].resolve_control.assert_not_called()
+    captured['server'].resolve_target.assert_not_called()
 
 
 @pytest.mark.asyncio

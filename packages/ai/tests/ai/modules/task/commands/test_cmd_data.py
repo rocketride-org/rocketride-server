@@ -231,7 +231,7 @@ async def test_a_standalone_tool_frame_with_an_address_resolves_like_submit(cata
 
     await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.address)
 
-    conn.resolve_control_or_start.assert_awaited_once()
+    ts.resolve_target.assert_awaited_once()
     conn.get_control.assert_not_called()
     assert engine_log[-1]['subcommand'] == 'tool'
 
@@ -294,7 +294,7 @@ async def test_a_standalone_tool_frame_with_a_control_id_is_the_controls(catalog
     await _frame(conn, subcommand='tool', tool='dialect', nodeId='db_1', input={}, token=control.control_id)
 
     conn.get_control.assert_called_once()
-    conn.resolve_control_or_start.assert_not_awaited()
+    ts.resolve_target.assert_not_awaited()
     assert engine_log[-1]['_caller']['controlId'] == control.control_id
 
 
@@ -309,7 +309,7 @@ async def test_an_open_by_address_resolves_like_submit_and_answers_with_the_cont
 
     body = await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain', token=control.address)
 
-    conn.resolve_control_or_start.assert_awaited_once()
+    ts.resolve_target.assert_awaited_once()
     conn.get_control.assert_not_called()
     assert body['pipeId'] == 1
     assert body['controlId'] == control.control_id and body['address'] == control.address
@@ -326,8 +326,41 @@ async def test_an_open_by_control_id_is_the_controls_and_answers_with_it(catalog
     body = await _frame(conn, subcommand='open', object={'name': 'x'}, mimeType='text/plain', token=control.control_id)
 
     conn.get_control.assert_called_once()
-    conn.resolve_control_or_start.assert_not_awaited()
+    ts.resolve_target.assert_not_awaited()
     assert body['controlId'] == control.control_id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('subcommand', ['open', 'tool'])
+@pytest.mark.parametrize('by', ['address', 'control id'])
+async def test_the_retired_team_option_is_refused_on_every_frame_that_starts_a_binding(
+    catalog, engines, engine_log, subcommand, by
+):
+    """``team`` on an open or a standalone tool frame is refused whichever form the token slot takes
+    (plan 11.1 B44): a control id walks no rung, but the option is retired, never silently dropped.
+    """
+    ts = _server()
+    control = await _start(ts, _pipeline())
+    conn = _data_conn(ts, control)
+    token = control.address if by == 'address' else control.control_id
+    frame = (
+        {'object': {'name': 'x'}, 'mimeType': 'text/plain'}
+        if subcommand == 'open'
+        else {'tool': 'dialect', 'nodeId': 'db_1', 'input': {}}
+    )
+    forwarded = len(engine_log)
+
+    with pytest.raises(TaskError) as excinfo:
+        await _frame(conn, subcommand=subcommand, token=token, team='team-1', **frame)
+
+    assert excinfo.value.field == 'team' and 'rooted address' in str(excinfo.value)
+    ts.resolve_target.assert_not_awaited()
+    conn.get_control.assert_not_called()
+    assert len(engine_log) == forwarded
+
+    # Without the option both forms still start the binding
+    await _frame(conn, subcommand=subcommand, token=token, **frame)
+    assert engine_log[-1]['subcommand'] == subcommand
 
 
 @pytest.mark.asyncio
@@ -383,7 +416,7 @@ async def test_a_frame_on_an_open_pipe_attaches_only(catalog, engines, engine_lo
     control = await _start(ts, _pipeline())
     conn = _data_conn(ts, control)
     pipe_id = await _opened(ts, conn)
-    conn.resolve_control_or_start.reset_mock()
+    ts.resolve_target.reset_mock()
     conn.get_control.reset_mock()
     arguments: Dict[str, Any] = {'subcommand': subcommand, 'pipeId': pipe_id}
     if subcommand == 'tool':
@@ -391,7 +424,7 @@ async def test_a_frame_on_an_open_pipe_attaches_only(catalog, engines, engine_lo
 
     await _frame(conn, **arguments)
 
-    conn.resolve_control_or_start.assert_not_awaited()
+    ts.resolve_target.assert_not_awaited()
     conn.get_control.assert_called_once()
 
 

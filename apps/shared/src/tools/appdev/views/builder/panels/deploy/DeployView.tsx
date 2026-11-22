@@ -349,8 +349,20 @@ const styles: Record<string, React.CSSProperties> = {
 function chipLabelOf(pin: RungPin): string {
 	if (pin.rung === 'personal') return 'ME';
 	if (pin.rung === 'public') return 'STORE';
-	const name = pin.handle.startsWith('@team/') ? pin.handle.slice('@team/'.length) : pin.handle;
-	return name.toUpperCase();
+	// The server composes the handle ('@Development', or '=team/<tid>' for a
+	// team the caller cannot name); the chip shows it as given, parsed by no one
+	return pin.handle.toUpperCase();
+}
+
+/**
+ * The pin a publish target lands on. The two target words the dialog writes
+ * itself find their pin by rung (the caller's own space, the store); a team
+ * row's target IS that team's audience, which its pin carries back unchanged.
+ */
+function pinOf(pins: RungPin[], target: string): RungPin | undefined {
+	if (target === '@me') return pins.find((p) => p.rung === 'personal');
+	if (target === '@public') return pins.find((p) => p.rung === 'public');
+	return pins.find((p) => p.target === target);
 }
 
 /**
@@ -410,14 +422,14 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	// The version whose "Publish to…" audience dialog is open (null = none).
 	const [publishFor, setPublishFor] = useState<AppVersionInfo | null>(null);
 	// The caller's team roster for the publish dialog (null = not loaded).
-	const [teams, setTeams] = useState<Array<{ id: string; name: string }> | null>(null);
+	const [teams, setTeams] = useState<Array<{ id: string; name: string; audience: string }> | null>(null);
 	// The pin awaiting soft-remove confirmation (null = none).
 	const [removePin, setRemovePin] = useState<RungPin | null>(null);
 	// A publish chosen in the dialog, awaiting its confirmation (decided
 	// 2026-11-16: every pointer move is confirmed, on apps as on pipelines).
-	// target is the WIRE form the publish contract takes (@team/<id>); handle is
-	// the NAME form the pins carry (@team/<name>), used to find the current pin.
-	const [pendingPublish, setPendingPublish] = useState<{ version: AppVersionInfo; target: string; handle: string; label: string } | null>(null);
+	// target is what the publish verb takes: '@me', '@public', or a team's
+	// audience exactly as the server sent it (plan 2.5).
+	const [pendingPublish, setPendingPublish] = useState<{ version: AppVersionInfo; target: string; label: string } | null>(null);
 	// Deploy-message dialog (stock Modal + input — window.prompt is disabled in
 	// the VSCode webview). An empty comment is allowed (it is optional).
 	const [deployOpen, setDeployOpen] = useState(false);
@@ -633,14 +645,14 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 		[host, refresh]
 	);
 
-	/** Soft-remove one audience binding (the pin's handle IS the wire
+	/** Soft-remove one audience binding (the pin's audience IS the wire
 	 * target) — the app stops serving there; republishing revives it. */
 	const onRemovePin = useCallback(
 		async (pin: RungPin): Promise<void> => {
 			if (!host.removePublish) return;
 			setActionError('');
 			try {
-				await host.removePublish(pin.handle);
+				await host.removePublish(pin.target);
 			} catch (e) {
 				setActionError(e instanceof Error ? e.message : String(e));
 			}
@@ -668,9 +680,9 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 
 	/** The dialog rows' current-state hint: what the audience serves now. */
 	const pinStateOf = useCallback(
-		(handle: string, v: AppVersionInfo): string => {
+		(target: string, v: AppVersionInfo): string => {
 			if (pins === null) return pinsFailed ? 'current state unavailable' : 'loading';
-			const pin = pins.find((p) => p.handle === handle);
+			const pin = pinOf(pins, target);
 			if (!pin) return 'not published';
 			return pin.registryVersion === v.registryVersion ? `already on v${pin.registryVersion}` : `on v${pin.registryVersion}`;
 		},
@@ -678,16 +690,16 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 	);
 
 	/** The "Publish v<N> to…" rows and the move each one stages: Me, each
-	 * team, then the store. The move's target is the WIRE form the publish
-	 * contract takes (@team/<id>); its handle the NAME form the pins carry. */
+	 * team, then the store. A team row's target is the team's audience as the
+	 * server composed it; nothing here builds an audience string. */
 	const publishMovesOf = useCallback(
-		(v: AppVersionInfo): Array<{ row: IPublishTarget; move: { target: string; handle: string; label: string } }> => [
-			{ row: { id: '@me', label: 'Me', note: pinStateOf('@me', v) }, move: { target: '@me', handle: '@me', label: 'Me' } },
-			...(teams ?? []).map((t) => ({ row: { id: `@team/${t.id}`, label: t.name, note: pinStateOf(`@team/${t.name}`, v) }, move: { target: `@team/${t.id}`, handle: `@team/${t.name}`, label: t.name } })),
+		(v: AppVersionInfo): Array<{ row: IPublishTarget; move: { target: string; label: string } }> => [
+			{ row: { id: '@me', label: 'Me', note: pinStateOf('@me', v) }, move: { target: '@me', label: 'Me' } },
+			...(teams ?? []).map((t) => ({ row: { id: t.audience, label: t.name, note: pinStateOf(t.audience, v) }, move: { target: t.audience, label: t.name } })),
 			// Without a review ladder on the host (OSS — the server accepts
 			// any servable version on @public) the store row is as open as the
 			// internal rows; with one, only 'ready' unlocks it.
-			{ row: storeTargetOf({ label: 'Public: the app store', state: v.state, needsApproval: Boolean(host.submitForReview), note: pinStateOf('@public', v) }), move: { target: '@public', handle: '@public', label: 'the app store' } },
+			{ row: storeTargetOf({ label: 'Public: the app store', state: v.state, needsApproval: Boolean(host.submitForReview), note: pinStateOf('@public', v) }), move: { target: '@public', label: 'the app store' } },
 		],
 		[host, teams, pinStateOf]
 	);
@@ -829,7 +841,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 										{(pins ?? [])
 											.filter((p) => p.registryVersion === v.registryVersion)
 											.map((p) => (
-												<StatusBadge key={p.rung + p.handle} variant={p.serving === false ? 'muted' : p.rung === 'public' ? 'info' : 'success'}>
+												<StatusBadge key={p.target} variant={p.serving === false ? 'muted' : p.rung === 'public' ? 'info' : 'success'}>
 													{chipLabelOf(p)}
 												</StatusBadge>
 											))}
@@ -858,7 +870,7 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 						) : (
 							<>
 								{(pins ?? []).map((p) => (
-									<div key={p.rung + p.handle} style={styles.liveRow}>
+									<div key={p.target} style={styles.liveRow}>
 										<div style={styles.liveRung}>
 											{p.label}
 											<span style={styles.liveHandle}>{p.handle}</span>
@@ -962,15 +974,15 @@ export const DeployView: React.FC<IDeployViewProps> = ({ host, app, readOnly }) 
 				<ConfirmDialog
 					title={`Publish v${pendingPublish.version.registryVersion} to ${pendingPublish.label}?`}
 					message={(() => {
-						// Pins carry the NAME form of the handle; the target is the wire form.
-						// Unknown pins (loading or failed) are not "unpublished": say so
-						// rather than promising a first publish over an existing pin.
+						// The target finds its pin (pinOf). Unknown pins (loading or failed)
+						// are not "unpublished": say so rather than promising a first
+						// publish over an existing pin.
 						if (pins === null) {
 							return pinsFailed
 								? `What ${pendingPublish.label} serves now could not be loaded, so this may repoint an existing publication. It points ${pendingPublish.label} at v${pendingPublish.version.registryVersion}.`
 								: `What ${pendingPublish.label} serves now is still loading. This points ${pendingPublish.label} at v${pendingPublish.version.registryVersion}.`;
 						}
-						const current = pins.find((p) => p.handle === pendingPublish.handle);
+						const current = pinOf(pins, pendingPublish.target);
 						if (!current) {
 							return `${pendingPublish.label} is not published yet; this is its first publish, and it serves v${pendingPublish.version.registryVersion} at once.`;
 						}

@@ -32,8 +32,8 @@ const TEST_CONFIG = {
 	timeout: 120000,
 };
 
-/** The one team on the OSS test server. */
-const TEAM = 'local';
+/** The one team on the OSS test server, by its audience (a bare team id is no deploy target, plan 2.5). */
+const TEAM = '=team/local';
 
 /** A unique project id per test — registry versions accumulate forever. */
 function freshProject(): string {

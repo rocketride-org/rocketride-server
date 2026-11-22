@@ -45,12 +45,12 @@ import pytest
 from ai.account.base import AccountBase, SubscriptionRequiredError
 from ai.account.pipe_deploy import listing_of
 from ai.modules.task import store_gate
-from ai.modules.task.task_control import DeploymentRef, Listing, TaskControl
+from ai.modules.task.task_control import RESOLVE_ATTACH, RESOLVE_READ, DeploymentRef, Listing, TaskControl
 from ai.modules.task.task_engine import TaskEngine
 from ai.modules.task.task_server_facade import _InProcessConn
 
 from . import test_task_engine_sharing as sharing
-from .test_task_engine_sharing import ADDRESS, _caller, _pipeline, _server, _start
+from .test_task_engine_sharing import ADDRESS, _caller, _pipeline, _resolve, _server, _start
 
 # The runtime-model fixtures, shared with the engine-sharing tests
 catalog = sharing.catalog
@@ -210,7 +210,7 @@ async def test_a_caller_without_a_subscription_is_refused_before_any_engine_star
     store.list(mode)
 
     with pytest.raises(SubscriptionRequiredError) as refused:
-        await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+        await _resolve(ts, ADDRESS, _stranger(), 'task.data')
 
     error = refused.value
     assert error.code == 'SUBSCRIPTION_REQUIRED'
@@ -226,12 +226,12 @@ async def test_a_free_pipe_is_never_refused_and_never_asks(catalog, engines, sto
     ts = _server()
     store.publish()
 
-    unlisted = await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+    unlisted = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
     assert unlisted.listing == Listing()
 
     store.list('free')
     other = _caller('user-y', dev_team='team-y', teams=('team-y',), org='org-3', developer_id='initech')
-    listed = await ts.resolve_or_start(ADDRESS, other, 'task.data')
+    listed = await _resolve(ts, ADDRESS, other, 'task.data')
     assert listed.rung == 'public' and listed.listing.mode == 'free'
     assert store.asked == []
 
@@ -244,11 +244,11 @@ async def test_a_subscriber_is_served_and_the_verdict_stands_on_the_control(cata
     store.list('subscription')
     store.subscribers.add(('org-2', PIPE))
 
-    control = await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+    control = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
     assert control.rung == 'public' and control.listing == Listing(mode='subscription', plan='Pro')
     assert control.subscription_allowed_at > 0.0
 
-    assert await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data') is control
+    assert await _resolve(ts, ADDRESS, _stranger(), 'task.data') is control
     assert store.asked == [('org-2', PIPE)]
 
 
@@ -259,20 +259,20 @@ async def test_a_live_control_is_asked_again_after_the_window_and_a_refusal_is_n
     store.publish()
     store.list('subscription')
     store.subscribers.add(('org-2', PIPE))
-    control = await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+    control = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
 
     # The window passed and the subscription lapsed: refused, every time
     _expire(control)
     store.subscribers.clear()
     for _ in range(2):
         with pytest.raises(SubscriptionRequiredError):
-            await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+            await _resolve(ts, ADDRESS, _stranger(), 'task.data')
     assert len(store.asked) == 3
 
     # Subscribed again: the next call is admitted and the allow stands
     store.subscribers.add(('org-2', PIPE))
-    assert await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data') is control
-    assert await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data') is control
+    assert await _resolve(ts, ADDRESS, _stranger(), 'task.data') is control
+    assert await _resolve(ts, ADDRESS, _stranger(), 'task.data') is control
     assert len(store.asked) == 4
 
 
@@ -284,7 +284,7 @@ async def test_the_publishers_own_org_is_never_asked(catalog, engines, store):
     store.list('subscription')
     colleague = _caller('user-q', dev_team='team-q', teams=('team-q',), org='org-1')
 
-    control = await ts.resolve_or_start(ADDRESS, colleague, 'task.data')
+    control = await _resolve(ts, ADDRESS, colleague, 'task.data')
 
     assert control.rung == 'public' and control.listing.paid
     assert store.asked == []
@@ -297,12 +297,12 @@ async def test_the_callers_own_rungs_are_never_asked(catalog, engines, store):
     store.deploy('=user/user-a', billing='team-1')
     store.list('subscription')
 
-    mine = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
+    mine = await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data')
     assert mine.rung == 'me' and mine.listing.paid
     await ts.stop_task(mine.key)
 
     played = await _start(ts, _pipeline(), user='user-a')
-    assert await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data') is played
+    assert await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data') is played
     assert store.asked == []
 
 
@@ -316,12 +316,12 @@ async def test_a_scoped_key_is_refused_on_a_paid_publication_even_with_a_subscri
     scoped = _stranger(endpoints=[ADDRESS])
 
     with pytest.raises(PermissionError) as refused:
-        await ts.resolve_or_start(ADDRESS, scoped, 'task.data')
+        await _resolve(ts, ADDRESS, scoped, 'task.data')
     assert refused.value.required == store_gate.ACCOUNT_KEY_REQUIRED
     assert len(ts._engines) == 0 and list(ts._task_control) == []
 
     store.list('free')
-    assert (await ts.resolve_or_start(ADDRESS, scoped, 'task.data')).rung == 'public'
+    assert (await _resolve(ts, ADDRESS, scoped, 'task.data')).rung == 'public'
 
 
 @pytest.mark.asyncio
@@ -332,8 +332,83 @@ async def test_the_owners_scoped_key_is_refused_on_their_own_paid_publication(ca
     store.list('paywall')
 
     with pytest.raises(PermissionError) as refused:
-        await ts.resolve_or_start(ADDRESS, _caller('user-a', endpoints=[ADDRESS]), 'task.data')
+        await _resolve(ts, ADDRESS, _caller('user-a', endpoints=[ADDRESS]), 'task.data')
     assert refused.value.required == 'account key'
+
+
+# =============================================================================
+# ROOTED ADDRESSES AND CONTROL IDS: THE SAME GATE ON EVERY START
+# =============================================================================
+
+
+@pytest.mark.asyncio
+async def test_a_rooted_address_to_a_paid_publication_is_refused_before_any_engine_starts(catalog, engines, store):
+    """A root walks only its rung (plan 3.2), and the rung that answers is where the gate stands."""
+    ts = _server()
+    store.publish()
+    store.list('subscription')
+
+    with pytest.raises(SubscriptionRequiredError) as refused:
+        await _resolve(ts, f'@public/{ADDRESS}', _stranger(), 'task.data')
+
+    error = refused.value
+    assert error.code == 'SUBSCRIPTION_REQUIRED'
+    assert (error.address, error.plan) == (ADDRESS, 'Pro')
+    assert store.asked == [('org-2', PIPE)]
+    assert len(ts._engines) == 0 and list(ts._task_control) == []
+
+
+@pytest.mark.asyncio
+async def test_a_live_control_hit_through_a_rooted_address_is_refused_once_the_subscription_lapses(
+    catalog, engines, store
+):
+    """The control a root reaches answers from its own verdict: re-asked after the window, a refusal never cached."""
+    ts = _server()
+    store.publish()
+    store.list('subscription')
+    store.subscribers.add(('org-2', PIPE))
+    rooted = f'@public/{ADDRESS}'
+    control = await _resolve(ts, rooted, _stranger(), 'task.data')
+    assert control.rung == 'public' and control.listing.paid
+
+    # Inside the window the live control answers without a question
+    assert await _resolve(ts, rooted, _stranger(), 'task.data') is control
+    assert store.asked == [('org-2', PIPE)]
+
+    # Lapsed: the rooted and the bare address both land on the live control, both refused
+    _expire(control)
+    store.subscribers.clear()
+    for target in (rooted, ADDRESS):
+        with pytest.raises(SubscriptionRequiredError) as refused:
+            await _resolve(ts, target, _stranger(), 'task.data')
+        assert refused.value.code == 'SUBSCRIPTION_REQUIRED'
+    assert list(ts._task_control) == [control.key]
+
+    # Subscribed again: the same control is admitted
+    store.subscribers.add(('org-2', PIPE))
+    assert await _resolve(ts, rooted, _stranger(), 'task.data') is control
+
+
+@pytest.mark.asyncio
+async def test_a_start_by_control_id_is_gated_and_a_read_or_attach_is_not(catalog, engines, store):
+    """A control id in start mode is a binding about to begin; read and attach start none (monitors, the token lookup)."""
+    ts = _server()
+    store.publish()
+    store.list('paywall')
+    store.subscribers.add(('org-2', PIPE))
+    control = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
+    _expire(control)
+    store.subscribers.clear()
+
+    with pytest.raises(SubscriptionRequiredError):
+        await ts.resolve_target(_stranger(), control.control_id, 'task.data')
+
+    for mode in (RESOLVE_READ, RESOLVE_ATTACH):
+        resolution = await ts.resolve_target(_stranger(), control.control_id, 'task.monitor', mode=mode)
+        assert resolution.control is control
+    attached = await ts.resolve_target(_stranger(), f'@public/{ADDRESS}', 'task.monitor', mode=RESOLVE_ATTACH)
+    assert attached.control is control
+    assert store.asked == [('org-2', PIPE), ('org-2', PIPE)]
 
 
 # =============================================================================
@@ -352,6 +427,25 @@ async def test_submit_by_name_is_refused_with_the_code_on_the_wire(catalog, engi
 
     assert response['success'] is False and response['code'] == 'SUBSCRIPTION_REQUIRED'
     assert 'Pro' in response['message'] and '/catalog' in response['message']
+    TaskEngine._send_data.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('name', [f'@public/{ADDRESS}', 'control id'], ids=['rooted', 'control-id'])
+async def test_submit_by_a_rooted_name_or_a_control_id_is_refused_on_the_wire(catalog, engines, store, name):
+    """Both reach the one resolver; a lapsed subscription answers SUBSCRIPTION_REQUIRED before the inline open."""
+    ts = _server()
+    store.publish()
+    store.list('subscription')
+    store.subscribers.add(('org-2', PIPE))
+    control = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
+    _expire(control)
+    store.subscribers.clear()
+
+    target = control.control_id if name == 'control id' else name
+    response = await _wire(_conn(ts, _stranger()), 'rrext_submit', name=target, data='hello')
+
+    assert response['success'] is False and response['code'] == 'SUBSCRIPTION_REQUIRED'
     TaskEngine._send_data.assert_not_awaited()
 
 
@@ -393,7 +487,7 @@ async def test_a_binding_by_control_id_is_refused_once_the_subscription_lapses(c
     store.list('subscription')
     store.subscribers.add(('org-2', PIPE))
     conn = _conn(ts, _stranger())
-    control = await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+    control = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
 
     _expire(control)
     store.subscribers.clear()
@@ -411,7 +505,7 @@ async def test_a_binding_by_control_id_inside_the_window_asks_nothing(catalog, e
     store.publish()
     store.list('subscription')
     store.subscribers.add(('org-2', PIPE))
-    control = await ts.resolve_or_start(ADDRESS, _stranger(), 'task.data')
+    control = await _resolve(ts, ADDRESS, _stranger(), 'task.data')
 
     await store_gate.require_access(control, _stranger())
     await store_gate.require_access(control, _stranger())

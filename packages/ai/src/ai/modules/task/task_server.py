@@ -88,7 +88,7 @@ from contextlib import asynccontextmanager
 from typing import Deque, List
 from fastapi import WebSocket
 from dataclasses import dataclass, field
-from typing import AsyncIterator, Awaitable, Callable, Dict, Any, Optional, Set, Tuple, Union
+from typing import AsyncIterator, Awaitable, Callable, Dict, Any, NamedTuple, Optional, Set, Tuple, Union
 from ai.constants import (
     CONST_CLEANUP_DELAY_TIME,
     CONST_CLEANUP_SLEEP_TIME,
@@ -110,13 +110,23 @@ from rocketride import EVENT_TYPE
 from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
 from ai.account.base import OutOfCreditsError
-from ai.account.models import AccountInfo, home_team, resolve_run_permissions, resolve_task_permissions
+from ai.account.models import (
+    AccountInfo,
+    home_team,
+    resolve_run_permissions,
+    resolve_task_permissions,
+    team_id_of_name,
+)
 from ai.account.pipe_deploy import Pin, listing_of, resolve_pins, teams_to_probe
+from ai.account.roots import KIND_CONTROL, KIND_ME, KIND_NONE, KIND_ORG, KIND_PUBLIC, KIND_SPEC, KIND_TEAM
 from ai.account.store import Store
 from .task_conn import TaskConn
 from .trace_owner import TraceOwners
 from . import store_gate
 from .task_control import (
+    RESOLVE_ATTACH,
+    RESOLVE_READ,
+    RESOLVE_START,
     RUNGS,
     CallerConfigError,
     DeploymentRef,
@@ -146,9 +156,11 @@ from .pipeline import MultipleSourcesError, resolve_implied_source
 from .commands.cmd_monitor import owner_key
 from .address import (
     Address,
+    Target,
     build_address,
     check_endpoint_scope,
-    parse_address,
+    format_target,
+    parse_target,
     validate_component_ids,
     validate_identity,
     validate_segment,
@@ -577,6 +589,59 @@ class ControlRegistry(MutableMapping):
         """One source-index probe: the sources registered for a pipe, sorted."""
         self.probes += 1
         return sorted(self._sources.get((developer_id, pipe_id), {}))
+
+
+# =============================================================================
+# RESOLUTION SHAPES (plan 3.2)
+# =============================================================================
+
+
+@dataclass(frozen=True)
+class RungPlan:
+    """
+    The rungs one target walks (plan 3.2).
+
+    Attributes:
+        rungs: The rungs, in the fixed order (``spec``, ``me``, ``team``,
+            ``public``): all of them for a bare address, one for a rooted one.
+        teams: The team ids ``@team`` probes, in order: the caller's team
+            order (a scoped key's frozen team), or the one team a team root
+            names; empty when ``team`` is not walked.
+        root: The root as the server writes it (``@me``, ``@Development``,
+            ``=team/<tid>``); ``''`` for the ladder. A refusal names it.
+    """
+
+    rungs: Tuple[str, ...]
+    teams: Tuple[str, ...] = ()
+    root: str = ''
+
+    @property
+    def published(self) -> Tuple[str, ...]:
+        """The plan's published rungs, the ones a publication can answer (every rung but ``@spec``)."""
+        return tuple(rung for rung in self.rungs if rung != 'spec')
+
+
+class Resolution(NamedTuple):
+    """
+    What ``resolve_target`` found.
+
+    Attributes:
+        target: The parsed target.
+        control: The control that answers; ``None`` only for a ``read`` a
+            publication answers.
+        pin: The publication that answered a ``read``, or that a ``start``
+            started its control from; ``None`` when a registered control answered.
+        started: True when this call started the control from the publication.
+        artifact: The pinned artifact a ``read`` decided on (the spec the
+            answering publication serves, loaded server-side); ``None``
+            otherwise.
+    """
+
+    target: Target
+    control: Optional[TaskControl]
+    pin: Optional[Pin]
+    started: bool
+    artifact: Optional[Dict[str, Any]] = None
 
 
 class TaskServer(DAPBase):
@@ -1219,245 +1284,351 @@ class TaskServer(DAPBase):
         check_endpoint_scope(getattr(account_info, 'endpoints', None), control.address)
         return self._check_engine_available(control)
 
-    def resolve_token(
-        self, token: Any, account_info: AccountInfo, require: Optional[str] = None, *, team: Optional[str] = None
-    ) -> TaskControl:
-        """
-        A control id OR an address in the token slot, for the verbs that take either (plan 7.5).
+    # ==== Resolution: the one entry of every address-taking verb (plan 3.2) =====
 
-        The monitor key builders send either the control id they were handed
-        or an address, which resolves to the caller's own control; a
-        standalone ``tool`` borrow resolves an address the way ``submit()``
-        does (plan 3.6). A control id is the ``=control/`` id root (plan
-        2.5), a form no address can take.
-
-        Args:
-            token: What the client put in the token slot.
-            account_info: The request's account (required).
-            require: The permission the request needs.
-            team: Per-call ``@team`` override for an address.
-
-        Returns:
-            The control.
-
-        Raises:
-            PermissionError: As ``control_by_id`` / ``resolve_control``.
-            TaskError: As ``resolve_control`` (an address nothing answers).
-        """
-        if is_control_id(token):
-            return self.control_by_id(token, account_info, require)
-        return self.resolve_control(str(token or ''), account_info, require, team=team)
-
-    def resolve_control(
+    async def resolve_target(
         self,
-        address: str,
         account_info: AccountInfo,
+        target: Union[str, Target],
         require: Optional[str] = None,
         *,
-        team: Optional[str] = None,
-        rung: Optional[str] = None,
-    ) -> TaskControl:
+        mode: str = RESOLVE_START,
+    ) -> Resolution:
         """
-        THE resolver over the registry: an address plus the request's account yields one control.
+        THE resolver: what a target names for this caller, and the control that serves it.
 
-        ``rung`` holds the walk to ONE rung (``'spec'``, ``'me'``, ``'team'``,
-        ``'public'``) for a caller that already knows which continuum it
-        means (a monitor subscription keyed to the caller's dev run must
-        never land on their personal deploy of the same address, nor the
-        reverse); the default walks them all.
+        Every verb that takes an address calls this and nothing else: the
+        ``submit`` of a name, the data ``open`` and the standalone ``tool``
+        frame (what ``send``/``pipe``/``tool`` and both HTTP doors send), the
+        interfaces call, monitors and the task-token lookup. The target is
+        ``[<root>/]developerId.pipelineId[.source][:<version>]`` or a control
+        id (``address.parse_target``):
 
-        Walks the rungs in the fixed order and takes the first that answers
-        (``@spec``: the caller's own presence, attach-only; ``@me``: the
-        caller's personal deployment run; ``@team``: the first team in the
-        caller's TEAM ORDER with a team-owned run of the address; ``@public``:
-        the caller's control on a store publication). Starting a published
-        rung from its artifact when nothing is registered is
-        ``resolve_or_start``. Every hit is permission-checked; a key with an
-        ``endpoints`` scope skips ``@spec`` (a production webhook must never
-        land on the owner's Play'd run), probes its frozen team only, and is
-        refused outside its scope. There is NO owner qualifier: nobody can
-        name another user's control.
+        - A control id is one registry hit, the caller re-checked
+          (``control_by_id``).
+        - A bare address walks the ladder in the fixed order (``@spec``, then
+          ``@me``, then each team in the caller's team order, then
+          ``@public``); ``@spec`` is attach-only and skipped for a key with an
+          ``endpoints`` scope (a production webhook never lands on the
+          owner's Play'd run).
+        - A rooted address walks ONLY its root's rung and never falls
+          through: nothing serving there is ``TASK_NOT_REGISTERED`` naming
+          that one rung. ``@<team>/`` and ``=team/<tid>/`` need membership,
+          and a scoped key's frozen team refuses any other team root.
+          ``@org/`` and ``=org/<oid>/`` name the active org only; the org
+          rung is not served yet (C.35) and is refused with a clear error.
+        - A ``:<version>`` is checked as plan 3.2 says (``@spec`` refuses
+          it; a version other than the rung's published one needs
+          ``task.control`` there, and ``@public`` serves only ``ready``
+          versions) and then refused: serving pinned versions is C.36.
 
-        Every probe is an index lookup (plan 3.2), never a registry walk:
-        ``@spec``/``@me``/``@public`` are one name-index probe each
-        (``<rung>.<userId>.<address>``), ``@team`` is one owner-index probe
-        per team in the order (first hit wins; the order is total, so there
-        is no ambiguity), and a two-segment address first reads the pipe's
-        registered sources. The cost is O(caller's teams x sources) whatever
-        the registry holds.
+        On each rung the live control answers, else (``start``/``read``) a
+        publication that can start one; candidates are ordered by rung, so a
+        live control never beats an earlier rung's publication, and a later
+        rung with several live sources (``TASK_SOURCE_REQUIRED``) never
+        blocks it: that refusal stands only where the rung would have
+        answered. Every probe is an index lookup, never a registry walk.
+        Every hit is permission-checked and held to a scoped key's
+        ``endpoints``.
 
-        The walk runs over LIVE controls first: a stopped run never answers
-        its address while another rung has a live one (a dead ``@spec`` falls
-        through). A dormant control (its engine stopped on its inactivity
-        timer, or crashed after it confirmed running) is live: its next
-        request starts the engine again. Only when no rung has a live control
-        is the walk repeated over every registered control, so a run that
-        just finished keeps its final status readable until the cleanup pass
-        removes it.
-
-        A two-segment address (no source) resolves when exactly one live
-        source answers; several live sources raise ``TASK_SOURCE_REQUIRED``.
-        A finished source never counts against a live one.
+        A ``start`` is where a binding begins, so the store gate stands on
+        every control it returns (plan 0 S9/S10, 8.4): a control id and a
+        live control answer from the verdict the control holds
+        (``store_gate.require_access``, cached for the allow window), and a
+        publication is checked with the listing of its pinned version in hand
+        before any engine starts (``_start_from_pin``). A ``read`` and an
+        ``attach`` start no binding and are not gated; the open that follows
+        is (``DataCommands._new_binding``, then the engine's ``spend.check``).
 
         Args:
-            address (str): ``developerId.pipelineId[.source]``.
-            account_info (AccountInfo): The request's account (required).
-            require (Optional[str]): The permission the request needs
-                (``'task.data'``, ``'task.control'``, ``'task.monitor'`` ...).
-            team (Optional[str]): Per-call ``@team`` override (one of the
-                caller's teams).
+            account_info: The request's account (required).
+            target: The target text, or one already parsed.
+            require: The permission the request needs (``'task.data'``,
+                ``'task.control'``, ``'task.monitor'`` ...).
+            mode: ``start`` (act on the first candidate that can serve: a
+                publication starts its control from the artifact), ``read``
+                (the same decision, nothing started: the candidate a start
+                would act on, a control or a publication with its artifact;
+                a pinned artifact without the named source yields to the next
+                candidate in both) or ``attach`` (registered controls only, live
+                first, then one still registered so a run that just finished
+                keeps its final status readable; nothing starts).
 
         Returns:
-            TaskControl: The resolved control.
+            The ``Resolution``: the parsed target, the control that answers
+            (``None`` only for a ``read`` a publication answers), the pin of
+            that publication, whether this call started the control, and (a
+            ``read`` a publication answers) the pinned artifact.
 
         Raises:
-            TaskError: TASK_INVALID_ARGUMENT (grammar), TASK_SOURCE_REQUIRED,
-                or TASK_NOT_REGISTERED (with ``rungsTried``) when no rung answers.
-            PermissionError: Unauthenticated, no permission, ``team`` is not
-                the caller's, or outside the key's endpoints scope.
+            TaskError: TASK_INVALID_ARGUMENT (grammar, a refused or retired
+                root, a version, the org rung), TASK_SOURCE_REQUIRED, or
+                TASK_NOT_REGISTERED (with ``rungsTried``) when nothing answers.
+            PermissionError: Unauthenticated, no permission, a team root the
+                caller is not a member of (or not a scoped key's frozen
+                team), another org, outside the key's endpoints scope, or (a
+                ``start``) a scoped key on a publication that is not free
+                (``required='account key'``).
+            SubscriptionRequiredError: A ``start`` whose caller has no
+                subscription to a subscription-priced publication.
         """
-        # Step 1: the account and the address grammar
+        # Step 1: the account and the grammar
         if account_info is None:
             raise PermissionError('Not authenticated')
-        parsed = parse_address(address)
+        if mode not in (RESOLVE_START, RESOLVE_READ, RESOLVE_ATTACH):
+            raise ValueError(f'Unknown resolution mode: {mode!r}')
+        parsed = target if isinstance(target, Target) else parse_target(target)
+
+        # Step 2: a control id is one registry hit, the caller re-checked; a
+        # start through it passes the store gate like any other
+        if parsed.root == KIND_CONTROL:
+            control = self.control_by_id(format_target(parsed), account_info, require)
+            if mode == RESOLVE_START:
+                await store_gate.require_access(control, account_info)
+            return Resolution(parsed, control, None, False)
+
+        # Step 3: the rungs this target walks, and a version's checks
+        plan = self._rung_plan(account_info, parsed)
+        if parsed.version is not None:
+            await self._refuse_version(account_info, parsed, plan, require)
         rungs: List[str] = []
 
-        # Step 2: live controls first, then anything still registered
-        for live_only in (True, False):
-            control = self._walk_rungs(parsed, address, account_info, require, live_only, rungs, team, only=rung)
-            if control is not None:
-                return self._check_engine_available(control)
+        # Step 4: attach: registered controls only, live first
+        if mode == RESOLVE_ATTACH:
+            for live_only in (True, False):
+                control = self._walk_rungs(parsed.address, account_info, require, live_only, rungs, plan)
+                if control is not None:
+                    return Resolution(parsed, self._check_engine_available(control), None, False)
+            raise self._not_registered(parsed.dotted, rungs, plan)
 
-        # Step 3: no rung answers
-        raise self._not_registered(address, rungs)
+        # Step 5: the candidates in the ladder's order; read answers the one a
+        # start would act on, without acting: a pinned artifact without the
+        # named source yields to the next candidate in both modes
+        # (_artifact_source), so discovery and execution pick the same
+        # publication. A held refusal (an ambiguous rung) is raised where it stands
+        candidates = await self._candidates(parsed.address, account_info, require, rungs, plan)
+        if mode == RESOLVE_READ:
+            for candidate in candidates:
+                if isinstance(candidate, TaskError):
+                    raise candidate
+                if isinstance(candidate, TaskControl):
+                    return Resolution(parsed, candidate, None, False)
+                artifact = await self._read_pin(candidate, parsed.address)
+                if artifact is not None:
+                    return Resolution(parsed, None, candidate, False, artifact)
+            raise self._not_registered(parsed.dotted, rungs, plan)
 
-    async def resolve_or_start(
-        self,
-        address: str,
-        account_info: AccountInfo,
-        require: Optional[str] = None,
-        *,
-        team: Optional[str] = None,
-    ) -> TaskControl:
-        """
-        Resolve a NAME call: the caller's control on the first rung that answers, started when needed.
-
-        See ``resolve_name``; this returns the control only.
-        """
-        control, _started = await self.resolve_name(address, account_info, require, team=team)
-        return control
-
-    async def resolve_name(
-        self,
-        address: str,
-        account_info: AccountInfo,
-        require: Optional[str] = None,
-        *,
-        team: Optional[str] = None,
-    ) -> Tuple[TaskControl, bool]:
-        """
-        Resolve a NAME call rung by rung: live control or publication, whichever comes first.
-
-        The fixed order of plan 3.2, each rung answered by its live control
-        or, failing that, by its publication (started from the artifact):
-        ``@spec`` (live only: a name never starts a spec run), ``@me``,
-        ``@team`` slot by slot in the caller's team order (``team=``
-        overrides it), ``@public``. So a live ``@team`` control of a LATER
-        team never beats an earlier team's publication, and a live
-        ``@team`` control never beats the caller's own ``@me`` deployment.
-        A live ``@spec``/``@me`` hit answers without reading publications.
-
-        The rung that answers is also where the store gate stands (plan 0
-        S9/S10, 8.4): a publication whose listing is not free refuses a key
-        scoped to ``endpoints`` and a caller with no subscription, before
-        any engine starts; a live control answers from the verdict it holds.
-
-        Args:
-            address: ``developerId.pipelineId[.source]``.
-            account_info: The request's account (required).
-            require: The permission the request needs.
-            team: Per-call ``@team`` override.
-
-        Returns:
-            The control (``control.rung`` says which rung answered) and True
-            when this call started it from an artifact.
-
-        Raises:
-            TaskError: As ``resolve_control``; TASK_NOT_REGISTERED lists the rungs tried.
-            PermissionError: As ``resolve_control``, or a scoped key on a
-                publication that is not free (``required='account key'``).
-            SubscriptionRequiredError: The caller has no subscription to a
-                subscription-priced publication.
-        """
-        parsed, rungs, candidates = await self.resolve_candidates(address, account_info, require, team=team)
+        # Step 6: start acts on the first candidate that can serve, and the
+        # store gate stands on whichever answers (plan 0 S9/S10, 8.4): a live
+        # control answers from the verdict it holds, a publication is checked
+        # with its listing in hand before any engine starts. A pinned
+        # artifact without the named source yields nothing; the next answers,
+        # and a held refusal stands once every earlier candidate yielded nothing
         for candidate in candidates:
+            if isinstance(candidate, TaskError):
+                raise candidate
             if isinstance(candidate, TaskControl):
                 control = self._check_engine_available(candidate)
                 await store_gate.require_access(control, account_info)
-                return control, False
-            # A pinned artifact without the named source yields nothing; the
-            # next candidate in the order answers
-            control, started = await self._start_from_pin(candidate, parsed, account_info, require)
+                return Resolution(parsed, control, None, False)
+            control, started = await self._start_from_pin(candidate, parsed.address, account_info, require)
             if control is not None:
-                return control, started
-        raise self._not_registered(address, rungs)
+                return Resolution(parsed, control, candidate, started)
+        raise self._not_registered(parsed.dotted, rungs, plan)
 
-    async def resolve_candidates(
-        self,
-        address: str,
-        account_info: AccountInfo,
-        require: Optional[str] = None,
-        *,
-        team: Optional[str] = None,
-    ) -> Tuple[Address, List[str], List[Union[TaskControl, Pin]]]:
+    @staticmethod
+    def _rung_plan(account_info: AccountInfo, target: Target) -> RungPlan:
         """
-        THE decision of a NAME call: what answers ``address`` for this caller, in the ladder's order.
+        The rungs a target walks: the whole ladder for a bare address, one rung for a rooted one.
 
-        A pure read — nothing starts, nothing is held. Every verb that must
-        agree on "which rung answers" asks this: ``resolve_name`` acts on the
-        first candidate that can serve (starting a pin's engine when needed),
-        ``interfaces`` reads the first candidate's spec. One order, one
-        implementation (plan 3.2):
+        Args:
+            account_info: The request's account.
+            target: The parsed target (not a control id).
+
+        Returns:
+            The plan.
+
+        Raises:
+            PermissionError: A team root the caller is not a member of (or
+                not a scoped key's frozen team), or an org root naming
+                another org.
+            TaskError: TASK_INVALID_ARGUMENT for the org rung (not served
+                yet, C.35).
+        """
+        # Step 1: a bare address walks the ladder, the caller's team order on @team
+        if target.root == KIND_NONE:
+            return RungPlan(RUNGS, tuple(teams_to_probe(account_info)))
+        label = target.root_text
+
+        # Step 2: the caller's own rungs
+        if target.root in (KIND_SPEC, KIND_ME, KIND_PUBLIC):
+            return RungPlan((target.root,), (), label)
+
+        # Step 3: one team, by name (ignoring case) or by id, a member's only
+        if target.root == KIND_TEAM:
+            team_id = target.ref if target.by_id else team_id_of_name(account_info, target.ref)
+            if not team_id:
+                if getattr(account_info, 'endpoints', None) is not None:
+                    raise PermissionError(f'This API key is frozen to its own team; {label} names another')
+                raise PermissionError(f'You are not a member of a team named {target.ref!r}')
+            return RungPlan(('team',), tuple(teams_to_probe(account_info, team_id)), label)
+
+        # Step 4: the org rung: the active org only, and not served yet
+        if target.root == KIND_ORG:
+            org = getattr(account_info, 'organization', None) or {}
+            if target.by_id and target.ref != str(org.get('id') or ''):
+                raise PermissionError(f'{label} is not your active organization: an org root names the active org only')
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                f'The org rung is not yet supported: {label}/{target.dotted} cannot be resolved yet',
+                field='token',
+                root=label,
+            )
+        raise TaskError(TaskError.INVALID_ARGUMENT, f'{label} is not a task root', field='token')
+
+    async def _refuse_version(
+        self, account_info: AccountInfo, target: Target, plan: RungPlan, require: Optional[str]
+    ) -> None:
+        """
+        A pinned ``:<version>``: checked as plan 3.2 says, then refused (serving it is C.36).
+
+        ``@spec`` refuses a version. Otherwise the version pins the rung the
+        root names, or on a bare address the rung the ladder picks for the
+        publications (``@spec`` skipped); nothing there is
+        ``TASK_NOT_REGISTERED`` naming the rungs. The rung's published
+        version is an ordinary call; any other version must be on the
+        publication's registry rail, needs ``task.control`` on a team rung,
+        and on ``@public`` must be ``ready``. A refusal on that rung is final.
+
+        Args:
+            account_info: The request's account.
+            target: The parsed target, its ``version`` set.
+            plan: The rungs the target walks.
+            require: The permission the request needs.
+
+        Raises:
+            TaskError: TASK_INVALID_ARGUMENT (``field='version'``) always: a
+                ``@spec`` version, or (after the checks pass) "not yet
+                supported"; TASK_NOT_REGISTERED when no publication serves
+                the rung, or the version is not on its rail.
+            PermissionError: The caller may not reach the version.
+        """
+        # Deferred: the account singleton loads after this module
+        from ai.account import account
+
+        text = format_target(target)
+
+        # Step 1: a spec run has no version
+        if plan.rungs == ('spec',):
+            raise TaskError(
+                TaskError.INVALID_ARGUMENT,
+                f'{text!r}: a @spec run is the spec you submitted and has no version',
+                field='version',
+            )
+
+        # Step 2: the publication the version pins: the rung the root names,
+        # or the one the ladder picks (skipping @spec)
+        published = RungPlan(plan.published, plan.teams, plan.root)
+        pins = await resolve_pins('pipe', account_info, target.dotted, rungs=published.rungs, teams=published.teams)
+        pin = pins.first
+        if pin is None:
+            raise self._not_registered(target.dotted, [f'@{rung}' for rung in published.rungs], published)
+
+        # Step 3: any version but the published one is on the rail, needs
+        # task.control on a team rung, and on the store must be ready
+        if target.version != pin.version:
+            deployment = pin.deployment
+            entries = await account.deployments_versions(deployment.org_id, deployment.project_id)
+            entry = next((e for e in entries if int(e.get('version', 0)) == target.version), None)
+            if entry is None:
+                raise TaskError(
+                    TaskError.NOT_REGISTERED,
+                    f'{deployment.project_id} has no version {target.version}',
+                    address=target.dotted,
+                    rungsTried=[f'@{pin.rung}'],
+                )
+            if pin.rung == 'team':
+                perms = resolve_task_permissions(account_info, deployment.team)
+                if 'task.control' not in perms or (require and require not in perms):
+                    raise PermissionError(
+                        f'Version {target.version} is not the published one: it needs task.control on the team'
+                    )
+            elif pin.rung == 'public' and str(entry.get('state') or '') != 'ready':
+                raise PermissionError(f'@public serves only ready versions; version {target.version} is not one')
+
+        # Step 4: the checks passed; serving it is C.36
+        raise TaskError(
+            TaskError.INVALID_ARGUMENT,
+            f'Pinned versions are not yet supported: {text!r} cannot be served yet; '
+            f'call {format_target(target._replace(version=None))!r} for the published version',
+            field='version',
+            version=target.version,
+        )
+
+    async def _candidates(
+        self,
+        parsed: Address,
+        account_info: AccountInfo,
+        require: Optional[str],
+        rungs: List[str],
+        plan: RungPlan,
+    ) -> List[Union[TaskControl, Pin, TaskError]]:
+        """
+        What answers ``parsed`` for this caller on the plan's rungs, in the ladder's order. A pure read.
 
         - The caller's registered ``@spec`` or ``@me`` control, when there is
           one, is the whole answer: ``@spec`` has no publication to compare
           with, and nothing outranks ``@me``.
         - Otherwise the serving publications and the caller's registered
           control (``@team`` or ``@public``) are merged by rung rank — ``@me``,
-          each team in the caller's team order, ``@public`` — a pin before a
-          control of a LATER rung, the control before any pin of a later
-          rung. A dormant control (engine stopped on its idle timer) counts
-          as registered: its spec stays readable and its next request
-          restarts it.
+          each team in the plan's order, ``@public`` — a pin before a control
+          of a LATER rung, the control before any pin of a later rung. A
+          dormant control (engine stopped on its idle timer) counts as
+          registered: its spec stays readable and its next request restarts it.
+        - A rung whose live sources are ambiguous (``TASK_SOURCE_REQUIRED``
+          from the control walk) is HELD at its place in that order: an
+          earlier rung's publication still answers first, and the refusal
+          stands where the rung's control would have stood. On ``@spec`` it
+          is raised at once (nothing comes before it).
 
         Args:
-            address: ``developerId.pipelineId[.source]``.
-            account_info: The request's account (required).
+            parsed: The parsed address.
+            account_info: The request's account.
             require: The permission the request needs.
-            team: Per-call ``@team`` override.
+            rungs: Filled with the rungs the control walk tried.
+            plan: The rungs the target walks.
 
         Returns:
-            The parsed address, the rungs the control walk tried (for the
-            not-registered message) and the candidates in answer order, each
-            a ``TaskControl`` or a ``Pin``; empty when no rung has anything.
+            The candidates in answer order, each a ``TaskControl``, a ``Pin``
+            or a held ``TaskError`` (``TASK_SOURCE_REQUIRED``, raised by the
+            caller when it is reached); empty when no rung has anything.
 
         Raises:
-            TaskError: Bad address grammar, or TASK_SOURCE_REQUIRED.
-            PermissionError: Unauthenticated, no permission, or outside the
-                key's endpoints scope.
+            TaskError: TASK_SOURCE_REQUIRED on ``@spec``.
+            PermissionError: No permission, or outside the key's endpoints scope.
         """
-        # Step 1: the caller's registered control on any rung
-        if account_info is None:
-            raise PermissionError('Not authenticated')
-        parsed = parse_address(address)
-        rungs: List[str] = []
-        live = self._walk_rungs(parsed, address, account_info, require, True, rungs, team)
+        # Step 1: the caller's registered control on the plan's rungs; an
+        # ambiguous rung is held at its place in the order (only @spec, which
+        # nothing precedes, raises at once)
+        held: Optional[TaskError] = None
+        try:
+            live = self._walk_rungs(parsed, account_info, require, True, rungs, plan)
+        except TaskError as e:
+            if e.code != TaskError.SOURCE_REQUIRED or getattr(e, 'rung', '') == 'spec':
+                raise
+            live, held = None, e
         if live is not None and live.rung in ('spec', 'me'):
-            return parsed, rungs, [live]
+            return [live]
 
         # Step 2: the publications, merged with the control by rung rank
-        pins = await resolve_pins('pipe', account_info, address, team=team)
-        probe = teams_to_probe(account_info, team)
+        pins = (
+            (
+                await resolve_pins('pipe', account_info, build_address(*parsed), rungs=plan.published, teams=plan.teams)
+            ).pins
+            if plan.published
+            else ()
+        )
+        probe = list(plan.teams)
 
         def _rank(rung: str, team_id: str) -> int:
             """Position of a rung slot in the fixed order (me, each team, public)."""
@@ -1467,58 +1638,70 @@ class TaskServer(DAPBase):
                 return 1 + (probe.index(team_id) if team_id in probe else len(probe))
             return 2 + len(probe)
 
-        candidates: List[Union[TaskControl, Pin]] = []
-        live_rank = _rank(live.rung, live.owner_id) if live is not None else None
+        # The control, or the held refusal, takes the control's place
+        entry: Optional[Union[TaskControl, TaskError]] = live if live is not None else held
+        if live is not None:
+            entry_rank: Optional[int] = _rank(live.rung, live.owner_id)
+        elif held is not None:
+            entry_rank = _rank(getattr(held, 'rung', ''), getattr(held, 'teamId', ''))
+        else:
+            entry_rank = None
+        candidates: List[Union[TaskControl, Pin, TaskError]] = []
         placed = False
-        for pin in pins.pins:
+        for pin in pins:
             if (
-                live is not None
+                entry is not None
                 and not placed
-                and live_rank is not None
-                and live_rank <= _rank(pin.rung, pin.deployment.team)
+                and entry_rank is not None
+                and entry_rank <= _rank(pin.rung, pin.deployment.team)
             ):
-                candidates.append(live)
+                candidates.append(entry)
                 placed = True
             candidates.append(pin)
-        if live is not None and not placed:
-            candidates.append(live)
-        return parsed, rungs, candidates
+        if entry is not None and not placed:
+            candidates.append(entry)
+        return candidates
 
     def _walk_rungs(
         self,
         parsed: Address,
-        address: str,
         account_info: AccountInfo,
         require: Optional[str],
         live_only: bool,
         rungs: List[str],
-        team: Optional[str] = None,
-        only: Optional[str] = None,
+        plan: RungPlan,
     ) -> Optional[TaskControl]:
         """
-        One walk of the rungs over the registry indexes: the first hit, verified, or None.
+        One walk of the plan's rungs over the registry indexes: the first hit, verified, or None.
+
+        Every probe is an index lookup (plan 3.2), never a registry walk:
+        ``@spec``/``@me``/``@public`` are one name-index probe each
+        (``<rung>.<userId>.<address>``), ``@team`` is one owner-index probe
+        per team in the plan (first hit wins; the order is total, so there is
+        no ambiguity), and a two-segment address first reads the pipe's
+        registered sources. The cost is O(caller's teams x sources) whatever
+        the registry holds. A two-segment address resolves when exactly one
+        source answers; several raise ``TASK_SOURCE_REQUIRED``.
 
         Args:
             parsed: The parsed address.
-            address: The address as sent (for messages).
             account_info: The request's account.
             require: The permission the request needs.
             live_only: Consider only live (or dormant) controls.
             rungs: Filled with the rungs this walk tried, in order.
-            team: Per-call ``@team`` override.
-            only: Walk this one rung (``'spec'``/``'me'``/``'team'``/``'public'``) instead of all four.
+            plan: The rungs (and, on ``@team``, the teams) to walk.
 
         Returns:
             The control the first answering rung resolved, or None.
 
         Raises:
             TaskError: TASK_SOURCE_REQUIRED.
-            PermissionError: No permission, ``team`` is not the caller's, or
-                outside the key's endpoints scope.
+            PermissionError: No permission, or outside the key's endpoints scope.
         """
         registry = self._task_control
         endpoints = getattr(account_info, 'endpoints', None)
         user_id = account_info.userId
+        address = build_address(*parsed)
         rungs.clear()
 
         # Step 1: the full addresses: the one given, or one per registered source
@@ -1531,8 +1714,8 @@ class TaskServer(DAPBase):
         def _usable(control: Optional[TaskControl]) -> bool:
             return control is not None and (control.live or not live_only)
 
-        def _pick(candidates: List[TaskControl]) -> Optional[TaskControl]:
-            """One control, or the source-required error when several sources answer."""
+        def _pick(candidates: List[TaskControl], rung: str, team_id: str = '') -> Optional[TaskControl]:
+            """One control, or the source-required error (naming its rung and team) when several sources answer."""
             if not candidates:
                 return None
             if len(candidates) > 1:
@@ -1542,6 +1725,8 @@ class TaskServer(DAPBase):
                     f'{address!r} has several live sources ({", ".join(sources)}); name one',
                     address=address,
                     sources=sources,
+                    rung=rung,
+                    teamId=team_id,
                 )
             return candidates[0]
 
@@ -1552,36 +1737,32 @@ class TaskServer(DAPBase):
                 usable = [c for c in registry.lookup(control_key(rung, user_id, a)) if _usable(c)]
                 if usable:
                     found.append(usable[0])
-            return _pick(found)
-
-        def _wanted(rung: str) -> bool:
-            """Whether this walk visits ``rung`` (every rung unless one was asked for)."""
-            return only is None or only == rung
+            return _pick(found, rung)
 
         # Step 2: @spec, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
-        if endpoints is None and _wanted('spec'):
+        if endpoints is None and 'spec' in plan.rungs:
             rungs.append('@spec')
             control = _exact('spec')
             if control is not None:
                 return self._verify_control(control, account_info, require)
 
         # Step 3: @me, the caller's personal (user-owned) deployment run
-        if _wanted('me'):
+        if 'me' in plan.rungs:
             rungs.append('@me')
             control = _exact('me')
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
 
-        # Step 4: @team, the first team in the caller's team order (or the
-        # team= override, or a scoped key's frozen team) with a team-owned
-        # run of the address: one owner-index probe per team and address. A
-        # store pointer's deploy-rail run is team-owned too (its billing
-        # team) but sits on the public rung, and never answers here
-        if _wanted('team'):
+        # Step 4: @team, the plan's teams in order (the caller's team order,
+        # a rooted address's one team, or a scoped key's frozen team) with a
+        # team-owned run of the address: one owner-index probe per team and
+        # address. A store pointer's deploy-rail run is team-owned too (its
+        # billing team) but sits on the public rung, and never answers here
+        if 'team' in plan.rungs:
             rungs.append('@team')
-            for team_id in teams_to_probe(account_info, team):
+            for team_id in plan.teams:
                 runs = [
                     c
                     for a in addresses
@@ -1592,13 +1773,13 @@ class TaskServer(DAPBase):
                     and _usable(c)
                     and resolve_run_permissions(account_info, c)
                 ]
-                control = _pick(runs)
+                control = _pick(runs, 'team', team_id)
                 if control is not None:
                     check_endpoint_scope(endpoints, control.address)
                     return self._verify_control(control, account_info, require)
 
         # Step 5: @public, the caller's own control on a store publication
-        if _wanted('public'):
+        if 'public' in plan.rungs:
             rungs.append('@public')
             control = _exact('public')
             if control is not None:
@@ -1607,13 +1788,20 @@ class TaskServer(DAPBase):
         return None
 
     @staticmethod
-    def _not_registered(address: str, rungs_tried: List[str]) -> TaskError:
-        """The not-found error: the address and the rungs ACTUALLY tried (plan 3.8)."""
+    def _not_registered(address: str, rungs_tried: List[str], plan: RungPlan) -> TaskError:
+        """
+        The not-found error: the address and the rungs ACTUALLY tried (plan 3.8).
+
+        A rooted address names its one rung as the caller wrote it
+        (``@Development``, ``=team/<tid>``, ``@me``), tried or not: a scoped
+        key's ``@spec/`` walks nothing and is still refused naming ``@spec``.
+        """
+        tried = [plan.root] if plan.root else list(rungs_tried)
         return TaskError(
             TaskError.NOT_REGISTERED,
-            f'Your pipeline is not running ({address!r}; tried {", ".join(rungs_tried)})',
+            f'Your pipeline is not running ({address!r}; tried {", ".join(tried)})',
             address=address,
-            rungsTried=list(rungs_tried),
+            rungsTried=tried,
         )
 
     def _check_engine_available(self, control: TaskControl) -> TaskControl:
@@ -1652,6 +1840,64 @@ class TaskServer(DAPBase):
             engineKey=engine_key_value,
             reason=reason,
         )
+
+    @staticmethod
+    def _artifact_source(pipeline: Dict[str, Any], parsed: Address) -> Tuple[Optional[str], bool]:
+        """
+        The source an address names on a pinned artifact, and whether the artifact has it.
+
+        THE one source decision a publication answers by, in a ``start``
+        (``_start_from_pin``) and a ``read`` (``_read_pin``) alike: the
+        address's own source segment, else the artifact's default
+        ``source``, else its one implied source.
+
+        Args:
+            pipeline: The pinned artifact.
+            parsed: The parsed address.
+
+        Returns:
+            ``(source, present)``: ``source`` is None when the artifact has
+            several sources and no default (or none at all); ``present`` is
+            whether a component of that id is in the artifact.
+        """
+        source = parsed.source or pipeline.get('source')
+        if not source:
+            try:
+                source = resolve_implied_source(pipeline)
+            except MultipleSourcesError:
+                source = None
+        if not source:
+            return None, False
+        components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
+        return source, source in {c.get('id') for c in components}
+
+    async def _read_pin(self, pin: Pin, parsed: Address) -> Optional[Dict[str, Any]]:
+        """
+        The pinned artifact when ``pin`` answers a ``read`` of ``parsed``; None when it yields.
+
+        A read takes the source decision a start takes (``_artifact_source``):
+        an artifact without the source the address names yields, and the
+        next candidate answers, exactly as ``_start_from_pin`` yields. An
+        artifact with several sources and no default answers the read (its
+        interface map names the sources to choose from) where a start of the
+        same publication asks for one (``TASK_SOURCE_REQUIRED``).
+
+        Args:
+            pin: The serving publication.
+            parsed: The parsed address.
+
+        Returns:
+            The artifact, or None when it has no such source.
+        """
+        # Deferred: the account singleton loads after this module
+        from ai.account import account
+
+        deployment = pin.deployment
+        pipeline = await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version)
+        source, present = self._artifact_source(pipeline, parsed)
+        if source is not None and not present:
+            return None
+        return pipeline
 
     async def _start_from_pin(
         self,
@@ -1710,13 +1956,8 @@ class TaskServer(DAPBase):
         state_epoch = time.monotonic()
         pipeline = dict(await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version))
         components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
-        source = parsed.source or pipeline.get('source')
-        if not source:
-            try:
-                source = resolve_implied_source(pipeline)
-            except MultipleSourcesError:
-                source = None
-        if not source:
+        source, present = self._artifact_source(pipeline, parsed)
+        if source is None:
             pipe_address = build_address(parsed.developer_id, parsed.pipe_id)
             raise TaskError(
                 TaskError.SOURCE_REQUIRED,
@@ -1724,7 +1965,7 @@ class TaskServer(DAPBase):
                 address=pipe_address,
                 sources=sorted(str(c.get('id')) for c in components if (c.get('config') or {}).get('mode') == 'Source'),
             )
-        if source not in {c.get('id') for c in components}:
+        if not present:
             return None, False
         address = build_address(parsed.developer_id, parsed.pipe_id, source)
         endpoints = getattr(account_info, 'endpoints', None)

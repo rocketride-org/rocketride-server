@@ -143,17 +143,18 @@ class ExecutionMixin(DAPClient):
         ttl: int = None,
         env: Dict[str, str] = None,
         pipeline_trace_level: str = None,
-        team: str = None,
     ) -> SUBMIT_RESULT:
         """
         Run ONE request through a named or inline pipeline: ``use()`` plus one ``send()``.
 
         Exactly one of ``name``, ``pipeline`` or ``filepath``. A ``name`` is
-        the address ``developerId.pipelineId[.source]`` and resolves through
-        the fixed rungs: your live ``@spec`` control (attach only), your
-        ``@me`` deployment, the first team in your team order that publishes
-        it (``team`` overrides the order for this call), then ``@public``;
-        a published rung starts from its artifact when nothing is live. A
+        the address ``[<root>/]developerId.pipelineId[.source]``. A bare
+        address resolves through the fixed rungs: your live ``@spec`` control
+        (attach only), your ``@me`` deployment, the first team in your team
+        order that publishes it, then ``@public``. A rooted one walks only the
+        rung its root names and never falls through: ``@me/``, ``@spec/``,
+        ``@public/``, ``@<team>/`` or ``=team/<tid>/`` (one of your teams).
+        A published rung starts from its artifact when nothing is live. A
         ``pipeline``/``filepath`` addresses your own ``@spec`` rung: the
         control with the same ``project_id`` and resolved configuration is
         reused, otherwise one is created (``converged: 'started'``); a
@@ -185,7 +186,6 @@ class ExecutionMixin(DAPClient):
             env: ``ROCKETRIDE_*`` overrides (spec calls only).
             pipeline_trace_level: Trace level for this pipeline's requests
                 (``'none'``, ``'metadata'``, ``'summary'``, ``'full'``).
-            team: Answer ``@team`` from this one of your teams.
 
         Returns:
             SUBMIT_RESULT: the pipe close body plus ``token`` (the control
@@ -229,7 +229,6 @@ class ExecutionMixin(DAPClient):
             arguments['pipeline'] = spec
         optional = {
             'source': source,
-            'team': team,
             'params': params,
             'objinfo': objinfo,
             'mimetype': mimetype,
@@ -270,10 +269,8 @@ class ExecutionMixin(DAPClient):
 
         # Step 4: stream on the control the server answered with: its id
         # rides the token slot, so the data path lands on that control
-        # without a second resolution (the team stamp rides along).
-        result = await self.send(
-            stamps['token'], data, objinfo, mimetype, on_sse=on_sse, team=stamps.get('team'), params=params
-        )
+        # without a second resolution.
+        result = await self.send(stamps['token'], data, objinfo, mimetype, on_sse=on_sse, params=params)
         return {**(result or {}), **stamps}
 
     async def use(

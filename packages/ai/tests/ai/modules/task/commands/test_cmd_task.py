@@ -43,6 +43,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from ai.modules.task.commands.cmd_task import TaskCommands
+from ai.modules.task.task_control import RESOLVE_ATTACH
 
 #: The control id the requests name in their token slot.
 CONTROL_ID = '=control/0123456789abcdef0123456789abcdef'
@@ -651,19 +652,25 @@ async def test_on_rrext_get_task_status_returns_task_status_dict():
 async def test_on_rrext_get_token_resolves_the_address_through_the_one_resolver():
     """The handler forms the address from the caller's developer id and resolves it like every verb."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
+    server.resolve_target = AsyncMock(
+        return_value=SimpleNamespace(control=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
+    )
 
     conn = _make_conn(account_info=_account_info(), server=server)
     response = await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
     assert response == {'type': 'response', 'body': {'token': CONTROL_ID, 'address': 'acme.proj-1.src-1'}}
-    server.resolve_control.assert_called_once_with('acme.proj-1.src-1', conn._account_info, 'task.monitor', team=None)
+    server.resolve_target.assert_awaited_once_with(
+        conn._account_info, 'acme.proj-1.src-1', 'task.monitor', mode=RESOLVE_ATTACH
+    )
 
 
 @pytest.mark.asyncio
-async def test_on_rrext_get_token_team_scope_is_the_resolvers_team_override():
-    """A teamId argument scopes the permission check and the resolution to that team."""
+async def test_on_rrext_get_token_team_scope_roots_the_address_at_that_team():
+    """A teamId argument scopes the permission check and roots the resolution at that team."""
     server = MagicMock()
-    server.resolve_control = MagicMock(return_value=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
+    server.resolve_target = AsyncMock(
+        return_value=SimpleNamespace(control=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
+    )
 
     conn = _make_conn(account_info=_account_info(), server=server)
     conn.verify_team_permission = MagicMock()
@@ -672,9 +679,31 @@ async def test_on_rrext_get_token_team_scope_is_the_resolvers_team_override():
     )
     assert response == {'type': 'response', 'body': {'token': CONTROL_ID, 'address': 'acme.proj-1.src-1'}}
     conn.verify_team_permission.assert_called_once_with('team-1', 'task.monitor')
-    server.resolve_control.assert_called_once_with(
-        'acme.proj-1.src-1', conn._account_info, 'task.monitor', team='team-1'
+    server.resolve_target.assert_awaited_once_with(
+        conn._account_info, '=team/team-1/acme.proj-1.src-1', 'task.monitor', mode=RESOLVE_ATTACH
     )
+
+
+@pytest.mark.asyncio
+async def test_on_rrext_get_token_a_rows_audience_roots_the_address_at_its_rung():
+    """A deployment row's audience passed back unchanged: a team's at its team, the caller's own at @me."""
+    server = MagicMock()
+    server.resolve_target = AsyncMock(
+        return_value=SimpleNamespace(control=SimpleNamespace(address='acme.proj-1.src-1', control_id=CONTROL_ID))
+    )
+    conn = _make_conn(account_info=_account_info(), server=server)
+    conn.verify_team_permission = MagicMock()
+    conn.verify_permission = MagicMock()
+    user_id = conn._account_info.userId
+    for team_id, target in (
+        ('=team/team-1', '=team/team-1/acme.proj-1.src-1'),
+        (f'=user/{user_id}', '@me/acme.proj-1.src-1'),
+    ):
+        server.resolve_target.reset_mock()
+        await TaskCommands.on_rrext_get_token(
+            conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1', 'teamId': team_id}}
+        )
+        server.resolve_target.assert_awaited_once_with(conn._account_info, target, 'task.monitor', mode=RESOLVE_ATTACH)
 
 
 @pytest.mark.asyncio
@@ -686,7 +715,7 @@ async def test_on_rrext_get_token_without_a_developer_id_cannot_form_an_address(
     )
     with pytest.raises(ValueError, match='developer id'):
         await TaskCommands.on_rrext_get_token(conn, {'arguments': {'projectId': 'proj-1', 'source': 'src-1'}})
-    server.resolve_control.assert_not_called()
+    server.resolve_target.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

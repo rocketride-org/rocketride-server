@@ -26,6 +26,7 @@ function pin(overrides: Partial<RungPin> = {}): RungPin {
 		rung: 'personal',
 		label: 'Personal',
 		handle: '@me',
+		target: '=user/u1',
 		registryVersion: 3,
 		version: '1.2.0',
 		state: 'enabled',
@@ -81,8 +82,8 @@ test("pinStatusOf: an older server keeps today's words", () => {
 });
 
 test('servingSentenceOf: says who is served and who is set but not served', () => {
-	const pins = [pin(), pin({ rung: 'team', handle: '@team/qa', registryVersion: 4, version: '', serving: false, reason: 'disabled' })];
-	assert.equal(servingSentenceOf(pins), "Right now @me serves v3 (1.2.0); @team/qa is set to v4, but it isn't serving (disabled).");
+	const pins = [pin(), pin({ rung: 'team', handle: '@QA', target: '=team/t-qa', registryVersion: 4, version: '', serving: false, reason: 'disabled' })];
+	assert.equal(servingSentenceOf(pins), "Right now @me serves v3 (1.2.0); @QA is set to v4, but it isn't serving (disabled).");
 });
 
 test('servingSentenceOf: nothing served says so, and why', () => {
@@ -91,13 +92,13 @@ test('servingSentenceOf: nothing served says so, and why', () => {
 });
 
 test("servingSentenceOf: an older server keeps today's sentence; no pins says nothing", () => {
-	const pins = [legacyPin(), legacyPin({ rung: 'public', handle: '@public', registryVersion: 2, version: '' })];
+	const pins = [legacyPin(), legacyPin({ rung: 'public', handle: '@public', target: '@public', registryVersion: 2, version: '' })];
 	assert.equal(servingSentenceOf(pins), 'Right now @me serves v3 (1.2.0), @public serves v2.');
 	assert.equal(servingSentenceOf([]), '');
 });
 
 test('youSentenceOf: names the version the caller would get', () => {
-	const pins = [pin({ rung: 'public', handle: '@public', registryVersion: 2, version: '' }), pin({ servesYou: true })];
+	const pins = [pin({ rung: 'public', handle: '@public', target: '@public', registryVersion: 2, version: '' }), pin({ servesYou: true })];
 	assert.equal(youSentenceOf(pins), "You'd get v3 (1.2.0) through @me.");
 });
 

@@ -65,7 +65,7 @@ from ai.constants import CONST_DEFAULT_MAX_THREADS, CONST_ENGINE_IDLE_TTL
 from ai.modules.task import deploy_events, task_control, task_engine, task_server
 from ai.modules.task.commands.cmd_data import DataCommands
 from ai.modules.task.commands.cmd_task import TaskCommands
-from ai.modules.task.task_control import DeploymentRef, TaskControl, TeamContext
+from ai.modules.task.task_control import RESOLVE_ATTACH, DeploymentRef, TaskControl, TeamContext
 from ai.modules.task.engine_key import (
     engine_content,
     key_owner,
@@ -75,7 +75,7 @@ from ai.modules.task.engine_key import (
     stack_order,
 )
 from ai.modules.task.task_engine import TaskEngine, component_facts
-from ai.modules.task.task_server import ControlRegistry, EngineRegistry, TaskServer
+from ai.modules.task.task_server import ControlRegistry, EngineRegistry, Resolution, TaskServer
 from ai.modules.task.types import EngineState, TaskError
 from ai.modules.task.trace_owner import TraceOwners
 
@@ -1167,14 +1167,29 @@ async def _idle_out(ts, clock) -> None:
     await ts._ttl_cycle()
 
 
+async def _attach(ts, target, account, require=None):
+    """The control ``resolve_target`` attaches to for ``target``: registered controls only, nothing starts."""
+    return (await ts.resolve_target(account, target, require, mode=RESOLVE_ATTACH)).control
+
+
+async def _resolve(ts, target, account, require=None):
+    """The control ``resolve_target`` answers ``target`` with, a publication started when needed."""
+    return (await ts.resolve_target(account, target, require)).control
+
+
 def _data_conn(ts, control):
-    """A DataCommands whose resolution always lands on ``control`` (no transport, no auth)."""
+    """A DataCommands whose resolution always lands on ``control`` (no transport, no auth).
+
+    The test's own server answers every address with ``control``:
+    ``ts.resolve_target`` is replaced for the test (each test builds its own
+    server), so a frame by address is counted on it.
+    """
     conn = DataCommands.__new__(DataCommands)
     conn._server = ts
     conn._connection_id = 1
     conn._account_info = _caller()
     conn.get_control = MagicMock(return_value=control)
-    conn.resolve_control_or_start = AsyncMock(return_value=control)
+    ts.resolve_target = AsyncMock(return_value=Resolution(None, control, None, False))
     conn.build_response = lambda request, body: {'body': body}
     conn.debug_message = MagicMock()
     conn.verify_team_permission = lambda team_id, perm: None
@@ -1282,7 +1297,6 @@ async def test_status_shows_stopped_then_running(catalog, engines, clock, servin
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     conn = SimpleNamespace(
         get_control=MagicMock(return_value=control),
-        resolve_control_or_start=AsyncMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
         verify_team_permission=lambda team_id, perm: None,
@@ -1307,7 +1321,7 @@ async def test_a_dormant_control_still_resolves(catalog, engines, clock):
     control = await _start(ts, _pipeline(), user='user-a', ttl=3600)
     await _idle_out(ts, clock)
 
-    assert ts.resolve_control(control.address, _account('user-a'), 'task.data') is control
+    assert await _attach(ts, control.address, _account('user-a'), 'task.data') is control
 
 
 @pytest.mark.asyncio
@@ -1404,7 +1418,7 @@ async def test_a_crash_after_running_leaves_the_controls_dormant_and_restarts(ca
     assert a.engine_state == 'stopped' and b.engine_state == 'stopped'
     assert ts._task_control[a.key] is a and ts._task_control[b.key] is b
     assert ts._engines == {}
-    assert ts.resolve_control(a.address, _account('user-a'), 'task.data') is a
+    assert await _attach(ts, a.address, _account('user-a'), 'task.data') is a
 
     # The next request starts the same key again, with no error
     response = await DataCommands.on_rrext_process(_data_conn(ts, a), {'arguments': {'subcommand': 'open'}})
@@ -1466,7 +1480,7 @@ async def test_an_operator_stop_never_restarts(catalog, engines):
     assert await ts.ensure_engine(control) is engine
     assert len(engines) == 1
     with pytest.raises(TaskError) as told:
-        ts.resolve_control(control.address, _account('user-a'), 'task.data')
+        await _attach(ts, control.address, _account('user-a'), 'task.data')
     assert told.value.code == TaskError.ENGINE_UNAVAILABLE
 
 
@@ -1522,7 +1536,6 @@ async def test_status_shows_starting_while_in_the_start_gate(catalog, engines, c
     other = await _start(ts, _copy(), user='user-a', ttl=3600)
     conn = SimpleNamespace(
         get_control=MagicMock(return_value=control),
-        resolve_control_or_start=AsyncMock(return_value=control),
         build_response=lambda request, body: {'body': body},
         debug_message=MagicMock(),
         verify_team_permission=lambda team_id, perm: None,
@@ -1629,7 +1642,7 @@ async def test_a_hold_the_release_pass_could_not_drop_is_refused_on_its_next_req
     second = await _start(
         ts, _pipeline(), run_kind='deploy', owner_kind='user', deployment=deployment, token='docBrain2'
     )
-    assert ts.resolve_control(first.address, _account('user-a'), 'task.data') is first
+    assert await _attach(ts, first.address, _account('user-a'), 'task.data') is first
     await asyncio.sleep(0.05)  # the disable comes later than the registrations
 
     real_remove = ts.remove_task
@@ -1647,7 +1660,7 @@ async def test_a_hold_the_release_pass_could_not_drop_is_refused_on_its_next_req
     assert second.key not in ts._task_control
     assert first.key in ts._task_control
     with pytest.raises(TaskError) as err:
-        ts.resolve_control(first.address, _account('user-a'), 'task.data')
+        await _attach(ts, first.address, _account('user-a'), 'task.data')
     assert (err.value.code, err.value.reason) == (TaskError.ENGINE_UNAVAILABLE, 'unpublished')
     assert first.key not in ts._task_control
 
@@ -2100,12 +2113,12 @@ async def test_every_holder_is_told_engine_unavailable_once(catalog, engines):
 
     for control, user in ((a, 'user-a'), (b, 'user-a')):
         with pytest.raises(TaskError) as told:
-            ts.resolve_control(control.address, _account(user), 'task.data')
+            await _attach(ts, control.address, _account(user), 'task.data')
         assert told.value.code == TaskError.ENGINE_UNAVAILABLE
         assert (told.value.engineKey, told.value.reason) == (key, 'maintenance')
 
         with pytest.raises(TaskError) as again:
-            ts.resolve_control(control.address, _account(user), 'task.data')
+            await _attach(ts, control.address, _account(user), 'task.data')
         assert again.value.code == TaskError.NOT_REGISTERED
 
 
@@ -2380,7 +2393,7 @@ def deployments(monkeypatch, serving):
 def _caller(
     user_id='user-a', *, dev_team='team-1', teams=('team-1',), org='org-1', developer_id='acme', endpoints=None
 ):
-    """An account with task permissions on each of ``teams``."""
+    """An account with task permissions on each of ``teams``, each named its id capitalized (``Staging``)."""
     perms = ['task.control', 'task.data', 'task.monitor']
     return AccountInfo(
         auth='rr_key',
@@ -2391,7 +2404,7 @@ def _caller(
             'id': org,
             'name': '',
             'permissions': [],
-            'teams': [{'id': team, 'name': '', 'permissions': perms} for team in teams],
+            'teams': [{'id': team, 'name': team.capitalize(), 'permissions': perms} for team in teams],
             'developerId': developer_id,
         },
         endpoints=endpoints,
@@ -2405,7 +2418,7 @@ async def test_play_creates_the_dev_control_and_a_name_call_attaches_to_it(catal
     deployments.deploy('=user/user-a', billing='team-1')
     played = await _start(ts, _pipeline(), user='user-a')
 
-    resolved = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
+    resolved = await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data')
 
     assert resolved is played and resolved.rung == 'spec'
     assert list(ts._task_control) == [played.key]
@@ -2419,7 +2432,7 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
     played = await _start(ts, _pipeline(), user='user-a')
     await ts.stop_task(played.key)
 
-    control = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
+    control = await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data')
 
     assert control.rung == 'me' and control.index_key == f'me.user-a.{ADDRESS}'
     assert (control.run_kind, control.owner_kind, control.owner_id) == ('deploy', 'user', 'user-a')
@@ -2428,7 +2441,7 @@ async def test_a_dead_dev_falls_through_to_me_started_from_the_artifact(catalog,
     assert control.teamId == 'team-1' and control.engine_state == 'running'
 
     # The next name call attaches to it
-    assert await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data') is control
+    assert await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data') is control
 
 
 @pytest.mark.asyncio
@@ -2437,14 +2450,14 @@ async def test_without_a_personal_deployment_the_team_answers(catalog, engines, 
     ts = _server()
     deployments.deploy('=team/team-1')
 
-    control = await ts.resolve_or_start(ADDRESS, _caller('user-a'), 'task.data')
+    control = await _resolve(ts, ADDRESS, _caller('user-a'), 'task.data')
 
     assert control.rung == 'team' and control.index_key == f'team.team-1.{ADDRESS}'
     assert (control.owner_kind, control.owner_id) == ('team', 'team-1')
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='acme.docBrain')
 
     # A teammate resolves the same team control through the owner index
-    assert ts.resolve_control(ADDRESS, _caller('user-b'), 'task.data') is control
+    assert await _attach(ts, ADDRESS, _caller('user-b'), 'task.data') is control
 
 
 @pytest.mark.asyncio
@@ -2454,7 +2467,7 @@ async def test_a_non_owner_falls_past_the_owners_play_to_the_publication(catalog
     deployments.deploy('=team/team-1')
     played = await _start(ts, _pipeline(), user='user-a')
 
-    control = await ts.resolve_or_start(ADDRESS, _caller('user-b'), 'task.data')
+    control = await _resolve(ts, ADDRESS, _caller('user-b'), 'task.data')
 
     assert control is not played and control.rung == 'team'
     # Identical content, another owner (the team): another engine in this PR
@@ -2468,7 +2481,7 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
     deployments.publish(org='org-1')
     stranger = _caller('user-z', dev_team='team-z', teams=('team-z',), org='org-2', developer_id='globex')
 
-    control = await ts.resolve_or_start(ADDRESS, stranger, 'task.data')
+    control = await _resolve(ts, ADDRESS, stranger, 'task.data')
 
     assert control.rung == 'public' and control.index_key == f'public.user-z.{ADDRESS}'
     assert control.address == ADDRESS
@@ -2476,7 +2489,7 @@ async def test_a_public_control_is_the_callers_and_carries_the_publishers_deploy
     assert (control.orgId, control.teamId) == ('org-2', 'team-z')
     assert control.deployment == DeploymentRef(org_id='org-1', team_id='@public', project_id='acme.docBrain')
     assert control.trigger == 'submit'
-    assert ts.resolve_control(ADDRESS, stranger, 'task.data') is control
+    assert await _attach(ts, ADDRESS, stranger, 'task.data') is control
 
     # The publisher's kill switch releases it
     assert await ts.release_deployment_holds(control.deployment) == 1
@@ -2491,7 +2504,7 @@ async def test_public_needs_ready_and_an_enabled_binding(catalog, engines, deplo
     for state, review in (('enabled', 'submit'), ('disabled', 'ready'), ('enabled', 'failed')):
         deployments.publish(state=state, review=review)
         with pytest.raises(TaskError) as err:
-            await ts.resolve_or_start(ADDRESS, stranger, 'task.data')
+            await _resolve(ts, ADDRESS, stranger, 'task.data')
         assert err.value.code == TaskError.NOT_REGISTERED
 
 
@@ -2503,13 +2516,13 @@ async def test_a_scoped_key_skips_dev_and_starts_at_me(catalog, engines, deploym
     played = await _start(ts, _pipeline(), user='user-a')
     scoped = _caller('user-a', endpoints=[ADDRESS])
 
-    control = await ts.resolve_or_start(ADDRESS, scoped, 'task.data')
+    control = await _resolve(ts, ADDRESS, scoped, 'task.data')
 
     assert control is not played and control.rung == 'me'
 
     # Outside its scope the key is refused before anything starts
     with pytest.raises(PermissionError):
-        await ts.resolve_or_start('acme.otherPipe.webhook_1', scoped, 'task.data')
+        await _resolve(ts, 'acme.otherPipe.webhook_1', scoped, 'task.data')
 
 
 @pytest.mark.asyncio
@@ -2521,11 +2534,11 @@ async def test_not_registered_lists_the_rungs_actually_tried(catalog, engines, d
         (_caller('user-a', endpoints=[ADDRESS]), ['@me', '@team', '@public']),
     ):
         with pytest.raises(TaskError) as err:
-            await ts.resolve_or_start(ADDRESS, account, 'task.data')
+            await _resolve(ts, ADDRESS, account, 'task.data')
         assert err.value.code == TaskError.NOT_REGISTERED
         assert err.value.rungsTried == rungs
         with pytest.raises(TaskError) as err:
-            ts.resolve_control(ADDRESS, account, 'task.data')
+            await _attach(ts, ADDRESS, account, 'task.data')
         assert err.value.rungsTried == rungs
 
 
@@ -2553,8 +2566,8 @@ async def test_team_order_answers_from_the_first_team_holding_the_name(catalog, 
     ts = _server()
     _two_environments(deployments)
 
-    both = await ts.resolve_or_start(ADDRESS, _order('staging'), 'task.data')
-    only = await ts.resolve_or_start('acme.otherPipe.webhook_1', _order('staging'), 'task.data')
+    both = await _resolve(ts, ADDRESS, _order('staging'), 'task.data')
+    only = await _resolve(ts, 'acme.otherPipe.webhook_1', _order('staging'), 'task.data')
 
     assert (both.rung, both.owner_id, both.version) == ('team', 'staging', 5)
     assert (only.rung, only.owner_id, only.version) == ('team', 'production', 4)
@@ -2562,20 +2575,25 @@ async def test_team_order_answers_from_the_first_team_holding_the_name(catalog, 
 
 
 @pytest.mark.asyncio
-async def test_reordering_flips_the_next_call_and_team_overrides_one_call(catalog, engines, deployments):
-    """A reorder answers from the new first team even with the old one live; team= overrides one call."""
+async def test_reordering_flips_the_next_call_and_a_team_root_names_one_team(catalog, engines, deployments):
+    """A reorder answers from the new first team even with the old one live; a team root names one team."""
     ts = _server()
     _two_environments(deployments)
-    staging = await ts.resolve_or_start(ADDRESS, _order('staging'), 'task.data')
+    staging = await _resolve(ts, ADDRESS, _order('staging'), 'task.data')
 
-    production = await ts.resolve_or_start(ADDRESS, _order('production'), 'task.data')
+    production = await _resolve(ts, ADDRESS, _order('production'), 'task.data')
     assert (production.owner_id, production.version) == ('production', 4)
 
-    # The live staging control answers the override; the order is back for the next call
-    assert await ts.resolve_or_start(ADDRESS, _order('production'), 'task.data', team='staging') is staging
-    assert ts.resolve_control(ADDRESS, _order('production'), 'task.data') is production
-    with pytest.raises(PermissionError):
-        await ts.resolve_or_start(ADDRESS, _order('production'), 'task.data', team='elsewhere')
+    # The live staging control answers its root, by name in any case or by
+    # id; the order is back for the next bare call
+    assert await _resolve(ts, f'@staging/{ADDRESS}', _order('production'), 'task.data') is staging
+    assert await _resolve(ts, f'@STAGING/{ADDRESS}', _order('production'), 'task.data') is staging
+    assert await _resolve(ts, f'=team/staging/{ADDRESS}', _order('production'), 'task.data') is staging
+    assert await _attach(ts, ADDRESS, _order('production'), 'task.data') is production
+    with pytest.raises(PermissionError, match='not a member'):
+        await _resolve(ts, f'=team/elsewhere/{ADDRESS}', _order('production'), 'task.data')
+    with pytest.raises(PermissionError, match='not a member'):
+        await _resolve(ts, f'@Elsewhere/{ADDRESS}', _order('production'), 'task.data')
 
 
 @pytest.mark.asyncio
@@ -2585,7 +2603,7 @@ async def test_a_key_frozen_to_production_ignores_its_owners_order(catalog, engi
     _two_environments(deployments)
     key = _order('staging', endpoints=[ADDRESS], teams=('production',))
 
-    control = await ts.resolve_or_start(ADDRESS, key, 'task.data')
+    control = await _resolve(ts, ADDRESS, key, 'task.data')
 
     assert (control.owner_id, control.version) == ('production', 4)
     assert control.team_context == TeamContext('production', 'key')
@@ -2593,7 +2611,7 @@ async def test_a_key_frozen_to_production_ignores_its_owners_order(catalog, engi
     # A scoped key not pinned to one team resolves no team at all
     unpinned = _order('staging', endpoints=['acme.otherPipe.webhook_1'])
     with pytest.raises(TaskError) as err:
-        await ts.resolve_or_start('acme.otherPipe.webhook_1', unpinned, 'task.data')
+        await _resolve(ts, 'acme.otherPipe.webhook_1', unpinned, 'task.data')
     assert err.value.code == TaskError.NOT_REGISTERED
 
 
@@ -2603,7 +2621,7 @@ async def test_the_team_context_is_the_answering_team_and_home_elsewhere(catalog
     ts = _server()
     _two_environments(deployments)
 
-    answered = await ts.resolve_or_start(ADDRESS, _order('production', teams=('production', 'staging')), 'task.data')
+    answered = await _resolve(ts, ADDRESS, _order('production', teams=('production', 'staging')), 'task.data')
     assert answered.team_context == TeamContext('production', 'answering')
 
     played = await _start(ts, _pipeline(), user='user-a', team='staging')
@@ -2611,7 +2629,7 @@ async def test_the_team_context_is_the_answering_team_and_home_elsewhere(catalog
 
     deployments.publish(org='org-1')
     stranger = _caller('user-z', dev_team='team-z', teams=('team-y', 'team-z'), org='org-2', developer_id='globex')
-    public = await ts.resolve_or_start(ADDRESS, stranger, 'task.data')
+    public = await _resolve(ts, ADDRESS, stranger, 'task.data')
     assert public.team_context == TeamContext('team-z', 'home') and public.teamId == 'team-z'
 
 
@@ -2623,12 +2641,12 @@ async def test_a_two_segment_address_with_several_live_sources_needs_a_source(ca
     prompt = await _start(ts, _pipeline(), user='user-a', source='prompt_1')
 
     with pytest.raises(TaskError) as err:
-        ts.resolve_control('acme.docBrain', _caller('user-a'), 'task.data')
+        await _attach(ts, 'acme.docBrain', _caller('user-a'), 'task.data')
     assert err.value.code == TaskError.SOURCE_REQUIRED
     assert err.value.sources == ['prompt_1', 'webhook_1']
 
     await ts.stop_task(prompt.key)
-    assert ts.resolve_control('acme.docBrain', _caller('user-a'), 'task.data') is webhook
+    assert await _attach(ts, 'acme.docBrain', _caller('user-a'), 'task.data') is webhook
     assert ts._task_control.sources_of('acme', 'docBrain') == ['webhook_1']
 
 
@@ -2638,12 +2656,12 @@ async def test_a_two_segment_name_starts_the_artifacts_default_source(catalog, e
     ts = _server()
     deployments.deploy('=team/team-1')
 
-    control = await ts.resolve_or_start('acme.docBrain', _caller('user-a'), 'task.data')
+    control = await _resolve(ts, 'acme.docBrain', _caller('user-a'), 'task.data')
 
     assert control.address == ADDRESS and control.rung == 'team'
 
 
-def test_a_resolve_touches_constant_entries_however_large_the_registry():
+async def test_a_resolve_touches_constant_entries_however_large_the_registry():
     """100,000 controls at other addresses: a resolve probes O(1) + one per team."""
     ts = _server()
     registry = ts._task_control
@@ -2665,13 +2683,13 @@ def test_a_resolve_touches_constant_entries_however_large_the_registry():
 
     # A hit on @spec: one name-index probe
     registry.probes = 0
-    assert ts.resolve_control(ADDRESS, _caller('user-a', teams=teams), 'task.data') is mine
+    assert await _attach(ts, ADDRESS, _caller('user-a', teams=teams), 'task.data') is mine
     assert registry.probes == 1
 
     # A miss on every rung, twice (live, then registered): spec + me + teams + public per walk
     registry.probes = 0
     with pytest.raises(TaskError):
-        ts.resolve_control('acme.nowhere.webhook_1', _caller('user-a', teams=teams), 'task.data')
+        await _attach(ts, 'acme.nowhere.webhook_1', _caller('user-a', teams=teams), 'task.data')
     assert registry.probes == 2 * (3 + len(teams))
 
     # The forget path keeps the indexes exact

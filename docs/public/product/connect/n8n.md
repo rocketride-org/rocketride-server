@@ -74,7 +74,10 @@ HTTP-callable. The source node's Endpoint Info (shown in the IDE) gives its **ad
 `developerId.pipelineId.source`, and its **interface URL**,
 `<server>/webhook/<address>` (e.g. `http://localhost:5567/webhook/acme.docBrain.webhook_1`).
 Every call carries a RocketRide API key (`rr_...`) as a Bearer token: an account key, or a key
-scoped to that one endpoint, minted from the same Endpoint Info.
+scoped to that one endpoint, minted from the same Endpoint Info. To pin the call to one team's
+publication, root the address: `<server>/webhook/@Production/acme.docBrain.webhook_1`, or
+`<server>/webhook/=team/<tid>/acme.docBrain.webhook_1` for a URL that survives a team rename.
+A rooted address never falls through to another rung.
 
 ### The RocketRide community node (preferred)
 

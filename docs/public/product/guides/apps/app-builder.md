@@ -143,8 +143,8 @@ Two verbs, and they are not the same:
 - **Deploy** uploads your app's source; the server builds it into the next
   immutable version. Deploying activates nothing.
 - **Publish** points an audience at a version: `@me` for your own desktop,
-  `@team/<name>` for a team. First release, update, and rollback are all
-  the same move: repoint, never rebuild. There is no org-wide rung; an
+  `@<team>` (by name) or `=team/<tid>` for a team. First release, update, and rollback are all
+  the same move: repoint, never rebuild. The org rung (`@org`) is not served yet; an
   org-wide audience is a team your admin maintains.
 
 A deploy returns as soon as the server accepts the upload; the version
@@ -175,7 +175,7 @@ Publishing happens on the Deploy tab, or from the terminal:
 
 ```bash
 rocketride app deploy reports --publish @me   # deploy, wait for the build, publish to your desktop
-rocketride app publish reports 2 --to @team/QA
+rocketride app publish reports 2 --to @QA
 rocketride app versions reports                # the version rail
 rocketride app where reports                   # which audiences serve which version
 ```

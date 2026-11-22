@@ -672,7 +672,7 @@ Sub-commands:
 | `dev [app]` | Serve a live preview. `--open` opens it in your browser. |
 | `verify [app]` | Check the manifest, the declared assets, and the pack size. Needs no connection. `--store` adds the public store-submission checks. |
 | `deploy [app]` | Pack the source and deploy it as the next registry version. `--publish <target>` waits for the server build and publishes the new version. |
-| `publish [app] [version]` | Publish a version to `--to @me` (the default), `@team/<name>`, or `@public`. |
+| `publish [app] [version]` | Publish a version to `--to @me` (the default), `@<team>` (a team by name) or `=team/<tid>`, or `@public`. The retired `@team/<name>` and `@user` are refused. |
 | `unpublish [app]`, `disable [app]` | Stop serving the audience given by `--from`. `disable` keeps it listed, switched off. |
 | `versions [app]` | List versions, newest first, with build status and audiences. |
 | `where [app]` | Show which audiences serve which version. |
@@ -732,7 +732,8 @@ Sub-commands:
 ### deploy
 
 Use `deploy` to version pipelines in the server's registry, point teams at a
-version, and schedule runs. `--team` takes `@me`, a team name, or a team id.
+version, and schedule runs. `--team` takes `@me`, `@<team>` (a team by name), `=team/<tid>`, or
+`@public`; a bare team id is refused.
 
 ```bash
 rocketride deploy add pipelines/ingest/ingest.pipe --comment "v2 parse"   # next registry version

@@ -377,11 +377,11 @@ result = await client.use(pipeline=pipeline, args=['--trace=debugOut'])
 - They apply at task start only — attaching to an already-running task
   (`use_existing=True`) leaves the running process's arguments unchanged.
 
-### `async submit(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipeline_trace_level=None, team=None) -> SUBMIT_RESULT`
+### `async submit(*, name=None, pipeline=None, filepath=None, source=None, params=None, data=None, objinfo=None, mimetype=None, on_sse=None, threads=None, args=None, ttl=None, env=None, pipeline_trace_level=None) -> SUBMIT_RESULT`
 
 One request through a named or inline pipeline: `use()` plus one `send()`, sharing one resolver. Pass exactly one of `name`, `pipeline` or `filepath`.
 
-- **`name`** is the address `developerId.pipelineId[.source]`. It resolves through fixed rungs and the first that answers wins: your live `@spec` control (attach only; a name never starts a spec run), your `@me` deployment, the first team in your team order that publishes it (`team='...'` overrides the order for one call; a key scoped to endpoints uses its own team), then `@public`. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
+- **`name`** is the address `[<root>/]developerId.pipelineId[.source]`. A bare address resolves through fixed rungs and the first that answers wins: your live `@spec` control (attach only; a name never starts a spec run), your `@me` deployment, the first team in your team order that publishes it (a key scoped to endpoints uses its own team), then `@public`. A rooted address walks only its root's rung and never falls through: `@me/acme.docBrain`, `@spec/...`, `@public/...`, `@Production/...` (a team by name, any case) or `=team/<tid>/...` (by id; a scoped key's frozen team refuses any other); nothing there is `TASK_NOT_REGISTERED` naming that one rung. `=user/<uid>/...` is refused, and `@team/...` and `@user/...` are retired. A `:<version>` suffix (`acme.docBrain:12`) parses and is permission-checked but is refused as not yet supported, and `@org/...` is refused the same way until the org rung serves. The per-call `team` option is gone: write the root instead. A published rung starts from its artifact when nothing is live. `threads`/`args`/`env`/`ttl` are ignored on a name call and listed in `ignored`.
 - **`pipeline` / `filepath`** address your own `@spec` rung. `project_id` is REQUIRED (`invalid_argument`, `field: 'project_id'`). The control with the same `project_id` and the same resolved configuration is reused (`converged: 'none'`); otherwise one is created (`converged: 'started'`). A different configuration under the same `project_id` is a new control on the same engine; nothing is stopped for anyone.
 - Data up to `SUBMIT_INLINE_MAX` (1 MiB) travels inline in the one request; larger data, and every call with `on_sse`, streams through a pipe on the control the server answered with. Same result either way.
 - No timeout of its own, on either side: the request runs until the pipeline answers or fails (a request timeout configured on the client still applies, as your own bound). To stop a request, stream it through your own `pipe()` and call `cancel()` on it. The pipeline stays up afterwards and expires on its idle ttl.
@@ -425,9 +425,9 @@ The scope IS the kind: pass `team_id` to resolve the team's DEPLOYED run; omit i
 
 Retrieve the unresolved pipeline for a running task. The pipeline is returned exactly as stored on the task — `${ROCKETRIDE_*}` placeholders are NOT substituted, so no secrets are included in the response. Returns `None` if the task is not found.
 
-### `async interfaces(address: str, *, team: str = None) -> dict`
+### `async interfaces(address: str) -> dict`
 
-What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool(address=..., node_id=..., tool=...)` — a standalone tool call starts a dormant engine. Your own `@spec` control (Play in the Builder) answers first with the spec it submitted and `'version': None`; nothing has to be running on any rung. Raises `RuntimeError` (`TASK_NOT_REGISTERED`) when no rung serves you.
+What the publication that answers `address` offers a front end: its callable nodes by address and catalog `classType`. ONE pure read — no engine is started, no hold is taken, nothing is billed. The address resolves the way `submit()` resolves a name (your `@me` publication, your teams in team order, the publisher's `@public` one; a rooted address such as `@Production/acme.docBrain` reads only that rung); the pinned version's spec is projected server-side and never leaves the server. Sources sit under their own address (`acme.docBrain.chat`), every other node under the pipe address (`acme.docBrain`, the default source). Filter with plain equality on the classType word (`chat`, `dropper`, `database`), then call the node with `tool(address=..., node_id=..., tool=...)` — a standalone tool call starts a dormant engine. Your own `@spec` control (Play in the Builder) answers first with the spec it submitted and `'version': None`; nothing has to be running on any rung. Raises `RuntimeError` (`TASK_NOT_REGISTERED`) when no rung serves you.
 
 ```python
 answer = await client.interfaces('acme.docBrain')
@@ -484,9 +484,9 @@ Test connectivity to the RocketRide server. Raises `RuntimeError` if the server 
 
 ## 4. Sending Data
 
-### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None, team: str = None, params: Dict[str, Any] = None) -> Dict[str, Any]`
+### `async send(token: str, data: Union[str, bytes], objinfo: Dict[str, Any] = None, mimetype: str = None, on_sse=None, params: Dict[str, Any] = None) -> Dict[str, Any]`
 
-Send data directly to a pipeline. `token` is the control id, or an address (`developerId.pipelineId[.source]`) that the open resolves the way `submit()` resolves a name, starting a published rung when nothing is live; the pipe's later frames name the control id the open answered with. `data` is str or bytes; `objinfo` is optional metadata (e.g. `{'name': 'data.txt'}`); `mimetype` overrides auto-detection; `on_sse` streams SSE events for this call (see [Streaming Callback](#streaming-callback-on_sse)). Returns the processing result dict. Raises `ValueError` (data is not str/bytes) or `PipeException` (the underlying pipe open/write/close failed).
+Send data directly to a pipeline. `token` is the control id, or an address (`[<root>/]developerId.pipelineId[.source]`, a root such as `@Production/` naming one rung) that the open resolves the way `submit()` resolves a name, starting a published rung when nothing is live; the pipe's later frames name the control id the open answered with. `data` is str or bytes; `objinfo` is optional metadata (e.g. `{'name': 'data.txt'}`); `mimetype` overrides auto-detection; `on_sse` streams SSE events for this call (see [Streaming Callback](#streaming-callback-on_sse)). Returns the processing result dict. Raises `ValueError` (data is not str/bytes) or `PipeException` (the underlying pipe open/write/close failed).
 
 **Important:** Use this method with pipelines that have `webhook` or `dropper` as the source component. For chat/Q&A systems, use `chat()` instead with a `chat` source component.
 
@@ -509,9 +509,9 @@ for result in results:
 
 **Note:** Upload progress events are sent through the event system as `apaevt_status_upload` events (`open`, `write`, `close`, `complete`, `error` actions).
 
-### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, team: str = None, params: Dict[str, Any] = None) -> DataPipe`
+### `async pipe(token: str, objinfo: Dict[str, Any] = None, mime_type: str = None, provider: str = None, on_sse=None, params: Dict[str, Any] = None) -> DataPipe`
 
-Create a streaming data pipe for sending large datasets in chunks. `token` takes a control id or an address, as for `send()`. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
+Create a streaming data pipe for sending large datasets in chunks. `token` takes a control id or an address (bare or rooted), as for `send()`. `mime_type` defaults to `application/octet-stream`; `on_sse` scopes an SSE callback to this pipe. Returns a `DataPipe` instance (not yet opened).
 
 ### DataPipe
 
@@ -865,7 +865,7 @@ await client.deploy.add_pipe(created['pipePath'])
 
 #### `async deploy.deploy(project_id: str, version: int, team_id: str) -> Deployment`
 
-Point an audience at a published version. Promotion (Staging to Production) and rollback (v3 to v2) are both this call — the audience's pointer moves, nothing else changes. The audience is always explicit (no default-team fallback): a team id (requires `task.control` on it), `'@me'` (your own space), or `'@public'` (the store: your organization needs a developer id, and on a server that reviews only an approved `'ready'` version is accepted; a server without a reviewer takes any version that did not fail). A pointer on `'@me'` or `'@public'` is stamped with your development team, which its schedules and run-now bill; every caller of a public pipe pays for their own calls.
+Point an audience at a published version. Promotion (Staging to Production) and rollback (v3 to v2) are both this call — the audience's pointer moves, nothing else changes. The audience is always explicit (no default-team fallback): `'@<team>'` (a team by name) or `'=team/<tid>'` (a row's `teamId` passed back; either requires `task.control` on it; a bare team id is refused), `'@me'` (your own space), or `'@public'` (the store: your organization needs a developer id, and on a server that reviews only an approved `'ready'` version is accepted; a server without a reviewer takes any version that did not fail). A pointer on `'@me'` or `'@public'` is stamped with your development team, which its schedules and run-now bill; every caller of a public pipe pays for their own calls.
 
 #### Reads
 
@@ -919,7 +919,7 @@ result = await client.deploy.add(pipeline, comment='nightly export v2')
 version = result['artifact']['version']
 
 # 2. Point the production team at that version
-await client.deploy.deploy('my-project-guid', version, 'team-prod')
+await client.deploy.deploy('my-project-guid', version, '@Production')
 
 # 3. Sanity-check the cron (optional): next occurrences = Mon/Wed/Fri 08:00
 preview = await client.deploy.preview('0 8 * * 1,3,5', count=3)
@@ -929,7 +929,7 @@ await client.deploy.set_schedule(
     'my-project-guid',
     'webhook_1',  # the source the schedule fires
     '0 8 * * 1,3,5',
-    'team-prod',
+    '@Production',
     ttl=25200,  # 7 hours * 3600 s = the 08:00-15:00 run window
 )
 ```
@@ -974,16 +974,16 @@ with open('my-app-source.zip', 'rb') as f:
     result = await client.deploy.add(kind='app', data=f.read(), comment='v3: new settings panel')
 ```
 
-The zip contains the app's SOURCE (the server owns the build and never trusts client-produced binaries): either `package.json` + `src` at the zip root, or workspace-relative with `metadata={'appRoot': '<app folder>'}`. A new app deployment is born state `'private'` — an `@me`/`@team` binding may serve it immediately; reaching the public store requires review. Audience targets are `'@me'`, `'@team/<name-or-id>'`, or `'@public'` (`'@user'` is a legacy alias for `'@me'`).
+The zip contains the app's SOURCE (the server owns the build and never trusts client-produced binaries): either `package.json` + `src` at the zip root, or workspace-relative with `metadata={'appRoot': '<app folder>'}`. A new app deployment is born state `'private'` — an `@me`/`@team` binding may serve it immediately; reaching the public store requires review. Audience targets are `'@me'`, `'@<team>'` (a team by name), `'@public'`, or a pin's `audience` (`'=team/<tid>'`) passed back unchanged; the retired `'@team/...'` and `'@user'` are refused naming their replacement.
 
 - `async list_deployments(app_id: str) -> List[Dict[str, Any]]` — the app's deployed versions, newest first (the rail). Answered by role: the developer org sees its FULL rail (published or not); other callers see only versions serving on rows visible to them. Each entry carries its deployment `state`, its `buildStatus` (`'ok'` = servable bytes exist), the `buildPhase` the build reached and `buildEndedAt` (always present: epoch seconds, or `None` until the build ends), and a `rungs` list naming the audiences currently serving that version.
 - `async build_log(app_id: str, registry_version: int) -> Dict[str, Any]` — one version's durable server build log: the full phase-by-phase output of the build worker (error detail never rides the rail rows). Long logs serve their tail; an empty `log` means no log exists for the version. Developer-org gated. Returns `{'appId', 'version', 'log'}`.
-- `async publish_app(app_id: str, registry_version: int, target: str) -> Dict[str, Any]` — bind a deployment to an audience; one verb covers first publish, promote, and rollback (the binding is a pure pointer). `'@public'` requires the deployment be `'ready'` (approved); `'@me'`/`'@team'` accept any non-`'failed'` deployment. Returns the `publish` binding row.
+- `async publish_app(app_id: str, registry_version: int, target: str) -> Dict[str, Any]` — bind a deployment to an audience; one verb covers first publish, promote, and rollback (the binding is a pure pointer). `'@public'` requires the deployment be `'ready'` (approved); `'@me'` and a team accept any non-`'failed'` deployment. Returns the `publish` binding row.
 - `async remove_app_publish(app_id: str, target: str) -> Dict[str, Any]` — remove an audience binding; the app stops serving to that audience. SOFT: registry versions and audit history survive; publishing again revives it.
 - `async disable_app_publish(app_id: str, target: str) -> Dict[str, Any]` — disable an audience binding: serving stops, but the row STAYS in the where-live listing marked `'disabled'` (a visible off switch), unlike remove which hides it. Publishing any version to that audience re-enables it. Returns the `publish` binding row.
-- `async where_app(app_id: str) -> List[Dict[str, Any]]` — the reverse index: which audiences serve which version. Returns pin rows (`{'rung', 'handle', 'version', 'appVersion', 'state', 'deployedAt'}`).
+- `async where_app(app_id: str) -> List[Dict[str, Any]]` — the reverse index: which audiences serve which version. Returns pin rows (`{'rung', 'handle', 'audience', 'version', 'appVersion', 'state', 'deployedAt'}`): show `handle`, pass `audience` back unchanged as the publish/remove target.
 - `async wait_for_app_build(app_id: str, registry_version: int, *, timeout=600.0, interval=3.0, on_status=None) -> Dict[str, Any]` — wait for a version's server build to finish (deploys return at once with `buildStatus: 'queued'`; publish needs `'ok'`). Raises on a failed build, an unknown version, or the timeout
-- Pure helpers exported from `rocketride` (twins of the TypeScript `deploy-helpers`): `parse_registry_version(value)` (positive int; accepts `3`, `'3'`, `'v3'`), `pick_publish_version(rail)` (newest non-failed version), `resolve_deploy_teams(client, deployments)`, `team_name_of(teams, team_id, own_user_id)`, `wire_team_id_of(team_id, own_user_id)`, `resolve_team_arg(value, teams)` (passes what was typed through: the server resolves '@me', '@public', '@<team>' by name in any case and a row's audience; `team_name_of` and `wire_team_id_of` are deprecated pass-throughs, as rows carry their `handle` and every verb takes a row's `teamId` back unchanged), `pipeline_name_from_path(path)`, `registry_id_of(slug, developer_id)` (the `<developerId>.<slug>` row name; `LOCAL_DEVELOPER_ID` when the org has none)
+- Pure helpers exported from `rocketride` (twins of the TypeScript `deploy-helpers`): `parse_registry_version(value)` (positive int; accepts `3`, `'3'`, `'v3'`), `pick_publish_version(rail)` (newest non-failed version), `resolve_deploy_teams(client, deployments)`, `team_name_of(teams, team_id, own_user_id)`, `wire_team_id_of(team_id, own_user_id)`, `resolve_team_arg(value, teams)` (passes what was typed through: the server resolves `'@me'`, `'@public'`, `'@<team>'` by name in any case and a row's audience; `team_name_of` and `wire_team_id_of` are deprecated pass-throughs, as rows carry their `handle` and every verb takes a row's `teamId` back unchanged), `pipeline_name_from_path(path)`, `registry_id_of(slug, developer_id)` (the `<developerId>.<slug>` row name; `LOCAL_DEVELOPER_ID` when the org has none)
 - `async developer_status() -> Dict[str, Any]` — the caller org's developer namespace (the `<developerId>` half of its app ids): `{'developerId', 'stripeAccountId', 'stripeAccountStatus'}`, `developerId` None until an org admin registers one
 - `async register_developer(developer_id: str) -> Dict[str, Any]` — claim the org's developer id slug (org.admin, SaaS only)
 - `async submit_app(app_id: str, registry_version: int) -> Dict[str, Any]` — submit a deployed version for store review: flips the deployment `'private'` to `'submit'` (it enters the review queue). Developer-org and developer-namespace gated. Returns the refreshed `artifact` rail entry.
@@ -996,7 +996,7 @@ latest = rail[0]
 if latest['buildStatus'] != 'ok':
     print((await client.build_log('acme.reports', latest['registryVersion']))['log'])
 else:
-    await client.publish_app('acme.reports', latest['registryVersion'], '@team/qa')
+    await client.publish_app('acme.reports', latest['registryVersion'], '@QA')
     await client.submit_app('acme.reports', latest['registryVersion'])
 ```
 

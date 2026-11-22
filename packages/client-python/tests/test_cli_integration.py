@@ -630,11 +630,12 @@ class TestCliProfile:
         try:
             await client.connect()
             token = (await client.use(pipeline=get_echo_pipeline(), token=private_token(self.TOKEN_BASE)))['token']
-            # Engines are content-addressed and the profiler is engine-level: a second run of the
-            # IDENTICAL spec would share this run's engine and list as profiled too. The other run
-            # wires a differently named response component, so it has an engine of its own.
+            # Engines are keyed by the pipeline's shape (providers and lane-typed wiring, not
+            # component ids) and the profiler is engine-level: a second run of the same shape
+            # would share this run's engine and list as profiled too. The other run wires the
+            # json lane instead of text, so it has an engine of its own.
             other_spec = get_echo_pipeline()
-            other_spec['components'][1]['id'] = 'response_2'
+            other_spec['components'][1]['input'] = [{'lane': 'json', 'from': 'webhook_1'}]
             other = (await client.use(pipeline=other_spec, token=private_token(f'{self.TOKEN_BASE}-other')))['token']
             assert (await client.cprofile_start(target=token)).get('status') == 'started'
 

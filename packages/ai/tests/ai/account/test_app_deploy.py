@@ -825,15 +825,17 @@ async def test_add_rejects_unsafe_app_root(registry, content_store, app_root):
 async def test_publish_requires_registry_version_int(registry):
     """Publishing rejects a missing or non-int version (semver is display-only)."""
     conn = _FakeConn()
-    result = await handle_deploy_app(conn, _request('publish', version='1.0.0', target='@team/Development'))
+    result = await handle_deploy_app(conn, _request('publish', version='1.0.0', target='@Development'))
     assert result['success'] is False
     assert 'version' in result['message']
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize('target', ['@nope', '@team/ghost', '@org'])
+@pytest.mark.parametrize(
+    'target', ['@nope', '=team/ghost', '@org', '=org/org1', 'Development', 't1', '@spec', '=user/someone-else', '']
+)
 async def test_publish_rejects_unknown_targets(registry, target):
-    """Malformed targets, non-member teams, and the retired org rung are refused."""
+    """Non-member teams, bare words (a bare team id too), the org rung (not served yet), @spec and another user's space are refused."""
     registry.add_version(1, '1.0.0')
     conn = _FakeConn(teams=_TEAMS)
     result = await handle_deploy_app(conn, _request('publish', version=1, target=target))
@@ -842,12 +844,53 @@ async def test_publish_rejects_unknown_targets(registry, target):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('target', 'message'),
+    [
+        ('@team/Development', '@team/ is retired: publish to @<name> or =team/<tid>'),
+        ('@team/t1', '@team/ is retired: publish to @<name> or =team/<tid>'),
+        ('@user', '@user is retired: publish to @me'),
+        ('@org', 'Publishing to the org (@org, =org/<oid>) is not yet supported'),
+    ],
+)
+async def test_the_retired_spellings_are_refused_naming_their_replacement(registry, target, message):
+    """Plan 11.1 B43: neither retired spelling publishes, and each says what to write instead."""
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+    conn = _FakeConn(teams=_TEAMS)
+    for sub in ('publish', 'disable', 'remove'):
+        result = await handle_deploy_app(conn, _request(sub, version=1, target=target))
+        assert result['success'] is False and message in result['message'], (sub, result)
+    assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('target', ['@Development', '@development', '@DEVELOPMENT', '=team/t1'])
+async def test_a_team_publishes_by_name_in_any_case_or_by_its_audience(registry, quiet_push, target):
+    """A person types a name; a client passes a row's audience back unchanged: one team, one stored audience."""
+    registry.add_version(1, '1.0.0', publisher_id='someone-else', state='private')
+    conn = _FakeConn(teams=_TEAMS)
+    result = await handle_deploy_app(conn, _request('publish', version=1, target=target))
+    assert result['success'] is True
+    assert registry.set_calls[0]['audience'] == {'type': 'team', 'id': 't1', 'name': 'Development'}
+
+
+@pytest.mark.asyncio
+async def test_the_callers_own_audience_is_its_personal_space(registry, quiet_push):
+    """``=user/<uid>`` (a pin's audience passed back) publishes to the caller's own space, as ``@me`` does."""
+    registry.add_version(1, '1.0.0', publisher_id='u1')
+    conn = _FakeConn(teams=_TEAMS)
+    result = await handle_deploy_app(conn, _request('publish', version=1, target='=user/u1'))
+    assert result['success'] is True
+    assert registry.set_calls[0]['audience'] == {'type': 'user', 'id': 'u1', 'name': 'User One'}
+
+
+@pytest.mark.asyncio
 async def test_publish_user_blocked_without_entitlement(registry, quiet_push):
     """A user cannot publish a version to themselves that they cannot reach."""
     registry.add_version(1, '1.0.0', publisher_id='someone-else')
 
     conn = _FakeConn(teams=_TEAMS)
-    result = await handle_deploy_app(conn, _request('publish', version=1, target='@user'))
+    result = await handle_deploy_app(conn, _request('publish', version=1, target='@me'))
 
     assert result['success'] is False
     assert 'Not entitled' in result['message']
@@ -860,7 +903,7 @@ async def test_publish_user_allowed_for_deployer(registry, quiet_push):
     registry.add_version(1, '1.0.0', publisher_id='u1')
 
     conn = _FakeConn(teams=_TEAMS)
-    result = await handle_deploy_app(conn, _request('publish', version=1, target='@user'))
+    result = await handle_deploy_app(conn, _request('publish', version=1, target='@me'))
 
     assert result['success'] is True
     row = result['body']['publish']
@@ -869,9 +912,10 @@ async def test_publish_user_allowed_for_deployer(registry, quiet_push):
     # The manifest snapshot rode along from the entry's metadata
     assert registry.set_calls[0]['snapshot']['name'] == 'Brandy'
     # The audience the backend received is self-describing: the resolver
-    # stamped the display facts the history row will store verbatim.
+    # stamped the display name the history row will store verbatim, and no
+    # handle (a handle is composed for each reader).
     sent = registry.set_calls[0]['audience']
-    assert (sent['handle'], sent['name']) == ('@me', 'User One')
+    assert sent == {'type': 'user', 'id': 'u1', 'name': 'User One'}
     # The acting user's manifest is refreshed (data + signal)
     assert quiet_push == [{'user_id': 'u1', 'source': 'app-publish'}]
 
@@ -880,20 +924,20 @@ async def test_publish_user_allowed_for_deployer(registry, quiet_push):
 async def test_publish_team_needs_membership_only(registry, quiet_push):
     """Team publishing is membership-gated; the binding is born 'enabled'.
 
-    Internal (@team/@me) bindings accept any internal-eligible deployment,
+    Internal (team and @me) bindings accept any internal-eligible deployment,
     including one still 'private' (not yet submitted for review).
     """
     registry.add_version(1, '1.0.0', publisher_id='someone-else', state='private')
 
     conn = _FakeConn(teams=_TEAMS)
-    result = await handle_deploy_app(conn, _request('publish', version=1, target='@team/Development'))
+    result = await handle_deploy_app(conn, _request('publish', version=1, target='@Development'))
 
     assert result['success'] is True
     assert result['body']['publish']['state'] == 'enabled'
     # The team NAME was dereferenced at resolution — the history row never
     # needs a second lookup to say which team.
     sent = registry.set_calls[0]['audience']
-    assert (sent['handle'], sent['name'], sent['id']) == ('@team/Development', 'Development', 't1')
+    assert sent == {'type': 'team', 'id': 't1', 'name': 'Development'}
 
 
 @pytest.mark.asyncio
@@ -1243,7 +1287,7 @@ async def test_publish_blocked_outside_developer_namespace(registry, quiet_push)
     attacker = _FakeConn(teams=_TEAMS, developer_id='evil')
 
     # Every audience is refused — public, team, and self alike.
-    for target in ('@public', '@team/Development', '@user'):
+    for target in ('@public', '@Development', '@me'):
         refused = await handle_deploy_app(attacker, _request('publish', version=1, target=target))
         assert refused['success'] is False
         assert 'namespace' in refused['message'], target
@@ -1267,7 +1311,7 @@ async def test_publish_failed_artifact_never_publishes(registry, quiet_push):
     """A 'failed' artifact is unpublishable to ANY audience."""
     registry.add_version(1, '1.0.0', publisher_id='u1', state='failed')
     conn = _FakeConn(teams=_TEAMS)
-    result = await handle_deploy_app(conn, _request('publish', version=1, target='@team/Development'))
+    result = await handle_deploy_app(conn, _request('publish', version=1, target='@Development'))
     assert result['success'] is False
     assert 'failed processing' in result['message']
 
@@ -1292,13 +1336,14 @@ async def test_where_lists_visible_rows_with_deployment_states(registry):
     conn = _FakeConn(teams=_TEAMS)  # developer of acme.brandy -> sees all states
     result = await handle_deploy_app(conn, _request('where'))
 
-    pins = {(p['rung'], p['handle'], p['version'], p['state']) for p in result['body']['pins']}
-    # Personal reads back as '@me' — the ONE personal spelling everywhere
-    # ('@user' stays accepted on input, never shown).
+    pins = {(p['rung'], p['handle'], p['audience'], p['version'], p['state']) for p in result['body']['pins']}
+    # The handle is composed for this reader (their own space reads '@me', a
+    # team by its name); the audience is the publish/remove target a client
+    # passes back unchanged
     assert pins == {
-        ('personal', '@me', 1, 'ready'),
-        ('team', '@team/Development', 2, 'submit'),
-        ('public', '@public', 2, 'submit'),
+        ('personal', '@me', '=user/u1', 1, 'ready'),
+        ('team', '@Development', '=team/t1', 2, 'submit'),
+        ('public', '@public', '@public', 2, 'submit'),
     }
 
 
@@ -1464,7 +1509,7 @@ async def test_disable_flips_the_audience_row(registry):
     registry.seed_publish(AUD_TEAM, 1)
 
     conn = _FakeConn(teams=_TEAMS)
-    result = await handle_deploy_app(conn, _request('disable', target='@team/Development'))
+    result = await handle_deploy_app(conn, _request('disable', target='@Development'))
     assert result['success'] is True
     assert result['body']['publish']['state'] == 'disabled'
 
@@ -1489,9 +1534,9 @@ async def test_publish_disable_remove_push_the_rail_invalidation(registry, quiet
     dev._server = SimpleNamespace(broadcast_server_event=broadcast_server_event, _connections={})
 
     for sub, args in (
-        ('publish', {'version': 1, 'target': '@team/Development'}),
-        ('disable', {'target': '@team/Development'}),
-        ('remove', {'target': '@team/Development'}),
+        ('publish', {'version': 1, 'target': '@Development'}),
+        ('disable', {'target': '@Development'}),
+        ('remove', {'target': '@Development'}),
     ):
         assert (await handle_deploy_app(dev, _request(sub, **args)))['success'] is True
 
@@ -1693,7 +1738,7 @@ async def test_publish_refuses_unbuilt_version(registry, quiet_push):
     """A binding must never point at a version with no servable bytes."""
     registry.add_version(1, '1.0.0', state='private', build='queued')
     conn = _FakeConn(teams=_TEAMS)
-    result = await handle_deploy_app(conn, _request('publish', version=1, target='@team/Development'))
+    result = await handle_deploy_app(conn, _request('publish', version=1, target='@Development'))
     assert result['success'] is False
     assert 'still building' in result['message']
     assert registry.set_calls == []

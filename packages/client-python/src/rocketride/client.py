@@ -330,7 +330,6 @@ class RocketRideClient(
         token: str = None,
         node_id: str = '',
         input: dict = None,
-        team: str = None,
         timeout: float = None,
     ) -> Any:
         """
@@ -350,17 +349,17 @@ class RocketRideClient(
         Args:
             tool: Name of the @tool_function to invoke (e.g. ``'search'``,
                 ``'list'``, ``'execute'``).
-            address: The pipe's address (``developerId.pipelineId[.source]``),
+            address: The pipe's address (``[<root>/]developerId.pipelineId[.source]``),
                 or the ``address`` a :meth:`use`/:meth:`submit` result
-                returned beside its control id.
+                returned beside its control id. Pass the same address an
+                :meth:`interfaces` call was made with (a rooted
+                ``@<team>/...`` one included), so discovery and execution
+                land on the same publication.
             token: Deprecated spelling of ``address``; one of the two is
                 required.
             node_id: Target node ID.  When empty the call broadcasts to all
                 tool-lane nodes; the first node that owns the tool handles it.
             input: Arguments forwarded to the tool function.
-            team: Resolve the ``@team`` rung through this one of your teams --
-                the same team an :meth:`interfaces` call was made with, so
-                discovery and execution land on the same publication.
             timeout: Optional per-request timeout in ms.
 
         Returns:
@@ -375,31 +374,29 @@ class RocketRideClient(
         if not target:
             raise ValueError('tool() needs the pipe address (address=)')
         args = {'subcommand': 'tool', 'tool': tool, 'nodeId': node_id, 'input': input or {}}
-        if team:
-            args['team'] = team
         result = await self.call('rrext_process', token=target, timeout=timeout, **args)
         return result.get('result')
 
-    async def interfaces(self, address: str, *, team: str = None) -> dict:
+    async def interfaces(self, address: str) -> dict:
         """
         What the publication that answers ``address`` offers a front end.
 
         One pure read -- no engine is started, no hold is taken, nothing is
         billed. The address resolves the way :meth:`submit` resolves a name
         (your ``@me`` publication, your teams in team order, the publisher's
-        ``@public`` one) and the pinned version's spec is projected
-        server-side, so the spec never leaves the server. Sources sit under
+        ``@public`` one; a rooted address such as
+        ``@Production/acme.docBrain`` reads only that rung) and the pinned
+        version's spec is projected server-side, so the spec never leaves the
+        server. Sources sit under
         their own address (``acme.docBrain.chat``), every other node under the
         pipe address (``acme.docBrain``, the default source). A front end
         filters with plain equality on the catalog classType word: ``chat``,
         ``dropper``, ``database``.
 
         Args:
-            address: ``developerId.pipelineId[.source]``; a source segment is
-                accepted and ignored.
-            team: Resolve the ``@team`` rung through this one of your teams
-                (``@<team>`` by name in any case, ``=team/<tid>`` or a team
-                id; the server resolves it).
+            address: ``[<root>/]developerId.pipelineId[.source]``; a source
+                segment resolves as it does for :meth:`submit`, and the map
+                covers the whole pipe whichever source is named.
 
         Returns:
             ``{'address', 'rung', 'version', 'teamId'?, 'interfaces'}`` where
@@ -409,10 +406,7 @@ class RocketRideClient(
             RuntimeError: No published rung serves you (``TASK_NOT_REGISTERED``),
                 or the address is outside a scoped key's endpoints.
         """
-        args = {'subcommand': 'interfaces', 'address': address}
-        if team:
-            args['team'] = team
-        return await self.call('rrext_deploy_pipe', **args)
+        return await self.call('rrext_deploy_pipe', subcommand='interfaces', address=address)
 
     # =========================================================================
     # NAMESPACED API ACCESSORS

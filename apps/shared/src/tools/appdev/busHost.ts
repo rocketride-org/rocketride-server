@@ -64,8 +64,9 @@ export interface IAppBuilderBus {
 	getClient(): unknown;
 	/** Realm-local event stream (mirror.event → shell:event). */
 	on(event: 'shell:event', listener: (payload: ShellEventPayload) => void): () => void;
-	/** The mirrored account snapshot (retained shell:account topic). */
-	getAccountInfo(): { organization?: { teams?: Array<{ id: string; name: string }>; developerId?: string | null } | null } | undefined;
+	/** The mirrored account snapshot (retained shell:account topic). Each team
+	 *  carries its server-composed `audience` ('=team/<tid>', plan 2.5). */
+	getAccountInfo(): { organization?: { teams?: Array<{ id: string; name: string; audience?: string }>; developerId?: string | null } | null } | undefined;
 }
 
 /** The client members this adapter reaches — the narrowing view over
@@ -192,7 +193,9 @@ export function createBusAppBuilderHost(o: IBusAppBuilderHostOptions): Partial<I
 		deleteVersion: async (version) => {
 			await client().deploy.delete(needRegistryId(), version);
 		},
-		listTeams: async () => (bus.getAccountInfo()?.organization?.teams ?? []).map((t) => ({ id: t.id, name: t.name })),
+		// A team without its audience cannot be a publish target: the client composes none
+		listTeams: async () =>
+			(bus.getAccountInfo()?.organization?.teams ?? []).flatMap((t) => (t.audience ? [{ id: t.id, name: t.name, audience: t.audience }] : [])),
 		getWhereLive: async () => (registryId() ? toRungPins((await client().whereApp(registryId())) as WirePin[], hasReviewLadder) : []),
 		loadBuildLog: async (version) => {
 			const body = await client().buildLog(needRegistryId(), version);

@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-21T23:57:45.836Z
-// Source commit: 17c64db20f46cee2fcb0e399f22a4afb7ef16907
+// Generated:     2026-11-22T04:25:24.310Z
+// Source commit: 4f98565a59691c623cf7d28f3a288ffa1a5689ba
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -4895,7 +4895,7 @@ declare class DeployApi {
      * @param options.metadata - Optional metadata blob (e.g. projectId
      *   provenance, appRoot for workspace-relative app zips).
      * @param options.comment - "What changed" note kept in the registry.
-     * @param options.deployTo - Team id to deploy the new version to
+     * @param options.deployTo - The target to deploy the new version to (`'@me'`, `'@<team>'`, `'=team/<tid>'`, `'@public'`)
      *   immediately (one-step add+deploy; pipes only).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
@@ -4960,7 +4960,7 @@ declare class DeployApi {
      *
      * @param pipePath - The `.pipe` file.
      * @param options.comment - "What changed" note kept in the registry.
-     * @param options.deployTo - Team id to deploy the new version to
+     * @param options.deployTo - The target to deploy the new version to (`'@me'`, `'@<team>'`, `'=team/<tid>'`, `'@public'`)
      *   immediately (one-step add+deploy).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
@@ -5052,7 +5052,8 @@ declare class DeployApi {
      *
      * @param projectId - The project whose artifact to deploy.
      * @param version - The registry version to point the audience at.
-     * @param teamId - The target audience: a team id, `'@me'` or `'@public'`.
+     * @param teamId - The target (plan 2.5): `'@me'`, `'@<team>'` (a team by name), `'=team/<tid>'` (or a row's
+     *   `teamId`, its audience, passed back unchanged) or `'@public'`; a bare team id is refused.
      * @returns The updated deployment record, registry-joined.
      */
     deploy(projectId: string, version: number, teamId: string): Promise<Deployment>;
@@ -5196,7 +5197,7 @@ declare class DeployApi {
      * @param sourceId - The pipeline source the schedule fires.
      * @param schedule - 5-field cron expression; `null` or `'manual'` clears
      *   the schedule.
-     * @param teamId - The deployment to schedule: a team id, `'@me'` or `'@public'`.
+     * @param teamId - The deployment to schedule: a target as for `deploy()` (a row's `teamId` passed back unchanged).
      * @param options - Optional schedule options.
      * @param options.ttl - Run window in seconds ('fixed window'); omitted
      *   runs each task until the pipeline finishes.
@@ -5466,11 +5467,11 @@ export declare class DataPipe {
      * @param provider - Optional provider name for the data source
      * @param onSSE - Optional async callback invoked for each SSE event emitted by
      *                the pipeline node for this specific pipe
-     * @param team - Resolve the address through this one of your teams on every
-     *               request of the pipe (what submit() passes on from the team
-     *               that answered it)
+     * @param team - Retired: pass `undefined`. A rooted address in `token` names the rung
+     *               (`@<team>/...`, `=team/<tid>/...`); any value throws
      * @param params - Per-call parameter values by public name; they ride the open,
      *                 the one door every per-call value enters by
+     * @throws Error if `team` is passed (the per-call team option is retired)
      */
     constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>);
     /**
@@ -5970,11 +5971,12 @@ export declare class RocketRideClient extends DAPClient {
      * Run ONE request through a named or inline pipeline: `use()` plus one `send()`.
      *
      * Exactly one of `name`, `pipeline` or `filepath`. A `name` is the address
-     * `developerId.pipelineId[.source]` and resolves through the fixed rungs: your
-     * live `@spec` control (attach only), your `@me` deployment, the first team in
-     * your team order that publishes it (`team` overrides the order for this call),
-     * then `@public`; a published rung starts from its artifact when nothing is
-     * live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
+     * `[<root>/]developerId.pipelineId[.source]`. A bare address resolves through the
+     * fixed rungs: your live `@spec` control (attach only), your `@me` deployment, the
+     * first team in your team order that publishes it, then `@public`. A rooted one
+     * walks only the rung its root names and never falls through: `@me/`, `@spec/`,
+     * `@public/`, `@<team>/` or `=team/<tid>/` (one of your teams). A published rung
+     * starts from its artifact when nothing is live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
      * with the same `project_id` and resolved configuration is reused, otherwise
      * one is created (`converged: 'started'`); a different configuration under
      * the same `project_id` is a new control on the same engine. `project_id`
@@ -6000,9 +6002,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.ttl - Idle ttl in seconds (spec calls only)
      * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
      * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
-     * @param options.team - Answer `@team` from this one of your teams
      * @returns The pipe close body plus `token` (the control id: opaque, transient, valid for the life of the control; never persist it), `address`, `resolved`, `team`, `version`, `engineKey`, `converged` and `ignored`
-     * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
+     * @throws Error when not exactly one of name/pipeline/filepath is given, when the retired `team` option is passed, when the server refuses, or when the server does not support `submit`
      *
      * @example
      * ```typescript
@@ -6025,7 +6026,6 @@ export declare class RocketRideClient extends DAPClient {
         ttl?: number;
         env?: Record<string, string>;
         pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
-        team?: string;
     }): Promise<SUBMIT_RESULT>;
     /**
      * Terminate a running pipeline.
@@ -6119,30 +6119,36 @@ export declare class RocketRideClient extends DAPClient {
      * One pure read — no engine is started, no hold is taken, nothing is
      * billed. The address resolves the way `submit()` resolves a name (your
      * `@me` publication, your teams in team order, the publisher's `@public`
-     * one) and the pinned version's spec is projected server-side, so the spec
+     * one; a rooted address such as `@Production/acme.docBrain` reads only that
+     * rung) and the pinned version's spec is projected server-side, so the spec
      * never leaves the server. Sources sit under their own address
      * (`acme.docBrain.chat`), every other node under the pipe address
      * (`acme.docBrain`, the default source). A front end filters with plain
      * equality on the classType word: `chat`, `dropper`, `database`.
      *
-     * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
-     * @param options.team - Resolve the `@team` rung through this one of your teams (`@<team>` by name in any case, `=team/<tid>` or a team id; the server resolves it).
+     * @param address - `[<root>/]developerId.pipelineId[.source]`; a source segment resolves as it does for
+     *                  `submit()`, and the map covers the whole pipe whichever source is named.
+     * @param retired - The retired options slot (`{ team }`): any value throws; root the address instead
+     *                  (`@<team>/...`, `=team/<tid>/...`).
      * @returns The answering rung and version, and the interface map.
      * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
-     *         address is outside a scoped key's endpoints.
+     *         address is outside a scoped key's endpoints, or when `retired` is passed.
      */
-    interfaces(address: string, options?: {
-        team?: string;
-    }): Promise<PipeInterfaces>;
+    interfaces(address: string, retired?: unknown): Promise<PipeInterfaces>;
     /**
      * Create a data pipe for streaming operations.
      *
-     * `token` is the control id, or an address the open resolves the way `submit()`
-     * resolves a name, starting a published rung when nothing is live.
+     * `token` is the control id, or an address (bare or rooted, `@<team>/...`) the open
+     * resolves the way `submit()` resolves a name, starting a published rung when
+     * nothing is live. `team` is retired: pass `undefined` (any value throws); a
+     * rooted address names the rung.
      */
     pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe>;
     /**
      * Send data to a running pipeline.
+     *
+     * `token` is the control id, or an address (bare or rooted) resolved by the open.
+     * `team` is retired: pass `undefined` (any value throws); a rooted address names the rung.
      */
     send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<PIPELINE_RESULT | undefined>;
     /**
@@ -6593,11 +6599,13 @@ export declare class RocketRideClient extends DAPClient {
      * Bind a deployment to an audience — first publish, update, promote, and
      * rollback are all this one verb ("repoint, never rebuild"). The binding
      * is a pure pointer; '@public' requires the deployment be 'ready'
-     * (approved), '@me'/'@team' accept any non-'failed' deployment.
+     * (approved), '@me' and a team accept any non-'failed' deployment.
      *
      * @param appId - App id
      * @param registryVersion - Registry version number from the rail
-     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+     *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+     *                 and '@user' are refused; '@org' is refused until the org rung serves
      * @returns The binding row ({audience, version, state, artifactState, ...})
      */
     publishApp(appId: string, registryVersion: number, target: string): Promise<{
@@ -6609,7 +6617,9 @@ export declare class RocketRideClient extends DAPClient {
      * to the audience again revives it.
      *
      * @param appId - App id
-     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+     *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+     *                 and '@user' are refused; '@org' is refused until the org rung serves
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
@@ -6622,7 +6632,9 @@ export declare class RocketRideClient extends DAPClient {
      * the binding.
      *
      * @param appId - App id
-     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+     *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+     *                 and '@user' are refused; '@org' is refused until the org rung serves
      * @returns The binding row (state 'disabled')
      */
     disableAppPublish(appId: string, target: string): Promise<{
@@ -6632,11 +6644,13 @@ export declare class RocketRideClient extends DAPClient {
      * The reverse index: which audiences serve which version of an app.
      *
      * @param appId - App id
-     * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+     * @returns Pin rows ({rung, handle, audience, version, appVersion, state, deployedAt}): show `handle`,
+     *          pass `audience` back unchanged as the publish/remove target
      */
     whereApp(appId: string): Promise<Array<{
         rung: string;
         handle: string;
+        audience: string;
         version: number;
         appVersion: string;
         state: string;
@@ -6942,7 +6956,8 @@ export declare class RocketRideClient extends DAPClient {
      * @example
      * ```typescript
      * const { artifact } = await client.deploy.add({ pipeline, comment: 'v2' });
-     * await client.deploy.deploy('proj-1', artifact.version!, 'team-staging');
+     * // A team by name, or a row's `audience` (=team/<tid>) as the server returned it
+     * await client.deploy.deploy('proj-1', artifact.version!, '@Staging');
      * ```
      */
     get deploy(): DeployApi;
@@ -6992,20 +7007,19 @@ export declare class RocketRideClient extends DAPClient {
      * dormant, so a front end may call a node of a pipe nobody has used
      * recently. A node the entry source did not load fails at the engine.
      *
-     * @param options.address - The pipe's address (`developerId.pipelineId[.source]`),
+     * @param options.address - The pipe's address (`[<root>/]developerId.pipelineId[.source]`),
      *                          or the `address` a `use()`/`submit()` result returned beside
-     *                          its control id
+     *                          its control id. Pass the same address an `interfaces()` call
+     *                          was made with (a rooted `@<team>/...` one included), so
+     *                          discovery and execution land on the same publication
      * @param options.token - Deprecated spelling of `address`; one of the two is required
      * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
      * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
      *                         tool-lane nodes; the first node that owns the tool handles it.
      * @param options.input - Arguments forwarded to the tool function
-     * @param options.team - Resolve the `@team` rung through this one of your teams — the same
-     *                       team an `interfaces()` call was made with, so discovery and execution
-     *                       land on the same publication
      * @param options.timeout - Optional per-request timeout in ms
      * @returns The tool's return value (typically a record/object)
-     * @throws Error if the server signals failure or no node handles the requested tool
+     * @throws Error if the retired `team` option is passed, the server signals failure or no node handles the requested tool
      */
     tool<T = any>(options: {
         address?: string;
@@ -7013,7 +7027,6 @@ export declare class RocketRideClient extends DAPClient {
         tool: string;
         nodeId?: string;
         input?: Record<string, unknown>;
-        team?: string;
         timeout?: number;
     }): Promise<T>;
 }

@@ -30,7 +30,7 @@ run is its user, the owner of a deploy run is its team. These tests pin:
   running" collision guard scope correctly.
 
 Resolution itself (team scope, the caller's own dev run, owner-match access)
-is ``TaskServer.resolve_control``'s and is pinned by the security matrix.
+is ``TaskServer.resolve_target``'s and is pinned by the security matrix.
 """
 
 from __future__ import annotations

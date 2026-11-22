@@ -25,9 +25,11 @@ SubmitCommands: the DAP ``submit`` command (plan section 3).
 
 ``submit()`` is ``use()`` plus one request, sharing one resolver:
 
-1. resolve to a control: a NAME walks the rungs (``@spec`` attach-only, then
-   ``@me``, ``@team`` in the caller's team order, ``@public``) and starts a
-   published rung from its artifact when nothing is live; a SPEC addresses
+1. resolve to a control: a NAME goes through ``TaskServer.resolve_target``:
+   a bare address walks the rungs (``@spec`` attach-only, then ``@me``,
+   ``@team`` in the caller's team order, ``@public``), a rooted one
+   (``@<team>/...``, ``=team/<tid>/...``, ``@me/...``) only its root's rung,
+   and a published rung starts from its artifact when nothing is live; a SPEC addresses
    the caller's own ``@spec`` control of that identity (``project_id`` and
    resolved config), created when absent and otherwise reused (plan 3.4: a
    different config is another control on the same engine);
@@ -60,7 +62,7 @@ from .. import caller_stamp
 from .engine_access import engine_for, wait_running
 from ai.constants import CONST_SUBMIT_CLOSE_SECONDS, CONST_SUBMIT_INLINE_MAX
 
-from ..address import build_address, parse_address
+from ..address import parse_target, refuse_team_option
 from ..types import TaskError
 
 if TYPE_CHECKING:
@@ -100,10 +102,11 @@ class SubmitCommands(DAPConn):
 
         Args:
             request: The DAP request. ``arguments`` carry exactly one of
-                ``name`` (the address) or ``pipeline`` (an inline spec), and
-                optionally ``source``, ``team``, ``data`` (inline payload),
-                ``objinfo``, ``mimetype``, ``pipelineTraceLevel``, and the
-                spec-only ``threads``/``args``/``env``/``ttl``.
+                ``name`` (the address, bare or rooted) or ``pipeline`` (an
+                inline spec), and optionally ``source``, ``data`` (inline
+                payload), ``objinfo``, ``mimetype``, ``pipelineTraceLevel``,
+                and the spec-only ``threads``/``args``/``env``/``ttl``. The
+                retired ``team`` option is refused (a root names the rung).
 
         Returns:
             The response: the close body (inline delivery) plus the stamps,
@@ -126,6 +129,7 @@ class SubmitCommands(DAPConn):
                 'Pass exactly one of name, pipeline or filepath',
                 field='name',
             )
+        refuse_team_option(args)
 
         # Step 2: the inline payload fits, or the SDK streams it
         data = args.get('data')
@@ -164,22 +168,21 @@ class SubmitCommands(DAPConn):
         """
         A NAME call: the rungs, attach-only on ``@spec``, published rungs started when needed.
 
-        Server-controlled arguments are not applied; they are listed in
-        ``ignored`` so the same source runs unchanged in dev and production.
+        The name is a target (``address.parse_target``): a bare address walks
+        the ladder, a rooted one only its root's rung. Server-controlled
+        arguments are not applied; they are listed in ``ignored`` so the same
+        source runs unchanged in dev and production.
         """
-        # Step 1: the address, with source= overriding its third segment
-        parsed = parse_address(str(args.get('name')))
-        source = args.get('source') or parsed.source
-        address = build_address(parsed.developer_id, parsed.pipe_id, source)
+        # Step 1: the target, with source= overriding its third segment
+        target = parse_target(args.get('name')).with_source(args.get('source'))
 
-        # Step 2: the rungs (team= overrides the caller's team order)
-        control, started = await self._server.resolve_name(
-            address, self._account_info, 'task.data', team=args.get('team') or None
-        )
+        # Step 2: THE resolver (plan 3.2)
+        resolution = await self._server.resolve_target(self._account_info, target, 'task.data')
+        control = resolution.control
 
         # Step 3: the stamps
         ignored = [key for key in SERVER_CONTROLLED if args.get(key) is not None]
-        return control, self._stamps(control, converged='started' if started else 'none', ignored=ignored)
+        return control, self._stamps(control, converged='started' if resolution.started else 'none', ignored=ignored)
 
     async def _resolve_spec(
         self, request: Dict[str, Any], args: Dict[str, Any]
@@ -192,7 +195,7 @@ class SubmitCommands(DAPConn):
         resolved config is reused, any other spec gets a control of its own.
         """
         # Step 1: execute as a dev run; the token slot of the result is the control id
-        execute_args = {key: value for key, value in args.items() if key not in ('name', 'data', 'team')}
+        execute_args = {key: value for key, value in args.items() if key not in ('name', 'data')}
         execute = {**request, 'command': 'execute', 'arguments': execute_args}
         response = await self.on_execute(execute)
         result = response.get('body') or {}

@@ -60,7 +60,9 @@ from ai.account.models import resolve_run_permissions, resolve_task_permissions
 from rocketride import EVENT_TYPE, TASK_STATE, TASK_STATUS
 from ..address import in_endpoint_scope
 from ai.account.app_deploy import _developer_id_of
+from ai.account.roots import KIND_ME, KIND_SPEC, KIND_TEAM, format_root
 from ai.modules.task.address import ENDPOINT_ANY_SOURCE, build_address
+from ai.modules.task.task_control import RESOLVE_ATTACH
 from ai.modules.task.types import TaskError
 
 
@@ -560,11 +562,15 @@ class MonitorCommands(DAPConn):
             if project_id or source:
                 raise ValueError('You must specifiy either token or project_id/source, not both')
 
-            # The control id the client was handed, or an address resolved
-            # under the caller's account (plan 7.5; run-scoped either way: a
-            # user-owned run is subscribable only by its owner; a team-owned
-            # run by anyone with task.monitor on the run's team)
-            control = self._server.resolve_token(token, self._account_info, 'task.monitor')
+            # The control id the client was handed, or an address (bare or
+            # rooted) resolved under the caller's account through THE
+            # resolver, registered controls only (plan 3.2, 7.5; run-scoped
+            # either way: a user-owned run is subscribable only by its owner;
+            # a team-owned run by anyone with task.monitor on the run's team)
+            resolution = await self._server.resolve_target(
+                self._account_info, token, 'task.monitor', mode=RESOLVE_ATTACH
+            )
+            control = resolution.control
 
             # Build the key from the resolved run's OWNER so subscribe and
             # delivery agree regardless of how the subscription was addressed
@@ -610,9 +616,10 @@ class MonitorCommands(DAPConn):
             # subscription before the launch). When it does, ONE resolver
             # names it (plan 3.2): the caller's developer id, the pipe and the
             # source; a key's endpoints scope is enforced inside it. The
-            # resolver is held to the CONTINUUM the key names (a dev-keyed
-            # subscription never reads a personal deploy's status, nor the
-            # reverse), and the all-sources scope ('*') is no address at all
+            # address is ROOTED at the continuum the key names (=team/<tid>/,
+            # @me/ or @spec/), so a dev-keyed subscription never reads a
+            # personal deploy's status, nor the reverse; the all-sources
+            # scope ('*') is no address at all
             developer_id = _developer_id_of(self)
             address = (
                 build_address(developer_id, project_id, source)
@@ -622,13 +629,14 @@ class MonitorCommands(DAPConn):
             try:
                 if not address:
                     raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
-                control = self._server.resolve_control(
-                    address,
-                    self._account_info,
-                    'task.monitor',
-                    team=team_id or None,
-                    rung='team' if team_id else ('me' if key_kind == 'deploy' else 'spec'),
+                if team_id:
+                    target = format_root(KIND_TEAM, team_id, True, address)
+                else:
+                    target = format_root(KIND_ME if key_kind == 'deploy' else KIND_SPEC, rest=address)
+                resolution = await self._server.resolve_target(
+                    self._account_info, target, 'task.monitor', mode=RESOLVE_ATTACH
                 )
+                control = resolution.control
 
                 # The task is running, we can fill it in
                 event_id = control.id

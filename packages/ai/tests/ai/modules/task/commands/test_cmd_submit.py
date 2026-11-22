@@ -50,7 +50,7 @@ from ai.modules.task.task_server_facade import _InProcessConn
 from ai.modules.task.types import TaskError
 
 from .. import test_task_engine_sharing as sharing
-from ..test_task_engine_sharing import ADDRESS, _caller, _pipeline, _server
+from ..test_task_engine_sharing import ADDRESS, _attach, _caller, _pipeline, _server
 
 # The runtime-model fixtures, shared with the engine-sharing tests
 catalog = sharing.catalog
@@ -137,7 +137,7 @@ async def test_a_name_call_starts_the_publication_and_ignores_server_controlled_
     body = await _submit(conn, name=ADDRESS, data=b'hello', threads=4, ttl=5, objinfo={'name': 'q'})
 
     assert body['answer'] == 'ok'
-    control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
     assert body['token'] == control.control_id and is_control_id(body['token'])
     assert body['address'] == ADDRESS
     assert (body['resolved'], body['team'], body['version']) == ('@team', 'team-1', 1)
@@ -170,7 +170,7 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
 
     ts.trace_owners.claim = claim
     await _submit(conn, name=ADDRESS, data=b'hello')
-    control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
     assert claims == [('99', control.key, conn._connection_id)]
     # Released at the close: the owner lingers for the grace, stamped late
     owner = ts.trace_owners.owner('99')
@@ -198,7 +198,7 @@ async def test_a_close_that_carries_the_objects_error_counts_the_binding_failed(
     deployments.deploy('=team/team-1')
     body = await _submit(_conn(ts, _caller()), name=ADDRESS, data=b'hello')
     assert body['error'] == 'the parser refused it'
-    control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
     assert (control.stats.totalCount, control.stats.completedCount, control.stats.failedCount) == (1, 0, 1)
     assert control.stats.failedSize == 5
 
@@ -211,7 +211,7 @@ async def test_without_data_the_call_returns_the_control_id_for_streaming(catalo
 
     body = await _submit(_conn(ts, _caller()), name='acme.docBrain')
 
-    control = ts.resolve_control(ADDRESS, _caller(), 'task.data')
+    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
     assert body['token'] == control.control_id and body['address'] == ADDRESS and body['resolved'] == '@team'
     assert data_path == []
 
@@ -226,16 +226,74 @@ async def test_rung_order_and_the_rungs_tried(catalog, engines, deployments):
 
 
 @pytest.mark.asyncio
-async def test_team_overrides_the_order_for_one_call(catalog, engines, deployments, data_path):
-    """team= answers from that team; the order answers the next call."""
+async def test_a_team_root_answers_from_that_team_for_one_call(catalog, engines, deployments, data_path):
+    """A rooted name answers from its team; the order answers the next bare call; source= still applies."""
     ts = _server()
     deployments.deploy('=team/team-1', billing='team-1')
     deployments.deploy('=team/team-2', billing='team-2', version=2)
     account = _caller(teams=('team-1', 'team-2'))
     conn = _conn(ts, account)
 
-    assert (await _submit(conn, name=ADDRESS, team='team-2'))['team'] == 'team-2'
+    assert (await _submit(conn, name=f'=team/team-2/{ADDRESS}'))['team'] == 'team-2'
     assert (await _submit(conn, name=ADDRESS))['team'] == 'team-1'
+    rooted = await _submit(conn, name='@team-2/acme.docBrain', source='webhook_1')
+    assert (rooted['team'], rooted['address']) == ('team-2', ADDRESS)
+
+
+@pytest.mark.asyncio
+async def test_the_retired_team_option_is_refused(catalog, engines, deployments, data_path):
+    """team= is gone (plan 11.1 B44): an old client is told to write a root, never routed elsewhere."""
+    ts = _server()
+    deployments.deploy('=team/team-1', billing='team-1')
+    conn = _conn(ts, _caller(teams=('team-1', 'team-2')))
+    with pytest.raises(TaskError) as err:
+        await _submit(conn, name=ADDRESS, team='team-2')
+    assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'team')
+    assert 'write a rooted address' in str(err.value)
+    assert list(ts._task_control) == []
+
+
+@pytest.mark.asyncio
+async def test_a_rooted_name_never_falls_through(catalog, engines, deployments, data_path):
+    """Nothing on the named rung is TASK_NOT_REGISTERED naming that one rung, whatever the others serve."""
+    ts = _server()
+    deployments.deploy('=team/team-1', billing='team-1')
+    conn = _conn(ts, _caller(teams=('team-1', 'team-2')))
+    for root in ('@me', '@public', '=team/team-2', '@Team-2', '@spec'):
+        with pytest.raises(TaskError) as err:
+            await _submit(conn, name=f'{root}/{ADDRESS}')
+        assert err.value.code == TaskError.NOT_REGISTERED, root
+        assert err.value.rungsTried == [root], root
+    assert list(ts._task_control) == []
+
+
+@pytest.mark.asyncio
+async def test_a_version_is_checked_then_not_yet_served(catalog, engines, deployments, data_path):
+    """:<version> parses and is checked on its rung, then refused until pinned versions are served (C.36)."""
+    ts = _server()
+    deployments.deploy('=team/team-1', billing='team-1')
+    conn = _conn(ts, _caller())
+
+    # The published version on the rung the ladder picks: checked, then not yet supported
+    with pytest.raises(TaskError) as err:
+        await _submit(conn, name=f'{ADDRESS}:1')
+    assert (err.value.code, err.value.field) == (TaskError.INVALID_ARGUMENT, 'version')
+    assert 'not yet supported' in str(err.value)
+
+    # @spec has no versions; a rung with nothing published is not registered
+    with pytest.raises(TaskError) as err:
+        await _submit(conn, name=f'@spec/{ADDRESS}:1')
+    assert err.value.field == 'version' and 'no version' in str(err.value)
+    with pytest.raises(TaskError) as err:
+        await _submit(conn, name=f'@me/{ADDRESS}:1')
+    assert err.value.code == TaskError.NOT_REGISTERED and err.value.rungsTried == ['@me']
+
+    # Bad version forms are grammar errors
+    for bad in (':', ':0', ':01', ':-1', ':v2', ':1.5', ':1:2'):
+        with pytest.raises(TaskError) as err:
+            await _submit(conn, name=f'{ADDRESS}{bad}')
+        assert err.value.code == TaskError.INVALID_ARGUMENT, bad
+    assert list(ts._task_control) == []
 
 
 @pytest.mark.asyncio
@@ -308,12 +366,12 @@ async def test_a_data_request_on_a_name_starts_its_publication_like_process(cata
     deployments.deploy('=team/team-1')
     conn = _conn(ts, _caller())
 
-    control = await conn.resolve_control_or_start({'arguments': {'token': ADDRESS}}, 'task.data')
+    control = (await ts.resolve_target(conn._account_info, ADDRESS, 'task.data')).control
     assert (control.rung, control.live, control.trigger) == ('team', True, 'submit')
     assert list(ts._task_control) == [control.key]
 
     # The next data request attaches; nothing starts twice
-    again = await conn.resolve_control_or_start({'arguments': {'token': ADDRESS}}, 'task.data')
+    again = (await ts.resolve_target(conn._account_info, ADDRESS, 'task.data')).control
     assert again is control and len(ts._engines) == 1
 
 

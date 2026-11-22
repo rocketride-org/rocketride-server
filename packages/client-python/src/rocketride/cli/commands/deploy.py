@@ -271,7 +271,7 @@ async def run_deploy(args) -> int:
             client = await _connect_deploy(args, out)
             if client is None:
                 return 1
-            answer = await client.interfaces(args.address, team=args.team or None)
+            answer = await client.interfaces(args.address)
             if not out.json_requested:
                 rung = answer.get('rung')
                 where = f'@team {answer.get("teamId")}' if rung == 'team' else f'@{rung}'

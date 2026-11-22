@@ -406,3 +406,120 @@ async def test_task_data_runs_full_request_processing(monkeypatch):
     fake_client.disconnect.assert_awaited_once()
     body = result.body.decode() if hasattr(result, 'body') else str(result)
     assert 'OK' in body
+
+
+# ---------------------------------------------------------------------------
+# Rooted addresses through both doors (plan 3.5, C.32)
+# ---------------------------------------------------------------------------
+
+
+def _data_routes():
+    """The data routes ``initModule`` registers, as Starlette matches them."""
+    from starlette.routing import Route
+
+    from ai.modules import task_http
+
+    registered = []
+    server = SimpleNamespace(add_route=lambda path, handler, methods, **kw: registered.append((path, handler)))
+    task_http.initModule(server, {})
+    return [Route(path, endpoint=handler, methods=['POST']) for path, handler in registered if handler is task_Data]
+
+
+@pytest.mark.parametrize(
+    'path',
+    [
+        '/webhook/acme.docBrain.parsePDF',
+        '/webhook/@Production/acme.billing.webhook_1',
+        '/webhook/=team/1234abcd/acme.billing.webhook_1:12',
+        '/task/data/@me/acme.docBrain',
+        '/task/data/=team/1234abcd/acme.docBrain.parsePDF',
+    ],
+)
+def test_both_doors_carry_the_whole_target_in_the_path(path):
+    """``{address:path}``: a root's ``/`` and the ``@``/``=`` sigils reach the handler whole."""
+    from starlette.routing import Match
+
+    door, _, target = path.lstrip('/').partition('/')
+    if door == 'task':
+        target = target[len('data/') :]
+    scope = {'type': 'http', 'path': path, 'method': 'POST'}
+    matches = [route.matches(scope) for route in _data_routes()]
+    full = [child for match, child in matches if match == Match.FULL]
+    assert len(full) == 1, path
+    assert full[0]['path_params'] == {'address': target}
+
+
+def _door_request(path_address, account):
+    """A request the door receives for ``path_address`` (None: the bare door)."""
+    req = MagicMock()
+    req.app.state.server.get_port = MagicMock(return_value=9999)
+    req.state.account = account
+    req.path_params = {} if path_address is None else {'address': path_address}
+    req.query_params = {}
+    req.headers = {'Content-Type': 'application/octet-stream'}
+    return req
+
+
+async def _through_door(monkeypatch, path_address, account):
+    """Drive ``task_Data``; return (the target the SDK pipe was handed or None, the response body)."""
+    from ai.modules.task_http import task_data as task_data_mod
+
+    fake_client = MagicMock()
+    fake_client.connect = AsyncMock()
+    fake_client.disconnect = AsyncMock()
+    fake_client.debug_message = MagicMock()
+    monkeypatch.setattr(task_data_mod, 'RocketRideClient', MagicMock(return_value=fake_client))
+    handed = {}
+
+    class _CaptureProc(RequestProcessing):
+        """Records the target the door hands the SDK."""
+
+        def __init__(self, client, address, params=None):
+            super().__init__(client, address, params)
+            handed['target'] = address
+
+        async def process(self, request):
+            return task_data_mod.response({'objectsCompleted': 0, 'objectsRequested': 0})
+
+    monkeypatch.setattr(task_data_mod, 'RequestProcessing', _CaptureProc)
+    result = await task_Data(_door_request(path_address, account), authorization='Bearer rr_x')
+    return handed.get('target'), result.body.decode()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ('path_address', 'handed'),
+    [
+        ('@Production/acme.billing.webhook_1', '@Production/acme.billing.webhook_1'),
+        ('@production/acme.billing.webhook_1', '@production/acme.billing.webhook_1'),
+        ('=team/1234abcd/acme.billing.webhook_1', '=team/1234abcd/acme.billing.webhook_1'),
+        ('@me/acme.billing.webhook_1', '@me/acme.billing.webhook_1'),
+        ('@public/acme.billing', '@public/acme.billing'),
+        ('acme.billing.webhook_1', 'acme.billing.webhook_1'),
+    ],
+)
+async def test_a_rooted_address_rides_the_door_to_the_resolver(monkeypatch, path_address, handed):
+    """The door validates the target and hands it, root included, to the DAP side that resolves it."""
+    target, body = await _through_door(monkeypatch, path_address, SimpleNamespace(auth='rr_x', endpoints=None))
+    assert target == handed and 'OK' in body
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'path_address',
+    ['@team/Production/acme.billing.webhook_1', '@user/acme.billing', '=user/u1/acme.billing', '@me', 'acme'],
+)
+async def test_a_refused_or_retired_root_never_opens_a_connection(monkeypatch, path_address):
+    """Grammar refusals answer at the door, before any client connects."""
+    target, body = await _through_door(monkeypatch, path_address, SimpleNamespace(auth='rr_x', endpoints=None))
+    assert target is None and 'Error' in body
+
+
+@pytest.mark.asyncio
+async def test_a_scoped_key_is_held_to_the_dotted_address_under_any_root(monkeypatch):
+    """The endpoints scope sees the address alone: a root is a selector, never a way out of the scope."""
+    scoped = SimpleNamespace(auth='rr_x', endpoints=['acme.billing.webhook_1'])
+    target, _ = await _through_door(monkeypatch, '=team/1234abcd/acme.billing.webhook_1', scoped)
+    assert target == '=team/1234abcd/acme.billing.webhook_1'
+    target, body = await _through_door(monkeypatch, '=team/1234abcd/acme.other.webhook_1', scoped)
+    assert target is None and 'Error' in body

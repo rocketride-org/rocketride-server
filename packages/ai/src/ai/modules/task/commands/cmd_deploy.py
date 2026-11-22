@@ -64,6 +64,7 @@ from rocketlib import debug
 from ai.account import account
 from ai.account.app_deploy import _assert_owns_namespace, _developer_id_of, developer_id_required, publish_block_of
 from ai.account.audience import (
+    ORG_TARGET_NOT_YET,
     PUBLIC_AUDIENCE,
     Audience,
     compose_audience,
@@ -74,7 +75,7 @@ from ai.account.audience import (
     team_audience,
     user_audience,
 )
-from ai.account.deployment_backend import DEFAULT_REVIEW_STATE
+from ai.account.deployment_backend import DEFAULT_REVIEW_STATE, audience_handle
 from ai.account.models import resolve_team_permissions, team_id_of_name
 from ai.account.pipe_bundle import pipe_manifest, read_pipe_bundle, validate_store_block, write_pipe_content
 from ai.common.dap import DAPConn, TransportBase
@@ -235,17 +236,58 @@ class _DeployBase(DAPConn):
         )
         return {**row, **described}
 
+    def _with_audience_handle(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        A history row whose ``data.audience`` pair carries THIS reader's handle.
+
+        Publish rows store the audience pair and its display name, never a
+        handle (``deployment_backend.audience_display``); a handle an older
+        row stored is never shown: every reader sees the one the server
+        composes for them (``deployment_backend.audience_handle``), or none
+        where the pair names no audience.
+
+        Args:
+            row: A history row.
+
+        Returns:
+            The row, with ``data.audience.handle`` composed when it has an
+            audience pair, and a stored handle dropped when the pair decodes
+            to no audience; unchanged when it has no ``data.audience``.
+        """
+        # Step 1: the stored pair, without any handle an older row stored
+        data = row.get('data')
+        audience = data.get('audience') if isinstance(data, dict) else None
+        if not isinstance(audience, dict):
+            return row
+        pair = {key: value for key, value in audience.items() if key != 'handle'}
+        if not pair.get('type'):
+            # No type: no audience to compose a handle for
+            return {**row, 'data': {**data, 'audience': pair}}
+
+        # Step 2: this reader's handle for the pair
+        org = getattr(self._account_info, 'organization', None) or {}
+        org_id = (org.get('id') if isinstance(org, dict) else getattr(org, 'id', None)) or ''
+        try:
+            handle = audience_handle(pair, str(self._account_info.userId or ''), self._team_names(), str(org_id))
+        except ValueError:
+            # A pair no audience decodes (a legacy row): shown without a handle
+            return {**row, 'data': {**data, 'audience': pair}}
+        return {**row, 'data': {**data, 'audience': {**pair, 'handle': handle}}}
+
     def _audience_arg(self, args: Dict[str, Any]) -> Audience:
         """
         Read the ``teamId`` argument of a deploy verb as the audience it names.
 
-        ``teamId`` takes ``@me`` (the caller's personal space), ``@public``
-        (the store), ``@<team>`` (one of the caller's teams by name,
-        ignoring case: what a person types, passed through by the SDKs), any
-        audience a row or the ConnectResult carried (``=team/<tid>``,
-        ``=user/<uid>``, passed back unchanged), or a team id. This is the
-        ONE place the door reads the argument; everything after it holds a
-        decoded audience.
+        ``teamId`` takes exactly the targets of plan 2.5: ``@me`` (the
+        caller's personal space), ``@public`` (the store), ``@<team>`` (one
+        of the caller's teams by name, ignoring case: what a person types,
+        passed through by the SDKs), or any audience a row or the
+        ConnectResult carried (``=team/<tid>``, ``=user/<uid>``, passed back
+        unchanged). A bare team id is refused like every other bare word, as
+        are the retired ``@team/<...>`` and ``@user`` (each names its
+        replacement); ``@org`` and ``=org/<oid>`` parse and are refused until
+        the org rung serves (C.35). This is the ONE place the door reads the
+        argument; everything after it holds a decoded audience.
 
         Args:
             args: The verb's arguments.
@@ -254,19 +296,15 @@ class _DeployBase(DAPConn):
             The decoded audience (``@me`` and a team name already resolved).
 
         Raises:
-            ValueError: No ``teamId``, a form that is no target, or the org
-                audience.
+            ValueError: No ``teamId``, a form that is no target (a bare team
+                id included), a retired spelling, or the org rung.
             PermissionError: ``@me`` with no authenticated user, or a team
                 name that names none (or more than one) of the caller's teams.
         """
         value = args.get('teamId')
         if not value:
             raise ValueError('teamId is required')
-        value = str(value)
-        # A bare value is a team id; anything rooted is read by the grammar
-        if not value.startswith(('@', '=')):
-            return parse_audience(team_audience(value))
-        target = parse_target(value)
+        target = parse_target(str(value))
         if target.kind == 'me':
             if not self._account_info.userId:
                 raise PermissionError('Personal (@me) deployments require an authenticated user')
@@ -274,10 +312,7 @@ class _DeployBase(DAPConn):
         if target.kind == 'public':
             return parse_audience(PUBLIC_AUDIENCE)
         if target.kind == 'org':
-            raise ValueError(
-                'The org audience does not exist — publish to a team instead '
-                '(an org-admin-maintained "All members" team covers org-wide distribution)'
-            )
+            raise ValueError(ORG_TARGET_NOT_YET)
         if not target.by_id:
             # A team by name: the caller's own membership, ignoring case
             team_id = team_id_of_name(self._account_info, target.ref)
@@ -544,8 +579,13 @@ class DeployCommands(_DeployBase):
     async def _deploy_add_pipe(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Snapshot the pipeline into the org registry; optionally deploy in one step.
 
-        ``deployTo`` (optional team id) is the OSS/two-man convenience: publish
-        and point that team at the new version in a single call.
+        ``deployTo`` (an optional target, as ``teamId`` takes on ``deploy``:
+        ``@me``, ``@<team>``, ``=team/<tid>``, ``@public``) is the
+        OSS/two-man convenience: publish and point that target at the new
+        version in a single call. The target is read and authorized before
+        anything is written, so a refused target leaves the registry
+        untouched; only the store's gate on ``@public``, which reads the new
+        version's review state, runs after the write.
         """
         # Publishing puts an inert artifact in the org registry — gate it on
         # holding task.control SOMEWHERE (anyone who could deploy it anyway).
@@ -611,6 +651,17 @@ class DeployCommands(_DeployBase):
         full_name = self._registry_id(project_id)
         project_id = full_name
 
+        # The one-step deploy's target, read and authorized BEFORE the
+        # registry write (the same checks as rrext_deploy_pipe deploy, the
+        # pointer-time billing stamp included): a retired or foreign target
+        # must not leave a new version, withdrawn reviews and a change
+        # notification behind. _require_team owns the @me resolution and the
+        # task.control check (it reads teamId off the mapping it is handed)
+        deploy_team = billing_team = ''
+        if args.get('deployTo'):
+            deploy_team = self._require_team({'teamId': str(args['deployTo'])}, 'task.control')
+            billing_team = self._billing_team_of(deploy_team)
+
         org_id = self._org_id()
         caller_meta = args.get('metadata') if isinstance(args.get('metadata'), dict) else {}
         # The listing manifest the publish row snapshots (plan 9): the store
@@ -673,24 +724,18 @@ class DeployCommands(_DeployBase):
         # landed in — cross-org targeting goes through an org switch.
         body: Dict[str, Any] = {'artifact': entry, 'orgId': org_id, 'fullName': full_name}
         await self._notify_deploy_changed(org_id, '', project_id, 'add')
-        if args.get('deployTo'):
-            # One-step add+deploy — same checks as rrext_deploy_pipe deploy,
-            # including the pointer-time billing stamp. _require_team owns the
-            # @me resolution and the task.control check; reusing it keeps the
-            # one authorization rule in a single place (it reads teamId off the
-            # args mapping it is handed).
-            team_id = self._require_team({'teamId': str(args['deployTo'])}, 'task.control')
-            # The store takes its gate on this door too: on a review-ladder
-            # server the version just added is a draft, so it cannot go public
-            if team_id == PUBLIC_AUDIENCE:
+        if deploy_team:
+            # One-step add+deploy onto the target read above. The store takes
+            # its gate on this door too: on a review-ladder server the version
+            # just added is a draft, so it cannot go public
+            if deploy_team == PUBLIC_AUDIENCE:
                 await self._require_store_publishable(org_id, project_id, int(entry['version']))
-            billing_team = self._billing_team_of(team_id)
             dep = await account.deployments_deploy(
-                org_id, team_id, project_id, entry['version'], self._actor(), billing_team
+                org_id, deploy_team, project_id, entry['version'], self._actor(), billing_team
             )
             self._scheduler.sync(org_id, dep)
             body['deployment'] = self._describe(dep)
-            await self._notify_deploy_changed(org_id, team_id, project_id, 'deploy')
+            await self._notify_deploy_changed(org_id, deploy_team, project_id, 'deploy')
         return self.build_response(request, body=body)
 
     async def _withdraw_stale_submissions(self, org_id: str, project_id: str, new_version: int) -> None:
@@ -822,7 +867,9 @@ class DeployCommands(_DeployBase):
         body = await account.deployments_history(self._org_id(), project_id, team_id, args)
 
         # A pointer row names its audience: it carries the reader's rung and
-        # handle like a deployment row; an org-wide row ('' teamId) none
+        # handle like a deployment row; an org-wide row ('' teamId) none. A
+        # publish row's own audience pair gets this reader's handle too
         if isinstance(body, dict) and isinstance(body.get('rows'), list):
-            body = {**body, 'rows': [self._describe(r) if r.get('teamId') else r for r in body['rows']]}
+            rows = [self._describe(r) if r.get('teamId') else r for r in body['rows']]
+            body = {**body, 'rows': [self._with_audience_handle(r) for r in rows]}
         return self.build_response(request, body=body)

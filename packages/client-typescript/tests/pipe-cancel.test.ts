@@ -53,7 +53,7 @@ describe('DataPipe.cancel()', () => {
 			{ success: true, body: { pipeId: 7, cancelled: true } },
 			{ success: true, body: {} },
 		]);
-		const pipe = new DataPipe(client, 'acme.docBrain', {}, 'text/plain', undefined, undefined, 'team-1');
+		const pipe = new DataPipe(client, 'acme.docBrain', {}, 'text/plain');
 
 		await pipe.open();
 		await pipe.cancel();
@@ -62,7 +62,7 @@ describe('DataPipe.cancel()', () => {
 
 		expect(sent[1]).toEqual({
 			command: 'rrext_process',
-			arguments: { subcommand: 'cancel', pipeId: 7, team: 'team-1' },
+			arguments: { subcommand: 'cancel', pipeId: 7 },
 			token: 'acme.docBrain',
 		});
 		expect((sent[2].arguments as Packet).subcommand).toBe('close');
