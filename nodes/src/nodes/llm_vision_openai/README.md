@@ -52,7 +52,9 @@ an output cap of 4,096 tokens and a longer reply stops there; choose **Custom mo
 and set a higher output limit when you expect long answers. The output cap and the
 input (the image and the prompt) share the context window: keep the output limit
 below the context length, leaving room for the input, or the provider refuses the
-request.
+request. A reasoning model counts its thinking against the same cap, so even a short
+answer can come back cut off or empty: for a reasoning model, set the output limit
+well above the reply you expect.
 
 ### Documents and images
 
