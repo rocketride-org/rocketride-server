@@ -316,12 +316,13 @@ async def test_s4_two_teams_running_one_address_resolve_in_the_callers_team_orde
 
 
 async def test_s4_a_store_pointers_deploy_rail_run_never_answers_the_team_rung():
-    """A store schedule or run-now is team-owned by the stamped billing team but sits on the public rung:
-    a member of that team calling the address is never served through it on @team (nor on @public, which
-    answers only the caller's own control).
+    """A store schedule or run-now is org-owned with no caller (plan 8.3) and sits on the public rung: a
+    member of the publishing team calling the address is never served through it on @team, nor on @org
+    (only the org's admins watch an unattended org run), nor on @public (which answers only the caller's
+    own control).
     """
     ts = _server()
-    store = _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1', rung='public')
+    store = _control(ts, run_kind='deploy', owner_kind='org', user_id='', caller_id='', team_id='', rung='public')
     member = _account(user_id='user-a', team_id='team-1')
     with pytest.raises(TaskError) as err:
         await _attach(ts, store.address, member, 'task.monitor')

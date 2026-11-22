@@ -479,6 +479,17 @@ class TestDeploy:
         account_stub.deployments_deploy.assert_not_awaited()
 
     @pytest.mark.asyncio
+    async def test_an_org_admin_cannot_target_another_org(self, account_stub):
+        # The admin check alone would refuse a non-admin; an admin of org-1
+        # is refused a foreign org id too (the org rung is the active org only)
+        admin = _account_info()
+        admin.organization['permissions'] = ['org.admin']
+        conn = _make_conn(admin)
+        with pytest.raises(PermissionError):
+            await conn._deploy_deploy({}, {'projectId': 'proj-1', 'version': 3, 'teamId': '=org/org-2'})
+        account_stub.deployments_deploy.assert_not_awaited()
+
+    @pytest.mark.asyncio
     @pytest.mark.parametrize(
         ('team', 'message'),
         [
@@ -1069,10 +1080,10 @@ class TestPublicDeploy:
             _make_conn(info)._require_team({'teamId': '@public'}, 'task.control')
         # The store bills no team (plan 8.3), so a publisher with no
         # development team still publishes there; @me still needs one
-        await _make_conn(_account_info(teams=[]))._deploy_deploy({}, dict(self._DEPLOY))
+        await _make_conn(_account_info(teams=[], dev_team=''))._deploy_deploy({}, dict(self._DEPLOY))
         assert account_stub.deployments_deploy.await_args.args[5] == ''
         with pytest.raises(PermissionError, match='@me needs your development team'):
-            await _make_conn(_account_info(teams=[]))._deploy_deploy({}, {**self._DEPLOY, 'teamId': '@me'})
+            await _make_conn(_account_info(teams=[], dev_team=''))._deploy_deploy({}, {**self._DEPLOY, 'teamId': '@me'})
 
     @pytest.mark.asyncio
     async def test_a_pipeline_that_declares_roots_is_refused_on_the_store(self, account_stub):
@@ -1121,6 +1132,34 @@ class TestPublicDeploy:
             conn._test_scheduler.sync.assert_called_with('org-1', account_stub.deployments_schedule_set.return_value)
 
     @pytest.mark.asyncio
+    async def test_an_unattended_run_refuses_roots_declared_by_team_name(self, account_stub):
+        # A schedule or run-now has no session to resolve a team NAME in the
+        # pipeline's declared roots (plan 2.5): refused when it is set, naming
+        # the id form; the same root by id is accepted
+        account_stub.deployments_artifact.return_value = {
+            'project_id': 'proj-1',
+            'components': [{'id': 's1'}],
+            'roots': ['@Development/kb'],
+        }
+        conn = _make_conn(_account_info())
+        with pytest.raises(ValueError, match='declare each as =team/<tid>'):
+            await conn._deploy_schedule_set(
+                {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'schedule': '0 2 * * *'}
+            )
+        with pytest.raises(ValueError, match='declare each as =team/<tid>'):
+            await conn._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '=team/team-1'})
+        account_stub.deployments_schedule_set.assert_not_awaited()
+        account_stub.deployments_artifact.return_value = {
+            'project_id': 'proj-1',
+            'components': [{'id': 's1'}],
+            'roots': ['=team/team-1/kb'],
+        }
+        await conn._deploy_schedule_set(
+            {}, {'projectId': 'proj-1', 'teamId': '=team/team-1', 'sourceId': 's1', 'schedule': '0 2 * * *'}
+        )
+        account_stub.deployments_schedule_set.assert_awaited_once()
+
+    @pytest.mark.asyncio
     async def test_an_unattended_store_run_is_the_orgs(self, account_stub, monkeypatch):
         dispatched = {}
 
@@ -1138,10 +1177,10 @@ class TestPublicDeploy:
             'billingTeamId': 'team-1',
         }
         account_stub.deployments_get.return_value = record
-        member = _make_conn(_account_info(teams=[]))
+        member = _make_conn(_account_info(teams=[], dev_team=''))
         with pytest.raises(PermissionError, match='org admins'):
             await member._deploy_run({}, {'projectId': 'proj-1', 'sourceId': 's1', 'teamId': '@public'})
-        admin = _account_info(teams=[])
+        admin = _account_info(teams=[], dev_team='')
         admin.organization['permissions'] = ['org.admin']
         conn = _make_conn(admin)
         conn._server.control_by_key = MagicMock(

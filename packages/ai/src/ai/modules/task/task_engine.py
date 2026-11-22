@@ -3613,6 +3613,14 @@ class TaskEngine(DAPBase):
             # Check it - throws on error
             self._check_pipeline(resolved)
 
+            # The hosted policy, on the environment this start actually loaded:
+            # the server checked the control's snapshot, and a private engine
+            # reads its owner's values again here (a variable changed in
+            # between must not slip a refused node or transport through)
+            refusal = hosted_refusal(resolved)
+            if refusal:
+                raise ValueError(refusal)
+
             # Mark the start time
             self._status.startTime = time.time()
 

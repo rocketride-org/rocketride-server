@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 4009db84a5c549ab84c98d0c41ae2b6b67e80416
+// Source commit: 80cd79066ce23b09189051a2dec55deb80b69cab
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5577,7 +5577,10 @@ export declare class DataPipe {
  *
  * teamId present always addresses the team's deploy continuum (runKind is
  * ignored there); absent, the optional runKind selects between your dev
- * run (default) and your personal deploy run.
+ * run (default) and your personal deploy run. teamId also takes a row's
+ * audience as the server returned it (`=org/<oid>` watches the org's run).
+ * `version` subscribes a PINNED run (a version other than its rung's
+ * published one), which publishes under its own key.
  */
 export type MonitorKey = {
     token: string;
@@ -5587,6 +5590,7 @@ export type MonitorKey = {
     source: string;
     pipeId?: number;
     runKind?: "dev" | "deploy";
+    version?: number;
 };
 export declare class RocketRideClient extends DAPClient {
     /**

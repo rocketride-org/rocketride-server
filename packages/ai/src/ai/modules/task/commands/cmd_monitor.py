@@ -514,6 +514,7 @@ class MonitorCommands(DAPConn):
         team_id: str = '',
         run_kind: str = '',
         org_id: str = '',
+        version: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Configure event monitoring subscription for a specific task.
@@ -636,7 +637,9 @@ class MonitorCommands(DAPConn):
             # derivable without the control so subscribe-before-launch works.
             owner_id = team_id or org_id or self._account_info.userId
             key_kind = 'deploy' if (team_id or org_id) else (run_kind or 'dev')
-            event_key = owner_key(key_kind, owner_id, project_id, source)
+            # A pinned run (a version other than its rung's published one,
+            # plan 3.2) publishes under its own key; ``version`` subscribes it
+            event_key = owner_key(key_kind, owner_id, project_id, source, version)
 
             # It is ok if the task doesn't exist at this point in time (a
             # subscription before the launch). When it does, ONE resolver
@@ -652,6 +655,8 @@ class MonitorCommands(DAPConn):
                 if developer_id and source != ENDPOINT_ANY_SOURCE
                 else ''
             )
+            if address and version is not None:
+                address = f'{address}:{int(version)}'
             try:
                 if not address:
                     raise TaskError(TaskError.NOT_REGISTERED, 'no developer id: no live run can exist yet')
@@ -816,6 +821,13 @@ class MonitorCommands(DAPConn):
         pipe_id = args.get('pipeId', None)
         team_id = str(args.get('teamId') or '')
         run_kind = args.get('runKind') or ''
+        # The pinned version of a pinned run (plan 3.2), or absent
+        raw_version = args.get('version')
+        if raw_version is not None and (
+            isinstance(raw_version, bool) or not isinstance(raw_version, int) or raw_version < 1
+        ):
+            raise ValueError('version must be a positive integer, or omitted')
+        version = raw_version
 
         # A deployment row's audience passed back unchanged (plan 2.5): a
         # team's deploy run, the org's (its admins watch it, plan 8.3), or
@@ -856,6 +868,7 @@ class MonitorCommands(DAPConn):
             team_id=team_id,
             run_kind=run_kind,
             org_id=org_id,
+            version=version,
         )
 
         # Acknowledge successful subscription setup

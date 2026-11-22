@@ -264,10 +264,18 @@ class LogEventStream:
                 'source': self._source,
                 'types': ['all'],
             }
-            if self._team_id:
-                args['teamId'] = self._team_id
+            # The owner wins over team_id: an org or team run is subscribed
+            # by its audience, which the server takes in teamId; a user-owned
+            # run is the caller's own, selected by run_kind
+            owner = self._owner or ''
+            scope = owner if owner.startswith(('=org/', '=team/')) else self._team_id
+            if scope:
+                args['teamId'] = scope
             elif self._run_kind == 'deploy':
                 args['runKind'] = self._run_kind
+            # A pinned run publishes under its own key
+            if self._version is not None:
+                args['version'] = self._version
             await self._client.call('rrext_monitor', **args)
         except Exception:
             pass

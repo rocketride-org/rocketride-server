@@ -179,12 +179,17 @@ export class LogEventStream {
 	 * @returns The MonitorKey for addMonitor/removeMonitor.
 	 */
 	private monitorScope(): MonitorKey {
-		const { projectId, source, teamId, runKind } = this.stream;
+		const { projectId, source, teamId, runKind, owner, version } = this.stream;
+		// The owner wins over teamId (LogStreamRef): an org or team run is
+		// subscribed by its audience, which the server takes in teamId; a
+		// user-owned run is the caller's own, selected by runKind
+		const scope = owner && (owner.startsWith('=org/') || owner.startsWith('=team/')) ? owner : teamId;
 		return {
 			projectId,
 			source,
-			...(teamId ? { teamId } : {}),
-			...(!teamId && runKind === 'deploy' ? { runKind } : {}),
+			...(scope ? { teamId: scope } : {}),
+			...(!scope && runKind === 'deploy' ? { runKind } : {}),
+			...(version !== undefined ? { version } : {}),
 		};
 	}
 

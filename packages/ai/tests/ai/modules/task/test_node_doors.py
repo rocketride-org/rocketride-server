@@ -32,6 +32,7 @@ owning control, and ``TaskEngine.binding_control`` itself on its records.
 import shutil
 import tempfile
 import time
+import uuid
 from types import SimpleNamespace
 
 import pytest
@@ -59,6 +60,8 @@ def _control(**overrides):
         'ttl': 0,
         'owner_type': 'user',
         'roots': (),
+        # Each control its own key, as the registry mints one per control
+        'key': '=control/' + uuid.uuid4().hex,
     }
     fields.update(overrides)
     control = SimpleNamespace(**fields)
@@ -502,6 +505,18 @@ async def test_one_teams_projects_never_share_a_handle(files):
     alpha = _control(owner_type='team', project_id='alpha')
     beta = _control(owner_type='team', project_id='beta')
     engine = _Engine({'c1': alpha, 'c2': beta})
+    handle_id = (await _ask(engine, 'fs_open', correlationId='c1', path='a.txt', mode='w'))[0]['handle']
+    with pytest.raises(RuntimeError, match='another connection'):
+        await _ask(engine, 'fs_write', b'x', correlationId='c2', handle=handle_id)
+    await _ask(engine, 'fs_close', correlationId='c1', handle=handle_id, mode='w')
+
+
+async def test_two_controls_of_one_project_never_share_a_handle(files):
+    # One owner, one project, one engine, one storage root: two controls (two
+    # configurations, which may declare different roots) own their handles apart
+    first = _control(owner_type='team', project_id='alpha')
+    second = _control(owner_type='team', project_id='alpha')
+    engine = _Engine({'c1': first, 'c2': second})
     handle_id = (await _ask(engine, 'fs_open', correlationId='c1', path='a.txt', mode='w'))[0]['handle']
     with pytest.raises(RuntimeError, match='another connection'):
         await _ask(engine, 'fs_write', b'x', correlationId='c2', handle=handle_id)

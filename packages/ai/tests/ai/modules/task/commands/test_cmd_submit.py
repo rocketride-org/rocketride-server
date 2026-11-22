@@ -160,7 +160,11 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
     """The round trip's tree is the submitting control's, this connection first, and counts in its stats (plan 7.5)."""
     ts = _server()
     deployments.deploy('=team/team-1')
-    conn = _conn(ts, _caller())
+    # The caller's home team (team-0) is not the team whose publication
+    # serves (team-1), so the billing assertion tells the two apart
+    caller = _caller(dev_team='team-0', teams=('team-0', 'team-1'))
+    caller.teamOrder = ['team-0', 'team-1']
+    conn = _conn(ts, caller)
     claims: List[tuple] = []
     real_claim = ts.trace_owners.claim
 
@@ -170,7 +174,7 @@ async def test_an_inline_submit_claims_its_request_tree_for_the_control(catalog,
 
     ts.trace_owners.claim = claim
     await _submit(conn, name=ADDRESS, data=b'hello')
-    control = await _attach(ts, ADDRESS, _caller(), 'task.data')
+    control = await _attach(ts, ADDRESS, caller, 'task.data')
     assert claims == [('99', control.key, conn._connection_id)]
     # Released at the close: the owner lingers for the grace, stamped late
     owner = ts.trace_owners.owner('99')

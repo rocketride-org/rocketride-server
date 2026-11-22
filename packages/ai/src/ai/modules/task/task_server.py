@@ -109,6 +109,7 @@ from ai.common.dap import TransportWebSocket, DAPBase
 from rocketride import EVENT_TYPE
 from ai.web import WebServer
 from ai.account.app_deploy import developer_id_required
+from ai.account.audience import org_audience, team_audience, user_audience
 from ai.account.base import OutOfCreditsError
 from ai.account.models import (
     AccountInfo,
@@ -1561,15 +1562,24 @@ class TaskServer(DAPBase):
         # Step 2: the publication the version pins: the rung the root names,
         # or the one the ladder picks (skipping @spec)
         published = RungPlan(plan.published, plan.teams, plan.root)
+        state_epoch = time.monotonic()
         pins = await resolve_pins('pipe', account_info, target.dotted, rungs=published.rungs, teams=published.teams)
         pin = pins.first
         if pin is None:
             raise self._not_registered(target.dotted, [f'@{rung}' for rung in published.rungs], published)
         rung_plan = RungPlan((pin.rung,), (pin.deployment.team,) if pin.rung == 'team' else (), plan.root)
 
-        # Step 3: the rung's published version is an ordinary call on that rung
+        # Step 3: the rung's published version is an ordinary call on that
+        # rung. The walk reads the pin again: a promotion in between serves
+        # another version, so what it answered is checked and, if it moved,
+        # the version is served pinned below
         if target.version == pin.version:
-            return await self._resolve_on(account_info, target._replace(version=None), rung_plan, require, mode)
+            resolution = await self._resolve_on(account_info, target._replace(version=None), rung_plan, require, mode)
+            served = (
+                resolution.pin.version if resolution.pin is not None else getattr(resolution.control, 'version', None)
+            )
+            if served == target.version:
+                return resolution
 
         # Step 4: any other version is on the rail, needs task.control on a
         # team or the org rung, and on the store must be ready
@@ -1640,6 +1650,9 @@ class TaskServer(DAPBase):
             return Resolution(target, control, None, False)
         if mode == RESOLVE_ATTACH:
             raise self._not_registered(target.dotted, [f'@{pin.rung}'], rung_plan)
+        # A scoped key reaches only its endpoints, on a read (the interface map)
+        # as on a start
+        check_endpoint_scope(getattr(account_info, 'endpoints', None), build_address(*address))
         if mode == RESOLVE_READ:
             # A read takes the source decision the start below takes: a version
             # without the named source is not served, and the artifact rides the
@@ -1650,7 +1663,9 @@ class TaskServer(DAPBase):
             return Resolution(target, None, pinned_pin, False, artifact)
 
         # Step 6: start it from the version's artifact
-        control, started = await self._start_from_pin(pinned_pin, address, account_info, require, pinned=True)
+        control, started = await self._start_from_pin(
+            pinned_pin, address, account_info, require, pinned=True, state_epoch=state_epoch
+        )
         if control is None:
             raise self._not_registered(target.dotted, [f'@{pin.rung}'], rung_plan)
         return Resolution(target, control, pinned_pin, started)
@@ -1694,6 +1709,7 @@ class TaskServer(DAPBase):
         # source yields to the next candidate in both modes (_artifact_source),
         # so discovery and execution pick the same publication. A held refusal
         # (an ambiguous rung) is raised where it stands
+        state_epoch = time.monotonic()
         candidates = await self._candidates(target.address, account_info, require, rungs, plan)
         if mode == RESOLVE_READ:
             for candidate in candidates:
@@ -1719,7 +1735,9 @@ class TaskServer(DAPBase):
                 control = self._check_engine_available(candidate)
                 await store_gate.require_access(control, account_info)
                 return Resolution(target, control, None, False)
-            control, started = await self._start_from_pin(candidate, target.address, account_info, require)
+            control, started = await self._start_from_pin(
+                candidate, target.address, account_info, require, state_epoch=state_epoch
+            )
             if control is not None:
                 return Resolution(target, control, candidate, started)
         raise self._not_registered(target.dotted, rungs, plan)
@@ -1962,7 +1980,12 @@ class TaskServer(DAPBase):
         if 'org' in plan.rungs:
             rungs.append('@org')
             org_id = str((getattr(account_info, 'organization', None) or {}).get('id') or '')
-            control = (_exact('org', org_id) or _no_caller('org', org_id)) if org_id else None
+            control = _exact('org', org_id) if org_id else None
+            if control is None and org_id:
+                # The run with no caller answers only a caller who may watch it
+                # (the org's admins, plan 8.3); anyone else falls through
+                fallback = _no_caller('org', org_id)
+                control = fallback if fallback is not None and resolve_run_permissions(account_info, fallback) else None
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
@@ -2096,6 +2119,7 @@ class TaskServer(DAPBase):
         require: Optional[str],
         *,
         pinned: bool = False,
+        state_epoch: Optional[float] = None,
     ) -> Tuple[Optional[TaskControl], bool]:
         """
         The caller's control on ``pin``'s rung: attached when live, else started from the artifact.
@@ -2124,6 +2148,9 @@ class TaskServer(DAPBase):
             pinned: True when ``pin.version`` was named by the call and is not
                 the rung's published version (plan 3.2): the control's index
                 key carries it.
+            state_epoch: When the caller read ``pin`` as enabled (before any
+                await that followed); a disable or remove since then refuses
+                the control at registration. None: now.
 
         Returns:
             The control (None when the pinned artifact has no such source)
@@ -2149,8 +2176,17 @@ class TaskServer(DAPBase):
         # pin was read as enabled before this moment; a disable/remove from
         # here on refuses the control at registration (plan 7.2)
         deployment = pin.deployment
-        state_epoch = time.monotonic()
+        if state_epoch is None:
+            state_epoch = time.monotonic()
         pipeline = dict(await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version))
+        # The store serves callers of every org, so a pipeline that declares
+        # roots (team or org trees of its publisher) never runs there, however
+        # the version was chosen (plan 2.5; the publish door refuses it too)
+        if pin.rung == 'public' and pipeline.get('roots'):
+            raise PermissionError(
+                f'Version {pin.version} of {deployment.project_id} declares roots '
+                f'({", ".join(map(str, pipeline["roots"]))}): @public does not run a pipeline that reaches team or org files'
+            )
         components = [c for c in pipeline.get('components') or [] if isinstance(c, dict)]
         source, present = self._artifact_source(pipeline, parsed)
         if source is None:
@@ -2605,18 +2641,25 @@ class TaskServer(DAPBase):
         # Matching is by ADDRESS EQUALITY: the run's own key, or a pipe-scoped
         # key whose prefix (everything before the last dot) IS that key —
         # never a prefix test, which a longer sibling source could satisfy.
-        # The subscriptions stay while another control of the owner still
-        # answers to the same key (another config of one project_id, plan
-        # 3.4): they are its subscriptions too.
+        # The subscriptions stay while another control still answers to the
+        # same key (another config of one project_id, plan 3.4): they are its
+        # subscriptions too. The key carries the BARE owner id, which a user,
+        # a team and an org may share (on OSS all three are 'local'), so a
+        # sibling of any owner kind under that id counts.
         project_key = owner_key(
             control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
         )
-        for sibling in self._task_control.for_owner(control.owner):
-            sibling_key = owner_key(
-                sibling.run_kind, sibling.owner_id, sibling.project_id, sibling.source, sibling.pinned_version
-            )
-            if sibling_key == project_key:
-                return
+        owner_id = str(control.owner_id or '')
+        owners = {user_audience(owner_id), team_audience(owner_id), org_audience(owner_id)} if owner_id else set()
+        for owner in owners:
+            for sibling in self._task_control.for_owner(owner):
+                if sibling is control:
+                    continue
+                sibling_key = owner_key(
+                    sibling.run_kind, sibling.owner_id, sibling.project_id, sibling.source, sibling.pinned_version
+                )
+                if sibling_key == project_key:
+                    return
         for conn in self._connections.values():
             if hasattr(conn, '_monitors'):
                 keys_to_remove = [k for k in conn._monitors if k == project_key or k.rsplit('.', 1)[0] == project_key]
@@ -3928,30 +3971,38 @@ class TaskServer(DAPBase):
                 },
             }
             try:
-                result = await self.start_task(
-                    successor,
-                    conn,
-                    wait_for_running=wait_for_running,
-                    client_id=control.client_id,
-                    user_id=control.userId,
-                    team_id=control.teamId,
-                    org_id=control.orgId,
-                    caller_env=caller_env,
-                    run_kind=control.run_kind,
-                    owner_kind=control.owner_kind,
-                    trigger=control.trigger,
-                    developer_id=control.developer_id,
-                    deployment=control.deployment,
-                    rung=control.rung,
-                    version=control.version,
-                    pinned=control.pinned,
-                    caller_id=control.caller_id,
-                    env_team=control.env_team,
-                    listing=control.listing,
-                    # The predecessor's state epoch carries over: a deployment
-                    # revoked since it registered refuses the successor too
-                    deployment_epoch=control.registered_at,
-                )
+                # One start per index key (plan 3.2): a name start of the same key
+                # waits here, then attaches to the successor instead of registering
+                # a second live control beside it
+                async with self._engines.control_start_lock(control.index_key):
+                    result = await self.start_task(
+                        successor,
+                        conn,
+                        wait_for_running=wait_for_running,
+                        client_id=control.client_id,
+                        user_id=control.userId,
+                        team_id=control.teamId,
+                        org_id=control.orgId,
+                        caller_env=caller_env,
+                        run_kind=control.run_kind,
+                        owner_kind=control.owner_kind,
+                        trigger=control.trigger,
+                        developer_id=control.developer_id,
+                        deployment=control.deployment,
+                        rung=control.rung,
+                        version=control.version,
+                        pinned=control.pinned,
+                        caller_id=control.caller_id,
+                        env_team=control.env_team,
+                        listing=control.listing,
+                        # The declared roots resolve through the owner's session, as at
+                        # the predecessor's start: the restarting one (verified above)
+                        # for a run with a caller, none for an unattended run
+                        owner_account=account_info if (control.caller_id or control.owner_kind == 'user') else None,
+                        # The predecessor's state epoch carries over: a deployment
+                        # revoked since it registered refuses the successor too
+                        deployment_epoch=control.registered_at,
+                    )
             except Exception:
                 # Step 3b: a predecessor whose deployment was revoked meanwhile
                 # is not kept: it goes the way the kill switch takes every hold

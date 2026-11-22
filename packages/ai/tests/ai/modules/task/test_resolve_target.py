@@ -360,6 +360,32 @@ async def test_the_store_serves_only_ready_versions(catalog, engines, deployment
     assert (pinned.owner_id, pinned.orgId, pinned.teamId) == ('user-z', 'org-2', '')
 
 
+async def test_the_store_never_runs_a_version_that_declares_roots(catalog, engines, deployments):
+    """Plan 2.5: a version selector reaches the store's ready versions, never one that declares roots."""
+    deployments.publish(version=2)
+    _rail(deployments, 3, 'ready')
+    deployments.artifacts[('org-1', 'acme.docBrain', 3)]['roots'] = ['@Development/kb']
+    stranger = _caller('user-z', dev_team='team-z', teams=('team-z',), org='org-2', developer_id='globex')
+    ts = _server()
+    with pytest.raises(PermissionError, match='declares roots'):
+        await _resolve(ts, f'@public/{ADDRESS}:3', stranger, 'task.data')
+    assert list(ts._task_control) == []
+
+
+async def test_a_scoped_key_reads_a_pinned_version_only_on_its_endpoints(catalog, engines, deployments):
+    """A read of a pinned version (the interface map) holds a scoped key to its endpoints, as a start does."""
+    deployments.deploy('=team/team-1', version=2)
+    _rail(deployments, 1, 'private')
+    controller = _team_reader(['task.data', 'task.control'])
+    controller.endpoints = ['acme.other.webhook_1']
+    ts = _server()
+    with pytest.raises(PermissionError):
+        await ts.resolve_target(controller, f'{ADDRESS}:1', 'task.data', mode=RESOLVE_READ)
+    controller.endpoints = [ADDRESS]
+    resolution = await ts.resolve_target(controller, f'{ADDRESS}:1', 'task.data', mode=RESOLVE_READ)
+    assert resolution.pin.version == 1 and resolution.artifact is not None
+
+
 async def test_a_version_on_a_bare_address_is_pinned_on_the_rung_the_ladder_picks(catalog, engines, deployments):
     """Plan 3.2: the ladder picks the rung (skipping @spec) and pins the version there; a refusal there is final."""
     deployments.deploy('=user/user-a', version=2, billing='team-1')

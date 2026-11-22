@@ -63,12 +63,25 @@ from croniter import croniter
 
 from ai.account import account
 from ai.account.audience import PUBLIC_AUDIENCE, team_audience, user_audience
+from ai.account.file_store import normalize_path, parse_scope
+from ai.account.roots import KIND_TEAM
 from ai.account.pipe_deploy import listing_of
 from ai.common.dap import TransportBase
 from ai.common.list_rows import paginate_rows
 
 from .cmd_deploy import _DeployBase
 from ..task_control import DeploymentRef, unattended_attribution
+
+
+def _names_a_team(root_text: str) -> bool:
+    """True when a declared root names a team by NAME (``@Development/kb``), not by id (``=team/<tid>/kb``)."""
+    try:
+        root = parse_scope(normalize_path(root_text))
+    except (ValueError, PermissionError):
+        # Not a valid root at all: the start refuses it with its own message
+        return False
+    return root.kind == KIND_TEAM and not root.by_id
+
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -172,14 +185,17 @@ class DeployPipeCommands(_DeployBase):
     # =========================================================================
 
     async def _require_source_in_artifact(
-        self, org_id: str, team_id: str, project_id: str, source_id: str
+        self, org_id: str, team_id: str, project_id: str, source_id: str, *, unattended: bool = False
     ) -> Dict[str, Any]:
         """The team's deployment, after proving ``source_id`` is in its artifact.
 
         A schedule or per-source setting for a component id the deployed
         version does not contain would otherwise fail on every cron tick
         with nothing but a server log line — reject it at write time, where
-        the caller gets a real error.
+        the caller gets a real error. ``unattended`` (a schedule, a run-now):
+        the run has no session, so a team NAME in the pipeline's declared
+        roots (``@Development/kb``) cannot be resolved when it starts (plan
+        2.5); it is refused here, naming the id form to declare instead.
         """
         dep = await account.deployments_get(org_id, team_id, project_id)
         if dep is None or dep.get('state') == 'removed':
@@ -188,6 +204,13 @@ class DeployPipeCommands(_DeployBase):
         components = pipeline.get('components') or []
         if source_id not in {c.get('id') for c in components if isinstance(c, dict)}:
             raise ValueError(f'sourceId {source_id!r} is not a component of version {dep["version"]}')
+        if unattended:
+            named = [text for text in pipeline.get('roots') or [] if isinstance(text, str) and _names_a_team(text)]
+            if named:
+                raise ValueError(
+                    f'Version {dep["version"]} of {project_id} declares roots by team name ({", ".join(named)}): '
+                    'a scheduled or run-now run has no session to resolve a name, so declare each as =team/<tid>/...'
+                )
         return dep
 
     # =========================================================================
@@ -343,7 +366,7 @@ class DeployPipeCommands(_DeployBase):
 
         # The source must exist in the deployed artifact — a schedule for a
         # phantom source would fail on every tick.
-        await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
+        await self._require_source_in_artifact(org_id, team_id, project_id, source_id, unattended=True)
 
         # The paused flag is NOT part of this call: editing cron/ttl keeps
         # it, and schedule_pause/schedule_resume own flipping it.
@@ -462,7 +485,7 @@ class DeployPipeCommands(_DeployBase):
         # Same artifact-membership guard as schedule_set/source_config: a
         # sourceId the deployed version does not contain must fail HERE as a
         # validation error, not at launch with an engine-level message.
-        dep = await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
+        dep = await self._require_source_in_artifact(org_id, team_id, project_id, source_id, unattended=True)
         if dep.get('state') != 'enabled':
             raise ValueError(f'Deployment is {dep.get("state")} — enable it first')
 
