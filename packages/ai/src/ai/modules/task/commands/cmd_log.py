@@ -322,9 +322,10 @@ class LogCommands(DAPConn):
     # ── streams ──────────────────────────────────────────────────────────────
 
     async def _log_streams(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Every continuum of one source the caller may read, with its chapters: own dev, own @me
-        deploy, each team deploy the caller can monitor, then the org's for an org admin. Never-logged
-        scopes are left out.
+        """The published-version continuum of one source in each scope the caller may read, with its
+        chapters: own dev, own @me deploy, each team deploy the caller can monitor, then the org's for an
+        org admin. A pinned version's continuum (C.36) is not listed: a reader opens it with ``version``.
+        Never-logged scopes are left out.
         """
         self.verify_permission('task.monitor')
         self._verify_log_endpoint_scope(args)

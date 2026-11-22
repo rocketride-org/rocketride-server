@@ -334,11 +334,13 @@ async def test_an_org_runs_caller_receives_its_sse_and_never_its_monitor_events(
 @pytest.mark.asyncio
 async def test_the_catch_up_leaves_out_an_org_run_its_caller_may_not_monitor():
     """The TASK list and the SUMMARY snapshot hold an org run's caller to the live rule."""
+    status_dict = {'state': TASK_STATE.RUNNING.value, 'name': 'Org run'}
+    status = SimpleNamespace(**status_dict, model_dump=lambda: dict(status_dict))
     control = _org_control()
     control.task = MagicMock()
-    control.task.get_status = MagicMock(return_value=SimpleNamespace(state=TASK_STATE.RUNNING.value, name='Org run'))
+    control.task.get_status = MagicMock(return_value=status)
     control.task.shared = False
-    control.status_view = lambda: vars(control.task.get_status())
+    control.status_view = lambda: dict(status_dict)
     control.project_status = lambda body, shared: body
     server = MagicMock()
     server._task_control = {'org.org-1.user-1.acme.proj-1.src-1': control}
@@ -355,6 +357,11 @@ async def test_the_catch_up_leaves_out_an_org_run_its_caller_may_not_monitor():
     await MonitorCommands._send_updates(admin, control, EVENT_TYPE.NONE, EVENT_TYPE.TASK)
     _, kwargs = admin.send_event.await_args
     assert [task['id'] for task in kwargs['body']['tasks']] == ['task-1']
+    # The same fixture serves the SUMMARY snapshot, so the member's empty answer above is the gate's
+    admin.send_event.reset_mock()
+    await MonitorCommands._send_updates(admin, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY)
+    _, kwargs = admin.send_event.await_args
+    assert kwargs['event'] == 'apaevt_status_update' and kwargs['body'] == status_dict
 
 
 @pytest.mark.asyncio

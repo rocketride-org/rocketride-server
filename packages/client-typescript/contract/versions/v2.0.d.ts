@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: d0caf3efabb09dbf176136e7939de7a9e44917ca
+// Source commit: d2a2bb9ad2c3e6367657cd4852a5d306c1a5654c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -5346,10 +5346,13 @@ declare class LogApi {
      */
     chapters(stream: LogStreamRef): Promise<LogChaptersResult>;
     /**
-     * Lists every continuum of one source that you may read, each with its chapters.
+     * Lists the published-version continuum of one source in each scope you may read, each with its chapters.
      *
-     * Covers your own dev stream, your own @me deploy stream, and the deploy
-     * stream of each team you can monitor. Never-logged scopes are absent.
+     * Covers your own dev stream, your own @me deploy stream, the deploy
+     * stream of each team you can monitor, and the organization's for an org
+     * admin. A pinned version's run (`:<version>`) logs into a continuum of
+     * its own, which this does not list: open it with `version` on the
+     * stream reference. Never-logged scopes are absent.
      *
      * @param identity - Source identity (projectId + source); the scopes come from your permissions.
      * @returns One entry per readable stream: the `chapters()` body tagged with `teamId`, `teamName`, `runKind` and `ownerKind`.

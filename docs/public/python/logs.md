@@ -68,10 +68,13 @@ paces delivery.
 
 ## `streams()`
 
-Every continuum of one source you may read, each with its chapters: a dev run logs
-into your own tree, a team deploy (a scheduled run, for instance) into that team's
-tree, an `@me` deploy into your tree again. `chapters()` reads one of them;
-`streams()` names them all, tagged with the scope to pass on to `read()`.
+The continuum of one source in each scope you may read, each with its chapters: a
+dev run logs into your own tree, a team deploy (a scheduled run, for instance) into
+that team's tree, an `@me` deploy into your tree again, an org run into the org's
+tree (listed for org admins). `chapters()` reads one of them; `streams()` names them
+all, tagged with the scope to pass on to `read()`. A pinned version's run
+(`:<version>`) logs into a continuum of its own, which `streams()` does not list:
+open it with `version`.
 
 ## `chapters()`
 

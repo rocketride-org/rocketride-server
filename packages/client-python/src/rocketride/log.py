@@ -153,10 +153,13 @@ class LogApi:
 
     async def streams(self, project_id: str, source: str) -> LogStreamsResult:
         """
-        List every continuum of one source that you may read, each with its chapters.
+        List the published-version continuum of one source in each scope you may read, each with its chapters.
 
-        Covers your own dev stream, your own @me deploy stream, and the deploy
-        stream of each team you can monitor. Never-logged scopes are absent.
+        Covers your own dev stream, your own @me deploy stream, the deploy
+        stream of each team you can monitor, and the organization's for an org
+        admin. A pinned version's run (``:<version>``) logs into a continuum of
+        its own, which this does not list: open it with ``version``. Never-logged
+        scopes are absent.
 
         Args:
             project_id: Pipeline project id.

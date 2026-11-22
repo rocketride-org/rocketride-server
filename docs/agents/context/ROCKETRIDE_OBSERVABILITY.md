@@ -551,7 +551,7 @@ Both SDKs expose it as `client.log` (it rides the `rrext_log` DAP command
 under the hood). TypeScript signatures; Python mirrors them in snake_case:
 
 ```ts
-client.log.streams({ projectId, source })         // every continuum of a source you may read, with chapters
+client.log.streams({ projectId, source })         // each readable scope's continuum of a source, with chapters
 client.log.chapters(stream)                       // the whole timeline in one read
 client.log.read(stream, params?)                  // paged event-range read
 client.log.segment(stream, segmentId, params?)    // raw JSONL chunks of one segment (bulk replay)
@@ -570,11 +570,13 @@ client.log.openEventStream(stream)                // → LogEventStream, the DVR
 }
 ```
 
-- **`streams`** takes only `projectId` + `source` and lists every continuum of
-  that source you may read (own dev, own `@me` deploy, each team deploy you can
-  monitor), tagged with `teamId`, `teamName`, `runKind`, `ownerKind` and carrying the
-  `chapters` body. A scheduled team run and your dev run log into different
-  places; `chapters` reads one, this lists them all.
+- **`streams`** takes only `projectId` + `source` and lists the published-version
+  continuum of that source in each scope you may read (own dev, own `@me` deploy,
+  each team deploy you can monitor, the org's for an org admin), tagged with
+  `teamId`, `teamName`, `runKind`, `ownerKind` and carrying the `chapters` body. A
+  scheduled team run and your dev run log into different places; `chapters` reads
+  one, this lists them all. A pinned version's run (`:<version>`) logs into a
+  continuum of its own that is not listed: open it with `version`.
 - **`chapters`** returns per-run `beginTime`, `beginSeq`, `endTime` (null
   while the run is live), `outcome` (`"ok" | "error" | "cancelled"`, null
   while live), and `traceLevel`, plus segment activity spans and the
