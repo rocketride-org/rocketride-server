@@ -74,7 +74,7 @@ def _platform_node():
         if os.environ.get('RR_TEST_APP_COMPILERS') == '1':
             pytest.fail('Node is required for the live compiler gate (RR_TEST_APP_COMPILERS=1)')
         pytest.skip('Node is required for the real compiler boundary probe')
-    result = subprocess.run([node, '-p', 'process.execPath'], text=True, capture_output=True, check=True)
+    result = subprocess.run([node, '-p', 'process.execPath'], text=True, capture_output=True, check=True, timeout=30)
     return result.stdout.strip()
 
 

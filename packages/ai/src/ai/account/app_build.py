@@ -502,7 +502,7 @@ async def _exec_compiler(
 
 def _find_node() -> Optional[str]:
     """The node binary (RR_BUILD_NODE override, else PATH)."""
-    return os.environ.get('RR_BUILD_NODE') or shutil.which('node')
+    return shutil.which(os.environ.get('RR_BUILD_NODE') or 'node')
 
 
 def _find_pnpm() -> Optional[str]:
@@ -1047,7 +1047,7 @@ def _filter_env_files(app_dir: str) -> None:
         return
     for name in names:
         path = os.path.join(app_dir, name)
-        if not name.startswith('.env') or not os.path.isfile(path):
+        if not (name == '.env' or name.startswith('.env.')) or not os.path.isfile(path):
             continue
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
             kept = []
@@ -2141,6 +2141,12 @@ class AppBuildWorker:
         build['phase'] = 'harvest'
         await self._stamp(org_id, app_id, version, build)
         await feed.set_phase('harvest')
+        # The bundle step runs code that can write the job dir (it is bound
+        # read-write), so .out may have been swapped for a link. Containment is
+        # judged against the job's own .out, before anything is copied or read.
+        out_root = os.path.join(os.path.realpath(job_dir), '.out')
+        if os.path.islink(out_dir) or os.path.realpath(out_dir) != out_root:
+            raise BuildFailure('harvest', 'the build output directory is not the job output directory')
         # Manifest-referenced assets: rsbuild only emits what code imports,
         # and the entry token is scoped to dist/ — copy icon/readme in.
         for key in ('icon', 'readme'):
@@ -2154,6 +2160,10 @@ class AppBuildWorker:
                 raise BuildFailure('harvest', f'manifest {key} {rel!r} resolves outside the app')
             if os.path.isfile(src) and not os.path.isfile(os.path.join(out_dir, *rel.split('/'))):
                 dest = os.path.join(out_dir, *rel.split('/'))
+                if not _under(dest, (out_root,)):
+                    raise BuildFailure(
+                        'harvest', f'manifest {key} {rel!r} would be written outside the output directory'
+                    )
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 shutil.copyfile(src, dest)
         # Bound the harvest BEFORE reading anything: reject a pathological
@@ -2161,7 +2171,6 @@ class AppBuildWorker:
         # (the raw write path enforces no quota).
         total_bytes = 0
         total_files = 0
-        out_root = os.path.realpath(out_dir)
         for dirpath, _dirs, files in os.walk(out_dir):
             for filename in files:
                 total_files += 1
