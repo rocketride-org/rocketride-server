@@ -128,9 +128,13 @@ def real_engine(services: Dict[str, Dict[str, Any]], *, drivers: bool = False) -
     parsed services file; it is read at call time, so a test may change it.
     """
     saved = {name: module for name, module in sys.modules.items() if _owned(name, drivers)}
-    for name in list(saved):
-        if name.startswith(_NODE_PREFIXES):
-            del sys.modules[name]
+    # Drop every owned module, not only the ones re-created below: a sibling
+    # test may have imported the REAL ai.common.store (or .database) package,
+    # and its cached submodules (ai.common.store.store_global_base, ...) would
+    # otherwise be what the re-executed __init__.py imports, bound to the real
+    # rocketlib and ai.common.transform instead of the stand-ins.
+    for name in saved:
+        del sys.modules[name]
     try:
         with engine_stubs() as stubs:
             rocketlib = stubs['rocketlib']
