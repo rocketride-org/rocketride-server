@@ -47,10 +47,23 @@ def warn_if_signing_key_is_ephemeral() -> None:
     Only the filesystem store backend signs /task/fetch URLs; S3 and Azure
     presign. With RR_SIGNING_KEY unset the key is random per process, so a URL
     stops verifying when the engine restarts, and on every other replica.
+
+    RR_STORE_URL may hold ``${VAR}`` or ``%VAR%`` placeholders, so it is
+    expanded as the store expands it before the scheme is read. Only a known
+    presigning scheme stays silent; an unset, filesystem, unresolved or unknown
+    value warns.
     """
-    store_url = (os.environ.get('RR_STORE_URL') or '').lower()
-    if os.environ.get('RR_SIGNING_KEY') or (store_url and not store_url.startswith('filesystem://')):
+    if os.environ.get('RR_SIGNING_KEY'):
         return
+    raw = (os.environ.get('RR_STORE_URL') or '').strip()
+    if raw:
+        # Deferred: ai.account.store imports this package's siblings at load time.
+        from ai.account.store import Store
+
+        url = Store._expand_url_path(raw)
+        scheme = url.split('://', 1)[0].strip().lower() if '://' in url else ''
+        if scheme in ('s3', 'azureblob', 'azure'):
+            return
     warning(
         'RR_SIGNING_KEY is not set: file download URLs stop working when the engine restarts, and on '
         'other replicas. Set it, or use a shared s3:// or azureblob:// store (helm: sharedStoreConfigured).'
