@@ -726,6 +726,21 @@ def test_a_hosted_stream_that_breaks_after_text_ends_with_the_sentence(monkeypat
     assert len(gateway.requests) == 1
 
 
+def empty_stream(_request, _body):
+    return httpx.Response(200, headers={'content-type': 'text/event-stream'}, content=b'data: [DONE]\n\n')
+
+
+def test_a_hosted_turn_whose_stream_ends_empty_is_not_sent_again(monkeypatch, backend, hosted):
+    """LangChain raises for a stream with no chunks, so the turn takes the failed-stream path."""
+    _with_pass(monkeypatch)
+    gateway = backend(empty_stream, answer)
+
+    _result, error = _ask(_driver(monkeypatch, 'llm_openai', PLAIN), _turn(), True)
+
+    assert isinstance(error, HostedModelError) and str(error) == OTHER, repr(error)
+    assert len(gateway.requests) == 1
+
+
 def test_a_keyed_node_still_falls_back_after_a_failed_stream(monkeypatch, backend, hosted):
     gateway = backend(cut_stream, answer)
     result, error = _ask(_driver(monkeypatch, 'llm_openai', {**PLAIN, 'apikey': 'sk-user'}), _prompt(), True)
