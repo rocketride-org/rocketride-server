@@ -558,7 +558,9 @@ class HttpResult:
     ``max_bytes`` set, ``truncated`` is true when the body was longer: then
     ``content`` holds only the first ``max_bytes`` bytes, ``body`` is their
     text (never parsed as JSON), and ``size`` is the server's Content-Length
-    when it sent one for an uncompressed body, else None (unknown).
+    when it sent one for an uncompressed body, else None (unknown). A cut
+    ``body`` never ends in the first part of the node's secret key (see
+    ``Redactor.scrub_cut``); ``content`` stays the raw bytes.
     """
 
     status: int
@@ -672,6 +674,10 @@ class SupabaseApi:
             raise SupabaseError(
                 f'{what} failed: {self._redactor.redact(first_line(str(e)) or type(e).__name__)}'
             ) from None
+        if result.truncated and isinstance(result.body, str):
+            # This request carried the secret key (apikey, Authorization), and
+            # an endpoint that echoes its headers can be cut in the middle of it.
+            result.body = self._redactor.scrub_cut(result.body)
         if raise_for_status and not result.ok:
             detail = self._redactor.redact(error_message_from_body(result.body)) or 'no details'
             raise SupabaseError(f'{what} failed (HTTP {result.status}): {detail}', status=result.status)
@@ -736,6 +742,9 @@ def _parse_body(raw: bytes, content_type: str) -> Any:
 # =============================================================================
 
 REDACTED = '***'
+
+# The shortest start of a secret that Redactor.scrub_cut masks at the end of a cut text.
+_MIN_PARTIAL_SECRET = 4
 
 # Words that mark a header, field or query parameter as holding a credential.
 _SECRET_NAME_WORDS = 'authorization|apikey|api-key|api_key|secret|token|signature|password|passwd'
@@ -843,6 +852,22 @@ class Redactor:
         if isinstance(value, (list, tuple)):
             return [self.scrub(v) for v in value]
         return value
+
+    def scrub_cut(self, text: str) -> str:
+        """``scrub`` for text cut off at its end (a body capped at Max response size).
+
+        The cut can fall inside a secret, leaving its first characters, which
+        ``scrub`` does not recognise. A text that ends in the first
+        ``_MIN_PARTIAL_SECRET`` or more characters of a known secret has that
+        end replaced too. Shorter ends are left: they hold no more than the
+        public ``sb_secret_`` / ``eyJ`` prefix.
+        """
+        out = self.scrub(text)
+        for secret in self._secrets:
+            for size in range(len(secret) - 1, _MIN_PARTIAL_SECRET - 1, -1):
+                if out.endswith(secret[:size]):
+                    return out[:-size] + REDACTED
+        return out
 
 
 def drop_secret_fields(value: Any, *, extra: Iterable[str] = (), keep: Iterable[str] = ()) -> Any:

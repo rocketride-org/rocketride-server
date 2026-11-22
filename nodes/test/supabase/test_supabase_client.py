@@ -523,6 +523,17 @@ def test_scrub_only_replaces_configured_secrets():
     assert out['jwt_in_file'] == _jwt('anon') and out['n'] == 1
 
 
+def test_scrub_cut_masks_a_secret_cut_at_the_end():
+    r = sc.Redactor([FAKE_SECRET_KEY])
+    for size in (4, 10, len(FAKE_SECRET_KEY) - 1):
+        out = r.scrub_cut(f'apikey: {FAKE_SECRET_KEY}, again: {FAKE_SECRET_KEY[:size]}')
+        assert out == 'apikey: ***, again: ***', size
+    # Three characters are no more than the public prefix: kept, as is text that only looks alike.
+    assert r.scrub_cut('ends with sb_') == 'ends with sb_'
+    assert r.scrub_cut('sb_secret_TESTONLY plus more') == 'sb_secret_TESTONLY plus more'
+    assert sc.Redactor().scrub_cut('nothing configured') == 'nothing configured'
+
+
 def test_drop_secret_fields():
     user = {
         'id': 'u1',

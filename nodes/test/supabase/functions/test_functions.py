@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from .._support import (
@@ -224,6 +226,26 @@ def test_large_body_is_truncated():
     assert out['truncated'] is True and out['body_bytes'] == 2000
     assert len(out['body'].encode('utf-8')) <= 1024 and out['body'] == 'é' * 512
     assert 'first 1 KB' in out['note']
+
+
+@pytest.mark.parametrize('kept', [4, 20, len(FAKE_SECRET_KEY) - 1])
+def test_a_body_cut_inside_the_secret_key_shows_none_of_it(kept):
+    """A function that echoes its headers (apikey, Authorization) can be cut mid-key at Max response size."""
+
+    def echo(pad):
+        return json.dumps(
+            {'pad': pad, 'headers': {'apikey': FAKE_SECRET_KEY, 'authorization': f'Bearer {FAKE_SECRET_KEY}'}}
+        )
+
+    # Pad so the 1 KB cut falls `kept` characters into the second copy of the key.
+    body = echo('x' * (1024 - kept - echo('').rindex(FAKE_SECRET_KEY)))
+    assert body[:1024].endswith(FAKE_SECRET_KEY[:kept])
+    resp = FakeResponse(200, body.encode(), headers={'content-type': 'application/json'})
+    inst, _ = _inst(routes={HELLO: resp}, maxResponseKb=1)
+    out = inst.invoke_function({'name': 'hello'})
+    assert out['truncated'] is True and out['body'].endswith('Bearer ***')
+    assert FAKE_SECRET_KEY[:4] not in out['body']
+    assert_no_secrets(out)
 
 
 def test_large_json_body_is_truncated_to_text():
