@@ -124,6 +124,16 @@ class Owner:
         """The owning user or team (the server's TaskControl.owner_id)."""
         return self.teamId if self.owner_kind == 'team' else self.userId
 
+    @property
+    def key(self) -> str:
+        """The control's registry key, its control id (the server's TaskControl.key): file handles are owned by it."""
+        return self.control_id
+
+    @property
+    def roots(self) -> Tuple[Any, ...]:
+        """The roots the pipeline declared (the server's TaskControl.roots): a harness control declares none."""
+        return ()
+
 
 @dataclass
 class Call:
@@ -170,6 +180,8 @@ class ReplicaEngine:
             engine_id: This launch's id.
         """
         self.engine_id = engine_id
+        # The engine's display id (the server's TaskEngine.id): the channel names it when a command fails
+        self.id = f'replica-{engine_id}'
         self.streams = ChannelStreams()
         self._server = server
 
