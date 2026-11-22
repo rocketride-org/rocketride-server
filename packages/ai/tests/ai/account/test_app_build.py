@@ -1510,6 +1510,26 @@ def test_deeply_nested_package_json_is_a_build_failure_not_a_crash(tmp_path, tex
     assert info.value.phase == 'materialize'
 
 
+def test_package_manifest_is_parsed_once_however_many_configs_it_owns(tmp_path, monkeypatch):
+    ws = tmp_path / 'ws'
+    _write(ws / 'package.json', json.dumps({'type': 'module'}))
+    configs = ['postcss.config.js', 'postcss.config.cjs', 'postcss.config.mjs', '.postcssrc.json', '.postcssrc.yml']
+    for name in configs:
+        _write(ws / name, 'module.exports = {}')
+    loads = []
+    real_load = app_build.json.load
+
+    def counting_load(handle, *args, **kwargs):
+        loads.append(getattr(handle, 'name', None))
+        return real_load(handle, *args, **kwargs)
+
+    monkeypatch.setattr(app_build.json, 'load', counting_load)
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    # one parse for the package.json walk itself, one shared by every config
+    assert len(loads) <= 2, loads
+    assert (ws / 'postcss.config.js').read_text().startswith('export default')
+
+
 def test_workspace_yaml_deeply_nested_catalog_is_a_build_failure_not_a_crash():
     source = 'packages: ["apps/*"]\ncatalog:\n  a: ' + '{a: ' * 400 + 'x' + '}' * 400 + '\n'
     with pytest.raises(BuildFailure, match='nested'):
