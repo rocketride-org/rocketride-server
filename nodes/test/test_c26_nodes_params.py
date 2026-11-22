@@ -429,9 +429,11 @@ class _SlowBritishModelClient(_RecordingModelClient):
     """A model-server client whose British loader blocks until released."""
 
     release = None
+    entered = None
 
     def load_model(self, repo, loader, options):
         if options['lang_code'] == 'b':
+            type(self).entered.set()
             type(self).release.wait(5)
         super().load_model(repo, loader, options)
 
@@ -444,6 +446,7 @@ def test_audio_tts_a_slow_language_load_never_blocks_a_loaded_language(monkeypat
     monkeypatch.setattr(module, 'ModelClient', _SlowBritishModelClient)
     _SlowBritishModelClient.loaded = []
     _SlowBritishModelClient.release = threading.Event()
+    _SlowBritishModelClient.entered = threading.Event()
     glb = _control('nodes.audio_tts', 'audio_tts')
     os.remove(glb.synthesize('hello', 'af_heart')['path'])
 
@@ -452,7 +455,7 @@ def test_audio_tts_a_slow_language_load_never_blocks_a_loaded_language(monkeypat
     stalled = [threading.Thread(target=lambda: os.remove(glb.synthesize('hello', 'bf_emma')['path'])) for _ in range(2)]
     for thread in stalled:
         thread.start()
-    time.sleep(0.1)
+    assert _SlowBritishModelClient.entered.wait(5), 'the British load never started'
     started = time.monotonic()
     os.remove(glb.synthesize('hello', 'af_bella')['path'])
     assert time.monotonic() - started < 1
