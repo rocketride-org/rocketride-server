@@ -40,8 +40,13 @@ checks a generated query before it runs: a database that cannot be reached fails
 the step (and the LLM is not asked to rewrite a query that was never at fault).
 A query that a database that is up runs and refuses (a row cast failure, a
 statement timeout) keeps the `Query execution failed` error on the `text` and
-`answers` lanes, and so does a query `EXPLAIN` rejects. The `get_sql` and `get_data` tools
-report an outage as an explicit `valid: false` result.
+`answers` lanes. The other failures that are not an outage are reported there
+too, each in its own words: an `EXPLAIN` rejection after the last attempt reports
+its final validation error, unsafe SQL reports `Generated query contains unsafe
+SQL`, and an LLM reply with neither a query nor an answer says so. A pipeline
+with only the `table` lane has no lane that carries an error, so these failures
+raise and fail the step. The `get_sql` and `get_data` tools report an outage as
+an explicit `valid: false` result.
 
 ## As a tool
 
