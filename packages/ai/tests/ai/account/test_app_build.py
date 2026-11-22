@@ -215,9 +215,12 @@ importers:
         specifier: ^18.2.0
         version: 18.2.0(patch_hash=def456)(react@18.2.0)
 """
+    # Time only the regex scan: the YAML parse of a 1 MB scalar is pure Python
+    # and slow under coverage tracing on CI, which says nothing about the scan.
     start = time.monotonic()
-    pins = _lockfile_importer_pins(lock)
+    app_build._PATCH_HASH_RE.sub('', hostile)
     assert time.monotonic() - start < 2.0
+    pins = _lockfile_importer_pins(lock)
     assert pins['apps/foo-ui']['react-dom'] == '18.2.0(react@18.2.0)'
 
 
