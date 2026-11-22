@@ -266,14 +266,16 @@ function typeCheck(files) {
 	return ts.getPreEmitDiagnostics(program).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
 }
 
-// A frozen floor of five shapes: a record with an optional member, a generic,
-// a class, a literal union and a function type.
+// A frozen floor of six shapes: a record with an optional member, a generic,
+// a class, a literal union, a function type and a union of object types whose
+// branches share no key (the shape of MonitorKey).
 const FROZEN_FIXTURE = [
 	'export interface Rec { id: string; label?: string }',
 	'export interface Box<T> { value: T; note?: string }',
 	'export declare class Svc { name: string; port?: number; start(): void }',
 	"export type Kind = 'a' | 'b';",
 	'export type Fn = (x: number) => string;',
+	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number };',
 	'',
 ].join('\n');
 
@@ -284,6 +286,7 @@ const PINNED = [
 	['Svc', 0],
 	['Kind', 0],
 	['Fn', 0],
+	['Key', 0],
 ];
 
 /**
@@ -311,6 +314,7 @@ const LIVE_GROWN = [
 	'export class Svc { name = ""; port?: number; extra = 1; private secret = 0; start(): void { void this.secret; } }',
 	"export type Kind = 'a' | 'b';",
 	'export type Fn = (x: number) => string;',
+	'export type Key = { token: string } | { projectId: string; source: string; pipeId?: number; extra?: boolean };',
 	'',
 ].join('\n');
 
@@ -335,6 +339,14 @@ test('typeFloorLines: a dropped required member still fails the assignment', () 
 	const dropped = LIVE_GROWN.replace('export interface Rec { id: string; ', 'export interface Rec { ');
 	const messages = typeCheck(conformanceProgram(dropped, (lines) => lines.slice(0, 2))).join('\n');
 	assert.match(messages, /Property 'id' is missing/);
+});
+
+test('typeFloorLines: a key dropped from one branch of a union fails its pin', () => {
+	const dropped = LIVE_GROWN.replace('pipeId?: number; ', '');
+	// The two branches share no key, so keyof the union is empty: the
+	// assignment, and a key check built on keyof, both let this through.
+	assert.deepEqual(typeCheck(conformanceProgram(dropped, (lines) => lines.slice(0, 2))), []);
+	assert.match(typeCheck(conformanceProgram(dropped)).join('\n'), /Property 'pipeId' is missing/);
 });
 
 test('typeFloorLines: a generic pin is applied at its frozen arity', () => {
