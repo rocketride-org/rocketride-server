@@ -400,11 +400,38 @@ def token_scope_report(svc: GraphService, cfg: dict, required: list[str]) -> tup
     return granted, not missing, missing
 
 
-def build_auth(svc: GraphService, auth_type: str, cfg: dict, scopes: list[str]) -> GraphAuth:
-    """Build a :class:`GraphAuth` for ``svc`` from node config, scoped to ``scopes``.
+def require_token_scopes(svc: GraphService, cfg: dict, scopes: list[str]) -> None:
+    """
+    Refuse a user grant that does not carry an access tier's scopes.
+
+    Graph never binds the tier into the token (app-only asks for ``.default``,
+    the broker refresh sends the refresh token alone), so the tier a call asks
+    for is checked against the user's grant when the call uses it.
+
+    Args:
+        svc: The Graph service profile.
+        cfg: The call's settings (the user branch's ``userAuth``).
+        scopes: The scopes of the call's access tier.
+
+    Raises:
+        ValueError: The grant is missing a scope of the tier.
+    """
+    _granted, scopes_covered, missing = token_scope_report(svc, cfg, scopes)
+    if not scopes_covered:
+        raise ValueError(
+            f'{svc.product}: your Microsoft account authorization is missing required scopes '
+            'for the selected access tier. Please disconnect and reconnect your '
+            f'Microsoft account. Missing: {", ".join(missing)}'
+        )
+
+
+def build_auth(svc: GraphService, auth_type: str, cfg: dict) -> GraphAuth:
+    """Build a :class:`GraphAuth` for ``svc`` from the control's config.
 
     ``auth_type`` selects app-only (tenantId/clientId/clientSecret, client
     credentials) or delegated user OAuth (userAuth JSON, broker-refreshed).
+    The access tier is not part of the credential: each call checks its own
+    tier against a user grant with :func:`require_token_scopes`.
     """
     if auth_type == 'user':
         info = json.loads(_decode_blob(str(cfg.get('userAuth') or '')))
@@ -414,14 +441,6 @@ def build_auth(svc: GraphService, auth_type: str, cfg: dict, scopes: list[str]) 
         broker_url = resolve_refresh_url(svc, info.get('oauth_server_url'))
         refresh_token = info.get('refresh_token')
         expiry_ms = info.get('expiry_date')
-
-        _granted, scopes_covered, missing = token_scope_report(svc, cfg, scopes)
-        if not scopes_covered:
-            raise ValueError(
-                f'{svc.product}: your Microsoft account authorization is missing required scopes '
-                'for the selected access tier. Please disconnect and reconnect your '
-                f'Microsoft account. Missing: {", ".join(missing)}'
-            )
 
         # Fail fast: if the token is already expired and there is no refresh path
         # (no broker URL and no refresh_token), the first Graph call would fail

@@ -149,33 +149,11 @@ def test_config_preserves_arbitrary_valid_python_regex_syntax(monkeypatch):
     assert [pattern.pattern for pattern in patterns] == sources
 
 
-@pytest.mark.parametrize(
-    'pattern',
-    [
-        'https://service\\.example/',
-        '^https://service\\.example/',
-    ],
-)
-def test_begin_global_warns_about_whitelist_migration(monkeypatch, pattern):
-    """Every configured whitelist gets a canonical-matching migration warning."""
-    _http_client, iglobal, _iinstance = _load_node_modules(monkeypatch)
-    cfg = {'urlWhitelist': [{'whitelistPattern': pattern}]}
-    instance = object.__new__(iglobal.IGlobal)
-    instance.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig=cfg)
-
-    instance.beginGlobal()
-
-    iglobal.warning.assert_called_once_with(
-        'URL whitelist patterns now require a supported, explicit authority boundary; '
-        'review existing patterns before making requests'
-    )
-
-
 def test_whitelist_checks_path_resolved_url(monkeypatch):
     """The allowlist sees the exact path that will be sent on the wire."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(r'^https://service\.example/users/42$')],
     )
@@ -195,7 +173,7 @@ def test_whitelist_rejects_path_after_resolution(monkeypatch):
     """A template cannot be approved before its final path is known."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(r'^https://service\.example/users/allowed$')],
     )
@@ -232,7 +210,7 @@ def test_whitelist_rejects_final_query_mutations(monkeypatch, request_options, e
     """Exact URL patterns reject query data added after path substitution."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(r'^https://api\.example\.com/path\?fixed=1$')],
     )
@@ -272,7 +250,7 @@ def test_whitelist_checks_final_query_url(monkeypatch, request_options, expected
     """Exact URL patterns see the canonical query string sent to transport."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(rf'^{re.escape(expected_url)}$')],
     )
@@ -301,7 +279,7 @@ def test_whitelist_rejects_matches_ending_inside_authority(monkeypatch, pattern,
     """Whitelist matches must consume some authority without stopping inside a field."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(pattern)],
     )
@@ -357,7 +335,7 @@ def test_whitelist_rejects_consuming_authority_prefixes(monkeypatch, pattern, ur
     """Full matches cannot hide hostname or port prefixes behind later syntax."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(pattern)],
     )
@@ -505,7 +483,7 @@ def test_whitelist_allows_matches_ending_at_authority_boundaries(monkeypatch, pa
     """Host-agnostic, path, port, and IPv6 boundary patterns remain valid."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(pattern)],
     )
@@ -518,7 +496,7 @@ def test_whitelist_rejects_encoded_dot_segments(monkeypatch, encoded_segment):
     """Requests cannot decode traversal syntax after the whitelist approves it."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(r'^https://service\.example/public/')],
     )
@@ -543,7 +521,7 @@ def test_whitelist_pattern_cannot_match_inside_query_or_fragment(monkeypatch, ur
     """Only the request URL prefix—not embedded URL-shaped data—can satisfy a pattern."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(r'https://service\.example/public/')],
     )
@@ -556,7 +534,7 @@ def test_whitelist_checks_url_without_fragment(monkeypatch):
     """A fragment that is never sent cannot change allowlist matching."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(
+    instance._http_guardrails = types.SimpleNamespace(
         enabled_methods={'GET'},
         url_patterns=[re.compile(r'https://service\.example/public/data$')],
     )
@@ -580,7 +558,7 @@ def test_guardrails_reject_userinfo_urls(monkeypatch, url):
     """Instance validation rejects URL credentials before whitelist matching."""
     _http_client, _iglobal, iinstance = _load_node_modules(monkeypatch)
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = types.SimpleNamespace(enabled_methods={'GET'}, url_patterns=[])
+    instance._http_guardrails = types.SimpleNamespace(enabled_methods={'GET'}, url_patterns=[])
 
     with pytest.raises(ValueError, match='userinfo'):
         instance._validate_guardrails({'url': url, 'method': 'GET'})

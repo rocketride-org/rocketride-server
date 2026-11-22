@@ -4,11 +4,13 @@
 # =============================================================================
 
 """
-HTTP Request tool node - global (shared) state.
+HTTP Request tool node - the guardrails of one call.
 
-Reads the resolved config and stores security guardrails (allowed methods + URL
-whitelist), the configured credential and default headers, and the rate
-limiter for IInstance tool methods. The schema types and bounds every leaf and
+The control holds nothing: every guardrail is the call's (plan 4.1 rule 4).
+``IGlobal.guardrails`` turns one call's settings into its allowed methods,
+its URL whitelist, the configured credential, the default headers and the
+rate limits, which the instance counts in ``self.state`` so every replica
+serving the control shares them. The schema types and bounds every leaf and
 requires each auth branch's credential fields; this module keeps the semantic
 checks the schema cannot express (header grammar, placeholder residue, the
 pinned-https whitelist a configured credential demands).
@@ -18,10 +20,11 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from typing import NamedTuple, Optional
 
-from rocketlib import IGlobalBase, warning
+from rocketlib import IGlobalBase
 
-from .rate_limiter import DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_PER_MINUTE, DEFAULT_MAX_PER_SECOND, RateLimiter
+from .rate_limiter import DEFAULT_MAX_CONCURRENT, DEFAULT_MAX_PER_MINUTE, DEFAULT_MAX_PER_SECOND, RateLimits
 
 
 _METHOD_FLAGS = {
@@ -103,31 +106,41 @@ def _rows(cfg: Mapping, key: str) -> list:
     return raw_rows
 
 
+class Guardrails(NamedTuple):
+    """Everything one call is held to."""
+
+    enabled_methods: set
+    url_patterns: list
+    config_auth: Optional[dict]
+    default_headers: dict
+    limits: Optional[RateLimits]
+
+
 class IGlobal(IGlobalBase):
-    """Global state for http_request."""
+    """The control of http_request holds nothing; its pure builders turn one call's settings into its guardrails."""
 
-    enabled_methods: set[str] | None = None
-    url_patterns: list[re.Pattern] | None = None
-    config_auth: dict | None = None
-    default_headers: dict[str, str] | None = None
-    rate_limiter: RateLimiter | None = None
+    @classmethod
+    def guardrails(cls, cfg: Mapping) -> Guardrails:
+        """
+        One call's guardrails from its settings.
 
-    def beginGlobal(self) -> None:
-        # The resolved config: the active authType branch flattened beside the
-        # guardrails, the booleans and integers validated by the schema
-        cfg = self.config
-        self.enabled_methods, self.url_patterns = self._build_guardrails(cfg)
-        if self.url_patterns:
-            warning(
-                'URL whitelist patterns now require a supported, explicit authority boundary; '
-                'review existing patterns before making requests'
-            )
-        self.config_auth = self._build_config_auth(cfg)
-        self.default_headers = self._build_default_headers(cfg)
-        self._require_pinned_whitelist(
-            self.url_patterns, self._whitelist_reason(self.config_auth, self.default_headers)
-        )
-        self.rate_limiter = self._build_rate_limiter(cfg)
+        Args:
+            cfg: The call's settings: the active authType branch flattened beside the
+                guardrails, the booleans and integers validated by the schema.
+
+        Returns:
+            The allowed methods, the compiled whitelist, the configured credential,
+            the default headers and the rate limits (None when rate limiting is off).
+
+        Raises:
+            ValueError: A setting the schema cannot check is malformed, or a credential or
+                default header would travel without a pinned https whitelist.
+        """
+        enabled_methods, url_patterns = cls._build_guardrails(cfg)
+        config_auth = cls._build_config_auth(cfg)
+        default_headers = cls._build_default_headers(cfg)
+        cls._require_pinned_whitelist(url_patterns, cls._whitelist_reason(config_auth, default_headers))
+        return Guardrails(enabled_methods, url_patterns, config_auth, default_headers, cls._build_rate_limits(cfg))
 
     @staticmethod
     def _build_config_auth(cfg: Mapping) -> dict | None:
@@ -259,8 +272,8 @@ class IGlobal(IGlobalBase):
         return enabled, patterns
 
     @staticmethod
-    def _build_rate_limiter(cfg: Mapping) -> RateLimiter | None:
-        """Create a ``RateLimiter`` from the resolved configuration.
+    def _build_rate_limits(cfg: Mapping) -> RateLimits | None:
+        """Read the rate limits from one call's settings.
 
         The schema delivers three non-negative integers. All three at ``0``
         means the user opted out of rate limiting (``None``); a single ``0``
@@ -273,15 +286,8 @@ class IGlobal(IGlobalBase):
         if per_second == 0 and per_minute == 0 and concurrent == 0:
             return None
 
-        return RateLimiter(
-            max_per_second=per_second or DEFAULT_MAX_PER_SECOND,
-            max_per_minute=per_minute or DEFAULT_MAX_PER_MINUTE,
-            max_concurrent=concurrent or DEFAULT_MAX_CONCURRENT,
+        return RateLimits(
+            per_second=per_second or DEFAULT_MAX_PER_SECOND,
+            per_minute=per_minute or DEFAULT_MAX_PER_MINUTE,
+            concurrent=concurrent or DEFAULT_MAX_CONCURRENT,
         )
-
-    def endGlobal(self) -> None:
-        self.enabled_methods = set()
-        self.url_patterns = []
-        self.config_auth = None
-        self.default_headers = {}
-        self.rate_limiter = None

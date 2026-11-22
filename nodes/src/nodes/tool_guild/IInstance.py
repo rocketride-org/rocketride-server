@@ -67,9 +67,8 @@ class IInstance(IInstanceBase):
     _sessions_started: int = 0
 
     def _max_sessions(self) -> int:
-        """The per-request cap: the call's settings (a caller may raise it per call), else the shared config."""
-        settings = getattr(self, 'settings', None)
-        return int(settings.maxSessions if settings is not None else self.IGlobal.max_sessions)
+        """The per-request cap: the call's settings (a caller may raise it per call)."""
+        return int(self.settings.maxSessions)
 
     def _claim_session_slot(self) -> None:
         """Reserve one session against this request's budget, or raise."""
@@ -126,7 +125,7 @@ class IInstance(IInstanceBase):
             g.workspace,
             text,
             agent=agent,
-            verify=g.verify_tls,
+            verify=self.settings.verifyTls,
         )
         session_id = guild_client.session_id_of(session)
         if not session_id:
@@ -136,9 +135,16 @@ class IInstance(IInstanceBase):
             return {'success': True, 'session_id': session_id, 'status': guild_client.RUNNING, 'output': None}
 
         guild_client.wait_for_session(
-            g.base_url, g.key_id, g.key_secret, session_id, timeout=g.timeout, verify=g.verify_tls
+            g.base_url,
+            g.key_id,
+            g.key_secret,
+            session_id,
+            timeout=self.settings.timeout,
+            verify=self.settings.verifyTls,
         )
-        events = guild_client.get_session_events(g.base_url, g.key_id, g.key_secret, session_id, verify=g.verify_tls)
+        events = guild_client.get_session_events(
+            g.base_url, g.key_id, g.key_secret, session_id, verify=self.settings.verifyTls
+        )
         return {
             'success': True,
             'session_id': session_id,
@@ -189,9 +195,9 @@ class IInstance(IInstanceBase):
         """Start a Guild agent session and return its answer."""
         args = normalize_tool_input(args, tool_name='tool_guild')
         text = require_str(args, 'input', tool_name='run_agent')
-        agent = str(args.get('agent') or self.IGlobal.default_agent or '').strip()
+        agent = str(args.get('agent') or self.settings.agent or '').strip()
         wait = args.get('wait')
-        wait = self.IGlobal.result_mode == 'wait' if wait is None else bool(wait)
+        wait = self.settings.resultMode == 'wait' if wait is None else bool(wait)
         return self._run_agent(text, agent, wait=wait)
 
     @tool_function(
@@ -220,7 +226,9 @@ class IInstance(IInstanceBase):
         session_id = require_str(args, 'session_id', tool_name='get_session')
         # No workspace check: GET /api/sessions/{id} is addressed by session id alone,
         # so an agent can follow up with only the id from an earlier run_agent.
-        session = guild_client.get_session(g.base_url, g.key_id, g.key_secret, session_id, verify=g.verify_tls)
+        session = guild_client.get_session(
+            g.base_url, g.key_id, g.key_secret, session_id, verify=self.settings.verifyTls
+        )
         return {
             'success': True,
             'session_id': session_id,
@@ -272,7 +280,7 @@ class IInstance(IInstanceBase):
                 hi=guild_client.MAX_EVENT_LIMIT,
                 tool_name='get_session_events',
             ),
-            verify=g.verify_tls,
+            verify=self.settings.verifyTls,
         )
         return {'success': True, 'events': events, 'output': guild_client.extract_output(events)}
 
@@ -332,8 +340,7 @@ class IInstance(IInstanceBase):
 
     def closing(self):
         """Run the configured Guild agent with the accumulated input and emit its answer."""
-        g = self.IGlobal
-        agent = g.default_agent
+        agent = str(self.settings.agent or '').strip()  # this call's agent
         if not agent:
             raise ValueError('tool_guild pipeline step: no agent configured — set the Agent field.')
 

@@ -213,7 +213,10 @@ def _make(tier='write', results=None, flags=None):
     if flags:
         cfg.update(flags)
     access = ga.resolve_google_access(cfg, ga.CALENDAR)
-    inst.IGlobal = types.SimpleNamespace(service=FakeCalendar(results or {}), access=access)
+    service = FakeCalendar(results or {})
+    # The control serves the service of a tier; the binding resolved its access once
+    inst.IGlobal = types.SimpleNamespace(service=service, service_for=lambda tier: service)
+    inst.__dict__['_google_access'] = access
     return inst
 
 
@@ -577,7 +580,7 @@ def test_default_tier_is_write():
 def test_readonly_tier_allows_reads():
     inst = _make(tier='readonly', results={'get': _EVENT})
     assert inst.event_get({'eventId': 'ev1'})['id'] == 'ev1'
-    assert inst.IGlobal.access.can_write is False
+    assert inst._access().can_write is False
 
 
 _WRITE_OPS = [
@@ -663,6 +666,7 @@ def test_validate_config_warns_for_malformed_user_token(monkeypatch):
     config = {'authType': 'user', 'userAuth': '{bad json'}
     monkeypatch.setattr(google_workspace_validator, 'warning', warnings.append)
     monkeypatch.setattr(cal_ivalidator.IValidator, 'config', property(lambda self: config))
+    monkeypatch.setattr(cal_ivalidator.IValidator, '_resolved', lambda self: config, raising=False)
     cal_ivalidator.IValidator().validateConfig()
     assert any('invalid' in message.lower() for message in warnings)
 

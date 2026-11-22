@@ -30,6 +30,8 @@
 			"default": ""
 		},
 		"tool_python.timeout": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Execution timeout (seconds)",
 			"description": "Maximum seconds a script may run before it is killed. Leave unset for the sandbox default (20s); max is 1200s.",
@@ -38,6 +40,8 @@
 			"optional": true
 		},
 		"tool_python.allowedModules": {
+			"param": true,
+			"tool": false,
 			"title": "Additional Allowed Modules",
 			"description": "Modules the agent is allowed to import, in addition to the built-in defaults (math, json, re, collections, datetime, etc.). This setting has no effect on RocketRide Cloud, where only the built-in defaults can be imported.",
 			"type": "array",

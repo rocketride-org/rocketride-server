@@ -34,31 +34,33 @@ class Parser:
     """Wraps the ADE ``parse`` API: document bytes -> (Markdown text, tables)."""
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
-        """Build the parser from the node config (api_key, model, region)."""
+        """Build the parser from the control's config (api_key, region).
+
+        ``model`` is a per-call parameter: ``parse()`` takes it from the caller.
+        """
         self.bag = bag
 
-        # The resolved node config: model and region are schema enums with defaults
+        # The control's config: the key and the region (a schema enum with a default)
         config = connConfig
         self._api_key: Optional[str] = resolve_api_key(config)
-        self._model: str = config['model']
         self._region: str = config['region']
 
-        debug(
-            f'Landing.ai Parse: initialized (model={self._model}, region={self._region}, '
-            f'api_key={"set" if self._api_key else "not set"})'
-        )
+        debug(f'Landing.ai Parse: initialized (region={self._region}, api_key={"set" if self._api_key else "not set"})')
 
-    def read(self, file_data: bytes) -> str:
-        """Return only the Markdown text (the reader hook the node calls)."""
-        text, _tables = self.parse(file_data)
-        return text
-
-    def parse(self, file_data: bytes, file_name: Optional[str] = None) -> Tuple[str, List[str]]:
+    def parse(self, file_data: bytes, model: str, file_name: Optional[str] = None) -> Tuple[str, List[str]]:
         """Parse ``file_data`` with ADE -> (markdown, tables).
 
         Returns ("", []) when no key is configured or the document is empty; a
         parse failure is logged and re-raised. ADE infers the type from
         ``file_name``; a name is sniffed from the bytes when absent.
+
+        Args:
+            file_data: The document's bytes.
+            model: This call's ADE parse model.
+            file_name: The document's name, when the object carries one.
+
+        Returns:
+            The Markdown text and the Markdown of every table chunk.
         """
         if not self._api_key:
             error('Landing.ai Parse: no API key configured')
@@ -74,7 +76,7 @@ class Parser:
         try:
             client = build_client(self._api_key, self._region)
             debug(f'Landing.ai Parse: calling client.parse() ({len(file_data)} bytes, name={file_name})')
-            response = client.parse(document=(file_name, file_data), model=self._model)
+            response = client.parse(document=(file_name, file_data), model=model)
             return self._map_response(response)
         except Exception as e:  # noqa: BLE001 — log, then re-raise so the failure isn't silently empty
             error(f'Landing.ai Parse: error parsing document: {e}')

@@ -53,6 +53,7 @@
 			"type": "number",
 			"title": "Confidence threshold",
 			"description": "Minimum detection confidence (0.0-1.0). Default 0.5 - higher than object detect to suppress false faces on textured backgrounds.",
+			"param": true,
 			"default": 0.5,
 			"minimum": 0.0,
 			"maximum": 1.0
@@ -61,6 +62,7 @@
 			"type": "boolean",
 			"title": "Emit 6 alignment keypoints",
 			"description": "Include coarse 6-point keypoints per face (eyes, nose, mouth, ear tragions) for face-aware framing and alignment.",
+			"param": true,
 			"default": true
 		}
 	},

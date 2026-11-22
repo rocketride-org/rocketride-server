@@ -47,31 +47,30 @@ class NERRecognizer:
         """
         Initialize NER recognizer.
 
+        The confidence threshold and the metadata switch are each call's:
+        ``extract_entities`` takes the threshold, the instance reads the switch.
+
         Args:
-            config: The node's resolved configuration (model, aggregation_strategy,
-                min_confidence, store_in_metadata); defaults are the schema's.
+            config: The control's resolved configuration (model, aggregation_strategy:
+                both shape the loaded pipeline); defaults are the schema's.
         """
         self.model_name = config['model']
         self.aggregation_strategy = config['aggregation_strategy']
-        self.min_confidence = config['min_confidence']
-        self.store_in_metadata = config['store_in_metadata']
 
         # Initialize the NER pipeline
         # The pipeline will automatically use the model server if available,
         # or fall back to local execution
         self.ner_pipeline = pipeline(task='ner', model=self.model_name, aggregation_strategy=self.aggregation_strategy)
 
-        debug(
-            f'ner: initialized with model {self.model_name}, aggregation {self.aggregation_strategy}, '
-            f'minimum confidence {self.min_confidence}'
-        )
+        debug(f'ner: initialized with model {self.model_name}, aggregation {self.aggregation_strategy}')
 
-    def extract_entities(self, text: str) -> List[Dict[str, Any]]:
+    def extract_entities(self, text: str, min_confidence: float) -> List[Dict[str, Any]]:
         """
         Extract named entities from text.
 
         Args:
             text: Input text to process
+            min_confidence: The call's threshold: entities scoring below it are dropped
 
         Returns:
             List of entity dictionaries with keys:
@@ -102,7 +101,7 @@ class NERRecognizer:
                 raw_entities = results[0]['entities']
 
             # Filter by confidence threshold
-            filtered_entities = [entity for entity in raw_entities if entity.get('score', 0) >= self.min_confidence]
+            filtered_entities = [entity for entity in raw_entities if entity.get('score', 0) >= min_confidence]
 
             # Format results
             formatted_entities = []

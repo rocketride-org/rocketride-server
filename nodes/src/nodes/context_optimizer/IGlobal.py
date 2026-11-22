@@ -21,27 +21,38 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Global handler for the Context Optimizer node.
+
+The model, its window override and the four budget percentages are per-call
+parameters: each call builds its own (cheap) optimizer from its settings. The
+control keeps the one thing every call shares, the snapshot of the engine's
+model context windows, read from the service registry once per pipeline start.
+"""
+
 import os
 
 from rocketlib import IGlobalBase
 
-from .optimizer import ContextOptimizer
+from .optimizer import ContextOptimizer, ModelCatalog
 
 
 class IGlobal(IGlobalBase):
-    optimizer = None
+    """IGlobal for the Context Optimizer node: the model-window catalog."""
+
+    catalog: ModelCatalog | None = None
 
     def beginGlobal(self):
+        """Install the tokenizer and snapshot the engine's model windows."""
         # Load the requirements (tiktoken)
         from depends import depends  # type: ignore
 
         requirements = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt')
         depends(requirements)
 
-        # Create the optimizer on the resolved config (defaults applied, the
-        # selected mode's values flat)
-        self.optimizer = ContextOptimizer(self.config)
+        # One registry read per control; every call's optimizer budgets against it
+        self.catalog = ContextOptimizer.load_catalog()
 
     def endGlobal(self):
-        # Clean up resources
-        self.optimizer = None
+        """Release the catalog."""
+        self.catalog = None

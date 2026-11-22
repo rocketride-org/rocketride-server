@@ -80,6 +80,7 @@
 			"type": "array",
 			"title": "Instructions",
 			"description": "Multiple instructions to add to questions before sending to LLM",
+			"param": true,
 			"default": ["Please provide a detailed and helpful response to the following question:"],
 			"item": { "name": "instruction", "type": "string", "format": "textarea" }
 		}

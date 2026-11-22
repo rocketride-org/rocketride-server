@@ -16,8 +16,8 @@ pipeline.
 
 The node has no data lanes and no control-plane connections; it exists purely
 as an agent tool. It exposes two read-only operations against one configured
-bucket: listing object names and downloading a single object to a temporary
-file on the engine host. Pick it over a generic HTTP client when the agent
+bucket: listing object names and downloading a single object into the pipeline
+owner's file store. Pick it over a generic HTTP client when the agent
 should stay scoped to one bucket — and optionally one prefix within it — with
 credentials and a download size cap held by the node rather than by the agent.
 It reads objects only; it cannot upload, delete, or otherwise modify a bucket.
@@ -29,7 +29,7 @@ The server-name prefix is `gcs`, producing these registered functions.
 | Function | Description |
 |---|---|
 | `gcs.list_files` | List object names in the configured bucket. |
-| `gcs.download_file` | Download one object to a temporary file on the engine host and return its local path. |
+| `gcs.download_file` | Download one object into the owner's file store and return its path there. |
 
 `list_files` takes no required arguments. Optional `prefix` narrows the listing
 and is appended to the node's configured **Path Prefix**; optional
@@ -39,25 +39,32 @@ is an error string rather than raising.
 
 `download_file` requires `file_name`, the object's name or path inside the
 bucket, which is likewise resolved beneath the configured **Path Prefix**. On
-success it returns `success`, `local_path` (the temporary file on the engine
-host), and `size` in bytes. Every failure — client not connected, bucket not
+success it returns `success`, `path` (the file's path in the owner's file store,
+under `gcs/` with the object's folders and its file name led by the download's
+id, such as `gcs/reports/3f9c2a1b7d4e6f80-q1.csv`, readable with the filesystem
+tool), and `size` in bytes. Every failure — client not connected, bucket not
 configured, object over the size cap, or any GCS error — comes back as a
 dictionary with a single `error` key, so an agent should check for `error`
-before reading `local_path`.
+before reading `path`.
 
-Only the most recent download is retained: starting a new download deletes the
-previous temporary file, and anything left is removed when the node shuts down.
-An agent that needs a downloaded file must consume it before requesting the
-next one.
+Only the most recent download of a node is kept: its path is the node's state,
+and a new download (on whichever engine replica serves it, concurrent calls
+included) deletes the previous file. That deletion is best effort: if it fails,
+the node logs a warning and the older file stays in the owner's file store. An
+agent that needs a downloaded file must consume it before requesting the next
+one. Every download gets a path of its own, so two downloads never overwrite
+each other, even of objects with the same name, and two `tool_gcs` nodes of one
+owner never delete each other's files.
 
 ## Configuration
 
 Set the bucket the node is allowed to touch and how it authenticates; the rest
 has working defaults. **Bucket Name** is what makes the tool functions usable —
 without it both functions return a "Bucket name not configured" error. The node
-verifies its credentials and fetches the bucket at startup, so a bad key, a
-missing bucket, or insufficient permission fails the pipeline immediately
-rather than at the agent's first call.
+builds its credentials and storage client at startup, so a malformed key fails
+the pipeline immediately. The bucket is a per-call parameter and is not checked
+at startup: a missing bucket or insufficient permission comes back as an `error`
+from the agent's first call that reaches it.
 
 ### Bucket Name
 
@@ -104,18 +111,18 @@ types are available:
 
 **Project ID** is optional in both modes. Left blank, it is taken from the
 service account key or from the ambient credentials. The identity needs
-permission to read the configured bucket and to list its objects; the startup
-bucket check will fail otherwise.
+permission to read the configured bucket and to list its objects; without it,
+each tool call returns an `error`.
 
 ## Limitations
 
 The node declares the `noremote` capability, so it runs on the local engine
 host and is not available for remote execution. That host needs network access
-to Google Cloud Storage and enough disk for the largest download **Max Download
-Bytes** allows. Downloaded objects are written to the engine host's temporary
-directory and are only reachable by whatever runs there — the tool returns a
-local path, not a URL. Access is read-only: there is no write, upload, or
-delete path in this node.
+to Google Cloud Storage and enough memory for the largest download **Max Download
+Bytes** allows. Downloaded objects are written to the pipeline owner's file store,
+not to the engine host. The bucket, the prefix and the download cap are per-call
+parameters a caller may set and an LLM may not. Access to the bucket is read-only:
+there is no write, upload, or delete path in this node.
 
 ## Upstream docs
 

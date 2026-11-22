@@ -115,6 +115,7 @@
 			"default": ""
 		},
 		"extract.fields": {
+			"param": true,
 			"type": "array",
 			"title": "Fields",
 			"description": "The columns to extract from each record.",

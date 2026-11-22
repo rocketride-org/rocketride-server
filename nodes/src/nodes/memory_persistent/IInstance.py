@@ -13,34 +13,26 @@ and stores answers back into the session for future retrieval.
 from __future__ import annotations
 
 import copy
+import uuid
 
 from rocketlib import IInstanceBase, Entry, debug
 from ai.common.schema import Question, Answer
 
 from .IGlobal import IGlobal
+from .memory_store import PersistentMemoryStore, StateBackend
+
+# ==== Constants ==================================================================
+
+#: Where the owner's namespace in the control's Redis is kept, in the owner's file store.
+REDIS_NAMESPACE_PATH = '.memory_persistent/redis-namespace.json'
+
+#: The state key whose lock makes the first calls of an owner mint one namespace.
+_NAMESPACE_LOCK = 'redis-namespace'
 
 
 class IInstance(IInstanceBase):
-    """One request's view of the shared memory store: its sessions are the caller's (plan 12 B)."""
-
-    def _scoped(self, session_id):
-        """
-        The caller's session: a session id a client names is qualified by the
-        caller, so on a shared engine two callers naming one id never read
-        each other's memory. A binding without a caller keeps the bare id.
-
-        Args:
-            session_id: The id from the message metadata, or None.
-
-        Returns:
-            The scoped id, or None when none was given.
-        """
-        if not session_id:
-            return session_id
-        owner = self.caller.userId
-        return f'{owner}__{session_id}' if owner else session_id
-
-    """Pipeline instance for the memory_persistent node.
+    """
+    One call's view of the control's sessions.
 
     preventDefault() raises immediately, so no code may follow it — anything
     added after a preventDefault() call is unreachable at runtime.
@@ -48,6 +40,56 @@ class IInstance(IInstanceBase):
 
     IGlobal: IGlobal
     _current_session_id: str | None = None
+
+    def _store(self) -> PersistentMemoryStore:
+        """
+        This call's store: the control's backend with this call's history cap, summarization and session ttl.
+
+        A session id names a session of one owner only, on whichever replica
+        serves the call. On the ``memory`` branch the backend is this binding's
+        ``self.state``, which the server keys by the control's owner. On the
+        ``redis`` branch it is the control's pool, which every owner whose
+        control points at that Redis reaches, so the call's view keeps the
+        owner's sessions under the owner's namespace (plan 12 B).
+
+        Returns:
+            The store this call reads and writes.
+        """
+        settings = self.settings
+        redis = self.IGlobal.redis
+        backend = redis.for_namespace(self._redis_namespace()) if redis is not None else StateBackend(self.state)
+        return PersistentMemoryStore(
+            backend,
+            max_history=settings.max_history,
+            auto_summarize=settings.auto_summarize,
+            session_ttl_hours=float(settings.session_ttl_hours),
+        )
+
+    def _redis_namespace(self) -> str:
+        """
+        The owner's namespace in the control's Redis.
+
+        The node never keys what it keeps by the caller (plan 4.1 rule 7,
+        5.7): the namespace is a random id minted once into the owner's file
+        store, which the server roots at the binding's owner, and read back by
+        every later call on any replica. A file, not state: a session in Redis
+        may outlive the state store's seven days. The state lock makes the
+        first calls of one node agree on one id; two pipelines of one owner
+        minting at the same instant can each write one, and the call whose id
+        is overwritten loses what it stored (never another owner's data).
+
+        Returns:
+            The namespace id.
+        """
+        files = self.files
+        if files.stat(REDIS_NAMESPACE_PATH).get('exists'):
+            return files.get_json(REDIS_NAMESPACE_PATH)['namespace']
+        with self.state.lock(_NAMESPACE_LOCK):
+            if files.stat(REDIS_NAMESPACE_PATH).get('exists'):
+                return files.get_json(REDIS_NAMESPACE_PATH)['namespace']
+            namespace = uuid.uuid4().hex
+            files.put_json(REDIS_NAMESPACE_PATH, {'namespace': namespace})
+            return namespace
 
     def open(self, _obj: Entry) -> None:
         """Reset per-object state for the current pipeline item.
@@ -67,10 +109,7 @@ class IInstance(IInstanceBase):
         Args:
             question: The question from the questions lane; it is copied, never mutated.
         """
-        store = self.IGlobal.store
-        if store is None:
-            self.instance.writeQuestions(question)
-            return self.preventDefault()
+        store = self._store()
 
         # Deep copy to prevent mutation of the original question
         question = copy.deepcopy(question)
@@ -78,7 +117,7 @@ class IInstance(IInstanceBase):
         # Extract session_id from question metadata (if present)
         session_id = None
         if hasattr(question, 'metadata') and isinstance(question.metadata, dict):
-            session_id = self._scoped(question.metadata.get('session_id'))
+            session_id = question.metadata.get('session_id')
         self._current_session_id = session_id
 
         if session_id:
@@ -126,10 +165,7 @@ class IInstance(IInstanceBase):
         Args:
             answer: The answer from the answers lane; it is copied, never mutated.
         """
-        store = self.IGlobal.store
-        if store is None:
-            self.instance.writeAnswers(answer)
-            return self.preventDefault()
+        store = self._store()
 
         # Deep copy to prevent mutation
         answer = copy.deepcopy(answer)
@@ -137,7 +173,7 @@ class IInstance(IInstanceBase):
         # Extract session_id from answer metadata
         session_id = None
         if hasattr(answer, 'metadata') and isinstance(answer.metadata, dict):
-            session_id = self._scoped(answer.metadata.get('session_id'))
+            session_id = answer.metadata.get('session_id')
         if not session_id:
             session_id = self._current_session_id
 

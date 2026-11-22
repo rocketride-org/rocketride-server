@@ -55,7 +55,6 @@ def _make_parser() -> Parser:
     """Build a Parser without running __init__ (which reads engine config)."""
     parser = Parser.__new__(Parser)
     parser._api_key = 'test-key'
-    parser._model = 'dpt-2-latest'
     parser._region = 'production'
     return parser
 
@@ -64,7 +63,7 @@ def test_parse_returns_markdown_and_tables() -> None:
     """parse() should map the ADE response to (markdown, [table blocks])."""
     parser = _make_parser()
 
-    text, tables = parser.parse(b'%PDF-1.4 mock bytes', 'invoice.pdf')
+    text, tables = parser.parse(b'%PDF-1.4 mock bytes', 'dpt-2-latest', 'invoice.pdf')
 
     assert 'Mock Document' in text
     assert len(tables) == 1
@@ -72,10 +71,10 @@ def test_parse_returns_markdown_and_tables() -> None:
 
 
 def test_parse_passes_model_and_document_tuple_to_sdk() -> None:
-    """parse() should hand the SDK a (filename, bytes) tuple and the configured model."""
+    """parse() should hand the SDK a (filename, bytes) tuple and the call's model."""
     parser = _make_parser()
 
-    parser.parse(b'mock bytes', 'invoice.pdf')
+    parser.parse(b'mock bytes', 'dpt-2-latest', 'invoice.pdf')
 
     kwargs = LandingAIADE.last_parse_kwargs
     assert kwargs['model'] == 'dpt-2-latest'
@@ -87,7 +86,7 @@ def test_parse_sniffs_filename_when_absent() -> None:
     """parse() should derive a typed filename when none is given."""
     parser = _make_parser()
 
-    parser.parse(b'%PDF-1.4 mock bytes')  # no file_name
+    parser.parse(b'%PDF-1.4 mock bytes', 'dpt-2-latest')  # no file_name
 
     name, data = LandingAIADE.last_parse_kwargs['document']
     # filetype detects the PDF (upload.pdf); falls back to a .pdf name otherwise.
@@ -100,7 +99,7 @@ def test_parse_without_api_key_returns_empty() -> None:
     parser = _make_parser()
     parser._api_key = None
 
-    text, tables = parser.parse(b'mock bytes', 'invoice.pdf')
+    text, tables = parser.parse(b'mock bytes', 'dpt-2-latest', 'invoice.pdf')
 
     assert text == ''
     assert tables == []
@@ -117,7 +116,7 @@ def test_parse_reraises_sdk_errors(monkeypatch) -> None:
     monkeypatch.setattr(_parse_mod, 'build_client', lambda *a, **k: _Boom())
 
     with pytest.raises(RuntimeError, match='sdk down'):
-        parser.parse(b'mock bytes', 'invoice.pdf')
+        parser.parse(b'mock bytes', 'dpt-2-latest', 'invoice.pdf')
 
 
 def test_map_response_filters_table_chunks() -> None:

@@ -109,6 +109,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -330,7 +331,10 @@ class _Resp:
 def _make_instance(cfg=None):
     """Construct an IInstance wired to a config, with no engine runtime."""
     inst = mod.IInstance()
-    inst.IGlobal = cfg or _Cfg()
+    cfg = cfg or _Cfg()
+    inst.IGlobal = cfg
+    # The defaults are this call's settings; the fake carries the values a test asks for
+    inst.settings = SimpleNamespace(targetLang=cfg.target_lang, formality=cfg.formality, modelType=cfg.model_type)
     return inst
 
 
@@ -907,18 +911,17 @@ def test_translate_missing_text_error_no_http(monkeypatch):
     assert out['success'] is False
 
 
-def test_translate_target_lang_missing_arg_and_cfg_errors_no_http(monkeypatch):
-    """Neither a target_lang arg NOR a cfg default -> error dict, no HTTP call.
+def test_translate_target_lang_cleared_setting_falls_back_to_en_us(monkeypatch):
+    """No target_lang arg and a cleared targetLang setting -> the EN-US default is sent.
 
-    Per the ratified arg-or-cfg-or-error contract, target_lang errors ONLY when
-    both sources are empty. _Cfg() defaults target_lang='' so this is the
-    both-empty case. Discriminates an impl that errors whenever the ARG is
-    missing (which would wrongly reject the cfg-default-present case below).
+    A field cleared in the UI stores '' and the call falls back to the schema's
+    EN-US (as the control's snapshot did before the setting became per call),
+    so a missing argument never leaves the request without a target.
     """
-    _no_call_post(monkeypatch)
+    cap = _capture_post(monkeypatch, _Resp({'translations': [{'text': 'x', 'detected_source_language': 'EN'}]}))
     out = _make_instance(_Cfg(target_lang='')).deepl_translate({'text': 'hi'})
-    assert out['success'] is False
-    assert 'error' in out
+    assert out['success'] is True
+    assert cap['json']['target_lang'] == 'EN-US'
 
 
 def test_translate_target_lang_falls_back_to_cfg_default(monkeypatch):

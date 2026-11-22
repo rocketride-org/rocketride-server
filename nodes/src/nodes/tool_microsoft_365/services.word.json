@@ -22,6 +22,8 @@
 			"type": "string",
 			"title": "Access level",
 			"description": "Graph scopes to request. readonly: read document text only. write: full read/write (create, append, replace text, export PDF).",
+			"param": true,
+			"tool": false,
 			"default": "write",
 			"enum": [
 				["readonly", "Read-only"],

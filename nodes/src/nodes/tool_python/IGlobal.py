@@ -6,8 +6,8 @@
 """
 Python tool node - global (shared) state.
 
-Reads the resolved config and stores sandbox settings (allowed modules, timeout)
-for IInstance tool methods.
+Holds nothing per control: the sandbox settings (allowed modules, timeout) are
+per-call parameters; ``sandbox_limits`` reads them from a call's settings.
 """
 
 from __future__ import annotations
@@ -19,22 +19,23 @@ from rocketlib import IGlobalBase
 
 
 class IGlobal(IGlobalBase):
-    """Global state for tool_python."""
+    """Global state for tool_python: nothing per control (the sandbox limits are the call's)."""
 
-    allowed_modules: set[str] | None = None
-    timeout: int | None = None
 
-    def beginGlobal(self) -> None:
-        # The resolved config: the timeout within 1..1200 when set, None for the
-        # sandbox default; allowedModules the stored rows or None when unset
-        cfg = self.config
-        # Extra modules are not offered on the engine's host (see ai.common.sandbox)
-        self.allowed_modules = None if is_shared_host() else _parse_allowed_modules(cfg)
-        self.timeout = cfg.timeout
+def sandbox_limits(settings: Mapping) -> tuple[set[str] | None, int | None]:
+    """
+    One call's sandbox limits from its settings.
 
-    def endGlobal(self) -> None:
-        self.allowed_modules = None
-        self.timeout = None
+    Args:
+        settings: The call's settings: the timeout within 1..1200 when set (None
+            for the sandbox default), allowedModules the stored rows or None.
+
+    Returns:
+        The extra allowed modules (None: the sandbox defaults; never offered on a
+        shared engine host, see ai.common.sandbox) and the timeout.
+    """
+    allowed = None if is_shared_host() else _parse_allowed_modules(settings)
+    return allowed, settings.get('timeout')
 
 
 def _parse_allowed_modules(cfg: Mapping) -> set[str] | None:

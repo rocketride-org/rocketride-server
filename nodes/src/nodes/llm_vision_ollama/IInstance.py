@@ -76,10 +76,10 @@ class IInstance(LLMBase):
             question.addContext(image_data_url)
 
             # Add the configured prompt as a question
-            question.addQuestion(self.IGlobal._chat._prompt)
+            question.addQuestion(self.settings.prompt)
 
             # Call the vision model and emit text output
-            answer = self.IGlobal._chat.chat(question)
+            answer = self._question(question)
             self.instance.writeText(answer.getText())
 
             # Clear the buffer
@@ -115,10 +115,10 @@ class IInstance(LLMBase):
             # page_content is base64-encoded PNG (frame grabber always outputs PNG)
             image_data_url = f'data:image/png;base64,{doc.page_content}'
             question.addContext(image_data_url)
-            question.addQuestion(self.IGlobal._chat._prompt)
+            question.addQuestion(self.settings.prompt)
 
             try:
-                answer = self.IGlobal._chat.chat(question)
+                answer = self._question(question)
             except Exception as e:
                 warning(f'Ollama Vision: inference failed for chunk {doc.metadata.chunkId}: {e}')
                 continue

@@ -31,21 +31,27 @@
 			"title": "Max Items",
 			"description": "Upper cap on items returned per call (agent requests are clamped to this).",
 			"default": 100,
-			"minimum": 1
+			"minimum": 1,
+			"param": true,
+			"tool": false
 		},
 		"tool_apify.run_timeout_secs": {
 			"type": "integer",
 			"title": "Run Timeout (seconds)",
 			"description": "Max seconds an Actor run may take before it is stopped.",
 			"default": 120,
-			"minimum": 1
+			"minimum": 1,
+			"param": true,
+			"tool": false
 		},
 		"tool_apify.max_cost_usd": {
 			"type": "number",
 			"title": "Max Cost (USD)",
 			"description": "Spend limit per run for pay-per-event Actors.",
 			"default": 1,
-			"minimum": 0
+			"minimum": 0,
+			"param": true,
+			"tool": false
 		}
 	},
 	"properties": ["type", "tool_apify.apikey", "tool_apify.max_items", "tool_apify.run_timeout_secs", "tool_apify.max_cost_usd"],

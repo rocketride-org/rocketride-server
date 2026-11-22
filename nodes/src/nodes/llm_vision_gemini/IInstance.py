@@ -83,10 +83,10 @@ class IInstance(LLMBase):
                 image_base64 = base64.b64encode(bytes(self.image_data)).decode('utf-8')
                 image_data_url = f'data:{mimeType};base64,{image_base64}'
                 question.addContext(image_data_url)
-                question.addQuestion(self.IGlobal._chat._prompt)
+                question.addQuestion(self.settings.prompt)
 
                 try:
-                    answer = self.IGlobal._chat.chat(question)
+                    answer = self._question(question)
                     answer_text = answer.getText()
                     self._cached_answer = answer_text
                     self._cache_from_image = True
@@ -113,7 +113,7 @@ class IInstance(LLMBase):
 
             question = Question()
             question.addContext(f'data:image/png;base64,{doc.page_content}')
-            question.addQuestion(self.IGlobal._chat._prompt)
+            question.addQuestion(self.settings.prompt)
 
             if self._cached_answer is not None and self._cache_from_image:
                 # writeImage already called Gemini for this frame — reuse the result.
@@ -125,7 +125,7 @@ class IInstance(LLMBase):
                 self._cached_answer = None
                 self._cache_from_image = False
                 try:
-                    answer = self.IGlobal._chat.chat(question)
+                    answer = self._question(question)
                     answer_text = answer.getText()
                 except Exception as e:
                     chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'

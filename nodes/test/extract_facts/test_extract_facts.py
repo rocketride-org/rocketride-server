@@ -141,8 +141,8 @@ def _load_iinstance_class():
 
         @property
         def settings(self):
-            # With no caller the real settings view IS the global's resolved config (rocketlib/filters.py)
-            return self.IGlobal.config
+            # With no caller the real settings view is the control's config overlaid with no params (rocketlib/filters.py)
+            return self.IGlobal.config.overlay(None)
 
     class FakeEntry:
         pass
@@ -236,7 +236,7 @@ def _build_instance(
 
     glob = IGlobal.__new__(IGlobal)
     glob.glb = types.SimpleNamespace(logicalType='extract_facts', connConfig=config)
-    glob.beginGlobal()  # populates glob.fields/validate/include_provenance
+    glob.beginGlobal()  # the control holds nothing: the call's settings carry every key
 
     inst = IInstance.__new__(IInstance)
     inst.IGlobal = glob

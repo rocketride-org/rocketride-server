@@ -23,12 +23,16 @@
 			"type": "string",
 			"title": "Tool Description",
 			"description": "Natural-language description the agent uses to decide when to call this tool",
+			"param": true,
+			"tool": false,
 			"default": ""
 		},
 		"tool_pipe.return_type": {
 			"type": "string",
 			"title": "Return Type",
 			"description": "Which response lane value to return to the agent",
+			"param": true,
+			"tool": false,
 			"default": "text",
 			"enum": [
 				["text", "Text"],

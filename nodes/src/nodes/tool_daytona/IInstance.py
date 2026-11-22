@@ -114,7 +114,7 @@ class IInstance(IInstanceBase):
         description=lambda self: (
             f'Execute code in a remote Daytona sandbox (isolated from this machine) and return its output. '
             f'{_SESSION_NOTE} '
-            f'Sandbox language: {self.IGlobal.language}. Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
+            f'Sandbox language: {self.IGlobal.language}. Execution timeout: {self.settings.exec_timeout_secs}s.'
         ),
     )
     def run_code(self, args):
@@ -126,11 +126,11 @@ class IInstance(IInstanceBase):
 
         try:
             response = self._with_sandbox(
-                lambda sandbox: sandbox.process.code_run(code, timeout=self.IGlobal.exec_timeout_secs)
+                lambda sandbox: sandbox.process.code_run(code, timeout=self.settings.exec_timeout_secs)
             )
         except DaytonaError as e:
             return {'error': str(e), 'exit_code': -1, 'output': '', 'truncated': False}
-        return _exec_result(response, self.IGlobal.max_output_chars)
+        return _exec_result(response, self.settings.max_output_chars)
 
     @tool_function(
         input_schema={
@@ -158,7 +158,7 @@ class IInstance(IInstanceBase):
         },
         description=lambda self: (
             f'Run a shell command in the remote Daytona sandbox — install dependencies, build, then run. '
-            f'{_SESSION_NOTE} Execution timeout: {self.IGlobal.exec_timeout_secs}s.'
+            f'{_SESSION_NOTE} Execution timeout: {self.settings.exec_timeout_secs}s.'
         ),
     )
     def run_command(self, args):
@@ -172,7 +172,7 @@ class IInstance(IInstanceBase):
         if cwd is not None and not isinstance(cwd, str):
             raise ValueError('"cwd" must be a string when provided')
 
-        exec_kwargs = {'timeout': self.IGlobal.exec_timeout_secs}
+        exec_kwargs = {'timeout': self.settings.exec_timeout_secs}
         if cwd and cwd.strip():
             exec_kwargs['cwd'] = cwd.strip()
 
@@ -180,7 +180,7 @@ class IInstance(IInstanceBase):
             response = self._with_sandbox(lambda sandbox: sandbox.process.exec(command, **exec_kwargs))
         except DaytonaError as e:
             return {'error': str(e), 'exit_code': -1, 'output': '', 'truncated': False}
-        return _exec_result(response, self.IGlobal.max_output_chars)
+        return _exec_result(response, self.settings.max_output_chars)
 
     @tool_function(
         input_schema={
@@ -271,5 +271,5 @@ class IInstance(IInstanceBase):
         if raw is None:
             return {'error': f'file not found: {path.strip()}', 'content': '', 'truncated': False}
         text = raw.decode('utf-8', errors='replace') if isinstance(raw, (bytes, bytearray)) else str(raw)
-        content, truncated = _truncate(text, self.IGlobal.max_output_chars)
+        content, truncated = _truncate(text, self.settings.max_output_chars)
         return {'content': content, 'truncated': truncated}

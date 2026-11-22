@@ -51,12 +51,14 @@ class TestExtremeShapes(unittest.TestCase):
         """
         for name, fake in (
             ('build_detector', lambda min_confidence: object()),
-            ('detect_rotations', lambda detector, lock, image: ([[], [], [], []], [0.0] * 4)),
+            ('detect_rotations', lambda detector, lock, image, min_confidence: ([[], [], [], []], [0.0] * 4)),
         ):
             patcher = patch.object(orient_module, name, fake)
             patcher.start()
             self.addCleanup(patcher.stop)
-        return orient_module.build_orient({'detectSize': detect_size})
+        orient = orient_module.build_orient()
+        settings = {'detectSize': detect_size}
+        return lambda image_bytes, mime, want_image: orient(image_bytes, mime, want_image, settings)
 
     def test_a_sliver_abstains_instead_of_raising(self):
         """The short side scales to zero, and `cv2.resize` rejects a zero dimension.

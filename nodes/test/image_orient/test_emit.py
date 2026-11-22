@@ -44,6 +44,8 @@ sys.path.insert(0, str(NODES_SRC))
 
 from image_orient.IInstance import IInstance  # noqa: E402
 
+from ..framework.controls import control_config  # noqa: E402
+
 _MIME = 'image/jpeg'
 
 
@@ -66,14 +68,21 @@ class _Capture:
 
 
 class _FakeGlobal:
-    """Returns a canned decision, so nothing here needs an imaging library."""
+    """Returns a canned decision, so nothing here needs an imaging library.
+
+    Holds a control's resolved config, so the instance's settings (which it hands to
+    ``orient``) resolve as on a running engine.
+    """
 
     def __init__(self, result):
         self._result = result
         self.seen = []
+        self.settings_seen = []
+        self.config = control_config('image_orient')
 
-    def orient(self, image_bytes, mime, want_image):
+    def orient(self, image_bytes, mime, want_image, settings):
         self.seen.append((image_bytes, mime, want_image))
+        self.settings_seen.append(settings)
         return self._result
 
 

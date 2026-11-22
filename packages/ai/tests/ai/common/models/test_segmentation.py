@@ -57,3 +57,29 @@ def test_facade_load_once_ignores_threshold_and_maxedge(monkeypatch):
     opts = loads[0][2] or {}
     assert 'threshold' not in opts and 'max_edge' not in opts
     assert opts.get('mode') == 'instance'
+
+
+def test_segment_takes_threshold_and_max_edge_per_call(monkeypatch):
+    from PIL import Image
+
+    captured = {}
+    monkeypatch.setattr(segmod, 'get_model_server_address', lambda: 'localhost:5590')
+    monkeypatch.setattr(segmod, 'ModelClient', _fake_client_factory(captured))
+    monkeypatch.setattr(segmod, 'image_to_bytes', lambda image: image)
+
+    segmenter = Segmenter(mode='instance', threshold=0.3, max_edge=1024)
+    image = Image.new('RGB', (2000, 1000))
+
+    # No override: the facade's own defaults apply
+    segmenter.segment(image)
+    assert max(captured['args']['data'].size) == 1024
+    assert captured['args']['threshold'] == 0.3
+
+    # One call's override resizes and thresholds that call only
+    segmenter.segment(image, threshold=0.8, max_edge=500)
+    assert max(captured['args']['data'].size) == 500
+    assert captured['args']['threshold'] == 0.8
+
+    segmenter.segment(image)
+    assert max(captured['args']['data'].size) == 1024
+    assert len(captured['loads']) == 1  # the model loaded once across the three calls

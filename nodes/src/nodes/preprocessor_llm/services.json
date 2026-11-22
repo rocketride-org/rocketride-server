@@ -90,6 +90,7 @@
 			"type": "integer",
 			"title": "Number of tokens per document chunk",
 			"description": "Needs to match your embedding model.",
+			"param": true,
 			"default": 384,
 			"minimum": 1
 		}

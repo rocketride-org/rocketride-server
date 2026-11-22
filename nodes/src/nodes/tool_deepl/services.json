@@ -79,12 +79,14 @@
 			"env": "ROCKETRIDE_DEEPL_APIKEY"
 		},
 		"targetLang": {
+			"param": true,
 			"type": "string",
 			"title": "Default Target Language",
 			"description": "Default target language for translation when the agent does not supply one. Regional variants are allowed (e.g. EN-US, EN-GB, PT-BR, PT-PT, ZH-HANS, ZH-HANT).",
 			"default": "EN-US"
 		},
 		"formality": {
+			"param": true,
 			"type": "string",
 			"title": "Formality",
 			"description": "Default formality for translation. Only honored by a subset of target languages; DeepL returns an error for unsupported ones, which the node surfaces.",
@@ -98,6 +100,7 @@
 			]
 		},
 		"modelType": {
+			"param": true,
 			"type": "string",
 			"title": "Model Type",
 			"description": "Translation model to request. Empty lets DeepL choose its default. quality_optimized favors quality, latency_optimized favors speed, prefer_quality_optimized uses quality where available and otherwise falls back.",

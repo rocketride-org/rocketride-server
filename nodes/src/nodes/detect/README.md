@@ -36,7 +36,7 @@ The RF-DETR profile is the default and supplies the `rfdetr` engine. The MM-Grou
 
 ### Detection prompt
 
-This field is required for the prompt-driven MM-Grounding-DINO backend: startup fails when that backend has no non-empty prompt. It accepts period- or comma-separated terms, such as `person . car . dog`; the runtime splits either separator into the classes it passes to the detector. Use it to name objects or describe attributes such as `red car` or `person in a hat`. The field description explicitly warns that spatial relationships are not supported, so a prompt such as `the car on the left` can return all cars rather than only the left one.
+This field is required for the prompt-driven MM-Grounding-DINO backend. The prompt and the threshold are per-call parameters, so a caller may pass its own; the node checks the call's prompt when the call begins, and a call whose prompt names no class fails with an error that tells the caller to pass a prompt naming at least one class (or, on the configured prompt, to set one in the UI and restart the pipeline). It accepts period- or comma-separated terms, such as `person . car . dog`; the runtime splits either separator into the classes it passes to the detector. Use it to name objects or describe attributes such as `red car` or `person in a hat`. The field description explicitly warns that spatial relationships are not supported, so a prompt such as `the car on the left` can return all cars rather than only the left one.
 
 ### Confidence threshold
 

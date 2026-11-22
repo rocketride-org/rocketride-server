@@ -143,8 +143,8 @@ def build_detector(min_confidence: float):
     Create the YuNet detector.
 
     Args:
-        min_confidence: Score below which a detection is discarded by the model itself, so a weak
-            face never reaches the vote.
+        min_confidence: The score threshold the detector starts with; ``detect_rotations`` sets
+            each call's own before it detects.
 
     Returns:
         The detector, or None if the model could not be obtained — the node then abstains on
@@ -157,7 +157,7 @@ def build_detector(min_confidence: float):
         return None
 
 
-def detect_rotations(detector, lock, image):
+def detect_rotations(detector, lock, image, min_confidence: float):
     """
     Run the detector on all four rotations of one image.
 
@@ -165,6 +165,8 @@ def detect_rotations(detector, lock, image):
         detector: The YuNet detector.
         lock: Guards the detector, which is shared across concurrently processed objects.
         image: The downscaled BGR array to analyse.
+        min_confidence: This call's score threshold: a detection below it is discarded by the
+            model itself, so a weak face never reaches the vote.
 
     Returns:
         tuple: ``(detections, areas)``, each a list of four entries parallel to
@@ -175,9 +177,10 @@ def detect_rotations(detector, lock, image):
         frame = image if code is None else cv2.rotate(image, code)
         height, width = frame.shape[:2]
         found = []
-        # setInputSize is per-frame, not per-detector: 90 and 270 swap the dimensions. It also
-        # mutates state shared between concurrent objects, hence the lock.
+        # setInputSize is per-frame, not per-detector: 90 and 270 swap the dimensions. It and the
+        # call's score threshold mutate state shared between concurrent objects, hence the lock.
         with lock:
+            detector.setScoreThreshold(min_confidence)
             detector.setInputSize((width, height))
             _, faces = detector.detect(frame)
         if faces is not None:

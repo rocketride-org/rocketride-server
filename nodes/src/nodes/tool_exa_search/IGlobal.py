@@ -37,10 +37,6 @@ class IGlobal(IGlobalBase):
     """Global state for tool_exa_search."""
 
     apikey: str = ''
-    num_results: int = 10
-    use_autoprompt: bool = True
-    search_type: str = 'auto'
-    include_text: bool = True
 
     def beginGlobal(self) -> None:
         # The resolved config: defaults applied, numResults within 1-50, the
@@ -57,10 +53,6 @@ class IGlobal(IGlobalBase):
             raise ValueError('tool_exa_search: apikey is required')
 
         self.apikey = apikey
-        self.num_results = cfg.numResults
-        self.use_autoprompt = cfg.useAutoprompt
-        self.search_type = cfg.searchType
-        self.include_text = cfg.includeText
 
     def endGlobal(self) -> None:
         self.apikey = ''

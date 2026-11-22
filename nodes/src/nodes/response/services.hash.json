@@ -78,6 +78,8 @@
 			"type": "string",
 			"title": "Identifier key within result",
 			"minLength": 1,
+			"param": true,
+			"tool": false,
 			"default": "hash",
 			"maxLength": 32
 		}

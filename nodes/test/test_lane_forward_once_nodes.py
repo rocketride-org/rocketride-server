@@ -188,6 +188,20 @@ class _FakeIInstanceBase:
         raise _PreventDefaultRaised()
 
 
+class _FakeLLMBase(_FakeIInstanceBase):
+    """Stand-in for ai.common.llm_base.LLMBase: the call is resolved from the settings by the chat, as the real one does."""
+
+    def _call(self):
+        """Return this call's values, resolved by the control's chat from this call's settings."""
+        return self.IGlobal._chat.resolve_call(self.settings)
+
+    def _question(self, question):
+        """Ask the control's chat under this call, as the real one does for a chat without streaming."""
+        chat = self.IGlobal._chat
+        with chat.calling(self._call()):
+            return chat.chat(question)
+
+
 def _make_stubs():
     """Build the rocketlib and ai.common.* stub modules these nodes import."""
 
@@ -224,6 +238,7 @@ def _make_stubs():
         'ai.common.llm_base': types.ModuleType('ai.common.llm_base'),
         'ai.common.avi': types.ModuleType('ai.common.avi'),
         'ai.common.avi.descriptor': types.ModuleType('ai.common.avi.descriptor'),
+        'ai.constants': types.ModuleType('ai.constants'),
     }
     stubs['rocketlib'].IInstanceBase = _FakeIInstanceBase
     stubs['rocketlib'].Entry = FakeEntry
@@ -243,8 +258,10 @@ def _make_stubs():
     stubs['ai.common.utils'].normalize_tool_input = lambda args, **kw: args
     stubs['ai.common.utils'].optional_int = lambda args, key, default=None, **kw: default
     stubs['ai.common.utils'].require_str = lambda args, key, **kw: str(args[key])
-    stubs['ai.common.llm_base'].LLMBase = _FakeIInstanceBase
+    stubs['ai.common.llm_base'].LLMBase = _FakeLLMBase
     stubs['ai.common.avi.descriptor'].rename_ext = lambda metadata, ext: metadata
+    # memory_persistent's state backend keeps its values within the state store's ceiling
+    stubs['ai.constants'].CONST_STATE_MAX_TTL_SECONDS = 7 * 24 * 3600
     return stubs
 
 
@@ -460,16 +477,15 @@ def test_anomaly_detector_documents_without_metadata_are_delivered_once():
 class _StubRecognizer:
     """Stand-in for the GLiNER-backed recognizer."""
 
-    store_in_metadata = True
-
-    def extract_entities(self, text):
+    def extract_entities(self, text, min_confidence):
         """Return one fixed entity."""
         return [{'entity_group': 'PER', 'word': 'Obama'}]
 
 
 def _ner():
-    """Build a ner instance with a stub recognizer, begun as the engine begins every binding."""
+    """Build a ner instance with a stub recognizer and the call's settings, begun as the engine begins every binding."""
     inst, fake = _build('ner', types.SimpleNamespace(recognizer=_StubRecognizer()))
+    inst.settings = types.SimpleNamespace(min_confidence=0.9, store_in_metadata=True)
     inst.beginInstance()
     return inst, fake
 
@@ -526,14 +542,16 @@ class _StubAnswer:
 class _StubSearch:
     """Stand-in for the Exa search backend."""
 
-    def chat(self, question):
+    def chat(self, question, settings):
         """Return a fixed answer without calling any service."""
         return _StubAnswer()
 
 
 def _search_exa(listeners):
-    """Build a search_exa instance with the given connected lanes."""
-    return _build('search_exa', types.SimpleNamespace(search=_StubSearch()), listeners)
+    """Build a search_exa instance with the given connected lanes (the search knobs are the call's)."""
+    inst, fake = _build('search_exa', types.SimpleNamespace(search=_StubSearch()), listeners)
+    inst.settings = types.SimpleNamespace(type='auto', numResults=5, includeHighlights=True, highlightChars=600)
+    return inst, fake
 
 
 def test_search_exa_question_delivered_once_with_listener():
@@ -617,9 +635,15 @@ def test_llamaparse_table_not_delivered_without_listener():
 
 
 class _StubChat:
-    """Stand-in for the Mistral vision chat backend."""
+    """Stand-in for the Mistral vision chat backend and its per-call seam."""
 
-    _prompt = 'describe'
+    def resolve_call(self, settings):
+        """Return the call's values (the settings stand in for them)."""
+        return settings
+
+    def calling(self, call):
+        """Serve the call for the block; nothing to publish here."""
+        return contextlib.nullcontext(call)
 
     def chat(self, question):
         """Return a fixed answer without calling any service."""
@@ -627,8 +651,10 @@ class _StubChat:
 
 
 def _mistral():
-    """Build a llm_vision_mistral instance with a stub chat backend."""
-    return _build('llm_vision_mistral', types.SimpleNamespace(_chat=_StubChat()))
+    """Build a llm_vision_mistral instance with a stub chat backend and the call's prompts."""
+    inst, fake = _build('llm_vision_mistral', types.SimpleNamespace(_chat=_StubChat()))
+    inst.settings = types.SimpleNamespace(prompt='describe', systemPrompt='')
+    return inst, fake
 
 
 def test_mistral_converted_document_delivered_once():
@@ -766,12 +792,14 @@ def _context_optimizer(optimizer):
     """Build a context_optimizer instance with the given optimizer.
 
     Args:
-        optimizer: The optimizer IGlobal exposes, or None for config mode.
+        optimizer: The call's optimizer (beginInstance builds it from the call's settings), or None for config mode.
 
     Returns:
         (inst, fake_instance).
     """
-    return _build('context_optimizer', types.SimpleNamespace(optimizer=optimizer))
+    inst, fake = _build('context_optimizer', types.SimpleNamespace(catalog=None))
+    inst.optimizer = optimizer
+    return inst, fake
 
 
 def test_context_optimizer_delivers_only_the_trimmed_question():
@@ -889,7 +917,7 @@ def test_tool_n8n_media_stream_delivers_no_chunk(lane):
 
 
 # ============================================================================
-# memory_persistent: every exit forwards (a copy, when a store is set), so every exit must suppress
+# memory_persistent: every exit forwards a copy, so every exit must suppress
 # ============================================================================
 
 
@@ -1014,15 +1042,17 @@ class _SessionAnswer:
 
 
 def _memory(store):
-    """Build a memory_persistent instance with the given store.
+    """Build a memory_persistent instance whose calls read and write the given store.
 
     Args:
-        store: The session store IGlobal exposes, or None when the node is unconfigured.
+        store: The session store of each call (the instance builds one per call
+            from its settings and its state; ``_store`` stands in for that).
 
     Returns:
         (inst, fake_instance).
     """
-    inst, fake = _build('memory_persistent', types.SimpleNamespace(store=store))
+    inst, fake = _build('memory_persistent', types.SimpleNamespace(redis=None))
+    inst._store = lambda: store
     inst.open(None)
     return inst, fake
 
@@ -1045,14 +1075,16 @@ def _deliveries(fake, lane, write, payload):
     return delivered
 
 
-def test_memory_persistent_question_delivered_once_without_store():
-    """With no store the question passes through, once."""
-    inst, fake = _memory(None)
+def test_memory_persistent_question_delivered_once_without_session():
+    """With no session id the question passes through, once, and no session is made."""
+    store = _StubMemoryStore()
+    inst, fake = _memory(store)
     question = FakeQuestion()
 
     delivered = _deliveries(fake, 'questions', lambda: inst.writeQuestions(question), question)
 
-    assert delivered == [question], f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert len(delivered) == 1, f'questions lane delivered {len(delivered)} questions, expected 1'
+    assert store.sessions == {}
 
 
 def test_memory_persistent_question_delivered_once_with_invalid_session():
@@ -1083,14 +1115,16 @@ def test_memory_persistent_delivers_only_the_enriched_question():
     assert 'memory_context' not in question.metadata
 
 
-def test_memory_persistent_answer_delivered_once_without_store():
-    """With no store the answer passes through, once."""
-    inst, fake = _memory(None)
+def test_memory_persistent_answer_delivered_once_without_session():
+    """With no session id the answer passes through, once, and nothing is stored."""
+    store = _StubMemoryStore()
+    inst, fake = _memory(store)
     answer = _SessionAnswer({})
 
     delivered = _deliveries(fake, 'answers', lambda: inst.writeAnswers(answer), answer)
 
-    assert delivered == [answer], f'answers lane delivered {len(delivered)} answers, expected 1'
+    assert len(delivered) == 1, f'answers lane delivered {len(delivered)} answers, expected 1'
+    assert store.sessions == {}
 
 
 def test_memory_persistent_answer_delivered_once_with_invalid_session():

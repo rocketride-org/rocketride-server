@@ -23,6 +23,8 @@
 				"modify + filters/IMAP/POP/vacation/forwarding. settings_sharing: settings + sendAs/delegation/S⁠MIME. full: ",
 				"complete mailbox access, required for permanent delete."
 			],
+			"param": true,
+			"tool": false,
 			"default": "modify",
 			"enum": [
 				["readonly", "Read-only"],
@@ -40,6 +42,8 @@
 				"Enable permanent message/thread deletion (requires full access tier). Disabled by default to protect against ",
 				"accidental data loss."
 			],
+			"param": true,
+			"tool": false,
 			"default": false
 		}
 	},
@@ -57,7 +61,7 @@
 				"access": "modify"
 			}
 		},
-		"dropped": [],
+		"dropped": ["customerId", "service.customerId"],
 		"credential": {
 			"userToken": "user.userAuth"
 		}

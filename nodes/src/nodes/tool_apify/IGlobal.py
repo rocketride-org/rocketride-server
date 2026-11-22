@@ -25,13 +25,14 @@
 Apify tool node - global (shared) state.
 
 Reads the Apify API token from the resolved node config and creates an
-ApifyClient. Tool logic lives on IInstance via @tool_function.
+ApifyClient. Tool logic lives on IInstance via @tool_function, and so do the
+run bounds (max items, run timeout, max cost): they are per-call parameters
+the instance reads from ``self.settings``.
 """
 
 from __future__ import annotations
 
 import os
-from decimal import Decimal
 
 from rocketlib import IGlobalBase, warning
 
@@ -50,11 +51,6 @@ class IGlobal(IGlobalBase):
     """Global state for tool_apify."""
 
     client: ApifyClient | None = None
-    # Safety bounds for agent-driven runs; the schema supplies the defaults
-    # and the minimums, so the values arrive validated.
-    max_items: int = 100
-    run_timeout_secs: int = 120
-    max_cost_usd: Decimal = Decimal('1')
 
     def beginGlobal(self) -> None:
         cfg = self.config
@@ -64,10 +60,6 @@ class IGlobal(IGlobalBase):
         apikey = str(cfg.apikey or '').strip()
         if not apikey:
             raise Exception('tool_apify: apikey is required')
-
-        self.max_items = cfg.max_items
-        self.run_timeout_secs = cfg.run_timeout_secs
-        self.max_cost_usd = Decimal(str(cfg.max_cost_usd))
 
         try:
             self.client = ApifyClient(apikey)

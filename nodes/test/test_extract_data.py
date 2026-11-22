@@ -47,6 +47,14 @@ def test_services_documents_lane_maps_to_answers_and_documents():
 class _StubBase:
     """Stand-in for rocketlib IInstanceBase / IGlobalBase."""
 
+    #: This call's settings view, as the real base keeps it.
+    _settings = None
+
+    @property
+    def settings(self):
+        """This call's settings, served over ``_settings`` like the real base's."""
+        return self._settings
+
     def preventDefault(self) -> None:
         pass
 
@@ -153,8 +161,9 @@ def _make_instance(node_module):
     """
     instance_class = node_module.IInstance
     inst = instance_class.__new__(instance_class)
-    # The instance reads the kept field definitions through the accessor (methods-only IGlobal, plan 4.2)
-    inst.IGlobal = types.SimpleNamespace(fields=[], field_definitions=lambda: [])
+    # The target fields are this call's settings; the control holds nothing
+    inst.IGlobal = types.SimpleNamespace()
+    inst._settings = types.SimpleNamespace(fields=[])
     inst.instance = MagicMock()
     inst.table = []
     inst.chunkId = 0

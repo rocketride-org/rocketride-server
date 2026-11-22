@@ -22,35 +22,34 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Global handler for the Object Detection node.
+
+The control's configuration picks the backend (the selected profile's
+``engine`` constant), which is the model whose weights load here, once per
+control. The threshold and the prompt are per-call parameters: the instance
+reads them from its settings and passes them to ``Detector.detect``.
+"""
+
 from rocketlib import IGlobalBase
 from ai.common.models.base import make_device_lock
-from ai.common.models.vision.detection import OPEN_VOCAB_BACKENDS, Detector
+from ai.common.models.vision.detection import Detector
 
 
 class IGlobal(IGlobalBase):
+    """One control's detector: the loaded backend and the lock that serializes local inference."""
+
     detector = None
     device_lock = None
 
     def beginGlobal(self):
-        """Build the shared Detector facade from the resolved config.
+        """Build the shared Detector facade for the control's backend.
 
-        The selected profile pins the backend engine; the threshold is bounded
-        by the schema and the prompt exists only on the open-vocabulary branch,
-        where the schema requires it. The class split still guards against a
-        prompt made of separators only.
+        The selected profile pins the backend engine, which is the model
+        identity. The facade's own threshold and prompt stay at their defaults:
+        every call passes its own.
         """
-        config = self.config
-
-        backend = config.engine
-        prompt = (config.get('prompt') or '').strip()
-        classes = [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
-        if backend in OPEN_VOCAB_BACKENDS and not classes:
-            raise ValueError(
-                f'detect: engine "{backend}" requires a non-empty prompt. '
-                'Set a prompt in the UI (e.g. "person . car . dog") and restart the pipeline.'
-            )
-
-        self.detector = Detector(backend=backend, device=None, threshold=config.threshold, prompt=prompt or None)
+        self.detector = Detector(backend=self.config.engine, device=None)
 
         # Local inference must serialize GPU access
         self.device_lock = make_device_lock()
