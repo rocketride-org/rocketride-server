@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterator
 from rocketlib import warning
 from ai.common.chat import ChatBase
 from ai.common.config import Config
+from ai.common.llm_adapter import is_hosted_refusal
 from ai.common.model_gateway import (
     close_http_clients,
     hosted_http_clients,
@@ -47,8 +48,11 @@ def rejects_temperature(error: Exception) -> bool:
     So an error text that names the temperature anywhere counts, including a server that
     copies the request into its message: no attempt is made to tell that copy from a
     statement about the parameter, which may sit beside it.
+
+    A refusal from the hosted models backend never counts: it is final, whatever it
+    names. Its charged error replies are 5xx, so a resend never follows a charged call.
     """
-    if not isinstance(error, APIStatusError):
+    if not isinstance(error, APIStatusError) or is_hosted_refusal(error):
         return False
     if getattr(error, 'status_code', None) not in _REJECTED_REQUEST_STATUSES:
         return False

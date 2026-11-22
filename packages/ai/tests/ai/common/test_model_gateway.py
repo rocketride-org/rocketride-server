@@ -21,7 +21,8 @@ import sys
 import threading
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -661,6 +662,50 @@ def test_an_output_budget_at_the_pass_limit_is_not_offered_as_the_fix(monkeypatc
     assert 'Raise modelOutputTokens' not in str(error)
 
 
+def temperature_refused_by_the_backend(_request, _body):
+    error = {
+        'message': 'refused',
+        'type': 'rocketride_gateway_error',
+        'code': 'unsupported_parameter',
+        'param': 'temperature',
+    }
+    return httpx.Response(400, json={'error': error})
+
+
+def temperature_refused_by_the_provider(_request, _body):
+    """A provider's 400, passed through by the backend: released, not charged."""
+    error = {
+        'message': "Unsupported value: 'temperature' does not support 0 with this model.",
+        'type': 'invalid_request_error',
+        'param': 'temperature',
+        'code': 'unsupported_value',
+    }
+    return httpx.Response(400, json={'error': error})
+
+
+@pytest.mark.parametrize('streamed', [True, False], ids=['streamed', 'invoked'])
+def test_a_backend_refusal_that_names_the_temperature_stays_final(monkeypatch, backend, hosted, streamed):
+    _with_pass(monkeypatch)
+    gateway = backend(temperature_refused_by_the_backend, answer)
+
+    _result, error = _ask(_driver(monkeypatch, 'llm_openai_api', {**PLAIN, 'base_url': ''}), _prompt(), streamed)
+
+    assert isinstance(error, HostedModelError), repr(error)
+    assert len(gateway.requests) == 1
+
+
+@pytest.mark.parametrize('streamed', [True, False], ids=['streamed', 'invoked'])
+def test_a_temperature_the_provider_rejects_is_dropped_on_the_pass_too(monkeypatch, backend, hosted, streamed):
+    _with_pass(monkeypatch)
+    gateway = backend(temperature_refused_by_the_provider, answer)
+
+    result, error = _ask(_driver(monkeypatch, 'llm_openai_api', {**PLAIN, 'base_url': ''}), _prompt(), streamed)
+
+    assert error is None and result is not None, repr(error)
+    assert [('temperature' in r['body']) for r in gateway.requests] == [True, False]
+    assert {r['auth'] for r in gateway.requests} == {f'Bearer {TOKEN}'}
+
+
 def test_a_keyed_node_still_falls_back_after_a_failed_stream(monkeypatch, backend, hosted):
     gateway = backend(cut_stream, answer)
     result, error = _ask(_driver(monkeypatch, 'llm_openai', {**PLAIN, 'apikey': 'sk-user'}), _prompt(), True)
@@ -944,6 +989,68 @@ async def test_no_pass_reaches_the_task(monkeypatch, account, case):
 
     assert GATEWAY_ENV not in env and t._model_pass_renewal is None
     assert 'rrmg_' not in str(t.debug_message.call_args_list)
+
+
+async def test_the_pass_reaches_the_task_and_the_platform_secrets_do_not(monkeypatch, account):
+    for name in (
+        'RR_MODEL_GATEWAY_OPENAI_KEY',
+        'RR_DB_BROKER_TOKEN',
+        'ROCKETRIDE_DB_BROKER_TOKEN',
+        'RR_DATACORE_GRANT_KEY',
+    ):
+        monkeypatch.setenv(name, 'secret-' + name.lower())
+    monkeypatch.setenv('RR_SUBPROCESS_ENV', '*')
+    t = _env_task()
+    t._model_run_id = 'run-1'
+
+    env = await Task._build_subprocess_env(t, ([], False), True, 'run-1')
+    await Task._drop_model_pass(t)
+
+    assert json.loads(env[GATEWAY_ENV])['token'] == TOKEN
+    assert not any(value.startswith('secret-') for value in env.values())
+
+
+async def test_an_engine_that_ends_during_the_start_ends_the_pass_and_its_renewal(monkeypatch, account):
+    """The engine exits while the start waits on the run log: its _terminated() runs, and the start returns."""
+    import ai.account
+    import ai.modules.task.task_engine as engine
+    from rocketride import TASK_STATUS
+
+    t, _ = _startable_task(monkeypatch)
+    del t._build_subprocess_env
+    del t._terminated
+    t._wants_hosted_openai = MagicMock(return_value=True)
+    t._status = TASK_STATUS()
+    t._status.state = TASK_STATE.NONE.value
+    t._status.name = ''
+    t._run_trigger = 'manual'
+    t._server = SimpleNamespace(assign_port=MagicMock(return_value=20001), release_port=MagicMock(), _config={})
+    t._server.get_task_control = MagicMock(return_value=None)
+    t._debug_stdio = t._data_client = t._task_metrics = None
+    t._status_update_task = None
+    t._final_events_sent = True
+    t._forward_task_event = AsyncMock()
+    t._process_exit_code = AsyncMock(return_value=1)
+    t._status_update_loop = AsyncMock()
+    monkeypatch.setattr(engine.asyncio, 'create_subprocess_exec', AsyncMock(return_value=SimpleNamespace(pid=4321)))
+    monkeypatch.setattr(Task, 'TaskDbgStdio', MagicMock(return_value=SimpleNamespace(connect=AsyncMock())))
+    monkeypatch.setattr(ai.account.Store, 'file_store', MagicMock())
+    seen = {}
+
+    async def open_while_the_engine_ends(**_):
+        seen['renewal'] = t._model_pass_renewal
+        await Task._terminated(t)
+
+    run_log = SimpleNamespace(open=open_while_the_engine_ends, chapter_begin_seq=1)
+    monkeypatch.setattr(engine, 'RunLogWriter', MagicMock(return_value=run_log))
+    monkeypatch.setattr(engine, 'TaskMetrics', MagicMock())
+
+    await Task.start_task(t)
+    await asyncio.sleep(0)
+
+    assert seen['renewal'] is not None and seen['renewal'].cancelled()
+    assert account.revoked == [account.issued[0]['run_id']]
+    assert t._model_pass_renewal is None and t._model_run_id is None
 
 
 @pytest.mark.parametrize('opt_in', ['*', 'RR_*', 'RR_MODEL_GATEWAY_OPENAI_KEY', 'rr_model_gateway_openai_key'])
