@@ -24,7 +24,9 @@
 """
 Bland AI tool node instance.
 
-Delegates tool invocation to the ``BlandDriver`` created by ``IGlobal``.
+Delegates tool invocation to a ``BlandDriver`` built once per call from the
+control's account and this call's defaults (voice, maximum duration,
+recording, language).
 """
 
 from __future__ import annotations
@@ -34,13 +36,38 @@ from typing import Any
 from rocketlib import IInstanceBase
 
 from .IGlobal import IGlobal
+from .bland_driver import BlandDriver
 
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    # This call's driver, built on its first invoke
+    driver: BlandDriver | None = None
+
+    def _driver(self) -> BlandDriver:
+        """
+        This call's driver: the control's key and namespace with this call's defaults.
+
+        Returns:
+            The driver.
+
+        Raises:
+            RuntimeError: The control has no key (it never began).
+        """
+        if self.driver is None:
+            if not getattr(self.IGlobal, 'api_key', ''):
+                raise RuntimeError('bland_ai: driver not initialized — check API key configuration')
+            settings = self.settings
+            self.driver = BlandDriver(
+                server_name=self.IGlobal.server_name,
+                api_key=self.IGlobal.api_key,
+                default_voice=settings.voice,
+                max_duration=settings.maxDuration,
+                record=settings.record,
+                language=settings.language,
+            )
+        return self.driver
+
     def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        driver = getattr(self.IGlobal, 'driver', None)
-        if driver is None:
-            raise RuntimeError('bland_ai: driver not initialized — check API key configuration')
-        return driver.handle_invoke(param)
+        return self._driver().handle_invoke(param)

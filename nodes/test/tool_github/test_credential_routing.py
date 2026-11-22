@@ -754,7 +754,7 @@ def test_the_retry_after_a_401_continues_the_calls_rate_limit_budget(github, rsa
     with real_node(app_config(rsa_private_key_pem, rateLimitBudgetSeconds=5)) as inst:
         from tool_github import github_client
 
-        inst.IGlobal.retry_policy = github_client.RetryPolicy(budget_seconds=5, sleep=slept.append)
+        inst._options().retry_policy = github_client.RetryPolicy(budget_seconds=5, sleep=slept.append)
         result = dispatch(inst, 'repo_tree', {'repo': 'acme/api', 'walk': True})
     # The second 4 s wait does not fit the 1 s the first left: the call stops there.
     assert slept == [4.0]
@@ -785,7 +785,7 @@ def test_separate_tool_calls_get_separate_budgets(github, rsa_private_key_pem):
     with real_node(app_config(rsa_private_key_pem)) as inst:
         from tool_github import github_client
 
-        inst.IGlobal.retry_policy = github_client.RetryPolicy(budget_seconds=5, sleep=slept.append)
+        inst._options().retry_policy = github_client.RetryPolicy(budget_seconds=5, sleep=slept.append)
         first = dispatch(inst, 'repo_languages', {'repo': 'acme/api'})
         second = dispatch(inst, 'repo_languages', {'repo': 'acme/api'})
     # Each call waits its own 4 s of a 5 s budget.
@@ -913,9 +913,10 @@ def test_an_empty_default_repo_does_not_break_a_pat(github):
 
 
 def test_a_malformed_default_repo_is_refused_before_it_can_pick_a_credential(github):
-    with pytest.raises(ValueError, match='defaultRepo must be a repository in owner/repo form'):
-        with real_node({'credentialMap': {'acme/*': 'tok-owner'}, 'defaultRepo': 'acme'}):
-            pytest.fail('pipeline started with an invalid credential-routing default')
+    """The defaultRepo is a call's setting: the call that reads it is refused before any tool runs."""
+    with real_node({'credentialMap': {'acme/*': 'tok-owner'}, 'defaultRepo': 'acme'}) as inst:
+        with pytest.raises(ValueError, match='defaultRepo must be a repository in owner/repo form'):
+            dispatch(inst, 'repo_get', {})
     assert github.calls == []
 
 

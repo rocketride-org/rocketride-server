@@ -87,7 +87,7 @@ RAW_REQUEST_TOOL = 'request'
 #: Publishing more tools than this makes an LLM's tool choice unreliable, and some
 #: providers reject a larger list outright (OpenAI caps a request at 128 functions).
 #: Crossing it is a warning, never an error, and ``all`` is exempt — see
-#: ``IGlobal._oversized_warning``.
+#: ``oversized_warning``.
 RECOMMENDED_TOOL_LIMIT = 120
 
 
@@ -124,6 +124,27 @@ def tool_counts_by_group() -> dict[str, int]:
 def published_tool_count(groups) -> int:
     """How many tools the given set of groups publishes."""
     return sum(count for group, count in tool_counts_by_group().items() if group in groups)
+
+
+def oversized_warning(raw, groups) -> str:
+    """Warn when the selected groups publish more tools than an LLM handles well.
+
+    Advisory only - the tools are still published. ``all`` is an explicit opt-in
+    to the whole surface and is exempt.
+    """
+    if wants_all_groups(raw):
+        return ''
+    try:
+        total = published_tool_count(groups)
+    except Exception:
+        return ''
+    if total <= RECOMMENDED_TOOL_LIMIT:
+        return ''
+    return (
+        f'toolGroups publishes {total} tools, above the recommended {RECOMMENDED_TOOL_LIMIT}. '
+        'Agents pick the wrong tool more often at this size, and some providers reject more '
+        'than 128 tools in one request. Drop a group, or use "all" if this is deliberate.'
+    )
 
 
 def normalize_groups(raw) -> frozenset:

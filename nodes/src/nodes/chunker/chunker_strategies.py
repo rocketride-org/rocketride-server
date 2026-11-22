@@ -172,8 +172,17 @@ class SentenceChunker(ChunkingStrategy):
 class TokenChunker(ChunkingStrategy):
     """Split by token count using tiktoken (respects model context windows)."""
 
-    def __init__(self, chunk_size: int = 512, chunk_overlap: int = 50, encoding_name: str = 'cl100k_base'):
-        """Initialize with chunk size, overlap, and tiktoken encoding name."""
+    def __init__(
+        self, chunk_size: int = 512, chunk_overlap: int = 50, encoding_name: str = 'cl100k_base', encoder=None
+    ):
+        """Initialize with chunk size, overlap, the tiktoken encoding name and, optionally, its loaded encoder.
+
+        Args:
+            chunk_size: Maximum tokens per chunk.
+            chunk_overlap: Tokens shared by consecutive chunks; below ``chunk_size``.
+            encoding_name: The tiktoken encoding to load when no ``encoder`` is given.
+            encoder: An already loaded encoding of that name (the node's shared tokenizer).
+        """
         if chunk_size <= 0:
             raise ValueError('chunk_size must be positive')
         if chunk_overlap < 0:
@@ -183,7 +192,7 @@ class TokenChunker(ChunkingStrategy):
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
         self.encoding_name = encoding_name
-        self._encoder = None
+        self._encoder = encoder
 
     def _get_encoder(self):
         """Lazily initialize the tiktoken encoder."""

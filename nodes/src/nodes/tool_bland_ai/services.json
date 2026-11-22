@@ -33,6 +33,7 @@
 			"required": true
 		},
 		"bland_ai.voice": {
+			"param": true,
 			"type": "string",
 			"title": "Default Voice",
 			"description": "Default AI voice for calls",
@@ -47,6 +48,8 @@
 			]
 		},
 		"bland_ai.maxDuration": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Max Call Duration (minutes)",
 			"description": "Maximum call length in minutes (positive integer)",
@@ -54,6 +57,8 @@
 			"minimum": 1
 		},
 		"bland_ai.record": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Record Calls",
 			"default": true,
@@ -63,6 +68,7 @@
 			]
 		},
 		"bland_ai.language": {
+			"param": true,
 			"type": "string",
 			"title": "Language",
 			"default": "en",

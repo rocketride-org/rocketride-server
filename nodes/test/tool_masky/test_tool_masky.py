@@ -785,7 +785,8 @@ def test_begin_global_loads_depends_and_builds_driver(stubs, http):
     assert len(stubs.depends.calls) == 1
     assert isinstance(ig.driver, MaskyDriver)
     assert [t['name'] for t in ig.driver._tool_query()][0] == 'masky.list_avatars'
-    assert ig.settings['action'] == 'talking_head'
+    # The action is a call's setting: a call with no params reads the stored default
+    assert IGlobalMod.read_settings(ig._resolved())['action'] == 'talking_head'
     assert http['calls'] == []
 
 
@@ -822,7 +823,7 @@ def test_end_global_clears_client_key_and_driver(stubs):
     assert client._api_key == KEY
     ig.endGlobal()
     assert client._api_key == ''
-    assert ig.driver is None and ig.settings is None
+    assert ig.driver is None
 
 
 # ---------------------------------------------------------------------------
@@ -1132,7 +1133,7 @@ def test_a_cancelled_pipeline_stops_waiting_through_that_wiring(stubs, http, mon
         FakeResp(200, {'generation': {'generationId': 'G1', 'status': 'pending'}}),
     ]
     with pytest.raises(MaskyCancelled):
-        ig.driver._tool_invoke(
+        ig.driver.for_call(IGlobalMod.read_settings(ig._resolved()))._tool_invoke(
             tool_name='masky.speak', input_obj={'text': 'hi', 'output': 'audio', 'wait_for_completion': True}
         )
     assert [c['method'] for c in http['calls']] == ['POST', 'GET'], (

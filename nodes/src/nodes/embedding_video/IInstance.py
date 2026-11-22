@@ -94,7 +94,8 @@ class IInstance(IInstanceBase):
 
         elif action == AVI_ACTION.WRITE:
             if self._video_data is not None:
-                max_size = self.IGlobal.max_video_size_bytes
+                # The call's size cap, in megabytes
+                max_size = self.settings.maxVideoSizeMB * 1024 * 1024
                 if len(self._video_data) + len(buffer) > max_size:
                     max_mb = max_size / (1024 * 1024)
                     warning(f'Video exceeds maximum allowed size of {max_mb:.0f} MB, rejecting')
@@ -147,16 +148,17 @@ class IInstance(IInstanceBase):
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 video_duration = total_frames / fps
 
-                # Determine extraction boundaries.
-                start_time = self.IGlobal.start_time
-                duration = self.IGlobal.duration
+                # Determine extraction boundaries (this call's settings).
+                settings = self.settings
+                start_time = settings.start_time
+                duration = settings.duration
                 if duration <= 0:
                     end_time = video_duration
                 else:
                     end_time = min(start_time + duration, video_duration)
 
-                interval = self.IGlobal.frame_interval
-                max_frames = self.IGlobal.max_frames
+                interval = settings.interval
+                max_frames = settings.max_frames
 
                 frames_extracted = 0
                 frame_interval_frames = max(1, int(interval * fps))

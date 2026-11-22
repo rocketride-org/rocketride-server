@@ -57,6 +57,9 @@ def instance(monkeypatch):
             get_token=lambda repo=None, owner=None: 'test-token',
             auth_type_for=lambda repo=None, owner=None: 'pat',
             secrets=lambda: ('test-token',),
+        )
+        # The options are the call's settings
+        inst._call_options = SimpleNamespace(
             default_repo='owner/repo',
             read_only=True,
             tools=frozenset(),
@@ -235,7 +238,7 @@ def test_graphql_dispatches_with_json_input(instance):
 @pytest.mark.parametrize('allow_mutations', [False, True])
 def test_graphql_mutation_refused_in_read_only_mode_through_dispatch(instance, allow_mutations):
     inst, request = instance
-    inst.IGlobal.graphql_allow_mutations = allow_mutations
+    inst._options().graphql_allow_mutations = allow_mutations
     param = {
         'op': 'tool.invoke',
         'tool_name': 'graphql',
@@ -249,7 +252,7 @@ def test_graphql_mutation_refused_in_read_only_mode_through_dispatch(instance, a
 
 def test_graphql_mutation_refused_with_read_only_off_until_allowed_through_dispatch(instance):
     inst, request = instance
-    inst.IGlobal.read_only = False
+    inst._options().read_only = False
     param = {
         'op': 'tool.invoke',
         'tool_name': 'graphql',
@@ -260,7 +263,7 @@ def test_graphql_mutation_refused_with_read_only_off_until_allowed_through_dispa
     assert 'graphqlAllowMutations is off' in param['output']['message']
     assert 'readOnly' not in param['output']['message']
     request.assert_not_called()
-    inst.IGlobal.graphql_allow_mutations = True
+    inst._options().graphql_allow_mutations = True
     request.return_value = Mock(status_code=200, headers={}, ok=True)
     request.return_value.iter_content = Mock(return_value=[b'{"data": {"addStar": {"clientMutationId": null}}}'])
     inst.invoke(param)
@@ -270,7 +273,7 @@ def test_graphql_mutation_refused_with_read_only_off_until_allowed_through_dispa
 
 def test_allowlist_limits_discovery_and_dispatch(instance):
     inst, request = instance
-    inst.IGlobal.tools = frozenset({'graphql', 'repo_tree', 'label_list'})
+    inst._options().tools = frozenset({'graphql', 'repo_tree', 'label_list'})
     assert sorted(_query_tools(inst)) == ['graphql', 'label_list', 'repo_tree']
     # A tool left out of the allowlist is not this node's to run: the engine moves on.
     with pytest.raises(APERR) as error:

@@ -60,34 +60,26 @@ class Embedding:
     _vectorSize: int = 0
     _tokenSize: int = 0
     _embedding: SentenceTransformer | None = None
-    _document_prefix: str = ''
-    _query_prefix: str = ''
 
     def __init__(self, provider: str, config: Dict[str, Any], bag: Dict[str, Any]):
-        """Initialize the Embedding instance from the node's resolved config.
+        """Initialize the Embedding instance from the control's resolved config.
 
         Args:
             provider: The node's logical type.
-            config: The node's resolved config (``IGlobal.config``). The model
+            config: The control's resolved config (``IGlobal.config``). The model
                 is always set (pinned by the preset, or typed on the custom
-                profile); the truncation and prefix knobs exist on the custom
-                profile only, so they are read with their resolver defaults.
+                profile). The truncation and the prefixes are each call's: the
+                encode methods take them, so one loaded model serves them all.
             bag: The endpoint bag.
         """
         # Init the base
 
         # Get the model from our section
         self._model = config['model']
-        self._truncateDim = config.get('truncate_dim') or None
-        self._document_prefix = config.get('document_prefix') or ''
-        self._query_prefix = config.get('query_prefix') or ''
 
         # Create one
         monitorStatus('Loading model', self._model)
-        self._embedding = SentenceTransformer(
-            model_name_or_path=self._model,
-            truncate_dim=self._truncateDim,
-        )
+        self._embedding = SentenceTransformer(model_name_or_path=self._model)
 
         # Check it
         if self._embedding is None:
@@ -115,18 +107,32 @@ class Embedding:
         # Return it
         return self._tokenSize
 
+    @staticmethod
+    def _truncate(vectors: ndarray, truncate_dim: int) -> ndarray:
+        """Keep the first ``truncate_dim`` dimensions (0 keeps the model's own size).
+
+        The same cut sentence-transformers makes for ``truncate_dim``: the leading
+        dimensions of the model's output, taken after encoding.
+        """
+        return vectors[:, :truncate_dim] if truncate_dim else vectors
+
     # Encode the given string return a list of vectors
-    def encodeQuestion(self, question: Question) -> List:
+    def encodeQuestion(self, question: Question, query_prefix: str = '', truncate_dim: int = 0) -> List:
         """Given a string (document), encode the document into a vector.
 
         Return the vector as an array of floats.
+
+        Args:
+            question: The question whose entries are embedded in place.
+            query_prefix: The call's prefix prepended to each question text.
+            truncate_dim: The call's output dimensionality (0 = the model's).
         """
         # Encode all questions in one batch; encode(list) returns (N, dim), assign vectors[i] per question
         if not question.questions:
             return
         texts = (
-            [f'{self._query_prefix}{q.text}' for q in question.questions]
-            if self._query_prefix
+            [f'{query_prefix}{q.text}' for q in question.questions]
+            if query_prefix
             else [q.text for q in question.questions]
         )
         # Get the vectors
@@ -134,15 +140,21 @@ class Embedding:
         # Check the return type
         if not isinstance(vectors, ndarray):
             raise Exception('Embedding is not an ndarray')
+        vectors = self._truncate(vectors, truncate_dim)
         # Save it
         for i, q in enumerate(question.questions):
             q.embedding = vectors[i].tolist()
             q.embedding_model = self._model
 
-    def encodeChunks(self, chunks: List[Doc]) -> None:
+    def encodeChunks(self, chunks: List[Doc], document_prefix: str = '', truncate_dim: int = 0) -> None:
         """Given a list of documents, encode the document into a vector.
 
         Place it in the embedding field of the document.
+
+        Args:
+            chunks: The documents to embed in place.
+            document_prefix: The call's prefix prepended to each document text.
+            truncate_dim: The call's output dimensionality (0 = the model's).
         """
         # This happens if the document is empty
         if not len(chunks):
@@ -151,12 +163,10 @@ class Embedding:
         # For each document, if specified
         embeddings: List[str] = []
         for chunk in chunks:
-            embeddings.append(
-                f'{self._document_prefix}{chunk.page_content}' if self._document_prefix else chunk.page_content
-            )
+            embeddings.append(f'{document_prefix}{chunk.page_content}' if document_prefix else chunk.page_content)
 
         # Get the vectors
-        array_vectors = self._embedding.encode(embeddings, show_progress_bar=False)
+        array_vectors = self._truncate(self._embedding.encode(embeddings, show_progress_bar=False), truncate_dim)
 
         # Save the embeddings
         for index in range(0, len(chunks)):

@@ -93,9 +93,13 @@ def _begin(stored_config):
 
 
 def _decode_kwargs(stored_config):
-    """Build an IGlobal from a node config and return the kwargs it hands Whisper."""
+    """Build an IGlobal from a node config and return the kwargs one call hands Whisper.
+
+    The call has no params of its own, so its settings are the stored config's values
+    (the full resolved view, which serves the param-flagged keys).
+    """
     ig, _ = _begin(stored_config)
-    ig.transcribe(b'\x00\x01' * 2000)
+    ig.transcribe(b'\x00\x01' * 2000, ig._resolved())
 
     return ig._whisper.calls[-1]
 
@@ -180,15 +184,16 @@ def _built_whisper(stored_config):
     return ig._whisper
 
 
-def test_language_reaches_the_whisper_constructor():
-    """IGlobal has read `language` since the initial commit, but services.json never
-    declared it, so the UI could not reach it and every profile pinned en.
+def test_language_travels_with_each_request():
+    """The language is a per-call value: Whisper.transcribe(language=) overrides the
+    loaded model's default, so one model serves calls in different languages.
     """
-    assert _built_whisper({'language': 'ru'}).language == 'ru'
+    assert _decode_kwargs({'language': 'ru'})['language'] == 'ru'
+    assert _built_whisper({'language': 'ru'}).language is None
 
 
 def test_language_defaults_to_english():
-    assert _built_whisper({}).language == 'en'
+    assert _decode_kwargs({})['language'] == 'en'
 
 
 def test_language_is_declared_in_services_json():
@@ -223,12 +228,12 @@ def test_the_startup_log_names_what_was_actually_loaded():
     """The only runtime signal of which model is running.
 
     Both #1809 and #2067 are bugs where the node loaded a different model than the one on
-    screen and said nothing, so the line has to name every value that identifies the model.
+    screen and said nothing, so the line has to name every value that identifies the model
+    (the language is each call's, not the model's).
     """
     logged = ' '.join(_debug_lines({'model': 'medium', 'language': 'de', 'compute_type': 'int8'}))
 
     assert 'model=medium' in logged
-    assert 'language=de' in logged
     assert 'compute_type=int8' in logged
 
 
@@ -326,10 +331,14 @@ def _class_attrs(path, class_name):
     }
 
 
-def test_iglobal_reads_buffering_from_config():
+def test_buffering_is_a_per_call_setting():
+    """chunk_duration is a param: the control never reads it, the call's settings carry it."""
     ig, _ = _begin({'chunk_duration': 30})
 
-    assert ig.chunk_duration == 30
+    assert not hasattr(ig, 'chunk_duration')
+    assert ig._resolved()['chunk_duration'] == 30
+    with pytest.raises(ConfigError):
+        ig.config.chunk_duration
 
 
 def test_buffering_defaults_reproduce_transcribe_constants():

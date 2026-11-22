@@ -207,29 +207,23 @@ def _install_stubs():
         sys.modules['ai.common.schema'] = m
 
 
-def _load_real_iglobal_module():
-    """Load the real ``IGlobal`` module under a unique name (deps stubbed)."""
+def _load_real_policy_module():
+    """Load the real ``policy`` module (the call's gates and sink settings) under a unique name (deps stubbed)."""
     _install_stubs()
-    spec = importlib.util.spec_from_file_location('tfs_iglobal_real', str(_NODE_DIR / 'IGlobal.py'))
+    spec = importlib.util.spec_from_file_location('tfs_policy_real', str(_NODE_DIR / 'policy.py'))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
-def _load_real_iglobal():
-    """The real ``IGlobal`` class."""
-    return _load_real_iglobal_module().IGlobal
-
-
 class TestSinkConfig:
     def test_defaults_when_missing(self):
-        mod = _load_real_iglobal_module()
-        assert mod.IGlobal._sink_config({}) == ('output/', False, 3600, mod.OnConflict.UNIQUE)
+        mod = _load_real_policy_module()
+        assert mod.sink_config({}) == ('output/', False, 3600, mod.OnConflict.UNIQUE)
 
     def test_explicit_values(self):
-        mod = _load_real_iglobal_module()
-        IG = mod.IGlobal
-        assert IG._sink_config({'targetDir': 'out2/', 'emitUrl': True, 'urlExpiresIn': 120, 'onConflict': 'skip'}) == (
+        mod = _load_real_policy_module()
+        assert mod.sink_config({'targetDir': 'out2/', 'emitUrl': True, 'urlExpiresIn': 120, 'onConflict': 'skip'}) == (
             'out2/',
             True,
             120,
@@ -238,19 +232,28 @@ class TestSinkConfig:
 
     def test_conflict_policy_defaults_to_the_non_destructive_choice(self):
         """The tool definition declares no policy, so the sink's schema default `unique` applies."""
-        mod = _load_real_iglobal_module()
-        IG = mod.IGlobal
-        assert IG._sink_config({})[3] is mod.OnConflict.UNIQUE
-        assert IG._sink_config({'onConflict': 'skip'})[3] is mod.OnConflict.SKIP
-        assert IG._sink_config({'onConflict': 'overwrite'})[3] is mod.OnConflict.OVERWRITE
+        mod = _load_real_policy_module()
+        assert mod.sink_config({})[3] is mod.OnConflict.UNIQUE
+        assert mod.sink_config({'onConflict': 'skip'})[3] is mod.OnConflict.SKIP
+        assert mod.sink_config({'onConflict': 'overwrite'})[3] is mod.OnConflict.OVERWRITE
+
+    def test_a_call_policy_reads_every_gate_and_the_sink_settings(self):
+        """A call's settings carry the tool's gates or the sink's values; an absent key takes its schema default."""
+        mod = _load_real_policy_module()
+        policy = mod.call_policy(
+            {'allowDelete': True, 'targetDir': 'exports/', 'pathWhitelist': [{'whitelistPattern': '^a'}]}
+        )
+        assert (policy.allow_read, policy.allow_write, policy.allow_delete) == (True, True, True)
+        assert (policy.target_dir, policy.on_conflict) == ('exports/', mod.OnConflict.UNIQUE)
+        assert [p.pattern for p in policy.path_patterns] == ['^a']
 
     def test_members_cover_exactly_the_services_json_enum(self):
         """Member names are what resolves the dropdown value, so a new choice needs a member.
 
         The resolver pins the stored value to this enum, so a value outside it never
-        reaches ``_sink_config``.
+        reaches ``sink_config``.
         """
-        mod = _load_real_iglobal_module()
+        mod = _load_real_policy_module()
         fields = _load_services('services.store.json')['propertyDefinitions']
         choices = [c[0] for c in fields['filesystem.onConflict']['enum']]
         assert sorted(m.name.lower() for m in mod.OnConflict) == sorted(choices)
@@ -280,24 +283,6 @@ def _install_iinstance_stubs():
         pkg = types.ModuleType('tool_filesystem')
         pkg.__path__ = [str(_NODE_DIR)]
         sys.modules['tool_filesystem'] = pkg
-    if 'tool_filesystem.IGlobal' not in sys.modules:
-        ig = types.ModuleType('tool_filesystem.IGlobal')
-
-        class _IGlobalStub:
-            allow_write = True
-            path_patterns = None
-            target_dir = 'output/'
-            emit_url = False
-            url_expires_in = 3600
-
-        ig.IGlobal = _IGlobalStub
-        sys.modules['tool_filesystem.IGlobal'] = ig
-
-    # Set unconditionally: test_read_size_cap installs its own stub over the same key, so a
-    # conditional patch would depend on which module ran first.
-    stub_module = sys.modules['tool_filesystem.IGlobal']
-    stub_module.OnConflict = _load_real_iglobal_module().OnConflict
-    stub_module.IGlobal.on_conflict = stub_module.OnConflict.UNIQUE
 
 
 def _fs(exists_paths=()):
@@ -356,21 +341,22 @@ def _sink_instance(
     listeners=('json',),
     on_conflict='unique',
 ):
-    """Build an IInstance wired to a stub IGlobal, a ``self.files`` double and a mocked engine ``instance``."""
+    """Build an IInstance wired to a call policy, a ``self.files`` double and a mocked engine ``instance``."""
     _install_iinstance_stubs()
-    from tool_filesystem.IGlobal import IGlobal, OnConflict
     from tool_filesystem.IInstance import IInstance
+    from tool_filesystem.policy import CallPolicy, OnConflict
 
     inst = with_files(IInstance)()
     inst.files = file_store
-    g = IGlobal()
-    g.allow_write = allow_write
-    g.path_patterns = path_patterns
-    g.target_dir = target_dir
-    g.emit_url = emit_url
-    g.url_expires_in = url_expires_in
-    g.on_conflict = OnConflict[on_conflict.upper()]
-    inst.IGlobal = g
+    # The gates and the sink settings are the call's (built from its settings by the engine binding)
+    inst._call_policy = CallPolicy(
+        allow_write=allow_write,
+        path_patterns=tuple(path_patterns or ()),
+        target_dir=target_dir,
+        emit_url=emit_url,
+        url_expires_in=url_expires_in,
+        on_conflict=OnConflict[on_conflict.upper()],
+    )
     inst.instance = MagicMock()
     inst.instance.getListeners.return_value = list(listeners)
     # NB: ``name`` is a reserved MagicMock constructor kwarg, so assign after.

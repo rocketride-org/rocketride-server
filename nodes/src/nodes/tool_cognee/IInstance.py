@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Dict
 
 from rocketlib import IInstanceBase, tool_function
@@ -21,6 +22,28 @@ class IInstance(IInstanceBase):
     """Expose Cognee's shared memory workflow as three agent tools."""
 
     IGlobal: IGlobal
+
+    def _call_settings(self) -> SimpleNamespace:
+        """
+        This call's dataset scope, override gate, retrieval defaults and request timeout.
+
+        Returns:
+            The values the tools read, from the call's settings (the dataset stripped).
+
+        Raises:
+            ValueError: The dataset is blank, which would silently widen the scope to the server default.
+        """
+        settings = self.settings
+        dataset = settings.dataset.strip()
+        if not dataset:
+            raise ValueError('tool_cognee: dataset is required')
+        return SimpleNamespace(
+            dataset=dataset,
+            allow_dataset_override=settings.allow_dataset_override,
+            search_type=settings.search_type,
+            top_k=settings.top_k,
+            request_timeout=settings.request_timeout,
+        )
 
     @tool_function(
         input_schema={
@@ -61,8 +84,9 @@ class IInstance(IInstanceBase):
         """Store plain text in the configured Cognee dataset."""
         args = normalize_tool_input(args, tool_name='remember')
         cfg = self.IGlobal
+        call = self._call_settings()
         text = _required_string(args, 'text', tool_name='remember')
-        dataset = _dataset(args, cfg, tool_name='remember')
+        dataset = _dataset(args, call, tool_name='remember')
         run_in_background = args.get('run_in_background', False)
         if not isinstance(run_in_background, bool):
             raise ValueError('cognee.remember: "run_in_background" must be a boolean')
@@ -73,7 +97,7 @@ class IInstance(IInstanceBase):
             text=text,
             dataset=dataset,
             run_in_background=run_in_background,
-            timeout=cfg.request_timeout,
+            timeout=call.request_timeout,
         )
 
     @tool_function(
@@ -116,17 +140,18 @@ class IInstance(IInstanceBase):
         """Recall memory results while requesting references from Cognee."""
         args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
+        call = self._call_settings()
         query = _required_string(args, 'query', tool_name='recall')
-        dataset = _dataset(args, cfg, tool_name='recall')
+        dataset = _dataset(args, call, tool_name='recall')
 
-        search_type = args.get('search_type', cfg.search_type)
+        search_type = args.get('search_type', call.search_type)
         if not isinstance(search_type, str) or not search_type.strip():
             raise ValueError('cognee.recall: "search_type" must be a non-empty string')
         search_type = search_type.strip().upper()
         if search_type not in SEARCH_TYPES:
             raise ValueError(f'cognee.recall: unsupported search_type "{search_type}"')
 
-        top_k = args.get('top_k', cfg.top_k)
+        top_k = args.get('top_k', call.top_k)
         if isinstance(top_k, bool) or not isinstance(top_k, int):
             raise ValueError('cognee.recall: "top_k" must be an integer')
         top_k = max(1, min(MAX_TOP_K, top_k))
@@ -139,7 +164,7 @@ class IInstance(IInstanceBase):
             search_type=search_type,
             top_k=top_k,
             include_references=True,
-            timeout=cfg.request_timeout,
+            timeout=call.request_timeout,
         )
         return {'results': results, 'count': len(results)}
 
@@ -174,23 +199,25 @@ class IInstance(IInstanceBase):
         """Return the normalized processing status for a Cognee dataset."""
         args = normalize_tool_input(args, tool_name='memory_status')
         cfg = self.IGlobal
-        dataset = _dataset(args, cfg, tool_name='memory_status')
+        call = self._call_settings()
+        dataset = _dataset(args, call, tool_name='memory_status')
         dataset_id = self._resolve_dataset_id(dataset)
         status = cognee_client.get_dataset_status(
             cfg.base_url,
             cfg.api_key,
             dataset_id=dataset_id,
-            timeout=cfg.request_timeout,
+            timeout=call.request_timeout,
         )
         return {'dataset': dataset, 'dataset_id': dataset_id, 'status': status}
 
     def _resolve_dataset_id(self, dataset: str) -> str:
         """Resolve an exact dataset name to the UUID required by memory status."""
         cfg = self.IGlobal
+        call = self._call_settings()
         datasets = cognee_client.list_datasets(
             cfg.base_url,
             cfg.api_key,
-            timeout=cfg.request_timeout,
+            timeout=call.request_timeout,
         )
         for row in datasets:
             if str(row.get('name') or '') == dataset:
@@ -208,14 +235,14 @@ def _required_string(args: Dict[str, Any], field: str, *, tool_name: str) -> str
     return value.strip()
 
 
-def _dataset(args: Dict[str, Any], cfg: IGlobal, *, tool_name: str) -> str:
-    """Resolve the operator dataset and allow alternate scopes only when enabled."""
+def _dataset(args: Dict[str, Any], call: SimpleNamespace, *, tool_name: str) -> str:
+    """Resolve the call's operator dataset and allow alternate scopes only when the call enables them."""
     if 'dataset' not in args:
-        return cfg.dataset
+        return call.dataset
     value = args['dataset']
     if not isinstance(value, str) or not value.strip():
         raise ValueError(f'cognee.{tool_name}: "dataset" must be a non-empty string')
     dataset = value.strip()
-    if dataset != cfg.dataset and not cfg.allow_dataset_override:
+    if dataset != call.dataset and not call.allow_dataset_override:
         raise ValueError(f'cognee.{tool_name}: "dataset" must match the configured dataset')
     return dataset

@@ -852,10 +852,10 @@ class _PreventDefault(Exception):
 
 def _make_instance(regulator='sec', cik='0000320193'):
     inst = IInstance()
-    inst.IGlobal = MagicMock()
-    inst.IGlobal.regulator_type = regulator
-    inst.IGlobal.cik = cik
-    inst.IGlobal.sec_submission_cache = {}
+    inst.IGlobal = _iglobal_module.IGlobal()
+    inst.IGlobal.beginGlobal()
+    # The regulator and the company are the call's settings
+    inst.settings = types.SimpleNamespace(regulator_type=regulator, cik=cik)
     inst.instance = MagicMock()
     inst.preventDefault = MagicMock(side_effect=_PreventDefault)
     return inst
@@ -910,7 +910,7 @@ def test_write_answers_forwards_explicit_start_filter():
             'end': '2025-03-29',
             'unit': 'USD',
         },
-        submission_cache=inst.IGlobal.sec_submission_cache,
+        submission_cache=inst.IGlobal.submission_cache_for('0000320193'),
     )
     inst.preventDefault.assert_not_called()
 
@@ -979,44 +979,37 @@ def test_write_answers_historical_value_wrong_year_abstains():
             inst.writeAnswers(_answer(payload))
 
 
-# --- IGlobal CIK padding -----------------------------------------------------
+# --- The call's CIK -----------------------------------------------------------
 #
-# These run the real IGlobal through the real resolver (the engine's schema for
-# services.json), so they load IGlobal.py again with the real rocketlib rather
-# than the stubbed module the instance tests above import.
+# The CIK is a per-call setting: the instance pads it before it queries, and
+# the control keeps one bounded submission cache per company.
+
+_PERIOD_PAYLOAD = {'concept': 'AccountsPayableCurrent', 'value': '$1', 'form': '10-K', 'fy': 2025}
 
 
-def _begin_real_iglobal(conn_config):
-    """Build the node's IGlobal on the engine's resolver and start it.
-
-    Args:
-        conn_config: The node config in its stored shape.
-
-    Returns:
-        The started IGlobal.
-    """
-    import importlib.util
-
-    path = Path(__file__).resolve().parents[2] / 'src' / 'nodes' / 'authoritative_overlay' / 'IGlobal.py'
-    spec = importlib.util.spec_from_file_location('_authoritative_overlay_iglobal_under_test', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-
-    iglobal = module.IGlobal()
-    iglobal.glb = types.SimpleNamespace(logicalType='authoritative-overlay', connConfig=conn_config)
-    iglobal.beginGlobal()
-    return iglobal
+def _queried_cik(cik):
+    """The CIK one call with this setting sends to the SEC connector."""
+    inst = _make_instance(cik=cik)
+    with patch.object(_iinstance_module, 'query_sec', return_value=[1.0]) as query:
+        inst.writeAnswers(_answer(_PERIOD_PAYLOAD))
+    return query.call_args.kwargs['cik']
 
 
 def test_blank_cik_is_not_zero_padded_to_truthy():
-    assert _begin_real_iglobal({'cik': ''}).cik == ''
+    assert _queried_cik('') == ''
 
 
 def test_numeric_cik_is_zero_padded():
-    assert _begin_real_iglobal({'cik': '320193'}).cik == '0000320193'
+    assert _queried_cik(' 320193 ') == '0000320193'
 
 
-def test_an_unconfigured_node_takes_the_schema_defaults():
-    iglobal = _begin_real_iglobal({})
-    assert iglobal.regulator_type == 'sec'
-    assert iglobal.cik == '0000320193'
+def test_the_control_keeps_a_bounded_cache_per_company():
+    iglobal = _iglobal_module.IGlobal()
+    iglobal.beginGlobal()
+    first = iglobal.submission_cache_for('0000000001')
+    assert iglobal.submission_cache_for('0000000001') is first
+    for n in range(2, 2 + _iglobal_module.MAX_COMPANIES):
+        iglobal.submission_cache_for(f'{n:010d}')
+    # The oldest company was dropped past the bound; asking again starts it empty
+    assert iglobal.submission_cache_for('0000000001') is not first
+    iglobal.endGlobal()

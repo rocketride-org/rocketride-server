@@ -33,7 +33,7 @@ Tests cover:
 - Format compliance (JSON, markdown, bullet list, numbered list)
 - Policy enforcement (block raises, warn logs, log silent)
 - Combined evaluation (multiple violations)
-- IGlobal/IInstance lifecycle
+- IInstance lifecycle (the call's engine, built from its settings)
 - Deep copy mutation prevention
 
 Usage:
@@ -46,7 +46,6 @@ import sys
 import types
 
 import pytest
-import rocketlib as _real_rocketlib
 
 # ---------------------------------------------------------------------------
 # Load the guardrails_engine module directly without requiring runtime deps
@@ -605,8 +604,6 @@ class TestIInstanceLifecycle:
                 return self._text
 
         stubs['rocketlib'].IInstanceBase = FakeIInstanceBase
-        # The real base: IGlobal.config resolves through the engine's schema.
-        stubs['rocketlib'].IGlobalBase = _real_rocketlib.IGlobalBase
         stubs['rocketlib'].Entry = FakeEntry
         stubs['rocketlib'].debug = lambda *a, **kw: None
         stubs['rocketlib'].warning = lambda *a, **kw: None
@@ -642,15 +639,6 @@ class TestIInstanceLifecycle:
             sys.modules['guardrails.guardrails_engine'] = engine_mod
             engine_spec.loader.exec_module(engine_mod)
 
-            # Load IGlobal submodule
-            iglobal_spec = importlib.util.spec_from_file_location(
-                'guardrails.IGlobal',
-                os.path.join(_GUARDRAILS_DIR, 'IGlobal.py'),
-            )
-            iglobal_mod = importlib.util.module_from_spec(iglobal_spec)
-            sys.modules['guardrails.IGlobal'] = iglobal_mod
-            iglobal_spec.loader.exec_module(iglobal_mod)
-
             # Load IInstance submodule
             iinst_spec = importlib.util.spec_from_file_location(
                 'guardrails.IInstance',
@@ -676,8 +664,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         inst.instance = types.SimpleNamespace(writeQuestions=lambda q: forwarded.append(q))
@@ -690,8 +677,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         prevented = []
@@ -707,8 +693,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, _, _, FakeAnswer = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_content_safety': True, 'enable_pii_detection': True})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         inst.instance = types.SimpleNamespace(writeAnswers=lambda a: forwarded.append(a))
@@ -721,8 +706,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, _, _, FakeAnswer = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_pii_detection': True, 'enable_content_safety': True})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         prevented = []
@@ -739,8 +723,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'warn', 'enable_prompt_injection': True})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
         inst.instance = types.SimpleNamespace(writeQuestions=lambda q: None)
 
         q = FakeQuestion(questions=[FakeQuestionText('Hello world')], context=[])
@@ -754,8 +737,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'warn', 'enable_prompt_injection': True})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         inst.instance = types.SimpleNamespace(writeQuestions=lambda q: forwarded.append(q))
@@ -770,8 +752,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, FakeQuestion, _, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block'})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         inst.instance = types.SimpleNamespace(writeQuestions=lambda q: forwarded.append(q))
@@ -785,8 +766,7 @@ class TestIInstanceLifecycle:
         IInstance, EngineClass, _, _, _ = self._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block'})
-        mock_iglobal = types.SimpleNamespace(engine=engine, config={})
-        inst.IGlobal = mock_iglobal
+        inst.engine = engine
 
         forwarded = []
         inst.instance = types.SimpleNamespace(writeDocuments=lambda d: forwarded.append(d))
@@ -862,7 +842,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, _, _, FakeAnswer = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'warn', 'enable_content_safety': True, 'enable_pii_detection': True})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -877,7 +857,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, _, _, FakeAnswer = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'warn', 'enable_pii_detection': True})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -891,7 +871,7 @@ class TestIInstanceDeliveredExactlyOnce:
     def test_write_answers_delivered_exactly_once_when_engine_none(self):
         IInstance, _, _, _, FakeAnswer = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
-        inst.IGlobal = types.SimpleNamespace(engine=None, config={})
+        inst.engine = None
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -906,7 +886,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, _, _, FakeAnswer = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block'})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -924,7 +904,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, _, _, FakeAnswer = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_pii_detection': True, 'enable_content_safety': True})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -939,7 +919,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -954,7 +934,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'warn', 'enable_prompt_injection': True})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -968,7 +948,7 @@ class TestIInstanceDeliveredExactlyOnce:
     def test_write_questions_delivered_exactly_once_when_engine_none(self):
         IInstance, _, FakeQuestion, FakeQuestionText, _ = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
-        inst.IGlobal = types.SimpleNamespace(engine=None, config={})
+        inst.engine = None
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -983,7 +963,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, FakeQuestion, _, _ = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block'})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -1001,7 +981,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, FakeQuestion, FakeQuestionText, _ = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block', 'enable_prompt_injection': True})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -1016,7 +996,7 @@ class TestIInstanceDeliveredExactlyOnce:
         IInstance, EngineClass, _, _, _ = TestIInstanceLifecycle._load_iinstance_class()
         inst = IInstance()
         engine = EngineClass({'policy_mode': 'block'})
-        inst.IGlobal = types.SimpleNamespace(engine=engine, config={})
+        inst.engine = engine
         inst.preventDefault = lambda: (_ for _ in ()).throw(_PreventDefaultRaised())
 
         delivered = []
@@ -1057,7 +1037,7 @@ class TestConfigWiring:
 
     @staticmethod
     def _resolve(conn_config):
-        """Resolve a stored config exactly as IGlobal.beginGlobal() would."""
+        """Resolve a stored config exactly as a call's settings resolve it."""
         from rocketlib import getServiceSchema
         from rocketlib.config import resolveConfig
 

@@ -125,7 +125,8 @@ _ensure_pkg()
 try:
     from tool_xtrace_memory import IInstance as IInstanceMod  # noqa: E402
     from tool_xtrace_memory.IInstance import IInstance, _coerce_messages  # noqa: E402
-    from tool_xtrace_memory.IGlobal import IGlobal, _split_group_ids  # noqa: E402
+    from tool_xtrace_memory.IInstance import split_group_ids as _split_group_ids  # noqa: E402
+    from tool_xtrace_memory.IGlobal import IGlobal  # noqa: E402
 finally:
     for _name, _mod in _saved_core.items():
         if _mod is None:
@@ -144,21 +145,23 @@ IInstanceMod.normalize_tool_input = _passthrough
 
 
 def _make_global(**overrides):
+    """An IGlobal with the test account, carrying the scope and options its calls bind."""
     glb = IGlobal()
-    glb.api_key = 'xtk_test'
-    glb.org_id = 'org_test'
-    glb.base_url = 'https://api.production.xtrace.ai'
-    glb.user_id = 'alice'
-    glb.agent_id = ''
-    glb.app_id = ''
-    glb.group_ids = []
-    glb.wait = True
-    glb.ingest_timeout = 30
-    glb.extract_artifacts = False
-    glb.search_mode = 'compose'
-    glb.search_limit = 10
-    for k, v in overrides.items():
-        setattr(glb, k, v)
+    glb.api_key = overrides.pop('api_key', 'xtk_test')
+    glb.org_id = overrides.pop('org_id', 'org_test')
+    glb.base_url = overrides.pop('base_url', 'https://api.production.xtrace.ai')
+    glb.call_settings = {
+        'user_id': 'alice',
+        'agent_id': '',
+        'app_id': '',
+        'group_ids': [],
+        'wait': True,
+        'ingest_timeout': 30,
+        'extract_artifacts': False,
+        'search_mode': 'compose',
+        'search_limit': 10,
+        **overrides,
+    }
     return glb
 
 
@@ -187,6 +190,8 @@ def captured(monkeypatch):
 def _instance(glb):
     inst = IInstance()
     inst.IGlobal = glb
+    # The scope and the ingest/recall options are the call's settings
+    inst.settings = types.SimpleNamespace(**glb.call_settings)
     inst._conv_id = 'conv_fixed'
     return inst
 
@@ -220,11 +225,18 @@ def test_begin_global_reads_the_resolved_config(monkeypatch):
     monkeypatch.setattr(IGlobal, 'config', property(lambda self: resolved), raising=False)
     glb = IGlobal()
     glb.beginGlobal()
-    assert (glb.api_key, glb.org_id, glb.user_id) == ('xtk_resolved', 'org_1', 'alice')
+    assert (glb.api_key, glb.org_id) == ('xtk_resolved', 'org_1')
     assert glb.base_url == 'https://api.production.xtrace.ai'
-    assert glb.group_ids == ['grp_a', 'grp_b']
-    assert (glb.wait, glb.extract_artifacts) == (False, True)
-    assert (glb.ingest_timeout, glb.search_mode, glb.search_limit) == (45, 'retrieve', 5)
+
+    # The scope and the options are a call's settings, read by the instance
+    inst = IInstance()
+    inst.IGlobal = glb
+    inst.settings = resolved
+    call = inst._call_options()
+    assert call.user_id == 'alice'
+    assert call.group_ids == ['grp_a', 'grp_b']
+    assert (call.wait, call.extract_artifacts) == (False, True)
+    assert (call.ingest_timeout, call.search_mode, call.search_limit) == (45, 'retrieve', 5)
 
 
 # ---------------------------------------------------------------------------
@@ -358,3 +370,20 @@ def test_recall_group_scope_from_args(captured):
     assert p['group_ids'] == ['grp_tokyo']
     assert p['mode'] == 'retrieve'
     assert 'user_id' not in p
+
+
+def test_one_control_serves_two_calls_with_their_own_scope_and_mode(captured):
+    """The default scope and the search options are each call's: one control, two calls, two bodies."""
+    captured['response'] = {'mode': 'compose', 'context': '', 'data': []}
+    glb = _make_global()
+    first = _instance(glb)
+    second = _instance(glb)
+    second.settings = types.SimpleNamespace(
+        **{**glb.call_settings, 'user_id': 'bob', 'search_mode': 'retrieve', 'search_limit': 4}
+    )
+
+    first.recall({'query': 'q'})
+    second.recall({'query': 'q'})
+
+    bodies = [call['payload'] for call in captured['calls']]
+    assert [(p['user_id'], p['mode'], p['limit']) for p in bodies] == [('alice', 'compose', 10), ('bob', 'retrieve', 4)]

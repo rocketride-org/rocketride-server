@@ -33,8 +33,11 @@ definitions stay readable.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Iterable
 from urllib.parse import quote
+
+from rocketlib import warning
 
 from ai.common.utils import normalize_tool_input, require_int, require_str
 
@@ -182,8 +185,35 @@ class PipedriveToolsBase:
         """The ``/api/v2`` base. Search tools only — see ``BASE_URL_V2``."""
         return self.IGlobal.base_url_v2
 
+    # -- the call's options ------------------------------------------------
+
+    # This call's write gate and tool surface, read from its settings on first use
+    _call_options: SimpleNamespace | None = None
+
+    def _options(self) -> SimpleNamespace:
+        """This call's read-only gate, published tool groups and raw-request switch.
+
+        ``toolGroups`` is pinned by the schema to the groups this node implements, so
+        a misspelt group never reaches here. A selection that publishes more tools than
+        an LLM handles well is reported (advisory only), once per call.
+        """
+        if self._call_options is None:
+            from ..tool_groups import normalize_groups, oversized_warning
+
+            settings = self.settings
+            groups = normalize_groups(settings.toolGroups)
+            self._call_options = SimpleNamespace(
+                read_only=settings.readOnly,
+                tool_groups=groups,
+                allow_raw_request=settings.allowRawRequest,
+            )
+            oversized = oversized_warning(settings.toolGroups, groups)
+            if oversized:
+                warning(oversized)
+        return self._call_options
+
     def _require_write(self) -> None:
-        if self.IGlobal.read_only:
+        if self._options().read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
 
     # -- requests ---------------------------------------------------------

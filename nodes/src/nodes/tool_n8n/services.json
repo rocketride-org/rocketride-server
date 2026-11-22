@@ -42,12 +42,15 @@
 			"env": "ROCKETRIDE_N8N_KEY"
 		},
 		"tool_n8n.workflow": {
+			"param": true,
 			"type": "string",
 			"title": "Workflow (webhook path)",
 			"default": "",
 			"description": "The webhook path the target workflow listens on (set on its Webhook node). Used by the pipeline step and as the default for the trigger tool."
 		},
 		"tool_n8n.payloadMode": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Payload shape (pipeline step)",
 			"default": "simple",
@@ -58,6 +61,8 @@
 			"description": "How lane input is sent to the workflow. 'structured' preserves document boundaries + metadata; 'simple' (default) flattens to a single string for back-compat."
 		},
 		"tool_n8n.syncTimeout": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Response timeout (seconds)",
 			"default": 30,
@@ -66,6 +71,8 @@
 			"description": "Max seconds to wait for the webhook response in sync mode (raise for slow workflows)."
 		},
 		"tool_n8n.asyncTimeout": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Execution timeout (seconds)",
 			"default": 120,
@@ -110,6 +117,8 @@
 			"required": true
 		},
 		"tool_n8n.verifyTls": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Verify TLS certificate",
 			"default": true,
@@ -120,6 +129,8 @@
 			]
 		},
 		"tool_n8n.readOnly": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Read-only mode",
 			"default": true,
@@ -138,6 +149,8 @@
 		"tool_n8n.payloadMode",
 		{
 			"name": "mode",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Result mode",
 			"default": "sync",

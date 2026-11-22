@@ -130,7 +130,10 @@ def receipt(mime='video/mp4', status='done', job='speak:G1', url='https://x/v.mp
 
 def build(settings, driver):
     inst = IInstanceMod.IInstance()
-    inst.IGlobal = types.SimpleNamespace(settings=settings, driver=driver)
+    inst.IGlobal = types.SimpleNamespace(driver=driver)
+    # The call's settings and its view of the driver (built with those settings)
+    inst._settings_map = settings
+    inst._call_driver = driver
     inst.instance = FakeInstance()
     return inst
 

@@ -35,6 +35,7 @@ API docs: https://masky.ai/api/docs/masky-openapi.json
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 import threading
@@ -740,6 +741,26 @@ class MaskyDriver(ToolsBase):
                 'run': self._unbind_agent,
             },
         }
+
+    def for_call(self, settings: Dict[str, Any]) -> 'MaskyDriver':
+        """This driver for one call: the same client, run registries and pricing cache, the call's settings.
+
+        A shallow copy, so the registries (images, jobs, conversations, owners) and the
+        locks are the control's, shared by every call; only the settings and the media
+        URL switch are the call's.
+
+        Args:
+            settings: The call's ``read_settings`` mapping.
+
+        Returns:
+            The call's view of the driver.
+        """
+        view = copy.copy(self)
+        view._settings = settings
+        view._include_media_urls = settings['include_media_urls']
+        # The tool table holds bound methods: rebind each to the view, so a tool runs with the call's settings
+        view._tools = {name: {**spec, 'run': getattr(view, spec['run'].__name__)} for name, spec in self._tools.items()}
+        return view
 
     def close(self) -> None:
         """Release the client (clears the API key)."""

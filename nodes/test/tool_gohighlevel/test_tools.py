@@ -293,10 +293,9 @@ def _node(token: str = '', location: str = '', read_only: bool = False) -> IInst
     state = IGlobal()
     state.token = token or TOKEN
     state.location_id = location or LOCATION
-    state.read_only = read_only
-    state.tool_groups = ALL_GROUPS
-    state.allow_raw_request = True
     instance.IGlobal = state
+    # The write gate and the tool surface are the call's settings
+    instance._call_options = types.SimpleNamespace(read_only=read_only, tool_groups=ALL_GROUPS, allow_raw_request=True)
     return instance
 
 

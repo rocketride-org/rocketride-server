@@ -24,26 +24,24 @@
 """
 Bland AI tool node - global (shared) state.
 
-Reads the resolved node configuration (API key, default voice, etc.) and
-creates a ``BlandDriver`` that exposes make_call, get_call, and analyze_call
-tools for agent invocation.
+Reads the control's account (the API key) and its tool namespace. The call
+defaults (voice, maximum duration, recording, language) are each call's: the
+instance builds its ``BlandDriver`` from its settings over this account.
 """
 
 from __future__ import annotations
 
 from rocketlib import IGlobalBase, warning
 
-from .bland_driver import BlandDriver
-
 
 class IGlobal(IGlobalBase):
-    """Global state for tool_bland_ai."""
+    """Global state for tool_bland_ai: the account key and the tool namespace."""
 
-    driver: BlandDriver | None = None
+    api_key: str = ''
+    server_name: str = ''
 
     def beginGlobal(self) -> None:
-        # The resolved config: defaults applied, types and the maxDuration
-        # minimum already validated, the key a required secret
+        # The resolved config: the key a required secret
         cfg = self.config
 
         api_key = str(cfg.apikey or '').strip()
@@ -51,18 +49,9 @@ class IGlobal(IGlobalBase):
             warning('Bland AI API key is required. Get one at https://www.bland.ai')
             raise ValueError('Bland AI API key not configured')
 
-        try:
-            self.driver = BlandDriver(
-                server_name=cfg.serverName,
-                api_key=api_key,
-                default_voice=cfg.voice,
-                max_duration=cfg.maxDuration,
-                record=cfg.record,
-                language=cfg.language,
-            )
-        except Exception as e:
-            warning(str(e))
-            raise
+        self.api_key = api_key
+        self.server_name = cfg.serverName
 
     def endGlobal(self) -> None:
-        self.driver = None
+        self.api_key = ''
+        self.server_name = ''
