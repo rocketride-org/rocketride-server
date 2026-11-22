@@ -59,6 +59,9 @@ from ai.account.models import RequestContext
 from ai.account.store_providers.filesystem import FilesystemStore
 
 CLIENT = 'user-1'
+# The owner every writer here writes for, and its spool / registry scope id (scope_paths)
+OWNER = f'=user/{CLIENT}'
+SCOPE_ID = f'user-{CLIENT}'
 PROJECT = 'proj-1'
 SOURCE = 'chat_1'
 KIND = 'dev'
@@ -151,7 +154,7 @@ async def open_writer(istore, spool_root, stamp=None, raise_floor=None, kind=KIN
         stamp, raise_floor, _ = make_stamp()
     writer = RunLogWriter(
         make_file_store(istore),
-        CLIENT,
+        OWNER,
         PROJECT,
         SOURCE,
         kind,
@@ -171,7 +174,7 @@ def read_spool_lines(spool_root, stream=STREAM, *, decode=True, keep_keyframes=F
     full events through a per-segment SegmentDecoder and keyframe preambles
     are dropped (pass decode=False / keep_keyframes=True for the raw form).
     """
-    prefix = f'{CLIENT}.{stream}.'
+    prefix = f'{SCOPE_ID}.{stream}.'
     lines = []
     for name in sorted(os.listdir(spool_root)):
         if not (name.startswith(prefix) and name.endswith('.jsonl')):
@@ -430,7 +433,7 @@ class TestSegmentCodec:
         # must be marked incomplete (pre-existing open state is unknown).
         writer2 = RunLogWriter(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -474,7 +477,7 @@ class TestSealing:
         assert first['chapterStart'] is True
 
         # Sealed spool file parses line-by-line (line-boundary cut).
-        path = spool_path(spool_root, CLIENT, STREAM, 0)
+        path = spool_path(spool_root, SCOPE_ID, STREAM, 0)
         with open(path, encoding='utf-8') as f:
             for line in f:
                 json.loads(line)
@@ -524,7 +527,7 @@ class TestUpload:
         for line in data.splitlines():
             json.loads(line)
         # Spool copy deleted (no lease held).
-        assert not os.path.exists(spool_path(spool_root, CLIENT, STREAM, seg['id']))
+        assert not os.path.exists(spool_path(spool_root, SCOPE_ID, STREAM, seg['id']))
         await writer.end_run('ok')
 
     @pytest.mark.asyncio
@@ -546,7 +549,7 @@ class TestUpload:
         await writer._drain_uploads()
         seg = writer._control['segments'][0]
         assert seg['state'] == 'spooled'
-        seg_spool = spool_path(spool_root, CLIENT, STREAM, seg['id'])
+        seg_spool = spool_path(spool_root, SCOPE_ID, STREAM, seg['id'])
         assert os.path.exists(seg_spool)
 
         # Store recovers: retry succeeds and completes the transition.
@@ -577,7 +580,7 @@ class TestContinuum:
         stamp2, raise_floor2, state2 = make_stamp()
         writer2 = RunLogWriter(
             make_file_store(istore),
-            CLIENT,
+            OWNER,
             PROJECT,
             SOURCE,
             KIND,
@@ -671,7 +674,7 @@ class TestRetention:
         for i in range(5):
             writer = RunLogWriter(
                 make_file_store(istore),
-                CLIENT,
+                OWNER,
                 PROJECT,
                 SOURCE,
                 KIND,
@@ -719,7 +722,7 @@ class TestRecovery:
             stamp2, raise_floor2, state2 = make_stamp()
             writer2 = RunLogWriter(
                 make_file_store(istore),
-                CLIENT,
+                OWNER,
                 PROJECT,
                 SOURCE,
                 KIND,
@@ -853,11 +856,11 @@ async def test_an_older_writer_closing_leaves_the_newer_one_registered(istore, s
     """
     older = await open_writer(istore, spool_root)
     newer = await open_writer(istore, spool_root)
-    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
+    assert run_log.live_writer(OWNER, PROJECT, SOURCE, KIND) is newer
     await older.end_run('ok', '', reason='ttl')
-    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is newer
+    assert run_log.live_writer(OWNER, PROJECT, SOURCE, KIND) is newer
     await newer.end_run('ok', '', reason='user')
-    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
+    assert run_log.live_writer(OWNER, PROJECT, SOURCE, KIND) is None
 
 
 # =============================================================================
@@ -908,7 +911,7 @@ async def test_a_writer_announces_its_open_before_its_first_storage_read(istore,
     """A second engine joining the continuum finds the opening writer and waits for it, never opening a twin."""
     stamp, raise_floor, _ = make_stamp()
     writer = RunLogWriter(
-        make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+        make_file_store(istore), OWNER, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
     )
     # The storage read is held, as a slow store would hold it
     gate = asyncio.Event()
@@ -923,13 +926,13 @@ async def test_a_writer_announces_its_open_before_its_first_storage_read(istore,
         writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc', trace_level='summary')
     )
     await asyncio.sleep(0)
-    found = run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE)
+    found = run_log.live_writer(OWNER, PROJECT, SOURCE, KIND)
     assert found is writer and writer.is_opening and not writer.is_live
     gate.set()
     assert await writer.wait_opened() is True and writer.is_live
     await opening
     await writer.end_run('ok', '')
-    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
+    assert run_log.live_writer(OWNER, PROJECT, SOURCE, KIND) is None
 
 
 @pytest.mark.asyncio
@@ -954,7 +957,7 @@ async def test_a_reader_never_takes_an_opening_writers_empty_catalog(istore, spo
     await first.end_run('ok', '')
     stamp, raise_floor, _ = make_stamp()
     writer = RunLogWriter(
-        make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+        make_file_store(istore), OWNER, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
     )
     gate = asyncio.Event()
     real_load = writer._load_control
@@ -968,7 +971,7 @@ async def test_a_reader_never_takes_an_opening_writers_empty_catalog(istore, spo
         writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc', trace_level='summary')
     )
     await asyncio.sleep(0)
-    reader = run_log.RunLogReader(make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, spool_root=spool_root)
+    reader = run_log.RunLogReader(make_file_store(istore), OWNER, PROJECT, SOURCE, KIND, spool_root=spool_root)
     catalog = await reader._load_control()
     assert catalog.get('chapters'), "the persisted history, not the opening writer's empty catalog"
     gate.set()
@@ -981,7 +984,7 @@ async def test_a_failed_open_leaves_no_writer_behind(istore, spool_root):
     """An open that fails after marking the writer open reports not open, deregisters, and closes what it opened."""
     stamp, raise_floor, _ = make_stamp()
     writer = RunLogWriter(
-        make_file_store(istore), CLIENT, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
+        make_file_store(istore), OWNER, PROJECT, SOURCE, KIND, stamp, raise_floor, spool_root=spool_root
     )
     real_write = writer._write_control
     calls = {'n': 0}
@@ -996,5 +999,5 @@ async def test_a_failed_open_leaves_no_writer_behind(istore, spool_root):
     with pytest.raises(RuntimeError):
         await writer.open(trigger='manual', user=CLIENT, pipeline_hash='abc', trace_level='summary')
     assert writer.is_live is False and await writer.wait_opened() is False
-    assert run_log.live_writer(KIND, CLIENT, '', 'user', PROJECT, SOURCE) is None
+    assert run_log.live_writer(OWNER, PROJECT, SOURCE, KIND) is None
     assert writer._active_file is None and writer._worker is None

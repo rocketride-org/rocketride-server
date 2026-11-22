@@ -174,10 +174,8 @@ class DataCommands(DAPConn):
             subcommand = arguments.get('subcommand')
             pipe_id = arguments.get('pipeId')
 
-            # Step 1: the caller's control for the address. The account is read
-            # NOW: a replacing auth may complete while the engine is awaited,
-            # and the binding is billed to the session that dispatched it
-            account_info = self._account_info
+            # Step 1: the caller's control for the address; its attribution pays
+            # for every binding opened through it (plan 8.3)
             control = await self._control_for(request, subcommand, pipe_id)
 
             # Step 2: the binding this frame belongs to: a new one, or the one
@@ -211,12 +209,12 @@ class DataCommands(DAPConn):
                 # address learns the id its later frames name. A standalone tool
                 # call was a binding that opened and closed
                 if subcommand == 'open':
-                    kept = self._record_open(control, frame, body, account_info)
+                    kept = self._record_open(control, frame, body)
                     if kept:
                         body['controlId'] = control.control_id
                         body['address'] = control.address
                 elif subcommand == 'tool' and pipe_id is None:
-                    self._note_borrowed(control, body, account_info)
+                    self._note_borrowed(control, body)
             finally:
                 # A new binding that is not open now (a standalone tool call, a
                 # failed open) has ended: its nodes reach no state or files after it
@@ -390,7 +388,7 @@ class DataCommands(DAPConn):
             control.end_request()
         return response.get('body')
 
-    def _record_open(self, control: 'TaskControl', frame: '_Frame', body: Any, account_info: Any) -> bool:
+    def _record_open(self, control: 'TaskControl', frame: '_Frame', body: Any) -> bool:
         """
         Record a successful open on the control: the slot, its engine and its request tree.
 
@@ -412,24 +410,27 @@ class DataCommands(DAPConn):
             engine=frame.engine, trace_id=trace_id, correlation_id=frame.correlation_id
         )
         control.stats.totalCount += 1
-        self._claim(control, trace_id, account_info)
+        self._claim(control, trace_id)
         return True
 
-    def _claim(self, control: 'TaskControl', trace_id: str, account_info: Any) -> None:
+    def _claim(self, control: 'TaskControl', trace_id: str) -> None:
         """
-        Claim a request tree for the control, paid by THIS request's caller (plan 7.5, 8.3).
+        Claim a request tree for the control, paid by the control's attribution (plan 7.5, 8.3).
+
+        Every control runs for exactly one caller, so its row of the rung
+        table (``TaskControl.billing``) is that caller's: two callers of one
+        team publication hold two controls and bill two rows.
 
         Args:
             control: The caller's control.
             trace_id: The wire traceId the engine answered with.
-            account_info: The account that dispatched the frame (read before the engine was awaited).
         """
         team, version = control.publication()
         self._server.trace_owners.claim(
             trace_id,
             control.key,
             self._connection_id,
-            billing=control.caller_billing(account_info),
+            billing=control.billing,
             address=control.address,
             rung=control.rung or '',
             team=team,
@@ -460,7 +461,7 @@ class DataCommands(DAPConn):
         self._server.trace_owners.release(record.trace_id)
         record.engine.end_binding(record.correlation_id)
 
-    def _note_borrowed(self, control: 'TaskControl', body: Any, account_info: Any) -> None:
+    def _note_borrowed(self, control: 'TaskControl', body: Any) -> None:
         """
         A standalone tool call opened and closed a binding in one frame: claim and release its tree.
 
@@ -470,14 +471,13 @@ class DataCommands(DAPConn):
         Args:
             control: The caller's control.
             body: The tool response (``traceId`` of the borrowed pipe).
-            account_info: The account that dispatched the call.
         """
         trace_id = str((body or {}).get('traceId') or '') if isinstance(body, dict) else ''
         if not trace_id:
             return
         control.stats.totalCount += 1
         control.stats.completedCount += 1
-        self._claim(control, trace_id, account_info)
+        self._claim(control, trace_id)
         self._server.trace_owners.release(trace_id)
 
     async def _require_credit(self, control: 'TaskControl') -> None:

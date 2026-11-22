@@ -30,11 +30,13 @@ carries its own cron. On startup the scheduler reads every ENABLED deployment
 from the account module (``deployments_iter_enabled`` — OSS files or SaaS DB,
 this layer never knows) and builds an in-memory min-heap of next-run entries.
 
-Dispatch is the TRUSTED team path (``start_server_task_as_team``): no stored
-credential — the run executes as the team, with the deploying user carried as
-attribution only. At fire time the deployment is RE-READ so a disable/remove/
-pointer-move or schedule pause between ticks always wins, and the artifact is
-sha256-verified before it runs.
+Dispatch is the TRUSTED path (``start_server_task_as_team``): no stored
+credential — the run executes as its publication's row of the unattended rung
+table (plan 8.3, ``unattended_attribution``): the publisher on ``@me``, the
+team on ``@team``, the org on ``@org`` and ``@public``; who scheduled it lives
+in the audit log only. At fire time the deployment is RE-READ so a
+disable/remove/pointer-move or schedule pause between ticks always wins, and
+the artifact is sha256-verified before it runs.
 
 Caller responsibilities:
   • Call scheduler.sync(org_id, deployment) after every mutation
@@ -54,9 +56,9 @@ from croniter import croniter
 from rocketlib import debug, error, warning
 
 from ai.account import account
-from ai.account.pipe_deploy import listing_of, pointer_run_owner
+from ai.account.pipe_deploy import listing_of
 from .deploy_events import broadcast_deploy_changed
-from .task_control import DeploymentRef
+from .task_control import DeploymentRef, unattended_attribution
 from .task_server_facade import start_server_task_as_team
 
 if TYPE_CHECKING:
@@ -413,20 +415,19 @@ class TaskScheduler:
             pipeline = dict(pipeline)
             pipeline['source'] = source_id
 
-            # Owner rung: a '=user/<uid>' audience is a PERSONAL (@me) deployment —
-            # the run is USER-owned; a team audience is the team-owned
-            # dispatch (no human identity). Billing is ABSOLUTE: the stamp
-            # was written at pointer time, and fires only ever read it — a
-            # missing stamp (team deleted, pre-stamp record) is
-            # permission-shaped: permanent until a human re-publishes, so
-            # mark errored, don't retry.
-            # (pointer_run_owner decodes the audience: a team pointer from
-            # before the stamp bills its own team; the store is no team, so
-            # it only ever bills its stamp.)
-            owner_kind, owner_user, default_billing, forced_rung = pointer_run_owner(team_id)
-            billing_team = str(dep.get('billingTeamId') or '') or default_billing
-            if not billing_team:
-                error(f'[SCHEDULER] {entry.key}: no billing team stamped; marking errored')
+            # The run's row of the unattended rung table (plan 8.3): a personal
+            # (@me) pointer's run is the publisher's, billed to the stamp
+            # written at pointer time (fires only ever read it); a team
+            # pointer's is the team's, with no user; an org or store
+            # pointer's is the org's, with no user and no team. A missing @me
+            # stamp (team deleted, pre-stamp record) is permission-shaped:
+            # permanent until a human re-publishes, so mark errored, don't retry.
+            try:
+                attribution = unattended_attribution(
+                    team_id, org_id=org_id, billing_stamp=str(dep.get('billingTeamId') or '')
+                )
+            except ValueError as e:
+                error(f'[SCHEDULER] {entry.key}: {e}; marking errored')
                 await self._mark_errored(org_id, team_id, project_id)
                 return
 
@@ -438,8 +439,7 @@ class TaskScheduler:
                 control_id = await start_server_task_as_team(
                     self._server,
                     pipeline,
-                    org_id=org_id,
-                    team_id=billing_team,
+                    attribution=attribution,
                     deployment=DeploymentRef(org_id=org_id, team_id=team_id, project_id=project_id),
                     # A disable/remove between the state read above and the
                     # registration refuses the run instead of starting it
@@ -449,11 +449,6 @@ class TaskScheduler:
                     # Per-source execution settings ride the schedule record.
                     trace_level=sched.get('traceLevel') or 'full',
                     debug_out=bool(sched.get('debugOut')),
-                    owner_kind=owner_kind,
-                    owner_user_id=owner_user,
-                    # A store pointer's run sits on the public rung (team-owned
-                    # by its billing team); every other slot derives its rung
-                    rung=forced_rung,
                     listing=listing,
                 )
             except PermissionError as e:

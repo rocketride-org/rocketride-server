@@ -50,7 +50,7 @@ import uuid
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import PurePosixPath
-from typing import Any, Optional
+from typing import Any, NamedTuple, Optional
 
 from .models import RequestContext, resolve_task_permissions, team_id_of_name
 from .roots import (
@@ -65,6 +65,7 @@ from .roots import (
     Root,
     format_root,
     parse_root,
+    team_name_key,
 )
 from .store import IStore, StorageError
 
@@ -379,11 +380,128 @@ def _resolve_team_name(account_info, name: str) -> str:
     return team_id
 
 
+class DeclaredRoot(NamedTuple):
+    """
+    One root a pipeline declared (``"roots": ["@Development/kb"]``), resolved through its run's owner (plan 2.5).
+
+    ``self.files`` admits a rooted path only under a declared root: the same
+    tree (a team by the name it was declared by, ignoring case, or by its id;
+    the org as ``@org`` or by its id) and the declared path or below it.
+
+    Attributes:
+        kind: ``team`` or ``org``.
+        ref_id: The team or org id the root resolved to.
+        name_key: The casefolded team name it was declared by ('' when by id, or the org).
+        rest: The path under the tree the declaration names ('' for the whole tree).
+        physical: The tree's physical root (``teams/<tid>/files``, ``orgs/<oid>/files``).
+        text: The declaration as written, for messages.
+    """
+
+    kind: str
+    ref_id: str
+    name_key: str
+    rest: str
+    physical: str
+    text: str
+
+    def admits(self, root: Root, rest: str) -> bool:
+        """Whether a parsed node path (``root`` and its ``rest``) is under this declaration."""
+        if root.kind != self.kind:
+            return False
+        if root.by_id:
+            if root.ref != self.ref_id:
+                return False
+        elif self.kind == KIND_TEAM and (not self.name_key or team_name_key(root.ref) != self.name_key):
+            return False
+        return not self.rest or rest == self.rest or rest.startswith(self.rest + '/')
+
+
+def declared_roots(
+    roots: Any,
+    *,
+    owner_kind: str,
+    owner_id: str,
+    org_id: str,
+    account_info: Any = None,
+) -> 'tuple[DeclaredRoot, ...]':
+    """
+    Resolve a pipeline's declared ``roots`` through the run's OWNER, refusing what the owner could not reach (plan 2.5).
+
+    Called when a control starts. Each entry is a storage path whose first
+    segment is a team or org root (``@Development/kb``, ``=team/<tid>/kb``,
+    ``@org/shared``). The owner reaches what it could reach in a session: a
+    USER its own tree (no declaration needed), the teams where it holds
+    ``task.store`` and the org with ``org.admin``, judged on its own session
+    (``account_info``); a TEAM its own tree; the ORG the org tree. ``@me/``
+    and ``=user/`` are never declarable, and neither are the store words.
+
+    Args:
+        roots: The spec's ``roots`` value (absent: None or empty).
+        owner_kind: ``user``, ``team`` or ``org``.
+        owner_id: The owning user, team or org id.
+        org_id: The run's org.
+        account_info: The session a team NAME resolves through and, for a
+            user owner, whose reach is judged: the caller of the run (a user
+            owner is its caller). None for a run with no caller.
+
+    Returns:
+        The resolved declarations, in the spec's order.
+
+    Raises:
+        ValueError: ``roots`` is not a list of non-empty strings, or an entry
+            is outside the grammar or names no team or org tree.
+        PermissionError: The owner could not reach an entry (the start is
+            refused, naming it).
+    """
+    if roots is None or roots == []:
+        return ()
+    if not isinstance(roots, list) or not all(isinstance(entry, str) and entry for entry in roots):
+        raise ValueError('"roots" must be a list of storage paths such as "@Development/kb"')
+    out = []
+    for text in roots:
+        root = parse_scope(normalize_path(text))
+        rest = root.rest
+        if root.kind not in (KIND_TEAM, KIND_ORG):
+            raise ValueError(
+                f'roots: {text!r} names no team or org tree (declare @<team>/..., =team/<tid>/... or @org/...)'
+            )
+        if _system_tree(rest):
+            raise PermissionError(f'roots: {text!r} enters a system tree')
+        refused = PermissionError(f"roots: {text!r} is outside what this run's owner may reach")
+
+        # The org tree: the run's own org, for an org owner or an org admin
+        if root.kind == KIND_ORG:
+            if root.by_id and root.ref != org_id:
+                raise refused
+            if owner_kind == KIND_USER:
+                org = getattr(account_info, 'organization', None) or {}
+                if str(org.get('id') or '') != org_id or 'org.admin' not in (org.get('permissions') or []):
+                    raise refused
+            elif owner_kind != KIND_ORG:
+                raise refused
+            out.append(DeclaredRoot(KIND_ORG, org_id, '', rest, f'orgs/{org_id}/files', text))
+            continue
+
+        # A team tree: by id, or by name through the owner's session
+        team_id = root.ref if root.by_id else (team_id_of_name(account_info, root.ref) if account_info else '')
+        if not team_id:
+            raise refused
+        if owner_kind == KIND_USER:
+            if account_info is None or 'task.store' not in resolve_task_permissions(account_info, team_id):
+                raise refused
+        elif owner_kind != KIND_TEAM or team_id != owner_id:
+            raise refused
+        name_key = '' if root.by_id else team_name_key(root.ref)
+        out.append(DeclaredRoot(KIND_TEAM, team_id, name_key, rest, f'teams/{team_id}/files', text))
+    return tuple(out)
+
+
 def resolve_scope(
     ctx: RequestContext,
     client_id: str,
     normalized: str,
     engine_root: 'Optional[str]' = None,
+    declared: 'tuple[DeclaredRoot, ...]' = (),
 ) -> 'tuple[str, str, str]':
     """Authorize and resolve a normalized path to its physical scope root.
 
@@ -394,9 +512,11 @@ def resolve_scope(
 
     Who may resolve what (plan 2.5):
       - ``ctx.source == 'engine'`` (a node's ``self.files``): plain paths
-        only; every root (``@me/`` and ``=user/`` included) and every system
-        tree is rejected — LLM-generated paths can never wander out of the
-        run's storage anchor.
+        land in the run's storage anchor; a team or org root only under a
+        root the pipeline DECLARED (``declared``, resolved through the run's
+        owner when its control started); every other root (``@me/`` and
+        ``=user/`` always) and every system tree is rejected — an
+        LLM-generated path can never reach a root nobody declared.
       - ``'internal'`` sysPermission (trusted subsystems: the run-log writer,
         the deploy commands): they hold ids, so they write ``=`` roots,
         resolved by id with no checks, system trees included. A team name or
@@ -428,11 +548,17 @@ def resolve_scope(
     # task-specific team subtree for deploy runs — so node-level paths are
     # identical in both modes and can never leave the anchor.
     if ctx.source == 'engine':
-        if root.kind != KIND_NONE:
-            raise PermissionError('Rooted (@ and =) paths are not available in the engine context')
         if _system_tree(rest):
             raise PermissionError(f'{_system_tree(rest)}/ is not available in the engine context')
-        return ('own', engine_root or f'users/{client_id}/files', rest)
+        if root.kind == KIND_NONE:
+            return ('own', engine_root or f'users/{client_id}/files', rest)
+        match = next((entry for entry in declared if entry.admits(root, rest)), None)
+        if match is None:
+            raise PermissionError(
+                f'{format_root(root.kind, root.ref, root.by_id)}/ is not a root this pipeline declares '
+                '(list it in the pipeline\'s "roots")'
+            )
+        return (root.kind, match.physical, rest)
 
     account_info = ctx.account_info
     if account_info is None:
@@ -585,7 +711,14 @@ class FileStore:
     the owning connection terminates.
     """
 
-    def __init__(self, owner, client_id: str, ctx: RequestContext, root: 'Optional[str]' = None):
+    def __init__(
+        self,
+        owner,
+        client_id: str,
+        ctx: RequestContext,
+        root: 'Optional[str]' = None,
+        declared: 'tuple[DeclaredRoot, ...]' = (),
+    ):
         """Bind this instance to its owning Store, account, and identity.
 
         Args:
@@ -602,6 +735,9 @@ class FileStore:
                   node-level paths. Validated by ``validate_storage_root``;
                   forbidden for other identities (their anchor is their own
                   namespace).
+            declared: ENGINE contexts only — the roots the binding's pipeline
+                  declared, resolved through its owner (``declared_roots``):
+                  the team and org paths ``self.files`` admits beyond the anchor.
         """
         if not client_id:
             raise ValueError('client_id is required')
@@ -615,11 +751,14 @@ class FileStore:
             if ctx.source != 'engine':
                 raise ValueError('storage root overrides exist for engine contexts only')
             root = validate_storage_root(root)
+        if declared and ctx.source != 'engine':
+            raise ValueError('declared roots exist for engine contexts only')
         self._owner = owner
         self._store: IStore = owner._store
         self._client_id = client_id
         self._ctx = ctx
         self._root = root
+        self._declared = tuple(declared)
 
     # Shared single-process guards live on the owning Store so every
     # FileStore instance — regardless of which user or identity constructed
@@ -954,7 +1093,10 @@ class FileStore:
         if not prefix.endswith('/'):
             prefix += '/'
 
-        all_files = await self._store.list_files(prefix)
+        # Only the keys under the directory itself: the S3 and Azure backends
+        # list by a prefix normpath stripped of its '/', so 'kb/' would also
+        # return 'kbx/...' (rmdir filters the same way)
+        all_files = [f for f in await self._store.list_files(prefix) if f.startswith(prefix)]
 
         # Track entries; for files, keep the full path for mtime lookup
         entries_map: dict[str, dict] = {}
@@ -1040,7 +1182,12 @@ class FileStore:
         # deleted backend path with undefined behavior.
         self._assert_no_active_handles_under(full_prefix)
 
-        all_files = await self._store.list_files(full_prefix)
+        # Only the keys under the directory itself: the S3 and Azure backends
+        # build the listing prefix with normpath, which drops the trailing '/',
+        # so 'kb/' would also list 'kbx/...' and the loop below would delete it
+        # (and _full_path normalizes the separator away too, so it is restored)
+        directory = full_prefix.rstrip('/') + '/'
+        all_files = [f for f in await self._store.list_files(full_prefix) if f.startswith(directory)]
 
         # Ignore the dirmarker sentinel when checking emptiness
         non_marker = [f for f in all_files if not f.endswith('/' + DIR_MARKER)]
@@ -1357,7 +1504,9 @@ class FileStore:
         validated = self._validate_path(path)
         # resolve_scope hands back the kind it parsed — no second parse; the
         # scope-root guards key off (kind, rest).
-        kind, scope_root, rest = resolve_scope(self._ctx, self._client_id, validated, engine_root=self._root)
+        kind, scope_root, rest = resolve_scope(
+            self._ctx, self._client_id, validated, engine_root=self._root, declared=self._declared
+        )
         full = f'{scope_root}/{rest}' if rest else scope_root
         return full, kind, rest
 
@@ -1368,6 +1517,7 @@ class FileStore:
 
 
 __all__ = [
+    'DeclaredRoot',
     'FileStore',
     'FileHandle',
     'FileHandleMode',

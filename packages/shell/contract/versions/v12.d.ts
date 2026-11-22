@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-22T04:25:24.310Z
-// Source commit: 4f98565a59691c623cf7d28f3a288ffa1a5689ba
+// Generated:     2026-11-22T17:51:22.607Z
+// Source commit: d2a2bb9ad2c3e6367657cd4852a5d306c1a5654c
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1348,6 +1348,12 @@ export interface PipelineConfig {
     store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
+    /** The storage roots beyond its run's anchor this pipeline's nodes reach
+        through `self.files` (`'@Development/kb'`, `'=team/<tid>/kb'`,
+        `'@org/shared'`). Resolved through the run's owner when it starts: a
+        root the owner cannot reach refuses the start. A pipeline that
+        declares roots cannot be published to `@public`. */
+    roots?: string[];
     /** UI viewport settings for visual editors */
     viewport?: {
         x: number;
@@ -1382,8 +1388,8 @@ export interface SUBMIT_RESULT {
     token: string;
     /** The address that answered: `developerId.pipelineId.source` (the stable identity, beside the id) */
     address?: string;
-    /** The rung that answered */
-    resolved: "@spec" | "@me" | "@team" | "@public";
+    /** The rung that answered (`'@org'` is the org rung, plan 3.2) */
+    resolved: "@spec" | "@me" | "@team" | "@org" | "@public";
     /** On `@team`: the answering team */
     team?: string;
     /** The artifact version (absent on `@spec`) */
@@ -1417,8 +1423,8 @@ export type PipeInterfaceMap = Record<string, Record<string, PipeInterfaceNode[]
 export interface PipeInterfaces {
     /** The pipe address (`developerId.pipelineId`). */
     address: string;
-    /** The rung that answers you: `spec` (your own live control, no publication), `me`, `team` or `public`. */
-    rung: "spec" | "me" | "team" | "public";
+    /** The rung that answers you: `spec` (your own live control, no publication), `me`, `team`, `org` or `public`. */
+    rung: "spec" | "me" | "team" | "org" | "public";
     /** The registry version that publication points at; null when your own `spec` control answered (it has none). */
     version: number | null;
     /** The answering team on the `team` rung. */
@@ -1661,6 +1667,14 @@ export interface LogStreamRef {
      * teamId is set (a team scope is always the deploy continuum).
      */
     runKind?: LogRunKind;
+    /**
+     * The run's owner as its task row carried it (`=user/<uid>`,
+     * `=team/<tid>`, `=org/<oid>`), passed back unchanged: the tree the
+     * run's log lives in, whatever team it was billed to. Wins over teamId.
+     */
+    owner?: string;
+    /** The pinned version of a pinned run (its stream is its own); omitted = the published version's. */
+    version?: number;
 }
 /** One chapter (track) — a run inside the continuum. */
 export interface LogChapter {
@@ -1708,8 +1722,15 @@ export interface LogStreamEntry extends LogChaptersResult {
     teamId: string;
     teamName: string;
     runKind: LogRunKind;
-    /** Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind. */
+    /**
+     * Who owns the runs: 'user' (dev or @me deploy) or 'team'. Matches TASK_CONTROL.owner_kind.
+     * An org-owned stream (the org rung, C.35) arrives as 'org', which this union cannot name:
+     * the shell contract re-exports it and is append-only, so the union stays as frozen. Read
+     * `owner` (`=org/<oid>`) to tell an org stream.
+     */
     ownerKind: "user" | "team";
+    /** The owner string to pass back as `LogStreamRef.owner`. */
+    owner: string;
 }
 /** Response of `client.log.streams()`; never-logged scopes are absent. */
 export interface LogStreamsResult {
@@ -2080,6 +2101,12 @@ export interface OrgInfo {
      * Each entry includes team-scoped permissions.
      */
     teams: TeamInfo[];
+    /**
+     * The org rung's audience as the server composes it (`=org/<oid>`): the
+     * target to pass back unchanged to publish to the organisation (org
+     * admins only). Never parse it.
+     */
+    audience?: string;
     /**
      * Id of the organisation's default development team — the team invites
      * pre-select for new members. Null/absent when the organisation has none.
@@ -5047,8 +5074,10 @@ declare class DeployApi {
      * is always explicit: a team (requires `task.control` on it), `'@me'`
      * (your own space), or `'@public'` (the store: on a server that reviews,
      * only an approved `'ready'` version; your organization needs a developer
-     * id). A pointer on `'@me'` or `'@public'` is billed to your development
-     * team when its schedules or a run-now fire it.
+     * id). When its schedules or a run-now fire a pointer, the run is billed
+     * by its rung (plan 8.3): an `'@me'` pointer to your development team as
+     * stamped when you published it; a team's to that team; an `'@public'`
+     * (or `'@org'`) one to the organization, with no ledger team.
      *
      * @param projectId - The project whose artifact to deploy.
      * @param version - The registry version to point the audience at.
@@ -5090,10 +5119,14 @@ declare class DeployApi {
     /**
      * Starts one deployed source NOW (manual trigger).
      *
-     * The same trusted team dispatch the scheduler uses — the run executes
-     * as the team and carries NO human identity; billing attributes to the
-     * org and team, and who fired it is recorded only in the deployment's
-     * audit history. The deployment must be enabled.
+     * The same trusted dispatch the scheduler uses — the run has no CALLER:
+     * who fired it is recorded only in the deployment's audit history, never
+     * as the run's identity. Its owner and ledger follow the rung it runs on
+     * (plan 8.3): a team publication is that team's (billed to it, no ledger
+     * user); an `@org` or `@public` one is the org's, with no ledger team and
+     * no user; an `@me` one is the publisher's, who is its ledger user, billed
+     * to the team stamped when it was published. The deployment must be
+     * enabled.
      *
      * @param projectId - The deployed project.
      * @param sourceId - The pipeline source to fire.
@@ -5186,8 +5219,10 @@ declare class DeployApi {
     delete(projectId: string, version: number): Promise<DeployDeleteResult>;
     /**
      * Sets (or clears) one source's schedule on a deployment: a team's,
-     * `'@me'` or `'@public'` — any publication of the pipe can run on a
-     * schedule, billed to the team stamped when it was published.
+     * `'@me'`, `'@org'` or `'@public'` — any publication of the pipe can run
+     * on a schedule. Attribution follows the rung, as for `run()`: a team's
+     * schedule bills that team, an `@org` or `@public` one is the org's with
+     * no ledger team, an `@me` one bills the team stamped when it was published.
      *
      * The paused flag is untouched — editing cron/ttl preserves it (a new
      * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
@@ -5372,10 +5407,13 @@ declare class LogApi {
      */
     chapters(stream: LogStreamRef): Promise<LogChaptersResult>;
     /**
-     * Lists every continuum of one source that you may read, each with its chapters.
+     * Lists the published-version continuum of one source in each scope you may read, each with its chapters.
      *
-     * Covers your own dev stream, your own @me deploy stream, and the deploy
-     * stream of each team you can monitor. Never-logged scopes are absent.
+     * Covers your own dev stream, your own @me deploy stream, the deploy
+     * stream of each team you can monitor, and the organization's for an org
+     * admin. A pinned version's run (`:<version>`) logs into a continuum of
+     * its own, which this does not list: open it with `version` on the
+     * stream reference. Never-logged scopes are absent.
      *
      * @param identity - Source identity (projectId + source); the scopes come from your permissions.
      * @returns One entry per readable stream: the `chapters()` body tagged with `teamId`, `teamName`, `runKind` and `ownerKind`.
@@ -5611,7 +5649,10 @@ export declare class DataPipe {
  *
  * teamId present always addresses the team's deploy continuum (runKind is
  * ignored there); absent, the optional runKind selects between your dev
- * run (default) and your personal deploy run.
+ * run (default) and your personal deploy run. teamId also takes a row's
+ * audience as the server returned it (`=org/<oid>` watches the org's run).
+ * `version` subscribes a PINNED run (a version other than its rung's
+ * published one), which publishes under its own key.
  */
 export type MonitorKey = {
     token: string;
@@ -5621,6 +5662,7 @@ export type MonitorKey = {
     source: string;
     pipeId?: number;
     runKind?: "dev" | "deploy";
+    version?: number;
 };
 export declare class RocketRideClient extends DAPClient {
     /**
@@ -6605,7 +6647,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param registryVersion - Registry version number from the rail
      * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
      *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-     *                 and '@user' are refused; '@org' is refused until the org rung serves
+     *                 and '@user' are refused; '@org' (org admins) is the org rung
      * @returns The binding row ({audience, version, state, artifactState, ...})
      */
     publishApp(appId: string, registryVersion: number, target: string): Promise<{
@@ -6619,7 +6661,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param appId - App id
      * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
      *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-     *                 and '@user' are refused; '@org' is refused until the org rung serves
+     *                 and '@user' are refused; '@org' (org admins) is the org rung
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
@@ -6634,7 +6676,7 @@ export declare class RocketRideClient extends DAPClient {
      * @param appId - App id
      * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
      *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
-     *                 and '@user' are refused; '@org' is refused until the org rung serves
+     *                 and '@user' are refused; '@org' (org admins) is the org rung
      * @returns The binding row (state 'disabled')
      */
     disableAppPublish(appId: string, target: string): Promise<{
@@ -7084,6 +7126,8 @@ export interface DeployTeamRef {
  *   exists even with zero team memberships.
  * - Each team of the roster is addressed by the `audience` the server
  *   stamped on it; a team without one is not addressable and is skipped.
+ * - The org rung follows the teams, addressed by the organisation's
+ *   `audience`; only org admins (and sys.admin) control it.
  * - org.admin (and sys.admin) implies the FULL team permission set — the
  *   server resolver's documented expansion; per-team rows only carry
  *   explicit task.* grants for regular members.
@@ -11824,6 +11868,8 @@ export interface ClientOpMap extends ShellOpMap {
         projectId: string;
         source: string;
         teamId?: string;
+        owner?: string;
+        version?: number;
     }, void>;
     /** seek/getStatus/getTrace — gated on the runtime allowlist (the typed
      *  map gives NO runtime guarantee at a process boundary). Result stays

@@ -56,8 +56,9 @@ export interface DeployVersionCard {
 
 /** Which rung a deployment row is, from the caller's side: 'me' (their own
     personal space, addressed '@me'), 'personal' (another user's personal
-    space, which only an org admin sees), 'team', or 'public' (the store). */
-export type DeploymentRung = 'me' | 'personal' | 'team' | 'public';
+    space, which only an org admin sees), 'team', 'org' (the organisation,
+    published by org admins), or 'public' (the store). */
+export type DeploymentRung = 'me' | 'personal' | 'team' | 'org' | 'public';
 
 /** Per-source schedule facts on a live deployment (keyed by sourceId). */
 export interface TeamDeploymentSchedule {

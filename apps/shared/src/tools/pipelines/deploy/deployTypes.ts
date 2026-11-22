@@ -75,7 +75,7 @@ export interface TeamDeploymentRowDTO {
 	/** The rung the row's audience is, from the caller's side, as the server
 	 *  composed it: 'me' (their own personal space), 'personal' (another
 	 *  user's, org admins only), 'team', or 'public' (the store). */
-	rung: 'me' | 'personal' | 'team' | 'public';
+	rung: 'me' | 'personal' | 'team' | 'org' | 'public';
 	version: number;
 	state: 'enabled' | 'disabled' | 'errored' | 'removed';
 	/** Unix seconds of the pointer move (the header's deployed-at). */

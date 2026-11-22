@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional, Union
 from ai.common.dap import TransportBase
 
 from .task_conn import TaskConn
-from .task_control import DeploymentRef, Listing, TeamContext
+from .task_control import Attribution, DeploymentRef, Listing
 
 if TYPE_CHECKING:
     from .task_server import TaskServer
@@ -66,55 +66,51 @@ async def start_server_task_as_team(
     server: 'TaskServer',
     pipeline: Dict[str, Any],
     *,
-    org_id: str,
-    team_id: str,
+    attribution: Attribution,
     deployment: DeploymentRef,
     trigger: str = 'schedule',
     ttl: Optional[int] = None,
     trace_level: Optional[str] = None,
     debug_out: bool = False,
-    owner_kind: str = 'team',
-    owner_user_id: str = '',
-    rung: str = '',
     developer_id: str = '',
     version: Optional[int] = None,
-    team_context: Optional[TeamContext] = None,
+    pinned: bool = False,
+    caller_account: Any = None,
     deployment_epoch: Optional[float] = None,
     listing: Optional[Listing] = None,
 ) -> str:
     """Execute ``pipeline`` as a DEPLOYMENT run — no stored credential; return the control's KEY.
 
-    The trusted dispatch path for scheduled/deployed runs: instead of
-    replaying a user token, the connection's identity is CONSTRUCTED
-    server-side — a synthetic AccountInfo whose only grant is the task
-    permission set on ``team_id``. Two owner modes:
+    The trusted dispatch path for published runs (a ``submit(name)`` start,
+    a schedule fire, a run-now): instead of replaying a user token, the
+    connection's identity is CONSTRUCTED server-side from the run's row of
+    the rung table (``attribution``, plan 8.3), which rides the connection
+    as a trusted attribute read by on_execute — never as DAP arguments, so
+    remote clients cannot spoof a deploy run or pick who pays.
 
-      - ``owner_kind='team'`` (default): the TEAM owns the run. It carries
-        NO human identity; the env merge uses org+team layers only (a
-        deployment's configuration never depends on which human deployed
-        it); billing attributes to org+team; who deployed or fired lives
-        exclusively in the audit log and deployment history.
-      - ``owner_kind='user'``: a PERSONAL (@me) deployment run. The run is
-        OWNED by ``owner_user_id`` — private visibility, user-tree storage
-        and logs, the owner's user secret layer applies, and billing
-        attributes to the owner (``team_id`` is the deployment's ABSOLUTE
-        billing stamp, written at pointer time and read by the caller).
-      - ``run_kind='deploy'``, the owner scope, and ``trigger`` travel as
-        TRUSTED connection attributes read by on_execute — never as DAP
-        arguments, so remote clients cannot spoof a deploy run.
-      - The org's developer id rides the synthetic organization: it is the
-        address namespace, and a run cannot start without one.
-      - The deployment the run resolved through (``deployment``) rides
-        the same trusted channel: the publisher's disable/remove releases
-        the run's hold.
-      - ``rung`` stamps the published rung a ``submit(name)`` start
-        answered on (``'me'``, ``'team'`` or ``'public'``); empty derives it
-        from the owner. ``developer_id`` is the address namespace when it is
-        not ``org_id``'s own: a ``@public`` run is billed to the caller's org
-        while its address stays the publisher's.
-      - ``version`` is the artifact version a ``submit(name)`` start
-        resolved; ``team_context`` the team whose environment the control
-        runs with (plan 6.2; default: the deploying team ``team_id``).
+      - The OWNER (``attribution.owner_kind``/``owner_id``) is where the run
+        lives: a user (``@me``, a caller's ``@public``), a team (``@team``,
+        one control per caller) or the org (``@org``, an unattended
+        ``@public``).
+      - The payer, the ledger user and the ledger team are the row's: a run
+        with no caller has no user but on ``@me``, and ``@org``/``@public``
+        no team. The ORG mode (an org-owned run with no caller) carries no
+        user and no team at all, only the org.
+      - The environment is the row's: the caller's org, home team and user
+        on every rung; a run with no caller takes org and the publication's
+        team, with the publisher's own user layer on ``@me``.
+      - The deployment the run resolved through (``deployment``) rides the
+        same trusted channel: the publisher's disable/remove releases the
+        run's hold.
+      - ``developer_id`` is the address namespace when it is not the paying
+        org's own: a ``@public`` run is billed to the caller's org while its
+        address stays the publisher's.
+      - ``version`` is the artifact version the run starts from; ``pinned``
+        says the call named it and it is not the rung's published version
+        (plan 3.2), so the control has an identity of its own.
+      - ``caller_account`` is the caller's own session (a ``submit(name)``
+        start): the pipeline's declared roots resolve through it (plan 2.5).
+        None for a run with no caller.
       - ``listing`` is the store listing of that version (plan 8.4): what
         the control's store gate re-checks per request; default free.
 
@@ -133,60 +129,58 @@ async def start_server_task_as_team(
 
     # The address namespace comes from the org, not from a session, unless
     # the run's address lives in the publisher's namespace (@public)
-    developer_id = developer_id or await account.get_developer_id(org_id)
+    developer_id = developer_id or await account.get_developer_id(attribution.org_id)
     if not developer_id:
         raise PermissionError(developer_id_required('Running a deployment'))
 
-    # Trusted entry point, but still validate the owner pair: owner_kind='user'
-    # with an empty owner_user_id would build an identity with userId='' — a
-    # user-owned run with no owner. Downstream that yields no storage anchor
-    # (storage_root_for refuses a node's self.files) and an empty run-log
-    # anchor (raises), so the run executes with storage tools refused and no
-    # log, both SILENTLY. Fail loud.
-    if owner_kind == 'user' and not owner_user_id:
-        raise ValueError("owner_kind='user' requires a non-empty owner_user_id")
+    # Trusted entry point, but still validate the owner: a run with no owner
+    # id would have no storage anchor and no run-log tree, so it would run
+    # with storage tools refused and no log, both SILENTLY. Fail loud.
+    if not attribution.owner_id:
+        raise ValueError(f'A {attribution.owner_kind}-owned run requires its owner id')
 
     conn = _InProcessConn(server)
 
-    # Server-constructed team identity: full task permissions on the ONE
-    # team, nothing else. No userToken — deploy runs hold no credential,
-    # and no user identity: the team is the owner.
+    # Server-constructed identity: the ledger user (none for a run with no
+    # caller but an unattended @me) and full task permissions on the ledger
+    # team, if any, nothing else. No userToken — deploy runs hold no
+    # credential. The org mode carries no team and the org-level grant.
+    team_id = attribution.team_id
     conn._account_info = AccountInfo(
-        # A @team deploy carries NO human identity (the team owns it). A @me
-        # deploy is owned by a specific user, so it carries that user's id —
-        # billing attributes to the owner and the owner's user secret layer
-        # resolves. The billing team still rides devTeam below either way.
-        userId=owner_user_id if owner_kind == 'user' else '',
+        userId=attribution.user_id,
         displayName='',
         email='',
         devTeam=team_id,
-        teamOrder=[team_id],
+        teamOrder=[team_id] if team_id else [],
         organization={
-            'id': org_id,
+            'id': attribution.org_id,
             'name': '',
-            'permissions': [],
-            'teams': [
-                {
-                    'id': team_id,
-                    'name': '',
-                    'permissions': ['task.control', 'task.monitor', 'task.data', 'task.store'],
-                }
-            ],
+            'permissions': ['org.admin'] if attribution.owner_kind == 'org' else [],
+            'teams': (
+                [
+                    {
+                        'id': team_id,
+                        'name': '',
+                        'permissions': ['task.control', 'task.monitor', 'task.data', 'task.store'],
+                    }
+                ]
+                if team_id
+                else []
+            ),
             'developerId': developer_id,
         },
         capabilities=list(account.capabilities),
     )
     conn._authenticated = True
 
-    # The trusted, non-wire channel for run classification.
-    conn._trusted_run_kind = 'deploy'
-    conn._trusted_owner_kind = owner_kind
+    # The trusted, non-wire channel for the run's classification
+    conn._trusted_attribution = attribution
     conn._trusted_trigger = trigger
     conn._trusted_deployment = deployment
-    conn._trusted_rung = rung
     conn._trusted_version = version
+    conn._trusted_pinned = pinned
+    conn._trusted_caller_account = caller_account
     conn._trusted_deployment_epoch = deployment_epoch
-    conn._trusted_team_context = team_context or TeamContext(team_id, 'deploying')
     conn._trusted_listing = listing
 
     # The schedule's run window rides the execute arguments: start_task
@@ -196,7 +190,7 @@ async def start_server_task_as_team(
     # the server's DEFAULT idle timeout, which is a dev-task policy.
     # The per-source execution settings ride the same way as a dev run:
     # 'pipelineTraceLevel' plus '--trace=debugOut' in the task args.
-    arguments: Dict[str, Any] = {'pipeline': pipeline, 'teamId': team_id, 'ttl': int(ttl) if ttl else 0}
+    arguments: Dict[str, Any] = {'pipeline': pipeline, 'ttl': int(ttl) if ttl else 0}
     if trace_level:
         arguments['pipelineTraceLevel'] = trace_level
     if debug_out:

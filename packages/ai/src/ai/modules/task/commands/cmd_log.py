@@ -29,17 +29,20 @@
 # Dispatches on ``arguments.subcommand`` (streams / chapters / read / segment /
 # delete), the same shape as rrext_store and rrext_deploy. Streams are addressed by the plain
 # identity pair (projectId + source) — NEVER by token: tokens are
-# credentials and appear nowhere in the log system. The SCOPE IS THE KIND:
-# ``teamId`` present addresses that team's DEPLOY continuum, absent addresses
-# the caller's own DEV stream — run kind is derived, not an argument.
+# credentials and appear nowhere in the log system. The SCOPE IS THE OWNER:
+# ``owner`` (the string a task row carries) names the tree the run lives in;
+# without it ``teamId`` names a deployment's audience, and absent both the
+# caller's own tree, ``runKind`` picking its dev or @me continuum. A pinned
+# version's run (``version``) is a stream of its own.
 # =============================================================================
 
 import asyncio
 from typing import TYPE_CHECKING, Any, Dict, Optional, Tuple
 
 from ai.account import Store
-from ai.account.audience import deploy_scope_of
-from ai.account.models import resolve_task_permissions
+from ai.account.audience import compose_owner, deploy_scope_of, parse_audience, parse_owner
+from ai.account.models import resolve_org_permissions, resolve_task_permissions
+from ai.account.roots import KIND_ORG, KIND_TEAM, KIND_USER
 from ai.common.dap import DAPConn, TransportBase
 from ai.modules.task.run_log import RunLogReader
 
@@ -62,9 +65,9 @@ class LogCommands(DAPConn):
     the matching ``_log_*`` handler. Permissions differ per subcommand
     (``task.monitor`` for reads, ``task.control`` for the destructive
     delete), so each handler verifies its own permission. Unscoped requests
-    serve the caller their OWN streams (paths derived from
-    ``self._account_info.userId``); an optional ``teamId`` targets a team's
-    DEPLOY continuum, gated by the caller's permission on that team.
+    serve the caller their OWN streams; ``owner`` (or a deployment's
+    audience in ``teamId``) targets another owner's tree, gated by the
+    watchers of plan 8.3 (``_verify_log_access``).
     """
 
     def __init__(
@@ -129,68 +132,91 @@ class LogCommands(DAPConn):
 
     def _scope_for(self, args: Dict[str, Any]) -> Tuple[str, str]:
         """
-        Resolve the stream scope from the addressing arguments.
+        Resolve the stream scope from the addressing arguments: the run's OWNER and its continuum.
 
-        ``teamId`` present addresses that team's DEPLOY continuum (deploy
-        runs execute as the team and log into its tree). Absent, the scope
-        is the caller's OWN tree, where the optional ``runKind`` argument
-        picks the continuum: absent/'dev' is the dev stream (today's
-        behavior); 'deploy' is the caller's personal @me deploy stream —
-        the one case teamId-presence cannot express, since an @me run is
-        deploy-kind but user-owned. teamId WINS over runKind: a team scope
-        is always the deploy continuum.
+        ``owner`` is the owner string a task row carried (``=user/<uid>``,
+        ``=team/<tid>`` or ``=org/<oid>``, plan 2.5), passed back unchanged:
+        the tree the run's log lives in, whatever team it was billed to (an
+        ``@me`` deploy run's row names its billing team in ``teamId``, its
+        logs live in its owner's tree). A team or org owner is always the
+        deploy continuum; a user owner's continuum is ``runKind`` (absent:
+        dev).
 
-        ``teamId`` is a team id, or a deployment row's audience passed back
-        unchanged (plan 2.5): ``=team/<tid>`` is that team's continuum and
-        the caller's own ``=user/<uid>`` their personal deploy continuum.
+        Without ``owner``, ``teamId`` names a publication's audience the way a
+        deployment row carries it: ``=team/<tid>`` (or a bare team id) is that
+        team's continuum, the caller's own ``=user/<uid>`` their personal
+        deploy continuum, ``=org/<oid>`` the org's. Absent both, the scope is
+        the caller's OWN tree, where ``runKind`` picks the continuum:
+        absent/'dev' is the dev stream, 'deploy' the caller's personal @me
+        deploy stream.
 
         Args:
             args: The subcommand arguments.
 
         Returns:
-            ``(team_id, run_kind)`` — ``('', 'dev')`` for own dev streams,
-            ``('', 'deploy')`` for own @me streams, ``(<id>, 'deploy')``
-            for a team scope.
+            ``(owner, run_kind)``.
 
         Raises:
-            ValueError: An audience this reader cannot address (another
-                user's space, an org, the store).
+            ValueError: An owner or audience this reader cannot address (the
+                store, a malformed string).
         """
+        caller = str(self._account_info.userId or '')
+        owner = str(args.get('owner') or '')
+        run_kind = 'deploy' if args.get('runKind') == 'deploy' else 'dev'
+        if owner:
+            decoded = parse_owner(owner)
+            return compose_owner(decoded.kind, decoded.id), (run_kind if decoded.kind == KIND_USER else 'deploy')
         team_id = str(args.get('teamId') or '')
         if team_id.startswith(('@', '=')):
-            return deploy_scope_of(team_id, str(self._account_info.userId or ''))
+            decoded = parse_audience(team_id)
+            if decoded.kind == KIND_ORG:
+                return compose_owner(KIND_ORG, decoded.id), 'deploy'
+            team, kind = deploy_scope_of(team_id, caller)
+            return (compose_owner(KIND_TEAM, team) if team else compose_owner(KIND_USER, caller)), kind
         if team_id:
-            return team_id, 'deploy'
-        return '', ('deploy' if args.get('runKind') == 'deploy' else 'dev')
+            return compose_owner(KIND_TEAM, team_id), 'deploy'
+        if not caller:
+            raise PermissionError('Not authenticated')
+        return compose_owner(KIND_USER, caller), run_kind
 
     def _verify_log_access(self, args: Dict[str, Any], perm: str) -> None:
         """
-        The permission gate for every log subcommand.
+        The permission gate for every log subcommand: the watchers of plan 8.3.
 
-        Team-scoped requests (deploy streams) resolve ``perm`` against the
-        TARGET team — membership is the read/write right, exactly the
-        deployment model (teams are the environments). Unscoped requests
-        keep the original default-team check. Denials are uniform: a foreign
-        or unknown team reads the same as a permission miss (no existence
-        leak).
+        A user-owned run's log is its owner's alone (sys.admin and internal
+        identities pass); a team-owned run's is read with ``perm`` on THAT
+        team — membership is the read/write right, exactly the deployment
+        model; an org-owned run's is the active org's admins'. Denials are
+        uniform: a foreign or unknown owner reads the same as a permission
+        miss (no existence leak).
 
         Args:
-            args: The subcommand arguments (consulted for ``teamId``).
+            args: The subcommand arguments (``owner``, ``teamId``, ``runKind``).
             perm: 'task.monitor' for reads, 'task.control' for delete.
 
         Raises:
             PermissionError: Caller lacks ``perm`` in the resolved scope, or
                 the key's endpoints scope excludes the stream's address.
         """
-        # Step 1: resolve the scope the request addresses.
-        team_id, _ = self._scope_for(args)
+        # Step 1: resolve the owner the request addresses
+        owner, _ = self._scope_for(args)
+        decoded = parse_owner(owner)
 
-        # Step 2: team scope resolves against THAT team; otherwise the
-        # caller's default team, as before.
-        if team_id:
-            self.verify_team_permission(team_id, perm)
-        else:
+        # Step 2: the owner's watchers
+        sys_perms = self._account_info.sysPermissions or []
+        operator = 'sys.admin' in sys_perms or 'internal' in sys_perms
+        if decoded.kind == KIND_TEAM:
+            self.verify_team_permission(decoded.id, perm)
+        elif decoded.kind == KIND_ORG:
+            org = self._account_info.organization or {}
+            if not operator and (
+                str(org.get('id') or '') != decoded.id or not resolve_org_permissions(self._account_info)
+            ):
+                raise PermissionError("Access denied: the org's run logs are its admins'")
+        elif decoded.id == self._account_info.userId:
             self.verify_permission(perm)
+        elif not operator:
+            raise PermissionError("Access denied: a personal run log is its owner's")
 
         # Step 3: a key with an endpoints scope reaches only the streams of
         # the addresses inside it.
@@ -233,13 +259,13 @@ class LogCommands(DAPConn):
         Build a reader for the stream named by the addressing arguments.
 
         Args:
-            args: Must contain ``projectId`` and ``source``; ``teamId``
-                selects that team's deploy continuum (run kind is derived
-                from the scope — see ``_scope_for``).
+            args: Must contain ``projectId`` and ``source``; ``owner`` (or
+                ``teamId``) and ``runKind`` select the continuum (see
+                ``_scope_for``); ``version`` a pinned version's stream.
 
         Returns:
-            A RunLogReader scoped to the CALLER's user id, or to the TEAM
-            when ``teamId`` is given (permission-checked by the handler).
+            A RunLogReader over the OWNER's tree (permission-checked by the
+            handler).
 
         Raises:
             ValueError: On missing/invalid identity arguments.
@@ -251,46 +277,55 @@ class LogCommands(DAPConn):
             raise ValueError('projectId is required')
         if not source:
             raise ValueError('source is required')
-        team_id, run_kind = self._scope_for(args)
+        owner, run_kind = self._scope_for(args)
+        version = args.get('version')
+        if version is not None and (isinstance(version, bool) or not isinstance(version, int) or version < 1):
+            raise ValueError('version must be a positive integer')
 
-        # Store scoping comes from the AUTHENTICATED user, never from raw
-        # input: unscoped requests serve the caller their own streams only,
-        # and a teamId scope is permission-checked at the handler before
-        # this runs. .logs is a SYSTEM TREE — the file API denies it to
-        # every session identity — so the reader acts through an INTERNAL
-        # identity anchored at the caller's namespace; the reader's scope
-        # helper turns teamId into the '=team/<tid>/' prefix. The DOMAIN
-        # permission gate is _verify_log_access above.
+        # The owner is permission-checked at the handler before this runs.
+        # .logs is a SYSTEM TREE — the file API denies it to every session
+        # identity — so the reader acts through an INTERNAL identity; the
+        # reader's scope helper turns the owner into its '=<kind>/<id>/'
+        # prefix, the same one the writer wrote under. The DOMAIN permission
+        # gate is _verify_log_access above.
         from ai.account import RequestContext
 
         return RunLogReader(
-            Store.file_store(RequestContext.internal('log-reader'), client_id=self._account_info.userId),
-            self._account_info.userId,
+            Store.file_store(RequestContext.internal('log-reader'), client_id=parse_owner(owner).id),
+            owner,
             project_id,
             source,
             run_kind,
-            team_id=team_id,
+            version=version,
         )
 
     # =========================================================================
     # SUBCOMMAND HANDLERS
     # =========================================================================
 
-    @staticmethod
-    def _scope(run_kind: str, team: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """One place a stream can live: a team's tree, or the caller's own when ``team`` is None."""
+    def _scope(self, run_kind: str, team: Optional[Dict[str, Any]] = None, org: str = '') -> Dict[str, Any]:
+        """One place a stream can live: a team's tree, the org's, or the caller's own."""
+        if org:
+            kind, ident = KIND_ORG, org
+        elif team:
+            kind, ident = KIND_TEAM, str(team['id'])
+        else:
+            kind, ident = KIND_USER, str(self._account_info.userId or '')
         return {
             'teamId': team['id'] if team else '',
             'teamName': team.get('name', '') if team else '',
             'runKind': run_kind,
-            'ownerKind': 'team' if team else 'user',
+            'ownerKind': kind,
+            'owner': compose_owner(kind, ident),
         }
 
     # ── streams ──────────────────────────────────────────────────────────────
 
     async def _log_streams(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
-        """Every continuum of one source the caller may read, with its chapters: own dev, own @me
-        deploy, then each team deploy the caller can monitor. Never-logged scopes are left out.
+        """The published-version continuum of one source in each scope the caller may read, with its
+        chapters: own dev, own @me deploy, each team deploy the caller can monitor, then the org's for an
+        org admin. A pinned version's continuum (C.36) is not listed: a reader opens it with ``version``.
+        Never-logged scopes are left out.
         """
         self.verify_permission('task.monitor')
         self._verify_log_endpoint_scope(args)
@@ -304,6 +339,8 @@ class LogCommands(DAPConn):
             # Same resolver as verify_team_permission: nothing listed here could be denied on a direct read.
             if 'task.monitor' in resolve_task_permissions(self._account_info, team['id'])
         ]
+        if org.get('id') and resolve_org_permissions(self._account_info):
+            scopes.append(self._scope('deploy', org=str(org['id'])))
 
         identity = {'projectId': args.get('projectId'), 'source': args.get('source')}
         # One control-file read per scope, a few at a time: an org admin can monitor every team.
@@ -313,7 +350,7 @@ class LogCommands(DAPConn):
             async with limit:
                 try:
                     return await self._reader_for(
-                        {**identity, 'teamId': scope['teamId'], 'runKind': scope['runKind']}
+                        {**identity, 'owner': scope['owner'], 'runKind': scope['runKind']}
                     ).chapters()
                 except FileNotFoundError:
                     return None

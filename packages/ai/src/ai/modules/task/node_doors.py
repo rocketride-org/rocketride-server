@@ -270,7 +270,7 @@ async def _state_unlock(task: 'TaskEngine', arguments: Dict[str, Any], data: Opt
 
 def _files(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'FileStore':
     """
-    The file store of the binding's owner, its handles owned by (engine, owner root).
+    The file store of the binding's owner, its handles owned by (engine, control).
 
     Args:
         task: The engine the request came from.
@@ -285,17 +285,23 @@ def _files(task: 'TaskEngine', arguments: Dict[str, Any], command: str) -> 'File
     """
     control = _control(task, arguments, command)
     try:
-        # Handles belong to (engine, root): FileStore authorizes a handle by its
-        # connection id, so a handle opened under one project's root is never
-        # usable from another's, even for one team on one engine
-        root = storage_root_for(control.owner_type, control.userId, control.teamId, control.project_id or '')
-        conn_id = f'engine:{task.engine_id}:{root}'
+        # Handles belong to (engine, control): FileStore authorizes a handle by
+        # its connection id, and a control is the unit whose declared roots
+        # admit a path, so a handle opened under one control is never usable
+        # from another, even for one owner and project on one engine. The
+        # storage root is resolved first only to refuse an owner with no tree
+        storage_root_for(control.owner_type, control.userId, control.teamId, control.project_id or '', control.orgId)
+        conn_id = f'engine:{task.engine_id}:{control.key}'
+        # The roots the pipeline declared, resolved through its owner when
+        # the control started (plan 2.5): the only rooted paths admitted
         store = Store.file_store_for_caller(
             owner_kind=control.owner_type,
             user_id=control.userId,
             team_id=control.teamId,
             project_id=control.project_id or '',
             conn_id=conn_id,
+            org_id=control.orgId,
+            declared=control.roots,
         )
     except ValueError as e:
         raise ChannelRefused(f'{command}: {e}') from None

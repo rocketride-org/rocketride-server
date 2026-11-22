@@ -37,6 +37,7 @@ import pytest
 import ai.account
 import ai.modules.task.task_server_facade as facade_mod
 from ai.modules.task.task_control import DeploymentRef
+from ai.modules.task.task_control import unattended_attribution
 from ai.modules.task.task_server_facade import start_server_task_as_team
 
 #: The control id the execute answers with (the token slot, plan section 1).
@@ -48,13 +49,13 @@ CONTROL_ID = '=control/0123456789abcdef0123456789abcdef'
 # ============================================================================
 
 
-async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
+async def _dispatch(ttl, *, audience='=team/team-1', billing='', controls=None):
     """Run a dispatch with a capture stub in place of the DAP request.
 
     Args:
         ttl: The schedule window handed to the facade.
-        owner_kind: ``'team'`` (@team deploy) or ``'user'`` (@me deploy).
-        owner_user_id: The owning user of a @me deploy.
+        audience: The publication the unattended run fires (plan 8.3's second table).
+        billing: The pointer's billing stamp (an @me pointer needs one).
         controls: The live registry the server answers ``control_by_key``
             from, by control id; defaults to the one deploy control this
             dispatch starts.
@@ -72,6 +73,7 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
         captured['arguments'] = arguments
         captured['account_info'] = self._account_info
         captured['deployment'] = self._trusted_deployment
+        captured['attribution'] = self._trusted_attribution
         # Step 2: answer like a successful execute (the control id in the token slot).
         return {'success': True, 'body': {'token': CONTROL_ID, 'address': 'acme.proj-1.src-1'}}
 
@@ -95,13 +97,10 @@ async def _dispatch(ttl, *, owner_kind='team', owner_user_id='', controls=None):
         captured['key'] = await start_server_task_as_team(
             server,
             {'components': []},
-            org_id='org-1',
-            team_id='team-1',
-            deployment=DeploymentRef(org_id='org-1', team_id='team-1', project_id='proj-1'),
+            attribution=unattended_attribution(audience, org_id='org-1', billing_stamp=billing),
+            deployment=DeploymentRef(org_id='org-1', team_id=audience, project_id='proj-1'),
             trigger='schedule',
             ttl=ttl,
-            owner_kind=owner_kind,
-            owner_user_id=owner_user_id,
         )
     captured['server'] = server
     return captured
@@ -127,12 +126,13 @@ async def test_fixed_window_sends_ttl_seconds():
 
 
 @pytest.mark.asyncio
-async def test_pipeline_and_team_ride_alongside_ttl():
-    """The execute arguments carry pipeline + teamId + ttl, nothing implicit."""
-    arguments = (await _dispatch(None))['arguments']
+async def test_the_pipeline_rides_alongside_ttl_and_the_team_does_not():
+    """The execute arguments carry pipeline + ttl, nothing implicit: who pays rides the trusted channel."""
+    captured = await _dispatch(None)
+    arguments = captured['arguments']
     assert arguments['pipeline'] == {'components': []}
-    assert arguments['teamId'] == 'team-1'
-    assert set(arguments) == {'pipeline', 'teamId', 'ttl'}
+    assert set(arguments) == {'pipeline', 'ttl'}
+    assert (captured['attribution'].rung, captured['attribution'].team_id) == ('team', 'team-1')
 
 
 @pytest.mark.asyncio
@@ -168,7 +168,7 @@ async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipe
     """
     played = '=control/feedfacefeedfacefeedfacefeedface'
     controls = {played: SimpleNamespace(key=played), CONTROL_ID: SimpleNamespace(key=CONTROL_ID)}
-    captured = await _dispatch(None, owner_kind='user', owner_user_id='user-7', controls=controls)
+    captured = await _dispatch(None, audience='=user/user-7', billing='team-1', controls=controls)
     assert captured['key'] == CONTROL_ID
     assert captured['account_info'].userId == 'user-7'
     captured['server'].resolve_target.assert_not_called()
@@ -178,5 +178,22 @@ async def test_me_deploy_returns_its_own_key_while_the_owner_plays_the_same_pipe
 async def test_the_deployment_rides_the_trusted_channel_not_the_wire():
     """The run names the deployment it resolved through, out of reach of DAP arguments."""
     captured = await _dispatch(None)
-    assert captured['deployment'] == DeploymentRef(org_id='org-1', team_id='team-1', project_id='proj-1')
+    assert captured['deployment'] == DeploymentRef(org_id='org-1', team_id='=team/team-1', project_id='proj-1')
     assert 'deployment' not in captured['arguments']
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('audience', ['=org/org-1', '@public'])
+async def test_the_org_mode_carries_no_user_and_no_team(audience):
+    """Plan 8.3: an unattended @org or @public run is the org's: no user, no team, the org-level grant."""
+    captured = await _dispatch(None, audience=audience)
+    account_info = captured['account_info']
+    assert (account_info.userId, account_info.devTeam, account_info.teamOrder) == ('', '', [])
+    assert account_info.organization['teams'] == [] and account_info.organization['permissions'] == ['org.admin']
+    attribution = captured['attribution']
+    assert (attribution.owner_kind, attribution.owner_id, attribution.user_id, attribution.team_id) == (
+        'org',
+        'org-1',
+        '',
+        '',
+    )

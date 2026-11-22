@@ -822,14 +822,17 @@ class MiscCommands(DAPConn):
         server = self._server
         caller_user_id = self._account_info.userId
 
-        # Snapshot tasks the caller may see (run-scoped: user-owned runs are
-        # owner-only; team-owned runs need permissions on the run's team; a
-        # key with an endpoints scope sees only the runs inside it)
+        # Snapshot tasks the caller may monitor (run-scoped: user-owned runs
+        # are owner-only; team-owned runs need task.monitor on the run's team;
+        # org-owned runs are their admins', the caller of one holding
+        # task.data alone; a key with an endpoints scope sees only the runs
+        # inside it)
         endpoints = getattr(self._account_info, 'endpoints', None)
         task_controls = [
             c
             for c in server._task_control.values()
-            if resolve_run_permissions(self._account_info, c) and in_endpoint_scope(endpoints, c.address)
+            if 'task.monitor' in resolve_run_permissions(self._account_info, c)
+            and in_endpoint_scope(endpoints, c.address)
         ]
         # Connections are user-scoped, so filter by userId
         conn_items = [
@@ -882,7 +885,9 @@ class MiscCommands(DAPConn):
             task_name = status.get('name') or control.source
             # Monitor keys are owner-scoped — build from the control's owner
             # (once per control; they do not vary per connection).
-            project_key = owner_key(control.run_kind, control.owner_id, control.project_id, control.source)
+            project_key = owner_key(
+                control.run_kind, control.owner_id, control.project_id, control.source, control.pinned_version
+            )
             project_wildcard_key = owner_wildcard_key(control.run_kind, control.owner_id, control.project_id)
             for cid, conn in conn_items:
                 if not hasattr(conn, '_monitors'):
@@ -1073,9 +1078,11 @@ class MiscCommands(DAPConn):
             return 'Task monitor'
 
         # Strip the 'p.' prefix and split the owner-scoped key layout
-        # p.{runKind}.{ownerId}.{projectId}.{source} — the leading runKind
-        # segment (added with @me run identity) shifts every field right by
-        # one, so projectId is parts[2] and source parts[3], NOT parts[1]/[2].
+        # p.{runKind}.{ownerId}.{projectId}.{source}[:{version}] — the leading
+        # runKind segment (added with @me run identity) shifts every field
+        # right by one, so projectId is parts[2] and source parts[3], NOT
+        # parts[1]/[2]. A pinned run's source carries ':<version>' (C.36),
+        # and a pipe-scoped key one more '.<pipeId>' after it.
         parts = key[2:].split('.', 3)
         if len(parts) < 3:
             return 'Task monitor'
@@ -1085,6 +1092,7 @@ class MiscCommands(DAPConn):
         if len(parts) == 3 or parts[3] == '*':
             return f'{project_label}.*'
 
-        source = parts[3]
+        source, _, version = parts[3].split('.', 1)[0].partition(':')
         source_label = source_names.get(f'{project_id}.{source}', source)
-        return f'{project_label}.{source_label}'
+        pinned = f' v{version}' if version.isdigit() else ''
+        return f'{project_label}.{source_label}{pinned}'

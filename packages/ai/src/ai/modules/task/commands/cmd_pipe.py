@@ -62,13 +62,26 @@ from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from croniter import croniter
 
 from ai.account import account
-from ai.account.audience import PUBLIC_AUDIENCE, team_audience, user_audience
-from ai.account.pipe_deploy import listing_of, pointer_run_owner
+from ai.account.audience import PUBLIC_AUDIENCE, org_audience, team_audience, user_audience
+from ai.account.file_store import normalize_path, parse_scope
+from ai.account.roots import KIND_TEAM
+from ai.account.pipe_deploy import listing_of
 from ai.common.dap import TransportBase
 from ai.common.list_rows import paginate_rows
 
 from .cmd_deploy import _DeployBase
-from ..task_control import DeploymentRef
+from ..task_control import DeploymentRef, unattended_attribution
+
+
+def _names_a_team(root_text: str) -> bool:
+    """True when a declared root names a team by NAME (``@Development/kb``), not by id (``=team/<tid>/kb``)."""
+    try:
+        root = parse_scope(normalize_path(root_text))
+    except (ValueError, PermissionError):
+        # Not a valid root at all: the start refuses it with its own message
+        return False
+    return root.kind == KIND_TEAM and not root.by_id
+
 
 if TYPE_CHECKING:
     from ..task_server import TaskServer
@@ -172,14 +185,17 @@ class DeployPipeCommands(_DeployBase):
     # =========================================================================
 
     async def _require_source_in_artifact(
-        self, org_id: str, team_id: str, project_id: str, source_id: str
+        self, org_id: str, team_id: str, project_id: str, source_id: str, *, unattended: bool = False
     ) -> Dict[str, Any]:
         """The team's deployment, after proving ``source_id`` is in its artifact.
 
         A schedule or per-source setting for a component id the deployed
         version does not contain would otherwise fail on every cron tick
         with nothing but a server log line — reject it at write time, where
-        the caller gets a real error.
+        the caller gets a real error. ``unattended`` (a schedule, a run-now):
+        the run has no session, so a team NAME in the pipeline's declared
+        roots (``@Development/kb``) cannot be resolved when it starts (plan
+        2.5); it is refused here, naming the id form to declare instead.
         """
         dep = await account.deployments_get(org_id, team_id, project_id)
         if dep is None or dep.get('state') == 'removed':
@@ -188,6 +204,13 @@ class DeployPipeCommands(_DeployBase):
         components = pipeline.get('components') or []
         if source_id not in {c.get('id') for c in components if isinstance(c, dict)}:
             raise ValueError(f'sourceId {source_id!r} is not a component of version {dep["version"]}')
+        if unattended:
+            named = [text for text in pipeline.get('roots') or [] if isinstance(text, str) and _names_a_team(text)]
+            if named:
+                raise ValueError(
+                    f'Version {dep["version"]} of {project_id} declares roots by team name ({", ".join(named)}): '
+                    'a scheduled or run-now run has no session to resolve a name, so declare each as =team/<tid>/...'
+                )
         return dep
 
     # =========================================================================
@@ -211,8 +234,9 @@ class DeployPipeCommands(_DeployBase):
             await self._require_store_publishable(org_id, project_id, version)
 
         # The billing decision happens HERE, at pointer time (absolute):
-        # team audiences bill themselves; @me and @public stamp the
-        # publisher's dev team or refuse. Runs read the stamp and never resolve.
+        # team audiences bill themselves; @me stamps the publisher's dev
+        # team or refuses; @org and @public bill no team. Runs read the stamp
+        # and never resolve.
         billing_team = self._billing_team_of(team_id)
         dep = await account.deployments_deploy(org_id, team_id, project_id, version, self._actor(), billing_team)
         self._scheduler.sync(org_id, dep)
@@ -235,7 +259,8 @@ class DeployPipeCommands(_DeployBase):
 
         Visibility model: an org admin sees the WHOLE org — every team and
         every user's personal space. A regular user sees their own personal
-        space, the organization's store publications and the teams they are
+        space, the organization's store publications, its org-rung
+        publications (every member's rung, plan 3.2) and the teams they are
         a member of.
         """
         org_id = self._org_id()
@@ -253,6 +278,9 @@ class DeployPipeCommands(_DeployBase):
                 # The store rows are the organization's own publications:
                 # public by definition, so every member sees them
                 visible.add(PUBLIC_AUDIENCE)
+                # The org rung is every member's (plan 3.2), as a list scoped
+                # to '@org' already shows them
+                visible.add(org_audience(org_id))
                 deployments = [d for d in deployments if d.get('teamId') in visible]
         deployments = [self._describe(d) for d in deployments]
         # Standard list-API envelope ({rows,total,page,pageSize}): rows are
@@ -337,12 +365,14 @@ class DeployPipeCommands(_DeployBase):
         if ttl is not None and (not isinstance(ttl, int) or ttl <= 0):
             raise ValueError('ttl must be a positive integer (seconds) or omitted')
 
-        team_id = self._require_team(args, 'task.control')
+        team_id = self._require_team(args, 'task.control', unattended=True)
         org_id = self._org_id()
 
         # The source must exist in the deployed artifact — a schedule for a
         # phantom source would fail on every tick.
-        await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
+        # Setting a schedule makes an unattended run; clearing one makes none,
+        # so only a set meets the declared-roots refusal
+        await self._require_source_in_artifact(org_id, team_id, project_id, source_id, unattended=bool(cron))
 
         # The paused flag is NOT part of this call: editing cron/ttl keeps
         # it, and schedule_pause/schedule_resume own flipping it.
@@ -366,7 +396,7 @@ class DeployPipeCommands(_DeployBase):
         source_id = args.get('sourceId')
         if not source_id:
             raise ValueError('sourceId is required')
-        team_id = self._require_team(args, 'task.control')
+        team_id = self._require_team(args, 'task.control', unattended=True)
         org_id = self._org_id()
 
         dep = await account.deployments_schedule_set_paused(
@@ -440,18 +470,20 @@ class DeployPipeCommands(_DeployBase):
     async def _deploy_run(self, request: Dict[str, Any], args: Dict[str, Any]) -> Dict[str, Any]:
         """Start one deployed source NOW.
 
-        The same trusted team dispatch the scheduler uses (no stored
-        credential — the run executes AS THE TEAM and carries no human
-        identity; billing attributes to org+team, and who fired it is
-        recorded by the audit call below). Without this a deployment could
-        only ever run from a cron tick — no way to smoke-test a version or
-        fire an unscheduled source on demand.
+        The same trusted dispatch the scheduler uses (no stored credential
+        — the run is its publication's row of the unattended rung table, plan
+        8.3: the publisher's on ``@me``, the team's with no human identity on
+        ``@team``, the org's on ``@org`` and ``@public``; who fired it is
+        recorded by the audit call below). Only org admins run an ``@org`` or
+        ``@public`` publication now. Without this a deployment could only
+        ever run from a cron tick — no way to smoke-test a version or fire an
+        unscheduled source on demand.
         """
         project_id = self._registry_id(args.get('projectId'))
         source_id = args.get('sourceId')
         if not source_id:
             raise ValueError('sourceId is required')
-        team_id = self._require_team(args, 'task.control')
+        team_id = self._require_team(args, 'task.control', unattended=True)
         org_id = self._org_id()
 
         # The deployment must exist and be runnable — a disabled or errored
@@ -459,7 +491,7 @@ class DeployPipeCommands(_DeployBase):
         # Same artifact-membership guard as schedule_set/source_config: a
         # sourceId the deployed version does not contain must fail HERE as a
         # validation error, not at launch with an engine-level message.
-        dep = await self._require_source_in_artifact(org_id, team_id, project_id, source_id)
+        dep = await self._require_source_in_artifact(org_id, team_id, project_id, source_id, unattended=True)
         if dep.get('state') != 'enabled':
             raise ValueError(f'Deployment is {dep.get("state")} — enable it first')
 
@@ -484,21 +516,15 @@ class DeployPipeCommands(_DeployBase):
             # module is a TaskConn mixin — a top-level import would be circular.
             from ..task_server_facade import start_server_task_as_team
 
-            # Owner rung: a '=user/<uid>' audience is a PERSONAL (@me) deployment —
-            # the run is USER-owned (private storage/logs/visibility). Billing
-            # is ABSOLUTE: every publish stamped its billing/secrets team at
-            # pointer time, and runs only ever read the stamp — a missing one
-            # (stamped team deleted, or a pre-stamp record) refuses loudly
-            # instead of resolving anything.
-            # (pointer_run_owner decodes the audience: a team pointer from
-            # before the stamp bills its own team; the store is no team, so
-            # it only ever bills its stamp.)
-            owner_kind, owner_user, default_billing, forced_rung = pointer_run_owner(team_id)
-            billing_team = str(dep.get('billingTeamId') or '') or default_billing
-            if not billing_team:
-                raise ValueError(
-                    'This deployment has no billing team — re-publish it after setting your development team'
-                )
+            # The run's row of the unattended rung table (plan 8.3): a
+            # personal (@me) pointer's run is the publisher's (private
+            # storage/logs/visibility), billed to the stamp written at pointer
+            # time — a missing one (stamped team deleted, or a pre-stamp
+            # record) refuses loudly instead of resolving anything; a team
+            # pointer's is the team's; an org or store pointer's the org's.
+            attribution = unattended_attribution(
+                team_id, org_id=org_id, billing_stamp=str(dep.get('billingTeamId') or '')
+            )
 
             # A manual run honors the source's execution settings but NOT its
             # run window: the ttl window belongs to scheduled fires — a run the
@@ -509,18 +535,12 @@ class DeployPipeCommands(_DeployBase):
             key = await start_server_task_as_team(
                 self._server,
                 pipeline,
-                org_id=org_id,
-                team_id=billing_team,
+                attribution=attribution,
                 deployment=DeploymentRef(org_id=org_id, team_id=team_id, project_id=project_id),
                 trigger='manual',
                 ttl=None,
                 trace_level=sched.get('traceLevel') or 'full',
                 debug_out=bool(sched.get('debugOut')),
-                owner_kind=owner_kind,
-                owner_user_id=owner_user,
-                # A store pointer's run sits on the public rung (team-owned by
-                # its billing team); every other slot derives its rung
-                rung=forced_rung,
                 listing=listing,
             )
         except BaseException:

@@ -850,7 +850,6 @@ async def test_publish_rejects_unknown_targets(registry, target):
         ('@team/Development', '@team/ is retired: publish to @<name> or =team/<tid>'),
         ('@team/t1', '@team/ is retired: publish to @<name> or =team/<tid>'),
         ('@user', '@user is retired: publish to @me'),
-        ('@org', 'Publishing to the org (@org, =org/<oid>) is not yet supported'),
     ],
 )
 async def test_the_retired_spellings_are_refused_naming_their_replacement(registry, target, message):
@@ -861,6 +860,41 @@ async def test_the_retired_spellings_are_refused_naming_their_replacement(regist
         result = await handle_deploy_app(conn, _request(sub, version=1, target=target))
         assert result['success'] is False and message in result['message'], (sub, result)
     assert registry.set_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('target', ['@org', '@ORG', '=org/org1'])
+async def test_the_org_rung_is_published_disabled_and_removed_by_org_admins_only(registry, quiet_push, target):
+    """C.35: an org admin publishes to the org's audience; a member is refused on every verb; another org never."""
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='private')
+    member = _FakeConn(teams=_TEAMS)
+    for sub in ('publish', 'disable', 'remove'):
+        result = await handle_deploy_app(member, _request(sub, version=1, target=target))
+        assert result['success'] is False and 'org admins' in result['message'], (sub, result)
+    assert registry.set_calls == []
+
+    admin = _FakeConn(teams=_TEAMS)
+    admin._account_info.organization['permissions'] = ['org.admin']
+    result = await handle_deploy_app(admin, _request('publish', version=1, target=target))
+    assert result['success'] is True
+    assert registry.set_calls[0]['audience'] == {'type': 'org', 'id': 'org1', 'name': ''}
+    result = await handle_deploy_app(admin, _request('publish', version=1, target='=org/another'))
+    assert result['success'] is False and 'active organization' in result['message']
+
+
+@pytest.mark.asyncio
+async def test_an_org_app_is_on_every_members_desktop(registry):
+    """C.35: the org's publication serves every member, on their desktop, under a user and team pin."""
+    registry.add_version(1, '1.0.0', state='private')
+    registry.seed_publish({'type': 'org', 'id': 'org1'}, 1)
+    for user_id, teams in (('u1', ['t1']), ('someone-else', [])):
+        (entry,) = await resolve_app_pins('org1', user_id, teams)
+        assert (entry['rung'], entry['onDesktop'], entry['public'], entry['registryVersion']) == ('org', True, False, 1)
+    # A team pin of the same app is more specific than the org's
+    registry.add_version(2, '1.1.0', state='private')
+    registry.seed_publish({'type': 'team', 'id': 't1'}, 2)
+    assert (await resolve_app_pins('org1', 'u1', ['t1']))[0]['registryVersion'] == 2
+    assert (await resolve_app_pins('org1', 'u2', []))[0]['registryVersion'] == 1
 
 
 @pytest.mark.asyncio

@@ -1066,6 +1066,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         # Every control carries its owner (plan 1): a dev run -> its user
         owner_kind='user',
         owner_id='user-1',
+        pinned_version=None,
         provider='node-x',
         ttl=600,
         idle_seconds=lambda: 0.0,
@@ -1085,6 +1086,7 @@ async def test_on_rrext_dashboard_filters_to_caller_user_id(monkeypatch):
         run_kind='dev',
         owner_kind='user',
         owner_id='other-user',
+        pinned_version=None,
         provider='node-y',
         task=MagicMock(),
         launch_type=SimpleNamespace(value='EXECUTE'),
@@ -1328,6 +1330,28 @@ async def test_list_tasks_scopes_to_caller_permissions(monkeypatch):
     body = result['body']
     assert body['total'] == 2
     assert {row['id'] for row in body['rows']} == {'acme.task-1.reader', 'acme.task-3.reader'}
+
+
+@pytest.mark.asyncio
+async def test_list_tasks_leaves_an_org_run_to_the_org_admins(monkeypatch):
+    """The caller of an @org run holds task.data on it, never task.monitor: only an org admin lists it (plan 8.3)."""
+    monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
+
+    org_run = _list_control('task-9')
+    org_run.run_kind = 'deploy'
+    org_run.owner_kind = 'org'
+    org_run.owner_id = 'org-1'
+    org_run.caller_id = 'user-1'
+    server = _make_server([org_run])
+
+    member = _make_conn(account_info=_caller_account(), server=server)
+    assert (await MiscCommands.on_rrext_list_tasks(member, {'arguments': {}}))['body']['total'] == 0
+
+    admin_account = _caller_account()
+    admin_account.organization['permissions'] = ['org.admin']
+    admin_account.sysPermissions = []
+    admin = _make_conn(account_info=admin_account, server=server)
+    assert (await MiscCommands.on_rrext_list_tasks(admin, {'arguments': {}}))['body']['total'] == 1
 
 
 @pytest.mark.asyncio
@@ -1939,3 +1963,15 @@ async def test_on_rrext_convert_refuses_a_payload_without_components():
     conn = _make_conn()
     with pytest.raises(ValueError):
         await MiscCommands.on_rrext_convert(conn, {'arguments': {'pipeline': {'version': 1, 'component': {}}}})
+
+
+def test_the_monitor_label_names_a_pinned_runs_version():
+    """C.36: the key parser reads ``...source:<version>`` (and a pipe-scoped key after it) as the source plus its version."""
+    from ai.modules.task.commands.cmd_misc import MiscCommands
+
+    names, sources = {'docBrain': 'Doc brain'}, {'docBrain.webhook_1': 'Webhook'}
+    label = MiscCommands._resolve_monitor_label
+    assert label('p.deploy.team-1.docBrain.webhook_1:12', names, sources) == 'Doc brain.Webhook v12'
+    assert label('p.deploy.team-1.docBrain.webhook_1:12.7', names, sources) == 'Doc brain.Webhook v12'
+    assert label('p.deploy.team-1.docBrain.webhook_1', names, sources) == 'Doc brain.Webhook'
+    assert label('p.deploy.team-1.docBrain.*', names, sources) == 'Doc brain.*'

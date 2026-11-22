@@ -639,7 +639,9 @@ def db_identity(
         user_id: The run's user ('' for a team-owned run).
         team_id: The run's team.
         run_kind: ``'dev'`` or ``'deploy'``.
-        owner_kind: ``'user'`` or ``'team'``.
+        owner_kind: ``'user'``, ``'team'`` or ``'org'`` (the account layer
+            decides what an org-owned run may reach; SaaS refuses it until
+            its database rule is defined).
         public_endpoint: Whether the pipeline exposes a public endpoint.
         task_id: The run's display id, for the audit trail.
 
@@ -1191,11 +1193,12 @@ class TaskEngine(DAPBase):
             raise ValueError(f'invalid run_kind: {run_kind!r}')
         if trigger not in ('', 'manual', 'schedule', 'submit'):
             raise ValueError(f'invalid trigger: {trigger!r}')
-        # owner_kind picks the storage/run-log tree exactly like run_kind picks
-        # the continuum: any value outside the closed vocabulary ('Team',
-        # 'teams', ...) would silently take the user branch and write a
-        # team-owned deploy's files into the dispatcher's user tree.
-        if owner_kind not in ('', 'user', 'team'):
+        # owner_kind is a closed vocabulary ('Team', 'teams', ... are refused):
+        # the storage anchor and the run-log tree are chosen per CONTROL
+        # (storage_root_for, run_log.scope_paths), so here it reaches only the
+        # cloud-database identity, where the account layer decides; an
+        # org-owned run (the org rung, plan 8.3) is one of the kinds
+        if owner_kind not in ('', 'user', 'team', 'org'):
             raise ValueError(f'invalid owner_kind: {owner_kind!r}')
         # One run-log continuum per holding CONTROL (plan 7.5): writers by
         # control key, opened at start for the controls holding the engine and
@@ -2366,8 +2369,13 @@ class TaskEngine(DAPBase):
                 outcome = 'ok'
             else:
                 outcome = 'error'
-            # Every holding control's continuum completes with the engine's outcome
+            # Every holding control's continuum completes with the engine's
+            # outcome, once: controls of one continuum share one writer
+            ended: set = set()
             for key, writer in list(self._run_logs.items()):
+                if id(writer) in ended:
+                    continue
+                ended.add(id(writer))
                 try:
                     await writer.end_run(outcome, self._status.exitMessage or '', reason=self._stop_reason)
                 except Exception as e:
@@ -2630,6 +2638,9 @@ class TaskEngine(DAPBase):
         # control's run log, then delivered opener first. Every append happens
         # before the first await so no other engine's stamp interleaves
         deliveries = []
+        # Controls of one continuum share one writer: the stream records each
+        # event (one logSeq) once, the first receiving control's copy
+        recorded: set = set()
         for key, opener, late in targets:
             copy = {**body, 'controlId': key} if isinstance(body, dict) else body
             writer = writers.get(key)
@@ -2651,7 +2662,8 @@ class TaskEngine(DAPBase):
             # A shared engine names nobody: the copy names its own control
             if self.shared:
                 self._name_control(key, event)
-            if writer is not None:
+            if writer is not None and id(writer) not in recorded:
+                recorded.add(id(writer))
                 try:
                     writer.append(event)
                 except Exception as e:
@@ -2833,6 +2845,10 @@ class TaskEngine(DAPBase):
                 # stream); this engine's own writer opens once that has closed
                 shared = await self._shared_run_log(key)
                 if shared is not None:
+                    # This engine's own writer is this control's too; another
+                    # engine's stays that engine's to end
+                    if shared in self._run_logs.values():
+                        self._run_logs[key] = shared
                     return shared
                 writer = await self._open_run_log(key)
         return writer
@@ -2856,21 +2872,24 @@ class TaskEngine(DAPBase):
             control = self._server.control_by_key(key)
         except Exception:
             return None
-        owner_is_team = control.owner_kind == 'team'
         try:
             writer = run_log.live_writer(
-                control.run_kind,
-                control.teamId if owner_is_team else control.userId,
-                control.teamId,
-                control.owner_kind or 'user',
+                control.owner,
                 control.project_id or self.project_id,
                 control.source or self.source,
+                control.run_kind,
+                control.pinned_version,
             )
         except (TypeError, ValueError):
             # A control whose identity is not string-shaped names no stream
             return None
-        if writer is None or writer in self._run_logs.values():
+        if writer is None:
             return None
+        # This engine's own writer of the continuum, opened for another control
+        # (two callers of one team publication name one stream): shared, as
+        # the stream has one writer
+        if writer in self._run_logs.values():
+            return writer
         if not writer.is_live and not await writer.wait_opened():
             return None
         self.raise_log_seq_floor(writer.last_seq + 1)
@@ -2903,28 +2922,25 @@ class TaskEngine(DAPBase):
             from ai.account import RequestContext, Store
 
             control = self._server.control_by_key(key)
-            # The store view anchors at the control's OWNER namespace: the
-            # TEAM for a team-owned (@team) deploy, the USER for a user-owned
-            # run (an interactive .use or a personal @me deploy: private, so
-            # its continuum never lands in the billing team's tree)
-            owner_is_team = control.owner_kind == 'team'
+            # The continuum lives in the control's OWNER tree (plan 7.5,
+            # ``run_log.scope_paths``): the user's for a user-owned run (an
+            # interactive .use, a personal @me deploy, a caller's @public:
+            # private, so it never lands in the ledger team's tree), the
+            # team's for a team-owned one, the org's for an org-owned one. A
+            # pinned version's run is a stream of its own (C.36)
             writer = RunLogWriter(
-                Store.file_store(
-                    RequestContext.internal('run-log'),
-                    client_id=control.teamId if owner_is_team else control.userId,
-                ),
-                control.userId,
+                Store.file_store(RequestContext.internal('run-log'), client_id=control.owner_id),
+                control.owner,
                 control.project_id or self.project_id,
                 control.source or self.source,
                 control.run_kind,
                 self.stamp_log_event,
                 self.raise_log_seq_floor,
-                # team_id is the run's BILLING team (provenance for the control
-                # record) for every owner kind; owner_kind decides where the
-                # logs physically live
+                # team_id is the run's LEDGER team (provenance for the control
+                # record); the owner decides where the logs physically live
                 team_id=control.teamId,
-                owner_kind=control.owner_kind or 'user',
                 org_id=control.orgId,
+                version=control.pinned_version,
                 debug=self.debug_message,
             )
             await writer.open(
@@ -3617,6 +3633,18 @@ class TaskEngine(DAPBase):
 
             # Check it - throws on error
             self._check_pipeline(resolved)
+
+            # The hosted policy, on the environment this start actually loaded:
+            # the server checked the control's snapshot, and a private engine
+            # reads its owner's values again here (a variable changed in
+            # between must not slip a refused node or transport through). A
+            # shared engine's spec is its SHAPE (every config emptied), which
+            # cannot answer a per-config question such as the MCP transport;
+            # the server checks every control's own config before it holds it
+            if not self.shared:
+                refusal = hosted_refusal(resolved)
+                if refusal:
+                    raise ValueError(refusal)
 
             # Mark the start time
             self._status.startTime = time.time()

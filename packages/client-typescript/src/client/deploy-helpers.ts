@@ -104,6 +104,8 @@ export interface DeployTeamRef {
  *   exists even with zero team memberships.
  * - Each team of the roster is addressed by the `audience` the server
  *   stamped on it; a team without one is not addressable and is skipped.
+ * - The org rung follows the teams, addressed by the organisation's
+ *   `audience`; only org admins (and sys.admin) control it.
  * - org.admin (and sys.admin) implies the FULL team permission set — the
  *   server resolver's documented expansion; per-team rows only carry
  *   explicit task.* grants for regular members.
@@ -121,12 +123,13 @@ export function resolveDeployTeams(client: { getAccountInfo(): ConnectResult | u
 	const org = info?.organization;
 	const me: DeployTeamRef[] = info?.userId ? [{ id: '@me', name: 'Me', canControl: true }] : [];
 	const isAdmin = (org?.permissions ?? []).includes('org.admin') || (info?.sysPermissions ?? []).includes('sys.admin');
+	const orgRung: DeployTeamRef[] = org?.audience ? [{ id: org.audience, name: 'Org', canControl: isAdmin }] : [];
 
 	// step: prefer the identity's team roster when one exists
 	const orgTeams = org?.teams;
 	if (Array.isArray(orgTeams) && orgTeams.length > 0) {
 		const roster = orgTeams.flatMap((t): DeployTeamRef[] => (t.audience ? [{ id: t.audience, name: t.name || t.audience, canControl: isAdmin || (t.permissions ?? []).includes('task.control') }] : []));
-		return [...me, ...roster];
+		return [...me, ...roster, ...orgRung];
 	}
 
 	// step: rosterless — derive refs from the team rows so hosts still render
@@ -136,7 +139,7 @@ export function resolveDeployTeams(client: { getAccountInfo(): ConnectResult | u
 			seen.set(dep.teamId, { id: dep.teamId, name: dep.handle || dep.teamId, canControl: true });
 		}
 	}
-	return [...me, ...seen.values()];
+	return [...me, ...seen.values(), ...orgRung];
 }
 
 // =============================================================================
