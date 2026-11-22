@@ -23,18 +23,28 @@
 // category, two-line description on the paper surface) so the catalog and
 // the desktop read as one product; the bottom row carries the shell Button
 // instead of the desktop card's version chip and remove affordance.
+//
+// A tile opens its entry's DETAIL: the shell's DetailPanel drawer with the
+// icon, name and category in its header, the description, the publisher,
+// the entry's README (fetched from the entry's `readme` path and rendered
+// as markdown, relative images and links resolved against the README's
+// folder) and the same Open / Add / Adding action in its footer. Every part
+// stands on its own: a blank description hides nothing else.
 
 import React, { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { ConnectionManager } from '../../connection/connection';
 import { useAuthUser } from '../../hooks/useAuthUser';
 import { useSubscriptions } from '../../hooks/useSubscriptions';
 import { Button } from '../button/Button';
+import { MarkdownRenderer } from '../chat/components/MarkdownRenderer';
+import { DetailPanel } from '../detail-panel/DetailPanel';
 import { EmptyState } from '../empty-state/EmptyState';
 import { InputField } from '../input-field/InputField';
+import { LabelValue, Section } from '../section/Section';
 import type { AppManifestEntry } from '../workspace/types';
 import { launchAgent } from '../../modules/desktop/adapter';
 import { AGENT_LABEL, isAgent } from '../../modules/desktop/launch';
-import { CATALOG_PAGE_LIMIT, fetchCatalogPages, reconcileAdded } from './catalogLogic';
+import { CATALOG_PAGE_LIMIT, fetchCatalogPages, fetchReadme, isReadmePath, readmeBaseUrl, reconcileAdded } from './catalogLogic';
 
 // =============================================================================
 // CONSTANTS
@@ -65,6 +75,16 @@ const CATEGORY_LABELS: Record<string, string> = {
  */
 const formatCategory = (cat: string): string =>
 	CATEGORY_LABELS[cat.toLowerCase()] ?? cat.charAt(0).toUpperCase() + cat.slice(1);
+
+/**
+ * The line under an entry's name: "Agent" for an agent whatever its
+ * categories say (plan 9.1), else its first category.
+ *
+ * @param app - The catalog entry.
+ * @returns The line, or null when an app names no category.
+ */
+const categoryOf = (app: AppManifestEntry): string | null =>
+	isAgent(app) ? AGENT_LABEL : app.categories?.[0] ? formatCategory(app.categories[0]) : null;
 
 // =============================================================================
 // TYPES
@@ -97,6 +117,18 @@ export interface ICatalogPickerProps {
 	/** Extra styles merged onto the root (padding/width belong to the host). */
 	style?: CSSProperties;
 }
+
+/** An entry's state: 'desktop' → Open, 'adding' → disabled, 'available' → Add. */
+type CatalogEntryState = 'desktop' | 'adding' | 'available';
+
+/** An entry's README as the detail shows it. */
+type ReadmeState =
+	/** The fetch has not answered yet: the detail shows nothing for it. */
+	| { kind: 'loading' }
+	/** The entry names no README, or its fetch found none. */
+	| { kind: 'none' }
+	/** The markdown, and the path it was fetched from. */
+	| { kind: 'ready'; path: string; markdown: string };
 
 /** One catalog load. */
 interface CatalogState {
@@ -188,6 +220,19 @@ const S = {
 		transition: REDUCE_MOTION ? 'none' : 'transform 0.12s ease, background-color 0.12s ease',
 	} as CSSProperties,
 
+	/** The details control — a transparent button over the whole tile, under the action. */
+	tileOverlay: {
+		position: 'absolute' as const,
+		inset: 0,
+		zIndex: 0,
+		margin: 0,
+		padding: 0,
+		border: 'none',
+		borderRadius: 12,
+		backgroundColor: 'transparent',
+		cursor: 'pointer',
+	} as CSSProperties,
+
 	cardTop: {
 		display: 'flex',
 		flexDirection: 'row' as const,
@@ -254,7 +299,10 @@ const S = {
 		marginTop: 'auto',
 	} as CSSProperties,
 
+	/** The add failure — raised above the details overlay so its tooltip shows. */
 	cardError: {
+		position: 'relative' as const,
+		zIndex: 1,
 		fontSize: 12,
 		color: 'var(--rr-color-error)',
 		minWidth: 0,
@@ -262,6 +310,93 @@ const S = {
 		textOverflow: 'ellipsis',
 		whiteSpace: 'nowrap' as const,
 	} as CSSProperties,
+
+	/** The action's slot — raised above the details overlay so the Button takes its own clicks. */
+	cardAction: {
+		position: 'relative' as const,
+		zIndex: 1,
+		flexShrink: 0,
+	} as CSSProperties,
+
+	/** The detail header's icon — fills the drawer's 42px avatar slot. */
+	detailIcon: {
+		width: 42,
+		height: 42,
+		display: 'flex',
+		alignItems: 'center',
+		justifyContent: 'center',
+		backgroundColor: 'var(--rr-bg-surface-alt)',
+		color: 'var(--rr-brand)',
+		fontSize: 18,
+		fontWeight: 800,
+	} as CSSProperties,
+
+	/** The detail's description — the whole text, unclamped. */
+	detailDescription: {
+		margin: '10px 0 0',
+		fontSize: 14,
+		lineHeight: 1.5,
+		color: 'var(--rr-text-secondary)',
+	} as CSSProperties,
+
+	/** The detail's README — a wide image or code line scrolls inside it, not the drawer. */
+	detailReadme: {
+		overflowX: 'auto' as const,
+	} as CSSProperties,
+
+	/** The detail's placeholder when the entry has neither description nor README. */
+	detailEmpty: {
+		marginTop: 14,
+	} as CSSProperties,
+
+	/** The add failure in the detail footer — takes the room left of the action. */
+	detailError: {
+		flex: 1,
+		minWidth: 0,
+		fontSize: 12,
+		color: 'var(--rr-color-error)',
+		overflow: 'hidden',
+		textOverflow: 'ellipsis',
+		whiteSpace: 'nowrap' as const,
+	} as CSSProperties,
+};
+
+// =============================================================================
+// ACTION
+// =============================================================================
+
+/** Props for an entry's action. */
+interface CatalogActionProps {
+	app: AppManifestEntry;
+	state: CatalogEntryState;
+	onOpen: (app: AppManifestEntry) => void;
+	onAdd: (app: AppManifestEntry) => void;
+}
+
+/**
+ * An entry's action for its state: Open, Add, or the disabled Adding…. The
+ * tile and the detail both draw this one.
+ */
+const CatalogAction: React.FC<CatalogActionProps> = ({ app, state, onOpen, onAdd }) => {
+	if (state === 'desktop') {
+		return (
+			<Button variant="secondary" small onClick={() => onOpen(app)} title={`Open ${app.name}`}>
+				Open
+			</Button>
+		);
+	}
+	if (state === 'adding') {
+		return (
+			<Button variant="primary" small disabled>
+				Adding…
+			</Button>
+		);
+	}
+	return (
+		<Button variant="primary" small onClick={() => onAdd(app)} title={`Add ${app.name} to your desktop`}>
+			Add
+		</Button>
+	);
 };
 
 // =============================================================================
@@ -271,21 +406,23 @@ const S = {
 /** Props for one catalog tile. */
 interface CatalogTileProps {
 	app: AppManifestEntry;
-	/** 'desktop' → Open, 'adding' → disabled, 'available' → Add. */
-	state: 'desktop' | 'adding' | 'available';
+	state: CatalogEntryState;
 	/** The last add failure for this app, if any. */
 	error?: string;
 	onOpen: (app: AppManifestEntry) => void;
 	onAdd: (app: AppManifestEntry) => void;
+	/** Open the entry's detail. */
+	onDetails: (app: AppManifestEntry) => void;
 }
 
 /**
- * One catalog tile: the desktop card's chrome with the state's Button.
+ * One catalog tile: the desktop card's chrome with the state's Button. A
+ * click anywhere but the action, or Enter / Space on the focused tile, opens
+ * the entry's detail.
  */
-const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, onAdd }) => {
+const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, onAdd, onDetails }) => {
 	const [hover, setHover] = useState(false);
-	// An agent row reads "Agent" whatever its categories say (plan 9.1).
-	const category = isAgent(app) ? AGENT_LABEL : app.categories?.[0] ? formatCategory(app.categories[0]) : null;
+	const category = categoryOf(app);
 	const surface = hover ? 'var(--rr-bg-list-hover, var(--rr-bg-surface-alt))' : 'var(--rr-bg-paper)';
 
 	return (
@@ -299,6 +436,12 @@ const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, on
 				transform: hover && !REDUCE_MOTION ? 'translateY(-2px)' : 'none',
 			}}
 		>
+			{/* Details control — a sibling of the action, not its ancestor: the
+			    tile itself is inert, and this overlay carries the click and the
+			    keyboard activation over the tile's whole area. Raw button: the
+			    shell Button has no transparent whole-tile overlay form. */}
+			<button type="button" aria-label={`Show details for ${app.name}`} onClick={() => onDetails(app)} style={S.tileOverlay} />
+
 			{/* Top row — icon chip + name/category */}
 			<div style={S.cardTop}>
 				<div style={S.iconChip}>
@@ -318,23 +461,112 @@ const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, on
 			{/* Bottom row — the state's action */}
 			<div style={S.cardBottom}>
 				<span style={S.cardError} title={error}>{error ?? ''}</span>
-				{state === 'desktop' && (
-					<Button variant="secondary" small onClick={() => onOpen(app)} title={`Open ${app.name}`}>
-						Open
-					</Button>
-				)}
-				{state === 'adding' && (
-					<Button variant="primary" small disabled>
-						Adding…
-					</Button>
-				)}
-				{state === 'available' && (
-					<Button variant="primary" small onClick={() => onAdd(app)} title={`Add ${app.name} to your desktop`}>
-						Add
-					</Button>
-				)}
+				<div style={S.cardAction}>
+					<CatalogAction app={app} state={state} onOpen={onOpen} onAdd={onAdd} />
+				</div>
 			</div>
 		</div>
+	);
+};
+
+// =============================================================================
+// DETAIL
+// =============================================================================
+
+/**
+ * An entry's README, fetched from its `readme` path.
+ *
+ * The answer is kept with the path it was fetched from, so a README is only
+ * ever shown for the entry it belongs to; a request whose detail moved to
+ * another entry or closed is aborted and its answer dropped.
+ *
+ * @param readme - The entry's `readme` as the catalog sent it.
+ * @returns The README's state for the detail.
+ */
+function useReadme(readme: string | undefined): ReadmeState {
+	const path = isReadmePath(readme) ? readme : null;
+	const [fetched, setFetched] = useState<{ path: string; markdown: string } | null>(null);
+
+	useEffect(() => {
+		if (!path) return undefined;
+		const controller = new AbortController();
+		void fetchReadme((url, init) => fetch(url, init), path, controller.signal).then((markdown) => {
+			if (!controller.signal.aborted) setFetched({ path, markdown });
+		});
+		return () => controller.abort();
+	}, [path]);
+
+	if (!path) return { kind: 'none' };
+	if (!fetched || fetched.path !== path) return { kind: 'loading' };
+	return fetched.markdown.trim() ? { kind: 'ready', path, markdown: fetched.markdown } : { kind: 'none' };
+}
+
+/** Props for an entry's detail. */
+interface CatalogDetailProps {
+	app: AppManifestEntry;
+	state: CatalogEntryState;
+	/** The last add failure for this app, if any. */
+	error?: string;
+	onOpen: (app: AppManifestEntry) => void;
+	onAdd: (app: AppManifestEntry) => void;
+	onClose: () => void;
+}
+
+/**
+ * One entry's detail, in the shell's slide-over drawer: the icon (or the
+ * tile's first-letter chip), the name and the category line in the header;
+ * the description, the publisher and the README in the body, each shown
+ * when the entry carries it and none depending on another; the state's
+ * action, with the tile's error text, in the footer.
+ */
+const CatalogDetail: React.FC<CatalogDetailProps> = ({ app, state, error, onOpen, onAdd, onClose }) => {
+	const readme = useReadme(app.readme);
+	// A description of nothing but whitespace is a blank one.
+	const description = app.description?.trim();
+
+	return (
+		<DetailPanel
+			persistKey="panelDetailCatalogWidth"
+			open
+			onClose={onClose}
+			avatar={
+				<div style={S.detailIcon}>
+					{app.icon ? <img src={app.icon} alt="" decoding="async" style={S.iconImage} /> : app.name[0]}
+				</div>
+			}
+			title={app.name}
+			subtitle={categoryOf(app) ?? undefined}
+			footer={
+				<>
+					{error && <span style={S.detailError} title={error}>{error}</span>}
+					<CatalogAction app={app} state={state} onOpen={onOpen} onAdd={onAdd} />
+				</>
+			}
+		>
+			{description && <div style={S.detailDescription}>{description}</div>}
+
+			{app.publisher && (
+				<Section label="Details">
+					<LabelValue label="Publisher">{app.publisher}</LabelValue>
+				</Section>
+			)}
+
+			{/* The README stands on its own: shown whenever the entry has one. */}
+			{readme.kind === 'ready' && (
+				<Section label="README">
+					<div style={S.detailReadme}>
+						<MarkdownRenderer content={readme.markdown} baseUrl={readmeBaseUrl(readme.path)} />
+					</div>
+				</Section>
+			)}
+
+			{/* Nothing to read at all: say so, once the README fetch has answered. */}
+			{readme.kind === 'none' && !description && (
+				<div style={S.detailEmpty}>
+					<EmptyState title="Nothing to read yet." description={`This ${isAgent(app) ? 'agent' : 'app'} has no description and no README.`} />
+				</div>
+			)}
+		</DetailPanel>
 	);
 };
 
@@ -343,7 +575,9 @@ const CatalogTile: React.FC<CatalogTileProps> = ({ app, state, error, onOpen, on
 // =============================================================================
 
 /**
- * The catalog picker: every reachable app as a tile with Open / Add / Adding.
+ * The catalog picker: every reachable app and agent as a tile with Open /
+ * Add / Adding, and the detail drawer a tile opens (description, publisher,
+ * README, the same action).
  *
  * @param props - {@link ICatalogPickerProps}.
  */
@@ -368,6 +602,9 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 	const [adding, setAdding] = useState<ReadonlySet<string>>(() => new Set());
 	const [added, setAdded] = useState<ReadonlySet<string>>(() => new Set());
 	const [errors, setErrors] = useState<Record<string, string>>({});
+	// The entry whose detail is open, by id (null = closed): the drawer draws
+	// the live entry, so its action follows the tile's state.
+	const [detailId, setDetailId] = useState<string | null>(null);
 
 	// -- The catalog load ------------------------------------------------------
 	// Fire at once; if the connection is not attached yet, poll briefly until
@@ -478,12 +715,30 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 			.sort((a, b) => a.name.localeCompare(b.name));
 	}, [catalog.apps, excludeIds, search]);
 
-	/** The tile state: the live identity decides, the local marker bridges the push. */
-	const stateOf = (app: AppManifestEntry): CatalogTileProps['state'] => {
+	/** The entry state: the live identity decides, the local marker bridges the push. */
+	const stateOf = (app: AppManifestEntry): CatalogEntryState => {
 		if (isOnDesktop(app.id) || added.has(app.id)) return 'desktop';
 		if (adding.has(app.id)) return 'adding';
 		return 'available';
 	};
+
+	// -- The detail ------------------------------------------------------------
+	// The drawer shows an entry the grid lists; one that left the list (a
+	// reload under another identity) closes it.
+	const detailApp = detailId === null ? undefined : visible.find((a) => a.id === detailId);
+	useEffect(() => {
+		if (detailId !== null && !detailApp) setDetailId(null);
+	}, [detailId, detailApp]);
+
+	const showDetail = useCallback((app: AppManifestEntry) => setDetailId(app.id), []);
+	const closeDetail = useCallback(() => setDetailId(null), []);
+
+	// Opening from the detail leaves the catalog for the app: the drawer
+	// closes first, so it gives back the page scroll and the focus it holds.
+	const openFromDetail = useCallback((app: AppManifestEntry) => {
+		setDetailId(null);
+		open(app);
+	}, [open]);
 
 	return (
 		<div style={{ ...S.root, ...style }}>
@@ -535,9 +790,22 @@ export const CatalogPicker: React.FC<ICatalogPickerProps> = ({
 							error={errors[app.id]}
 							onOpen={open}
 							onAdd={add}
+							onDetails={showDetail}
 						/>
 					))}
 				</div>
+			)}
+
+			{/* The open entry's detail — mounted only while one is in view */}
+			{detailApp && (
+				<CatalogDetail
+					app={detailApp}
+					state={stateOf(detailApp)}
+					error={errors[detailApp.id]}
+					onOpen={openFromDetail}
+					onAdd={add}
+					onClose={closeDetail}
+				/>
 			)}
 		</div>
 	);

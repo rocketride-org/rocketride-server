@@ -62,6 +62,13 @@ const S = {
 		color: 'var(--rr-text-link)',
 		textDecoration: 'none',
 	} as CSSProperties,
+
+	// An image never grows past the column it sits in; its declared width
+	// holds up to that, and its height follows its aspect ratio.
+	image: {
+		maxWidth: '100%',
+		height: 'auto',
+	} as CSSProperties,
 };
 
 const HTML_WRAPPER = (body: string) => `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{margin:0;padding:16px;font-family:system-ui,sans-serif;}</style></head><body>${body}</body></html>`;
@@ -285,7 +292,8 @@ export const MarkdownRenderer: React.FC<MarkdownRendererProps> = ({ content, bas
 					);
 				},
 				blockquote: ({ children }: any) => <blockquote style={S.blockquote}>{children}</blockquote>,
-				ul: ({ children }: any) => <ul style={{ margin: '6px 0', paddingLeft: 20 }}>{children}</ul>,
+				img: ({ node: _node, ...rest }: React.ImgHTMLAttributes<HTMLImageElement> & { node?: unknown }) => <img {...rest} style={S.image} />,
+				ul:({ children }: any) => <ul style={{ margin: '6px 0', paddingLeft: 20 }}>{children}</ul>,
 				ol: ({ children }: any) => <ol style={{ margin: '6px 0', paddingLeft: 20 }}>{children}</ol>,
 				p: ({ children }: any) => <p style={{ margin: '4px 0', color: 'var(--rr-text-primary)' }}>{children}</p>,
 			}}

@@ -4,12 +4,13 @@
 // =============================================================================
 
 // =============================================================================
-// CATALOG LOGIC — the picker's pure parts (paging, marker reconciliation)
+// CATALOG LOGIC — the picker's pure parts (paging, marker reconciliation,
+// README paths and their fetch)
 // =============================================================================
 //
 // Kept free of React and of the connection so node:test can drive them
 // directly (catalogLogic.test.ts); CatalogPicker.tsx wires them to the
-// client and the identity.
+// client, the identity and the browser's fetch.
 
 /** The largest page `rrext_public_catalog` serves (the handler clamps `limit` to 100). */
 export const CATALOG_PAGE_LIMIT = 100;
@@ -74,4 +75,56 @@ export async function fetchCatalogPages<T>(
 export function reconcileAdded(prev: ReadonlySet<string>, isOnDesktop: (appId: string) => boolean): ReadonlySet<string> {
 	const next = new Set([...prev].filter((id) => !isOnDesktop(id)));
 	return next.size === prev.size ? prev : next;
+}
+
+/**
+ * Whether a catalog entry's `readme` names a README the picker can fetch.
+ *
+ * The catalog sends a URL path on the serving origin
+ * (`/pipelines/<id>/v<N>/README.md`, `/apps/<id>/v<N>/README.md`), and the
+ * browser's cookie authorizes the fetch. Only such a path qualifies: an
+ * absent value, a non-string, a relative path, an absolute URL and a
+ * `//host` network-path reference (another origin) are all "no README".
+ *
+ * @param readme - The entry's `readme` as the catalog sent it.
+ * @returns True for a path on this origin.
+ */
+export function isReadmePath(readme: unknown): readme is string {
+	return typeof readme === 'string' && /^\/(?![/\\])/.test(readme);
+}
+
+/**
+ * The base URL of a README path: its folder, up to and including the last
+ * `/` of the path (a query or fragment is not part of the path). Relative
+ * images and links in the README resolve against it.
+ *
+ * @param readmePath - A README path ({@link isReadmePath}).
+ * @returns The folder, ending in `/`.
+ */
+export function readmeBaseUrl(readmePath: string): string {
+	const path = readmePath.split(/[?#]/, 1)[0];
+	return path.slice(0, path.lastIndexOf('/') + 1);
+}
+
+/** Issues one README request: the browser's `fetch`, narrowed to what the load reads. */
+export type ReadmeFetch = (url: string, init: { signal: AbortSignal }) => Promise<{ ok: boolean; text(): Promise<string> }>;
+
+/**
+ * Fetch a README's markdown.
+ *
+ * A response that is not OK (the entry ships no README, or the caller may
+ * not read it) and a request that fails or is aborted are all "no README".
+ *
+ * @param get - Issues the request (`fetch`).
+ * @param readmePath - The README path ({@link isReadmePath}).
+ * @param signal - Aborts the request once its answer is no longer wanted.
+ * @returns The markdown, or '' when there is no README.
+ */
+export async function fetchReadme(get: ReadmeFetch, readmePath: string, signal: AbortSignal): Promise<string> {
+	try {
+		const response = await get(readmePath, { signal });
+		return response.ok ? await response.text() : '';
+	} catch {
+		return '';
+	}
 }

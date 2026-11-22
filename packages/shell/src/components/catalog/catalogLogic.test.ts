@@ -5,7 +5,7 @@
 
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { CATALOG_PAGE_LIMIT, fetchCatalogPages, reconcileAdded } from './catalogLogic';
+import { CATALOG_PAGE_LIMIT, fetchCatalogPages, fetchReadme, isReadmePath, readmeBaseUrl, reconcileAdded } from './catalogLogic';
 
 /** A catalog of `n` apps served through the verb's offset/limit paging. */
 const serving = (n: number) => {
@@ -77,4 +77,42 @@ test('a marker recorded after the identity already confirmed the app still clear
 	// A later removal from the desktop grid is then visible: nothing masks it.
 	identity.delete('a');
 	assert.equal(reconcileAdded(added, (id) => identity.has(id)), added);
+});
+
+test('a README path is a URL path on the serving origin and nothing else', () => {
+	assert.equal(isReadmePath('/pipelines/acme.myPipe/v4/README.md'), true);
+	assert.equal(isReadmePath('/apps/acme.app/v2/docs/README.md'), true);
+	// Absent, not a string, relative, absolute, and another origin's network path.
+	for (const value of [undefined, null, '', 42, 'README.md', './README.md', 'https://rr.example/apps/a/v1/README.md', '//cdn.example/README.md', '/\\cdn.example/README.md']) {
+		assert.equal(isReadmePath(value), false, String(value));
+	}
+});
+
+test('the README base URL is its folder, through the last slash of the path', () => {
+	assert.equal(readmeBaseUrl('/pipelines/acme.myPipe/v4/README.md'), '/pipelines/acme.myPipe/v4/');
+	assert.equal(readmeBaseUrl('/apps/acme.app/v2/docs/README.md'), '/apps/acme.app/v2/docs/');
+	assert.equal(readmeBaseUrl('/README.md'), '/');
+	// A query or fragment is not part of the path, slashes in it included.
+	assert.equal(readmeBaseUrl('/apps/a/v1/README.md?ref=/x/y#top/of'), '/apps/a/v1/');
+});
+
+test('fetchReadme answers the markdown of an OK response, asked for by its path with the abort signal', async () => {
+	const { signal } = new AbortController();
+	const calls: Array<{ url: string; signal: AbortSignal }> = [];
+	const get = async (url: string, init: { signal: AbortSignal }) => {
+		calls.push({ url, signal: init.signal });
+		return { ok: true, text: async () => '# Doc Brain' };
+	};
+	assert.equal(await fetchReadme(get, '/pipelines/acme.docBrain/v3/README.md', signal), '# Doc Brain');
+	assert.deepEqual(calls, [{ url: '/pipelines/acme.docBrain/v3/README.md', signal }]);
+});
+
+test('a response that is not OK, a failed request and an aborted one are all no README', async () => {
+	const { signal } = new AbortController();
+	// Not OK: the body (an error page) is never read as markdown.
+	assert.equal(await fetchReadme(async () => ({ ok: false, text: async () => 'Not Found' }), '/apps/a/v1/README.md', signal), '');
+	assert.equal(await fetchReadme(async () => { throw new TypeError('network'); }, '/apps/a/v1/README.md', signal), '');
+	// Aborted while the body streams: the read rejects.
+	const aborted = async () => ({ ok: true, text: async (): Promise<string> => { throw new DOMException('aborted', 'AbortError'); } });
+	assert.equal(await fetchReadme(aborted, '/apps/a/v1/README.md', signal), '');
 });
