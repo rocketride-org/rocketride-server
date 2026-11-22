@@ -115,6 +115,13 @@ class IInstance(SupabaseInstanceBase):
             problem = 'must use "/" as the separator, not "\\"'
         elif _has_control_chars(path):
             problem = 'must not contain control characters'
+        elif '%' in path:
+            # storage3 URL-decodes the path in info, upload, download and
+            # create_signed_url but sends it as written in remove (and this
+            # node's own download request encodes it as written), so one path
+            # with a "%" would name different objects in different tools
+            # ("r/50%25.txt" is stored as "r/50%.txt"; "a%2Fb" becomes "a/b").
+            problem = 'must not contain "%" (Supabase\'s client reads it as a URL escape)'
         elif len(path) > _MAX_PATH_LENGTH:
             problem = f'must be at most {_MAX_PATH_LENGTH} characters'
         elif any(segment in ('', '.', '..') for segment in path.split('/')):

@@ -170,7 +170,7 @@ def test_allowed_at_its_level(tool):
 
 @pytest.mark.parametrize(
     'path',
-    ['', '   ', '/abs.txt', '../secret', 'a/../b', 'a/./b', 'a//b', 'a\\b', 'a\x00b', 'x' * 1025],
+    ['', '   ', '/abs.txt', '../secret', 'a/../b', 'a/./b', 'a//b', 'a\\b', 'a\x00b', 'x' * 1025, 'r/50%25.txt'],
 )
 def test_bad_paths_are_refused_before_any_call(path):
     inst, client = _inst()
@@ -186,6 +186,28 @@ def test_bad_bucket_names_are_refused(bucket):
         inst.list_files({'bucket': bucket})
     with pytest.raises(ValueError, match='"name"'):
         inst.create_bucket({'name': bucket})
+    assert client.calls == []
+
+
+@pytest.mark.parametrize('path', ['r/50%25.txt', 'a%2Fb', '50%.txt', '%2e%2e/secret'])
+def test_a_percent_sign_is_refused_by_every_path_tool(path):
+    """storage3 URL-decodes paths in info, upload, download and create_signed_url, not in remove.
+
+    One rule for every tool: "%" is refused, so "r/50%25.txt" cannot be stored
+    as "r/50%.txt" and then miss on download or delete, and "a%2Fb" cannot slip
+    past the one-object check as "a/b".
+    """
+    inst, client = _inst('admin')
+    calls = [
+        lambda: inst.download_file({'bucket': 'docs', 'path': path}),
+        lambda: inst.create_signed_url({'bucket': 'docs', 'path': path}),
+        lambda: inst.upload_file({'bucket': 'docs', 'path': path, 'content': 'x'}),
+        lambda: inst.delete_file({'bucket': 'docs', 'paths': [path]}),
+        lambda: inst.list_files({'bucket': 'docs', 'prefix': path}),
+    ]
+    for call in calls:
+        with pytest.raises(ValueError, match='must not contain "%"'):
+            call()
     assert client.calls == []
 
 

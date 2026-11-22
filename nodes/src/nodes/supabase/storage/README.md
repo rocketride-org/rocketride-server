@@ -24,7 +24,7 @@ Tool names are the bare function names below; an agent sees each one as `<compon
 | `create_bucket` | Arguments: `name`, `public` (optional, default false). Returns name and public. Needs `admin`. |
 | `delete_file` | Deletes files permanently. Arguments: `bucket`, `paths` (list, at most 1000). Returns `deleted` and `not_found` (paths that did not exist). Folders are not deleted recursively. Needs `admin`. |
 
-Paths are relative to the bucket, for example `reports/2026/q1.csv`. A path with a leading `/`, a backslash, an empty, `.` or `..` segment, or a control character is refused before any call. A signed URL lets anyone who holds it download the file until it expires.
+Paths are relative to the bucket, for example `reports/2026/q1.csv`. A path with a leading `/`, a backslash, an empty, `.` or `..` segment, a `%` or a control character is refused before any call: supabase-py decodes `%` as a URL escape in some calls and not in others, so such a path could name a different file in each tool. A signed URL lets anyone who holds it download the file until it expires.
 
 ## Configuration
 
