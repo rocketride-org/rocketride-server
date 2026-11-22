@@ -360,6 +360,13 @@ test('typeFloorLines: a key moved off one branch of a union fails its pin', () =
 	assert.match(typeCheck(conformanceProgram(dropped)).join('\n'), /Type 'true' is not assignable to type '"x"'/);
 });
 
+test('typeFloorLines: narrowing a literal union passes every pin', () => {
+	// The frozen branch 'b' is no longer served: narrowing, which the assignment
+	// allows, so the per-branch pin skips it
+	const narrowed = LIVE_GROWN.replace("export type Kind = 'a' | 'b';", "export type Kind = 'a';");
+	assert.deepEqual(typeCheck(conformanceProgram(narrowed)), []);
+});
+
 test('typeFloorLines: a generic pin is applied at its frozen arity', () => {
 	assert.deepEqual(typeFloorLines('Box', 'Box__v2_1', 1), [
 		'const _t_Box__v2_1: Frozen_Box__v2_1<any> = {} as Current_Box<any>;',

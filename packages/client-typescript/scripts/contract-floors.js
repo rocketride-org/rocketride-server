@@ -233,12 +233,15 @@ function assignPinAliases(pins) {
  *
  *  - `_AllKeys<T>`: the keys of every branch of a union (`keyof` of a union is
  *    only the keys all its branches share).
- *  - `_DroppedKeys<F, C>`: per frozen branch, the keys no live branch assignable
- *    to that branch still declares. `never` when every branch kept its keys.
+ *  - `_DroppedKeys<F, C>`: per frozen branch the live type still serves (some live
+ *    branch is assignable to it), the keys no such live branch declares. A frozen
+ *    branch no live branch serves is narrowing, which `_t_` allows, and is
+ *    skipped. `never` when every served branch kept its keys.
  */
 const PIN_HELPER_TYPES = [
 	'type _AllKeys<T> = T extends unknown ? keyof T : never;',
-	'type _DroppedKeys<F, C> = F extends unknown ? Exclude<keyof F, _AllKeys<Extract<C, F>>> : never;',
+	'type _DroppedKeys<F, C> = F extends unknown ? ([Extract<C, F>] extends [never] ? never : ' +
+		'Exclude<keyof F, _AllKeys<Extract<C, F>>>) : never;',
 ].join('\n');
 
 /**

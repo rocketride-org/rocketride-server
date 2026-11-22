@@ -373,7 +373,7 @@ void _floor_v2_0;
 // frozen branch must keep its own keys (_b_, _DroppedKeys), so a key
 // dropped from one branch of a union type is caught too.
 type _AllKeys<T> = T extends unknown ? keyof T : never;
-type _DroppedKeys<F, C> = F extends unknown ? Exclude<keyof F, _AllKeys<Extract<C, F>>> : never;
+type _DroppedKeys<F, C> = F extends unknown ? ([Extract<C, F>] extends [never] ? never : Exclude<keyof F, _AllKeys<Extract<C, F>>>) : never;
 const _t_DAPException: Frozen_DAPException = {} as Current_DAPException;
 void _t_DAPException;
 const _k_DAPException: { [K in _AllKeys<Frozen_DAPException>]-?: K } = {} as { [K in _AllKeys<Current_DAPException>]-?: K };
