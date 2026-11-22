@@ -1469,6 +1469,22 @@ def test_package_json_refuses_specs_escaping_the_workspace_root(tmp_path, rel, s
         app_build._neutralize_tool_configs(str(ws), str(ws))
 
 
+@pytest.mark.parametrize(
+    'text',
+    [
+        '{"dependencies": ' + '{"a": ' * 5000 + '"1"' + '}' * 5000 + '}',
+        '{"a": ' + '[' * 200000,
+    ],
+    ids=['deep-dependencies-table', 'deep-array'],
+)
+def test_deeply_nested_package_json_is_a_build_failure_not_a_crash(tmp_path, text):
+    ws = tmp_path / 'ws'
+    _write(ws / 'apps/x/package.json', text)
+    with pytest.raises(BuildFailure, match='nested too deeply') as info:
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert info.value.phase == 'materialize'
+
+
 def test_workspace_yaml_deeply_nested_catalog_is_a_build_failure_not_a_crash():
     source = 'packages: ["apps/*"]\ncatalog:\n  a: ' + '{a: ' * 400 + 'x' + '}' * 400 + '\n'
     with pytest.raises(BuildFailure, match='nested'):
