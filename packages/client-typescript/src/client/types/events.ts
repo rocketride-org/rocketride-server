@@ -35,7 +35,7 @@ import type { PIPELINE_RESULT } from './data.js';
  * Event Categories:
  * ----------------
  * NONE: Unsubscribe from all events (cleanup and disconnection)
- * ALL: Subscribe to all events regardless of category (comprehensive monitoring)
+ * ALL: Every category except OPS (comprehensive monitoring; OPS is added explicitly)
  * DEBUGGER: Debug-specific events for debugging protocol communication
  * DETAIL: Real-time processing events requiring immediate client attention
  * SUMMARY: Periodic status summaries suitable for dashboard monitoring
@@ -50,6 +50,8 @@ import type { PIPELINE_RESULT } from './data.js';
  *
  * ALL: Comprehensive monitoring for administrative clients that need
  *      complete visibility into task execution and debugging activities.
+ *      It does not include OPS (1 << 10), the operator-only stream of a shared
+ *      engine's engine-level output: an operator subscribes ALL | OPS.
  *
  * DEBUGGER: Debug protocol events including breakpoint hits, variable
  *           changes, stack traces, and debugging session management.
@@ -82,7 +84,9 @@ import type { PIPELINE_RESULT } from './data.js';
  * Different clients can subscribe to different event types simultaneously:
  * - Debugging clients: DEBUGGER + DETAIL for comprehensive debugging
  * - Monitoring dashboards: SUMMARY for efficient status tracking
- * - Administrative tools: ALL for complete system visibility
+ * - Administrative tools: ALL | OPS for complete system visibility (ALL
+ *   excludes the operator-only OPS stream, which carries a shared engine's
+ *   errors, crashes and other engine-level output)
  * - Log viewers: OUTPUT for message monitoring
  * - Pipeline managers: FLOW + TASK for execution tracking
  *

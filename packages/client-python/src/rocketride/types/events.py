@@ -46,7 +46,7 @@ Subscription Model:
     - OUTPUT: Standard output and logging messages
     - FLOW: Pipeline execution flow and component tracking
     - TASK: Task lifecycle events (start, stop, state changes)
-    - ALL: Comprehensive monitoring for administrative tools
+    - ALL: Comprehensive monitoring for administrative tools (every category except OPS)
     - NONE: Unsubscribe from all events
 
 Network Optimization:
@@ -97,7 +97,7 @@ class EVENT_TYPE(Flag):
     Event Categories:
     ----------------
     NONE: Unsubscribe from all events (cleanup and disconnection)
-    ALL: Subscribe to all events regardless of category (comprehensive monitoring)
+    ALL: Every category except OPS (comprehensive monitoring; OPS is added explicitly)
     DEBUGGER: Debug-specific events for debugging protocol communication
     DETAIL: Real-time processing events requiring immediate client attention
     SUMMARY: Periodic status summaries suitable for dashboard monitoring
@@ -112,6 +112,8 @@ class EVENT_TYPE(Flag):
 
     ALL: Comprehensive monitoring for administrative clients that need
          complete visibility into task execution and debugging activities.
+         It does not include OPS (1 << 10), the operator-only stream of a shared
+         engine's engine-level output: an operator subscribes ALL | OPS.
 
     DEBUGGER: Debug protocol events including breakpoint hits, variable
               changes, stack traces, and debugging session management.
@@ -179,7 +181,7 @@ class EVENT_TYPE(Flag):
         1 << 10
     )  # Engine-level output of SHARED engines (counts, errors, bare prints, start/stop/crash) - sys.admin only
 
-    # Convenience combination - ALL events except NONE for comprehensive monitoring
+    # Convenience combination - every category except OPS, for comprehensive monitoring
     # ALL does NOT include OPS: an operator opts in explicitly, and existing ALL subscribers are unaffected
     ALL = DEBUGGER | DETAIL | SUMMARY | OUTPUT | FLOW | TASK | SSE | DASHBOARD | BILLING | DEPLOY
 

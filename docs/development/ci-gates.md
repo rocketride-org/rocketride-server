@@ -133,16 +133,44 @@ floors) and on an added export that was never `shell:freeze`d. The second step
 regenerates the floors from the immutable frozen versions and fails on any diff,
 so a floor cannot be hand-edited to launder a removed export past tsc.
 
-The job runs one more gate:
+The job runs two more gates. Locally, on a feature branch, pass the commit the
+branch left its pull request's base branch at (`develop` below; `HEAD^1` there
+is only your previous commit, which may already hold an earlier floor edit):
 
 ```bash
 node scripts/build.js client-typescript:regen && git diff --exit-code -- \
   packages/client-typescript/src/contract-check.generated.ts \
   packages/client-typescript/contract/index.ts \
   packages/client-typescript/contract/latest.ts
+git fetch origin develop
+node packages/client-typescript/scripts/freeze-client-api.js \
+  --released "$(git merge-base HEAD origin/develop)"
 ```
 
-It regen-checks the client-typescript SDK contract floors the same way.
+The first regen-checks the client-typescript SDK's derived contract files the
+same way, after running the floor-scoping tests
+(`scripts/contract-floors.test.js`). It proves the barrels and the conformance
+file match the floors in the tree, not that a floor itself is untouched: a
+floor edited together with the live surface regenerates the same derived
+files. The second closes that gap: every floor the base revision holds must be
+in the tree unchanged, except the in-progress floor keyed to the package's own
+`MAJOR.MINOR`, which a re-freeze may replace, and the package version may not
+be behind any floor. CI checks out with `fetch-depth: 2` and names the base by
+event: `HEAD^1` on a pull request's (or the merge queue's) merge commit, which
+is the base branch; the pre-push tip (`github.event.before`, fetched) on a
+push, which may carry several commits; and `HEAD^1` on a push that creates a
+branch, which has no pre-push tip. Use `HEAD^1` locally only on a checkout of
+a pull request's merge commit. Each type floor also requires the live type to
+keep every key the frozen one declares, so dropping an optional member within
+a major fails as surely as dropping a required one. Unlike the
+shell contract, which is not semver and stays append-only forever, the SDK
+floors are held per major: a 2.x surface is checked against the 2.x floors
+only, and the 1.x floors stay in `contract/versions/` as immutable history. A
+major bump is the one place the SDK surface may narrow, and `regen` fails until
+`./builder client-typescript:freeze` has cut the new major's first floor. The
+frozen floors check out with LF line endings on every platform
+(`.gitattributes`), and both freeze scripts compare them with line endings
+normalized.
 
 ### Helm — `helm-lint` (blocking, `deploy/helm/**` PRs only)
 
