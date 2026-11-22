@@ -327,6 +327,9 @@ def toolchain(monkeypatch, tmp_path):
     ``_resolve_bin``/``_installed_version``/``_resolve_user_tsc`` to work;
     the engine static tree carries placeholder platform tgzs.
     """
+    # These tests exercise the build pipeline, not the sandbox: keep them
+    # independent of an ambient RR_APP_BUILD_SANDBOX=required in the environment.
+    monkeypatch.setenv('RR_APP_BUILD_SANDBOX', 'off')
     env = tmp_path / 'env'
     for pkg, version, bins in (
         ('@rsbuild/core', '2.0.11', {'rsbuild': 'bin/rsbuild.js'}),
