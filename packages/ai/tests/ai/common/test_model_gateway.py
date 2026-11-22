@@ -850,20 +850,30 @@ def _transports(limit, deadline_s):
 
 
 def test_a_busy_retry_never_waits_for_a_slot_past_the_deadline(monkeypatch, backend):
-    monkeypatch.setattr(model_gateway, '_busy_delay', lambda attempt: 0.05)
+    monkeypatch.setattr(model_gateway, '_busy_delay', lambda attempt: 0.3)
     gateway = backend(refused('rate_limited', charged=False), answer)
-    gate, transport, _ = _transports(1, 0.2)
-    taken = threading.Event()
+    gate, transport, _ = _transports(1, 1.0)
+    taken, done = threading.Event(), threading.Event()
+
+    def hold():
+        # Waits while the first request holds the slot, then keeps it past the deadline
+        gate.acquire()
+        taken.set()
+        done.wait(10)
+        gate.release()
+
+    holder = threading.Thread(target=hold)
 
     def hold_the_slot_during_the_backoff(request, body):
-        threading.Thread(target=lambda: (gate.acquire(), taken.set(), time.sleep(0.5), gate.release())).start()
+        holder.start()
         return refused('rate_limited', charged=False)(request, body)
 
     gateway.script[0] = hold_the_slot_during_the_backoff
     response = transport.handle_request(httpx.Request('POST', f'{BASE_URL}/chat/completions', json={}))
+    done.set()
+    holder.join(10)
 
     assert response.status_code == 429 and len(gateway.requests) == 1
-    time.sleep(0.6)
     assert taken.is_set() and gate._value == 1
 
 
@@ -871,10 +881,11 @@ async def test_a_slot_that_comes_after_the_deadline_is_given_back():
     """A busy retry may take a slot only before its deadline, on both paths."""
     gate = model_gateway._run_gate(1)
     gate.acquire()
-    threading.Timer(0.04, gate.release).start()
+    late = threading.Timer(0.04, gate.release)
+    late.start()
 
     assert await model_gateway._acquire_async(gate, time.monotonic() + 0.03) is False
-    await asyncio.sleep(0.05)
+    await asyncio.to_thread(late.join, 10)
     assert gate._value == 1
     assert model_gateway._acquire_by(gate, time.monotonic() - 0.01) is False
     assert gate._value == 1
@@ -899,6 +910,13 @@ async def test_a_cancelled_async_wait_for_a_slot_keeps_none(monkeypatch):
 # ---------------------------------------------------------------------------
 # The task's pass, from issue to revoke
 # ---------------------------------------------------------------------------
+
+
+async def _until(check, timeout=10.0):
+    """Wait for check() to hold, a few milliseconds at a time, up to timeout."""
+    end = time.monotonic() + timeout
+    while not check() and time.monotonic() < end:
+        await asyncio.sleep(0.01)
 
 
 TEAM_REFUSAL = {'error': {'type': 'rocketride_gateway_error', 'code': 'team_deployment_not_supported', 'message': TEAM}}
@@ -945,10 +963,11 @@ async def test_a_hosted_run_gets_its_pass_and_renews_it_until_it_is_dropped(monk
     t._model_run_id = 'run-1'
 
     env = await Task._build_subprocess_env(t, ([], False), True, 'run-1')
-    await asyncio.sleep(0.1)
+    await _until(lambda: len(account.renewed) >= 2)
     renewal = t._model_pass_renewal
     await Task._drop_model_pass(t)
     renewed = len(account.renewed)
+    await _until(renewal.done)
     await asyncio.sleep(0.05)
 
     assert json.loads(env[GATEWAY_ENV]) == account.result
@@ -974,7 +993,8 @@ async def test_renewing_stops_when_the_pass_has_ended(monkeypatch, account):
     t._model_run_id = 'run-1'
 
     await Task._build_subprocess_env(t, ([], False), True, 'run-1')
-    await asyncio.sleep(0.1)
+    await _until(t._model_pass_renewal.done)
+    await asyncio.sleep(0.05)
 
     assert account.renewed == ['run-1'] and t._model_pass_renewal.done()
 
