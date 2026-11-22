@@ -55,7 +55,7 @@ if '--saas' in _sys.argv:
     # Raises ImportError loudly if the extension overlay was not deployed.
     from extension.saas import Account  # type: ignore[import]
 else:
-    # OSS mode — authenticate via ROCKETRIDE_APIKEY environment variable.
+    # OSS mode — authenticate via the RR_APIKEY environment variable.
     from .oss import Account  # type: ignore[assignment]
 
 # Instantiate the single shared Account object used by the entire process.

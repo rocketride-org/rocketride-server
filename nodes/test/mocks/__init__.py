@@ -31,13 +31,13 @@ external services (databases, APIs, etc.) to be running.
 
 How Mock Loading Works:
 -----------------------
-1. The test framework sets the ROCKETRIDE_MOCK environment variable to point
+1. The test framework sets the RR_MOCK environment variable to point
    to this directory (nodes/test/mocks/)
 
 2. When the EAAS server spawns a subprocess to run a pipeline, it passes
    this environment variable to the subprocess
 
-3. The node.py entry point checks for ROCKETRIDE_MOCK and, if set, inserts
+3. The node.py entry point checks for RR_MOCK and, if set, inserts
    that path at the FRONT of sys.path
 
 4. When node code does `import some_library`, Python searches sys.path
@@ -45,7 +45,7 @@ How Mock Loading Works:
 
 5. The mock completely shadows the real library - no code changes needed
 
-Mock Coverage (all external calls go through mocks when ROCKETRIDE_MOCK is set):
+Mock Coverage (all external calls go through mocks when RR_MOCK is set):
 ------------------------------------------------------------------------------
 - LLM providers: langchain_openai, langchain_anthropic, langchain_aws, langchain_xai
   (Chat* classes return stub responses)
@@ -53,7 +53,7 @@ Mock Coverage (all external calls go through mocks when ROCKETRIDE_MOCK is set):
 - Vector stores: qdrant_client, weaviate, psycopg2, pgvector, pinecone,
   chromadb, pymilvus, astrapy, elasticsearch, opensearchpy (index_search)
 
-LLM credential placeholders (pipeline injects when ROCKETRIDE_MOCK): anthropic, xai,
+LLM credential placeholders (pipeline injects when RR_MOCK): anthropic, xai,
 openai, perplexity, deepseek, mistral, vision_mistral, gemini, ibm_watson, bedrock.
 
 Not mocked (native SDK; would need mocks for full test): Mistral SDK, Google genai,
@@ -157,7 +157,7 @@ class Index:
 Troubleshooting:
 ----------------
 1. If mock isn't loading:
-   - Verify ROCKETRIDE_MOCK env var is set in the test server
+   - Verify RR_MOCK env var is set in the test server
    - Check that node.py is adding the path to sys.path
    - Ensure directory name exactly matches the import name
 
@@ -175,5 +175,5 @@ See Also:
 - nodes/test/mocks/qdrant_client/ - Complete example with thorough comments
 - nodes/test/framework/discovery.py - How test configs are discovered
 - nodes/test/framework/runner.py - How tests are executed
-- packages/ai/src/ai/node.py - Where ROCKETRIDE_MOCK is injected into sys.path
+- packages/ai/src/ai/node.py - Where RR_MOCK is injected into sys.path
 """

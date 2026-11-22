@@ -22,7 +22,7 @@ engine runtime (via ``depends``); they are absent from the unit-test
 interpreter, so a deterministic test-local stub is injected below ONLY when the
 real lib is missing. They are intentionally NOT placed under
 ``nodes/test/mocks/`` -- the engine loads that dir engine-wide via
-ROCKETRIDE_MOCK, which would shadow the real libs during the dynamic run.
+RR_MOCK, which would shadow the real libs during the dynamic run.
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@
 Mock google.genai for llm_gemini and accessibility_describe node testing.
 ===========================================================================
 
-When ROCKETRIDE_MOCK is set, this replaces the real google.genai so that
+When RR_MOCK is set, this replaces the real google.genai so that
 llm_gemini and accessibility_describe use stubbed responses instead of
 calling the real Google AI API.
 
@@ -17,7 +17,9 @@ API surface mocked:
     response.text  ->  str
 """
 
-MOCK_RESPONSE_TEXT = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
+MOCK_RESPONSE_TEXT = (
+    'Mock LLM response. This stub is used when RR_MOCK is set so tests run without API keys or external services.'
+)
 
 
 class _MockResponse:

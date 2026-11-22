@@ -5,7 +5,7 @@
 """
 Mock elasticsearch for index_search node tests.
 
-When ROCKETRIDE_MOCK is set, this module shadows the real elasticsearch package
+When RR_MOCK is set, this module shadows the real elasticsearch package
 so the Elasticsearch store uses in-memory storage. Supports indices.exists/create/
 delete, index(), search(), bulk(), scan(), cluster.health(), and close().
 """

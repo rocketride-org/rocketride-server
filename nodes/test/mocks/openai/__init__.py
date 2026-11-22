@@ -1,7 +1,7 @@
 """
 Mock openai package for LLM node testing.
 
-When ROCKETRIDE_MOCK is set, this replaces the real openai SDK so validateConfig
+When RR_MOCK is set, this replaces the real openai SDK so validateConfig
 and any direct OpenAI usage in llm_openai, llm_perplexity, llm_deepseek do not
 call real APIs.
 """

@@ -126,7 +126,7 @@ def test_engine_key_imports_the_standard_library_only():
 
 
 def test_avoid_mocks_is_part_of_the_content_identity():
-    """A spec that strips ROCKETRIDE_MOCK from its engine (avoidMocks) is another engine."""
+    """A spec that strips RR_MOCK from its engine (avoidMocks) is another engine."""
     from ai.modules.task.engine_key import content_hash, engine_content
 
     parts = dict(types={'a': 'webhook'}, connections={'a': connections_of({})}, source='a')

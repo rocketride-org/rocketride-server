@@ -112,7 +112,7 @@ def _parse_credential_env_var(env_var: str, provider: str) -> Optional[str]:
     return None
 
 
-# Placeholder credentials for LLM nodes when ROCKETRIDE_MOCK is set (mocks handle requests)
+# Placeholder credentials for LLM nodes when RR_MOCK is set (mocks handle requests)
 # apikey: format must pass each provider's validation (sk-ant, xai-, sk-, AI..., etc.)
 # Bedrock uses accessKey/secretKey; Vertex uses GCP service account (not covered here)
 _LLM_MOCK_CREDENTIALS = {
@@ -337,7 +337,7 @@ class PipelineBuilder:
             config.update(self.config.config)
         # Inject credentials into the pipeline config.
         #
-        # `ROCKETRIDE_MOCK` (set by the test runner) and per-group
+        # `RR_MOCK` (set by the test runner) and per-group
         # `avoidMocks` control the mock-SDK baseline. `requires` is
         # independent — it always overlays real env var values on top.
         #
@@ -351,7 +351,7 @@ class PipelineBuilder:
         #   MOCK unset + requires=[…]          → env vars only (real SDK)
         creds: Dict[str, Any] = {}
         if profile:
-            if os.environ.get('ROCKETRIDE_MOCK') and not self.config.avoid_mocks and provider in _LLM_MOCK_CREDENTIALS:
+            if os.environ.get('RR_MOCK') and not self.config.avoid_mocks and provider in _LLM_MOCK_CREDENTIALS:
                 creds.update(_LLM_MOCK_CREDENTIALS[provider])
             if self.config.requires:
                 for env_var in self.config.requires:

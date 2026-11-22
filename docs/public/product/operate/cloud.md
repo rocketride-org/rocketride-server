@@ -23,10 +23,11 @@ ROCKETRIDE_URI=https://api.rocketride.ai
 ROCKETRIDE_APIKEY=your-api-token
 ```
 
-The SDKs and CLIs read `ROCKETRIDE_APIKEY`. The MCP servers (the standalone
-`rocketride-mcp` server and the engine's MCP module) additionally read
-`ROCKETRIDE_AUTH`; in the standalone MCP server it takes precedence over
-`ROCKETRIDE_APIKEY`.
+The SDKs and CLIs read `ROCKETRIDE_APIKEY`. The standalone `rocketride-mcp`
+server also reads `ROCKETRIDE_AUTH`, which takes precedence over
+`ROCKETRIDE_APIKEY`. The engine's built-in MCP module is part of the server and
+reads the server's own settings instead (`RR_MCP_ENGINE_AUTH`, then
+`RR_APIKEY`); see [MCP self-hosting](/connect/mcp/http/self-hosting).
 
 > **Always use `https://` or `wss://` for Cloud.** An `http://`, `ws://`, or
 > bare `host:port` URI silently downgrades to an unencrypted connection. The

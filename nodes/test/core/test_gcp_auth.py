@@ -54,7 +54,7 @@ def _install_google_auth_stubs() -> tuple[list[str], list[tuple[Any, str, Any]]]
     """Make ``google.auth`` and ``google.oauth2.service_account`` patchable.
 
     CI's engine pytest process does not install per-node requirements, so
-    google-auth is often missing. ``ROCKETRIDE_MOCK`` also ships ``google.oauth2``
+    google-auth is often missing. ``RR_MOCK`` also ships ``google.oauth2``
     without ``google.auth``, so ``import google.auth`` fails even when oauth2
     is present.
 

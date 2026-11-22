@@ -98,8 +98,10 @@ await client.connect();
 ```
 
 Expose the engine beyond localhost and you should put it behind TLS and
-authentication (set `ROCKETRIDE_APIKEY`). For a clustered deployment, see the Helm
-chart under `deploy/helm/rocketride/`.
+authentication: set `RR_APIKEY` in the engine's environment, and clients send
+that key as `ROCKETRIDE_APIKEY`. An engine that has `ROCKETRIDE_APIKEY` but not
+`RR_APIKEY` refuses to start, so a key meant for it is never silently ignored.
+For a clustered deployment, see the Helm chart under `deploy/helm/rocketride/`.
 
 ## Provider credentials
 

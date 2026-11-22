@@ -339,7 +339,7 @@ def test_guard_reads_public_patterns_off_the_test_double_too(fake_web_server, pa
 def test_guard_leaves_unrelated_public_patterns_alone_on_the_double(monkeypatch, fake_web_server, pattern):
     import ai.modules.mcp as mcp_module
 
-    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'svc-key')
+    monkeypatch.setenv('RR_APIKEY', 'svc-key')
     fake_web_server.public.add(pattern)
 
     mcp_module.initModule(fake_web_server, {})  # must not raise

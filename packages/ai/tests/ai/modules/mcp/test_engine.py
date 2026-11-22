@@ -8,8 +8,8 @@ import pytest
 def test_make_engine_client_requires_uri(monkeypatch):
     from ai.modules.mcp.engine import make_engine_client
 
-    monkeypatch.delenv('ROCKETRIDE_URI', raising=False)
-    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'k')
+    monkeypatch.delenv('RR_MCP_ENGINE_URI', raising=False)
+    monkeypatch.setenv('RR_APIKEY', 'k')
     with pytest.raises(ValueError):
         make_engine_client({})
 
@@ -17,11 +17,41 @@ def test_make_engine_client_requires_uri(monkeypatch):
 def test_make_engine_client_requires_auth(monkeypatch):
     from ai.modules.mcp.engine import make_engine_client
 
-    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://localhost:5565')
-    monkeypatch.delenv('ROCKETRIDE_AUTH', raising=False)
-    monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
+    monkeypatch.setenv('RR_MCP_ENGINE_URI', 'ws://localhost:5565')
+    monkeypatch.delenv('RR_MCP_ENGINE_AUTH', raising=False)
+    monkeypatch.delenv('RR_APIKEY', raising=False)
     with pytest.raises(ValueError):
         make_engine_client({})
+
+
+def test_make_engine_client_never_reads_the_clients_names(monkeypatch):
+    """ROCKETRIDE_URI / ROCKETRIDE_AUTH / ROCKETRIDE_APIKEY are what a CLIENT reads, not this server module."""
+    from ai.modules.mcp.engine import make_engine_client
+
+    for name in ('RR_MCP_ENGINE_URI', 'RR_MCP_ENGINE_AUTH', 'RR_APIKEY'):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv('ROCKETRIDE_URI', 'ws://localhost:5565')
+    monkeypatch.setenv('ROCKETRIDE_AUTH', 'client-auth')
+    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'client-key')
+    with pytest.raises(ValueError, match='RR_MCP_ENGINE_URI'):
+        make_engine_client({})
+    with pytest.raises(ValueError, match='RR_MCP_ENGINE_AUTH/RR_APIKEY'):
+        make_engine_client({'rocketride_uri': 'ws://localhost:5565'})
+
+
+def test_make_engine_client_falls_back_to_the_servers_own_key(monkeypatch):
+    from ai.modules.mcp import engine
+
+    monkeypatch.delenv('RR_MCP_ENGINE_AUTH', raising=False)
+    monkeypatch.setenv('RR_APIKEY', 'server-key')
+    built = {}
+    monkeypatch.setattr(engine, 'WsEngineClient', lambda **kwargs: built.update(kwargs) or kwargs)
+    engine.make_engine_client({'rocketride_uri': 'ws://localhost:5565'})
+    assert built['auth'] == 'server-key'
+
+    monkeypatch.setenv('RR_MCP_ENGINE_AUTH', 'mcp-key')
+    engine.make_engine_client({'rocketride_uri': 'ws://localhost:5565'})
+    assert built['auth'] == 'mcp-key'
 
 
 class _FakeDeployApi:

@@ -97,7 +97,7 @@ future refactor could unify the separate Vertex node with this one.)
 ### Running the tests
 
 The node ships a `test` block in `services.json` that runs against a local test server
-with a mocked `google.genai`, so no real API key is required. Set `ROCKETRIDE_MOCK` to
+with a mocked `google.genai`, so no real API key is required. Set `RR_MOCK` to
 `nodes/test/mocks`; the test sends "What is 2+2?" on `questions` (model
 `models/gemini-2.5-flash`) and expects `answers` to contain "Mock LLM response".
 

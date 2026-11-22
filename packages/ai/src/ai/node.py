@@ -408,8 +408,6 @@ def run():
     """
     Execute the script.
     """
-    import os
-
     # See the module top: a task that should hide its /proc entries and could
     # not must not run pipeline code.
     if _proc_private_error:
@@ -417,8 +415,12 @@ def run():
         warning(message)
         raise TaskNotPrivateError(message)
 
-    # Inject mock modules path if set (for testing)
-    mock_path = os.environ.get('ROCKETRIDE_MOCK')
+    # Inject mock modules path if set (for testing): RR_MOCK, which the server
+    # hands its engines by name. Imported here, not at the top: importing
+    # ai.common resolves its requirements, which this process does later anyway
+    from ai.common.server_env import mocks_path
+
+    mock_path = mocks_path()
     if mock_path:
         sys.path.insert(0, mock_path)
 

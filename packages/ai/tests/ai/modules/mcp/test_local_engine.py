@@ -21,9 +21,9 @@ from mcp.client import Client
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    for name in ('ROCKETRIDE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH', 'ROCKETRIDE_AUTH'):
+    for name in ('RR_MCP_ENGINE_URI', 'MCP_RESOURCE_IDENTIFIER', 'MCP_DEV_NO_AUTH', 'RR_MCP_ENGINE_AUTH'):
         monkeypatch.delenv(name, raising=False)
-    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'svc-key')
+    monkeypatch.setenv('RR_APIKEY', 'svc-key')
 
 
 def _init(monkeypatch, fake_web_server, host, config=None):
