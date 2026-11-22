@@ -646,3 +646,37 @@ def test_a_failed_write_says_no_rows_were_saved_only_on_a_transactional_database
     with pytest.raises(DatabaseLaneError) as raised:
         nontransactional.writeTable('| who |\n| --- |\n| run-1 |')
     assert 'no rows were saved' not in str(raised.value)
+
+
+def _engine_whose_commit_fails_after_the_server_committed():
+    """A real engine whose transaction block raises on exit, after the rows were written: a lost commit acknowledgement."""
+    engine = _healthy_engine()
+    with engine.begin() as conn:
+        conn.exec_driver_sql('CREATE TABLE answers (who TEXT)')
+    real_begin = engine.begin
+
+    @contextlib.contextmanager
+    def begin():
+        with real_begin() as conn:
+            yield conn
+        raise OperationalError(
+            'COMMIT', {}, sqlite3.OperationalError('connection lost before the commit was acknowledged')
+        )
+
+    engine.begin = begin
+    return engine
+
+
+@pytest.mark.parametrize('lane', ['answers', 'table'])
+def test_a_failed_commit_does_not_claim_that_no_rows_were_saved(lane):
+    """The server may have committed before the acknowledgement was lost, so the outcome is unknown, not "no rows saved"."""
+    inst = _make(_engine_whose_commit_fails_after_the_server_committed())
+
+    with pytest.raises(DatabaseLaneError) as raised:
+        if lane == 'answers':
+            inst.writeAnswers(_answer([{'who': 'run-1'}]))
+        else:
+            inst.writeTable('| who |\n| --- |\n| run-1 |')
+
+    assert 'no rows were saved' not in str(raised.value)
+    assert 'may have been saved' in str(raised.value)

@@ -988,8 +988,10 @@ ownership, "who holds this"). It is per user, per app and per server, the last
 save wins, and it is best-effort: the shell debounces writes by about half a
 second, swallows a write that fails, and skips writes entirely while the
 connection is down, so a value an app "saved" while the database was
-unavailable may exist nowhere. Nothing reconciles it back into SQL afterwards,
-and a second user or run never sees it.
+unavailable may exist nowhere. Nothing reconciles it back into SQL afterwards.
+It is saved state, not shared state: a later page on the same server, user and
+app reads what was saved, but other users do not share it and concurrent runs
+get no synchronized updates.
 
 When the cloud database is unavailable, do not record the work in `appState`
 instead. Show an honest "database unavailable" state, block the actions that
@@ -1011,9 +1013,15 @@ step, while a generated query that a database which is up refuses (a row cast
 failure, a statement timeout) is reported as `Query execution failed` on the
 `text` and `answers` lanes, so an app that reads those lanes must handle that
 error as well as a failed step. The graph nodes (`rocketride_graph`,
-`graph_neo4j`, `graph_falkordb`, `graph_arango`) do not make that distinction:
-any read that fails on the `questions` lane, an outage or a query the database
-refuses, fails the step and writes nothing to the lanes.
+`graph_neo4j`, `graph_falkordb`, `graph_arango`) do not make that distinction
+for execution: an outage, or a query the database refuses while it runs, fails
+the step and writes nothing to the lanes. A generated query that is rejected
+before it runs is different: when `EXPLAIN` validation rejects every attempt, or
+the safety check refuses the query, the node reports the error on the lanes
+and returns normally (`graph_arango` emits the validation error as its result,
+likewise without failing the step), so an app that reads those lanes must handle
+that error as well as a failed step. A graph pipeline with no `text` or `answers`
+lane has nowhere to report it: nothing is reported and the step still succeeds.
 
 ### Data in the RocketRide cloud databases
 
