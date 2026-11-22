@@ -116,7 +116,7 @@ class ExaSearch(ChatBase):
         return answer
 
     def _sanitize_result_urls(self, value: Any) -> Any:  # noqa: ANN401
-        if os.environ.get('ROCKETRIDE_MOCK'):
+        if os.environ.get('RR_MOCK'):
             return value
 
         if isinstance(value, list):

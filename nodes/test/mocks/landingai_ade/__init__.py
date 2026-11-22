@@ -5,7 +5,7 @@
 
 """Mock for the `landingai_ade` SDK used by the Landing.ai Parse/Extract nodes.
 
-Shadows the real package (via ROCKETRIDE_MOCK on sys.path) so node tests run
+Shadows the real package (via RR_MOCK on sys.path) so node tests run
 without network access or an ADE API key. Returns deterministic response objects
 shaped like the real ParseResponse / ExtractResponse (attribute access, not dicts,
 because the node reads `.markdown`, `.chunks[].type`, `.extraction`, etc.).

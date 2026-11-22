@@ -324,11 +324,9 @@ def _refuse_cleartext_engine_uri(uri: str, source_value: str, source_name: str) 
     so the bind can never excuse the check. A credential sent to
     ``ws://127.0.0.1:5565`` never reaches a wire anyone can tap, so there is
     nothing to protect -- and refusing it would be a real deployment hazard:
-    ``WebServer.__init__`` loads ``dist/server/.env``, ``.env.template`` ships
-    ``ROCKETRIDE_URI=http://localhost:5565``, and ``docker/Dockerfile.engine``
-    copies all of ``dist/server/`` into the image, so a pod carrying that file
-    would fail to boot over a credential that never leaves it. Only a
-    non-loopback target is refused.
+    the loopback default this module derives is exactly that URI, and an
+    operator's ``RR_MCP_ENGINE_URI`` naming this host would be refused at boot
+    over a credential that never leaves it. Only a non-loopback target is refused.
 
     Args:
         uri: The resolved engine URI.
@@ -358,8 +356,9 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
     clients, the widget CSP origin and the user-facing upload/dropper links
     all derive from what this returns. Rules, first match wins:
 
-    1. ``explicit`` -- ``config['rocketride_uri']`` or env ``ROCKETRIDE_URI``,
-       used as-is.
+    1. ``explicit`` -- ``config['rocketride_uri']`` or env ``RR_MCP_ENGINE_URI``,
+       used as-is. (``ROCKETRIDE_URI`` is the address a CLIENT connects to;
+       ``.env.template`` ships it for the SDKs, so it is never read here.)
     2. ``loopback default`` -- a loopback-only bind talks to this engine
        itself, ``ws://<host>:<port>``, so an unconfigured laptop engine never
        silently drives RocketRide's cloud. ``localhost`` maps to
@@ -393,9 +392,9 @@ def _resolve_engine_uri(config: Dict[str, Any], bind_host: str, bind_port: int) 
         RuntimeError: when the resolved engine URI is cleartext and addresses a
             non-loopback host.
     """
-    explicit = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI')
+    explicit = config.get('rocketride_uri') or os.environ.get('RR_MCP_ENGINE_URI')
     if explicit:
-        source_name = 'rocketride_uri' if config.get('rocketride_uri') else 'ROCKETRIDE_URI'
+        source_name = 'rocketride_uri' if config.get('rocketride_uri') else 'RR_MCP_ENGINE_URI'
         _refuse_cleartext_engine_uri(explicit, explicit, source_name)
         return explicit, 'explicit'
     if auth.is_loopback_bind(bind_host):
@@ -519,7 +518,7 @@ def initModule(server: 'Any', config: Dict[str, Any]) -> None:
     # The URI and local_engine are resolved ONCE, here, where the bind
     # host/port are known, and injected into a copy of config so every client
     # the factory builds (shared or per-caller) uses exactly these values.
-    # Deferring make_engine_client means a missing ROCKETRIDE_AUTH/APIKEY
+    # Deferring make_engine_client means a missing RR_MCP_ENGINE_AUTH/RR_APIKEY
     # doesn't raise ValueError at engine boot — only on first request.
     # Per-caller requests (identity.CALLER_AUTH set by handle_mcp below) get
     # a fresh client instead of the shared singleton — see _make_engine_factory.

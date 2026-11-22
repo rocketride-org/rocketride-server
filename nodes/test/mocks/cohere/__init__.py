@@ -1,7 +1,7 @@
 """
 Mock Cohere package for rerank node integration tests.
 
-When ROCKETRIDE_MOCK is set, this replaces the real cohere SDK so dynamic
+When RR_MOCK is set, this replaces the real cohere SDK so dynamic
 node tests do not call external APIs.
 """
 

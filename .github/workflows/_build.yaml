@@ -327,9 +327,9 @@ jobs:
       - name: Test
         if: inputs.codeql == false && inputs.test
         # Integration tests boot a local server on :5565 and connect a test
-        # client. Both sides need the same shared secret to authenticate;
-        # without ROCKETRIDE_APIKEY the server raises AuthenticationException
-        # and the client tests fail with "No authentication configured".
+        # client. Both sides need the same shared secret to authenticate: the
+        # server requires RR_APIKEY, the test client sends ROCKETRIDE_APIKEY,
+        # and a server holding only ROCKETRIDE_APIKEY refuses to start.
         #
         # Use a literal CI-only value rather than ${{ secrets.ROCKETRIDE_APIKEY }}.
         # The original PR #712 wired this through a secret, but as its own
@@ -346,6 +346,7 @@ jobs:
         # documented "MYAPIKEY" placeholder used elsewhere in the codebase
         # (.env.template, the engine's built-in dev key).
         env:
+          RR_APIKEY: MYAPIKEY
           ROCKETRIDE_APIKEY: MYAPIKEY
           # Force uv to copy rather than hardlink when (re)installing node deps at
           # test time. On Windows a hardlink over an already-loaded native .pyd

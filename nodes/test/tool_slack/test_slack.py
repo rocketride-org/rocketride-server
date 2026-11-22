@@ -772,7 +772,7 @@ def _make_iglobal(conn_config=None):
 
 
 _MOCK_ENV = {
-    'ROCKETRIDE_MOCK': 'nodes/test/mocks',
+    'RR_MOCK': 'nodes/test/mocks',
     'ROCKETRIDE_SLACK_TOKEN': '',
     'ROCKETRIDE_SLACK_WEBHOOK_URL': '',
 }
@@ -816,7 +816,7 @@ class TestIGlobal:
 
     def test_mock_mode_skips_dependency_install(self):
         iglobal = _make_iglobal()
-        with patch.dict(os.environ, {'ROCKETRIDE_MOCK': 'nodes/test/mocks'}, clear=False):
+        with patch.dict(os.environ, {'RR_MOCK': 'nodes/test/mocks'}, clear=False):
             saved_depends = sys.modules.pop('depends', None)
             try:
                 iglobal._ensure_dependencies()  # should not raise

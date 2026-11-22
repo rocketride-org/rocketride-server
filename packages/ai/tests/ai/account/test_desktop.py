@@ -569,8 +569,10 @@ async def test_oss_list_get_public_on_a_failed_inventory_write_nothing_then_seed
     ]
     write = await acct.handle_app(_conn(), _req('desktop_add', appId='rocketride.sql'))
     assert write == {'success': False, 'message': 'The app catalog is unavailable; try again.'}
-    # authenticate() checks ROCKETRIDE_APIKEY: a developer with one set would
-    # get the 401 tuple here instead of the identity.
+    # authenticate() checks RR_APIKEY, and refuses a server holding only the
+    # client's ROCKETRIDE_APIKEY: a developer with either set would get the 401
+    # tuple here instead of the identity.
+    monkeypatch.delenv('RR_APIKEY', raising=False)
     monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
     signed_in = await acct.authenticate('')
     assert signed_in.apps == []

@@ -6,7 +6,7 @@
 """
 Mock googleapiclient.discovery for tool_gmail testing.
 
-When ROCKETRIDE_MOCK is set, this replaces the real discovery client so the
+When RR_MOCK is set, this replaces the real discovery client so the
 Gmail node builds a stub service that returns canned responses instead of
 calling Google. The chain mirrors the real API:
 

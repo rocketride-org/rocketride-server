@@ -226,7 +226,8 @@ function makeStartTestServerAction(options = {}) {
 				// expect a shared API key between server and client. Default to the
 				// same local-dev key used by tests when ROCKETRIDE_APIKEY is unset.
 				env: {
-					ROCKETRIDE_APIKEY: apikey,
+					// The server's own key (RR_APIKEY); the tests send it as ROCKETRIDE_APIKEY
+					RR_APIKEY: apikey,
 				},
 				onOutput: (text) => {
 					if (taskComplete) return;

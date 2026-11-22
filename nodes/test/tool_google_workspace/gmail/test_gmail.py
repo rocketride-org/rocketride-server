@@ -417,18 +417,18 @@ def test_services_json_declares_access_and_gmail_flags():
 
 
 # ---------------------------------------------------------------------------
-# Mock run: build the Gmail client through the ROCKETRIDE_MOCK Google SDK stubs
+# Mock run: build the Gmail client through the RR_MOCK Google SDK stubs
 # and exercise a call end-to-end (no network, no real google-api-python-client).
 # ---------------------------------------------------------------------------
 
-# Packages the ROCKETRIDE_MOCK stubs replace.
+# Packages the RR_MOCK stubs replace.
 _MOCKED_SDK = ('google.oauth2', 'googleapiclient')
 _MOCKS_DIR = Path(__file__).resolve().parents[2] / 'mocks'
 
 
 @contextlib.contextmanager
 def _stubbed_google_sdk():
-    """Make ``google.oauth2`` / ``googleapiclient`` resolve to the ROCKETRIDE_MOCK stubs.
+    """Make ``google.oauth2`` / ``googleapiclient`` resolve to the RR_MOCK stubs.
 
     The node test tasks install the real SDK, and an earlier test in this process
     may already have imported it. Those cached modules would shadow the stubs, so
@@ -464,7 +464,7 @@ def _stubbed_google_sdk():
 
 @pytest.fixture
 def mock_google_sdk():
-    """Run the test against the ROCKETRIDE_MOCK Google SDK stubs."""
+    """Run the test against the RR_MOCK Google SDK stubs."""
     with _stubbed_google_sdk():
         yield
 

@@ -42,14 +42,23 @@ inherit the engine's full environment, only an allowlist:
   A task that uses a RocketRide database node then gets `ROCKETRIDE_DB_DSNS`,
   holding the DSN of each database the run was approved for.
   Any other `ROCKETRIDE_DB_*` name passes through like the rest.
-- what nodes and the task itself use directly: `RR_STORE_URL`,
-  `RR_STORE_SECRET_KEY`, `RR_SIGNING_KEY`, `RR_BASE_URL`, `RR_CORS_ORIGINS`,
-  `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and
-  the API-key fallbacks individual node pages document (such as
-  `OPENAI_API_KEY`)
+  `ROCKETRIDE_` is the pipelines' and the clients' namespace; the engine's own
+  settings are `RR_` names, which a task does not get unless listed below.
+- what nodes and the task itself use directly: `RR_CORS_ORIGINS`,
+  `RR_OAUTH_BROKER_URL`, `RR_PROC_PRIVATE`, `RR_MOCK` (test servers only),
+  `MEDIA_TOOLKIT_FFMPEG`, `AWS_*`, and the API-key fallbacks individual node
+  pages document (such as `OPENAI_API_KEY`). The object store and its secret,
+  the engine's address, its API key and the fetch-URL signing key stay in the
+  engine: a task's files and state go through it.
 
 Pipeline code can read everything on that list. Any other engine setting stays
 in the engine.
+
+An engine started with a retired `ROCKETRIDE_` spelling of one of its own
+settings refuses to start and names the replacement (`ROCKETRIDE_MOCK` is now
+`RR_MOCK`). A standalone engine's API key is `RR_APIKEY`; `ROCKETRIDE_APIKEY`
+is what a client sends, and an engine that has it but not `RR_APIKEY` refuses
+to start.
 
 | Variable            | Effect                                                                                                                                                                                                        |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

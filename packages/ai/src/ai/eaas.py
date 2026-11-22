@@ -42,6 +42,7 @@ from typing import Any, Dict
 
 from rocketlib import warning
 
+from ai.common.server_env import check_server_environment
 from ai.constants import CONST_TASK_DATA_PATH
 from ai.proc_privacy import make_process_private, should_make_private
 from ai.web import WebServer
@@ -58,6 +59,18 @@ def _make_engine_private() -> None:
         make_process_private()
     except Exception as e:
         warning(f'could not make the engine process private: {e}')
+
+
+def _require_current_settings() -> None:
+    """Refuse to serve with a retired ROCKETRIDE_* spelling of a server setting in the environment.
+
+    The server's own settings are RR_* names (ai.common.server_env): a retired
+    spelling would reach every pipeline and every engine, and would be ignored.
+    """
+    try:
+        check_server_environment()
+    except EnvironmentError as e:
+        raise SystemExit(str(e))
 
 
 def _require_writable_task_data(path: str = CONST_TASK_DATA_PATH) -> None:
@@ -200,6 +213,10 @@ async def run(config: Dict[str, Any] = None) -> None:
 
     # Create the server
     server = WebServer(config=config, standardEndpoints=False)
+
+    # After WebServer, which loads the engine's .env: a retired ROCKETRIDE_*
+    # spelling of a server setting refuses the start before anything reads one
+    _require_current_settings()
 
     # After WebServer, which loads the engine's .env (RR_PROC_PRIVATE may live
     # there), and before serving, so before any task exists.

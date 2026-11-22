@@ -690,9 +690,9 @@ async def test_the_pipe_gate_asks_eaas_for_the_tasks_own_org(task_side, monkeypa
 
 
 def test_status_accepts_only_the_channel_token(task_side, monkeypatch):
-    monkeypatch.setenv('ROCKETRIDE_APIKEY', 'enginekey')
+    monkeypatch.setenv('RR_APIKEY', 'enginekey')
     assert task_side.http('/status', 'enginekey') == 401
-    monkeypatch.delenv('ROCKETRIDE_APIKEY')
+    monkeypatch.delenv('RR_APIKEY')
     assert task_side.http('/status', 'anything') == 401
     assert task_side.http('/status') == 401
     assert task_side.http('/status', TOKEN) == 200

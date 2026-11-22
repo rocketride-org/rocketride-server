@@ -270,6 +270,9 @@ CONST_SUBPROCESS_ENV_NAMES = frozenset(
         # Operator opt-in that makes task processes hide their /proc entries
         # (ai.proc_privacy); non-secret, and tasks must see it to act on it
         'RR_PROC_PRIVATE',
+        # The test-mock module directory (test servers only): node.py puts it
+        # first on sys.path; a pipeline's avoidMocks removes it below
+        'RR_MOCK',
         # Executable override for the media toolkit nodes
         'MEDIA_TOOLKIT_FFMPEG',
         # Bare names individual node READMEs document as engine-host fallbacks
@@ -3755,9 +3758,9 @@ class TaskEngine(DAPBase):
             # broker credentials and injects the resolved per-tenant DSN.
             subprocess_env = await self._build_subprocess_env(access)
 
-            # avoidMocks: strip ROCKETRIDE_MOCK so node.py loads real libraries
+            # avoidMocks: strip RR_MOCK so node.py loads real libraries
             if self._pipeline.get('avoidMocks'):
-                subprocess_env.pop('ROCKETRIDE_MOCK', None)
+                subprocess_env.pop('RR_MOCK', None)
 
             # A stop that arrived during the awaits above (loading the
             # placeholder values, writing the task file) found no process to

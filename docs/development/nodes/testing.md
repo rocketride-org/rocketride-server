@@ -672,7 +672,7 @@ selected, the run stops before any test starts.
 
 ### Mock support
 
-Integration tests set the `ROCKETRIDE_MOCK` environment variable, which enables mock implementations for external services (LLM providers, vector stores, etc.). This allows tests to run in CI without real API keys. Mock modules are located in `nodes/test/mocks/`.
+Integration tests set the `RR_MOCK` environment variable, which enables mock implementations for external services (LLM providers, vector stores, etc.). This allows tests to run in CI without real API keys. Mock modules are located in `nodes/test/mocks/`.
 
 ---
 

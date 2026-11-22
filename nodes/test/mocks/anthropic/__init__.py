@@ -1,7 +1,7 @@
 """
 Mock anthropic package for LLM node testing.
 
-When ROCKETRIDE_MOCK is set, this replaces the real anthropic SDK so validateConfig
+When RR_MOCK is set, this replaces the real anthropic SDK so validateConfig
 in llm_anthropic does not call real APIs.
 """
 

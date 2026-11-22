@@ -2,7 +2,7 @@
 Mock langchain_openai for LLM and embedding node testing.
 =========================================================
 
-When ROCKETRIDE_MOCK is set, this replaces the real langchain_openai so
+When RR_MOCK is set, this replaces the real langchain_openai so
 llm_openai, llm_ollama, llm_deepseek, llm_perplexity use stubbed responses
 instead of calling real APIs. embedding_openai also uses this mock.
 
@@ -15,7 +15,9 @@ import copy
 import json
 
 # Stub response returned by ChatOpenAI.invoke() - mirrors LangChain AIMessage
-MOCK_LLM_RESPONSE = 'Mock LLM response. This stub is used when ROCKETRIDE_MOCK is set so tests run without API keys or external services.'
+MOCK_LLM_RESPONSE = (
+    'Mock LLM response. This stub is used when RR_MOCK is set so tests run without API keys or external services.'
+)
 
 # Mock embedding dimension (OpenAI text-embedding-3-small default)
 MOCK_EMBEDDING_DIM = 1536

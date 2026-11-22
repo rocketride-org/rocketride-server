@@ -36,7 +36,7 @@ and collection errors out, by design.
 package is importable it is used as-is; only when it is absent does this file
 install a local, test-scoped stand-in so the engine can be unit-tested in
 isolation. The stub deliberately does NOT live in ``nodes/test/mocks/``: that
-directory is injected engine-wide via ``ROCKETRIDE_MOCK``
+directory is injected engine-wide via ``RR_MOCK``
 (``packages/ai/src/ai/node.py`` prepends it to ``sys.path`` in the node
 subprocess), so a ``rank_bm25`` package there would shadow the real library and
 make the dynamic services.json test exercise fake BM25 scoring. ``mocks/`` is
@@ -83,7 +83,7 @@ sys.path.insert(0, str(_NODES_SRC))
 # is absent do we install the minimal stand-in below -- scoped to this test
 # module via sys.modules, NOT placed in nodes/test/mocks/, because that
 # directory is prepended to sys.path in the engine's node subprocess
-# (ROCKETRIDE_MOCK, see packages/ai/src/ai/node.py) and would shadow the real
+# (RR_MOCK, see packages/ai/src/ai/node.py) and would shadow the real
 # library during the dynamic services.json test. This is the only stub the
 # test installs -- rocketlib / ai.* / depends are provided by the build
 # interpreter and are NOT stubbed here.

@@ -117,7 +117,7 @@ class AccountBase(ABC):
     Abstract interface for the RocketRide Account facade.
 
     Two concrete implementations exist:
-      - ``account/oss/``  — API-key auth against ROCKETRIDE_APIKEY; all
+      - ``account/oss/``  — API-key auth against RR_APIKEY; all
                             account-management methods raise NotImplementedError.
       - ``extension/saas/`` — Zitadel + DB auth; full account management,
                             billing, and marketplace support.

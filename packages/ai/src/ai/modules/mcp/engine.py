@@ -140,7 +140,7 @@ class WsEngineClient:
     def base_url(self) -> str:
         """HTTP(S) base for the engine REST surface, derived from the WS/HTTP uri.
 
-        The data-ingress endpoint (`/task/data`) is HTTP, but ``ROCKETRIDE_URI``
+        The data-ingress endpoint (`/task/data`) is HTTP, but the engine URI
         may be a ``ws://`` URL. Normalize the scheme and strip any trailing slash.
         """
         uri = self._uri
@@ -437,13 +437,16 @@ class WsEngineClient:
 
 def make_engine_client(config: Dict[str, Any]) -> EngineClient:
     """Build the seam client. ``config`` keys (``rocketride_uri``,
-    ``rocketride_auth``) take precedence; the environment variables are the
-    fallback so existing deployments keep working unchanged.
+    ``rocketride_auth``) take precedence; the server's own settings are the
+    fallback: ``RR_MCP_ENGINE_URI``, and ``RR_MCP_ENGINE_AUTH`` then the
+    server's API key ``RR_APIKEY`` (on a standalone server, the key that opens
+    this engine). ``ROCKETRIDE_URI``/``ROCKETRIDE_APIKEY`` are what a CLIENT
+    reads, and this module is part of the server, so it reads neither.
 
     The MCP module always passes a resolved ``rocketride_uri`` (explicit,
     loopback default or public default -- see
-    ``ai.modules.mcp._resolve_engine_uri``), so ``ROCKETRIDE_URI`` is optional
-    there; only a direct caller with neither set hits the URI error below.
+    ``ai.modules.mcp._resolve_engine_uri``), so ``RR_MCP_ENGINE_URI`` is
+    optional there; only a direct caller with neither set hits the URI error below.
 
     ``local_engine`` (injected by ``ai.modules.mcp.initModule``, true only on a
     loopback bind) keeps the SDK's default env. Otherwise the client is built
@@ -453,12 +456,10 @@ def make_engine_client(config: Dict[str, Any]) -> EngineClient:
     would override a customer's same-named secrets.
     """
     config = config or {}
-    uri = config.get('rocketride_uri') or os.environ.get('ROCKETRIDE_URI') or ''
-    auth = (
-        config.get('rocketride_auth') or os.environ.get('ROCKETRIDE_AUTH') or os.environ.get('ROCKETRIDE_APIKEY') or ''
-    )
+    uri = config.get('rocketride_uri') or os.environ.get('RR_MCP_ENGINE_URI') or ''
+    auth = config.get('rocketride_auth') or os.environ.get('RR_MCP_ENGINE_AUTH') or os.environ.get('RR_APIKEY') or ''
     if not uri:
-        raise ValueError('Missing engine URI: set config rocketride_uri or env ROCKETRIDE_URI')
+        raise ValueError('Missing engine URI: set config rocketride_uri or env RR_MCP_ENGINE_URI')
     if not auth:
-        raise ValueError('Missing engine auth: set config rocketride_auth or env ROCKETRIDE_AUTH/ROCKETRIDE_APIKEY')
+        raise ValueError('Missing engine auth: set config rocketride_auth or env RR_MCP_ENGINE_AUTH/RR_APIKEY')
     return WsEngineClient(uri=uri, auth=auth, env=None if config.get('local_engine') else {})

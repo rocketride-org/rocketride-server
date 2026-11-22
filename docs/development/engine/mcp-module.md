@@ -40,11 +40,12 @@ future in-process implementation replaces one file, not the tool code). A
 request that carries its own credential (API key or verified OAuth JWT) gets a
 fresh per-request client under that identity, closed when the request ends;
 credential-less requests share one lazy singleton built from
-`ROCKETRIDE_AUTH`/`ROCKETRIDE_APIKEY`.
+`RR_MCP_ENGINE_AUTH`, else the engine's own key `RR_APIKEY` (the engine module reads
+the server's `RR_*` settings, never the clients' `ROCKETRIDE_*` ones).
 
 Every client connects to one engine URI, resolved once in `initModule` by
 `_resolve_engine_uri` (which also feeds the widget CSP origin and the
-upload/dropper links): explicit `rocketride_uri` / `ROCKETRIDE_URI` wins;
+upload/dropper links): explicit `rocketride_uri` / `RR_MCP_ENGINE_URI` wins;
 otherwise a loopback bind uses this engine's own `ws://127.0.0.1:<port>`, and
 any other bind uses the `MCP_RESOURCE_IDENTIFIER` origin as `wss://`/`ws://`.
 

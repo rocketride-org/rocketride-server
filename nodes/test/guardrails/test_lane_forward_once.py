@@ -51,7 +51,7 @@ serve; the rule being measured belongs to the engine, not to guardrails.
 The questions and documents runs inject their payload straight onto the lane
 (`lane/<name>` MIME), so they involve no model and no network. The answers run
 needs a producer, because `Answer` rejects a preset `answer` field on
-validation - `llm_openai_api` under `ROCKETRIDE_MOCK` supplies one offline.
+validation - `llm_openai_api` under `RR_MOCK` supplies one offline.
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ from typing import Any, Dict, List, Tuple
 # ambiguous: dropped on purpose, or lost?
 GUARDRAILS = {'id': 'guard_1', 'provider': 'guardrails', 'config': {'profile': 'basic'}}
 
-# Placeholder credentials only - the mock OpenAI SDK under ROCKETRIDE_MOCK
+# Placeholder credentials only - the mock OpenAI SDK under RR_MOCK
 # answers without a network call. Mirrors _LLM_MOCK_CREDENTIALS in
 # framework/pipeline.py.
 LLM = {

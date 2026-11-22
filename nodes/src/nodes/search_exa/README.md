@@ -61,7 +61,7 @@ Exa HTTP errors are mapped to descriptive failures:
 
 ### URL safety
 
-Before serializing results, the node validates every `url`, `image`, and `favicon` field. Each must use `http` or `https` and resolve to a public IP address. A result whose primary `url` resolves to a private, loopback, link-local, reserved, multicast, or unspecified address is dropped entirely; invalid `image` and `favicon` fields are removed while their result is retained. This sanitization is skipped when `ROCKETRIDE_MOCK` is set. That bypass is intended only for controlled tests and must never be enabled in production.
+Before serializing results, the node validates every `url`, `image`, and `favicon` field. Each must use `http` or `https` and resolve to a public IP address. A result whose primary `url` resolves to a private, loopback, link-local, reserved, multicast, or unspecified address is dropped entirely; invalid `image` and `favicon` fields are removed while their result is retained. This sanitization is skipped when `RR_MOCK` is set. That bypass is intended only for controlled tests and must never be enabled in production.
 
 ## Upstream docs
 

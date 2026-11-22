@@ -90,7 +90,7 @@ the shared LLM base's default retry and mapping logic.
 
 `services.json` includes a `test` block that runs model `custom` against a local test
 server with a mocked `langchain_openai`, so no real API key is required.
-`ROCKETRIDE_MOCK` must point to `nodes/test/mocks`.
+`RR_MOCK` must point to `nodes/test/mocks`.
 
 ---
 
