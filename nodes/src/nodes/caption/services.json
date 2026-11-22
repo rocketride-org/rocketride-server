@@ -37,6 +37,7 @@
 			"type": "string",
 			"title": "Granularity",
 			"description": "How detailed the caption should be.",
+			"param": true,
 			"default": "caption",
 			"enum": [
 				["caption", "Short"],

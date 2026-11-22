@@ -22,6 +22,7 @@
 # =============================================================================
 
 import copy
+from typing import TYPE_CHECKING
 
 from rocketlib import IInstanceBase, Entry, debug, warning
 from .IGlobal import IGlobal
@@ -29,6 +30,9 @@ from ai.common.schema import Doc
 from ai.common.schema import Question
 from ai.common.schema import QuestionHistory
 from ai.common.schema import QuestionText
+
+if TYPE_CHECKING:
+    from .optimizer import ContextOptimizer
 
 
 def blank_budgeted_fields(question: Question) -> Question:
@@ -83,7 +87,27 @@ def prompt_overhead_tokens(optimizer, question: Question) -> int:
 class IInstance(IInstanceBase):
     """Pipeline instance that fits each question into the model's token budget."""
 
-    IGlobal: IGlobal  # Reference to global context providing the optimizer
+    IGlobal: IGlobal  # Reference to global context providing the model-window catalog
+
+    optimizer: 'ContextOptimizer | None' = None
+
+    def beginInstance(self):
+        """Build this call's optimizer from its settings over the control's catalog.
+
+        The resolver has flattened the selected mode and applied the defaults;
+        the optimizer validates and clamps the values (a bad model name or
+        percentage falls back with a warning, never an error). With no catalog
+        (the control never began) there is no optimizer and questions pass through.
+        """
+        # Imported here: the optimizer module pulls in the shared config helpers
+        from .optimizer import ContextOptimizer
+
+        catalog = self.IGlobal.catalog
+        self.optimizer = ContextOptimizer(self.settings, catalog) if catalog is not None else None
+
+    def endInstance(self):
+        """Release this call's optimizer."""
+        self.optimizer = None
 
     def open(self, entry: Entry):
         """Start a new object; the node keeps no per-object state.
@@ -109,7 +133,7 @@ class IInstance(IInstanceBase):
         # Deep copy so we never mutate the upstream question
         question = copy.deepcopy(question)
 
-        optimizer = self.IGlobal.optimizer
+        optimizer = self.optimizer
         if optimizer is None:
             # No optimizer available (e.g. config mode) -- pass through
             warning('context_optimizer: optimizer not initialized, passing question through unchanged')

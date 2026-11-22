@@ -34,7 +34,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from depends import depends
 
@@ -49,7 +49,7 @@ from neo4j.exceptions import Neo4jError, ServiceUnavailable
 
 from rocketlib import error, warning
 
-from ai.common.graph import GraphGlobalBase, is_cypher_safe, strip_cypher_literals
+from ai.common.graph import GraphGlobalBase, is_cypher_safe, max_execute_rows, strip_cypher_literals
 
 DEFAULT_URI = 'neo4j://localhost:7687'
 DEFAULT_DATABASE = 'neo4j'
@@ -128,7 +128,9 @@ class IGlobal(GraphGlobalBase):
                 except Exception:
                     pass
 
-    def _run_query(self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None) -> List[Dict]:
+    def _run_query(
+        self, query: str, params: Optional[Dict] = None, limit: Optional[int] = None, *, settings: Mapping
+    ) -> List[Dict]:
         """Execute a read-only Cypher query and return rows as plain dicts.
 
         Unlike FalkorDB's GRAPH.RO_QUERY, Bolt has no server-side read-only
@@ -138,12 +140,14 @@ class IGlobal(GraphGlobalBase):
 
         With ``limit`` set the caller wants truncation detection, so return one
         row past it (still bounded by ``read_row_cap``); with no limit (the lane
-        path) fall back to the ``read_row_cap`` ceiling.
+        path) fall back to the ``read_row_cap`` ceiling. The ceiling is the
+        call's: ``settings`` is the calling instance's ``self.settings``.
         """
         if not is_cypher_safe(query):
             raise ValueError('Refusing to execute unsafe (write/admin) Cypher statement')
 
-        cap = self.read_row_cap if limit is None else min(int(limit), self.read_row_cap) + 1
+        row_cap = self.read_row_cap(settings)
+        cap = row_cap if limit is None else min(int(limit), row_cap) + 1
         with self.driver.session(
             database=self.database,
             default_access_mode=neo4j.READ_ACCESS,
@@ -151,29 +155,35 @@ class IGlobal(GraphGlobalBase):
             result = session.run(neo4j.Query(query, timeout=self.QUERY_TIMEOUT), params or {})
             return [_record_to_dict(record) for _, record in zip(range(cap), result)]
 
-    def _run_query_raw(self, query: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _run_query_raw(
+        self, query: str, params: Optional[Dict[str, Any]] = None, *, settings: Mapping
+    ) -> Dict[str, Any]:
         """Execute a raw statement with no safety gate (the EXECUTE path).
 
         The statement runs in an explicit transaction that commits only after
         the row cap is checked, so a result over ``max_execute_rows`` is rolled
-        back and a retry cannot duplicate the write. Batched statements run in
+        back and a retry cannot duplicate the write. The session and its
+        transaction end before this returns: one transaction per call, nothing
+        left open for a later call. Batched statements run in
         auto-commit, the only mode Neo4j allows for them; each batch commits on
         its own, so the cap cannot undo them.
 
-        ``params`` binds ``$name`` values as Bolt parameters.
+        ``params`` binds ``$name`` values as Bolt parameters. ``settings`` is the
+        calling instance's ``self.settings``, which carries the call's row cap.
         """
+        max_rows = max_execute_rows(settings)
         with self.driver.session(database=self.database) as session:
             if _needs_auto_commit(query):
                 return self._read_execute_result(
-                    session.run(neo4j.Query(query, timeout=self.QUERY_TIMEOUT), params or {})
+                    session.run(neo4j.Query(query, timeout=self.QUERY_TIMEOUT), params or {}), max_rows
                 )
             # Leaving the block commits; an exception inside it, the row cap's included, rolls back.
             with session.begin_transaction(timeout=self.QUERY_TIMEOUT) as tx:
-                return self._read_execute_result(tx.run(query, params or {}))
+                return self._read_execute_result(tx.run(query, params or {}), max_rows)
 
-    def _read_execute_result(self, result: neo4j.Result) -> Dict[str, Any]:
-        """Collect an EXECUTE result as ``{'rows', 'affected_rows'}``; raise past ``max_execute_rows``."""
-        max_rows = self.max_execute_rows
+    @staticmethod
+    def _read_execute_result(result: neo4j.Result, max_rows: int) -> Dict[str, Any]:
+        """Collect an EXECUTE result as ``{'rows', 'affected_rows'}``; raise past ``max_rows``."""
         rows = [_record_to_dict(record) for _, record in zip(range(max_rows + 1), result)]
         if len(rows) > max_rows:
             raise ValueError(f'EXECUTE query exceeded max_execute_rows={max_rows}')
@@ -193,7 +203,7 @@ class IGlobal(GraphGlobalBase):
         )
         return {'rows': rows, 'affected_rows': affected}
 
-    def _validate_query(self, query: str) -> Tuple[bool, str]:
+    def _validate_query(self, query: str, *, settings: Mapping) -> Tuple[bool, str]:
         """Run EXPLAIN to check syntax without executing the query."""
         try:
             with self.driver.session(database=self.database) as session:
@@ -204,8 +214,8 @@ class IGlobal(GraphGlobalBase):
         except Exception as e:
             return False, str(e)
 
-    def _reflect_schema(self) -> Dict[str, Any]:
-        """Reflect node labels, their properties, and relationship types."""
+    def _reflect_schema(self, graph: Optional[str] = None) -> Dict[str, Any]:
+        """Reflect node labels, their properties, and relationship types of the control's database."""
         schema: Dict[str, Any] = {'nodes': {}, 'relationships': []}
 
         try:

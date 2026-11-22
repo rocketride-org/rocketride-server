@@ -139,8 +139,8 @@ def _make_instance():
 
     inst.IGlobal = types.SimpleNamespace(
         embedding=types.SimpleNamespace(
-            encodeChunks=lambda docs: encoded.append(list(docs)),
-            encodeQuestion=lambda question: encoded.append(question),
+            encodeChunks=lambda docs, prefix, truncate_dim: encoded.append(list(docs)),
+            encodeQuestion=lambda question, prefix, truncate_dim: encoded.append(question),
         )
     )
     inst.instance = types.SimpleNamespace(writeDocuments=lambda docs: delivered.extend(docs))

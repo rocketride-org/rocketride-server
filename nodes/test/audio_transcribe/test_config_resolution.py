@@ -31,7 +31,8 @@ _DISCOVERY_PY = os.path.join(_HERE, '..', 'framework', 'discovery.py')
 
 _LOGICAL_TYPE = 'audio_transcribe'
 
-# Every key IGlobal.beginGlobal() reads out of the resolved config.
+# Every key the node reads out of the resolved config (model and compute_type by the
+# IGlobal, the rest from each call's settings).
 _KEYS_IGLOBAL_READS = (
     'model',
     'language',

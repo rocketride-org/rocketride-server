@@ -24,12 +24,11 @@
 """
 TwelveLabs node - global (shared) state.
 
-Loads the API key and instructions from the resolved node config once, making
+Loads the API key from the resolved node config once, making
 them available to all instances.
 """
 
 import os
-from typing import List
 
 from rocketlib import IGlobalBase
 
@@ -38,23 +37,21 @@ class IGlobal(IGlobalBase):
     """
     Global configuration for the TwelveLabs node.
 
-    Loads the API key and instructions from configuration once,
+    Loads the API key from configuration once (the instructions are per call),
     making them available to all instances.
     """
 
     api_key: str = ''
-    instructions: List[str]
 
     def __init__(self) -> None:
         """
         Initialize the global configuration for the TwelveLabs node.
         """
         super().__init__()
-        self.instructions = []
 
     def beginGlobal(self) -> None:
         """
-        Load the API key and instructions from the resolved config once,
+        Load the API key from the resolved config once,
         making them available to all instances.
         """
         # install requirements
@@ -67,11 +64,9 @@ class IGlobal(IGlobalBase):
         # reference resolved per call); the schema marks it required
         config = self.config
         self.api_key = str(config.apikey or '').strip()
-        self.instructions = [str(instruction) for instruction in (config.instructions or [])]
 
     def endGlobal(self) -> None:
         """
         Clear the global configuration.
         """
         self.api_key = ''
-        self.instructions = []

@@ -366,7 +366,8 @@ class IInstance(IInstanceBase):
 
         cfg = self.IGlobal
         raw_limit = args.get('limit')
-        limit = cfg.default_limit if raw_limit is None else _coerce_limit(raw_limit, default=cfg.default_limit)
+        default_limit = self.settings.defaultLimit  # this call's default page size
+        limit = default_limit if raw_limit is None else _coerce_limit(raw_limit, default=default_limit)
 
         match = args.get('match')
         # 'and'/'or' only: company search's op enum has no third value, and person

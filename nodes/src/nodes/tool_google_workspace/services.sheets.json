@@ -44,7 +44,7 @@
 				"access": "write"
 			}
 		},
-		"dropped": [],
+		"dropped": ["customerId", "service.customerId"],
 		"credential": {
 			"userToken": "user.userAuth"
 		}

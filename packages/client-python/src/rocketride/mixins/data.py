@@ -278,10 +278,12 @@ class DataMixin(DAPClient):
             if body.get('controlId'):
                 self._token = body['controlId']
 
-            # If an SSE callback was provided, subscribe and register for this pipe
-            if self._on_sse is not None and self._pipe_id is not None:
+            # If an SSE callback was provided, subscribe (the server narrows by
+            # slot) and register under the request tree: the slot is reused by
+            # the next binding once this pipe closes, the traceId never is
+            if self._on_sse is not None and self._pipe_id is not None and self._trace_id is not None:
                 await self._client.set_events(self._token, ['SSE'], pipe_id=self._pipe_id)
-                self._client._register_sse_pipe(self._pipe_id, self._on_sse)
+                self._client._register_sse_pipe(self._trace_id, self._on_sse)
 
             return self
 
@@ -376,8 +378,8 @@ class DataMixin(DAPClient):
                 self._closed = True
 
                 # Unregister SSE callback and scoped monitor subscription
-                if self._on_sse is not None and self._pipe_id is not None:
-                    self._client._unregister_sse_pipe(self._pipe_id)
+                if self._on_sse is not None and self._pipe_id is not None and self._trace_id is not None:
+                    self._client._unregister_sse_pipe(self._trace_id)
                     try:
                         await self._client.set_events(self._token, [], pipe_id=self._pipe_id)
                     except Exception:

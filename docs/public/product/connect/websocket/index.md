@@ -19,7 +19,8 @@ send so you can debug, trace, or build your own client.
   client upgrades to a WebSocket from there. See [Cloud](/operate/cloud).
 - **Encoding:** JSON messages framed per the engine protocol (described below).
 - **Auth:** the first frame on the socket is an `auth` request carrying your API
-  key (`{ "auth": "$ROCKETRIDE_APIKEY", "clientName": "...", "clientVersion": "..." }`);
+  key and the wire protocol you speak
+  (`{ "auth": "$ROCKETRIDE_APIKEY", "clientName": "...", "clientVersion": "...", "protocol": 2 }`);
   the SDKs read the key from the `ROCKETRIDE_APIKEY` env var (engine URI from
   `ROCKETRIDE_URI`). If `auth` fails the request errors. Once authenticated, each
   task request carries the `token` returned by `execute` (the SDK's `use()`) in
@@ -31,11 +32,30 @@ send so you can debug, trace, or build your own client.
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
 
+### Protocol version
+
+Compatibility is decided by one number, the wire protocol major. This server
+speaks protocol **2**: it advertises `protocol: 2` in `rrext_public_probe`,
+and the 2.x SDKs send `protocol: 2` in the `auth` arguments. The spellings on
+this page are protocol 2's (camelCase: `pipeId`, `traceId`).
+
+- A login naming a protocol the server does not speak is refused with the
+  code `TASK_VERSION_MISMATCH` before its credential is looked at; the
+  message names both protocols.
+- A login with no `protocol` (the 1.x SDKs) is served as protocol 1: the
+  connection adds `pipe_id` beside `pipeId` in data-op responses, SSE events
+  and recorded SSE events, and renames an inbound `pipe_id` to `pipeId`.
+  Nothing else changes for it. Protocol 1 is temporary and will be switched
+  off; a client of your own sends `protocol: 2`.
+
 ### Pre-auth probe (`rrext_public_probe`)
 
 Before authenticating, a client may open a public connection and send
-`rrext_public_probe`. The response body carries `version`, `capabilities`,
-`platform`, the public `apps` list, `stripePublishableKey` (when billing is
+`rrext_public_probe`. The response body carries `version`, `protocol` (the
+wire protocol major, see [Protocol version](#protocol-version)),
+`capabilities`, `features` (server features a client checks before using
+them, such as `submit`), `platform`, the public `apps` list,
+`stripePublishableKey` (when billing is
 configured), `posthogPublishableKey` + `posthogHost` (when product telemetry
 is configured; absent means telemetry is off), and `endpoints` — the server's
 public addresses:
@@ -75,18 +95,21 @@ then the raw bytes, so the frame on the wire is `<json-header>\n<binary-payload>
 }
 ```
 
-This particular request -- opening a data pipe -- carries the control's own
-`token` (the control id returned by `execute`): a pipe is always opened on an
-already-running control, and the slot takes the control id only, never an
-address. Every request on the pipe (`write`, `close`, ...) carries that same
-`token` in `arguments`, for example:
+This particular request -- opening a data pipe -- carries a `token` that is
+either the control id returned by `execute` or an address. An address resolves
+through your rungs the way `submit` does: its live control answers, or a
+published pipe that is not running is started. The open's response returns the
+control the pipe was opened on, as `controlId` (and its `address`). Every later
+request on the pipe (`write`, `close`, ...) carries that control id as its
+`token` in `arguments`, never an address, so a frame cannot land on another
+control the address resolves to by then. For example:
 
 ```json
 {
 	"type": "request",
 	"seq": 3,
 	"command": "rrext_process",
-	"arguments": { "subcommand": "write", "pipe_id": 1, "token": "$TASK_TOKEN" }
+	"arguments": { "subcommand": "write", "pipeId": 1, "token": "$TASK_TOKEN" }
 }
 ```
 
@@ -106,7 +129,7 @@ whether the command worked; a successful response carries a `body`.
 	"request_seq": 1,
 	"command": "rrext_process",
 	"success": true,
-	"body": { "pipe_id": 1 }
+	"body": { "pipeId": 1, "traceId": "...", "controlId": "...", "address": "..." }
 }
 ```
 
@@ -167,12 +190,51 @@ pipeline output streams back. An event names an `event` and carries a `body`;
 the client matches it to the task it started.
 
 ```json
-{ "type": "event", "seq": 7, "event": "apaevt_sse", "body": { "pipe_id": 1, "type": "...", "data": {} } }
+{ "type": "event", "seq": 7, "event": "apaevt_sse", "body": { "pipeId": 1, "traceId": "...", "type": "...", "data": {} } }
 ```
 
 The engine can also push a dedicated monitoring stream (task lifecycle, periodic
 status snapshots, resource metrics, and per-component flow traces) over this same
 socket. See [Observability](/connect/websocket/observability).
+
+### Where events come from: the engine's lines
+
+Each engine process reports to the server in single lines on its standard
+output: a `>`, a three-letter tag, then `*`-separated fields, integers in hex.
+Clients never see these lines, but their field names carry through to the
+events built from them, so they are the vocabulary to read the events by:
+
+| Line | Fields | Becomes |
+| --- | --- | --- |
+| `>DBG*op*pipeId*componentId*traceId*trace` | `op` (`begin`, `enter`, `leave`, `end`); `pipeId`, the pipe slot; `componentId`, the component (an entry name on `begin`/`end`); `traceId`, the request tree; `trace`, JSON | `apaevt_flow`: `id` (the slot), `op`, `pipes`, `component` (the author's component id), `traceId`, `trace`. Emitted only for a binding whose own trace level asked for it |
+| `>SSE*{json}` | `pipeId`, `traceId`, `type`, `data` | `apaevt_sse` with that body |
+| `>OBJ`, `>CNT`, `>ERR`, `>WRN`, `>DL`, `>EXIT`, and plain output | no request: engine-level | status, warning and `output` events (see below) |
+
+On the wire a `traceId` is a string (`nodeId.engineId.n`), opaque and never
+reused, while a `pipeId` is a slot the next request reuses once a binding
+closes: correlate by `traceId`. Every event body a control receives also
+carries `controlId`, the receiving control, and `engineKey`, the engine that
+emitted it.
+
+**Pipe-tagged and engine-level events.** An event with a `traceId` belongs to
+the request that produced it: the server delivers it to that request's
+control (its monitors and run log) and to no other holder of the engine. An
+engine-level line carries no request. On a private engine (one owner) it goes
+to the engine's own controls. On an engine shared across users it belongs to
+no caller: each holder still receives the status, projected to its own
+counts, and the task lifecycle, but counts, errors, warnings, downloads, exit
+codes and plain output leave the server as **`apaevt_ops`**, body
+`{ engineKey, kind, ... }` (`kind` is the original event name), on the `OPS`
+event type (`1 << 10`). Only `sys.admin` may subscribe `OPS`, on the `*`
+wildcard only, and `ALL` does not include it.
+
+A request tree is released when its pipe closes. For
+`CONST_BINDING_GRACE_SECONDS` (5 seconds) after that, an event of the tree
+still goes to that request's control, with `late: true` in its body, so a
+consumer waiting for a request's final events reads the request's own stream
+and checks `late`. An event whose tree is unknown, or was released longer ago
+than the grace period, is delivered like an engine-level line: to the
+engine's own controls on a private engine, as `apaevt_ops` on a shared one.
 
 ## A session, end to end
 
@@ -198,7 +260,7 @@ visually or by hand, the protocol just transports it.
 ## MIME type selects the lane
 
 Every write carries a MIME type — the `mimeType` argument of `rrext_process` /
-`open`, which the HTTP `/webhook/{project_id}/{source}` route fills in from the
+`open`, which the HTTP `/webhook/{address}` route fills in from the
 request's `Content-Type` header. That MIME type is **routing, not metadata**: it
 picks which lane the body is delivered on.
 

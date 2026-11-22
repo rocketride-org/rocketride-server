@@ -22,13 +22,56 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Instance handler for the Object Detection node.
+
+The confidence threshold and the open-vocabulary prompt are this call's
+(``self.settings``): one control, whose IGlobal holds the loaded backend,
+serves calls that ask for different classes at different thresholds. The
+instance reads both as the binding begins and passes them to every
+``Detector.detect`` of the call.
+"""
+
 import json
 import time
+from typing import Optional
 
 from rocketlib import IInstanceBase, AVI_ACTION, debug, warning
 from ai.common.image import ImageProcessor
 from ai.common.avi.descriptor import descriptor_from_payload, forward_enriched_image
+from ai.common.models.vision.detection import OPEN_VOCAB_BACKENDS
 from .IGlobal import IGlobal
+
+
+def call_prompt(backend: str, prompt: Optional[str]) -> Optional[str]:
+    """
+    The prompt one call sends to the detector, checked against the control's backend.
+
+    The schema requires a prompt on the open-vocabulary branch; the class
+    split still guards against a prompt made of separators only.
+
+    Args:
+        backend: The control's backend engine.
+        prompt: The call's prompt (absent on a closed-set branch).
+
+    Returns:
+        The stripped prompt, or None when the call carries none.
+
+    Raises:
+        ValueError: An open-vocabulary backend got a prompt naming no class.
+    """
+    prompt = (prompt or '').strip()
+    classes = [c.strip() for c in prompt.replace('.', ',').split(',') if c.strip()]
+    if backend in OPEN_VOCAB_BACKENDS and not classes:
+        # The prompt is a per-call parameter: a caller's override is fixed on
+        # the call, the configured default in the UI
+        raise ValueError(
+            f'detect: engine "{backend}" requires a non-empty prompt naming at least one class '
+            '(e.g. "person . car . dog"). A caller that passes the prompt in its parameters must '
+            'pass one that names a class; a call on the configured prompt needs it set in the UI '
+            'and the pipeline restarted.'
+        )
+    return prompt or None
 
 
 class IInstance(IInstanceBase):
@@ -47,6 +90,22 @@ class IInstance(IInstanceBase):
         super().__init__(*args, **kwargs)
         self._image_data = None
         self._source_descriptor = None  # stream descriptor parsed on the image BEGIN
+        self._prompt = None  # this call's prompt, None on a closed-set backend
+        self._threshold = None  # this call's confidence threshold
+
+    def beginInstance(self):
+        """
+        Read this call's threshold and prompt.
+
+        The prompt exists only on the open-vocabulary branch, so it is absent
+        from the settings of a closed-set control.
+
+        Raises:
+            ValueError: The call's prompt names no class on an open-vocabulary backend.
+        """
+        settings = self.settings
+        self._threshold = settings.threshold
+        self._prompt = call_prompt(self.IGlobal.detector.backend, settings.get('prompt'))
 
     def open(self, object):
         """Reset the per-object buffers and counters so nothing from a previous object carries over.
@@ -115,7 +174,7 @@ class IInstance(IInstanceBase):
                 t_decode = (time.perf_counter() - t0) * 1000
                 t0 = time.perf_counter()
                 with self.IGlobal.device_lock:
-                    detections = self.IGlobal.detector.detect(image)
+                    detections = self.IGlobal.detector.detect(image, prompt=self._prompt, threshold=self._threshold)
                 t_detect = (time.perf_counter() - t0) * 1000
                 t0 = time.perf_counter()
                 self._emit(image, detections)

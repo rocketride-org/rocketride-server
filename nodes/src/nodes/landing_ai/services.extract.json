@@ -42,7 +42,8 @@
 			"type": "boolean",
 			"title": "Strict",
 			"description": "Fail the extraction when the document does not match the schema, instead of returning partial results.",
-			"default": false
+			"default": false,
+			"param": true
 		},
 		"landing_ai_extract.region": {
 			"type": "string",

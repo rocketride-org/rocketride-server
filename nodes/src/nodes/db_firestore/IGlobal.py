@@ -51,14 +51,15 @@ class IGlobal(IGlobalBase):
 
     client: firestore.Client | None = None
     database: str = '(default)'
-    collection: str = ''
 
     def beginGlobal(self) -> None:
         """Open the Firestore client from the resolved config.
 
         The resolver applied the database default and flattened the selected
         authentication branch, so ``cfg`` carries ``authType`` and, for a
-        service account, ``serviceAccountKey``.
+        service account, ``serviceAccountKey``. The collection is a per-call
+        parameter: the tools read it from the instance's settings when the
+        caller names none.
         """
         if firestore is None:
             raise ImportError('google-cloud-firestore is not installed.')
@@ -66,7 +67,6 @@ class IGlobal(IGlobalBase):
         cfg = self.config
 
         self.database = cfg.database.strip()
-        self.collection = cfg.collection.strip()
 
         # Auth
         try:

@@ -53,7 +53,12 @@ def _instance():
     """Return an instance with a recording store, opened on a first object."""
     inst = _Instance.__new__(_Instance)
     # A filter in the pipe, not its endpoint: IInstanceBase.open has nothing else to do
-    inst.IGlobal = SimpleNamespace(store=_Store(), glb=SimpleNamespace(logicalType='store'))
+    store = _Store()
+    # A stand-in global serving the one store to the call, as store_for does
+    inst.IGlobal = SimpleNamespace(
+        store=store, _stores={}, store_for=lambda settings: store, glb=SimpleNamespace(logicalType='store')
+    )
+    inst._settings = {}
     inst.IEndpoint = SimpleNamespace(endpoint=SimpleNamespace(logicalType='source'))
     inst.open(None)
     return inst

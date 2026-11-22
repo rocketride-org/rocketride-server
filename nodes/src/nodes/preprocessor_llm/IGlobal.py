@@ -39,26 +39,17 @@ class IGlobal(IGlobalBase):
 
     This class extends IGlobalBase and manages configuration parameters
     for text analysis operations including summarization, key point extraction,
-    and entity recognition. It installs the dependencies and reads the
-    resolved node configuration.
-
-    Attributes:
-        numberOfTokens (int): Maximum number of tokens per chunk.
+    and entity recognition. It installs the dependencies; the chunk size
+    (numberOfTokens) is a per-call parameter the instance reads.
     """
 
     # Number of tokens per chunk; the schema default until beginGlobal runs
-    numberOfTokens: int = 384
 
     def beginGlobal(self) -> None:
         """
-        Install the dependencies and read the resolved configuration.
-
-        The schema supplies the default and the lower bound, so the value is
-        read as it is.
+        Install the dependencies; the chunk size is a per-call parameter.
         """
         from depends import depends  # type: ignore
 
         requirements_path = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements_path)
-
-        self.numberOfTokens = int(self.config.numberOfTokens)

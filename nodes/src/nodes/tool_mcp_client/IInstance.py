@@ -45,13 +45,20 @@ _FRAMEWORK_KEYS = frozenset({'security_context'})
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    def _server_name(self) -> str:
+        """This call's namespace for the server's tools."""
+        return self.settings.serverName.strip()
+
     def _tool_query_dynamic(self) -> list:
-        """Return tools discovered from the MCP server."""
-        return self.IGlobal.list_namespaced_tools()
+        """Return tools discovered from the MCP server, under this call's namespace."""
+        return self.IGlobal.list_namespaced_tools(self._server_name())
 
     def _tool_invoke_dynamic(self, *, tool_name: str, input_obj: Any) -> Any:
         """Dispatch a tool call to the MCP server."""
         server_name, bare_tool = _split_tool_name(tool_name)
+        configured = self._server_name()
+        if server_name != configured:
+            raise Exception(f'Unknown MCP serverName {server_name!r} (this node configured as {configured!r})')
         if input_obj is None:
             arguments: Dict[str, Any] = {}
         elif isinstance(input_obj, dict):

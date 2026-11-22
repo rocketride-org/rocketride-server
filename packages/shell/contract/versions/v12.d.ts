@@ -23,8 +23,8 @@
 // =============================================================================
 // FROZEN shell-api contract — ShellApiV12 — never edit by hand
 // =============================================================================
-// Generated:     2026-11-20T10:45:54.245Z
-// Source commit: a1e8790989c99513f4a12d04c002c0be04feae5c
+// Generated:     2026-11-22T03:02:28.737Z
+// Source commit: 7b19bc3fc8b3c7ed185ef193e4b23eed340b8a64
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder shell:freeze
 // =============================================================================
@@ -1484,7 +1484,18 @@ export interface DeploymentSchedule {
 }
 /** One team's deployment of a project, joined with registry info. */
 export interface Deployment {
+    /** The publication's audience, composed by the server: `=user/<uid>`,
+        `=team/<tid>`, `=org/<oid>` or `@public` (the same string as `audience`;
+        the wire keeps this name). Pass it back unchanged; never parse it. */
     teamId?: string;
+    /** The publication's audience (same value as `teamId`). */
+    audience?: string;
+    /** The rung as the reader sees it: `me` (their own personal space),
+        `personal` (another user's), `team`, `org` or `public`. */
+    rung?: "me" | "personal" | "team" | "org" | "public";
+    /** What to show for the audience: `@me`, `@<team>`, `@org`, `@public`,
+        `=team/<tid>` for a team the reader cannot name, or `Personal`. */
+    handle?: string;
     projectId?: string;
     /** The registry version this team currently points at. */
     version?: number;
@@ -1516,15 +1527,22 @@ export interface DeployHistoryEntry {
     /** Unix timestamp (seconds). */
     at?: number;
     /** `pause`/`resume` appear only on rows written before the
-        enable/disable vocabulary (the trail is immutable). NOTE: app rails
-        additionally carry the review vocabulary (`request`/`approved`/
-        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime —
-        the union names the pipe-rail actions only and stays as the frozen
-        v1.3 floor wrote it (widening a returned union would break floor
-        assignability); compare raw strings for the app-rail extras. */
+        enable/disable vocabulary (the trail is immutable). App rails also
+        carry `delete`, a binding's lifecycle as its state (`enabled`/
+        `disabled`/`removed`), the review transitions (`request`/`approved`/
+        `rejected`/`withdrawn`/`failed`) and the human `reply` row at runtime:
+        the union names the pipe-rail actions only, because the shell contract
+        (append-only) re-exports this type; compare raw strings for the rest,
+        widening first: `(entry.action as string | undefined) === 'delete'`
+        (a literal outside the union does not compile against it directly). */
     action?: "publish" | "deploy" | "rollback" | "enable" | "disable" | "pause" | "resume" | "errored" | "remove";
-    /** `''` on org-wide rows (publish); the team id on pointer changes. */
+    /** `''` on org-wide rows (publish); the audience on pointer changes. */
     teamId?: string;
+    /** On pointer changes: the audience, the reader's rung and the handle to
+        show, exactly as on a `Deployment` row. */
+    audience?: string;
+    rung?: "me" | "personal" | "team" | "org" | "public";
+    handle?: string;
     version?: number;
     actor?: DeployActor;
     /** Row payload — self-describing by contract (rows render without a
@@ -2026,6 +2044,12 @@ export interface TeamInfo {
      * Examples: `'task.execute'`, `'task.monitor'`, `'store.read'`.
      */
     permissions: string[];
+    /**
+     * The team's audience as the server composes it (`=team/<tid>`): what a
+     * deploy verb's `teamId` takes for this team. Pass it unchanged; never
+     * build or parse one.
+     */
+    audience?: string;
 }
 /**
  * Describes the organisation the authenticated user belongs to.
@@ -2631,6 +2655,8 @@ interface DashboardConnectionAdded extends DashboardEventBase {
     clientName?: string | null;
     /** Client version from auth handshake. */
     clientVersion?: string | null;
+    /** Wire protocol the login negotiated: 2, or 1 for a 1.x client that named none. */
+    protocol?: number | null;
     /** Account identifier. */
     clientId?: string | null;
 }
@@ -2794,7 +2820,7 @@ export interface UPLOAD_RESULT {
  * Event Categories:
  * ----------------
  * NONE: Unsubscribe from all events (cleanup and disconnection)
- * ALL: Subscribe to all events regardless of category (comprehensive monitoring)
+ * ALL: Every category except OPS (comprehensive monitoring; OPS is added explicitly)
  * DEBUGGER: Debug-specific events for debugging protocol communication
  * DETAIL: Real-time processing events requiring immediate client attention
  * SUMMARY: Periodic status summaries suitable for dashboard monitoring
@@ -2809,6 +2835,8 @@ export interface UPLOAD_RESULT {
  *
  * ALL: Comprehensive monitoring for administrative clients that need
  *      complete visibility into task execution and debugging activities.
+ *      It does not include OPS (1 << 10), the operator-only stream of a shared
+ *      engine's engine-level output: an operator subscribes ALL | OPS.
  *
  * DEBUGGER: Debug protocol events including breakpoint hits, variable
  *           changes, stack traces, and debugging session management.
@@ -2841,7 +2869,9 @@ export interface UPLOAD_RESULT {
  * Different clients can subscribe to different event types simultaneously:
  * - Debugging clients: DEBUGGER + DETAIL for comprehensive debugging
  * - Monitoring dashboards: SUMMARY for efficient status tracking
- * - Administrative tools: ALL for complete system visibility
+ * - Administrative tools: ALL | OPS for complete system visibility (ALL
+ *   excludes the operator-only OPS stream, which carries a shared engine's
+ *   errors, crashes and other engine-level output)
  * - Log viewers: OUTPUT for message monitoring
  * - Pipeline managers: FLOW + TASK for execution tracking
  *
@@ -3257,7 +3287,7 @@ export declare enum PROTOCOL_CAPS {
     DEPRECATED = 32768,
     /** Driver is experimental */
     EXPERIMENTAL = 65536,
-    /** Node is certified reentrant-safe for cross-user sharing */
+    /** Retired: the server sets it on no node and reads it nowhere (engines share by shape) */
     MULTITENANT = 131072
 }
 /**
@@ -3710,7 +3740,7 @@ export type PkceCredential = {
 /**
  * SDK version — automatically synced from package.json during build.
  */
-export declare const SDK_VERSION = "1.6.0";
+export declare const SDK_VERSION = "2.0.0";
 /**
  * Default protocol for connections when none is specified.
  */
@@ -3748,6 +3778,12 @@ export declare const CONST_SOCKET_TIMEOUT = 180;
  * One shared constant with the server and the Python SDK (1 MiB).
  */
 export declare const SUBMIT_INLINE_MAX: number;
+/**
+ * The wire protocol major this SDK speaks. It is sent as `protocol` in the login
+ * arguments; the server refuses a login whose protocol it does not speak.
+ * One shared constant with the server and the Python SDK.
+ */
+export declare const WIRE_PROTOCOL = 2;
 /**
  * WebSocket ping interval in seconds.
  * Ping frames are sent at this interval to detect dead connections.
@@ -4859,7 +4895,7 @@ declare class DeployApi {
      * @param options.metadata - Optional metadata blob (e.g. projectId
      *   provenance, appRoot for workspace-relative app zips).
      * @param options.comment - "What changed" note kept in the registry.
-     * @param options.deployTo - Team id to deploy the new version to
+     * @param options.deployTo - The target to deploy the new version to (`'@me'`, `'@<team>'`, `'=team/<tid>'`, `'@public'`)
      *   immediately (one-step add+deploy; pipes only).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
@@ -4924,7 +4960,7 @@ declare class DeployApi {
      *
      * @param pipePath - The `.pipe` file.
      * @param options.comment - "What changed" note kept in the registry.
-     * @param options.deployTo - Team id to deploy the new version to
+     * @param options.deployTo - The target to deploy the new version to (`'@me'`, `'@<team>'`, `'=team/<tid>'`, `'@public'`)
      *   immediately (one-step add+deploy).
      * @returns The artifact entry, plus the deployment when `deployTo` was given.
      */
@@ -5004,15 +5040,20 @@ declare class DeployApi {
         workspaceRoot?: string;
     }): Promise<AppVerifyReport>;
     /**
-     * Points a team at a published version.
+     * Points an audience at a published version.
      *
      * Promotion (Staging → Production) and rollback (v3 → v2) are both this
-     * call — the team's pointer moves, nothing else changes. The team is
-     * always explicit; requires `task.control` on it.
+     * call — the audience's pointer moves, nothing else changes. The audience
+     * is always explicit: a team (requires `task.control` on it), `'@me'`
+     * (your own space), or `'@public'` (the store: on a server that reviews,
+     * only an approved `'ready'` version; your organization needs a developer
+     * id). A pointer on `'@me'` or `'@public'` is billed to your development
+     * team when its schedules or a run-now fire it.
      *
      * @param projectId - The project whose artifact to deploy.
-     * @param version - The registry version to point the team at.
-     * @param teamId - The target team (the environment).
+     * @param version - The registry version to point the audience at.
+     * @param teamId - The target (plan 2.5): `'@me'`, `'@<team>'` (a team by name), `'=team/<tid>'` (or a row's
+     *   `teamId`, its audience, passed back unchanged) or `'@public'`; a bare team id is refused.
      * @returns The updated deployment record, registry-joined.
      */
     deploy(projectId: string, version: number, teamId: string): Promise<Deployment>;
@@ -5020,9 +5061,10 @@ declare class DeployApi {
      * Deployments visible to the caller, as the standard list envelope.
      *
      * @param params - Optional team scope + list-API params.
-     * @param params.teamId - Restrict to one team; omitted = the visibility
-     *   model: the caller's member teams plus their own personal space, and
-     *   the whole org for an org admin.
+     * @param params.teamId - Restrict to one team, `'@me'` or `'@public'`;
+     *   omitted = the visibility model: the caller's member teams, their own
+     *   personal space and the organization's store rows (`teamId: '@public'`),
+     *   and the whole org for an org admin.
      * @returns `{rows, total, page, pageSize}` of {@link Deployment} rows.
      */
     list(params?: DeployListParams & {
@@ -5143,7 +5185,9 @@ declare class DeployApi {
      */
     delete(projectId: string, version: number): Promise<DeployDeleteResult>;
     /**
-     * Sets (or clears) one source's schedule on a team deployment.
+     * Sets (or clears) one source's schedule on a deployment: a team's,
+     * `'@me'` or `'@public'` — any publication of the pipe can run on a
+     * schedule, billed to the team stamped when it was published.
      *
      * The paused flag is untouched — editing cron/ttl preserves it (a new
      * schedule starts unpaused); {@link pauseSchedule}/{@link resumeSchedule}
@@ -5153,7 +5197,7 @@ declare class DeployApi {
      * @param sourceId - The pipeline source the schedule fires.
      * @param schedule - 5-field cron expression; `null` or `'manual'` clears
      *   the schedule.
-     * @param teamId - The team whose deployment to schedule.
+     * @param teamId - The deployment to schedule: a target as for `deploy()` (a row's `teamId` passed back unchanged).
      * @param options - Optional schedule options.
      * @param options.ttl - Run window in seconds ('fixed window'); omitted
      *   runs each task until the pipeline finishes.
@@ -5416,17 +5460,18 @@ export declare class DataPipe {
      * Creates a new DataPipe instance.
      *
      * @param client - The RocketRideClient instance managing this pipe
-     * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data
+     * @param token - The control id (a `use()`/`submit()` result's `token`) of the control receiving the data, or an
+     *                address the open resolves (its answer's control id then names the pipe on every later frame)
      * @param objinfo - Metadata about the object being sent (e.g., filename, size)
      * @param mimeType - MIME type of the data being sent (default: 'application/octet-stream')
      * @param provider - Optional provider name for the data source
      * @param onSSE - Optional async callback invoked for each SSE event emitted by
      *                the pipeline node for this specific pipe
-     * @param team - Resolve the address through this one of your teams on every
-     *               request of the pipe (what submit() passes on from the team
-     *               that answered it)
+     * @param team - Retired: pass `undefined`. A rooted address in `token` names the rung
+     *               (`@<team>/...`, `=team/<tid>/...`); any value throws
      * @param params - Per-call parameter values by public name; they ride the open,
      *                 the one door every per-call value enters by
+     * @throws Error if `team` is passed (the per-call team option is retired)
      */
     constructor(client: RocketRideClient, token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>);
     /**
@@ -5578,14 +5623,20 @@ export type MonitorKey = {
     runKind?: "dev" | "deploy";
 };
 export declare class RocketRideClient extends DAPClient {
-    /** SSE callbacks by the request tree's wire traceId (a pipe slot is reused; a traceId never is). */
     /**
-     * SSE callbacks by pipe SLOT. A slot is reused by the next binding once a
-     * pipe closes, so dispatch by the never-reused `traceId` (which every SSE
-     * body now carries) is the right key; it lands with the 2.0 surface, since
-     * this member's type is part of the frozen 1.x class contract.
+     * SSE callbacks by pipe slot. A slot is reused by the next binding once a
+     * pipe closes, so delivery also checks the event's `traceId` against
+     * `_sseTraceCallbacks` (the member types are part of the append-only shell
+     * contract, so the map keeps its key).
      */
     readonly _ssePipeCallbacks: Map<number, (type: string, data: Record<string, unknown>) => Promise<void>>;
+    /**
+     * SSE callbacks by the request tree's wire `traceId`: the key delivery
+     * uses. A slot number is engine-local and reused, so two open pipes on two
+     * engines can share one; a traceId names its server and launch and is never
+     * reused. `_ssePipeCallbacks` keeps its frozen type and is no longer read.
+     */
+    readonly _sseTraceCallbacks: Map<string, (type: string, data: Record<string, unknown>) => Promise<void>>;
     /**
      * Creates a new RocketRideClient instance.
      *
@@ -5618,7 +5669,7 @@ export declare class RocketRideClient extends DAPClient {
      *   auth: 'your-api-key',
      *   uri: 'wss://your-server.com',
      *   persist: true,
-     *   onEvent: (event) => console.log('Event:', event)
+     *   onEvent: async (event) => console.log('Event:', event)
      * });
      *
      * // Using custom env dictionary
@@ -5826,6 +5877,9 @@ export declare class RocketRideClient extends DAPClient {
      * writing the converted text back to a file. Nothing is stored server-side.
      *
      * @param options.pipeline - Pipeline configuration, flat or in the `.pipe` file envelope
+     * @param options.nameHint - The name a nameless pipeline takes when the
+     *        conversion fills it in: pass the file's name without its extension.
+     *        Without one the server uses the `project_id`, never a GUID.
      * @returns The pipeline to use (the input when `touched` is false), what
      *          changed per component, and the components that could not be
      *          converted (they keep their original config)
@@ -5833,7 +5887,7 @@ export declare class RocketRideClient extends DAPClient {
      *
      * @example
      * ```typescript
-     * const result = await client.convert({ pipeline });
+     * const result = await client.convert({ pipeline, nameHint: 'docBrain' });
      * if (result.touched && result.errors.length === 0) {
      *   await save(result.pipeline);
      * }
@@ -5843,6 +5897,7 @@ export declare class RocketRideClient extends DAPClient {
      */
     convert(options: {
         pipeline: PipelineConfig | Record<string, unknown>;
+        nameHint?: string;
     }): Promise<ConvertResult>;
     /**
      * Start an RocketRide pipeline for processing data.
@@ -5916,11 +5971,12 @@ export declare class RocketRideClient extends DAPClient {
      * Run ONE request through a named or inline pipeline: `use()` plus one `send()`.
      *
      * Exactly one of `name`, `pipeline` or `filepath`. A `name` is the address
-     * `developerId.pipelineId[.source]` and resolves through the fixed rungs: your
-     * live `@spec` control (attach only), your `@me` deployment, the first team in
-     * your team order that publishes it (`team` overrides the order for this call),
-     * then `@public`; a published rung starts from its artifact when nothing is
-     * live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
+     * `[<root>/]developerId.pipelineId[.source]`. A bare address resolves through the
+     * fixed rungs: your live `@spec` control (attach only), your `@me` deployment, the
+     * first team in your team order that publishes it, then `@public`. A rooted one
+     * walks only the rung its root names and never falls through: `@me/`, `@spec/`,
+     * `@public/`, `@<team>/` or `=team/<tid>/` (one of your teams). A published rung
+     * starts from its artifact when nothing is live. A `pipeline`/`filepath` addresses your own `@spec` rung: the control
      * with the same `project_id` and resolved configuration is reused, otherwise
      * one is created (`converged: 'started'`); a different configuration under
      * the same `project_id` is a new control on the same engine. `project_id`
@@ -5946,9 +6002,8 @@ export declare class RocketRideClient extends DAPClient {
      * @param options.ttl - Idle ttl in seconds (spec calls only)
      * @param options.env - `ROCKETRIDE_*` overrides (spec calls only)
      * @param options.pipelineTraceLevel - Trace level for this pipeline's requests
-     * @param options.team - Answer `@team` from this one of your teams
      * @returns The pipe close body plus `token` (the control id: opaque, transient, valid for the life of the control; never persist it), `address`, `resolved`, `team`, `version`, `engineKey`, `converged` and `ignored`
-     * @throws Error when not exactly one of name/pipeline/filepath is given, when the server refuses, or when the server does not support `submit`
+     * @throws Error when not exactly one of name/pipeline/filepath is given, when the retired `team` option is passed, when the server refuses, or when the server does not support `submit`
      *
      * @example
      * ```typescript
@@ -5971,7 +6026,6 @@ export declare class RocketRideClient extends DAPClient {
         ttl?: number;
         env?: Record<string, string>;
         pipelineTraceLevel?: "none" | "metadata" | "summary" | "full";
-        team?: string;
     }): Promise<SUBMIT_RESULT>;
     /**
      * Terminate a running pipeline.
@@ -6065,27 +6119,36 @@ export declare class RocketRideClient extends DAPClient {
      * One pure read — no engine is started, no hold is taken, nothing is
      * billed. The address resolves the way `submit()` resolves a name (your
      * `@me` publication, your teams in team order, the publisher's `@public`
-     * one) and the pinned version's spec is projected server-side, so the spec
+     * one; a rooted address such as `@Production/acme.docBrain` reads only that
+     * rung) and the pinned version's spec is projected server-side, so the spec
      * never leaves the server. Sources sit under their own address
      * (`acme.docBrain.chat`), every other node under the pipe address
      * (`acme.docBrain`, the default source). A front end filters with plain
      * equality on the classType word: `chat`, `dropper`, `database`.
      *
-     * @param address - `developerId.pipelineId[.source]`; a source segment is accepted and ignored.
-     * @param options.team - Resolve the `@team` rung through this one of your teams.
+     * @param address - `[<root>/]developerId.pipelineId[.source]`; a source segment resolves as it does for
+     *                  `submit()`, and the map covers the whole pipe whichever source is named.
+     * @param retired - The retired options slot (`{ team }`): any value throws; root the address instead
+     *                  (`@<team>/...`, `=team/<tid>/...`).
      * @returns The answering rung and version, and the interface map.
      * @throws Error when no published rung serves you (`TASK_NOT_REGISTERED`) or the
-     *         address is outside a scoped key's endpoints.
+     *         address is outside a scoped key's endpoints, or when `retired` is passed.
      */
-    interfaces(address: string, options?: {
-        team?: string;
-    }): Promise<PipeInterfaces>;
+    interfaces(address: string, retired?: unknown): Promise<PipeInterfaces>;
     /**
      * Create a data pipe for streaming operations.
+     *
+     * `token` is the control id, or an address (bare or rooted, `@<team>/...`) the open
+     * resolves the way `submit()` resolves a name, starting a published rung when
+     * nothing is live. `team` is retired: pass `undefined` (any value throws); a
+     * rooted address names the rung.
      */
     pipe(token: string, objinfo?: Record<string, unknown>, mimeType?: string, provider?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<DataPipe>;
     /**
      * Send data to a running pipeline.
+     *
+     * `token` is the control id, or an address (bare or rooted) resolved by the open.
+     * `team` is retired: pass `undefined` (any value throws); a rooted address names the rung.
      */
     send(token: string, data: string | Uint8Array, objinfo?: Record<string, unknown>, mimetype?: string, onSSE?: (type: string, data: Record<string, unknown>) => Promise<void>, team?: string, params?: Record<string, unknown>): Promise<PIPELINE_RESULT | undefined>;
     /**
@@ -6099,17 +6162,24 @@ export declare class RocketRideClient extends DAPClient {
      * (matching Python client behavior) rather than through a callback parameter.
      *
      * @param files - Array of file objects with optional metadata and MIME types
-     * @param token - The control id of the control receiving the uploads
+     * @param token - The control id of the control receiving the uploads, or its address (resolved by each open)
      * @param maxConcurrent - Maximum number of concurrent uploads (default: 5)
      *
      * @returns Promise resolving to array of UPLOAD_RESULT objects in the same order as input
      *
      * @example
      * ```typescript
-     * // Subscribe to upload events
-     * client.on('apaevt_status_upload', (event) => {
-     *   console.log(`${event.body.filepath}: ${event.body.bytes_sent}/${event.body.file_size}`);
+     * // Progress arrives on the client's onEvent callback
+     * const client = new RocketRideClient({
+     *   auth: 'your-api-key',
+     *   uri: 'wss://your-server.com',
+     *   onEvent: async (event) => {
+     *     if (event.event !== 'apaevt_status_upload') return;
+     *     const upload = event.body as unknown as UPLOAD_RESULT;
+     *     console.log(`${upload.filepath}: ${upload.bytes_sent}/${upload.file_size}`);
+     *   },
      * });
+     * await client.connect();
      *
      * // Upload files
      * const results = await client.sendFiles(
@@ -6529,11 +6599,13 @@ export declare class RocketRideClient extends DAPClient {
      * Bind a deployment to an audience — first publish, update, promote, and
      * rollback are all this one verb ("repoint, never rebuild"). The binding
      * is a pure pointer; '@public' requires the deployment be 'ready'
-     * (approved), '@me'/'@team' accept any non-'failed' deployment.
+     * (approved), '@me' and a team accept any non-'failed' deployment.
      *
      * @param appId - App id
      * @param registryVersion - Registry version number from the rail
-     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+     *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+     *                 and '@user' are refused; '@org' is refused until the org rung serves
      * @returns The binding row ({audience, version, state, artifactState, ...})
      */
     publishApp(appId: string, registryVersion: number, target: string): Promise<{
@@ -6545,7 +6617,9 @@ export declare class RocketRideClient extends DAPClient {
      * to the audience again revives it.
      *
      * @param appId - App id
-     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+     *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+     *                 and '@user' are refused; '@org' is refused until the org rung serves
      * @returns The final binding row (state 'removed')
      */
     removeAppPublish(appId: string, target: string): Promise<{
@@ -6558,7 +6632,9 @@ export declare class RocketRideClient extends DAPClient {
      * the binding.
      *
      * @param appId - App id
-     * @param target - '@me', '@team/<name-or-id>', or '@public' ('@user' = legacy alias)
+     * @param target - '@me', '@<team>' (a team of yours by name), '@public', or an audience a row or the
+     *                 ConnectResult carried ('=team/<tid>'), passed back unchanged. The retired '@team/...'
+     *                 and '@user' are refused; '@org' is refused until the org rung serves
      * @returns The binding row (state 'disabled')
      */
     disableAppPublish(appId: string, target: string): Promise<{
@@ -6568,11 +6644,13 @@ export declare class RocketRideClient extends DAPClient {
      * The reverse index: which audiences serve which version of an app.
      *
      * @param appId - App id
-     * @returns Pin rows ({rung, handle, version, appVersion, state, deployedAt})
+     * @returns Pin rows ({rung, handle, audience, version, appVersion, state, deployedAt}): show `handle`,
+     *          pass `audience` back unchanged as the publish/remove target
      */
     whereApp(appId: string): Promise<Array<{
         rung: string;
         handle: string;
+        audience: string;
         version: number;
         appVersion: string;
         state: string;
@@ -6928,20 +7006,19 @@ export declare class RocketRideClient extends DAPClient {
      * dormant, so a front end may call a node of a pipe nobody has used
      * recently. A node the entry source did not load fails at the engine.
      *
-     * @param options.address - The pipe's address (`developerId.pipelineId[.source]`),
+     * @param options.address - The pipe's address (`[<root>/]developerId.pipelineId[.source]`),
      *                          or the `address` a `use()`/`submit()` result returned beside
-     *                          its control id
+     *                          its control id. Pass the same address an `interfaces()` call
+     *                          was made with (a rooted `@<team>/...` one included), so
+     *                          discovery and execution land on the same publication
      * @param options.token - Deprecated spelling of `address`; one of the two is required
      * @param options.tool - Name of the @tool_function to invoke (e.g. 'search', 'list', 'execute')
      * @param options.nodeId - Target node ID.  When empty the call broadcasts to all
      *                         tool-lane nodes; the first node that owns the tool handles it.
      * @param options.input - Arguments forwarded to the tool function
-     * @param options.team - Resolve the `@team` rung through this one of your teams — the same
-     *                       team an `interfaces()` call was made with, so discovery and execution
-     *                       land on the same publication
      * @param options.timeout - Optional per-request timeout in ms
      * @returns The tool's return value (typically a record/object)
-     * @throws Error if the server signals failure or no node handles the requested tool
+     * @throws Error if the retired `team` option is passed, the server signals failure or no node handles the requested tool
      */
     tool<T = any>(options: {
         address?: string;
@@ -6949,7 +7026,6 @@ export declare class RocketRideClient extends DAPClient {
         tool: string;
         nodeId?: string;
         input?: Record<string, unknown>;
-        team?: string;
         timeout?: number;
     }): Promise<T>;
 }
@@ -6990,7 +7066,9 @@ export interface AppRailVersion {
 export declare function pickPublishVersion<T extends AppRailVersion>(rows: T[]): T | null;
 /** One deploy target the caller can address. */
 export interface DeployTeamRef {
-    /** Team id, or '@me' for the caller's personal space. */
+    /** What a deploy verb's `teamId` takes for this target, passed unchanged:
+        '@me' for the caller's personal space, or the team's audience as the
+        server composed it (`=team/<tid>`). */
     id: string;
     /** Display name. */
     name: string;
@@ -7003,12 +7081,15 @@ export interface DeployTeamRef {
  *
  * - '@me' (the personal space) comes first for any signed-in user — it
  *   exists even with zero team memberships.
+ * - Each team of the roster is addressed by the `audience` the server
+ *   stamped on it; a team without one is not addressable and is skipped.
  * - org.admin (and sys.admin) implies the FULL team permission set — the
  *   server resolver's documented expansion; per-team rows only carry
  *   explicit task.* grants for regular members.
  * - Rosterless identities (the OSS single-team server) derive refs from the
- *   deployment rows with control assumed — the server enforces the real
- *   permission on every call. Personal (`user~`) rows never become targets.
+ *   deployment rows the server marked `rung: 'team'`, named by their
+ *   `handle`, with control assumed — the server enforces the real permission
+ *   on every call. No audience string is parsed here.
  *
  * @param client - A connected client (its cached ConnectResult is read), or none.
  * @param deployments - Deployment rows used as the rosterless fallback.
@@ -7072,39 +7153,40 @@ export declare function containerNameOf(name: string): string;
  */
 export declare function devContainerNameOf(slug: string, developerId: string | null | undefined): string;
 /**
- * Resolves a team id to its display name, falling back to the id. Personal
- * (`user~`) owner keys render as "Me" for the caller's own space and
- * "Personal" for another user's (admin visibility) — the raw guid never
- * reaches a label.
+ * The name of the team ref whose `id` is `teamId`, else `teamId` unchanged.
+ *
+ * @deprecated Show a row's `handle` instead: the server composes it for the
+ * reader (plan 2.5). Kept for the frozen contract; it parses nothing.
  *
  * @param teams - The resolved team refs.
- * @param teamId - The team id (or owner key) to resolve.
- * @param ownUserId - The caller's user id ('' when unknown).
- * @returns The display name, or the id when unknown.
+ * @param teamId - A ref id or a row's `teamId`, matched exactly.
+ * @param _ownUserId - Unused; kept for the frozen signature.
+ * @returns The matching ref's name, or `teamId`.
  */
-export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, ownUserId?: string): string;
+export declare function teamNameOf(teams: DeployTeamRef[], teamId: string, _ownUserId?: string): string;
 /**
- * Translates a row's owner key into the ADDRESSABLE team ref for API calls:
- * the caller's own `user~{uid}` row is addressed as '@me' (the server never
- * accepts raw owner keys); everything else passes through.
+ * The value to put on the wire for a row's `teamId`: the value itself.
  *
- * @param teamId - The row's team id / owner key.
- * @param ownUserId - The caller's user id ('' when unknown).
- * @returns The team id to put on the wire.
+ * @deprecated A row's `teamId` is its audience and every deploy verb takes
+ * it back unchanged (plan 2.5); there is nothing to translate. Kept for the
+ * frozen contract.
+ *
+ * @param teamId - The row's `teamId`.
+ * @param _ownUserId - Unused; kept for the frozen signature.
+ * @returns `teamId`, unchanged.
  */
-export declare function wireTeamIdOf(teamId: string, ownUserId: string): string;
+export declare function wireTeamIdOf(teamId: string, _ownUserId: string): string;
 /**
- * Resolves what a person typed as a team — '@me', a team id, or a team
- * display name (case-insensitive) — to the id to send. An unknown value
- * passes through unchanged (the server validates it; an admin may address
- * a team outside their own roster).
+ * What a person typed as a team, passed through for the server to resolve.
+ * The server reads every spelling (`@me`, `@public`, `@<team>` by name
+ * ignoring case, `=team/<tid>`, a row's audience) and refuses an unknown
+ * one; the SDK matches nothing (plan 2.5).
  *
  * @param input - The typed team ('' = unscoped/default).
- * @param teams - The caller's resolved team refs.
- * @returns The team id to put on the wire.
- * @throws Error when a name matches more than one team.
+ * @param _teams - Unused; kept for the frozen signature.
+ * @returns The typed value, trimmed.
  */
-export declare function resolveTeamArg(input: string, teams: DeployTeamRef[]): string;
+export declare function resolveTeamArg(input: string, _teams: DeployTeamRef[]): string;
 /**
  * The registry name for a pipeline file whose JSON carries none — `.pipe`
  * names live in FILENAMES, and every deploy surface renders pipelineName.

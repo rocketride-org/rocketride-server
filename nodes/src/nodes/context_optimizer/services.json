@@ -218,6 +218,7 @@
 	//
 	"propertyDefinitions": {
 		"context_optimizer.model_name": {
+			"param": true,
 			"type": "string",
 			"title": "Model name",
 			"description": "Model identifier for context-window lookup. Use an id published by an llm_* node (e.g. gpt-5.4, claude-sonnet-4-6, models/gemini-3.1-pro-preview); a short family alias such as claude-sonnet also resolves.",
@@ -229,6 +230,7 @@
 			"default": "custom"
 		},
 		"context_optimizer.max_context_tokens": {
+			"param": true,
 			"type": "integer",
 			"title": "Max context tokens",
 			"description": "The model's context window in tokens (0 = use the model default)",
@@ -236,6 +238,7 @@
 			"default": 128000
 		},
 		"context_optimizer.system_prompt_budget_pct": {
+			"param": true,
 			"type": "number",
 			"title": "System prompt budget (%)",
 			"description": "Percentage of context window for system prompt",
@@ -244,6 +247,7 @@
 			"default": 10
 		},
 		"context_optimizer.query_budget_pct": {
+			"param": true,
 			"type": "number",
 			"title": "Query budget (%)",
 			"description": "Percentage of context window for the query/question",
@@ -252,6 +256,7 @@
 			"default": 15
 		},
 		"context_optimizer.document_budget_pct": {
+			"param": true,
 			"type": "number",
 			"title": "Document budget (%)",
 			"description": "Percentage of context window for retrieved documents",
@@ -260,6 +265,7 @@
 			"default": 50
 		},
 		"context_optimizer.history_budget_pct": {
+			"param": true,
 			"type": "number",
 			"title": "History budget (%)",
 			"description": "Percentage of context window for conversation history",
@@ -275,6 +281,7 @@
 	"properties": [
 		{
 			"name": "mode",
+			"param": true,
 			"type": "string",
 			"title": "Mode",
 			"description": "Context optimization mode",

@@ -53,6 +53,7 @@
 			"required": true
 		},
 		"tool_guild.agent": {
+			"param": true,
 			"type": "string",
 			"title": "Agent",
 			"default": "",
@@ -60,6 +61,7 @@
 			"optional": true
 		},
 		"tool_guild.resultMode": {
+			"param": true,
 			"type": "string",
 			"title": "Result mode",
 			"default": "wait",
@@ -70,6 +72,7 @@
 			"description": "Guild runs agents asynchronously; 'wait' polls the session until it finishes. 'start' returns the session id without waiting, useful for fire-and-forget tool calls, but the pipeline step always waits (a session id is of no use downstream)."
 		},
 		"tool_guild.timeout": {
+			"param": true,
 			"type": "integer",
 			"title": "Session timeout (seconds)",
 			"default": 300,
@@ -78,6 +81,8 @@
 			"description": "Max seconds to wait for a session to finish before raising. Guild's own turn timeout is 3600s; a timeout here does NOT cancel the session on Guild's side: the session id is reported so the run stays traceable."
 		},
 		"tool_guild.maxSessions": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Max sessions per run",
 			"default": 10,
@@ -86,6 +91,8 @@
 			"description": "Cap on Guild sessions this node may start in one pipeline run. Guild bills per automation (the free tier allows 100/month), so this bounds a runaway agent loop."
 		},
 		"tool_guild.verifyTls": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Verify TLS certificate",
 			"default": true,

@@ -39,6 +39,8 @@ from chunker.chunker_strategies import (  # noqa: E402
     TokenChunker,
 )
 
+from ..framework.controls import assert_config_refuses, bind_call, control_config  # noqa: E402
+
 
 # ===========================================================================
 # SentenceChunker
@@ -385,18 +387,25 @@ def _import_schema():
     return Doc, DocMetadata
 
 
-class TestIGlobalLifecycle:
-    """IGlobal strategy selection through the real resolver (the engine's schema for services.json)."""
+def _control(conn_config):
+    """Start the node's IGlobal on a stored config, through the real resolver."""
+    IGlobal, _ = _import_node_classes()
+    iglobal = IGlobal()
+    iglobal.glb = SimpleNamespace(logicalType='chunker', id='node_1', connConfig=conn_config)
+    iglobal.beginGlobal()
+    return iglobal
+
+
+class TestInstanceStrategy:
+    """Each call's strategy, built from its settings through the real resolver (the engine's schema)."""
 
     @staticmethod
-    def _begin(conn_config):
-        """Start the node's IGlobal on a stored config and return it."""
-        IGlobal, _ = _import_node_classes()
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.strategy = None
-        iglobal.glb = SimpleNamespace(logicalType='chunker', connConfig=conn_config)
-        iglobal.beginGlobal()
-        return iglobal
+    def _begin(conn_config, params=None):
+        """Start one call of a control on a stored config and return its instance."""
+        _, IInstance = _import_node_classes()
+        inst = bind_call(IInstance(), _control(conn_config), params)
+        inst.beginInstance()
+        return inst
 
     def test_iglobal_creates_sentence_strategy(self):
         iglobal = self._begin({'strategy': 'sentence', 'sentence': {'chunk_size': 500, 'chunk_overlap': 50}})
@@ -449,6 +458,31 @@ class TestIGlobalLifecycle:
         with pytest.raises(ConfigError, match='"sentence.chunk_size" expects integer'):
             self._begin({'sentence': {'chunk_size': '500'}})
 
+    def test_one_control_serves_two_calls_with_their_own_strategy(self):
+        """The strategy and its sizes are per call: one control, no rebuild, one shared tokenizer."""
+        _, IInstance = _import_node_classes()
+        iglobal = _control({})
+        token_params = {'strategy': 'token', 'token.chunk_size': 64, 'token.encoding_name': 'o200k_base'}
+
+        calls = [bind_call(IInstance(), iglobal, params) for params in ({}, token_params, token_params)]
+        for inst in calls:
+            inst.beginInstance()
+
+        sentence, token, again = (inst.strategy for inst in calls)
+        assert isinstance(sentence, SentenceChunker)
+        assert (sentence.chunk_size, sentence.chunk_overlap) == (1000, 200)
+        assert isinstance(token, TokenChunker)
+        assert (token.chunk_size, token.chunk_overlap, token.encoding_name) == (64, 50, 'o200k_base')
+        # The tokenizer is the control's, loaded once for both token calls
+        assert token._encoder is again._encoder is iglobal.encoder_for('o200k_base')
+
+    def test_an_overlap_param_not_below_the_size_fails_the_call(self):
+        with pytest.raises(ValueError, match='must be less than chunk_size'):
+            self._begin({}, {'sentence.chunk_size': 100, 'sentence.chunk_overlap': 100})
+
+    def test_the_control_config_refuses_the_strategy_params(self):
+        assert_config_refuses(control_config('chunker'), ['strategy', 'chunk_size', 'chunk_overlap'])
+
 
 class TestIInstanceWriteDocuments:
     """IInstance.writeDocuments emits one document per chunk."""
@@ -457,9 +491,8 @@ class TestIInstanceWriteDocuments:
     def _make_instance(IInstance, strategy):
         inst = IInstance.__new__(IInstance)
         inst.chunkId = 0
-        iglobal = MagicMock()
-        iglobal.strategy = strategy
-        inst.IGlobal = iglobal
+        # The strategy beginInstance builds from the call's settings
+        inst.strategy = strategy
         inst.instance = MagicMock()
         inst.preventDefault = MagicMock(return_value=None)
         return inst

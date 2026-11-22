@@ -408,11 +408,71 @@ async def test_a_version_on_a_rung_with_nothing_published_is_not_registered(cata
 
 
 async def test_read_answers_the_publication_and_starts_nothing(catalog, engines, deployments):
-    deployments.deploy('=team/team-1', version=2, pipeline=_pipeline())
+    deployments.deploy('=team/team-1', version=2, pipeline=_pipeline(name='Version two'))
     ts = _server()
     resolution = await ts.resolve_target(_caller(), f'@Team-1/{ADDRESS}', 'task.data', mode=RESOLVE_READ)
     assert resolution.control is None and resolution.pin.rung == 'team' and resolution.pin.version == 2
     assert resolution.target == parse_target(f'@Team-1/{ADDRESS}')
+    # The pinned version's artifact, read server-side, rides the answer
+    assert resolution.artifact['name'] == 'Version two'
+    assert list(ts._task_control) == []
+
+
+def _without(source):
+    """The webhook -> prompt artifact without component ``source``."""
+    pipeline = _pipeline()
+    pipeline['components'] = [c for c in pipeline['components'] if c['id'] != source]
+    return pipeline
+
+
+async def test_a_pinned_version_read_carries_its_artifact_and_takes_the_start_decision(catalog, engines, deployments):
+    """A read of a pinned version answers with that version's artifact (the interfaces verb reads it), and a
+    version without the named source is not served on read as on start.
+    """
+    deployments.deploy('=team/team-1', version=2)
+    _rail(deployments, 1, 'private')
+    ts = _server()
+    controller = _team_reader(['task.data', 'task.control'])
+    resolution = await ts.resolve_target(controller, f'{ADDRESS}:1', 'task.data', mode=RESOLVE_READ)
+    assert resolution.control is None and resolution.pin.version == 1
+    assert resolution.artifact['components'][1]['config'] == {'instructions': ['v1']}
+    assert list(ts._task_control) == []
+
+    deployments.artifacts[('org-1', 'acme.docBrain', 1)] = _without('prompt_1')
+    for mode in (RESOLVE_READ, RESOLVE_START):
+        with pytest.raises(TaskError) as excinfo:
+            await ts.resolve_target(controller, 'acme.docBrain.prompt_1:1', 'task.data', mode=mode)
+        assert excinfo.value.code == TaskError.NOT_REGISTERED, mode
+
+
+async def test_a_publication_without_the_named_source_yields_on_read_as_on_start(catalog, engines, deployments):
+    """The personal publication ranks first but lacks ``prompt_1``: the read and the start both pass it for the
+    team's, so the interface map describes the pipeline submit() runs (plan 3.6).
+    """
+    deployments.deploy('=user/user-a', version=1, pipeline=_without('prompt_1'))
+    deployments.deploy('=team/team-1', version=2)
+    ts = _server()
+    target = 'acme.docBrain.prompt_1'
+
+    resolution = await ts.resolve_target(_caller(), target, 'task.data', mode=RESOLVE_READ)
+    assert resolution.control is None and (resolution.pin.rung, resolution.pin.version) == ('team', 2)
+    assert list(ts._task_control) == []
+
+    control = await _resolve(ts, target, _caller(), 'task.data')
+    assert (control.rung, control.version, control.address) == ('team', 2, target)
+
+    # The personal one still answers a source it has
+    resolution = await ts.resolve_target(_caller(), ADDRESS, 'task.data', mode=RESOLVE_READ)
+    assert (resolution.pin.rung, resolution.pin.version) == ('me', 1)
+
+
+async def test_a_source_no_publication_has_is_not_registered_on_read_as_on_start(catalog, engines, deployments):
+    deployments.deploy('=user/user-a', pipeline=_without('prompt_1'))
+    ts = _server()
+    for mode in (RESOLVE_READ, RESOLVE_START):
+        with pytest.raises(TaskError) as excinfo:
+            await ts.resolve_target(_caller(), 'acme.docBrain.prompt_1', 'task.data', mode=mode)
+        assert excinfo.value.code == TaskError.NOT_REGISTERED, mode
     assert list(ts._task_control) == []
 
 

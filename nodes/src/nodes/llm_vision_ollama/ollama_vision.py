@@ -30,11 +30,15 @@ from rocketlib import warning
 
 
 class Chat(ChatBase):
-    """Ollama Vision chat bot using open-source multimodal models."""
+    """
+    Ollama Vision chat bot using open-source multimodal models.
+
+    The model and its output limit are the call's (``self.call``, which
+    ``ChatBase.calling`` publishes for the request): one chat serves every
+    call of its control, and each request builds its client on the call's model.
+    """
 
     _llm: ChatOpenAI
-    _system_prompt: str = ''
-    _prompt: str = ''
     _serverbase: str = ''
 
     def __init__(self, provider: str, connConfig: Dict[str, Any], bag: Dict[str, Any]):
@@ -49,9 +53,6 @@ class Chat(ChatBase):
             serverbase = serverbase.rstrip('/') + '/v1'
         self._serverbase = serverbase
 
-        self._system_prompt = config['systemPrompt'] or ''
-        self._prompt = config['prompt']
-
     def _format_user_error(self, error_msg: str) -> str:
         """Convert API error messages to user-friendly format."""
         error_lower = error_msg.lower()
@@ -60,13 +61,13 @@ class Chat(ChatBase):
         ):
             return f'Cannot connect to Ollama server. Is Ollama running? (tried: {self._serverbase})'
         if any(p in error_lower for p in ['model not found', 'no such model', '404']):
-            return f"Model '{self._model}' is not loaded in Ollama. Run: ollama pull {self._model}"
+            return f"Model '{self.call.model}' is not loaded in Ollama. Run: ollama pull {self.call.model}"
         if any(p in error_lower for p in ['rate limit', 'too many requests', '429']):
             return 'Too many requests to Ollama. Please wait a moment and try again.'
         if any(p in error_lower for p in ['internal server error', '500', 'service unavailable']):
             return 'Ollama returned a server error. Please check the Ollama logs.'
         if any(p in error_lower for p in ['timeout', 'timed out']):
-            return f"Vision request timed out. The model '{self._model}' may need more time — please try again."
+            return f"Vision request timed out. The model '{self.call.model}' may need more time — please try again."
         if any(p in error_lower for p in ['image', 'vision', 'multimodal']):
             return (
                 'Image processing error. Please check that your image is in a supported format (JPEG, PNG, GIF, WEBP).'
@@ -74,8 +75,20 @@ class Chat(ChatBase):
         return f'Ollama Vision error: {error_msg}'
 
     def chat(self, question: Question) -> Answer:
-        """Send a vision request to Ollama and get the response."""
+        """Send a vision request to Ollama and get the response.
+
+        Args:
+            question: The call's question: its first question is the prompt (the call's
+                ``settings.prompt``), its context carries the image.
+
+        Returns:
+            The model's answer.
+        """
         from langchain_core.messages import HumanMessage, SystemMessage
+
+        # The call's system prompt: every path into this chat (the lanes, ``ask``,
+        # ``writeQuestions``) runs under ``calling``, so the call carries it
+        system_prompt = self.call.settings.get('systemPrompt') or ''
 
         # Extract image data URL from context
         image_data = None
@@ -88,14 +101,14 @@ class Chat(ChatBase):
             raise ValueError('No image data found in question context.')
 
         # Use configured prompt, or fall back to question text
-        prompt_text = self._prompt or (question.questions[0].text if question.questions else None)
+        prompt_text = question.questions[0].text if question.questions else None
         if not prompt_text:
             prompt_text = 'Describe this image.'
 
         # Build multimodal messages
         messages = []
-        if self._system_prompt:
-            messages.append(SystemMessage(content=self._system_prompt))
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
         messages.append(
             HumanMessage(
                 content=[
@@ -104,6 +117,9 @@ class Chat(ChatBase):
                 ]
             )
         )
+
+        # The call's model and output limit: each attempt builds its client from them
+        call = self.call
 
         # Retry loop with exponential backoff
         max_retries = 1
@@ -119,11 +135,11 @@ class Chat(ChatBase):
                 # Fresh client per attempt — avoids exhausting the shared HTTP connection pool
                 # when daemon threads from prior timed-out attempts are still holding connections
                 llm = ChatOpenAI(
-                    model=self._model,
+                    model=call.model,
                     base_url=self._serverbase,
                     api_key='ollama',
                     temperature=0,
-                    max_tokens=self._modelOutputTokens,
+                    max_tokens=call.output_tokens,
                 )
 
                 def _invoke():

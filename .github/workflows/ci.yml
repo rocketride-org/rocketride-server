@@ -364,6 +364,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          # HEAD^1 is the trusted base of the released-floor check below on a
+          # merge commit; a push fetches its pre-push tip there instead
+          fetch-depth: 2
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -406,8 +409,9 @@ jobs:
         # Same guarantee for the rocketride TypeScript SDK: regenerate its
         # contract barrels + conformance file from the immutable frozen floors
         # (the regen also re-runs the contract tsc, so a removed or narrowed
-        # SDK export fails here), then fail on any diff — a hand-edited floor
-        # line cannot launder a breaking change past the tsc floors.
+        # SDK export fails here), then fail on any diff — a hand-edited check
+        # or barrel line cannot launder a breaking change past the tsc floors
+        # (an edit to a floor itself is the released-floor step below).
         # DELIBERATE asymmetry with shell:check above: additive SDK drift is
         # allowed between releases (client floors are release history keyed to
         # npm versions, not growth-minted), so no client-typescript:check runs
@@ -419,6 +423,30 @@ jobs:
             packages/client-typescript/src/contract-check.generated.ts \
             packages/client-typescript/contract/index.ts \
             packages/client-typescript/contract/latest.ts
+      - name: client SDK released floors are unchanged against the base
+        # The regen diff above checks the DERIVED files only: a floor edited
+        # together with the live surface regenerates the same derived files.
+        # Compare every released floor (all but the package's in-progress
+        # MAJOR.MINOR) with a trusted base. On a pull request's (or the merge
+        # queue's) merge commit that is HEAD^1, the base branch. A push can
+        # carry several commits, so its HEAD^1 may already hold an earlier
+        # commit's floor edit: its base is the pre-push tip (`before`),
+        # fetched here. A push that creates a branch has no pre-push tip, so
+        # its first parent stands in.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: |
+          base=HEAD^1
+          if [ "$EVENT_NAME" = push ]; then
+            if [[ -n "$PUSH_BEFORE" && ! "$PUSH_BEFORE" =~ ^0+$ ]]; then
+              git fetch --no-tags --depth=1 origin "$PUSH_BEFORE"
+              base=$PUSH_BEFORE
+            else
+              echo "Branch-creating push: no pre-push tip, comparing with HEAD^1."
+            fi
+          fi
+          node packages/client-typescript/scripts/freeze-client-api.js --released "$base"
 
   # ---------------------------------------------------------------------------
   #  Gatekeeper — the ONLY job to mark as "Required" in branch protection.

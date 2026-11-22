@@ -46,6 +46,7 @@
 		"memory_persistent.redis_host": {
 			"type": "string",
 			"title": "Redis Host",
+			"env": "ROCKETRIDE_MEMORY_PERSISTENT_REDIS_HOST",
 			"description": "Redis server hostname",
 			"default": "localhost",
 			"minLength": 1
@@ -53,6 +54,7 @@
 		"memory_persistent.redis_port": {
 			"type": "integer",
 			"title": "Redis Port",
+			"env": "ROCKETRIDE_MEMORY_PERSISTENT_REDIS_PORT",
 			"description": "Redis server port",
 			"default": 6379,
 			"minimum": 1,
@@ -69,6 +71,8 @@
 			"type": "number",
 			"title": "Session TTL (hours)",
 			"description": "How long sessions persist before auto-expiry (0 = no expiry)",
+			"param": true,
+			"tool": false,
 			"default": 0,
 			"minimum": 0
 		},
@@ -77,6 +81,8 @@
 			"type": "integer",
 			"title": "Max History Entries",
 			"description": "Maximum history entries per session before auto-summarization",
+			"param": true,
+			"tool": false,
 			"default": 100,
 			"minimum": 1
 		},
@@ -84,6 +90,8 @@
 			"type": "boolean",
 			"title": "Auto-Summarize",
 			"description": "Automatically summarize older history entries when limit is reached",
+			"param": true,
+			"tool": false,
 			"default": true
 		}
 	},

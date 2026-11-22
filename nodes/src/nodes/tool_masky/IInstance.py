@@ -24,8 +24,8 @@
 """
 Masky node instance.
 
-As a tool, ``invoke`` hands the call to the ``MaskyDriver`` created by
-``IGlobal``. As a pipeline step, each text record runs the configured action:
+As a tool, ``invoke`` hands the call to the call's view of the ``MaskyDriver``
+the IGlobal created. As a pipeline step, each text record runs the call's action:
 the node renders it, waits, downloads the finished file, streams it on the
 matching media lane with its byte count declared on BEGIN, and writes a JSON
 receipt on ``text``. Downloading keeps the output once Masky's signed URL
@@ -39,7 +39,8 @@ from typing import Any, Dict
 
 from rocketlib import IInstanceBase, warning
 
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, read_settings
+from .masky_driver import MaskyDriver
 from .masky_core import LIMITS, MaskyError, check_budget, estimate_turn, media_details, speech_over_limit, split_turns
 
 _EXTENSIONS = {
@@ -55,8 +56,34 @@ _EXTENSIONS = {
 class IInstance(IInstanceBase):
     IGlobal: IGlobal
 
+    # This call's settings and its view of the control's driver, built on first use
+    _settings_map: Dict[str, Any] | None = None
+    _call_driver: MaskyDriver | None = None
+
+    def _call_settings(self) -> Dict[str, Any]:
+        """
+        This call's node settings, read from its settings view with ``read_settings``.
+
+        Returns:
+            The settings mapping (action, defaults, gates, budgets, per-action options).
+
+        Raises:
+            ValueError: The credit cap or the base URL is unusable.
+        """
+        if self._settings_map is None:
+            self._settings_map = read_settings(self.settings)
+        return self._settings_map
+
+    def _driver(self) -> MaskyDriver | None:
+        """This call's view of the control's driver (its settings), or None before the control began."""
+        if self._call_driver is None:
+            driver = getattr(self.IGlobal, 'driver', None)
+            if driver is not None:
+                self._call_driver = driver.for_call(self._call_settings())
+        return self._call_driver
+
     def invoke(self, param: Any) -> Any:  # noqa: ANN401
-        driver = getattr(self.IGlobal, 'driver', None)
+        driver = self._driver()
         if driver is None:
             raise RuntimeError(
                 'tool_masky: driver not initialized. Set the API key on the node or in ROCKETRIDE_MASKY_KEY'
@@ -78,7 +105,7 @@ class IInstance(IInstanceBase):
     def writeText(self, text: str) -> None:
         value = (text or '').strip()
         if value:
-            settings = getattr(self.IGlobal, 'settings', None) or {}
+            settings = self._call_settings()
             if settings.get('action') == 'live':
                 self._live(value)
             else:
@@ -91,8 +118,8 @@ class IInstance(IInstanceBase):
     # ------------------------------------------------------------------
 
     def _render(self, text: str) -> Dict[str, Any]:
-        driver = getattr(self.IGlobal, 'driver', None)
-        settings = getattr(self.IGlobal, 'settings', None) or {}
+        driver = self._driver()
+        settings = self._call_settings()
         if driver is None:
             raise RuntimeError(
                 'tool_masky: driver not initialized. Set the API key on the node or in ROCKETRIDE_MASKY_KEY'
@@ -169,8 +196,8 @@ class IInstance(IInstanceBase):
 
     def _live(self, text: str) -> None:
         """Send the record as one or more turns of a live conversation; write one receipt on text."""
-        driver = self.IGlobal.driver
-        settings = getattr(self.IGlobal, 'settings', None) or {}
+        driver = self._driver()
+        settings = self._call_settings()
         chunks = split_turns(text)
         mode, output = settings.get('turn_mode', 'chat'), settings.get('turn_output', 'audio')
         # The cap applies to the whole record: one long record must not slip past
@@ -257,7 +284,7 @@ class IInstance(IInstanceBase):
         if receipt.get('status') == 'failed':
             raise MaskyError(receipt.get('error') or f'Render failed (job {job}).')
         if receipt.get('status') != 'done':
-            timeout = (getattr(self.IGlobal, 'settings', None) or {}).get('timeout_sec', 300)
+            timeout = self._call_settings().get('timeout_sec', 300)
             raise MaskyError(
                 f'Still rendering after {timeout:g} s (job {job}). Raise the Render Timeout or check later with get_generation.'
             )
@@ -268,7 +295,7 @@ class IInstance(IInstanceBase):
         url, mime = media.get('url'), media.get('mime', '')
         if not url:
             raise MaskyError(f'Masky finished job {job} but returned no media URL.')
-        data = self.IGlobal.driver.download(url)
+        data = self._driver().download(url)
         details = media_details(mime, data)
         media.update(details)
         name = f'{str(job).replace(":", "-")}.{_EXTENSIONS.get(mime, "bin")}'

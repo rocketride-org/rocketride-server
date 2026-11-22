@@ -42,8 +42,6 @@ class IGlobal(IGlobalBase):
 
     client: Optional[HydraDBClient] = None
     database: str = ''
-    collection: str = 'default'
-    max_results: int = 10
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -52,16 +50,16 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self) -> None:
         """Build the HydraDB client from the resolved config (no network I/O here).
 
-        The schema marks the API key and database required and bounds
-        max_results, so the resolver has refused anything this cannot run with.
+        The schema marks the API key and database required, so the resolver
+        has refused anything this cannot run with. The collection and the
+        result count are per-call parameters: every client method takes the
+        collection per call, so the instance passes its own.
         """
         config = self.config
 
         self.database = config.database.strip()
-        self.collection = config.collection.strip()
-        self.max_results = config.max_results
 
-        self.client = HydraDBClient(config.api_key.strip(), self.database, collection=self.collection)
+        self.client = HydraDBClient(config.api_key.strip(), self.database)
 
     def endGlobal(self) -> None:
         """Clear the API key from memory and drop the client."""

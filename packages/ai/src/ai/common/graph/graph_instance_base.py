@@ -48,7 +48,13 @@ from ai.common.table import Table
 from ai.common.utils import normalize_tool_input, parse_bool, require_str
 
 from .cypher_safety import is_cypher_safe
-from .graph_global_base import DEFAULT_MAX_EXECUTE_ROWS, GraphGlobalBase
+from .graph_global_base import (
+    DEFAULT_MAX_EXECUTE_ROWS,
+    GraphGlobalBase,
+    allow_execute,
+    graph_description,
+    max_validation_attempts,
+)
 
 DEFAULT_ROW_LIMIT = 250
 
@@ -127,7 +133,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
         # Clamp to the driver's own row ceiling so truncation is computed against
         # the limit actually enforced, not a larger number the caller asked for.
-        limit = min(self._clamp_limit(args.get('limit')), self.IGlobal.read_row_cap)
+        limit = min(self._clamp_limit(args.get('limit')), self.IGlobal.read_row_cap(self.settings))
 
         generated = self.get_query({'question': question, 'limit': limit})
         if not generated.get('valid'):
@@ -136,7 +142,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
         query = generated['query']
         try:
             # Ask for one row past the limit so a full page reads as truncated.
-            rows = self.IGlobal._run_query(query, limit=limit)
+            rows = self.IGlobal._run_query(query, limit=limit, settings=self.settings)
         except Exception as e:
             return {'valid': False, 'error': str(e), 'query': query, 'rows': []}
 
@@ -174,7 +180,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
     )
     def get_schema(self, args):
         """Return the reflected graph schema."""
-        schema = self.IGlobal.graph_schema or {}
+        schema = self.IGlobal.schema_for(self.settings) or {}
         nodes = schema.get('nodes', {})
         return {
             'labels': list(nodes.keys()),
@@ -269,7 +275,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
         """
         args = normalize_tool_input(args, tool_name='execute')
         # A disabled node reports that first, whatever the arguments are.
-        if not self.IGlobal.allow_execute:
+        if not allow_execute(self.settings):
             raise ValueError('execute tool is disabled for this node (set allow_execute=true)')
 
         key = 'sql' if 'query' not in args and 'sql' in args else 'query'
@@ -283,9 +289,9 @@ class GraphInstanceBase(IInstanceBase, ABC):
             raise ValueError('execute: graph nodes return row objects, so "row_mode" must be \'object\'')
 
         if params:
-            result = self.IGlobal._run_query_raw(query, params=params)
+            result = self.IGlobal._run_query_raw(query, params=params, settings=self.settings)
         else:
-            result = self.IGlobal._run_query_raw(query)
+            result = self.IGlobal._run_query_raw(query, settings=self.settings)
         out = {
             'rows': [self._sanitize_row(row) for row in result.get('rows', [])],
             'affected_rows': result.get('affected_rows', 0),
@@ -406,7 +412,10 @@ class GraphInstanceBase(IInstanceBase, ABC):
         last_error: Optional[str] = None
         result: Dict = {}
 
-        for attempt in range(self.IGlobal.max_validation_attempts):
+        # The retry budget is this call's: each attempt is an LLM round trip
+        attempts = max_validation_attempts(self.settings)
+
+        for attempt in range(attempts):
             result = self._buildQueryOnce(
                 question_text,
                 limit=limit,
@@ -420,19 +429,15 @@ class GraphInstanceBase(IInstanceBase, ABC):
             if not parse_bool(result.get('isValid', False)) or not query or not is_cypher_safe(query):
                 return result
 
-            ok, explain_error = self.IGlobal._validate_query(query)
+            ok, explain_error = self.IGlobal._validate_query(query, settings=self.settings)
             if ok:
                 return result
 
-            warning(
-                f'Query validation attempt {attempt + 1}/{self.IGlobal.max_validation_attempts} failed: {explain_error}'
-            )
+            warning(f'Query validation attempt {attempt + 1}/{attempts} failed: {explain_error}')
             previous_query = query
             last_error = explain_error
 
-        warning(
-            f'Query validation failed after {self.IGlobal.max_validation_attempts} attempt(s); rejecting the query.'
-        )
+        warning(f'Query validation failed after {attempts} attempt(s); rejecting the query.')
         # Every EXPLAIN attempt failed. Force isValid false so callers do not run
         # a query the database already rejected; keep the last query for context
         # and the error so callers can tell this apart from a non-graph question.
@@ -454,10 +459,11 @@ class GraphInstanceBase(IInstanceBase, ABC):
         question: Question = Question(type=QuestionType.QUESTION, role='You are a technical assistant.')
         question.addQuestion(question_text)
 
-        if self.IGlobal.db_description:
-            question.addContext(f'Graph description: {self.IGlobal.db_description}')
+        description = graph_description(self.settings)
+        if description:
+            question.addContext(f'Graph description: {description}')
 
-        question.addContext(self._describe_schema(self.IGlobal.graph_schema))
+        question.addContext(self._describe_schema(self.IGlobal.schema_for(self.settings)))
         question.expectJson = True
 
         question.addInstruction(
@@ -601,7 +607,7 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
             executed = is_valid and bool(query)
             # When the LLM decides it isn't a graph question, `query` holds its prose answer.
-            result = self.IGlobal._run_query(query) if executed else query
+            result = self.IGlobal._run_query(query, settings=self.settings) if executed else query
 
             self._emit(result, lanes, executed=executed)
 
@@ -619,11 +625,11 @@ class GraphInstanceBase(IInstanceBase, ABC):
 
     def _answerExecute(self, statement: str, lanes) -> None:
         """Run a raw statement from the EXECUTE lane path and emit the result."""
-        if not self.IGlobal.allow_execute:
+        if not allow_execute(self.settings):
             warning('QuestionType.EXECUTE is disabled for this node (set allow_execute=true to enable).')
             return
         try:
-            result = self.IGlobal._run_query_raw(statement)
+            result = self.IGlobal._run_query_raw(statement, settings=self.settings)
             rows = result.get('rows', [])
             affected = result.get('affected_rows', 0)
             markdown = self._formatResultAsMarkdown(rows) if rows else None

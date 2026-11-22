@@ -87,20 +87,24 @@
 			"format": "textarea",
 			"title": "Database description",
 			"default": "",
-			"description": "What is this database used for? Describe its collections, graphs and domain - this helps the LLM generate more accurate AQL queries."
+			"description": "What is this database used for? Describe its collections, graphs and domain - this helps the LLM generate more accurate AQL queries.",
+			"param": true,
+			"tool": false
 		},
 		"arangodb.endpoint": {
 			"type": "string",
 			"title": "Connection endpoint",
 			"default": "http://localhost:8529",
 			"minLength": 1,
-			"description": "HTTP(S) endpoint for the ArangoDB server. Use http://host:8529 for self-host/Docker, or https://<id>.arangodb.cloud:8529 for ArangoGraph cloud (TLS)."
+			"description": "HTTP(S) endpoint for the ArangoDB server. Use http://host:8529 for self-host/Docker, or https://<id>.arangodb.cloud:8529 for ArangoGraph cloud (TLS).",
+			"env": "ROCKETRIDE_GRAPH_ARANGO_ENDPOINT"
 		},
 		"arangodb.user": {
 			"type": "string",
 			"title": "User",
 			"default": "root",
-			"description": "Username to authenticate with ArangoDB. Defaults to 'root'."
+			"description": "Username to authenticate with ArangoDB. Defaults to 'root'.",
+			"env": "ROCKETRIDE_GRAPH_ARANGO_USER"
 		},
 		"arangodb.password": {
 			"type": "string",
@@ -122,7 +126,8 @@
 			"title": "Database name",
 			"default": "_system",
 			"minLength": 1,
-			"description": "Name of the ArangoDB database to query. '_system' is the built-in default - point this at your application database."
+			"description": "Name of the ArangoDB database to query. '_system' is the built-in default - point this at your application database.",
+			"env": "ROCKETRIDE_GRAPH_ARANGO_DATABASE"
 		},
 		"arangodb.max_attempts": {
 			"type": "integer",
@@ -130,7 +135,9 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 20,
-			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated AQL query"
+			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated AQL query",
+			"param": true,
+			"tool": false
 		},
 		"arangodb.max_execute_rows": {
 			"type": "integer",
@@ -138,13 +145,17 @@
 			"default": 25000,
 			"minimum": 1,
 			"maximum": 1000000,
-			"description": "Maximum number of rows returned by a query. Also caps the raw EXECUTE path; a query that exceeds it fails rather than streaming unbounded results."
+			"description": "Maximum number of rows returned by a query. Also caps the raw EXECUTE path; a query that exceeds it fails rather than streaming unbounded results.",
+			"param": true,
+			"tool": false
 		},
 		"arangodb.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
-			"description": "Permit QuestionType.EXECUTE callers to run raw AQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue AQL directly."
+			"description": "Permit QuestionType.EXECUTE callers to run raw AQL without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue AQL directly.",
+			"param": true,
+			"tool": false
 		}
 	},
 	//

@@ -26,7 +26,7 @@ while str(NODES_SRC) in sys.path:
     sys.path.remove(str(NODES_SRC))
 sys.path.insert(0, str(NODES_SRC))
 
-from response.IGlobal import IGlobal  # noqa: E402
+from rocketlib import IGlobalBase  # noqa: E402
 from response.IInstance import IInstance  # noqa: E402
 from response.IValidator import IValidator  # noqa: E402
 from ai.common.schema import Answer  # noqa: E402
@@ -47,8 +47,8 @@ class _Obj:
         self.hasPath = False
 
 
-def _global(config, logical_type='response_text', cls=IGlobal):
-    """Build the node's IGlobal (or IValidator) for ``config`` without starting it.
+def _global(config, logical_type='response_text', cls=IGlobalBase):
+    """Build the control (the framework IGlobal: the node has none of its own) or the IValidator for ``config``.
 
     Args:
         config: The connConfig, in the service's path-addressed shape.
@@ -64,10 +64,10 @@ def _global(config, logical_type='response_text', cls=IGlobal):
 
 
 def _instance(glb):
-    """Build an IInstance on a started IGlobal, with an empty result object.
+    """Build an IInstance bound to one call of the control, with an empty result object.
 
     Args:
-        glb: The started IGlobal.
+        glb: The control.
 
     Returns:
         The IInstance.
@@ -75,6 +75,7 @@ def _instance(glb):
     inst = IInstance()
     inst.IGlobal = glb
     inst.instance = SimpleNamespace(currentObject=_Obj())
+    inst.beginInstance()
     inst.open(None)
     return inst
 
@@ -85,9 +86,9 @@ _KEYS_THE_RESULT_ALREADY_HOLDS = ('result_types', 'name', 'path', 'metadata', 'o
 
 @pytest.mark.parametrize('key', _KEYS_THE_RESULT_ALREADY_HOLDS)
 def test_a_reserved_lane_name_stops_the_node_with_a_clear_error(key):
-    """Every reserved key is refused as the single-lane ``laneName``."""
+    """Every reserved key is refused as the single-lane ``laneName`` when the call begins."""
     with pytest.raises(ValueError, match=f"Result key '{key}' is reserved"):
-        _global({'laneName': key}).beginGlobal()
+        _instance(_global({'laneName': key}))
 
 
 def test_a_reserved_key_in_the_lanes_mapping_is_refused_too():
@@ -100,7 +101,7 @@ def test_a_reserved_key_in_the_lanes_mapping_is_refused_too():
         ]
     }
     with pytest.raises(ValueError, match="Result key 'result_types', 'status' is reserved"):
-        _global(config, 'response').beginGlobal()
+        _instance(_global(config, 'response'))
 
 
 def test_the_config_dialog_warns_instead_of_failing(monkeypatch):
@@ -127,7 +128,6 @@ def test_valid_keys_raise_no_warning(monkeypatch):
 def test_a_custom_key_still_collects_every_lane():
     """A valid custom key gets a list for each lane, and result_types maps it back."""
     glb = _global({'laneName': 'out'})
-    glb.beginGlobal()
     inst = _instance(glb)
     answer = Answer()
     answer.setAnswer('42')
@@ -146,7 +146,6 @@ def test_a_custom_key_still_collects_every_lane():
 def test_unmapped_lanes_use_their_lane_type():
     """With no key configured, each lane keeps its own name, as before."""
     glb = _global({'lanes': [{'laneId': 'table', 'laneName': 'grid'}]}, 'response')
-    glb.beginGlobal()
     inst = _instance(glb)
 
     inst.writeTable('| a |')
@@ -194,6 +193,5 @@ def test_the_services_still_set_defaults_to_check():
 )
 def test_no_service_default_result_key_is_reserved(services_file, logical_type, lane_name):
     """A service's default key must stay usable: reserving it would stop every pipeline that keeps the default."""
-    glb = _global({}, logical_type)
-    glb.beginGlobal()
-    assert glb.laneName == lane_name
+    inst = _instance(_global({}, logical_type))
+    assert inst._lane_name == lane_name

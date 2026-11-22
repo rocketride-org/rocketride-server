@@ -44,11 +44,10 @@ def _conn_config(flat: dict) -> dict:
 
 
 def _started_global(iglobal, cfg: dict):
-    """Run ``beginGlobal`` on the stored config ``cfg`` and return the IGlobal instance."""
-    instance = object.__new__(iglobal.IGlobal)
-    instance.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig=_conn_config(cfg))
-    instance.beginGlobal()
-    return instance
+    """The guardrails a call carrying no params applies under the stored config ``cfg``."""
+    control = object.__new__(iglobal.IGlobal)
+    control.glb = types.SimpleNamespace(logicalType='tool_http_request', connConfig=_conn_config(cfg))
+    return iglobal.IGlobal.guardrails(control._resolved())
 
 
 def _capture_transport(monkeypatch, http_client):
@@ -65,9 +64,11 @@ def _capture_transport(monkeypatch, http_client):
     return sent
 
 
-def _instance(iinstance, glb):
+def _instance(iinstance, guardrails):
     instance = object.__new__(iinstance.IInstance)
-    instance.IGlobal = glb
+    # The binding's guardrails, and no limiter (the limits are counted in state; see test_rate_limiter)
+    instance._http_guardrails = guardrails
+    instance._http_limiter = None
     return instance
 
 
@@ -271,11 +272,6 @@ def test_begin_global_loads_config_auth_and_default_headers(node_modules):
     assert glb.config_auth == {'type': 'bearer', 'bearer': {'token': 'ghp_live'}}
     assert glb.default_headers == {'Accept': 'application/vnd.github+json'}
 
-    glb.endGlobal()
-
-    assert glb.config_auth is None
-    assert glb.default_headers == {}
-
 
 def test_begin_global_refuses_config_auth_without_whitelist(node_modules):
     """Point 2 of #2495: a configured token must not be sendable to any public host."""
@@ -376,7 +372,6 @@ def test_begin_global_ignores_credentials_stored_under_another_auth_type(node_mo
     glb = _started_global(iglobal, {'authType': 'none', 'authToken': 'ghp_live', 'authHeaderValue': 'k'})
 
     assert glb.config_auth is None
-    assert iglobal.warning.call_args_list == []
 
 
 def test_begin_global_requires_the_selected_branch_credential(node_modules):

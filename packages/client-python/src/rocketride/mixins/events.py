@@ -100,11 +100,11 @@ class EventMixin(DAPClient):
         self._caller_on_connect_error: Optional[ConnectErrorCallback] = kwargs.get('on_connect_error', None)
         self._caller_on_protocol_message: Optional[Any] = kwargs.get('on_protocol_message', None)
         self._caller_on_debug_message: Optional[Any] = kwargs.get('on_debug_message', None)
-        # Maps a pipe SLOT → SSE callback. A slot is reused by the next binding
-        # once a pipe closes; dispatch by the never-reused traceId (which every
-        # SSE body now carries) lands with the 2.0 surface, in step with the
-        # TypeScript SDK, whose frozen 1.x class type pins the slot-keyed map.
-        self._sse_pipe_callbacks: Dict[int, Callable] = {}
+        # Maps a request tree's wire traceId → SSE callback (every SSE body
+        # carries it). A pipe slot is reused by the next binding once a pipe
+        # closes; a traceId never is, so an event that arrives after its pipe
+        # closed never reaches the next pipe opened on the same slot.
+        self._sse_pipe_callbacks: Dict[str, Callable] = {}
         # Reference-counted monitor subscriptions: key_string → {event_type: ref_count}
         self._monitor_keys: Dict[str, Dict[str, int]] = {}
 
@@ -299,15 +299,16 @@ class EventMixin(DAPClient):
         # Forward to VS Code debugger if available
         self._send_vscode_event(event_type=event_type, body=event_body)
 
-        # Dispatch pipe-scoped SSE events to the registered DataPipe callback
+        # Dispatch pipe-scoped SSE events to the registered DataPipe callback,
+        # by the request tree (never by the slot, which the next pipe reuses)
         if event_type == 'apaevt_sse':
-            pipe_id = event_body.get('pipeId')
-            callback = self._sse_pipe_callbacks.get(pipe_id)
+            trace_id = event_body.get('traceId')
+            callback = self._sse_pipe_callbacks.get(trace_id) if isinstance(trace_id, str) else None
             if callback is not None:
                 try:
                     await callback(event_body.get('type', ''), event_body.get('data', {}))
                 except Exception as e:
-                    self.debug_message(f'Error in SSE callback for pipe {pipe_id}: {e}')
+                    self.debug_message(f'Error in SSE callback for trace {trace_id}: {e}')
 
         # Call user-provided event handler if available
         if self._caller_on_event is not None:
@@ -317,13 +318,13 @@ class EventMixin(DAPClient):
                 # Log errors but don't let user code break the connection
                 self.debug_message(f'Error in user event handler for {event_type} (seq {seq_num}): {e}')
 
-    def _register_sse_pipe(self, pipe_id: int, callback: Callable) -> None:
-        """Register a pipe-scoped SSE callback. Called by DataPipe after open()."""
-        self._sse_pipe_callbacks[pipe_id] = callback
+    def _register_sse_pipe(self, trace_id: str, callback: Callable) -> None:
+        """Register a pipe-scoped SSE callback under its request tree's traceId. Called by DataPipe after open()."""
+        self._sse_pipe_callbacks[trace_id] = callback
 
-    def _unregister_sse_pipe(self, pipe_id: int) -> None:
-        """Remove a pipe-scoped SSE callback. Called by DataPipe after close()."""
-        self._sse_pipe_callbacks.pop(pipe_id, None)
+    def _unregister_sse_pipe(self, trace_id: str) -> None:
+        """Remove a pipe-scoped SSE callback by its request tree's traceId. Called by DataPipe after close()."""
+        self._sse_pipe_callbacks.pop(trace_id, None)
 
     async def set_events(self, token: str, event_types: List[str], pipe_id: int = None) -> None:
         """

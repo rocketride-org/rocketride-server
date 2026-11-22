@@ -135,6 +135,19 @@ class _StubIInstanceBase:
 
     IGlobal: Any = None
 
+    @property
+    def settings(self) -> Dict[str, Any]:
+        """The call's settings: the tool-surface values the stand-in global carries."""
+        keys = ('serverName', 'expose_tools', 'allow_write')
+        return {key: getattr(self.IGlobal, key) for key in keys if hasattr(self.IGlobal, key)}
+
+    def _store(self) -> Any:
+        """The call's store (StoreInstanceBase supplies it): the stand-in global's one store."""
+        store = getattr(self.IGlobal, 'store', None)
+        if store is None:
+            raise RuntimeError('no store is open')
+        return store
+
     def _collect_tool_methods(self) -> Dict[str, Callable]:
         methods: Dict[str, Callable] = {}
         for name in dir(type(self)):

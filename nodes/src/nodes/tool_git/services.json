@@ -57,6 +57,8 @@
 			"optional": true
 		},
 		"git.safeMode": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Safe Mode",
 			"description": "Block destructive operations: force-push and force branch deletion. Normal branch deletion is allowed only when the branch is fully merged into HEAD; deleting an unmerged branch requires force=true (which is blocked in safe mode). Recommended for agent use.",
@@ -67,6 +69,8 @@
 			]
 		},
 		"git.readOnlyMode": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Read-Only Mode",
 			"description": "Block ALL write operations (clone, init, write_file, stage, commit, stash push/pop/drop, branch create/delete, checkout, merge, fetch, pull, push). Read-only tools (status, log, show, diff, blame, file_at, branch_list, grep, ls_files, stash list) remain available. Strictly stronger than Safe Mode. Recommended when the agent only needs to inspect a repository.",

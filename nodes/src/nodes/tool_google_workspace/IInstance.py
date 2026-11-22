@@ -32,6 +32,10 @@ validators, and the ``check_connection`` implementation. The decorated
 ``@tool_function check_connection`` itself stays in each service (its schema
 and description are per-service); it delegates to
 :meth:`_check_connection_impl`, optionally supplying a live probe.
+
+The access tier and the gate flags are this call's: ``_access`` resolves
+them from ``self.settings`` once per binding, and ``_svc`` asks the
+control for the service of that tier.
 """
 
 from __future__ import annotations
@@ -51,12 +55,18 @@ class GoogleToolInstanceBase(IInstanceBase):
     # -----------------------------------------------------------------------
 
     def _svc(self):
-        """Return the shared discovery service handle."""
-        return self.IGlobal.service
+        """Return the control's discovery service for this call's access tier."""
+        return self.IGlobal.service_for(self._access().tier)
 
     def _access(self):
-        """Return the node's access descriptor (tier, scopes, flags)."""
-        return self.IGlobal.access
+        """Return this call's access descriptor (tier, scopes, flags), resolved once per binding."""
+        access = self.__dict__.get('_google_access')
+        if access is None:
+            from nodes.core.google_access import resolve_google_access
+
+            access = resolve_google_access(self.settings, self.IGlobal.spec)
+            self.__dict__['_google_access'] = access
+        return access
 
     # -----------------------------------------------------------------------
     # Shared argument validators (string/int validators come from
@@ -96,7 +106,13 @@ class GoogleToolInstanceBase(IInstanceBase):
         except the actual cause.
         """
         access = self._access()
-        service = self._svc()
+        build_error = None
+        try:
+            service = self._svc()
+        except Exception as exc:
+            # The tier's service is built on first use: a credential that cannot
+            # serve it is exactly what this diagnostic reports
+            service, build_error = None, exc
         checked = ['client']
         if service is None:
             connection_ok: bool | str = False
@@ -109,6 +125,8 @@ class GoogleToolInstanceBase(IInstanceBase):
             'access': getattr(access, 'tier', None),
             'requiredScopes': list(getattr(access, 'scopes', []) or []),
         }
+        if build_error is not None:
+            out['error'] = str(build_error)[:500]
         if probe is not None and service is not None:
             checked.append('probe')
             try:

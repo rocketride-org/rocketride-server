@@ -29,6 +29,8 @@
 			"title": "Exclude prefix",
 			"description": "Which paths to exclude from the output path, if not required put N/A. e.g Users/Downloads/ or N/A",
 			"type": "string",
+			"param": true,
+			"tool": false,
 			"default": "N/A"
 		}
 	},

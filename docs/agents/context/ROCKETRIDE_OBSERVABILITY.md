@@ -70,10 +70,18 @@ socket opens must be the `auth` command:
 	"arguments": {
 		"auth": "${ROCKETRIDE_APIKEY}",
 		"clientName": "agents-db",
-		"clientVersion": "1.0.0"
+		"clientVersion": "1.0.0",
+		"protocol": 2
 	}
 }
 ```
+
+`protocol` is the wire protocol major your client speaks; this server speaks
+`2`, and the spellings in this guide are protocol 2's. A login naming any
+other value is refused with `TASK_VERSION_MISMATCH` before the key is read. A
+login with no `protocol` is served as protocol 1 (the 1.x SDKs), which also
+receives `pipe_id` beside `pipeId`, until that protocol is switched off: send
+`protocol: 2`.
 
 If `success: false` comes back, the server closes the socket. Do not retry blindly
 on auth failure.
@@ -133,7 +141,7 @@ You correlate responses to requests by matching `request_seq` to the `seq` you s
 Subscriptions are managed with the `rrext_monitor` DAP command. The server keeps
 a per-connection registry keyed by **token** (the control id a `use()`/`submit()`
 result returned; a restart mints a new one, so resubscribe after one) or
-**project+source** directly, optionally narrowed to a `pipe_id` or widened to
+**project+source** directly, optionally narrowed to a `pipeId` or widened to
 `*` (all your tasks). A control id you do not own is `permission_denied`. The
 token slot also takes an address, bare or rooted: `@me/acme.docBrain.webhook_1`
 watches only your personal deployment's run, `=team/<tid>/acme.docBrain.webhook_1`
@@ -172,9 +180,16 @@ Valid values:
 | `DASHBOARD` | 128 | Server-level events (connections, monitor changes)                                |
 | `BILLING`   | 256 | Billing ledger events (credits/debits), org-scoped                                |
 | `DEPLOY`    | 512 | Deployment-change invalidations (pointer, state, schedule, run mutations), org-scoped |
-| `ALL`       | 1023 | Everything above                                                                 |
+| `ALL`       | 1023 | Everything above (`OPS` excluded)                                                |
+| `OPS`       | 1024 | Engine-level output of a SHARED engine as `apaevt_ops` (§5.3b); `sys.admin` only, wildcard only |
 
 You may also send the bitmask as an integer (`"types": 36` = SUMMARY|TASK).
+
+`OPS` and `DASHBOARD` are platform-wide: subscribing either on the `*`
+wildcard requires `sys.admin` (or the server's internal identity) and is
+otherwise refused with a `PermissionError`, and `OPS` on anything but `*` is
+refused for everyone. Because `ALL` includes `DASHBOARD`, a non-admin
+subscribing `*` with `ALL` is refused too: name the types you want (§4.3).
 
 ### 4.2 Subscription scopes
 
@@ -340,10 +355,11 @@ SHA-256 of those facts; there is no day in it. Nothing per request rides the sta
 
 ```ts
 {
-  id: number,                                  // pipe index within the pipeline
+  id: number,                                  // the pipe SLOT (reused by the next request once a binding closes)
   op: "begin" | "enter" | "leave" | "end",
   pipes: string[],                             // current component stack for this pipe
   component?: string,                          // component this op refers to (on "leave", the leaving one); pair enter/leave by identity, not stack position
+  traceId: string,                             // the request tree, `nodeId.engineId.n` (never reused; opaque)
   trace: {                                     // shape depends on pipelineTraceLevel
     lane?: string,
     data?: object,                             // input/intermediate data
@@ -351,13 +367,19 @@ SHA-256 of those facts; there is no day in it. Nothing per request rides the sta
     error?: string
   },
   result?: PIPELINE_RESULT,                    // present when op==="end" and level >= summary
+  controlId: string,                           // the receiving control (each holder gets its own copy)
+  engineKey: string,                           // the engine that emitted it
   project_id: string,
   source: string
 }
 ```
 
 This is the data that lets you reconstruct _why_ a pipeline produced what it
-produced: each component entry/exit with its lane data and any error.
+produced: each component entry/exit with its lane data and any error. Group
+by `traceId`, not by `id`: one request's frames share its `traceId`, while a
+slot serves many requests in turn. The engine emits the underlying `>DBG`
+line only for a binding whose own trace level asked for it, so on an engine
+several controls hold, each one's flow follows its own `pipelineTraceLevel`.
 
 ### 5.3b `apaevt_ops`: engine-level output of a SHARED engine (subscribe to `OPS`, `sys.admin` only)
 
@@ -371,10 +393,26 @@ They leave the server as `apaevt_ops` with body `{ engineKey, kind, ... }`
 subscription is refused without `sys.admin`. On a private engine the same
 output reaches the owner's own controls as before.
 
+What decides the path is the event's `traceId`. A pipe-tagged event (flow,
+SSE, a data-op result) goes to the control whose request carries that
+`traceId`, and to no other holder; an event that carries none, or whose
+request tree is unknown or was released more than
+`CONST_BINDING_GRACE_SECONDS` (5 seconds) ago, is engine-level. Within those
+5 seconds after its pipe closed, an event still reaches its request's control
+with `late: true` in its body. On a shared engine
+the holders still receive the status (each projected to its own counts) and
+the task lifecycle. `apaevt_ops` is live only: no run log records it.
+
 ### 5.4 `apaevt_sse`: node-to-UI passthrough (subscribe to `SSE`)
 
-Nodes call `self.sendSSE(type, **data)` (rocketlib) to broadcast custom
-updates ("thinking", "tool_call", progress, etc.). Body shape:
+Nodes call `self.instance.sendSSE(type, **data)` (rocketlib) to send custom
+updates ("thinking", "tool_call", progress, etc.) to the caller. A node that
+sends from a worker thread or asyncio task captures the binding first: it
+calls `logger = self.logger()` inside the originating call, hands `logger` to
+the worker, and the worker calls `logger.sendSSE(type, **data)`. The worker
+never calls `self.logger()` itself: that reads whichever binding is current on
+the pipe when it runs, which after the slot is reused is the next holder's, so
+its events would carry that holder's `pipeId` and `traceId`. Body shape:
 
 ```ts
 {
@@ -386,8 +424,9 @@ updates ("thinking", "tool_call", progress, etc.). Body shape:
 ```
 
 Correlate by `traceId`, never by `pipeId`: a slot is handed to the next
-request as soon as a binding closes. (The SDKs' `on_sse` / `onSSE` callbacks
-still dispatch by slot on the 1.x surface and move to `traceId` with 2.0.)
+request as soon as a binding closes. (The SDKs' per-pipe `on_sse` / `onSSE`
+callbacks still dispatch by slot; a raw `on_event` / `onEvent` handler sees
+both fields.)
 
 Schema is intentionally open: interpret per node type.
 
@@ -494,7 +533,14 @@ and `ROCKETRIDE_typescript_API.md`.
 
 The server records each task's events into a per-stream **run log**: an
 append-only continuum of the same typed events described in §5, organized as
-chapters (one per run) over size-sealed segments. If your ingester was offline
+chapters (one per run) over size-sealed segments. A continuum belongs to the
+stream, not to a control: the stream is identified without a control id
+(`stream` in §8.1), so every control that runs it writes into the same
+continuum. A restart mints a new control id and opens the next chapter, and
+`logSeq` continues across runs. Routing into a continuum stays per control:
+on an engine several controls hold, each control writes its own requests'
+events and never another holder's, and engine-level output of a shared
+engine is in no holder's log (§5.3b). If your ingester was offline
 for a window — or you would rather not maintain your own event database at
 all — you can read recorded runs back after the fact instead of (or in
 addition to) ingesting live.

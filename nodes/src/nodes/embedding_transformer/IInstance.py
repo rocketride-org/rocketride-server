@@ -39,9 +39,22 @@ class IInstance(IInstanceBase):
     documents: List[Doc]
     maxDocuments: int = 64
 
+    # This call's encoding knobs, read from its settings in beginInstance
+    _truncate_dim: int = 0
+    _document_prefix: str = ''
+    _query_prefix: str = ''
+
     def beginInstance(self):
-        """Start this binding with its own empty accumulator."""
+        """Start this binding with its own empty accumulator and its encoding knobs.
+
+        The truncation and the prefixes exist on the custom profile only, so a
+        preset's call reads them as unset (no truncation, no prefix).
+        """
         self.documents = []
+        settings = self.settings
+        self._truncate_dim = settings.get('truncate_dim') or 0
+        self._document_prefix = settings.get('document_prefix') or ''
+        self._query_prefix = settings.get('query_prefix') or ''
 
     def open(self, obj: Entry):
         """
@@ -65,7 +78,7 @@ class IInstance(IInstanceBase):
             return
 
         # Encode the documents
-        self.IGlobal.embedding.encodeChunks(self.documents)
+        self.IGlobal.embedding.encodeChunks(self.documents, self._document_prefix, self._truncate_dim)
 
         # Write the documents to the instance
         self.instance.writeDocuments(self.documents)
@@ -99,7 +112,8 @@ class IInstance(IInstanceBase):
         Args:
             question (Question): The question to encode.
         """
-        self.IGlobal.embedding.encodeQuestion(question)  # Encode the question
+        # Encode the question with the call's prefix and truncation
+        self.IGlobal.embedding.encodeQuestion(question, self._query_prefix, self._truncate_dim)
 
     def close(self):
         # Flush any stragglers

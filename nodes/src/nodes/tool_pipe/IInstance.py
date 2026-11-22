@@ -42,7 +42,6 @@ from rocketlib import IJson
 
 from ai.common.utils import normalize_tool_input
 
-from .IGlobal import IGlobal
 
 # Result type descriptions keyed by return_type config value.
 _RETURN_TYPE_DESCRIPTIONS = {
@@ -54,8 +53,6 @@ _RETURN_TYPE_DESCRIPTIONS = {
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal
-
     @tool_function(
         input_schema={
             'type': 'object',
@@ -68,7 +65,7 @@ class IInstance(IInstanceBase):
             },
         },
         description=lambda self: (
-            self.IGlobal.tool_description or 'Accepts a text input and returns the pipeline result.'
+            str(self.settings.tool_description or '').strip() or 'Accepts a text input and returns the pipeline result.'
         ),
         output_schema=lambda self: {
             'type': 'object',

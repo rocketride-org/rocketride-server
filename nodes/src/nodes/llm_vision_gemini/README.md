@@ -25,6 +25,8 @@ Choose a vision model from the **Model** selector, then provide the API key and 
 for the analysis task. Each listed model pins its model id and context limit. The
 default is **Gemini 2.5 Flash - Fast Vision (1M tokens)** (`models/gemini-2.5-flash`).
 
+The model settings (the selector, a custom model id and its token limits), the system prompt and the prompt are per-call parameters: a pipeline can expose them in its `parameters` map, and each call then sends its own values to the same running node, which keeps one API key and sends each request on the call's model. The call's output limit is sent to the provider as the request's output cap. A caller may choose the model and its limits; an LLM may not, through a tool call.
+
 ### Models
 
 | Model | Model id | Context tokens | Output tokens |
@@ -48,9 +50,18 @@ default is **Gemini 2.5 Flash - Fast Vision (1M tokens)** (`models/gemini-2.5-fl
 Select **Custom model** to enter a Gemini model id such as `models/gemini-2.5-pro`, its
 total context length in tokens (default 1,048,576), and optionally its output token
 limit (at least 1,024). Choose a model that accepts image input. The output limit is
-not sent to Gemini (requests carry no output cap); the node lowers it to the context
+sent to Gemini as each request's output cap; the node lowers it to the context
 limit, requires at least 1,024, and reports it to nodes that ask for the model's
 output length.
+
+When the output limit is empty (always, for a listed model), each request carries
+an output cap of 4,096 tokens and a longer reply stops there; choose **Custom model**
+and set a higher output limit when you expect long answers. The output cap and the
+input (the image and the prompt) share the context window: keep the output limit
+below the context length, leaving room for the input, or the provider refuses the
+request. A reasoning model counts its thinking against the same cap, so even a short
+answer can come back cut off or empty: for a reasoning model, set the output limit
+well above the reply you expect.
 
 ### Documents and images
 

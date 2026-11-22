@@ -27,6 +27,7 @@
 			"required": true
 		},
 		"tool_tavily.maxResults": {
+			"param": true,
 			"type": "integer",
 			"title": "Max Results",
 			"description": "Maximum number of search results to return (1-20)",
@@ -35,6 +36,7 @@
 			"maximum": 20
 		},
 		"tool_tavily.searchDepth": {
+			"param": true,
 			"type": "string",
 			"title": "Search Depth",
 			"description": "Tavily search depth",
@@ -45,6 +47,7 @@
 			]
 		},
 		"tool_tavily.topic": {
+			"param": true,
 			"type": "string",
 			"title": "Topic",
 			"description": "Search topic category",

@@ -57,13 +57,8 @@ _mod = _load_recognizer_module()
 GliNERRecognizer = _mod.GliNERRecognizer
 
 
-# The resolved node config the recognizer reads (defaults applied, flat).
-_CONFIG = {
-    'model': 'stub/gliner',
-    'anonymizeChar': '█',
-    'redactionStyle': 'mask',
-    'entityTypes': ['person', 'email'],
-}
+# The resolved control config the recognizer reads (the redaction and the entity types are per call).
+_CONFIG = {'model': 'stub/gliner'}
 
 
 class _StubGLiNER:

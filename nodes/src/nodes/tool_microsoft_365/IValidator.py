@@ -55,7 +55,9 @@ class MicrosoftToolValidatorBase(IValidatorBase):
         Raises:
             ConfigError: The stored configuration does not fit the schema.
         """
-        cfg = self.config
+        self.config
+        # The stored tier and flags are params, which self.config refuses: the full view serves them
+        cfg = self._resolved()
         if syntaxOnly:
             return
 

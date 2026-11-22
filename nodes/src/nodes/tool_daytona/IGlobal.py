@@ -57,13 +57,13 @@ class IGlobal(IGlobalBase):
     # deepagent's asyncio.gather fan-out), and an unsynchronized check-then-act
     # would create two billed sandboxes and orphan one.
     _sandbox_lock: threading.Lock | None = None
-    # Safety bounds for agent-driven execution; the schema supplies the
-    # defaults and the ranges, so the values arrive validated.
+    # The creation arguments of the one shared sandbox; the schema supplies
+    # the defaults and the ranges, so the values arrive validated. The
+    # per-execution bounds (exec_timeout_secs, max_output_chars) are
+    # parameters: the instance reads them from self.settings on every call.
     snapshot: str = ''
     language: str = 'python'
     auto_stop_minutes: int = 5
-    exec_timeout_secs: int = 120
-    max_output_chars: int = 50000
 
     def beginGlobal(self) -> None:
         self._sandbox_lock = threading.Lock()
@@ -83,8 +83,6 @@ class IGlobal(IGlobalBase):
         # auto_stop_interval=0 would disable the inactivity stop entirely; the
         # schema minimum of 1 minute keeps an abandoned sandbox shutting down.
         self.auto_stop_minutes = cfg.auto_stop_minutes
-        self.exec_timeout_secs = cfg.exec_timeout_secs
-        self.max_output_chars = cfg.max_output_chars
 
         config_kwargs = {'api_key': apikey}
         if api_url:

@@ -64,19 +64,26 @@ missing issues a warning rather than attempting a network probe.
 ### Collection
 
 **Collection** partitions memory operations inside the chosen database and
-defaults to `default`; a blank value also resolves to `default`. Change it to
-isolate separate users or workspaces that share a HydraDB database. The value
-is applied consistently to ingestion, recall, and relation inspection, so a
-memory stored in one collection is not retrieved by this node configured for
-another.
+defaults to `default`. Change it to isolate separate users or workspaces that
+share a HydraDB database. It is a per-call parameter: a pipeline may expose it
+in its `parameters` map, and each call may then send its own collection, so one
+node serves every user or workspace. It is not a tool argument: no tool takes a
+collection, and an agent cannot choose one through its tool calls, so it stays
+in the collection its caller picked. The call's collection applies to
+ingestion, recall, and relation inspection alike, so a memory stored in one
+collection is not retrieved by a call that names another. A collection that is
+blank after trimming fails the tool call rather than falling back to
+`default`.
 
 ### Max results
 
 **Max results** is the default result count for `recall_memory`, with a default
 of 10 and an effective range of 1–100. Raise it when an agent needs a broader
 set of possible context, accepting a larger result payload; lower it when the
-agent needs only the most relevant context. A per-call `max_results` overrides
-this default but is subject to the same clamp.
+agent needs only the most relevant context. It is also a per-call parameter: a
+call may send its own value, which replaces the configured one for that call.
+Separately, `recall_memory` takes its own `max_results` tool argument; when the
+agent passes it, it overrides both and is subject to the same clamp.
 
 ## Authentication
 

@@ -104,9 +104,18 @@ class _StubTable:
         return f'MD|headers={headers}|rows={len(data)}'
 
 
+class _StubInstanceBase:
+    """Stand-in for IInstanceBase: ``settings`` is the call's view, which a test sets as ``_settings``."""
+
+    @property
+    def settings(self):
+        """The call's settings, as the real IInstanceBase serves them."""
+        return self._settings
+
+
 def _build_import_stubs() -> dict:
     rocketlib = types.ModuleType('rocketlib')
-    rocketlib.IInstanceBase = object
+    rocketlib.IInstanceBase = _StubInstanceBase
     # The real bases: IGlobal.config resolves glb.connConfig through the engine's schema.
     rocketlib.IGlobalBase = _real_rocketlib.IGlobalBase
     rocketlib.IValidatorBase = _real_rocketlib.IValidatorBase
@@ -281,23 +290,34 @@ class _FakeInstance:
         return SimpleNamespace(answer=self._invoke_answer)
 
 
+# The node's per-call params at the values these tests assume
+_CALL_DEFAULTS = {'max_attempts': 1, 'db_description': '', 'allow_execute': False, 'max_execute_rows': 25000}
+
+
 def _make_instance(ig=None, instance=None) -> IInstance:
     inst = IInstance.__new__(IInstance)
     inst.IGlobal = ig if ig is not None else SimpleNamespace()
     inst.instance = instance if instance is not None else _FakeInstance()
+    # The call's settings ride with the fake global only as test input (see _fake_ig)
+    inst._settings = dict(getattr(inst.IGlobal, 'call', _CALL_DEFAULTS))
     return inst
 
 
 def _fake_ig(**overrides):
+    """A fake IGlobal; per-call keys among ``overrides`` become the next call's settings, not global state."""
+    call = dict(_CALL_DEFAULTS)
+    if 'max_validation_attempts' in overrides:
+        call['max_attempts'] = overrides.pop('max_validation_attempts')
+    for key in ('db_description', 'allow_execute', 'max_execute_rows'):
+        if key in overrides:
+            call[key] = overrides.pop(key)
     base = dict(
-        max_validation_attempts=1,
-        db_description='',
         database='_system',
-        allow_execute=False,
         graph_schema={'collections': {}, 'graphs': [], 'views': []},
         _validate_query=lambda aql: (True, ''),
         _run_query=lambda aql, *a, **k: [{'name': 'Alice'}],
         _run_query_raw=lambda aql, *a, **k: {'rows': [], 'affected_rows': 0},
+        call=call,
     )
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -432,7 +452,7 @@ class TestRunQuery:
             )
         )
         with pytest.raises(ValueError, match='unsafe'):
-            ig._run_query('FOR u IN users REMOVE u IN users')
+            ig._run_query('FOR u IN users REMOVE u IN users', max_rows=25000)
         assert executed == []  # safety gate ran before any execute
 
     def test_collection_named_like_keyword_executes(self):
@@ -440,46 +460,42 @@ class TestRunQuery:
         # EXPLAIN-plan gate sees no modification node, so the read executes (not refused).
         executed = []
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 100
         ig.db = SimpleNamespace(
             aql=SimpleNamespace(
                 explain=lambda aql: _plan('EnumerateCollectionNode', 'ReturnNode'),
                 execute=lambda *a, **k: executed.append(1) or iter([{'d': 1}]),
             )
         )
-        assert ig._run_query('FOR d IN replace RETURN d') == [{'d': 1}]
+        assert ig._run_query('FOR d IN replace RETURN d', max_rows=100) == [{'d': 1}]
         assert executed == [1]  # the precise gate let the read through
 
     def test_safe_query_executes_and_returns_rows(self):
         ig = IGlobal.__new__(IGlobal)
         ig.db = SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: iter([{'x': 1}, {'x': 2}])))
-        assert ig._run_query('FOR u IN users RETURN u') == [{'x': 1}, {'x': 2}]
+        assert ig._run_query('FOR u IN users RETURN u', max_rows=25000) == [{'x': 1}, {'x': 2}]
 
 
 class TestRunQueryRaw:
     def test_row_cap_exceeded_raises(self):
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 2
         ig.db = SimpleNamespace(
             aql=SimpleNamespace(execute=lambda *a, **k: _FakeCursor([{'a': 1}, {'a': 2}, {'a': 3}]))
         )
         with pytest.raises(ValueError, match='max_execute_rows'):
-            ig._run_query_raw('FOR u IN users RETURN u')
+            ig._run_query_raw('FOR u IN users RETURN u', max_rows=2)
 
     def test_exactly_max_rows_returned_without_raising(self):
         # Boundary: a cursor of exactly max_execute_rows is returned, not rejected
         # (the cap check runs before the append, so no extra row is held).
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 2
         ig.db = SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: _FakeCursor([{'a': 1}, {'a': 2}])))
-        out = ig._run_query_raw('FOR u IN users RETURN u')
+        out = ig._run_query_raw('FOR u IN users RETURN u', max_rows=2)
         assert out['rows'] == [{'a': 1}, {'a': 2}]
 
     def test_affected_rows_when_no_rows_returned(self):
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 100
         ig.db = SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: _FakeCursor([], {'modified': 5})))
-        out = ig._run_query_raw('INSERT {a:1} INTO users')
+        out = ig._run_query_raw('INSERT {a:1} INTO users', max_rows=100)
         assert out == {'rows': [], 'affected_rows': 5}
 
     def test_memory_limit_passed_to_execute(self):
@@ -490,9 +506,8 @@ class TestRunQueryRaw:
             return _FakeCursor([])
 
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 100
         ig.db = SimpleNamespace(aql=SimpleNamespace(execute=_execute))
-        ig._run_query_raw('FOR u IN users RETURN u')
+        ig._run_query_raw('FOR u IN users RETURN u', max_rows=100)
         assert captured['memory_limit'] == IGlobal.QUERY_MEMORY_LIMIT
         assert captured['max_runtime'] == IGlobal.QUERY_MAX_RUNTIME
 
@@ -594,10 +609,18 @@ class TestBeginGlobalResolution:
         ig, config = self._begin_with({}, monkeypatch)
         assert ig.endpoint == 'http://localhost:8529'
         assert ig.database == '_system'
-        assert ig.max_validation_attempts == 5
-        assert ig.max_execute_rows == 25000
-        assert ig.allow_execute is False
+        # The per-call params are not read into the global
+        for name in ('max_validation_attempts', 'max_execute_rows', 'allow_execute', 'db_description'):
+            assert name not in vars(ig)
         assert config['auth_method'] == 'userpass' and config['user'] == 'root'
+
+    @pytest.mark.parametrize('key', ['db_description', 'max_attempts', 'max_execute_rows', 'allow_execute'])
+    def test_a_param_read_through_the_global_config_raises(self, key, monkeypatch):
+        ig, _config = self._begin_with({}, monkeypatch)
+        from rocketlib.config import ConfigError
+
+        with pytest.raises(ConfigError):
+            ig.config[key]
 
     def test_token_branch_flattens_to_the_token(self, monkeypatch):
         _ig, config = self._begin_with({'auth_method': 'token', 'token': {'token': 'jwt'}}, monkeypatch)
@@ -935,9 +958,8 @@ class TestRunQueryCaps:
     def test_result_capped_at_max_execute_rows(self):
         _reset_logs()
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 3
         ig.db = SimpleNamespace(aql=SimpleNamespace(execute=lambda *a, **k: iter([{'i': i} for i in range(10)])))
-        rows = ig._run_query('FOR u IN users RETURN u')
+        rows = ig._run_query('FOR u IN users RETURN u', max_rows=3)
         assert len(rows) == 3
         assert any('truncated' in w for w in _WARNING_CALLS)
 
@@ -949,9 +971,8 @@ class TestRunQueryCaps:
             return iter([])
 
         ig = IGlobal.__new__(IGlobal)
-        ig.max_execute_rows = 100
         ig.db = SimpleNamespace(aql=SimpleNamespace(execute=_execute))
-        ig._run_query('FOR u IN users RETURN u')
+        ig._run_query('FOR u IN users RETURN u', max_rows=100)
         assert captured['memory_limit'] == IGlobal.QUERY_MEMORY_LIMIT
         assert captured['max_runtime'] == IGlobal.QUERY_MAX_RUNTIME
 

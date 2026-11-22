@@ -80,7 +80,9 @@
 			"title": "Table",
 			"description": "Name of the table to store vectors in your RocketRide cloud database.",
 			"type": "string",
-			"default": "rocketride"
+			"default": "rocketride",
+			"param": true,
+			"tool": false
 		},
 		"rrvector.score": {
 			"title": "Score threshold",
@@ -88,7 +90,8 @@
 			"type": "number",
 			"default": 0.5,
 			"minimum": 0,
-			"maximum": 1
+			"maximum": 1,
+			"param": true
 		},
 		"rrvector.similarity": {
 			"title": "Similarity Metric",
@@ -99,7 +102,8 @@
 				["cosine", "Cosine"],
 				["l2", "L2 (Euclidean)"],
 				["inner_product", "Inner product"]
-			]
+			],
+			"param": true
 		},
 		"rrvector.hnsw_m": {
 			"title": "HNSW m",
@@ -107,7 +111,9 @@
 			"type": "integer",
 			"default": 16,
 			"minimum": 2,
-			"maximum": 100
+			"maximum": 100,
+			"param": true,
+			"tool": false
 		},
 		"rrvector.hnsw_ef_construction": {
 			"title": "HNSW ef_construction",
@@ -115,7 +121,9 @@
 			"type": "integer",
 			"default": 64,
 			"minimum": 4,
-			"maximum": 1000
+			"maximum": 1000,
+			"param": true,
+			"tool": false
 		},
 		"rrvector.scope": {
 			"type": "string",
@@ -136,19 +144,25 @@
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names rrvector.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "rrvector",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		},
 		"rrvector.expose_tools": {
 			"type": "boolean",
 			"title": "Expose as tools",
 			"default": false,
-			"description": "Offer this table to agents and apps as tool functions: search, objdir, list_documents, get and stats, plus upsert, delete, soft_delete and restore when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected."
+			"description": "Offer this table to agents and apps as tool functions: search, objdir, list_documents, get and stats, plus upsert, delete, soft_delete and restore when writes through tools are allowed. Leave OFF unless a trusted application or agent in this pipeline is meant to read the table through tools; objdir and get together return the whole table, not only the matches the questions lane returns. The documents and questions lanes are unaffected.",
+			"param": true,
+			"tool": false
 		},
 		"rrvector.allow_write": {
 			"type": "boolean",
 			"title": "Allow writes through tools",
 			"default": false,
-			"description": "Permit the upsert, delete, soft_delete and restore tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, list_documents, get, stats) are unaffected."
+			"description": "Permit the upsert, delete, soft_delete and restore tool functions to change this table in your RocketRide cloud database. Applies only while Expose as tools is on. Leave OFF unless a trusted application or agent needs to manage documents through tools; the documents lane and the read tools (search, objdir, list_documents, get, stats) are unaffected.",
+			"param": true,
+			"tool": false
 		}
 	},
 	//

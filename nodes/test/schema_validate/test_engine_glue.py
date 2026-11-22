@@ -39,7 +39,7 @@ import types
 import pytest
 from rocketlib.config import ConfigError
 
-from nodes.schema_validate.IGlobal import IGlobal
+from rocketlib import IGlobalBase
 from nodes.schema_validate.IInstance import IInstance
 
 
@@ -91,18 +91,22 @@ def _json_answer(value):
     return a
 
 
-def _build_global(conn_config):
-    """The node's IGlobal, begun on ``conn_config`` through the real resolver."""
-    glob = IGlobal.__new__(IGlobal)
-    glob.glb = types.SimpleNamespace(logicalType='schema_validate', connConfig=conn_config)
-    glob.beginGlobal()
-    return glob
+def _begin_call(conn_config):
+    """One call of a control stored as ``conn_config``, begun through the real resolver.
+
+    The node has no IGlobal (the engine's base serves the config); the call's
+    beginInstance builds its validation rules from its settings.
+    """
+    control = IGlobalBase()
+    control.glb = types.SimpleNamespace(logicalType='schema_validate', connConfig=conn_config)
+    inst = IInstance.__new__(IInstance)
+    inst.IGlobal = control
+    inst.beginInstance()
+    return inst
 
 
 def _build_instance(conn_config=None):
-    glob = _build_global(conn_config or {})
-    inst = IInstance.__new__(IInstance)
-    inst.IGlobal = glob
+    inst = _begin_call(conn_config or {})
     captured = types.SimpleNamespace(answers=[], prevented=0)
     inst.instance = types.SimpleNamespace(writeAnswers=lambda a: captured.answers.append(a))
     inst.preventDefault = lambda: setattr(captured, 'prevented', captured.prevented + 1)
@@ -113,44 +117,44 @@ def _build_instance(conn_config=None):
 
 
 def test_beginglobal_defaults():
-    glob = _build_global({})
-    assert glob.validation['sign'] == 'warning'
-    assert glob.validation['require_provenance'] == 'error'
-    assert glob.validation['amount_field'] == 'amount'
-    assert 'revenue' in glob.validation['category_metric_map']
+    call = _begin_call({})
+    assert call.validation['sign'] == 'warning'
+    assert call.validation['require_provenance'] == 'error'
+    assert call.validation['amount_field'] == 'amount'
+    assert 'revenue' in call.validation['category_metric_map']
 
 
 def test_beginglobal_rejects_ok_severity():
     # 'ok' is not a severity of these fields: the schema enum refuses it, naming the key.
     with pytest.raises(ConfigError, match='sign'):
-        _build_global({'sign': 'ok'})
+        _begin_call({'sign': 'ok'})
     with pytest.raises(ConfigError, match='require_provenance'):
-        _build_global({'require_provenance': 'ok'})
+        _begin_call({'require_provenance': 'ok'})
 
 
 def test_beginglobal_rejects_a_non_string_severity():
     # A list/dict supplied via a .pipe is a type error, not a TypeError on the membership test.
     with pytest.raises(ConfigError, match='sign'):
-        _build_global({'sign': ['x']})
+        _begin_call({'sign': ['x']})
 
 
 def test_beginglobal_strips_field_names_and_refuses_blank_ones():
-    glob = _build_global({'amount_field': ' total '})
-    assert glob.validation['amount_field'] == 'total'
+    call = _begin_call({'amount_field': ' total '})
+    assert call.validation['amount_field'] == 'total'
     with pytest.raises(ValueError, match='metric_field'):
-        _build_global({'metric_field': '   '})
+        _begin_call({'metric_field': '   '})
 
 
 def test_beginglobal_coerces_map_keywords():
-    glob = _build_global({'category_metric_map': {'Revenue': ['  Sales  ', 'NET SALES']}})
-    assert glob.validation['category_metric_map'] == {'Revenue': ['sales', 'net sales']}
+    call = _begin_call({'category_metric_map': {'Revenue': ['  Sales  ', 'NET SALES']}})
+    assert call.validation['category_metric_map'] == {'Revenue': ['sales', 'net sales']}
 
 
 def test_beginglobal_refuses_a_malformed_map():
     with pytest.raises(ValueError, match='category_metric_map'):
-        _build_global({'category_metric_map': {'revenue': 'not-a-list'}})
+        _begin_call({'category_metric_map': {'revenue': 'not-a-list'}})
     with pytest.raises(ConfigError, match='category_metric_map'):
-        _build_global({'category_metric_map': 'not-an-object'})
+        _begin_call({'category_metric_map': 'not-an-object'})
 
 
 # --- IInstance.writeAnswers / closing ---------------------------------------

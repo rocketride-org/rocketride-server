@@ -23,11 +23,32 @@
 
 import json
 from typing import List, Union
-from rocketlib import IInstanceBase, Entry
+from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Doc, DocMetadata, Question, QuestionType, Answer
 from ai.common.util import normalize
 from .IGlobal import IGlobal
 from rocketlib.types import IInvokeLLM
+
+
+def well_formed_fields(fields) -> List[dict]:
+    """
+    The field definitions that name both a column and a type; the rest are skipped with a warning.
+
+    Args:
+        fields: The call's ``fields`` setting.
+
+    Returns:
+        The well-formed definitions, in order.
+    """
+    kept = []
+    for field in fields or []:
+        field_name = field.get('column', '')
+        field_type = field.get('type', '')
+        if not field_name or not field_type:
+            warning(f'Skipping incorrectly defined field with name "{field_name}" and type "{field_type}"')
+            continue
+        kept.append(field)
+    return kept
 
 
 class IInstance(IInstanceBase):
@@ -37,6 +58,13 @@ class IInstance(IInstanceBase):
     # Class attributes for tracking the current chunk and table IDs.
     chunkId: int = 0
     table: List
+
+    def _field_definitions(self) -> List[dict]:
+        """This call's well-formed field definitions, read from its settings once per binding."""
+        fields = self.__dict__.get('_fields')
+        if fields is None:
+            fields = self.__dict__['_fields'] = well_formed_fields(self.settings.fields)
+        return fields
 
     def beginInstance(self):
         """Start this binding with its own empty accumulator."""
@@ -66,7 +94,7 @@ class IInstance(IInstanceBase):
 
         # Create all the fields declarations
         fields: List[str] = []
-        for field in self.IGlobal.field_definitions():
+        for field in self._field_definitions():
             field_name = field.get('column', '').ljust(32)
             field_type = field.get('type', '').ljust(16)
             field_defval = field.get('defval', '')

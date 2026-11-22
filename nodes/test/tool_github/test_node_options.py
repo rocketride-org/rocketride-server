@@ -21,14 +21,20 @@ ALLOWED = ['graphql', 'repo_tree', 'label_list']
 
 
 def _begin(cfg):
-    """Run beginGlobal on the stored config ``cfg`` (a PAT is added) and return the IGlobal."""
+    """Begin a control on the stored config ``cfg`` (a PAT is added) and return one call's options.
+
+    The options are params: a call with no params of its own reads the stored values.
+    """
     with scoped_stubs({'token': 'ghp_options', **cfg}):
         from tool_github.IGlobal import IGlobal
+        from tool_github.IInstance import IInstance
 
         glb = IGlobal()
         glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
         glb.beginGlobal()
-        return glb
+        inst = IInstance()
+        inst.IGlobal = glb
+        return inst._options()
 
 
 def _published(tools):
@@ -36,7 +42,8 @@ def _published(tools):
         from tool_github.IInstance import IInstance, tool_names
 
         inst = IInstance()
-        inst.IGlobal = SimpleNamespace(tools=frozenset(tools))
+        # The allowlist is the call's setting
+        inst._call_options = SimpleNamespace(tools=frozenset(tools))
         return set(inst._collect_tool_methods()), tool_names()
 
 
@@ -110,24 +117,28 @@ def test_allowlist_of_the_wrong_shape_fails_at_start(raw):
 
 
 def test_integer_options_default():
-    glb = _begin({})
-    assert glb.graphql_max_bytes == 4 * 1024 * 1024
-    assert glb.retry_policy.budget_seconds == 60
-    assert glb.retry_policy.max_retries == 3
-    assert glb.retry_policy.sleep is None
+    options = _begin({})
+    assert options.graphql_max_bytes == 4 * 1024 * 1024
+    assert options.retry_policy.budget_seconds == 60
+    assert options.retry_policy.max_retries == 3
+    assert options.retry_policy.sleep is None
 
 
 def test_unset_integer_options_mean_the_default():
     """None is "unset" in the stored tree, so the declared default applies."""
-    glb = _begin({'graphqlMaxResponseBytes': None, 'rateLimitBudgetSeconds': None, 'rateLimitMaxRetries': None})
-    assert (glb.graphql_max_bytes, glb.retry_policy.budget_seconds, glb.retry_policy.max_retries) == (4194304, 60, 3)
+    options = _begin({'graphqlMaxResponseBytes': None, 'rateLimitBudgetSeconds': None, 'rateLimitMaxRetries': None})
+    assert (options.graphql_max_bytes, options.retry_policy.budget_seconds, options.retry_policy.max_retries) == (
+        4194304,
+        60,
+        3,
+    )
 
 
 def test_integer_options_are_read_as_stored():
-    glb = _begin({'rateLimitBudgetSeconds': 30, 'rateLimitMaxRetries': 0, 'graphqlMaxResponseBytes': 2048})
-    assert glb.retry_policy.budget_seconds == 30
-    assert glb.retry_policy.max_retries == 0
-    assert glb.graphql_max_bytes == 2048
+    options = _begin({'rateLimitBudgetSeconds': 30, 'rateLimitMaxRetries': 0, 'graphqlMaxResponseBytes': 2048})
+    assert options.retry_policy.budget_seconds == 30
+    assert options.retry_policy.max_retries == 0
+    assert options.graphql_max_bytes == 2048
 
 
 @pytest.mark.parametrize(
@@ -166,15 +177,18 @@ def test_a_bad_graphql_allow_mutations_fails_at_start_naming_the_field(raw):
         _begin({'graphqlAllowMutations': raw})
 
 
-def test_end_global_resets_the_options():
-    glb = _begin(
-        {'tools': ALLOWED, 'rateLimitBudgetSeconds': 5, 'graphqlMaxResponseBytes': 2048, 'graphqlAllowMutations': True}
-    )
-    glb.endGlobal()
-    assert glb.tools == frozenset()
-    assert glb.graphql_allow_mutations is False
-    assert glb.graphql_max_bytes == 4 * 1024 * 1024
-    assert glb.retry_policy.budget_seconds == 60
+def test_the_control_config_refuses_every_option():
+    """The options are params: the control's config never serves them, a call's settings do."""
+    with scoped_stubs({'token': 'ghp_options'}):
+        from tool_github.IGlobal import IGlobal
+
+        glb = IGlobal()
+        glb.glb = types.SimpleNamespace(logicalType='tool_github', connConfig=conn_config())
+        glb.beginGlobal()
+        options = ('defaultRepo', 'readOnly', 'tools', 'graphqlAllowMutations', 'graphqlMaxResponseBytes')
+        for key in (*options, 'rateLimitBudgetSeconds', 'rateLimitMaxRetries'):
+            with pytest.raises(ConfigError):
+                getattr(glb.config, key)
 
 
 def test_services_json_offers_exactly_the_registered_tools_as_choices():

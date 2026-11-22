@@ -174,11 +174,13 @@
 				[0.8, "Strongly related"],
 				[0.9, "Highly relevant"],
 				[1.0, "Almost identical"]
-			]
+			],
+			"param": true
 		},
 		"chroma.top_k": {
 			"base": "vector.top_k",
-			"type": "integer"
+			"type": "integer",
+			"param": true
 		},
 		"chroma.tenant": {
 			"title": "Tenant",
@@ -203,7 +205,9 @@
 			"title": "Tool Server Name",
 			"description": "Label for this store in tool-response messages (for example, a refused write names chroma.delete). Pipeline agents address the available functions as node-id.function; apps use the function name and node ID. Changing this label does not change those addresses. See the node README for the available functions and their tool-exposure and write-permission settings.",
 			"default": "chroma",
-			"minLength": 1
+			"minLength": 1,
+			"param": true,
+			"tool": false
 		}
 	},
 	//
@@ -220,11 +224,11 @@
 			"enum": {
 				"local": {
 					"title": "Your own ChromaDB server",
-					"properties": ["chroma.local.host", "chroma.local.port", "chroma.score", "vector.collection", "chroma.top_k", "chroma.serverName"]
+					"properties": ["chroma.local.host", "chroma.local.port", "chroma.score", { "base": "vector.collection", "param": true, "tool": false }, "chroma.top_k", "chroma.serverName"]
 				},
 				"cloud": {
 					"title": "ChromaDB Cloud Server",
-					"properties": ["chroma.cloud.host", "chroma.cloud.port", "chroma.apikey", "chroma.tenant", "chroma.database", "chroma.ssl", "chroma.score", "vector.collection", "chroma.top_k", "chroma.serverName"]
+					"properties": ["chroma.cloud.host", "chroma.cloud.port", "chroma.apikey", "chroma.tenant", "chroma.database", "chroma.ssl", "chroma.score", { "base": "vector.collection", "param": true, "tool": false }, "chroma.top_k", "chroma.serverName"]
 				}
 			}
 		}

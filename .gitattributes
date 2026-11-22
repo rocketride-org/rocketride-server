@@ -13,6 +13,11 @@
 # Markdown files should use LF (node doc generator writes LF; prevents spurious diffs on Windows)
 *.md text eol=lf
 
+# Frozen contract floors are compared byte-for-byte with the LF bundle their
+# freeze script generates; a CRLF checkout (core.autocrlf=true) must not read as drift
+packages/client-typescript/contract/versions/*.d.ts text eol=lf
+packages/shell/contract/versions/*.d.ts text eol=lf
+
 # Windows batch files should use CRLF
 *.cmd text eol=crlf
 *.bat text eol=crlf

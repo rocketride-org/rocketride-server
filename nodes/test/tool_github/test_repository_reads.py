@@ -13,7 +13,7 @@ from unittest.mock import Mock
 import pytest
 import requests
 
-from ._stubs import scoped_stubs
+from ._stubs import call_options, scoped_stubs
 
 
 TOKEN = 'sentinel-private-token-2592'
@@ -47,14 +47,10 @@ def node(monkeypatch):
             auth_type='pat',
             token=TOKEN,
             private_key_pem='',
-            default_repo='owner/repo',
-            read_only=True,
             get_token=Mock(return_value=TOKEN),
-            tools=frozenset(),
-            graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
-            graphql_allow_mutations=False,
-            retry_policy=github_client.RetryPolicy(),
         )
+        # The options are the call's settings
+        inst._call_options = call_options(github_client, default_repo='owner/repo', read_only=True)
         # Per-call credential questions answered from the attributes the tests set.
         inst.IGlobal.auth_type_for = lambda repo=None, owner=None: inst.IGlobal.auth_type
         inst.IGlobal.app_jwt = lambda repo=None: github_client.sign_app_jwt(
@@ -338,7 +334,7 @@ def test_app_identity_without_a_slug_is_a_shape_failure(node, rsa_private_key_pe
 
 def test_a_missing_repo_names_the_tool(node):
     inst, request, _ = node
-    inst.IGlobal.default_repo = ''
+    inst._options().default_repo = ''
     with pytest.raises(ValueError, match='^label_list: repo is required'):
         inst.label_list({})
     request.assert_not_called()
@@ -894,7 +890,7 @@ def test_tree_walk_stopped_by_a_rate_limit_keeps_retry_after_and_partial_data(no
 def test_tree_walk_waits_out_a_rate_limit_and_carries_on(node):
     inst, request, client = node
     slept = []
-    inst.IGlobal.retry_policy = client.RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
+    inst._options().retry_policy = client.RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
     request.side_effect = routed(
         {
             ('main', True): tree([], truncated=True),
@@ -918,7 +914,7 @@ def test_tree_walk_waits_out_a_rate_limit_and_carries_on(node):
 def test_tree_walk_shares_one_wait_budget_among_its_reads(node):
     inst, request, client = node
     slept = []
-    inst.IGlobal.retry_policy = client.RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
+    inst._options().retry_policy = client.RetryPolicy(sleep=slept.append, clock=lambda: 1_800_000_000.0)
 
     def limited_then(sha, path):
         return [

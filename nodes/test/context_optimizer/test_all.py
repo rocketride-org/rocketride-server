@@ -149,6 +149,8 @@ from context_optimizer.optimizer import (  # noqa: E402
 
 import rocketlib  # noqa: E402  -- the engine binding the catalog is read through
 
+from ..framework.controls import assert_config_refuses, bind_call, control_config  # noqa: E402
+
 
 # ===========================================================================
 # Engine-registry substitutes
@@ -1123,44 +1125,69 @@ class TestEdgeCases:
 # ===========================================================================
 
 
+def _control(conn_config, monkeypatch):
+    """One control on a stored config (the real resolver), its catalog loads counted."""
+    loads = []
+    real_load = ContextOptimizer.load_catalog.__func__
+
+    def counting_load(cls):
+        loads.append(1)
+        return real_load(cls)
+
+    monkeypatch.setattr(ContextOptimizer, 'load_catalog', classmethod(counting_load))
+    iglobal = IGlobal()
+    iglobal.glb = types.SimpleNamespace(logicalType='context_optimizer', id='node_1', connConfig=conn_config)
+    iglobal.beginGlobal()
+    return iglobal, loads
+
+
 class TestIGlobalLifecycle:
-    """Test the IGlobal class lifecycle with mocks."""
+    """One control: the catalog is loaded once; each call builds its optimizer from its settings."""
 
-    def test_begin_global_builds_the_optimizer_from_the_resolved_config(self, monkeypatch):
-        """The resolver's view (mode flattened, defaults applied) is what beginGlobal hands the optimizer."""
-        import context_optimizer.IGlobal as iglobal_module
+    def test_a_call_builds_its_optimizer_from_the_resolved_settings(self, monkeypatch):
+        """The resolver's view (mode flattened, defaults applied) is what the call's optimizer is built from."""
+        iglobal, _ = _control({'mode': 'manual', 'manual': {'max_context_tokens': 112}}, monkeypatch)
+        inst = bind_call(IInstance(), iglobal)
+        inst.beginInstance()
 
-        built = []
-        monkeypatch.setattr(iglobal_module, 'ContextOptimizer', lambda config: built.append(dict(config)) or 'opt')
-        iglobal = IGlobal.__new__(IGlobal)
-        iglobal.optimizer = None
-        iglobal.glb = types.SimpleNamespace(
-            logicalType='context_optimizer', connConfig={'mode': 'manual', 'manual': {'max_context_tokens': 112}}
+        opt = inst.optimizer
+        assert (opt.model_name, opt.max_context_tokens) == ('custom', 112)
+        assert (opt.system_prompt_budget_pct, opt.query_budget_pct) == (10, 15)
+        assert (opt.document_budget_pct, opt.history_budget_pct) == (50, 25)
+
+    def test_one_control_serves_two_calls_with_their_own_budgets(self, monkeypatch):
+        """Two calls with different model, window and budgets share one catalog load."""
+        iglobal, loads = _control({}, monkeypatch)
+        first = bind_call(IInstance(), iglobal)
+        second = bind_call(
+            IInstance(),
+            iglobal,
+            {'mode': 'manual', 'manual.max_context_tokens': 4000, 'document_budget_pct': 70},
+        )
+        for inst in (first, second):
+            inst.beginInstance()
+
+        assert loads == [1]
+        assert (first.optimizer.model_name, first.optimizer.max_context_tokens) == ('gpt-5', 0)
+        assert first.optimizer.document_budget_pct == 50
+        assert (second.optimizer.model_name, second.optimizer.max_context_tokens) == ('custom', 4000)
+        assert second.optimizer.document_budget_pct == 70
+        assert first.optimizer._catalog is second.optimizer._catalog is iglobal.catalog.windows
+
+    def test_the_control_config_refuses_every_budget(self):
+        assert_config_refuses(
+            control_config('context_optimizer'),
+            ['mode', 'model_name', 'system_prompt_budget_pct', 'query_budget_pct', 'document_budget_pct'],
         )
 
-        iglobal.beginGlobal()
-
-        assert iglobal.optimizer == 'opt'
-        assert built == [
-            {
-                'mode': 'manual',
-                'model_name': 'custom',
-                'max_context_tokens': 112,
-                'system_prompt_budget_pct': 10,
-                'query_budget_pct': 15,
-                'document_budget_pct': 50,
-                'history_budget_pct': 25,
-            }
-        ]
-
     def test_end_global_cleanup(self):
-        """EndGlobal should release the optimizer."""
+        """EndGlobal should release the catalog."""
         iglobal = IGlobal.__new__(IGlobal)
-        iglobal.optimizer = MagicMock()
+        iglobal.catalog = MagicMock()
 
         iglobal.endGlobal()
 
-        assert iglobal.optimizer is None
+        assert iglobal.catalog is None
 
 
 def _write_questions(inst, question) -> None:
@@ -1180,13 +1207,11 @@ def _write_questions(inst, question) -> None:
 
 
 class TestIInstanceLifecycle:
-    """Test the IInstance class with mocked IGlobal/optimizer."""
+    """Test the IInstance class with a mocked optimizer."""
 
     def _make_instance(self, optimizer=None):
         inst = IInstance.__new__(IInstance)
-        iglobal = MagicMock()
-        iglobal.optimizer = optimizer
-        inst.IGlobal = iglobal
+        inst.optimizer = optimizer  # built by beginInstance from the call's settings
         inst.instance = MagicMock()
         return inst
 
@@ -1206,7 +1231,7 @@ class TestIInstanceLifecycle:
         inst = self._make_instance(optimizer=MagicMock())
 
         # Configure the mock optimizer to return a result
-        inst.IGlobal.optimizer.optimize.return_value = {
+        inst.optimizer.optimize.return_value = {
             'system_prompt': 'opt_sys',
             'question': 'opt_q',
             'documents': [],
@@ -1626,9 +1651,7 @@ class TestMultiEntryQuestions:
     @staticmethod
     def _instance(optimizer):
         inst = IInstance.__new__(IInstance)
-        iglobal = MagicMock()
-        iglobal.optimizer = optimizer
-        inst.IGlobal = iglobal
+        inst.optimizer = optimizer  # built by beginInstance from the call's settings
         inst.instance = MagicMock()
         return inst
 
@@ -1831,9 +1854,7 @@ class TestModelNameValidation:
 def _make_iinstance(optimizer) -> IInstance:
     """An IInstance wired to *optimizer* with a mocked downstream."""
     inst = IInstance.__new__(IInstance)
-    iglobal = MagicMock()
-    iglobal.optimizer = optimizer
-    inst.IGlobal = iglobal
+    inst.optimizer = optimizer  # built by beginInstance from the call's settings
     inst.instance = MagicMock()
     return inst
 

@@ -44,7 +44,7 @@ class IInstance(IInstanceBase):
         )
 
         # Chunk the document
-        textChunks = self.IGlobal.preprocessor.process(text)
+        textChunks = self.IGlobal.preprocessor.process(text, self.settings.language)
         if not textChunks:
             warning(
                 f'The file {self.instance.currentObject.path} could not be processed, because it does not appear to contain supported source code in one of these languages: c/c++, python, javascript, typescript, typescript.'

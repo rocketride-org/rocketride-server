@@ -40,7 +40,6 @@ def recognizer():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     instance = module.NERRecognizer.__new__(module.NERRecognizer)
-    instance.min_confidence = 0.9
     return instance
 
 
@@ -61,7 +60,8 @@ def test_real_postprocessor_to_recognizer_preserves_high_confidence_entity(recog
 
     recognizer.ner_pipeline = stub_pipeline
 
-    assert recognizer.extract_entities('Alice Uncertain') == [
+    # The call's threshold drops the low-confidence span
+    assert recognizer.extract_entities('Alice Uncertain', 0.9) == [
         {'entity_group': label, 'word': 'Alice', 'score': 0.99, 'start': 0, 'end': 5}
     ]
 
@@ -74,4 +74,4 @@ def test_empty_entities_remain_empty(recognizer):
         return [{'entities': []}]
 
     recognizer.ner_pipeline = stub_pipeline
-    assert recognizer.extract_entities('nothing to recognize') == []
+    assert recognizer.extract_entities('nothing to recognize', 0.9) == []

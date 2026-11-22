@@ -24,6 +24,8 @@
 				"Docs scopes to request. readonly: read document text and metadata only. write: full read/write (create ",
 				"documents, append and replace text, insert images and tables, and run arbitrary batchUpdate requests)."
 			],
+			"param": true,
+			"tool": false,
 			"default": "write",
 			"enum": [
 				["readonly", "Read-only"],
@@ -45,7 +47,7 @@
 				"access": "write"
 			}
 		},
-		"dropped": [],
+		"dropped": ["customerId", "service.customerId"],
 		"credential": {
 			"userToken": "user.userAuth"
 		}

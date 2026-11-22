@@ -106,18 +106,21 @@
 	//
 	"propertyDefinitions": {
 		"scan_cropper.deskew": {
+			"param": true,
 			"type": "boolean",
 			"title": "Straighten photos",
 			"description": "Rotates each photo upright as it is cut, so a slightly crooked scan comes out square. Turn this off only if you would rather keep the original pixels untouched - the photo then keeps its tilt and has page-coloured wedges in the corners.",
 			"default": true
 		},
 		"scan_cropper.quality": {
+			"param": true,
 			"type": "string",
 			"title": "JPEG quality",
 			"description": "Type 'auto' to match the quality your scanner saved at, or a number from 1 to 100. Leave it on 'auto': saving above the original cannot recover detail the scanner already threw away, it only makes files bigger - a quality-75 scan re-saved at 100 is roughly four times the size and looks the same.",
 			"default": "auto"
 		},
 		"scan_cropper.qualityTolerance": {
+			"param": true,
 			"type": "number",
 			"title": "File size vs quality (dB)",
 			"description": "Only used when JPEG quality is 'auto'. How much final quality to give up in exchange for smaller files. 0.2 keeps files large and near-perfect, 1.0 makes them roughly half the size with a difference you would struggle to see. Measured on a 33-page album: 657 MB at 0.2, 463 MB at 0.5, 330 MB at 1.0.",
@@ -126,6 +129,7 @@
 			"maximum": 1.5
 		},
 		"scan_cropper.detectSize": {
+			"param": true,
 			"type": "integer",
 			"title": "Detection size (px)",
 			"description": "How big a copy of the scan the search for photos runs on. Your crops are always cut from the full-resolution original, so this only trades speed against how precisely photo edges are located. It is the main speed control and the cost is quadratic: 3000 to 2000 is about 2.25x faster. Raise it if crop edges land slightly inside or outside the photo.",
@@ -138,6 +142,7 @@
 			"default": 4500
 		},
 		"scan_cropper.texture": {
+			"param": true,
 			"type": "number",
 			"title": "Page smoothness",
 			"description": "How smooth an area has to be before it counts as empty page rather than part of a photo. RAISE this if the page itself is being detected as photos (grainy, patterned or fabric-covered pages). LOWER it if a photo with large flat areas - a plain sky, a studio backdrop - is being cut short or missed.",
@@ -150,6 +155,7 @@
 			"default": 9.0
 		},
 		"scan_cropper.minArea": {
+			"param": true,
 			"type": "number",
 			"title": "Smallest photo to keep",
 			"description": "Ignore anything smaller than this share of the whole scan. 0.005 means half a percent of the page. Lower it if small photos or stamps are being missed; raise it if specks and dust are coming out as tiny crops.",
@@ -158,6 +164,7 @@
 			"maximum": 0.5
 		},
 		"scan_cropper.maxArea": {
+			"param": true,
 			"type": "number",
 			"title": "Largest photo to keep",
 			"description": "Ignore anything larger than this share of the whole scan. Kept below 1.0 so that failing to find the photos returns nothing rather than handing you the entire page as one giant 'photo'. You rarely need to change this.",
@@ -166,6 +173,7 @@
 			"maximum": 1.0
 		},
 		"scan_cropper.maxAspect": {
+			"param": true,
 			"type": "number",
 			"title": "Longest allowed shape",
 			"description": "How stretched a rectangle may be before it is rejected as not a photo, measured as long side divided by short side. 5.0 comfortably allows panoramas. Lower it if strips of page edge or scanner lid are being picked up as photos.",
@@ -174,6 +182,7 @@
 			"maximum": 20
 		},
 		"scan_cropper.minRelative": {
+			"param": true,
 			"type": "number",
 			"title": "Discard small leftovers",
 			"description": "Throws away finds much smaller than the biggest photo on the page, on the assumption they are torn-off pieces of one photo rather than photos in their own right. 0.4 means 'drop anything under 40% of the largest'. Lower it, or set 0 to keep everything, when one page genuinely holds photos of very different sizes.",
@@ -186,6 +195,7 @@
 			"default": 0.2
 		},
 		"scan_cropper.maxDepth": {
+			"param": true,
 			"type": "integer",
 			"title": "Separate touching photos",
 			"description": "Photos mounted edge to edge look like one shape and have to be cut apart; this is how many times a shape may be cut. Set to 0 when your photos never touch - it switches off the most expensive part of the search and is by far the biggest speed win. Raise it if a row of several touching photos comes out as one image.",
@@ -202,6 +212,7 @@
 			"default": 6
 		},
 		"scan_cropper.skew": {
+			"param": true,
 			"type": "number",
 			"title": "Tilt allowance when separating (degrees)",
 			"description": "How crooked the join between two touching photos may be and still be found. NOT a speed setting - lowering it narrows the search without saving any time, because the number of angles tried does not drop below five. Raise it only if touching photos on a visibly crooked scan are not being separated.",
@@ -210,6 +221,7 @@
 			"maximum": 10
 		},
 		"scan_cropper.ratioTolerance": {
+			"param": true,
 			"type": "number",
 			"title": "Print shape tolerance (%)",
 			"description": "Used only when deciding whether a shape is two touching photos or one whole photo: how far the pieces may sit from a standard print shape (6x4, 5x7, square and so on). It never rejects a photo on its own, so an unusual shape is still kept. Raise it if photos that should be split are staying joined; lower it if one photo is being cut in half.",
@@ -225,6 +237,7 @@
 	"properties": [
 		{
 			"name": "profile",
+			"param": true,
 			"title": "Scan type",
 			"description": "Pick what you actually scanned and nothing else needs setting. There is no white/dark/album background choice because the node works the background out from the scan itself - what these change is whether photos touch each other, how similar their sizes are, and how grainy the page is. Every value a scan type uses is listed below, filled in with that scan type's own numbers, so you can start from it and adjust one thing.",
 			"type": "string",

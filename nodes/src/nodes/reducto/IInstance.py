@@ -36,6 +36,16 @@ class IInstance(IInstanceBase):
         self.current_text = ''
         self.document_data = b''
 
+    def beginInstance(self):
+        """Refuse this call's advanced-mode options when one is not a Python dictionary literal.
+
+        Raises:
+            ValueError: An option field the call fills is not a dictionary; the message names it.
+        """
+        from .IValidator import check_option_dicts
+
+        check_option_dicts(self.settings)
+
     def open(self, object: Entry):
         """Call from engLib, process object startup."""
         debug(f'Reducto Instance: Opening object {object.fileName if hasattr(object, "fileName") else "unknown"}')
@@ -155,7 +165,7 @@ class IInstance(IInstanceBase):
         has_table_listener = self.instance.hasListener('table')
 
         # Parse document once and get both text and tables
-        text, tables = self.IGlobal.parser.parse(document_data, file_name)
+        text, tables = self.IGlobal.parser.parse(document_data, self.settings, file_name)
 
         # Handle text if we have a listener
         if has_text_listener:

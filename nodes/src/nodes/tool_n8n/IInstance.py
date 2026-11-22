@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 from typing import Any, Dict
 
 from rocketlib import AVI_ACTION, Entry, IInstanceBase, tool_function
@@ -78,6 +79,9 @@ class IInstance(IInstanceBase):
 
     IGlobal: IGlobal
 
+    # This call's run options, read from its settings on first use (see _run_options)
+    _call_options: SimpleNamespace | None = None
+
     def beginInstance(self) -> None:
         """Reset the preflight flag and create the lane input buffers."""
         self._preflight_done = False
@@ -90,15 +94,40 @@ class IInstance(IInstanceBase):
     # Shared helpers
     # =======================================================================
 
+    def _run_options(self) -> SimpleNamespace:
+        """
+        This call's run options: the default workflow, the result mode and its timeouts,
+        the payload mode, TLS verification and the read-only gate.
+
+        The control holds the instance URL and the credentials; these are each
+        call's settings. Only the selected result mode's timeout is in the view;
+        the other keeps its schema default.
+
+        Returns:
+            The options, read once per call from its settings.
+        """
+        if self._call_options is None:
+            settings = self.settings
+            self._call_options = SimpleNamespace(
+                default_workflow=str(settings.workflow or '').strip(),
+                mode=settings.mode,
+                payload_mode=settings.payloadMode,
+                sync_timeout=settings.get('syncTimeout', 30),
+                async_timeout=settings.get('asyncTimeout', 120),
+                verify_tls=settings.verifyTls,
+                read_only=settings.readOnly,
+            )
+        return self._call_options
+
     def _preflight_once(self) -> None:
         """Probe reachability once per instance (deploy-aware error on failure)."""
         if not self._preflight_done:
-            n8n_client.preflight(self.IGlobal.base_url, verify=self.IGlobal.verify_tls)
+            n8n_client.preflight(self.IGlobal.base_url, verify=self._run_options().verify_tls)
             self._preflight_done = True
 
     def _require_write(self) -> None:
         """Raise ValueError when the node is configured read-only."""
-        if self.IGlobal.read_only:
+        if self._run_options().read_only:
             raise ValueError('This operation is blocked: the node is in read-only mode.')
 
     @staticmethod
@@ -151,7 +180,7 @@ class IInstance(IInstanceBase):
         path = self._safe_path(workflow)
         self._preflight_once()
 
-        is_async = g.mode == 'async'
+        is_async = self._run_options().mode == 'async'
         correlation_id = ''
         started_after = ''
         if is_async:
@@ -174,8 +203,8 @@ class IInstance(IInstanceBase):
             files=files,
             auth=g.webhook_auth,
             test_mode=test_mode,
-            verify=g.verify_tls,
-            timeout=g.sync_timeout,
+            verify=self._run_options().verify_tls,
+            timeout=self._run_options().sync_timeout,
         )
 
         if not n8n_client.is_started_ack(body):
@@ -183,15 +212,17 @@ class IInstance(IInstanceBase):
             return {'success': True, 'started': True, 'result': body}
 
         if is_async:
-            workflow_id = n8n_client.find_workflow_id_by_path(g.base_url, g.api_key, path, verify=g.verify_tls)
+            workflow_id = n8n_client.find_workflow_id_by_path(
+                g.base_url, g.api_key, path, verify=self._run_options().verify_tls
+            )
             execution = n8n_client.wait_for_execution(
                 g.base_url,
                 g.api_key,
                 workflow_id,
                 correlation_id=correlation_id,
                 started_after=started_after,
-                timeout=g.async_timeout,
-                verify=g.verify_tls,
+                timeout=self._run_options().async_timeout,
+                verify=self._run_options().verify_tls,
             )
             return {'success': True, 'started': True, 'result': execution}
 
@@ -243,7 +274,7 @@ class IInstance(IInstanceBase):
     def trigger_workflow(self, args):
         """Trigger an n8n workflow via its webhook."""
         args = normalize_tool_input(args, tool_name='tool_n8n')
-        workflow = (args.get('workflow') or self.IGlobal.default_workflow or '').strip()
+        workflow = (args.get('workflow') or self._run_options().default_workflow or '').strip()
         payload = args.get('payload') if isinstance(args.get('payload'), dict) else {}
         try:
             out = self._run_webhook(workflow, payload, test_mode=bool(args.get('test_mode')))
@@ -274,7 +305,9 @@ class IInstance(IInstanceBase):
             'limit': max(1, min(int(args.get('limit') or 50), 250)),
         }
         try:
-            data = n8n_client.call(g.base_url, g.api_key, 'GET', '/workflows', params=params, verify=g.verify_tls)
+            data = n8n_client.call(
+                g.base_url, g.api_key, 'GET', '/workflows', params=params, verify=self._run_options().verify_tls
+            )
         except ValueError as exc:
             return {'success': False, 'workflows': [], 'error': str(exc)}
         items = data.get('data', []) if isinstance(data, dict) else (data or [])
@@ -294,7 +327,9 @@ class IInstance(IInstanceBase):
         g = self.IGlobal
         try:
             wid = require_str(args, 'id', tool_name='get_workflow')
-            data = n8n_client.call(g.base_url, g.api_key, 'GET', f'/workflows/{wid}', verify=g.verify_tls)
+            data = n8n_client.call(
+                g.base_url, g.api_key, 'GET', f'/workflows/{wid}', verify=self._run_options().verify_tls
+            )
         except ValueError as exc:
             return {'success': False, 'workflow': None, 'error': str(exc)}
         return {'success': True, 'workflow': n8n_client.clean_workflow(data)}
@@ -325,7 +360,9 @@ class IInstance(IInstanceBase):
             'limit': max(1, min(int(args.get('limit') or 20), 250)),
         }
         try:
-            data = n8n_client.call(g.base_url, g.api_key, 'GET', '/executions', params=params, verify=g.verify_tls)
+            data = n8n_client.call(
+                g.base_url, g.api_key, 'GET', '/executions', params=params, verify=self._run_options().verify_tls
+            )
         except ValueError as exc:
             return {'success': False, 'executions': [], 'error': str(exc)}
         items = data.get('data', []) if isinstance(data, dict) else (data or [])
@@ -357,7 +394,7 @@ class IInstance(IInstanceBase):
                 'GET',
                 f'/executions/{eid}',
                 params={'includeData': include_data},
-                verify=g.verify_tls,
+                verify=self._run_options().verify_tls,
             )
         except ValueError as exc:
             return {'success': False, 'execution': None, 'error': str(exc)}
@@ -404,7 +441,9 @@ class IInstance(IInstanceBase):
         try:
             self._require_write()
             wid = require_str(args, 'id', tool_name=tool_name)
-            n8n_client.call(g.base_url, g.api_key, 'POST', f'/workflows/{wid}/{verb}', verify=g.verify_tls)
+            n8n_client.call(
+                g.base_url, g.api_key, 'POST', f'/workflows/{wid}/{verb}', verify=self._run_options().verify_tls
+            )
         except ValueError as exc:
             return {'success': False, 'error': str(exc)}
         return {'success': True, 'id': wid, 'active': active}
@@ -515,7 +554,7 @@ class IInstance(IInstanceBase):
         flattens everything to ``{"data": "<text>"}`` for back-compat.
         """
         text = ''.join(self._text_parts)
-        if self.IGlobal.payload_mode == 'structured':
+        if self._run_options().payload_mode == 'structured':
             return {'text': text, 'documents': self._documents}
         return {'data': text + ''.join(d.get('content', '') for d in self._documents)}
 
@@ -554,8 +593,7 @@ class IInstance(IInstanceBase):
 
     def closing(self):
         """Trigger the configured workflow with the accumulated input and emit the result."""
-        g = self.IGlobal
-        workflow = g.default_workflow
+        workflow = self._run_options().default_workflow
         if not workflow:
             raise ValueError('tool_n8n pipeline step: no workflow configured — set the Workflow (webhook path) field.')
 

@@ -69,7 +69,8 @@ def _ensure_rocketlib() -> None:
     """Install a minimal rocketlib stub so the node imports without the engine."""
     mod = sys.modules.get('rocketlib') or types.ModuleType('rocketlib')
     if not hasattr(mod, 'IInstanceBase'):
-        mod.IInstanceBase = type('IInstanceBase', (), {})
+        # The node reads its call's values through ``settings``, which ``_instance`` stores as ``_settings``
+        mod.IInstanceBase = type('IInstanceBase', (), {'settings': property(lambda self: self._settings)})
     if not hasattr(mod, 'IGlobalBase'):
         mod.IGlobalBase = type('IGlobalBase', (), {})
     if not hasattr(mod, 'tool_function'):
@@ -195,18 +196,22 @@ def _pin_normalizer(monkeypatch):
     monkeypatch.setattr(IInstanceMod, 'normalize_tool_input', _passthrough)
 
 
+#: The call settings a test binds to its control (the schema defaults).
+_CALL_DEFAULTS = {
+    'dataset': 'main',
+    'allow_dataset_override': False,
+    'search_type': 'GRAPH_COMPLETION_DECOMPOSITION',
+    'top_k': 15,
+    'request_timeout': 120,
+}
+
+
 def _make_global(**overrides):
-    """Build an IGlobal preset with test config."""
+    """Build an IGlobal preset with the test server, carrying the call settings its instances bind."""
     glb = IGlobal()
-    glb.base_url = 'http://localhost:8000'
-    glb.api_key = 'ck_test'
-    glb.dataset = 'main'
-    glb.allow_dataset_override = False
-    glb.search_type = 'GRAPH_COMPLETION_DECOMPOSITION'
-    glb.top_k = 15
-    glb.request_timeout = 120
-    for k, v in overrides.items():
-        setattr(glb, k, v)
+    glb.base_url = overrides.pop('base_url', 'http://localhost:8000')
+    glb.api_key = overrides.pop('api_key', 'ck_test')
+    glb.call_settings = {**_CALL_DEFAULTS, **overrides}
     return glb
 
 
@@ -320,9 +325,11 @@ def test_shared_cognee_example_topology_and_documentation():
 
 
 def _instance(glb):
-    """Construct an IInstance bound to the given IGlobal."""
+    """Construct an IInstance bound to the given IGlobal and the call settings it carries."""
     inst = IInstance()
     inst.IGlobal = glb
+    # The dataset scope and the recall defaults are the call's settings
+    inst._settings = types.SimpleNamespace(**glb.call_settings)
     return inst
 
 
@@ -1112,11 +1119,13 @@ def test_global_loads_exact_runtime_configuration(monkeypatch):
 
     assert glb.base_url == 'https://cognee.example'
     assert glb.api_key == 'ck_config'
-    assert glb.dataset == 'demo'
-    assert glb.allow_dataset_override is True
-    assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
-    assert glb.top_k == 7
-    assert glb.request_timeout == 45
+    # The scope and recall values are a call's settings: a call with no params reads the stored ones
+    settings = glb._resolved()
+    assert settings.dataset == 'demo'
+    assert settings.allow_dataset_override is True
+    assert settings.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
+    assert settings.top_k == 7
+    assert settings.request_timeout == 45
 
 
 def test_global_unconfigured_node_runs_on_the_schema_defaults():
@@ -1126,11 +1135,8 @@ def test_global_unconfigured_node_runs_on_the_schema_defaults():
 
     assert glb.base_url == 'http://localhost:8000'
     assert glb.api_key == ''
-    assert glb.dataset == 'main'
-    assert glb.allow_dataset_override is False
-    assert glb.search_type == 'GRAPH_COMPLETION_DECOMPOSITION'
-    assert glb.top_k == 15
-    assert glb.request_timeout == 120
+    settings = glb._resolved()
+    assert {key: settings[key] for key in _CALL_DEFAULTS} == _CALL_DEFAULTS
 
 
 def test_global_rejects_an_out_of_range_top_k():
@@ -1141,18 +1147,32 @@ def test_global_rejects_an_out_of_range_top_k():
         _configured_global({'top_k': 500}).beginGlobal()
 
 
-@pytest.mark.parametrize(
-    ('conn_config', 'field'),
-    [
-        ({'base_url': '   '}, 'base_url'),
-        ({'base_url': '/'}, 'base_url'),
-        ({'dataset': '   '}, 'dataset'),
-    ],
-)
-def test_global_rejects_a_value_that_strips_to_empty(conn_config, field):
+@pytest.mark.parametrize('conn_config', [{'base_url': '   '}, {'base_url': '/'}])
+def test_global_rejects_a_value_that_strips_to_empty(conn_config):
     """The schema minLength counts whitespace: a blank value passes it, so the node refuses it after stripping."""
-    with pytest.raises(Exception, match=f'tool_cognee: {field} is required'):
+    with pytest.raises(Exception, match='tool_cognee: base_url is required'):
         _configured_global(conn_config).beginGlobal()
+
+
+@pytest.mark.parametrize(
+    ('tool_name', 'args'),
+    [('remember', {'text': 'memory'}), ('recall', {'query': 'question'}), ('memory_status', {})],
+)
+def test_a_call_whose_dataset_strips_to_empty_is_refused(tool_name, args):
+    """A blank dataset setting would widen the scope to the server default: the call fails instead."""
+    with pytest.raises(ValueError, match='tool_cognee: dataset is required'):
+        getattr(_instance(_make_global(dataset='   ')), tool_name)(args)
+
+
+def test_the_control_config_refuses_the_call_settings():
+    """The scope and recall values are params: the control's config never serves them."""
+    from rocketlib.config import ConfigError
+
+    glb = _configured_global({})
+    glb.beginGlobal()
+    for key in _CALL_DEFAULTS:
+        with pytest.raises(ConfigError):
+            getattr(glb.config, key)
 
 
 def test_global_end_clears_api_key():
@@ -1184,7 +1204,7 @@ def test_global_unset_dataset_override_is_false():
     """None means unset, so the declared default (off) applies."""
     glb = _configured_global({'base_url': 'https://cognee.example', 'allow_dataset_override': None})
     glb.beginGlobal()
-    assert glb.allow_dataset_override is False
+    assert glb._resolved().allow_dataset_override is False
 
 
 def test_global_services_expose_dataset_override_boolean_in_profile_and_shape():
@@ -1216,3 +1236,17 @@ def test_global_services_expose_dataset_override_boolean_in_profile_and_shape():
     assert override['type'] == 'boolean'
     assert override['default'] is False
     assert 'cognee.allow_dataset_override' in services['properties']
+
+
+def test_one_control_serves_two_calls_with_their_own_dataset_and_top_k(modern_calls):
+    """The dataset scope and the recall defaults are each call's: one control, two calls."""
+    glb = _make_global()
+    first = _instance(glb)
+    second = _instance(glb)
+    second._settings = types.SimpleNamespace(**{**glb.call_settings, 'dataset': ' team ', 'top_k': 3})
+
+    first.recall({'query': 'q'})
+    second.recall({'query': 'q'})
+
+    sent = [call['kwargs'] for call in modern_calls['calls']]
+    assert [(kwargs['dataset'], kwargs['top_k']) for kwargs in sent] == [('main', 15), ('team', 3)]

@@ -40,6 +40,23 @@ class IInstance(IInstanceBase):
     _document_data: bytes
     _target_object_writer: Optional[object]
 
+    # This call's parser, from the control's cache for its parse configuration
+    _call_parser = None
+
+    def _parser(self):
+        """
+        This call's parser: the control's client for the call's parse configuration.
+
+        Returns:
+            The ``Parser`` (built on the control's first call with this configuration).
+
+        Raises:
+            RuntimeError: The call's advanced block is not a JSON object.
+        """
+        if self._call_parser is None:
+            self._call_parser = self.IGlobal.parser_for(self.settings)
+        return self._call_parser
+
     def open(self, object: Entry):
         """Call from engLib, process object startup."""
         debug(f'LlamaParse Instance: Opening object {object.fileName if hasattr(object, "fileName") else "unknown"}')
@@ -73,8 +90,8 @@ class IInstance(IInstanceBase):
                 # Parse the document using LlamaParse
                 with self.IGlobal._parserLock:
                     debug('LlamaParse Instance: Acquired parser lock')
-                    if self.IGlobal._parser:
-                        result = self.IGlobal._parser.parse(
+                    if self._parser():
+                        result = self._parser().parse(
                             file_data=self._document_data,
                             file_name=self._current_object.fileName,
                         )
@@ -270,25 +287,43 @@ class IInstance(IInstanceBase):
             )
 
     def _process_document(self, document_data: bytes, mime_type: str):
-        """Process document data using LlamaParse."""
+        """
+        Process document data using LlamaParse.
+
+        The call's parse configuration is resolved first: one that cannot build
+        a client (an advanced block that is not a JSON object, an argument the
+        SDK refuses) fails the object through ``completionCode``, as ``close()``
+        reports a parse error, and nothing is emitted for it. An error past that
+        point is written to the text lane as an error report.
+        """
+        # Step 1: this call's parser; a configuration error fails the object, it is never parsed text
+        try:
+            self._parser()
+        except Exception as e:
+            debug(f'LlamaParse Instance: Parse configuration refused: {e}')
+            if getattr(self, '_current_object', None):
+                self._current_object.completionCode(str(e))
+            return
+
+        # Step 2: parse the document and emit what it holds
         try:
             debug(f'LlamaParse Instance: Sending document to LlamaParse: {len(document_data)} bytes, MIME: {mime_type}')
 
             # Parse the document using LlamaParse
             with self.IGlobal._parserLock:
                 debug('LlamaParse Instance: Acquired parser lock')
-                if self.IGlobal._parser:
+                if self._parser():
                     # For images, ensure we get markdown output
                     if mime_type.startswith('image/'):
                         debug('LlamaParse Instance: Processing image file')
                         # Parse image - result_type is configured in the parser
-                        result = self.IGlobal._parser.parse(
+                        result = self._parser().parse(
                             file_data=document_data,
                             file_name=self._current_object.fileName,
                         )
                     else:
                         # For documents, use the configured result_type
-                        result = self.IGlobal._parser.parse(
+                        result = self._parser().parse(
                             file_data=document_data,
                             file_name=self._current_object.fileName,
                         )
@@ -515,11 +550,9 @@ class IInstance(IInstanceBase):
             # Parse the document using LlamaParse
             with self.IGlobal._parserLock:
                 debug('LlamaParse Instance: Acquired parser lock for document object')
-                if self.IGlobal._parser:
+                if self._parser():
                     debug(f'LlamaParse Instance: Calling parser for document object: {self._current_object.fileName}')
-                    result = self.IGlobal._parser.parse(
-                        file_data=document_data, file_name=self._current_object.fileName
-                    )
+                    result = self._parser().parse(file_data=document_data, file_name=self._current_object.fileName)
                     # Handle both old string format and new dict format
                     if isinstance(result, dict):
                         text = result.get('text', '')

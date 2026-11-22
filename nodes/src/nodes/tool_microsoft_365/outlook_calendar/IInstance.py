@@ -190,7 +190,7 @@ class IInstance(MicrosoftToolInstanceBase):
         end = require_str(args, 'end', tool_name=op)
         calendar = optional_str(args, 'calendar', default='', tool_name=op) or ''
         params = {'startDateTime': start, 'endDateTime': end, '$top': MAX_TOP, '$select': EVENT_SELECT}
-        data = request(self.IGlobal.auth, 'GET', f'{self._calendar_events_base(calendar)}/calendarView', params=params)
+        data = request(self._auth(), 'GET', f'{self._calendar_events_base(calendar)}/calendarView', params=params)
         return {
             'events': [clean_event(e) for e in data.get('value') or []],
             'next_link': data.get('@odata.nextLink'),
@@ -210,7 +210,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """Get a single calendar event by id. Read-only."""
         args = normalize_tool_input(args, tool_name='tool_outlook_calendar')
         event_id = require_str(args, 'event_id', tool_name='outlook_calendar_get_event')
-        data = request(self.IGlobal.auth, 'GET', self._event(event_id))
+        data = request(self._auth(), 'GET', self._event(event_id))
         return clean_event(data)
 
     # =======================================================================
@@ -279,10 +279,10 @@ class IInstance(MicrosoftToolInstanceBase):
         """Create a calendar event, optionally inviting attendees. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_calendar')
         op = 'outlook_calendar_create_event'
-        self.IGlobal.access.require_write(op)
+        self._access().require_write(op)
         calendar = optional_str(args, 'calendar', default='', tool_name=op) or ''
         event = self._compose_event(args, op)
-        data = request(self.IGlobal.auth, 'POST', f'{self._calendar_events_base(calendar)}/events', json_body=event)
+        data = request(self._auth(), 'POST', f'{self._calendar_events_base(calendar)}/events', json_body=event)
         return clean_event(data)
 
     @tool_function(
@@ -341,7 +341,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """Update a calendar event, changing only the fields provided. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_calendar')
         op = 'outlook_calendar_update_event'
-        self.IGlobal.access.require_write(op)
+        self._access().require_write(op)
         event_id = require_str(args, 'event_id', tool_name=op)
         patch: dict = {}
         subject = optional_str(args, 'subject', default=None, tool_name=op)
@@ -362,7 +362,7 @@ class IInstance(MicrosoftToolInstanceBase):
             patch['location'] = {'displayName': location}
         if not patch:
             raise ValueError(f'{op}: at least one field to update must be provided')
-        data = request(self.IGlobal.auth, 'PATCH', self._event(event_id), json_body=patch)
+        data = request(self._auth(), 'PATCH', self._event(event_id), json_body=patch)
         return clean_event(data)
 
     @tool_function(
@@ -379,9 +379,9 @@ class IInstance(MicrosoftToolInstanceBase):
         """Delete a calendar event. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_calendar')
         op = 'outlook_calendar_delete_event'
-        self.IGlobal.access.require_write(op)
+        self._access().require_write(op)
         event_id = require_str(args, 'event_id', tool_name=op)
-        request(self.IGlobal.auth, 'DELETE', self._event(event_id))
+        request(self._auth(), 'DELETE', self._event(event_id))
         return {'deleted': event_id}
 
     @tool_function(
@@ -404,13 +404,13 @@ class IInstance(MicrosoftToolInstanceBase):
         """Respond to a meeting invitation. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_calendar')
         op = 'outlook_calendar_respond'
-        self.IGlobal.access.require_write(op)
+        self._access().require_write(op)
         event_id = require_str(args, 'event_id', tool_name=op)
         response = self._enum_arg(args, 'response', _RESPONSE_VALUES, None)
         if response is None:
             raise ValueError(f'{op}: "response" is required and must be one of {list(_RESPONSE_VALUES)}')
         comment = optional_str(args, 'comment', default='', tool_name=op) or ''
-        request(self.IGlobal.auth, 'POST', f'{self._event(event_id)}/{response}', json_body={'comment': comment})
+        request(self._auth(), 'POST', f'{self._event(event_id)}/{response}', json_body={'comment': comment})
         return {'responded': event_id, 'response': response}
 
     # =======================================================================
@@ -465,7 +465,7 @@ class IInstance(MicrosoftToolInstanceBase):
             body['timeConstraint'] = {
                 'timeslots': [{'start': event_datetime(window_start), 'end': event_datetime(window_end)}]
             }
-        data = request(self.IGlobal.auth, 'POST', f'{self._base()}/findMeetingTimes', json_body=body)
+        data = request(self._auth(), 'POST', f'{self._base()}/findMeetingTimes', json_body=body)
         return {'suggestions': data.get('meetingTimeSuggestions') or []}
 
     @tool_function(
@@ -526,7 +526,7 @@ class IInstance(MicrosoftToolInstanceBase):
             'startTime': self._dt_arg(args, 'start', op),
             'endTime': self._dt_arg(args, 'end', op),
         }
-        data = request(self.IGlobal.auth, 'POST', f'{self._base()}/calendar/getSchedule', json_body=body)
+        data = request(self._auth(), 'POST', f'{self._base()}/calendar/getSchedule', json_body=body)
         return {'schedules': data.get('value') or []}
 
     # =======================================================================
@@ -541,7 +541,7 @@ class IInstance(MicrosoftToolInstanceBase):
         """List the calendars in the mailbox. Read-only."""
         normalize_tool_input(args, tool_name='tool_outlook_calendar')
         data = request(
-            self.IGlobal.auth, 'GET', f'{self._base()}/calendars', params={'$top': 100, '$select': CALENDAR_SELECT}
+            self._auth(), 'GET', f'{self._base()}/calendars', params={'$top': 100, '$select': CALENDAR_SELECT}
         )
         return {'calendars': [clean_calendar(c) for c in data.get('value') or []]}
 
@@ -559,9 +559,9 @@ class IInstance(MicrosoftToolInstanceBase):
         """Create a new calendar. Requires the write tier."""
         args = normalize_tool_input(args, tool_name='tool_outlook_calendar')
         op = 'outlook_calendar_create_calendar'
-        self.IGlobal.access.require_write(op)
+        self._access().require_write(op)
         name = require_str(args, 'name', tool_name=op)
-        data = request(self.IGlobal.auth, 'POST', f'{self._base()}/calendars', json_body={'name': name})
+        data = request(self._auth(), 'POST', f'{self._base()}/calendars', json_body={'name': name})
         return clean_calendar(data)
 
     # =======================================================================
@@ -601,12 +601,12 @@ class IInstance(MicrosoftToolInstanceBase):
         op = 'outlook_calendar_delta_sync'
         delta_link = optional_str(args, 'delta_link', default='', tool_name=op) or ''
         if delta_link:
-            data = request(self.IGlobal.auth, 'GET', delta_link)
+            data = request(self._auth(), 'GET', delta_link)
         else:
             start = require_str(args, 'start', tool_name=op)
             end = require_str(args, 'end', tool_name=op)
             params = {'startDateTime': start, 'endDateTime': end}
-            data = request(self.IGlobal.auth, 'GET', f'{self._base()}/calendarView/delta', params=params)
+            data = request(self._auth(), 'GET', f'{self._base()}/calendarView/delta', params=params)
         return {
             'events': [clean_event(e) for e in data.get('value') or []],
             'delta_link': data.get('@odata.deltaLink'),

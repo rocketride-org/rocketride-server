@@ -87,6 +87,7 @@
 			"format": "textarea",
 			"title": "Graph description",
 			"default": "",
+			"param": true,
 			"description": "What is this graph used for? Describe its content and domain, this helps the LLM generate more accurate Cypher queries."
 		},
 		"graph_neo4j.uri": {
@@ -94,12 +95,14 @@
 			"title": "Connection URI",
 			"default": "neo4j://localhost:7687",
 			"minLength": 1,
+			"env": "ROCKETRIDE_GRAPH_NEO4J_URI",
 			"description": "Bolt URI for the Neo4J instance. Use neo4j:// or bolt:// for plaintext, neo4j+s:// or bolt+s:// for TLS (e.g. Neo4J Aura cloud)"
 		},
 		"graph_neo4j.user": {
 			"type": "string",
 			"title": "User",
 			"default": "neo4j",
+			"env": "ROCKETRIDE_GRAPH_NEO4J_USER",
 			"description": "Username to authenticate with the Neo4J instance."
 		},
 		"graph_neo4j.password": {
@@ -122,6 +125,7 @@
 			"title": "Database name",
 			"default": "neo4j",
 			"minLength": 1,
+			"env": "ROCKETRIDE_GRAPH_NEO4J_DATABASE",
 			"description": "Name of the Neo4J database to connect to. Use 'neo4j' for the default database."
 		},
 		"graph_neo4j.max_attempts": {
@@ -130,12 +134,16 @@
 			"default": 5,
 			"minimum": 1,
 			"maximum": 10,
+			"param": true,
+			"tool": false,
 			"description": "Maximum number of times to re-ask the LLM if EXPLAIN rejects the generated Cypher query"
 		},
 		"graph_neo4j.allow_execute": {
 			"type": "boolean",
 			"title": "Allow direct query execution",
 			"default": false,
+			"param": true,
+			"tool": false,
 			"description": "Permit QuestionType.EXECUTE callers to run raw Cypher without LLM translation or safety checks. Leave OFF unless a trusted application explicitly needs to issue Cypher directly."
 		}
 	},

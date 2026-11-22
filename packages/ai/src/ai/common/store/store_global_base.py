@@ -26,10 +26,18 @@
 """Abstract IGlobal layer shared by every vector store node.
 
 Vector stores differ in transport (Qdrant REST/gRPC, Weaviate, Pinecone, ...)
-and in how they validate a collection name, but they share a lifecycle: read
-the resolved config, resolve the tool namespace and the two tool switches,
-check the credentials, open the store and expose the agent tools. That
+and in how they validate a collection name, but they share a lifecycle: check
+the credentials, open the store a call names and expose the agent tools. That
 lifecycle lives here; the driver-specific piece lives in the hook below.
+
+The collection, the score threshold and the other values a store reads are
+parameters (plan 4.1 rule 4): one control serves calls that name different
+collections. The global therefore keeps a BOUNDED keyed cache of driver stores,
+keyed by the store-shaping values of the call's settings, each store opened by
+the driver from those settings on the first call that names them. It is a
+cache, never state (plan 4.1 rule 1): an evicted store is opened again on its
+next use. The tool namespace and the two tool switches are read per call by the
+tool mixin, so they are not part of the key.
 
 A concrete node implements ``_open_store`` and inherits the rest. See
 ``nodes/src/nodes/store_qdrant/IGlobal.py`` for a worked example. Save-time
@@ -38,7 +46,12 @@ validation is not part of this class: the engine imports the package's
 ships it in ``IValidator.py``.
 """
 
+import hashlib
+import json
+import threading
+
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from rocketlib import IGlobalBase
@@ -47,30 +60,43 @@ from ai.common.config import check_credential_resolved
 
 from .document_store import DocumentStoreBase
 
+# The most driver stores one control keeps open. A call names its collection
+# (and its threshold and the like) as parameters; past this many distinct
+# combinations the least recently used store is dropped and opened again when
+# a call returns to it. A cache, never state (plan 4.1 rule 1).
+STORE_CACHE_MAX = 8
+
+# The settings the tool mixin reads per call. They shape the tool surface, not
+# the store, so two calls that differ only in them share one store.
+TOOL_SURFACE_KEYS = frozenset({'serverName', 'expose_tools', 'allow_write'})
+
 
 class StoreGlobalBase(IGlobalBase, ABC):
     """Abstract base for the IGlobal layer of any vector store node."""
 
-    # Namespace prefix for agent-facing tool names (``<serverName>.search`` ...).
-    # Overridden by the driver and, when present, by the resolved node config.
+    # The driver's default namespace prefix for agent-facing tool names
+    # (``<serverName>.search`` ...); a call's ``serverName`` setting overrides it.
     serverName: str = ''
 
     # Whether the write tools (upsert, delete, soft_delete, restore) may change
-    # the store (read by VectorStoreToolMixin). True keeps every existing driver as it was; a
-    # driver whose store is shared or managed sets the class default to False
-    # and lets the node owner opt in through an ``allow_write`` config field.
-    # Resolved from the node config in beginGlobal, like serverName.
-    allow_write: bool = True
-
-    # Whether the node offers its tool surface at all (read by
+    # the store when the node declares no ``allow_write`` field (read by
     # VectorStoreToolMixin). True keeps every existing driver as it was; a
     # driver whose store is shared or managed sets the class default to False
-    # and lets the node owner opt in through an ``expose_tools`` config field.
-    # Resolved from the node config in beginGlobal, like allow_write.
+    # and declares the field, which a call then sets.
+    allow_write: bool = True
+
+    # Whether the node offers its tool surface at all when the node declares
+    # no ``expose_tools`` field (read by VectorStoreToolMixin), like
+    # allow_write.
     expose_tools: bool = True
 
-    # The live store, opened in beginGlobal and read by StoreInstanceBase.
-    store: Optional[DocumentStoreBase] = None
+    # Driver stores by the digest of the store-shaping settings, least
+    # recently used first; created in beginGlobal, bounded by STORE_CACHE_MAX.
+    _stores: Optional['OrderedDict[str, DocumentStoreBase]'] = None
+
+    # Guards the cache: one store is opened per key, even when the calls of a
+    # control that name a new collection arrive together.
+    _stores_lock: Optional[threading.Lock] = None
 
     # Embedder hook for the control-plane tool path (search/upsert). Nothing
     # binds it today: the store embeds in the data lane only, and the tool
@@ -85,12 +111,14 @@ class StoreGlobalBase(IGlobalBase, ABC):
 
     @abstractmethod
     def _open_store(self, logical_type: str, config: Mapping, bag: Dict[str, Any]) -> DocumentStoreBase:
-        """Instantiate and return the driver's ``DocumentStoreBase`` for this node.
+        """Instantiate and return the driver's ``DocumentStoreBase`` for one set of store settings.
 
-        Called once per control, from ``beginGlobal``. Must raise if the store
-        cannot be constructed so the failure surfaces on the control's first
-        request. ``config`` is the resolved ``ConfigView``: defaults applied,
-        the active branch flattened, keys read by their short name.
+        Called from ``store_for`` on the first call whose store-shaping
+        settings no cached store matches. Must raise if the store cannot be
+        constructed so the failure surfaces on that call. ``config`` is the
+        CALL's settings (``IInstance.settings``): the control's config with the
+        call's parameters over it, defaults applied, the active branch
+        flattened, keys read by their short name.
         """
 
     # The config fields holding what the driver sends its server to sign in.
@@ -114,32 +142,49 @@ class StoreGlobalBase(IGlobalBase, ABC):
     # ------------------------------------------------------------------
 
     def beginGlobal(self) -> None:
-        """Open the store from the resolved config."""
-        self.store = None
-        bag = self.IEndpoint.endpoint.bag
+        """Check the control's credentials and start the store cache empty.
 
-        # The resolved config: defaults applied, the active branch flattened
-        config = self.config
-
-        # Resolve the namespace used for agent-facing tool names; the schema
-        # supplies the driver's default and the user may override it.
-        resolved_name = config.get('serverName')
-        if isinstance(resolved_name, str) and resolved_name.strip():
-            self.serverName = resolved_name.strip()
-
-        # The two tool switches: a driver that declares them reads the
-        # resolved boolean; one that does not keeps its class default.
-        if 'expose_tools' in config:
-            self.expose_tools = bool(config['expose_tools'])
-        if 'allow_write' in config:
-            self.allow_write = bool(config['allow_write'])
+        Nothing a call decides is read here: the collection and the other
+        store settings are parameters, so a store is opened by ``store_for``
+        on the first call that names its settings.
+        """
+        self._stores_lock = threading.Lock()
+        self._stores = OrderedDict()
 
         # A key left as an unfilled ${ROCKETRIDE_...} fails here, before the driver sends it.
-        self._check_credentials(config)
+        self._check_credentials(self.config)
 
-        # Open the driver's store on the resolved view: the control's own
-        self.store = self._open_store(self.config.node.provider, config, bag)
+    def store_for(self, settings: Mapping) -> DocumentStoreBase:
+        """Return the driver store for this call's settings, opening it on first use.
+
+        Two calls whose store-shaping settings are equal share one store; the
+        tool-surface settings are not part of the key. The key is a digest, so
+        no setting value is kept as a key.
+
+        Args:
+            settings: The calling instance's ``self.settings``.
+
+        Returns:
+            DocumentStoreBase: The store for those settings.
+        """
+        # Step 1: the store-shaping settings, as one digest
+        shape = {key: settings[key] for key in settings if key not in TOOL_SURFACE_KEYS}
+        key = hashlib.sha256(json.dumps(shape, sort_keys=True, default=str).encode('utf-8')).hexdigest()
+
+        with self._stores_lock:
+            # Step 2: a store already open for these settings is served from the cache
+            store = self._stores.get(key)
+            if store is not None:
+                self._stores.move_to_end(key)
+                return store
+
+            # Step 3: open it from the call's settings and keep it, bounded
+            store = self._open_store(self.config.node.provider, settings, self.IEndpoint.endpoint.bag)
+            self._stores[key] = store
+            while len(self._stores) > STORE_CACHE_MAX:
+                self._stores.popitem(last=False)
+            return store
 
     def endGlobal(self) -> None:
-        """Drop the store."""
-        self.store = None
+        """Drop every cached store."""
+        self._stores = None

@@ -248,23 +248,18 @@ class FakeLaser:
 
 
 class StubGlobal:
-    """IGlobal stand-in for IInstance tests: drives coroutines synchronously."""
+    """IGlobal stand-in for IInstance tests: drives coroutines synchronously, records each wait budget."""
 
-    def __init__(self, state, **overrides):
+    def __init__(self, state):
         self.state = state
         self.connection_string = 'iggy:laser@localhost:8090'
-        self.namespace = 'ns-default'
-        self.allow_namespace_override = True
-        self.folded = True
-        self.recall_limit = 10
-        self.op_timeout = 30
-        for k, v in overrides.items():
-            setattr(self, k, v)
 
-    def run(self, coro, *, timeout=None):
+    def run(self, coro, *, timeout):
+        self.state.setdefault('timeouts', []).append(timeout)
         return asyncio.run(coro)
 
-    def get_laser(self):
+    def get_laser(self, *, timeout):
+        self.state.setdefault('connect_timeouts', []).append(timeout)
         return FakeLaser(self.state)
 
 
@@ -280,10 +275,24 @@ def _pin_normalizer(monkeypatch):
 
 
 def _instance(state=None, **overrides):
-    """Construct an IInstance bound to a StubGlobal; returns (instance, call state)."""
+    """Construct an IInstance bound to a StubGlobal and the call's settings; returns (instance, call state)."""
     state = state if state is not None else {'calls': []}
     inst = IInstance()
-    inst.IGlobal = StubGlobal(state, **overrides)
+    inst.IGlobal = StubGlobal(state)
+    if 'connection_string' in overrides:
+        # The connection is the control's
+        inst.IGlobal.connection_string = overrides.pop('connection_string')
+    # The namespace, its override gate, the recall defaults and the timeout are the call's settings
+    inst.settings = SimpleNamespace(
+        **{
+            'namespace': 'ns-default',
+            'allow_namespace_override': True,
+            'folded': True,
+            'recall_limit': 10,
+            'op_timeout': 30,
+            **overrides,
+        }
+    )
     return inst, state
 
 
@@ -356,11 +365,37 @@ def test_begin_global_reads_the_cloud_branch(bridge):
 
 def test_begin_global_unset_leaves_mean_the_defaults(bridge):
     glb = bridge()
-    assert glb.recall_limit == 10
-    assert glb.op_timeout == 30
-    assert glb.folded is True
-    assert glb.allow_namespace_override is True
     assert glb.stream == 'rocketride-memory'
+    # The recall defaults are a call's settings: a call with no params reads the schema defaults
+    settings = glb._resolved()
+    assert (settings.recall_limit, settings.op_timeout) == (10, 30)
+    assert settings.folded is True
+    assert settings.allow_namespace_override is True
+
+
+def test_the_control_config_refuses_the_call_settings(bridge):
+    from rocketlib.config import ConfigError
+
+    glb = bridge()
+    for key in ('namespace', 'allow_namespace_override', 'folded', 'recall_limit', 'op_timeout'):
+        with pytest.raises(ConfigError):
+            getattr(glb.config, key)
+
+
+def test_one_control_serves_calls_with_their_own_options():
+    """One control (one bridge, one connection) serves calls with their own timeout, limit and namespace."""
+    state = {'calls': []}
+    first, _ = _instance(state)
+    second, _ = _instance(state, op_timeout=5, recall_limit=3, namespace='team-b')
+    second.IGlobal = first.IGlobal
+    first.remember({'content': 'a fact'})
+    second.remember({'content': 'a fact'})
+    second.recall({})
+    # Each call's connect and operation draw on that call's own op_timeout
+    assert state['connect_timeouts'] == pytest.approx([30, 5, 5], abs=1)
+    assert state['timeouts'] == pytest.approx([30, 5, 5], abs=1)
+    assert first._public_namespace({}, 'remember') == 'ns-default'
+    assert second._public_namespace({}, 'remember') == 'team-b'
 
 
 @pytest.mark.parametrize(
@@ -394,7 +429,7 @@ def test_begin_global_reads_stream(bridge, monkeypatch):
         return FakeLaser({'calls': []})
 
     monkeypatch.setattr(IGlobalMod, '_connect', fake_connect)
-    glb.get_laser()
+    glb.get_laser(timeout=30)
     assert streams == ['shared-memory']  # pinned at connect for laser.memory()
 
 
@@ -409,7 +444,7 @@ def test_run_executes_on_bridge_loop(bridge):
     async def where():
         return threading.current_thread().name
 
-    assert glb.run(where()) == 'tool_laserdata_memory-loop'
+    assert glb.run(where(), timeout=30) == 'tool_laserdata_memory-loop'
 
 
 def test_run_timeout_maps_to_runtime_error(bridge):
@@ -422,6 +457,21 @@ def test_run_timeout_maps_to_runtime_error(bridge):
         glb.run(slow(), timeout=0.05)
 
 
+@pytest.mark.parametrize('timeout', [0, -0.5])
+def test_run_refuses_a_spent_budget_before_the_operation_starts(bridge, timeout):
+    # A write submitted with no budget left could run while the caller sees a timeout
+    glb = bridge()
+    started = []
+
+    async def write():
+        started.append(True)
+
+    with pytest.raises(RuntimeError, match='spent before it started'):
+        glb.run(write(), timeout=timeout)
+    time.sleep(0.05)
+    assert started == []
+
+
 def test_run_when_not_open_raises():
     glb = IGlobal()
 
@@ -429,7 +479,7 @@ def test_run_when_not_open_raises():
         return 1
 
     with pytest.raises(RuntimeError, match='not open'):
-        glb.run(noop())
+        glb.run(noop(), timeout=30)
 
 
 def test_get_laser_connects_once_across_threads(bridge, monkeypatch):
@@ -445,13 +495,74 @@ def test_get_laser_connects_once_across_threads(bridge, monkeypatch):
 
     monkeypatch.setattr(IGlobalMod, '_connect', fake_connect)
     results = []
-    threads = [threading.Thread(target=lambda: results.append(glb.get_laser())) for _ in range(4)]
+    threads = [threading.Thread(target=lambda: results.append(glb.get_laser(timeout=30))) for _ in range(4)]
     for t in threads:
         t.start()
     for t in threads:
         t.join()
     assert state['connects'] == 1
     assert len(results) == 4 and all(r is results[0] for r in results)
+
+
+def _slow_connect(state, seconds):
+    """A ``_connect`` stand-in that takes ``seconds`` to open a ``FakeLaser`` over ``state``."""
+
+    async def connect(_conn, _stream):
+        await asyncio.sleep(seconds)
+        return FakeLaser(state)
+
+    return connect
+
+
+def _bridged(glb, op_timeout):
+    """An instance bound to the real control ``glb`` with this call's ``op_timeout``."""
+    inst, state = _instance(op_timeout=op_timeout)
+    inst.IGlobal = glb
+    return inst, state
+
+
+def test_a_cold_call_spends_one_op_timeout_on_its_connect_and_its_operation(bridge, monkeypatch):
+    """The first connect counts against the call's op_timeout: connect plus operation past it fails the call."""
+    glb = bridge()
+    inst, state = _bridged(glb, op_timeout=0.5)
+    monkeypatch.setattr(IGlobalMod, '_connect', _slow_connect(state, 0.3))
+    slow_recall = FakeMemory.recall
+
+    async def recall(self, **kwargs):
+        await asyncio.sleep(0.3)
+        return await slow_recall(self, **kwargs)
+
+    monkeypatch.setattr(FakeMemory, 'recall', recall)
+
+    # 0.3 s of connect leaves 0.2 s for a 0.3 s recall
+    with pytest.raises(RuntimeError, match='timed out'):
+        inst.recall({})
+    # A warm call has the whole budget for the same recall
+    assert inst.recall({}) == {'results': [], 'count': 0}
+
+
+def test_a_call_waiting_on_another_calls_connect_gives_up_by_its_own_op_timeout(bridge, monkeypatch):
+    """A call queued behind a slow connect fails within its own op_timeout, not the connecting call's."""
+    glb = bridge()
+    slow, state = _bridged(glb, op_timeout=30)
+    monkeypatch.setattr(IGlobalMod, '_connect', _slow_connect(state, 1.0))
+    connecting = threading.Thread(target=slow.remember, args=({'content': 'a fact'},))
+    connecting.start()
+    wait_until = time.monotonic() + 5
+    while not glb._pending and time.monotonic() < wait_until:
+        time.sleep(0.01)
+    assert glb._pending, 'the slow connect never started'
+
+    quick, _ = _bridged(glb, op_timeout=0.2)
+    t0 = time.monotonic()
+    with pytest.raises(RuntimeError, match='connect timed out'):
+        quick.remember({'content': 'a fact'})
+    elapsed = time.monotonic() - t0
+    connecting.join(5)
+
+    # The quick call gave up at its own deadline; the connecting call still finished its remember
+    assert elapsed < 0.9
+    assert [call[0] for call in state['calls']] == ['remember']
 
 
 async def _immediate(value):
@@ -496,14 +607,14 @@ def test_run_rejected_while_closing(bridge):
         return 1
 
     with pytest.raises(RuntimeError, match='not open'):
-        glb.run(noop())
+        glb.run(noop(), timeout=30)
 
 
 def test_end_global_closes_and_clears(bridge, monkeypatch):
     glb = bridge(cfg={'connection_string': 'iggy:laser@localhost:8090'})
     state = {'calls': [], 'closed': False}
     monkeypatch.setattr(IGlobalMod, '_connect', lambda _c, _s: _immediate(FakeLaser(state)))
-    glb.get_laser()
+    glb.get_laser(timeout=30)
     loop = glb._loop
     glb.endGlobal()
     assert state['closed'] is True
@@ -664,7 +775,7 @@ def test_sdk_error_scrubbed_of_credentials():
 def test_connect_failure_maps_to_runtime_error():
     inst, _ = _instance()
 
-    def boom():
+    def boom(*, timeout):
         raise Exception('Connection refused')
 
     inst.IGlobal.get_laser = boom

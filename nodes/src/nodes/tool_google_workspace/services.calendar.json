@@ -29,6 +29,8 @@
 				"(create, update, move, quick-add events; manage calendars and ACLs). Deletion additionally requires the ",
 				"allowDelete flag; public/domain-wide ACL sharing requires allowPublicSharing."
 			],
+			"param": true,
+			"tool": false,
 			"default": "write",
 			"enum": [
 				[
@@ -48,6 +50,8 @@
 				"When off (the default), event_delete and calendar_delete are refused even at the write tier. Enable only if the ",
 				"agent should be able to permanently delete events and calendars — this is irreversible."
 			],
+			"param": true,
+			"tool": false,
 			"default": false
 		},
 		"allowPublicSharing": {
@@ -58,6 +62,8 @@
 				"(scopeType 'default' = anyone on the internet, and 'domain' = everyone in a domain). Turn on to allow public or ",
 				"domain-wide sharing. Grants to individual users/groups are not gated."
 			],
+			"param": true,
+			"tool": false,
 			"default": false
 		}
 	},
@@ -75,7 +81,7 @@
 				"access": "write"
 			}
 		},
-		"dropped": [],
+		"dropped": ["customerId", "service.customerId"],
 		"credential": {
 			"userToken": "user.userAuth"
 		}

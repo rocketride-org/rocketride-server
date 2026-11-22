@@ -27,6 +27,7 @@
 			"required": true
 		},
 		"mem0.user_id": {
+			"param": true,
 			"type": "string",
 			"optional": true,
 			"title": "User id",
@@ -41,6 +42,8 @@
 			"minLength": 1
 		},
 		"mem0.agent_id": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"optional": true,
 			"title": "Agent id",
@@ -48,6 +51,7 @@
 			"default": ""
 		},
 		"mem0.run_id": {
+			"param": true,
 			"type": "string",
 			"optional": true,
 			"title": "Run id",
@@ -55,6 +59,8 @@
 			"default": ""
 		},
 		"mem0.app_id": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"optional": true,
 			"title": "App id",
@@ -62,6 +68,7 @@
 			"default": ""
 		},
 		"mem0.infer": {
+			"param": true,
 			"type": "boolean",
 			"title": "Infer memories",
 			"description": "When on (default), Mem0 runs LLM extraction to derive salient facts from the turns. When off, the raw messages are stored verbatim.",
@@ -72,6 +79,8 @@
 			]
 		},
 		"mem0.wait": {
+			"param": true,
+			"tool": false,
 			"type": "boolean",
 			"title": "Synchronous store",
 			"description": "When on (default), 'remember' polls Mem0 until background extraction finishes, so a following 'recall' can see the new memory. When off, 'remember' returns immediately and extraction runs in the background.",
@@ -82,6 +91,8 @@
 			]
 		},
 		"mem0.ingest_timeout": {
+			"param": true,
+			"tool": false,
 			"type": "integer",
 			"title": "Store timeout (s)",
 			"description": "Max seconds 'remember' waits/polls for background extraction to finish before returning a 'queued' result.",
@@ -90,6 +101,7 @@
 			"maximum": 120
 		},
 		"mem0.search_limit": {
+			"param": true,
 			"type": "integer",
 			"title": "Recall limit",
 			"description": "Maximum number of memory rows to retrieve per recall.",

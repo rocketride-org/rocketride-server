@@ -27,6 +27,7 @@
 			"required": true
 		},
 		"tool_exa_search.numResults": {
+			"param": true,
 			"type": "integer",
 			"title": "Number of Results",
 			"description": "Maximum number of search results to return (1-50)",
@@ -35,6 +36,7 @@
 			"maximum": 50
 		},
 		"tool_exa_search.useAutoprompt": {
+			"param": true,
 			"type": "boolean",
 			"title": "Use Autoprompt",
 			"description": "Let Exa optimize the query for better results",
@@ -45,6 +47,7 @@
 			]
 		},
 		"tool_exa_search.searchType": {
+			"param": true,
 			"type": "string",
 			"title": "Search Type",
 			"description": "Type of search to perform",
@@ -56,6 +59,7 @@
 			]
 		},
 		"tool_exa_search.includeText": {
+			"param": true,
 			"type": "boolean",
 			"title": "Include Text Content",
 			"description": "Include full text content in results",

@@ -843,6 +843,36 @@ class TestReads:
         handles = [r['data']['audience']['handle'] for r in result['body']['rows']]
         assert handles == ['@me', '@Development', '=team/team-9']
 
+    @pytest.mark.asyncio
+    async def test_a_stored_handle_never_reaches_the_reader_where_no_audience_decodes(self, account_stub):
+        # A legacy pair with no type, or a type no audience has, is shown
+        # without a handle: the one an older row stored is dropped, the rest
+        # of the pair kept; a row with no audience pair is untouched
+        account_stub.deployments_history.return_value = {
+            'rows': [
+                {
+                    'action': 'publish',
+                    'seq': 3,
+                    'teamId': '',
+                    'data': {'audience': {'id': 'team-1', 'name': 'Old', 'handle': '@team/Old'}},
+                },
+                {
+                    'action': 'publish',
+                    'seq': 2,
+                    'teamId': '',
+                    'data': {'audience': {'type': 'bogus', 'id': 'x', 'name': 'Old', 'handle': '@team/Old'}},
+                },
+                {'action': 'deploy', 'seq': 1, 'teamId': '', 'data': {'note': 'kept'}},
+            ],
+            'total': 3,
+        }
+        conn = _make_conn(_account_info(teams=[{'id': 'team-1', 'name': 'Development', 'permissions': []}]))
+        result = await conn._deploy_history({}, {'projectId': 'proj-1'})
+        rows = result['body']['rows']
+        assert rows[0]['data']['audience'] == {'id': 'team-1', 'name': 'Old'}
+        assert rows[1]['data']['audience'] == {'type': 'bogus', 'id': 'x', 'name': 'Old'}
+        assert rows[2]['data'] == {'note': 'kept'}
+
 
 # ============================================================================
 # state / schedules
@@ -1328,7 +1358,11 @@ def _control(rung='dev', owner_id='user-1', address='acme.docBrain.chat'):
 
 
 def _answers(conn, *candidates, address='acme.docBrain'):
-    """THE decision stub: ``resolve_target`` in read mode answers the first of ``candidates``."""
+    """THE decision stub: ``resolve_target`` in read mode answers the first of ``candidates``.
+
+    A pin answers with the artifact the decision read (``ARTIFACT``), as the
+    resolver's read does.
+    """
     from ai.account.pipe_deploy import Pin
     from ai.modules.task.address import parse_target
     from ai.modules.task.task_server import Resolution
@@ -1341,7 +1375,7 @@ def _answers(conn, *candidates, address='acme.docBrain'):
     first = candidates[0]
     pin = first if isinstance(first, Pin) else None
     control = None if pin is not None else first
-    resolution = Resolution(parse_target(address), control, pin, False)
+    resolution = Resolution(parse_target(address), control, pin, False, ARTIFACT if pin is not None else None)
     conn._server.resolve_target = AsyncMock(return_value=resolution)
     return conn._server.resolve_target
 
@@ -1394,8 +1428,9 @@ class TestInterfaces:
         args, kwargs = decide.await_args
         assert args[0] is conn._account_info and args[1] == 'acme.docBrain.chat' and args[2] == 'task.data'
         assert kwargs == {'mode': RESOLVE_READ}
-        # The pinned version's artifact, read server-side, for the whole pipe
-        account_stub.deployments_artifact.assert_awaited_once_with('org-1', 'docBrain', 2)
+        # The pinned artifact the decision read, for the whole pipe: no second
+        # registry read (the resolver loads the pinned version: test_resolve_target)
+        account_stub.deployments_artifact.assert_not_awaited()
         assert body['address'] == 'acme.docBrain'
         assert body['rung'] == 'team' and body['teamId'] == 'team-1' and body['version'] == 2
         assert body['interfaces'] == {
@@ -1474,7 +1509,7 @@ class TestInterfaces:
         account_stub.deployments_artifact.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_a_public_pin_reads_the_publishers_artifact(self, account_stub, interfaces_stub):
+    async def test_a_public_pin_answers_with_the_artifact_the_decision_read(self, account_stub, interfaces_stub):
         conn = _make_conn(_account_info())
         _answers(
             conn,
@@ -1482,8 +1517,8 @@ class TestInterfaces:
             address='zeta.docBrain',
         )
         resp = await conn.on_rrext_deploy_pipe({'arguments': {'subcommand': 'interfaces', 'address': 'zeta.docBrain'}})
-        account_stub.deployments_artifact.assert_awaited_once_with('org-9', 'docBrain', 7)
-        assert resp['body']['rung'] == 'public' and 'teamId' not in resp['body']
+        account_stub.deployments_artifact.assert_not_awaited()
+        assert resp['body']['rung'] == 'public' and resp['body']['version'] == 7 and 'teamId' not in resp['body']
         assert 'zeta.docBrain.chat' in resp['body']['interfaces']
 
     @pytest.mark.asyncio

@@ -598,8 +598,10 @@ class DeployPipeCommands(_DeployBase):
         Arguments: ``address`` (``[<root>/]developerId.pipelineId[.source]``;
         the address resolves exactly as ``submit()`` resolves it, a source
         segment included (on a rung with live controls it is that source's
-        control that answers), so discovery and execution never disagree;
-        the map covers the whole pipe whichever source is named; a root
+        control that answers, and a publication whose artifact lacks that
+        source yields to the next candidate, as it does for ``submit()``),
+        so discovery and execution pick the same publication; the map
+        covers the whole pipe whichever source is named; a root
         names the one rung to read, ``@<team>/...`` or ``=team/<tid>/...``
         for one team's publication). The retired ``team`` option is refused.
 
@@ -631,8 +633,9 @@ class DeployPipeCommands(_DeployBase):
         # the one rung a root names — without starting anything. The answer is
         # the caller's registered control (the spec it submitted; @spec has no
         # publication, and a dormant control's spec stays readable) or a
-        # publication's pin (the registry artifact). Nothing has to be running
-        # on any rung; no rung answering is TASK_NOT_REGISTERED.
+        # publication's pin with the registry artifact the decision read.
+        # Nothing has to be running on any rung; no rung answering is
+        # TASK_NOT_REGISTERED.
         resolution = await self._server.resolve_target(account_info, address, 'task.data', mode=RESOLVE_READ)
         if resolution.pin is None:
             return self.build_response(request, body=await self._interfaces_of_control(resolution.control))
@@ -645,9 +648,10 @@ class DeployPipeCommands(_DeployBase):
             # request on it needs; @me is the caller's own, @public is anyone's
             self.verify_team_permission(deployment.team, 'task.data')
 
-        # Step 3: the pinned artifact, projected through the catalog
-        pipeline = await account.deployments_artifact(deployment.org_id, deployment.project_id, pin.version)
-        interfaces = await pipe_interfaces(pipeline, parsed.developer_id, parsed.pipe_id, services_catalog.get_service)
+        # Step 3: the pinned artifact the decision read, projected through the catalog
+        interfaces = await pipe_interfaces(
+            resolution.artifact, parsed.developer_id, parsed.pipe_id, services_catalog.get_service
+        )
         body: Dict[str, Any] = {
             'address': pipe_address,
             'rung': pin.rung,

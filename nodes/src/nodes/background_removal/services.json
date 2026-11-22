@@ -43,7 +43,8 @@
 			"description": "Downscale source so long edge <= this value before inference; alpha is upsampled back to the original source size for compositing. Lower = faster + less VRAM; higher = sharper edges.",
 			"default": 1024,
 			"minimum": 256,
-			"maximum": 4096
+			"maximum": 4096,
+			"param": true
 		},
 		"background_removal.hr.maxEdge": {
 			"base": "background_removal.maxEdge",

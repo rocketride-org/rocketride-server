@@ -37,11 +37,9 @@ class IGlobal(IGlobalBase):
     """Global state for tool_crustdata."""
 
     apikey: str = ''
-    default_limit: int = 10
 
     def beginGlobal(self) -> None:
-        # The resolved config: defaultLimit arrives an integer within 1-1000,
-        # the key a required secret
+        # The resolved config: the key a required secret (defaultLimit is per call)
         cfg = self.config
 
         # The key reaches the node through its config (a ${ROCKETRIDE_CRUSTDATA_APIKEY}
@@ -54,7 +52,6 @@ class IGlobal(IGlobalBase):
             raise ValueError('tool_crustdata: apikey is required')
 
         self.apikey = apikey
-        self.default_limit = cfg.defaultLimit
 
     def endGlobal(self) -> None:
         self.apikey = ''

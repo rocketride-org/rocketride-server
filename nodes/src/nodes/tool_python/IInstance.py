@@ -33,7 +33,7 @@ from __future__ import annotations
 from rocketlib import IInstanceBase, tool_function
 from ai.common.sandbox import execute_sandboxed, _TIMEOUT, _DEFAULT_ALLOWED_MODULES
 
-from .IGlobal import IGlobal
+from .IGlobal import IGlobal, sandbox_limits
 
 
 class IInstance(IInstanceBase):
@@ -67,8 +67,8 @@ class IInstance(IInstanceBase):
             f'Execute Python code in a sandboxed environment and return stdout/stderr. '
             f'Use print() to produce visible output. Assign to a variable named "result" '
             f'to return structured data (dict, list, etc.). '
-            f'Timeout: {self.IGlobal.timeout if self.IGlobal.timeout is not None else _TIMEOUT}s. '
-            f'Allowed imports: {", ".join(sorted(_DEFAULT_ALLOWED_MODULES | (self.IGlobal.allowed_modules or set())))}. '
+            f'Timeout: {sandbox_limits(self.settings)[1] or _TIMEOUT}s. '
+            f'Allowed imports: {", ".join(sorted(_DEFAULT_ALLOWED_MODULES | (sandbox_limits(self.settings)[0] or set())))}. '
             f'All other imports will raise ImportError. '
             f'The sandbox has no network, filesystem or subprocess access beyond what the allowed imports provide. '
             f'For web requests use the HTTP request tool (tool_http_request node) if it is connected. '
@@ -82,4 +82,5 @@ class IInstance(IInstanceBase):
         code = args.get('code')
         if not code or not isinstance(code, str) or not code.strip():
             raise ValueError('"code" is required and must be a non-empty string')
-        return execute_sandboxed(code, allowed_modules=self.IGlobal.allowed_modules, timeout=self.IGlobal.timeout)
+        allowed_modules, timeout = sandbox_limits(self.settings)  # this call's sandbox
+        return execute_sandboxed(code, allowed_modules=allowed_modules, timeout=timeout)

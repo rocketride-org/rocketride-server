@@ -38,7 +38,7 @@ class IGlobal(IGlobalBase):
 
     def beginGlobal(self):
         """Initialize the NER recognizer when the pipeline starts."""
-        # The resolved config: the profile's model (or the custom id) and the thresholds, flat
+        # The resolved config: the profile's model (or the custom id) and its aggregation, flat
         config = self.config
         debug(f'    Loading NER model: {config.model}')
         self.recognizer = NERRecognizer(config)

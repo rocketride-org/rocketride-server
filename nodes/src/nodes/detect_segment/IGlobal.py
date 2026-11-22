@@ -22,6 +22,15 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Global handler for the Segmentation node.
+
+The control's preset pins the mode, the model and its revision, which are the
+weights loaded here once per control. The threshold and the inference edge
+are per-call parameters: the instance reads them from its settings and passes
+them to ``Segmenter.segment``.
+"""
+
 from depends import load_depends
 
 # pycocotools is needed client-side for RLE restore + overlay rendering,
@@ -34,14 +43,17 @@ from ai.common.models.vision.segmentation import Segmenter
 
 
 class IGlobal(IGlobalBase):
+    """One control's segmenter: the loaded model and the lock that serializes local inference."""
+
     segmenter = None
     device_lock = None
 
     def beginGlobal(self):
-        """Build the shared Segmenter facade from the resolved config.
+        """Build the shared Segmenter facade for the control's preset.
 
-        The selected preset pins its mode, model and revision; the resolver has
-        already bounded threshold and maxEdge to the schema's ranges.
+        The selected preset pins its mode, model and revision. The facade's
+        own threshold and edge bound stay at their defaults: every call
+        passes its own.
         """
         config = self.config
 
@@ -49,8 +61,6 @@ class IGlobal(IGlobalBase):
             mode=config.mode,
             model_name=config.model,
             device=None,
-            threshold=config.threshold,
-            max_edge=config.maxEdge,
             revision=config.revision,
         )
 

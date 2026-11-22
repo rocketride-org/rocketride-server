@@ -86,6 +86,7 @@
 	//
 	"propertyDefinitions": {
 		"summarization.numberOfSummaries": {
+			"param": true,
 			"type": "integer",
 			"title": "Number of chunks to summarize",
 			"description": "How many chunks are summarized after the document is split",
@@ -93,6 +94,7 @@
 			"minimum": 1
 		},
 		"summarization.numberOfSummaryWords": {
+			"param": true,
 			"type": "integer",
 			"title": "Number of words in each summary",
 			"description": "Set to 0 to disable summaries.",
@@ -100,6 +102,7 @@
 			"minimum": 0
 		},
 		"summarization.numberOfKeyPointWords": {
+			"param": true,
 			"type": "integer",
 			"title": "Number of words in each key point",
 			"description": "Set to 0 to disable key points.",
@@ -107,6 +110,7 @@
 			"minimum": 0
 		},
 		"summarization.numberOfEntities": {
+			"param": true,
 			"type": "integer",
 			"title": "Number of entities to extract",
 			"description": "Entities extracted from the document. Set to 0 to disable entity extraction.",

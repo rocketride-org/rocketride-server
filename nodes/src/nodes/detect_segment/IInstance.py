@@ -22,6 +22,15 @@
 # SOFTWARE.
 # =============================================================================
 
+"""
+Instance handler for the Segmentation node.
+
+The mask threshold and the inference edge are this call's (``self.settings``):
+one control, whose IGlobal holds the loaded model, serves calls that segment
+at different thresholds and resolutions. The instance passes both to every
+``Segmenter.segment`` of the call.
+"""
+
 import colorsys
 import json
 import time
@@ -231,8 +240,12 @@ class IInstance(IInstanceBase):
             try:
                 image = ImageProcessor.load_image_from_bytes(self._image_data)
                 t0 = time.perf_counter()
+                # The threshold and the inference edge are this call's
+                settings = self.settings
                 with self.IGlobal.device_lock:
-                    result = self.IGlobal.segmenter.segment(image)
+                    result = self.IGlobal.segmenter.segment(
+                        image, threshold=settings.threshold, max_edge=settings.maxEdge
+                    )
                 debug(f'segment: infer={(time.perf_counter() - t0) * 1000:.0f}ms')
                 self._emit(image, result)
             except Exception as exc:

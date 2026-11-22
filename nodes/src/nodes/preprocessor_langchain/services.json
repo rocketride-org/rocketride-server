@@ -78,6 +78,7 @@
 	//
 	"propertyDefinitions": {
 		"langchain.splitter.mode": {
+			"param": true,
 			"type": "string",
 			"title": "Split by",
 			"description": "Measure chunks in characters or in estimated tokens",
@@ -88,6 +89,7 @@
 			]
 		},
 		"langchain.splitter.strlen": {
+			"param": true,
 			"type": "integer",
 			"title": "String length",
 			"description": "Chunk size in characters, used when splitting by string length",
@@ -95,6 +97,7 @@
 			"minimum": 1
 		},
 		"langchain.splitter.tokens": {
+			"param": true,
 			"type": "integer",
 			"title": "Number of tokens",
 			"description": "Chunk size in estimated tokens, used when splitting by tokens",
@@ -102,18 +105,22 @@
 			"minimum": 1
 		},
 		"langchain.splitter.separators": {
+			"param": true,
 			"type": "string",
 			"title": "Split separators",
 			"description": "Quoted, comma-separated list of separators tried in order; empty keeps LangChain's defaults",
 			"default": "'\\n\\n', '\\n', ' ', ''"
 		},
 		"langchain.splitter.separator": {
+			"param": true,
 			"type": "string",
 			"title": "Split separator",
 			"description": "One quoted separator; empty keeps LangChain's default",
 			"default": "\"\\n\""
 		},
 		"langchain.splitter.model": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"default": "en_core_web_sm",
@@ -141,6 +148,7 @@
 	"properties": [
 		{
 			"name": "splitter",
+			"param": true,
 			"type": "string",
 			"title": "Text splitter",
 			"description": "The LangChain splitter class. Pick the one that matches your content: Markdown for .md, Latex for LaTeX, Character/NLTK/Spacy as needed.",

@@ -124,7 +124,7 @@ with _scoped_stubs():
         paginated_v2,
         split_custom_fields,
     )
-    from tool_pipedrive.IGlobal import _oversized_warning
+    from tool_pipedrive.tool_groups import oversized_warning as _oversized_warning
     from tool_pipedrive.tool_groups import (
         ALL_GROUPS,
         DEFAULT_GROUPS,
@@ -172,12 +172,15 @@ def _instance(**overrides):
     glob.token = TEST_TOKEN
     glob.base_url = BASE_URL
     glob.base_url_v2 = BASE_URL_V2
-    glob.read_only = False
-    glob.tool_groups = DEFAULT_GROUPS
-    glob.allow_raw_request = True
-    for key, value in overrides.items():
-        setattr(glob, key, value)
     inst.IGlobal = glob
+    # The write gate and the tool surface are the call's settings
+    options = {'read_only': False, 'tool_groups': DEFAULT_GROUPS, 'allow_raw_request': True}
+    for key, value in overrides.items():
+        if key in options:
+            options[key] = value
+        else:
+            setattr(glob, key, value)
+    inst._call_options = types.SimpleNamespace(**options)
     return inst
 
 
@@ -1104,3 +1107,20 @@ class TestEveryTimeFieldNamesItsZone:
 
     def test_no_published_parameter_describes_a_time_without_saying_which_zone(self):
         assert audit_time_fields(IInstance, self.ALLOWED) == []
+
+
+def test_one_control_publishes_each_calls_own_surface():
+    """The tool groups, the raw-request switch and the read-only gate are each call's settings."""
+    wide = _instance(tool_groups=ALL_GROUPS)
+    narrow = IInstance.__new__(IInstance)
+    narrow.IGlobal = wide.IGlobal
+    narrow.settings = types.SimpleNamespace(readOnly=True, toolGroups=['deals'], allowRawRequest=False)
+
+    published_wide = set(wide._collect_tool_methods())
+    published_narrow = set(narrow._collect_tool_methods())
+
+    assert narrow._options().tool_groups == normalize_groups(['deals'])
+    assert 'request' in published_wide and 'request' not in published_narrow
+    assert published_narrow < published_wide
+    with pytest.raises(ValueError, match='read-only mode'):
+        narrow._require_write()

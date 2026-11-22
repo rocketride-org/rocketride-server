@@ -63,6 +63,8 @@ class IInstance(LLMBase):
             from ai.common.schema import Question
             import base64
 
+            from .accessibility_vision import system_prompt_for
+
             try:
                 question = Question()
 
@@ -73,11 +75,12 @@ class IInstance(LLMBase):
                 # Add the image as context for the vision model
                 question.addContext(image_data_url)
 
-                # Add the accessibility analysis prompt
-                question.addQuestion(self.IGlobal.chat.prompt)
+                # Add the call's accessibility analysis prompt
+                settings = self.settings
+                question.addQuestion(settings.prompt)
 
-                # Call the vision model and get the accessibility description
-                answer = self.IGlobal.chat.chat(question)
+                # Call the vision model with the call's system instruction
+                answer = self.IGlobal.chat.chat(question, system_prompt=system_prompt_for(settings))
 
                 # Emit the description as text output
                 self.instance.writeText(answer.getText())

@@ -57,9 +57,16 @@ def node(monkeypatch):
             auth_type='pat',
             token=TOKEN,
             private_key_pem='',
+            get_token=Mock(return_value=TOKEN),
+        )
+        # The options are the call's settings
+        inst._call_options = SimpleNamespace(
             default_repo='owner/repo',
             read_only=True,
-            get_token=Mock(return_value=TOKEN),
+            tools=frozenset(),
+            graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
+            graphql_allow_mutations=False,
+            retry_policy=github_client.RetryPolicy(),
         )
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)

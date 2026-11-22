@@ -129,7 +129,6 @@ def test_build_detector_translates_missing_lib(monkeypatch):
     det = FaceDetector.__new__(FaceDetector)
     det.profile = 'short'
     det.threshold = 0.5
-    det.emit_landmarks = True
     det.model_url = 'http://example/model.tflite'
     monkeypatch.setattr(det, '_resolve_model_path', lambda: '/tmp/model.tflite')
 
@@ -145,7 +144,6 @@ def test_build_detector_succeeds_when_lib_present(monkeypatch):
     det = FaceDetector.__new__(FaceDetector)
     det.profile = 'short'
     det.threshold = 0.5
-    det.emit_landmarks = True
     det.model_url = 'http://example/model.tflite'
     monkeypatch.setattr(det, '_resolve_model_path', lambda: '/tmp/model.tflite')
 

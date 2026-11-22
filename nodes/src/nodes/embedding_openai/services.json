@@ -67,7 +67,8 @@
 	//
 	// Optional:
 	//		Local property definitions. The model IS the selector (one value
-	//		per OpenAI embedding model, no per-model settings); the API key is
+	//		per OpenAI embedding model, no per-model settings) and a per-call
+	//		parameter a caller may set (an LLM may not); the API key is
 	//		shared by every model and is a required leaf an account variable
 	//		can supply.
 	//
@@ -86,6 +87,8 @@
 	"properties": [
 		{
 			"name": "model",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Model",
 			"description": "OpenAI embedding model",

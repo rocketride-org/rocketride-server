@@ -84,10 +84,10 @@ class IInstance(LLMBase):
                 image_base64 = base64.b64encode(bytes(self.image_data)).decode('utf-8')
                 image_data_url = f'data:{mimeType};base64,{image_base64}'
                 question.addContext(image_data_url)
-                question.addQuestion(self.IGlobal._chat._prompt)
+                question.addQuestion(self.settings.prompt)
 
                 try:
-                    answer = self.IGlobal._chat.chat(question)
+                    answer = self._question(question)
                     self._cached_answer = answer.getText()
                     self._cache_from_image = True
                     self.instance.writeText(self._cached_answer)
@@ -124,10 +124,10 @@ class IInstance(LLMBase):
                 question = Question()
                 # All Image doc producers (frame_grabber, thumbnail, embedding_image) normalize to PNG
                 question.addContext(f'data:image/png;base64,{doc.page_content}')
-                question.addQuestion(self.IGlobal._chat._prompt)
+                question.addQuestion(self.settings.prompt)
 
                 try:
-                    answer = self.IGlobal._chat.chat(question)
+                    answer = self._question(question)
                 except Exception as e:
                     chunk_id = doc.metadata.chunkId if doc.metadata else 'unknown'
                     warning(f'OpenAI Vision: inference failed for chunk {chunk_id}: {e}')

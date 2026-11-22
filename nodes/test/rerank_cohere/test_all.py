@@ -154,14 +154,13 @@ def _make_cohere_client_mock(rerank_response=None):
 # ===========================================================================
 
 
+#: The per-call values a rerank call carries (the call's settings).
+_CALL = {'top_n': 3, 'model': 'rerank-english-v3.0'}
+
+
 class TestRerankClient:
     def _make_client(self, config=None, mock_response=None):
-        config = config or {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
+        config = config or {'apikey': 'test-api-key'}
         response = mock_response or _make_mock_rerank_response(
             [
                 {'index': 2, 'relevance_score': 0.95},
@@ -179,7 +178,7 @@ class TestRerankClient:
         client = self._make_client()
         documents = ['doc A', 'doc B', 'doc C']
 
-        results = client.rerank(query='test query', documents=documents)
+        results = client.rerank(query='test query', documents=documents, top_n=3, model='rerank-english-v3.0')
 
         assert len(results) == 3
         assert results[0]['index'] == 2
@@ -190,7 +189,7 @@ class TestRerankClient:
 
     def test_rerank_top_n_override(self):
         client = self._make_client()
-        client.rerank(query='test', documents=['a', 'b', 'c'], top_n=2)
+        client.rerank(query='test', documents=['a', 'b', 'c'], top_n=2, model='rerank-english-v3.0')
         client._client.rerank.assert_called_once_with(
             model='rerank-english-v3.0',
             query='test',
@@ -202,7 +201,7 @@ class TestRerankClient:
         """JSON callers may pass top_n as 5.0 -- accept and coerce to int."""
         single_response = _make_mock_rerank_response([{'index': 0, 'relevance_score': 0.9}])
         client = self._make_client(mock_response=single_response)
-        client.rerank(query='q', documents=['a', 'b'], top_n=2.0)
+        client.rerank(query='q', documents=['a', 'b'], top_n=2.0, model='rerank-english-v3.0')
         kwargs = client._client.rerank.call_args.kwargs
         assert kwargs['top_n'] == 2
         assert isinstance(kwargs['top_n'], int)
@@ -210,20 +209,20 @@ class TestRerankClient:
     def test_rerank_top_n_rejects_fractional_float(self):
         client = self._make_client()
         with pytest.raises(ValueError, match='top_n must be an integer'):
-            client.rerank(query='q', documents=['a'], top_n=2.5)
+            client.rerank(query='q', documents=['a'], top_n=2.5, model='rerank-english-v3.0')
         client._client.rerank.assert_not_called()
 
     def test_rerank_top_n_rejects_bool(self):
         """Bool is a subclass of int; must be rejected explicitly."""
         client = self._make_client()
         with pytest.raises(ValueError, match='top_n must be an integer'):
-            client.rerank(query='q', documents=['a'], top_n=True)
+            client.rerank(query='q', documents=['a'], top_n=True, model='rerank-english-v3.0')
         client._client.rerank.assert_not_called()
 
     def test_rerank_model_override(self):
         single_response = _make_mock_rerank_response([{'index': 0, 'relevance_score': 0.9}])
         client = self._make_client(mock_response=single_response)
-        client.rerank(query='q', documents=['d'], model='rerank-v3.0')
+        client.rerank(query='q', documents=['d'], model='rerank-v3.0', top_n=3)
         client._client.rerank.assert_called_once_with(
             model='rerank-v3.0',
             query='q',
@@ -234,42 +233,44 @@ class TestRerankClient:
     def test_rerank_empty_query_raises(self):
         client = self._make_client()
         with pytest.raises(ValueError, match='Query must not be empty'):
-            client.rerank(query='', documents=['doc'])
+            client.rerank(query='', documents=['doc'], top_n=3, model='rerank-english-v3.0')
 
     def test_rerank_empty_documents_raises(self):
         client = self._make_client()
         with pytest.raises(ValueError, match='Documents list must not be empty'):
-            client.rerank(query='q', documents=[])
+            client.rerank(query='q', documents=[], top_n=3, model='rerank-english-v3.0')
 
     def test_rerank_invalid_api_key(self):
         client = self._make_client()
         client._client.rerank.side_effect = _rerank_client_mod.UnauthorizedError('invalid key')
         with pytest.raises(RerankAuthenticationError, match='Invalid Cohere API key'):
-            client.rerank(query='q', documents=['d'])
+            client.rerank(query='q', documents=['d'], top_n=3, model='rerank-english-v3.0')
 
     def test_rerank_rate_limit(self):
         client = self._make_client()
         client._client.rerank.side_effect = _rerank_client_mod.TooManyRequestsError('rate limited')
         with pytest.raises(RerankRateLimitError, match='Cohere rate limit exceeded'):
-            client.rerank(query='q', documents=['d'])
+            client.rerank(query='q', documents=['d'], top_n=3, model='rerank-english-v3.0')
 
     def test_rerank_bad_request(self):
         client = self._make_client()
         client._client.rerank.side_effect = _rerank_client_mod.BadRequestError('bad request')
         with pytest.raises(RerankBadRequestError, match='Invalid rerank request'):
-            client.rerank(query='q', documents=['d'])
+            client.rerank(query='q', documents=['d'], top_n=3, model='rerank-english-v3.0')
 
     def test_rerank_server_error(self):
         client = self._make_client()
         client._client.rerank.side_effect = _rerank_client_mod.InternalServerError('server error')
         with pytest.raises(RerankServerError, match='Cohere server error'):
-            client.rerank(query='q', documents=['d'])
+            client.rerank(query='q', documents=['d'], top_n=3, model='rerank-english-v3.0')
 
     def test_rerank_with_threshold_filters_low_scores(self):
         client = self._make_client()
         results = client.rerank_with_threshold(
             query='test',
             documents=['doc A', 'doc B', 'doc C'],
+            top_n=3,
+            model='rerank-english-v3.0',
             min_score=0.70,
         )
         assert len(results) == 2
@@ -280,6 +281,8 @@ class TestRerankClient:
         results = client.rerank_with_threshold(
             query='test',
             documents=['doc A', 'doc B', 'doc C'],
+            top_n=3,
+            model='rerank-english-v3.0',
             min_score=0.0,
         )
         assert len(results) == 3
@@ -289,121 +292,61 @@ class TestRerankClient:
         results = client.rerank_with_threshold(
             query='test',
             documents=['doc A', 'doc B', 'doc C'],
+            top_n=3,
+            model='rerank-english-v3.0',
             min_score=0.99,
         )
         assert len(results) == 0
 
     def test_missing_api_key_raises(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': 0.0,
-            'apikey': '',
-        }
+        config = {'apikey': ''}
         with pytest.raises(ValueError, match='Cohere API key is required'):
             with patch.object(_rerank_client_mod, 'CohereClient'):
                 RerankClient('rerank_cohere', config, {})
 
     def test_whitespace_api_key_raises(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': 0.0,
-            'apikey': '   ',
-        }
+        config = {'apikey': '   '}
         with pytest.raises(ValueError, match='Cohere API key is required'):
             with patch.object(_rerank_client_mod, 'CohereClient'):
                 RerankClient('rerank_cohere', config, {})
 
     def test_api_key_is_stripped_before_client_creation(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': 0.0,
-            'apikey': ' test-api-key ',
-        }
+        config = {'apikey': ' test-api-key '}
         with patch.object(_rerank_client_mod, 'CohereClient') as mock_client_cls:
             RerankClient('rerank_cohere', config, {})
         mock_client_cls.assert_called_once_with(api_key='test-api-key')
 
-    def test_invalid_top_n_type_raises(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 'three',
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
+    @pytest.mark.parametrize('top_n', ['three', 2.5, True])
+    def test_an_unusable_top_n_fails_the_call(self, top_n):
+        client = self._make_client()
         with pytest.raises(ValueError, match='top_n must be an integer'):
-            with patch.object(_rerank_client_mod, 'CohereClient'):
-                RerankClient('rerank_cohere', config, {})
+            client.rerank(query='q', documents=['d'], top_n=top_n, model='rerank-english-v3.0')
+        client._client.rerank.assert_not_called()
 
-    def test_invalid_top_n_fractional_float_raises(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 2.5,
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
-        with pytest.raises(ValueError, match='top_n must be an integer'):
-            with patch.object(_rerank_client_mod, 'CohereClient'):
-                RerankClient('rerank_cohere', config, {})
-
-    def test_top_n_accepts_json_float(self):
-        """Configuring top_n as 5.0 (a JSON-style float) should succeed."""
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 5.0,
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
-        with patch.object(_rerank_client_mod, 'CohereClient'):
-            client = RerankClient('rerank_cohere', config, {})
-        assert client._top_n == 5
-        assert isinstance(client._top_n, int)
-
-    def test_top_n_rejects_bool_at_init(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': True,
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
-        with pytest.raises(ValueError, match='top_n must be an integer'):
-            with patch.object(_rerank_client_mod, 'CohereClient'):
-                RerankClient('rerank_cohere', config, {})
-
-    def test_invalid_min_score_type_raises(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': 'high',
-            'apikey': 'test-api-key',
-        }
+    @pytest.mark.parametrize('min_score', ['high', True])
+    def test_an_unusable_min_score_fails_the_call(self, min_score):
+        client = self._make_client()
         with pytest.raises(ValueError, match='min_score must be a number'):
-            with patch.object(_rerank_client_mod, 'CohereClient'):
-                RerankClient('rerank_cohere', config, {})
+            client.rerank_with_threshold(query='q', documents=['d'], min_score=min_score, **_CALL)
+        client._client.rerank.assert_not_called()
 
-    def test_min_score_rejects_bool(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': True,
-            'apikey': 'test-api-key',
-        }
-        with pytest.raises(ValueError, match='min_score must be a number'):
-            with patch.object(_rerank_client_mod, 'CohereClient'):
-                RerankClient('rerank_cohere', config, {})
+    @pytest.mark.parametrize('model', ['', '  ', None])
+    def test_a_call_without_a_model_fails(self, model):
+        client = self._make_client()
+        with pytest.raises(ValueError, match='Cohere model name is required'):
+            client.rerank(query='q', documents=['d'], top_n=3, model=model)
+        client._client.rerank.assert_not_called()
 
     def test_rerank_invalid_top_n_override_raises(self):
         client = self._make_client()
         with pytest.raises(ValueError, match='top_n must be an integer'):
-            client.rerank(query='q', documents=['d'], top_n=0)
+            client.rerank(query='q', documents=['d'], top_n=0, model='rerank-english-v3.0')
         client._client.rerank.assert_not_called()
 
     def test_rerank_with_threshold_invalid_min_score_override_raises(self):
         client = self._make_client()
         with pytest.raises(ValueError, match='min_score must be a number'):
-            client.rerank_with_threshold(query='q', documents=['d'], min_score=1.5)
+            client.rerank_with_threshold(query='q', documents=['d'], min_score=1.5, **_CALL)
         client._client.rerank.assert_not_called()
 
 
@@ -467,36 +410,34 @@ class TestIGlobal:
         )
         return iglobal
 
-    def test_begin_global_creates_reranker_on_the_default_model(self, rerank_pkg):
+    def test_begin_global_creates_one_reranker_from_the_key(self, rerank_pkg):
         iglobal_mod, _ = rerank_pkg
         iglobal = self._make_iglobal(iglobal_mod)
 
-        mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
-        with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
-            iglobal.beginGlobal()
+        iglobal.beginGlobal()
+        # One client, holding only the key: the model and the numbers are each call's
         assert iglobal._reranker is not None
-        assert iglobal._reranker._model == 'rerank-english-v3.0'
-        assert (iglobal._reranker._top_n, iglobal._reranker._min_score) == (5, 0.0)
+        assert iglobal._reranker._client is not None
+        assert not hasattr(iglobal._reranker, '_model')
 
-    def test_a_named_entry_pins_its_model(self, rerank_pkg):
+    @pytest.mark.parametrize(
+        'stored, expected',
+        [
+            ({'apikey': 'test-key'}, ('rerank-english-v3.0', 5, 0.0)),
+            ({'profile': 'rerank-v3.5', 'apikey': 'test-key', 'top_n': 2}, ('rerank-v3.5', 2, 0.0)),
+            (
+                {'profile': 'custom', 'custom': {'model': 'my-reranker'}, 'apikey': 'test-key', 'min_score': 0.4},
+                ('my-reranker', 5, 0.4),
+            ),
+        ],
+        ids=['default', 'named-entry', 'custom'],
+    )
+    def test_a_call_starts_from_the_stored_entry(self, rerank_pkg, stored, expected):
+        """A named entry pins its model, custom takes a free-form one; a call with no params reads them."""
         iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(iglobal_mod, {'profile': 'rerank-v3.5', 'apikey': 'test-key', 'top_n': 2})
-
-        mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
-        with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
-            iglobal.beginGlobal()
-        assert (iglobal._reranker._model, iglobal._reranker._top_n) == ('rerank-v3.5', 2)
-
-    def test_custom_takes_a_free_form_model(self, rerank_pkg):
-        iglobal_mod, _ = rerank_pkg
-        iglobal = self._make_iglobal(
-            iglobal_mod, {'profile': 'custom', 'custom': {'model': 'my-reranker'}, 'apikey': 'test-key'}
-        )
-
-        mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
-        with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
-            iglobal.beginGlobal()
-        assert iglobal._reranker._model == 'my-reranker'
+        iglobal = self._make_iglobal(iglobal_mod, stored)
+        settings = iglobal._resolved()
+        assert (settings.model, settings.top_n, settings.min_score) == expected
 
     def test_mock_mode_skips_dependency_install(self, rerank_pkg):
         iglobal_mod, _ = rerank_pkg
@@ -576,6 +517,8 @@ class TestIInstance:
         reranker.rerank_with_threshold.return_value = rerank_results
         iglobal._reranker = reranker
         inst.IGlobal = iglobal
+        # The model, the count and the threshold are the call's settings
+        inst._settings = types.SimpleNamespace(model='rerank-english-v3.0', top_n=5, min_score=0.0)
 
         inst.instance = Mock()
         return inst
@@ -598,6 +541,7 @@ class TestIInstance:
         kwargs = inst.IGlobal._reranker.rerank_with_threshold.call_args.kwargs
         assert kwargs['query'] == 'What is machine learning?'
         assert len(kwargs['documents']) == 2
+        assert (kwargs['model'], kwargs['top_n'], kwargs['min_score']) == ('rerank-english-v3.0', 5, 0.0)
 
         docs = inst.instance.writeDocuments.call_args[0][0]
         assert len(docs) == 2
@@ -764,12 +708,7 @@ class TestRerankExceptions:
         assert 'BadRequest' in RerankBadRequestError.__name__
 
     def test_exception_preserves_original_cause(self):
-        config = {
-            'model': 'rerank-english-v3.0',
-            'top_n': 3,
-            'min_score': 0.0,
-            'apikey': 'test-api-key',
-        }
+        config = {'apikey': 'test-api-key'}
         mock_cohere_client = _make_cohere_client_mock(_make_mock_rerank_response([]))
         with patch.object(_rerank_client_mod, 'CohereClient', return_value=mock_cohere_client):
             client = RerankClient('rerank_cohere', config, {})
@@ -778,5 +717,5 @@ class TestRerankExceptions:
         client._client.rerank.side_effect = original
 
         with pytest.raises(RerankAuthenticationError) as exc_info:
-            client.rerank(query='q', documents=['d'])
+            client.rerank(query='q', documents=['d'], top_n=3, model='rerank-english-v3.0')
         assert exc_info.value.__cause__ is original
