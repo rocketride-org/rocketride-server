@@ -22,58 +22,6 @@
 		"billing": {
 			"plans": [
 				{
-					"nickname": "Starter",
-					"amountCents": 500,
-					"currency": "usd",
-					"interval": "month",
-					"metadata": {
-						"order": 100,
-						"seats": 1,
-						"features": [
-							"pipelines"
-						],
-						"description": [
-							"500 tokens/month included",
-							"$0.03/token overage",
-							"Token rollover"
-						],
-						"credits": {
-							"recurring": {
-								"tokens": 500
-							}
-						},
-						"labels": {
-							"tokens": "tokens"
-						}
-					}
-				},
-				{
-					"nickname": "Starter",
-					"amountCents": 6000,
-					"currency": "usd",
-					"interval": "year",
-					"metadata": {
-						"order": 100,
-						"seats": 1,
-						"features": [
-							"pipelines"
-						],
-						"description": [
-							"500 tokens/month included",
-							"$0.03/token overage",
-							"Token rollover"
-						],
-						"credits": {
-							"recurring": {
-								"tokens": 500
-							}
-						},
-						"labels": {
-							"tokens": "tokens"
-						}
-					}
-				},
-				{
 					"nickname": "Builder",
 					"amountCents": 5000,
 					"currency": "usd",
@@ -251,29 +199,6 @@
 						},
 						"labels": {
 							"tokens": "tokens"
-						}
-					}
-				},
-				{
-					"nickname": "Enterprise",
-					"amountCents": 0,
-					"currency": "usd",
-					"interval": "one_time",
-					"metadata": {
-						"order": 500,
-						"description": [
-							"Negotiated token pricing",
-							"Token rollover",
-							"Priority support + SLA",
-							"Dedicated infrastructure",
-							"Custom integrations"
-						],
-						"displayAmount": "Custom",
-						"action": {
-							"type": "mailto",
-							"url": "sales@rocketride.ai",
-							"subject": "Enterprise pricing inquiry",
-							"label": "Contact us"
 						}
 					}
 				},

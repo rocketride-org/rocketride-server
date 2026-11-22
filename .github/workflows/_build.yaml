@@ -328,6 +328,27 @@ jobs:
         if: matrix.platform == 'ubuntu' && inputs.codeql == false && inputs.test
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends bubblewrap
 
+      # CPython 3.12 `_wmi` timeout race (python/cpython#130727, fixed in 3.13
+      # by python/cpython#134313): after a WMI query times out, its helper
+      # thread can close an unrelated handle of the process. Under CI load a
+      # quarter to a third of the Windows engine processes hit that timeout.
+      # The hook makes `platform` take its non-WMI path in every engine Python
+      # process of the test run. Remove this step, the removal step before
+      # Package and scripts/ci/*rr_ci_skip_wmi* once the engine runs Python 3.13
+      # or later. On 3.13+ the step only prints that reminder as a warning and
+      # installs nothing; it never fails the job for it.
+      - name: Skip WMI queries in the engine's Python / Windows
+        if: inputs.codeql == false && inputs.test && matrix.platform == 'windows'
+        shell: bash
+        run: |
+          if [ "$(dist/server/engine.exe -c "import sys; print('new' if sys.version_info >= (3, 13) else 'old', end='')")" = new ]; then
+            echo "::warning title=WMI hook no longer needed::The engine runs Python 3.13 or later, which has the _wmi fix (python/cpython#134313). Remove this step, the removal step before Package and scripts/ci/*rr_ci_skip_wmi*."
+            exit 0
+          fi
+          cp scripts/ci/rr_ci_skip_wmi.py scripts/ci/rr_ci_skip_wmi.pth dist/server/Lib/site-packages/
+          dist/server/engine.exe -c "import _wmi, sys; sys.exit(0 if getattr(_wmi.exec_query, '_rr_ci_skip_wmi', False) else 'the WMI hook is not active in a new engine process')"
+          dist/server/engine.exe -m pytest scripts/ci/test_rr_ci_skip_wmi.py -q -p no:cacheprovider
+
       - name: Test
         if: inputs.codeql == false && inputs.test
         # Integration tests boot a local server on :5565 and connect a test
@@ -391,6 +412,12 @@ jobs:
         with:
           category: /language:cpp
 
+      # The WMI hook is for the test run only: keep it out of the packaged engine.
+      - name: Remove the WMI hook / Windows
+        if: always() && matrix.platform == 'windows'
+        shell: bash
+        run: rm -f dist/server/Lib/site-packages/rr_ci_skip_wmi.py dist/server/Lib/site-packages/rr_ci_skip_wmi.pth dist/server/Lib/site-packages/__pycache__/rr_ci_skip_wmi.*.pyc
+
       - name: Package
         if: inputs.package
         run: ${{ matrix.builder_cmd }} package --verbose
@@ -405,6 +432,18 @@ jobs:
             ${{ github.workspace }}/dist/artifacts/*.zip
             ${{ github.workspace }}/dist/artifacts/*.tar.gz
             ${{ github.workspace }}/dist/artifacts/*.json
+          if-no-files-found: error
+
+      # One platform only: the Python nodes are the same on every platform, and each server's index names this archive
+      - name: Upload node archive
+        if: inputs.package && matrix.platform == 'ubuntu'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-artifacts-nodes
+          retention-days: ${{ inputs.retention_days }}
+          path: |
+            ${{ github.workspace }}/dist/nodes/rocketride-nodes-v*.zip
+            ${{ github.workspace }}/dist/nodes/index.json
           if-no-files-found: error
 
       - name: Upload VS Code extension

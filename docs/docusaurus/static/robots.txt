@@ -1,4 +1,4 @@
-# robots.txt for docs.rocketride.org
+# robots.txt for docs.rocketride.ai
 # Explicitly welcomes AI crawlers + declares sitemap.
 #
 # WARNING, if you are about to add a rule here:
@@ -51,4 +51,4 @@ Allow: /
 User-agent: *
 Allow: /
 
-Sitemap: https://docs.rocketride.org/sitemap.xml
+Sitemap: https://docs.rocketride.ai/sitemap.xml
