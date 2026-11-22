@@ -55,6 +55,19 @@ export async function renameRetrying(src: string, dest: string, delayMs = 500): 
 }
 
 /**
+ * Downloads into staging, then renames it to dest with renameRetrying, so a file Windows
+ * holds right after its download still lands; staging never outlives the call.
+ */
+export async function downloadThenRename(dest: string, staging: string, download: (staging: string) => Promise<void>): Promise<void> {
+	try {
+		await download(staging);
+		await renameRetrying(staging, dest);
+	} finally {
+		fs.rmSync(staging, { force: true });
+	}
+}
+
+/**
  * Moves a staged release into place once all of it is downloaded: the server's files into
  * engineDir, already cleared, and its node archive, if it has one, into a fresh nodesDir.
  */

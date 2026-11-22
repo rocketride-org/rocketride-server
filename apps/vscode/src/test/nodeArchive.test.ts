@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { commitStagedRelease, missingNodeArchive, nodeArchiveOf, renameRetrying } from '../engine/shared/node-archive';
+import { commitStagedRelease, downloadThenRename, missingNodeArchive, nodeArchiveOf, renameRetrying } from '../engine/shared/node-archive';
 
 /** An engine/ folder whose nodes/index.json holds index, or none when index is undefined. */
 function engineWith(index?: unknown): string {
@@ -110,4 +110,27 @@ test('a rename still held after ten tries fails', async (t) => {
 
 	await assert.rejects(renameRetrying(path.join(dir, 'a'), path.join(dir, 'b'), 1), { code: 'EPERM' });
 	assert.equal(calls(), 10);
+});
+
+test('a download Windows holds for a moment after it is written still lands in place', async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-nodes-'));
+	const calls = failingRename(t, 'EPERM', 1);
+
+	await downloadThenRename(path.join(dir, 'rocketride-nodes-v1.zip'), path.join(dir, 'rocketride-nodes-v1.zip.download'), async (staging) => fs.writeFileSync(staging, 'zip'));
+
+	assert.equal(calls(), 2);
+	assert.deepEqual(fs.readdirSync(dir), ['rocketride-nodes-v1.zip']);
+});
+
+test('a download that fails leaves neither the file nor its staging copy', async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rr-nodes-'));
+
+	await assert.rejects(
+		downloadThenRename(path.join(dir, 'a.zip'), path.join(dir, 'a.zip.download'), async (staging) => {
+			fs.writeFileSync(staging, 'part');
+			throw new Error('connection reset');
+		}),
+		/connection reset/
+	);
+	assert.deepEqual(fs.readdirSync(dir), []);
 });

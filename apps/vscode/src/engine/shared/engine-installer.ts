@@ -38,7 +38,7 @@ import * as lockfile from 'proper-lockfile';
 import { execFile, execFileSync } from 'child_process';
 import { getLogger } from '../../shared/util/output';
 import { icons } from '../../shared/util/icons';
-import { commitStagedRelease, missingNodeArchive, nodeArchiveOf, renameRetrying } from './node-archive';
+import { commitStagedRelease, downloadThenRename, missingNodeArchive, nodeArchiveOf, renameRetrying } from './node-archive';
 
 // =============================================================================
 // TYPES
@@ -431,13 +431,9 @@ export class EngineInstaller {
 		const nodesDir = this.nodesDir();
 		fs.mkdirSync(nodesDir, { recursive: true });
 		// Renamed into place once whole, so an archive that is there is complete
-		const staging = path.join(nodesDir, `${archive}.download`);
-		try {
-			await this.downloadNodeArchive(release, archive, staging, progress, token, githubToken);
-			await renameRetrying(staging, path.join(nodesDir, archive));
-		} finally {
-			fs.rmSync(staging, { force: true });
-		}
+		await downloadThenRename(path.join(nodesDir, archive), path.join(nodesDir, `${archive}.download`), (staging) =>
+			this.downloadNodeArchive(release, archive, staging, progress, token, githubToken)
+		);
 	}
 
 	/** Downloads the release's node archive to dest. */
@@ -779,7 +775,7 @@ export class EngineInstaller {
 				}
 			}
 
-			fs.renameSync(tmpDownloadPath, destPath);
+			await renameRetrying(tmpDownloadPath, destPath);
 		} catch (err) {
 			try {
 				file.close();

@@ -40,10 +40,13 @@ put it in a `nodes/` folder beside the runtime directory
 (`rocketride-engine/../nodes/`): a run gets the nodes its pipeline names from
 there, so no node code is downloaded at run time. A node's Python packages and
 models still install on first use; provision them in advance for an offline host.
-To upgrade, extract the new release into a new, empty runtime directory. A
-`nodes/<name>/` folder that an older release left in the runtime directory is
+To upgrade, extract the new release into a new, empty runtime directory, and put
+its node archive in the `nodes/` folder beside it. Do not copy the old runtime
+directory's `nodes/`: a `nodes/<name>/` folder an older release left there is
 loaded instead of the node in the archive, and nothing replaces it. Copy only the
-nodes you wrote yourself from the old `nodes/` into the new one.
+nodes you wrote yourself into the new runtime directory's `nodes/`, from the old
+runtime directory's `nodes/` and from `local_nodes/` or the folder you passed with
+`--node_path`, which the engine no longer reads.
 
 ```bash
 mkdir rocketride-engine && tar -xzf rocketride-server-<version>-linux-x64.tar.gz -C rocketride-engine
