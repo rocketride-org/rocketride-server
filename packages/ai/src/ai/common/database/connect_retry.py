@@ -363,8 +363,16 @@ class _DeadlineWatchdog:
         with self._cond:
             heapq.heappush(self._heap, entry)
             if self._thread is None:
-                self._thread = threading.Thread(target=self._run, name='db-ping-watchdog', daemon=True)
-                self._thread.start()
+                thread = threading.Thread(target=self._run, name='db-ping-watchdog', daemon=True)
+                try:
+                    thread.start()
+                except BaseException:
+                    # No thread: leave ``_thread`` unset so the next arm tries again, and
+                    # drop the entry, which nothing would ever run or pop.
+                    self._heap.remove(entry)
+                    heapq.heapify(self._heap)
+                    raise
+                self._thread = thread
             elif self._heap[0] is entry:
                 self._cond.notify()  # the thread sleeps toward a later deadline
         return entry
@@ -452,15 +460,17 @@ def install_ping_watchdog(engine: Any, timeout: float, watchdog: Optional[_Deadl
                 state['aborted'] = True
                 _abort_socket(handle)
 
-        entry = watchdog.arm(timeout, abort)
+        entry = None
         try:
+            entry = watchdog.arm(timeout, abort)  # inside the try: if it raises, the duplicate is still closed
             result = real_ping(dbapi_connection)
         finally:
             with lock:
                 state['done'] = True
                 aborted = state['aborted']
                 _close_socket(handle)
-            watchdog.disarm(entry)
+            if entry is not None:
+                watchdog.disarm(entry)
         return False if aborted else result
 
     dialect.do_ping = bounded_ping

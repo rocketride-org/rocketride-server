@@ -697,6 +697,53 @@ def test_the_watchdog_fires_an_expired_deadline_and_skips_a_disarmed_one():
     assert kept[2] is not None  # handed to the thread, not disarmed
 
 
+def test_a_watchdog_thread_that_fails_to_start_is_retried_on_the_next_arm(monkeypatch):
+    """A failed ``Thread.start`` must not leave a never-started thread recorded, or no later arm would ever start one."""
+    watchdog = connect_retry_module._DeadlineWatchdog()
+    real_start = threading.Thread.start
+    calls = []
+
+    def start_fails_once(self):
+        calls.append(self)
+        if len(calls) == 1:
+            raise RuntimeError("can't start new thread")
+        return real_start(self)
+
+    monkeypatch.setattr(threading.Thread, 'start', start_fails_once)
+
+    with pytest.raises(RuntimeError, match="can't start new thread"):
+        watchdog.arm(0.05, lambda: None)
+    assert watchdog._thread is None  # before: the dead thread object stayed recorded
+    assert watchdog._heap == []  # and its entry stayed in the heap
+
+    fired = threading.Event()
+    watchdog.arm(0.05, fired.set)  # the next arm starts a thread, which runs the callback
+    assert fired.wait(2)
+
+
+@pytest.mark.skipif(
+    not connect_retry_module.PING_WATCHDOG_SUPPORTED, reason='Windows cannot duplicate a socket, so no watchdog there'
+)
+def test_a_watchdog_that_cannot_arm_does_not_leak_the_duplicated_socket(monkeypatch):
+    engine = create_engine('sqlite://')
+    pinged = []
+    engine.dialect.do_ping = lambda dbapi_connection: pinged.append(True) or True
+    watchdog = connect_retry_module._DeadlineWatchdog()
+
+    def cannot_arm(timeout, callback):
+        raise RuntimeError("can't start new thread")
+
+    watchdog.arm = cannot_arm
+    install_ping_watchdog(engine, 5, watchdog)
+    taken, _aborted = _fake_duplicates(monkeypatch)
+
+    with pytest.raises(RuntimeError, match="can't start new thread"):
+        engine.dialect.do_ping(object())
+
+    assert len(taken) == 1 and taken[0].closed  # before: the duplicate descriptor leaked
+    assert pinged == []  # the ping itself never ran unbounded
+
+
 def test_an_earlier_deadline_wakes_the_watchdog_that_sleeps_toward_a_later_one():
     watchdog = connect_retry_module._DeadlineWatchdog()
     watchdog.arm(30, lambda: None)  # the thread now sleeps for 30 s
