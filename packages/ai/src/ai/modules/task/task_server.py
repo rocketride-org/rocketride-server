@@ -1709,7 +1709,9 @@ class TaskServer(DAPBase):
         """
 
         def _held(candidate: Any) -> bool:
-            # A held refusal stands; otherwise the candidate's version must match
+            # A held refusal stands; otherwise the candidate's version must
+            # match (the walk already passed over controls of another version
+            # before it chose a source; this holds the publications)
             if expect_version is None or isinstance(candidate, TaskError):
                 return True
             return getattr(candidate, 'version', None) == expect_version
@@ -1718,7 +1720,14 @@ class TaskServer(DAPBase):
         if mode == RESOLVE_ATTACH:
             for live_only in (True, False):
                 control = self._walk_rungs(
-                    target.address, account_info, require, live_only, rungs, plan, unattended=True
+                    target.address,
+                    account_info,
+                    require,
+                    live_only,
+                    rungs,
+                    plan,
+                    unattended=True,
+                    expect_version=expect_version,
                 )
                 if control is not None and _held(control):
                     return Resolution(target, self._check_engine_available(control), None, False)
@@ -1729,7 +1738,13 @@ class TaskServer(DAPBase):
         # so discovery and execution pick the same publication. A held refusal
         # (an ambiguous rung) is raised where it stands
         state_epoch = time.monotonic()
-        candidates = [c for c in await self._candidates(target.address, account_info, require, rungs, plan) if _held(c)]
+        candidates = [
+            c
+            for c in await self._candidates(
+                target.address, account_info, require, rungs, plan, expect_version=expect_version
+            )
+            if _held(c)
+        ]
         if mode == RESOLVE_READ:
             for candidate in candidates:
                 if isinstance(candidate, TaskError):
@@ -1768,6 +1783,8 @@ class TaskServer(DAPBase):
         require: Optional[str],
         rungs: List[str],
         plan: RungPlan,
+        *,
+        expect_version: Optional[int] = None,
     ) -> List[Union[TaskControl, Pin, TaskError]]:
         """
         What answers ``parsed`` for this caller on the plan's rungs, in the ladder's order. A pure read.
@@ -1794,6 +1811,9 @@ class TaskServer(DAPBase):
             require: The permission the request needs.
             rungs: Filled with the rungs the control walk tried.
             plan: The rungs the target walks.
+            expect_version: A ``:N`` call's version: the control walk passes
+                over controls of every other version before it chooses a
+                source (``_walk_rungs``).
 
         Returns:
             The candidates in answer order, each a ``TaskControl``, a ``Pin``
@@ -1809,7 +1829,7 @@ class TaskServer(DAPBase):
         # nothing precedes, raises at once)
         held: Optional[TaskError] = None
         try:
-            live = self._walk_rungs(parsed, account_info, require, True, rungs, plan)
+            live = self._walk_rungs(parsed, account_info, require, True, rungs, plan, expect_version=expect_version)
         except TaskError as e:
             if e.code != TaskError.SOURCE_REQUIRED or getattr(e, 'rung', '') == 'spec':
                 raise
@@ -1870,6 +1890,7 @@ class TaskServer(DAPBase):
         rungs: List[str],
         plan: RungPlan,
         unattended: bool = False,
+        expect_version: Optional[int] = None,
     ) -> Optional[TaskControl]:
         """
         One walk of the plan's rungs over the registry indexes: the first hit, verified, or None.
@@ -1900,6 +1921,10 @@ class TaskServer(DAPBase):
             plan: The rungs (and, on ``@team``, the teams) to walk.
             unattended: An attach: on the team and org rungs, fall back to the
                 run with no caller (a schedule, a run-now).
+            expect_version: A ``:N`` call's version (the rung's published
+                one): controls of any other version are passed over before
+                the source is chosen, so version 1's live sources never make
+                a source-less call on version 2 ambiguous.
 
         Returns:
             The control the first answering rung resolved, or None.
@@ -1922,7 +1947,11 @@ class TaskServer(DAPBase):
             addresses = [build_address(parsed.developer_id, parsed.pipe_id, source) for source in sources if source]
 
         def _usable(control: Optional[TaskControl]) -> bool:
-            return control is not None and (control.live or not live_only)
+            return (
+                control is not None
+                and (control.live or not live_only)
+                and (expect_version is None or control.version == expect_version)
+            )
 
         def _pick(candidates: List[TaskControl], rung: str, team_id: str = '') -> Optional[TaskControl]:
             """One control, or the source-required error (naming its rung and team) when several sources answer."""
@@ -2263,11 +2292,29 @@ class TaskServer(DAPBase):
             raise refusal
         confirmed_at = time.monotonic() if asked else 0.0
 
-        # Step 4: one start per index key; a concurrent request attaches
+        # Step 4: one start per index key; a concurrent request attaches. Only
+        # a control of the version this pin runs answers. The published
+        # version's key carries no version (plan 7.5) and a promotion does not
+        # repoint the runs already under it (plan 7.2's lazy repoint is not
+        # built), so the previous version's run keeps the key until it stops
+        # or idles out: a call held to the new version is refused meanwhile,
+        # never answered by the old one
         async with self._engines.control_start_lock(key):
-            existing = next((c for c in self._task_control.lookup(key) if c.live and not c.restarting), None)
+            running = [c for c in self._task_control.lookup(key) if c.live and not c.restarting]
+            existing = next((c for c in running if c.version == pin.version), None)
             if existing is not None:
                 return self._check_engine_available(self._verify_control(existing, account_info, require)), False
+            if running:
+                superseded = running[0]
+                raise TaskError(
+                    TaskError.ENGINE_UNAVAILABLE,
+                    f'Version {superseded.version} of {address!r} still runs on the {pin.rung} rung; '
+                    f'version {pin.version} answers once that run stops or idles out',
+                    address=address,
+                    engineKey=getattr(superseded.task, 'engine_key', '') or '',
+                    reason='superseded',
+                    version=superseded.version,
+                )
             pipeline['source'] = source
             started = await start_server_task_as_team(
                 self,

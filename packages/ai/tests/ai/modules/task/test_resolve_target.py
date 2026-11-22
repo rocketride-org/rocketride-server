@@ -525,6 +525,40 @@ async def test_an_ambiguous_team_rung_that_answers_first_needs_a_source(catalog,
         assert excinfo.value.sources == ['prompt_1', 'webhook_1']
 
 
+async def test_a_version_call_passes_over_another_versions_live_sources(catalog, engines, deployments):
+    """A source-less ``:2`` on the rung's published version: version 1's two live sources are passed over before
+    a source is chosen, and never answer it. While version 1 still runs under the address the start is refused,
+    naming it (a promotion does not repoint, plan 7.2); once it is gone version 2 starts.
+    """
+    deployments.deploy('=team/team-1', version=2)
+    ts = _server()
+    old = [
+        _control(ts, run_kind='deploy', owner_kind='team', team_id='team-1', source=s)
+        for s in ('webhook_1', 'prompt_1')
+    ]
+    for control in old:
+        control.version = 1
+    reader = _team_reader(['task.data'])
+
+    resolution = await ts.resolve_target(reader, 'acme.docBrain:2', 'task.data', mode=RESOLVE_READ)
+    assert resolution.control is None and resolution.pin.version == 2
+
+    with pytest.raises(TaskError) as excinfo:
+        await _resolve(ts, 'acme.docBrain:2', reader, 'task.data')
+    assert excinfo.value.code == TaskError.ENGINE_UNAVAILABLE and excinfo.value.reason == 'superseded'
+    assert str(excinfo.value).startswith(f'Version 1 of {ADDRESS!r} still runs on the team rung')
+
+    # Without a version the rung's two live sources stand
+    with pytest.raises(TaskError) as excinfo:
+        await ts.resolve_target(reader, '=team/team-1/acme.docBrain', 'task.data', mode=RESOLVE_READ)
+    assert excinfo.value.code == TaskError.SOURCE_REQUIRED
+
+    for control in old:
+        ts._unregister_control(control)
+    control = await _resolve(ts, 'acme.docBrain:2', reader, 'task.data')
+    assert (control.version, control.pinned, control.address) == (2, False, ADDRESS)
+
+
 async def test_an_ambiguous_later_rung_never_blocks_an_earlier_publication(catalog, engines, deployments):
     """A personal publication ranks before the team rung: it answers the read and the start, the team's two
     live sources notwithstanding (plan 3.2: the ladder's order, a pin before a control of a later rung).
