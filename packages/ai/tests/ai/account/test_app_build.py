@@ -34,6 +34,7 @@ is covered by the e2e deploy flow on dev machines/CI, not here.
 import io
 import json
 import os
+import shutil
 import re
 import sys
 import time
@@ -1312,6 +1313,100 @@ async def test_env_files_keep_only_public_lines(monkeypatch, build_store, toolch
     assert seen['.env'].splitlines() == ['PUBLIC_API=https://api.example', 'export PUBLIC_B=two']
     assert seen['.env.local'].strip() == ''
     assert seen['.env.production'].splitlines() == ['PUBLIC_X=1']
+
+
+_REAL_FIND_NODE = app_build._find_node
+
+
+def test_find_node_resolves_the_override_through_path(monkeypatch):
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('node is not on PATH')
+    monkeypatch.setenv('RR_BUILD_NODE', 'node')
+    assert _REAL_FIND_NODE() == node
+    monkeypatch.setenv('RR_BUILD_NODE', 'definitely-not-a-real-binary-name')
+    assert _REAL_FIND_NODE() is None
+
+
+@pytest.mark.asyncio
+async def test_env_filter_only_touches_dotenv_files(monkeypatch, build_store, toolchain):
+    seen: Dict[str, str] = {}
+
+    def inspect(ws_dir):
+        app = os.path.join(ws_dir, 'apps', 'brandy-ui')
+        for name in ('.env.local', '.environment.md', '.envrc'):
+            seen[name] = open(os.path.join(app, name), encoding='utf-8').read()
+
+    zip_bytes = _hardening_zip(
+        {
+            'apps/brandy-ui/.env.local': 'SECRET=x\n',
+            'apps/brandy-ui/.environment.md': 'SECRET=docs\n',
+            'apps/brandy-ui/.envrc': 'SECRET=direnv\n',
+        }
+    )
+    rail, _fake = await _run_capturing(monkeypatch, zip_bytes, inspect=inspect)
+    assert rail.stamps[-1]['status'] == 'ok'
+    assert seen['.env.local'].strip() == ''
+    assert seen['.environment.md'] == 'SECRET=docs\n'
+    assert seen['.envrc'] == 'SECRET=direnv\n'
+
+
+class _HarvestTamperExec(_FakeExec):
+    """A bundle step that lets code in the sandbox tamper with the job's .out."""
+
+    def __init__(self, tamper):
+        super().__init__()
+        self.tamper = tamper
+
+    async def __call__(self, argv, cwd, timeout, on_line=None):
+        result = await super().__call__(argv, cwd, timeout, on_line)
+        if 'build' in argv:
+            config = argv[argv.index('--config') + 1]
+            self.tamper(os.path.join(os.path.dirname(os.path.dirname(config)), '.out'))
+        return result
+
+
+async def _run_tampered(monkeypatch, tamper):
+    rail = _FakeRail(_app_source_zip(), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    monkeypatch.setattr(app_build, '_exec', _HarvestTamperExec(tamper))
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    return rail
+
+
+@pytest.mark.asyncio
+async def test_harvest_refuses_an_out_dir_swapped_for_a_symlink(monkeypatch, build_store, toolchain, tmp_path):
+    outside = tmp_path / 'outside'
+    outside.mkdir()
+    (outside / 'remoteEntry.js').write_text('// host file')
+
+    def tamper(out_dir):
+        shutil.rmtree(out_dir)
+        os.symlink(str(outside), out_dir)
+
+    rail = await _run_tampered(monkeypatch, tamper)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'harvest'), final
+    assert not (
+        build_store / 'orgs' / 'org1' / 'files' / '.deployments' / 'acme.brandy' / 'v000001-abcdef12' / 'dist'
+    ).exists()
+    assert sorted(p.name for p in outside.iterdir()) == ['remoteEntry.js']
+
+
+@pytest.mark.asyncio
+async def test_harvest_does_not_copy_a_manifest_asset_through_a_dangling_link(
+    monkeypatch, build_store, toolchain, tmp_path
+):
+    target = tmp_path / 'outside' / 'written-through-the-link.svg'
+    target.parent.mkdir()
+
+    def tamper(out_dir):
+        os.symlink(str(target), os.path.join(out_dir, 'icon.svg'))
+
+    rail = await _run_tampered(monkeypatch, tamper)
+    assert not target.exists()
+    assert rail.stamps[-1]['status'] == 'failed'
 
 
 def _guard_cases(job, env):
