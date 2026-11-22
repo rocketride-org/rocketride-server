@@ -1683,7 +1683,9 @@ class TaskServer(DAPBase):
         rungs: List[str] = []
         if mode == RESOLVE_ATTACH:
             for live_only in (True, False):
-                control = self._walk_rungs(target.address, account_info, require, live_only, rungs, plan)
+                control = self._walk_rungs(
+                    target.address, account_info, require, live_only, rungs, plan, unattended=True
+                )
                 if control is not None:
                     return Resolution(target, self._check_engine_available(control), None, False)
             raise self._not_registered(target.dotted, rungs, plan)
@@ -1830,6 +1832,7 @@ class TaskServer(DAPBase):
         live_only: bool,
         rungs: List[str],
         plan: RungPlan,
+        unattended: bool = False,
     ) -> Optional[TaskControl]:
         """
         One walk of the plan's rungs over the registry indexes: the first hit, verified, or None.
@@ -1845,7 +1848,11 @@ class TaskServer(DAPBase):
         sources) whatever the registry holds. A two-segment address resolves
         when exactly one source answers; several raise
         ``TASK_SOURCE_REQUIRED``. A run with no caller (a schedule, a
-        run-now) is under ``-`` in its key and never answers a caller.
+        run-now) is under ``-`` in its key and never answers a caller's data
+        request; an attach (``unattended``: a monitor, a stop) falls back to
+        it on the team and org rungs when the caller has no control of their
+        own there, for a caller who may watch that run (plan 8.3: the team's
+        members with ``task.monitor``, the org's admins).
 
         Args:
             parsed: The parsed address.
@@ -1854,6 +1861,8 @@ class TaskServer(DAPBase):
             live_only: Consider only live (or dormant) controls.
             rungs: Filled with the rungs this walk tried, in order.
             plan: The rungs (and, on ``@team``, the teams) to walk.
+            unattended: An attach: on the team and org rungs, fall back to the
+                run with no caller (a schedule, a run-now).
 
         Returns:
             The control the first answering rung resolved, or None.
@@ -1907,6 +1916,19 @@ class TaskServer(DAPBase):
                     found.append(usable[0])
             return _pick(found, rung, owner_id if rung == 'team' else '')
 
+        def _no_caller(rung: str, owner_id: str) -> Optional[TaskControl]:
+            """The run with no caller on ``rung`` under ``owner_id`` (a schedule, a run-now): an attach's fallback."""
+            if not unattended:
+                return None
+            found = []
+            for a in addresses:
+                usable = [
+                    c for c in registry.lookup(control_key(rung, owner_id, a, '')) if _usable(c) and not c.restarting
+                ]
+                if usable:
+                    found.append(usable[0])
+            return _pick(found, rung, owner_id if rung == 'team' else '')
+
         # Step 2: @spec, the caller's own presence. Attach-only, and skipped
         # for a scoped (machine) credential.
         if endpoints is None and 'spec' in plan.rungs:
@@ -1931,7 +1953,7 @@ class TaskServer(DAPBase):
         if 'team' in plan.rungs:
             rungs.append('@team')
             for team_id in plan.teams:
-                control = _exact('team', team_id)
+                control = _exact('team', team_id) or _no_caller('team', team_id)
                 if control is not None and resolve_run_permissions(account_info, control):
                     check_endpoint_scope(endpoints, control.address)
                     return self._verify_control(control, account_info, require)
@@ -1940,7 +1962,7 @@ class TaskServer(DAPBase):
         if 'org' in plan.rungs:
             rungs.append('@org')
             org_id = str((getattr(account_info, 'organization', None) or {}).get('id') or '')
-            control = _exact('org', org_id) if org_id else None
+            control = (_exact('org', org_id) or _no_caller('org', org_id)) if org_id else None
             if control is not None:
                 check_endpoint_scope(endpoints, control.address)
                 return self._verify_control(control, account_info, require)
