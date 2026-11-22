@@ -166,10 +166,13 @@ argument (`chapters`, `read`, `segment`, `delete`). Reads require `task.monitor`
 `delete` requires `task.control`. Those rights are checked against the OWNER the
 request resolves to (`owner` when given, else `teamId`, else your own stream): your
 own streams need them on your account; a team's (a team id or `=team/<tid>`) need
-them on that team — membership is the read/write right; an org's (`=org/<oid>`, as
-`owner` or as `teamId`) are the active org's admins'; another user's personal
-streams are refused. A key with an `endpoints` scope also reaches only the streams
-of the addresses inside it. `openEventStream()` is client-side
+them among the permissions you hold on that team — a member with `task.monitor`
+there reads its logs, deleting needs `task.control` there, and an org admin holds
+every team permission; an org's (`=org/<oid>`, as `owner` or as `teamId`) are the
+active org's admins'. Another user's personal streams, and another org's, are
+refused, except to `sys.admin` and `internal` identities, which pass the owner
+check. A key with an `endpoints` scope reaches only the streams of the addresses
+inside it, whoever holds it. `openEventStream()` is client-side
 composition: it issues `chapters` and `segment` calls under the hood and
 registers a live monitor subscription while open (released by
 `closeEventStream()`) — it adds no wire surface of its own.
