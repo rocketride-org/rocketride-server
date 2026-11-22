@@ -25,12 +25,13 @@ do, OAuth requires `MCP_EXPECTED_AUDIENCE` (below); API-key auth
 | `MCP_AUTHORIZATION_SERVER` | `https://auth.rocketride.ai` | OAuth authorization server advertised in discovery metadata. |
 | `MCP_EXPECTED_AUDIENCE` | _(unset)_ | Audience OAuth tokens must carry — for the default Zitadel setup this is a **project id**, not a URL. When unset, OAuth tokens are accepted only on loopback binds. |
 | `MCP_JWKS_URL` | `<issuer>/oauth/v2/keys` | Where token signing keys are fetched from. |
-| `ROCKETRIDE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. When unset: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER` with `https`→`wss` / `http`→`ws` (default `wss://api.rocketride.ai`). The engine logs the resolved value at startup. |
+| `RR_MCP_ENGINE_URI` | _(derived)_ | Engine address MCP tools connect back to; also the origin of widget CSP and upload/dropper links. The engine config key `rocketride_uri` wins over it. When neither is set: `ws://127.0.0.1:<port>` (or `ws://[::1]:<port>`) on a loopback bind, otherwise the origin of `MCP_RESOURCE_IDENTIFIER` with `https`→`wss` / `http`→`ws` (default `wss://api.rocketride.ai`). The engine logs the resolved value at startup. `ROCKETRIDE_URI` is the address a client connects to and is never read here. |
+| `RR_MCP_ENGINE_AUTH` | `RR_APIKEY` | Credential of the module's shared engine client (the engine config key `rocketride_auth` wins over it). Unset, the engine's own key `RR_APIKEY` is used. `ROCKETRIDE_AUTH` and `ROCKETRIDE_APIKEY` are what a client sends and are never read here. |
 | `MCP_OPENAI_APPS_CHALLENGE_TOKEN` | _(unset)_ | Served as the plain-text body of `GET /.well-known/openai-apps-challenge` for OpenAI's plugin domain verification. Unset: the route answers 404. |
 
 Three related guards to know about:
 
-- `ROCKETRIDE_URI` must be encrypted when it points at a **remote** engine: a
+- The engine address must be encrypted when it points at a **remote** engine: a
   cleartext `ws://` / `http://` value addressing a non-loopback host fails boot,
   because the caller's own credential is sent to the engine in the first DAP
   `auth` message. The check keys on the engine's target host, not on the bind —
