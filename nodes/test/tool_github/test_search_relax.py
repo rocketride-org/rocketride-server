@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 _NODES_SRC = Path(__file__).resolve().parents[2] / 'src'
@@ -166,6 +167,8 @@ class _Cfg:
 def _make_instance(cfg=None):
     inst = mod.IInstance()
     inst.IGlobal = cfg or _Cfg()
+    # The default repository and the read-only gate are the call's settings
+    inst._call_options = SimpleNamespace(default_repo=inst.IGlobal.default_repo, read_only=inst.IGlobal.read_only)
     return inst
 
 

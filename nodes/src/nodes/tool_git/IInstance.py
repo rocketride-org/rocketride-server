@@ -83,7 +83,7 @@ def _tool(
 
     1. Envelope strip (drops harness wrappers like ``input`` / ``repo_path``).
     2. Repo-initialised check (returns error if IGlobal.repo is None).
-    3. Read-only guard for write tools (when ``read_only_mode`` is on).
+    3. Read-only guard for write tools (when the call's ``readOnlyMode`` setting is on).
     4. Strict schema validation (rejects unknown args with allowed-list).
     5. Body execution with uniform error catching — ``GitError``, ``ValueError``,
        ``KeyError`` (missing required arg), and ``pygit2.GitError`` (unwrapped
@@ -131,8 +131,8 @@ def _tool(
                 # Determine if THIS call mutates state. Static True/False covers
                 # most tools; the callable form lets stash distinguish op='list'.
                 writes = is_write(args) if callable(is_write) else is_write
-                # Fail closed: missing attribute defaults to read-only.
-                if writes and getattr(self.IGlobal.repo, 'read_only_mode', True):
+                # The read-only gate is this call's setting
+                if writes and self.settings.readOnlyMode:
                     return {
                         'error': (
                             f'{tool_name!r} is blocked in read-only mode. '
@@ -495,6 +495,7 @@ class IInstance(IInstanceBase):
         return self.IGlobal.repo.branch_delete(
             name=args['name'],
             force=optional_bool(args, 'force', default=False, tool_name='branch_delete'),
+            safe_mode=self.settings.safeMode,
         )
 
     @_tool(
@@ -570,6 +571,7 @@ class IInstance(IInstanceBase):
             remote=args.get('remote') or 'origin',
             branch=args.get('branch') or None,
             force=optional_bool(args, 'force', default=False, tool_name='push'),
+            safe_mode=self.settings.safeMode,
         )
 
     # ==================================================================

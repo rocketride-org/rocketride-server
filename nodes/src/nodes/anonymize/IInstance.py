@@ -21,12 +21,25 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import Any, Dict
+
 from rocketlib import Entry, IInstanceBase
 from .IGlobal import IGlobal
+from .anonymize import clean_entity_types
 
 
 class IInstance(IInstanceBase):
     IGlobal: IGlobal  # Reference to a global context providing recognizer functionality
+
+    def _redaction(self) -> Dict[str, Any]:
+        """
+        This call's redaction: the style ('mask' or 'token') and the mask character.
+
+        Returns:
+            The keyword arguments ``process`` and ``handleClassifications`` take.
+        """
+        settings = self.settings
+        return {'redaction_style': settings.redactionStyle, 'anonymize_char': settings.anonymizeChar}
 
     #
     # Current object context properties
@@ -46,14 +59,16 @@ class IInstance(IInstanceBase):
     def writeClassifications(self, classifications: dict, classificationPolicy: dict, classificationRules: dict):
         self.has_classifications = True
         self.target_object_text = self.IGlobal.recognizer.handleClassifications(
-            classifications, self.target_object_text, classificationPolicy, classificationRules
+            classifications, self.target_object_text, classificationPolicy, classificationRules, **self._redaction()
         )
 
     def closing(self):
         if not self.has_classifications:
-            # No classifications received - anonymize with the configured entity types
+            # No classifications received - anonymize with the call's entity types:
+            # clean_entity_types drops blank entries and falls back to the common
+            # defaults when the result is empty, so detection is never silently disabled
             self.target_object_text = self.IGlobal.recognizer.process(
-                self.target_object_text, self.IGlobal.recognizer.labels
+                self.target_object_text, clean_entity_types(self.settings.entityTypes), **self._redaction()
             )
 
         # Resume the writeText lane

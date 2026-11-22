@@ -3,11 +3,23 @@
 # Copyright (c) 2026 Aparavi Software AG
 # =============================================================================
 
+"""
+Global handler for the Kokoro text-to-speech node.
+
+The voice is a per-call parameter. A Kokoro pipeline is built for one
+language (the first letter of the voice) and takes the voice per synthesis,
+so the control keeps one engine per language a call has asked for: a local
+``KPipeline`` from the module-scope loader cache, or a model-server client
+bound to that language's loader. The voice list names nine languages, which
+bounds the cache.
+"""
+
 import base64
 import os
 import tempfile
+import threading
 import wave
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Tuple
 
 import numpy as np
 
@@ -31,52 +43,109 @@ _PIPELINES = LoaderCache()
 class IGlobal(IGlobalBase):
     """Kokoro-only TTS node global state.
 
-    Holds either a local ``KPipeline`` (when no model server is configured) or a
-    ``ModelClient`` bound to a remote Kokoro loader. The local path needs the
-    ``kokoro``/``soundfile`` wheels and the ``en_core_web_sm`` spaCy model; the
-    remote path only needs the base client libraries.
+    Holds, per language a call has asked for, either a local ``KPipeline``
+    (when no model server is configured) or a ``ModelClient`` bound to a remote
+    Kokoro loader. The local path needs the ``kokoro``/``soundfile`` wheels and
+    the ``en_core_web_sm`` spaCy model; the remote path only needs the base
+    client libraries.
     """
 
-    _voice: str
-    _lang: str
-    _pipeline: Optional[Any] = None
-    _pipeline_key: Optional[tuple] = None
-    _remote_client: Optional[Any] = None
-
     def beginGlobal(self):
-        """Initialise local pipeline or remote client from the node configuration.
+        """Choose local or remote synthesis; the engines are built per language on first use.
 
-        The resolved config supplies the voice (the schema default when unset,
-        and always one of the listed voices), then either connects to the
-        model server — skipping the heavy local dependency install — or
-        installs the local requirements and constructs a ``KPipeline``.
+        With a model server the heavy local dependency install is skipped;
+        without one the local requirements are installed here, once.
         """
-        self._voice = self.config.kokoro_voice
-        self._lang = self._voice[0]
+        self._lock = threading.Lock()
+        self._address = get_model_server_address()
+        self._pipelines: Dict[str, Any] = {}
+        self._clients: Dict[str, Any] = {}
+        self._build_locks: Dict[Tuple[str, str], threading.Lock] = {}
 
-        addr = get_model_server_address()
-        if addr:
-            self._remote_client = ModelClient(addr)
-            self._remote_client.load_model(
-                _KOKORO_REPO_ID,
-                _KOKORO_LOADER_TYPE,
-                {'lang_code': self._lang, 'repo_id': _KOKORO_REPO_ID},
-            )
-        else:
+        if not self._address:
             from depends import depends  # type: ignore
 
             depends(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'requirements.txt'))
 
-            key = (_KOKORO_REPO_ID, self._lang)
-            self._pipeline = _PIPELINES.acquire(key, self._load_pipeline)
-            self._pipeline_key = key
+    def _build_lock(self, kind: str, lang: str) -> threading.Lock:
+        """
+        The lock one language's build of ``kind`` (``pipeline`` or ``client``) runs under.
 
-    def _load_pipeline(self) -> Any:
-        """Build the local ``KPipeline`` for this control's language (once per process, via the cache)."""
+        ``self._lock`` guards only the maps; a build runs under its own
+        language's lock, so a call for a language already built never waits on
+        another language's load (a remote load retries for minutes).
+        """
+        with self._lock:
+            return self._build_locks.setdefault((kind, lang), threading.Lock())
+
+    def _pipeline_for(self, lang: str) -> Any:
+        """
+        The local ``KPipeline`` of one language, acquired from the loader cache on first use.
+
+        Args:
+            lang: The Kokoro language code (the first letter of the voice).
+
+        Returns:
+            The pipeline; the voice is passed per synthesis.
+        """
+        with self._lock:
+            pipeline = self._pipelines.get(lang)
+        if pipeline is not None:
+            return pipeline
+        with self._build_lock('pipeline', lang):
+            # Another call for this language may have built it while we waited
+            with self._lock:
+                pipeline = self._pipelines.get(lang)
+            if pipeline is None:
+                pipeline = _PIPELINES.acquire((_KOKORO_REPO_ID, lang), lambda: self._load_pipeline(lang))
+                with self._lock:
+                    self._pipelines[lang] = pipeline
+            return pipeline
+
+    def _client_for(self, lang: str) -> Any:
+        """
+        The model-server client bound to one language's Kokoro loader, connected on first use.
+
+        A client whose load fails is disconnected before the error propagates:
+        it is never cached, so ``endGlobal`` could not close it later.
+
+        Args:
+            lang: The Kokoro language code (the first letter of the voice).
+
+        Returns:
+            The ``ModelClient``; the voice is sent per inference.
+        """
+        with self._lock:
+            client = self._clients.get(lang)
+        if client is not None:
+            return client
+        with self._build_lock('client', lang):
+            # Another call for this language may have connected it while we waited
+            with self._lock:
+                client = self._clients.get(lang)
+            if client is None:
+                client = ModelClient(self._address)
+                try:
+                    client.load_model(
+                        _KOKORO_REPO_ID, _KOKORO_LOADER_TYPE, {'lang_code': lang, 'repo_id': _KOKORO_REPO_ID}
+                    )
+                except Exception:
+                    # Close the half-open connection; the load error is the one the caller sees
+                    try:
+                        client.disconnect()
+                    except Exception:
+                        pass
+                    raise
+                with self._lock:
+                    self._clients[lang] = client
+            return client
+
+    def _load_pipeline(self, lang: str) -> Any:
+        """Build the local ``KPipeline`` for one language (once per process, via the cache)."""
         self._ensure_spacy_en_model()
         from kokoro import KPipeline
 
-        return KPipeline(lang_code=self._lang)
+        return KPipeline(lang_code=lang)
 
     @staticmethod
     def _ensure_spacy_en_model() -> None:
@@ -104,23 +173,31 @@ class IGlobal(IGlobalBase):
             stderr=subprocess.DEVNULL,
         )
 
-    def synthesize(self, text: str) -> Dict[str, Any]:
-        """Synthesise ``text`` to a temporary WAV file and return its path.
+    def synthesize(self, text: str, voice: str) -> Dict[str, Any]:
+        """Synthesise ``text`` in one call's voice to a temporary WAV file and return its path.
 
         Writes a freshly-allocated file under the system temp dir and returns
         ``{'path': <abs path>, 'mime_type': 'audio/wav'}``. The caller owns the
         file and is responsible for deleting it once the bytes have been
         streamed. On any synthesis error the temp file is removed before the
         exception propagates so there are no orphans on disk.
+
+        Args:
+            text: The text to speak.
+            voice: The call's Kokoro voice (one of the schema's); its first letter is the language.
+
+        Returns:
+            The temp file's path and MIME type.
         """
+        lang = voice[0]
         fd, out_path = tempfile.mkstemp(prefix='tts_', suffix='.wav')
         os.close(fd)
         try:
-            if self._remote_client is not None:
-                body = self._remote_client.send_command(
+            if self._address:
+                body = self._client_for(lang).send_command(
                     'inference',
                     {
-                        'inputs': [{'text': text, 'voice': self._voice, 'speed': 1}],
+                        'inputs': [{'text': text, 'voice': voice, 'speed': 1}],
                         'output_fields': ['wav_base64'],
                     },
                 )
@@ -132,7 +209,7 @@ class IGlobal(IGlobalBase):
                     f.write(wav_bytes)
             else:
                 chunks: list[np.ndarray] = []
-                for _gs, _ps, audio in self._pipeline(text, voice=self._voice, speed=1):
+                for _gs, _ps, audio in self._pipeline_for(lang)(text, voice=voice, speed=1):
                     if audio is None:
                         continue
                     if hasattr(audio, 'detach'):
@@ -162,15 +239,15 @@ class IGlobal(IGlobalBase):
             raise
 
     def endGlobal(self):
-        """Release the local pipeline to the loader cache and disconnect the remote client, if any."""
-        self._pipeline = None
-        if self._pipeline_key is not None:
-            _PIPELINES.release(self._pipeline_key)
-            self._pipeline_key = None
-        client = self._remote_client
-        if client is not None:
+        """Release every local pipeline to the loader cache and disconnect every remote client."""
+        pipelines, self._pipelines = getattr(self, '_pipelines', None) or {}, {}
+        for lang in pipelines:
+            _PIPELINES.release((_KOKORO_REPO_ID, lang))
+        clients, self._clients = getattr(self, '_clients', None) or {}, {}
+        self._build_locks = {}
+        for client in clients.values():
             try:
                 client.disconnect()
             except Exception:
                 pass
-            self._remote_client = None
+        self._lock = None

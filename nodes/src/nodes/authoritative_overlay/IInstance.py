@@ -127,7 +127,13 @@ class IInstance(IInstanceBase):
         normally so the engine forwards the unchanged answer once — do not
         also call ``self.instance.writeAnswers``, or the answer is emitted twice.
         """
-        regulator_type = self.IGlobal.regulator_type
+        # The regulator and the company are this call's settings
+        settings = self.settings
+        regulator_type = settings.regulator_type.strip()
+        cik_raw = settings.cik.strip()
+        # Zero-pad only after the emptiness check so a blank CIK stays falsy
+        # (zfill(10) on '' would become '0000000000' and skip query_sec's guard).
+        cik = cik_raw.zfill(10) if cik_raw else ''
 
         # We expect a JSON answer with a 'concept' and a 'value'
         try:
@@ -183,9 +189,9 @@ class IInstance(IInstanceBase):
         try:
             official_data = query_sec(
                 concept,
-                cik=self.IGlobal.cik,
+                cik=cik,
                 filters=filters,
-                submission_cache=self.IGlobal.sec_submission_cache,
+                submission_cache=self.IGlobal.submission_cache_for(cik),
             )
         except Exception as e:
             warning(f'Failed to query {regulator_type} connector: {str(e)}')

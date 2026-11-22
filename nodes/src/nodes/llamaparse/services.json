@@ -39,6 +39,8 @@
 			"required": true
 		},
 		"llamaparse.lvm_model": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "LVM Model",
 			"description": "The LVM model to use for parsing when LVM or agentic modes are selected.",
@@ -51,6 +53,7 @@
 			]
 		},
 		"llamaparse.system_prompt_append": {
+			"param": true,
 			"type": "string",
 			"title": "Additional Instructions",
 			"description": "Additional instructions appended to the system prompt for LlamaParse. Leave empty for none.",
@@ -58,12 +61,15 @@
 			"default": ""
 		},
 		"llamaparse.spreadsheet_extract_sub_tables": {
+			"param": true,
 			"type": "boolean",
 			"title": "Extract Sub Tables",
 			"description": "Extract sub-tables from spreadsheets for better table parsing.",
 			"default": false
 		},
 		"llamaparse.advanced_config": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Advanced Configuration (JSON)",
 			"description": "Enter configuration options in JSON format. For more information, see: <a href='https://developers.llamaindex.ai/llamaparse/parse/v1/presets_and_modes/advance_parsing_modes/' target='_blank'>LlamaParse Documentation</a>",
@@ -79,6 +85,8 @@
 		"llamaparse.api_key",
 		{
 			"name": "configMode",
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Configuration",
 			"description": "Simple options, or a raw JSON configuration passed to LlamaParse.",
@@ -89,6 +97,8 @@
 					"properties": [
 						{
 							"name": "parse_mode",
+							"param": true,
+							"tool": false,
 							"type": "string",
 							"title": "Parse Mode",
 							"description": "The parse mode to use for choosing the complexity of the parse",

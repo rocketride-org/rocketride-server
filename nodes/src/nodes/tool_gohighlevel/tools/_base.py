@@ -51,6 +51,7 @@ the API rather than chosen:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Iterable
 
 from ai.common.utils import normalize_tool_input, require_str, validate_tool_input_schema
@@ -735,8 +736,30 @@ class GoHighLevelToolsBase:
         """
         return self.IGlobal.location_id
 
+    # -- the call's options ------------------------------------------------
+
+    # This call's write gate and tool surface, read from its settings on first use
+    _call_options: SimpleNamespace | None = None
+
+    def _options(self) -> SimpleNamespace:
+        """This call's read-only gate, published tool groups and raw-request switch.
+
+        The schema pins ``toolGroups`` to the groups this node implements, so a
+        misspelt group never reaches here.
+        """
+        if self._call_options is None:
+            from ..tool_groups import normalize_groups
+
+            settings = self.settings
+            self._call_options = SimpleNamespace(
+                read_only=settings.readOnly,
+                tool_groups=normalize_groups(settings.toolGroups),
+                allow_raw_request=settings.allowRawRequest,
+            )
+        return self._call_options
+
     def _require_write(self) -> None:
-        if self.IGlobal.read_only:
+        if self._options().read_only:
             raise ValueError('This operation is not permitted: the node is configured in read-only mode')
 
     # -- version ----------------------------------------------------------

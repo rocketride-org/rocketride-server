@@ -108,7 +108,9 @@ def _start_error(cfg):
             node_config.read_options(view)
             node_config.read_auth(view)
         validator = IValidator()
+        # The restricted view for the auth, the full one for the options (params)
         validator._config_restricted = view
+        validator._config_view = view
         validator.validateConfig()
         return [str(error.value), *(str(call.args[0]) for call in warning.call_args_list)]
 

@@ -23,16 +23,32 @@
 
 from rocketlib import IInstanceBase, Entry, warning
 from ai.common.schema import Question, Answer
-from .IGlobal import IGlobal
+from .guardrails_engine import GuardrailsEngine
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal
+    """Check questions and answers against this call's policy; the control holds nothing (no IGlobal)."""
+
+    # This call's checks, built from its settings in beginInstance
+    engine: GuardrailsEngine = None
 
     def __init__(self):
         """Initialize the guardrails instance state."""
         super().__init__()
         self.source_documents = []
+
+    def beginInstance(self):
+        """Build this call's guardrails engine from its settings.
+
+        The selected profile flattens to the full set of checks: Basic and
+        Strict pin most of them as constants, Custom exposes every one. The
+        engine holds only these values and the module's compiled patterns.
+        """
+        self.engine = GuardrailsEngine(self.settings)
+
+    def endInstance(self):
+        """Release this call's engine."""
+        self.engine = None
 
     def open(self, entry: Entry):
         """Reset per-object state."""
@@ -48,7 +64,7 @@ class IInstance(IInstanceBase):
         Args:
             question: The incoming Question object.
         """
-        engine = self.IGlobal.engine
+        engine = self.engine
         if engine is None:
             self._forward_question(question)
             return
@@ -107,7 +123,7 @@ class IInstance(IInstanceBase):
         Args:
             answer: The incoming Answer object.
         """
-        engine = self.IGlobal.engine
+        engine = self.engine
         if engine is None:
             self._forward_answer(answer)
             return

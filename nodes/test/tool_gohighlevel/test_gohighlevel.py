@@ -192,12 +192,15 @@ def _instance(**overrides):
     glob = Mock()
     glob.token = GHL_TEST_TOKEN
     glob.location_id = LOCATION_ID
-    glob.read_only = False
-    glob.tool_groups = DEFAULT_GROUPS
-    glob.allow_raw_request = True
-    for key, value in overrides.items():
-        setattr(glob, key, value)
     inst.IGlobal = glob
+    # The write gate and the tool surface are the call's settings
+    options = {'read_only': False, 'tool_groups': DEFAULT_GROUPS, 'allow_raw_request': True}
+    for key, value in overrides.items():
+        if key in options:
+            options[key] = value
+        else:
+            setattr(glob, key, value)
+    inst._call_options = types.SimpleNamespace(**options)
     return inst
 
 
@@ -1119,9 +1122,9 @@ class TestGroupGating:
         assert all(base_position[mixin] < base_position[engine_base] for mixin in ALL_MIXINS)
 
     def test_a_partially_unknown_value_narrows_to_the_names_that_matched(self):
-        # The dropped name is warned about at runtime by IGlobal.beginGlobal and in the
-        # editor by validateConfig; the selection itself is what the operator asked for
-        # minus the typo, which never publishes more than they intended.
+        # The dropped name is warned about in the editor by validateConfig; the selection
+        # itself is what the operator asked for minus the typo, which never publishes more
+        # than they intended.
         assert normalize_groups(['contacts', 'nope']) == frozenset({'contacts'})
         assert normalize_groups('contacts, nope') == frozenset({'contacts'})
 
@@ -1711,10 +1714,18 @@ class TestIGlobalGroups:
                 glob.beginGlobal()
         assert "'nope'" in str(raised.value)
 
+    @staticmethod
+    def _call_groups(glob) -> frozenset:
+        """The tool groups one call publishes: a call with no params reads the stored value."""
+        inst = IInstance.__new__(IInstance)
+        inst.IGlobal = glob
+        inst.settings = glob._resolved()
+        return inst._options().tool_groups
+
     def test_a_clean_config_warns_nothing(self):
         with _iglobal_harness(self._config(toolGroups=['contacts'])) as (glob, warning_mock):
             glob.beginGlobal()
-            assert glob.tool_groups == frozenset({'contacts'})
+            assert self._call_groups(glob) == frozenset({'contacts'})
             warning_mock.assert_not_called()
 
     def test_an_empty_list_publishes_the_default_set(self):
@@ -1722,7 +1733,7 @@ class TestIGlobalGroups:
             glob.beginGlobal()
             from tool_gohighlevel.tool_groups import DEFAULT_GROUPS
 
-            assert glob.tool_groups == DEFAULT_GROUPS
+            assert self._call_groups(glob) == DEFAULT_GROUPS
 
     def test_a_missing_token_is_a_schema_error(self):
         from rocketlib.config import ConfigError
@@ -1757,3 +1768,20 @@ class TestEveryTimeFieldNamesItsZone:
 
     def test_no_published_parameter_describes_a_time_without_saying_which_zone(self):
         assert audit_time_fields(IInstance, self.ALLOWED) == []
+
+
+def test_one_control_publishes_each_calls_own_surface():
+    """The tool groups, the raw-request switch and the read-only gate are each call's settings."""
+    wide = _instance()
+    narrow = IInstance.__new__(IInstance)
+    narrow.IGlobal = wide.IGlobal
+    narrow.settings = types.SimpleNamespace(readOnly=True, toolGroups=['contacts'], allowRawRequest=False)
+
+    published_wide = set(wide._collect_tool_methods())
+    published_narrow = set(narrow._collect_tool_methods())
+
+    assert narrow._options().tool_groups == normalize_groups(['contacts'])
+    assert RAW_REQUEST_TOOL in published_wide and RAW_REQUEST_TOOL not in published_narrow
+    assert published_narrow < published_wide
+    with pytest.raises(ValueError, match='read-only mode'):
+        narrow._require_write()

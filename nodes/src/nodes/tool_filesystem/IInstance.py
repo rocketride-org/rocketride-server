@@ -35,8 +35,10 @@ tree):
   * ``create_directory(path)``
   * ``stat_file(path)``
 
-Each method checks the corresponding allow-flag on ``self.IGlobal``, validates
-the path against the configured regex whitelist, and then calls ``self.files``.
+Each method checks the corresponding allow-flag of the call's policy (built
+from its settings, see ``policy.py``), validates the path against the call's
+regex whitelist, and then calls ``self.files``. The node has no IGlobal: the
+control holds nothing.
 A refusal from the store (``DoorError`` carrying the server's reason, or a
 ``ValueError`` from the node's own checks) propagates to the agent as a tool
 error.
@@ -58,7 +60,7 @@ if TYPE_CHECKING:
 from ai.common.avi.descriptor import descriptor_from_payload
 from ai.common.utils import optional_str, register_debugger_thread, require_dict, require_str
 
-from .IGlobal import IGlobal, OnConflict
+from .policy import CallPolicy, OnConflict, call_policy
 
 # Cap on bytes returned by a single read_file call. The underlying FileStore
 # defaults to 100 MB, which can blow the agent's context window or OOM the
@@ -73,7 +75,7 @@ MAX_READ_LIMIT = 4 * 1024 * 1024  # 4 MB
 MAX_COLLISION_SUFFIX = 100
 
 
-# Map each @tool_function name to the IGlobal allow-flag that gates it.
+# Map each @tool_function name to the call policy's allow-flag that gates it.
 # Used by ``_collect_tool_methods`` to hide disabled tools from the agent
 # at ``tool.query`` discovery time (not just at invocation).
 _ALLOW_FLAG_BY_TOOL = {
@@ -87,7 +89,19 @@ _ALLOW_FLAG_BY_TOOL = {
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal
+    # This call's policy, built from its settings on first use
+    _call_policy: CallPolicy | None = None
+
+    def _policy(self) -> CallPolicy:
+        """
+        This call's gates, path whitelist and sink settings.
+
+        Returns:
+            The policy, built once per call from its settings.
+        """
+        if self._call_policy is None:
+            self._call_policy = call_policy(self.settings)
+        return self._call_policy
 
     # ------------------------------------------------------------------
     # Tool methods
@@ -282,7 +296,7 @@ class IInstance(IInstanceBase):
         flag = _ALLOW_FLAG_BY_TOOL.get(name)
         if flag is None:
             return True
-        return bool(getattr(self.IGlobal, flag, False))
+        return bool(getattr(self._policy(), flag, False))
 
     def _prepare(
         self,
@@ -310,7 +324,7 @@ class IInstance(IInstanceBase):
         flag_attr = _ALLOW_FLAG_BY_TOOL.get(tool_name)
         if flag_attr is None:
             raise RuntimeError(f'no allow-flag mapping for tool {tool_name!r}')
-        if not getattr(self.IGlobal, flag_attr, False):
+        if not getattr(self._policy(), flag_attr, False):
             label = flag_attr.removeprefix('allow_')
             raise ValueError(f'{label} access is not enabled for this filesystem tool')
 
@@ -341,7 +355,7 @@ class IInstance(IInstanceBase):
 
     def _check_path(self, path: str) -> None:
         """Enforce the configured path whitelist (if any)."""
-        patterns = self.IGlobal.path_patterns or []
+        patterns = self._policy().path_patterns or []
         if patterns and not any(p.search(path) for p in patterns):
             raise ValueError(f'path {path!r} does not match any allowed path pattern')
 
@@ -387,7 +401,7 @@ class IInstance(IInstanceBase):
             The path to write, or ``None`` when ``skip`` left an existing file alone —
             not an error, and logged here rather than at each caller.
         """
-        target_dir = (self.IGlobal.target_dir or '').strip()
+        target_dir = (self._policy().target_dir or '').strip()
         if target_dir and not target_dir.endswith('/'):
             target_dir += '/'
         stem, ext = os.path.splitext(filename)
@@ -397,11 +411,11 @@ class IInstance(IInstanceBase):
         candidate = f'{target_dir}{stem}{ext}'
         self._check_path(candidate)
 
-        if self.IGlobal.on_conflict == OnConflict.OVERWRITE:
+        if self._policy().on_conflict == OnConflict.OVERWRITE:
             # No probe: replacing is the point, so a stat only costs a round-trip.
             return candidate
 
-        if self.IGlobal.on_conflict == OnConflict.SKIP:
+        if self._policy().on_conflict == OnConflict.SKIP:
             # 'both' is an object store holding a key and a same-named prefix: still a file.
             if self.files.stat(candidate).get('type') in ('file', 'both'):
                 warning(f'tool_filesystem: {filename!r} already exists and onConflict is skip; not written')
@@ -423,8 +437,8 @@ class IInstance(IInstanceBase):
     def _sink_ref(self, path: str, mime: str | None = None) -> dict:
         """Reference dict for a persisted file, resolving a signed URL if configured."""
         url = None
-        if self.IGlobal.emit_url:
-            url = self.files.get_url(path, expires_in=self.IGlobal.url_expires_in)
+        if self._policy().emit_url:
+            url = self.files.get_url(path, expires_in=self._policy().url_expires_in)
         return {'storePath': path, 'url': url, 'name': os.path.basename(path), 'mime': mime}
 
     def _sink_write(self, data: bytes, filename: str, *, index: int | None = None) -> dict | None:
@@ -436,7 +450,7 @@ class IInstance(IInstanceBase):
         Returns:
             The reference, or ``None`` when the conflict policy skipped the write.
         """
-        if not self.IGlobal.allow_write:
+        if not self._policy().allow_write:
             raise ValueError('write access is not enabled for this filesystem tool')
         path = self._sink_target_path(filename, index=index)
         if path is None:
@@ -593,7 +607,7 @@ class IInstance(IInstanceBase):
         Returns:
             The path to open for writing — the destination itself, or a staging sibling.
         """
-        if self.IGlobal.on_conflict != OnConflict.OVERWRITE:
+        if self._policy().on_conflict != OnConflict.OVERWRITE:
             return path
         try:
             return self._staging_path(path)
@@ -700,7 +714,7 @@ class IInstance(IInstanceBase):
             if st is None or not data:
                 return
             if st['handle'] is None:
-                if not self.IGlobal.allow_write:
+                if not self._policy().allow_write:
                     raise ValueError('write access is not enabled for this filesystem tool')
                 name = self._stream_filename(st.get('descriptor'), st['mime'])
                 path = self._sink_target_path(name)

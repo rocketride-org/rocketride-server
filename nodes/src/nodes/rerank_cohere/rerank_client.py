@@ -25,7 +25,7 @@
 Cohere Rerank client wrapper for the RocketRide pipeline.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from cohere import ClientV2 as CohereClient
 from cohere.errors import BadRequestError, UnauthorizedError, TooManyRequestsError, InternalServerError
 
@@ -103,28 +103,21 @@ class RerankClient:
     """
 
     _client: CohereClient
-    _model: str
 
     def __init__(self, logicalType: str, config: Dict[str, Any], bag: Dict[str, Any]):
         """
         Initialize the Cohere rerank client.
 
+        The model, the result count and the score threshold are each call's:
+        ``rerank`` and ``rerank_with_threshold`` take them, so one client (one
+        API key) serves every call.
+
         Args:
             logicalType: The logical type of the node.
-            config: Configuration dictionary containing API key, model, etc.
+            config: The control's resolved configuration: the API key.
             bag: Shared bag for cross-node communication.
         """
         self._logicalType = logicalType
-        self._model = config.get('model', 'rerank-english-v3.0')
-        if not isinstance(self._model, str) or not self._model.strip():
-            raise ValueError('Cohere model name is required')
-        self._model = self._model.strip()
-
-        raw_top_n = config.get('top_n', 5)
-        self._top_n = _coerce_top_n(raw_top_n)
-
-        raw_min_score = config.get('min_score', 0.0)
-        self._min_score = _validate_min_score(raw_min_score)
 
         apikey = config.get('apikey', '')
         if not isinstance(apikey, str) or not apikey.strip():
@@ -132,17 +125,15 @@ class RerankClient:
 
         self._client = CohereClient(api_key=apikey.strip())
 
-    def rerank(
-        self, query: str, documents: List[str], top_n: Optional[int] = None, model: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    def rerank(self, query: str, documents: List[str], top_n: int, model: str) -> List[Dict[str, Any]]:
         """
         Rerank a list of documents by relevance to the given query.
 
         Args:
             query: The query to rank documents against.
             documents: List of document text strings.
-            top_n: Number of top results to return. Defaults to configured value.
-            model: Cohere rerank model to use. Defaults to configured value.
+            top_n: The call's number of top results to return.
+            model: The call's Cohere rerank model.
 
         Returns:
             List of dicts with keys: index, relevance_score, document.
@@ -164,13 +155,10 @@ class RerankClient:
             normalized_documents.append(document.strip())
         documents = normalized_documents
 
-        effective_top_n = _coerce_top_n(top_n) if top_n is not None else self._top_n
-        if model is not None:
-            if not isinstance(model, str) or not model.strip():
-                raise ValueError('Model must not be empty')
-            effective_model = model.strip()
-        else:
-            effective_model = self._model
+        effective_top_n = _coerce_top_n(top_n)
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError('Cohere model name is required')
+        effective_model = model.strip()
 
         try:
             response = self._client.rerank(
@@ -203,9 +191,9 @@ class RerankClient:
         self,
         query: str,
         documents: List[str],
-        top_n: Optional[int] = None,
-        min_score: Optional[float] = None,
-        model: Optional[str] = None,
+        top_n: int,
+        min_score: float,
+        model: str,
     ) -> List[Dict[str, Any]]:
         """
         Rerank documents and filter by minimum relevance score.
@@ -213,14 +201,14 @@ class RerankClient:
         Args:
             query: The query to rank documents against.
             documents: List of document text strings.
-            top_n: Number of top results to return before filtering.
-            min_score: Minimum relevance score threshold (0.0-1.0).
-            model: Cohere rerank model to use.
+            top_n: The call's number of top results to return before filtering.
+            min_score: The call's minimum relevance score threshold (0.0-1.0).
+            model: The call's Cohere rerank model.
 
         Returns:
             List of dicts above the min_score threshold, sorted by relevance.
         """
-        effective_min_score = _validate_min_score(min_score) if min_score is not None else self._min_score
+        effective_min_score = _validate_min_score(min_score)
 
         results = self.rerank(query=query, documents=documents, top_n=top_n, model=model)
 

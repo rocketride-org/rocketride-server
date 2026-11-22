@@ -28,6 +28,8 @@
 	},
 	"propertyDefinitions": {
 		"authoritative_overlay.regulator_type": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Regulator Source",
 			"description": "Which regulator database to cross-check against",
@@ -40,6 +42,8 @@
 			]
 		},
 		"authoritative_overlay.cik": {
+			"param": true,
+			"tool": false,
 			"type": "string",
 			"title": "Company CIK",
 			"description": "The SEC Central Index Key for the company.",

@@ -24,17 +24,42 @@
 from rocketlib import Entry, IInstanceBase
 from ai.common.schema import Answer
 
-from .IGlobal import IGlobal
-from .normalize import dedupe_facts, normalize_payload
+from .normalize import build_mapping, dedupe_facts, normalize_payload
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal  # Reference to the global context holding the resolved config
+    """Normalize fact answers by this call's rules; the control holds nothing (no IGlobal)."""
 
     # Normalized payloads collected during the object, emitted at closing.
     # Each entry is (kind, data): kind == 'json' for dict/list payloads,
     # kind == 'text' for pass-through text. See writeAnswers/closing.
     pending: list = None
+
+    # This call's normalisation rules, built from its settings on first use
+    rules: dict = None
+
+    def normalization_rules(self) -> dict:
+        """
+        This call's normalisation rules, built once from its settings (types and enums are the schema's).
+
+        Returns:
+            The rules ``normalize_payload`` takes: the two field names, the
+            default currency, the decimal format and the merged metric mapping.
+        """
+        if self.rules is None:
+            settings = self.settings
+            self.rules = {
+                'label_field': settings.label_field,
+                'value_field': settings.value_field,
+                # Written verbatim into normalized.currency, which downstream currency
+                # conversion matches on; the schema holds it to three letters, the
+                # case is normalised here.
+                'default_currency': settings.default_currency.upper(),
+                'decimal_format': settings.decimal_format,
+                # Merge the built-in mapping with the call's overrides (a pure dict merge)
+                'mapping': build_mapping(settings.label_to_metric),
+            }
+        return self.rules
 
     def open(self, obj: Entry):
         self.pending = []
@@ -58,7 +83,7 @@ class IInstance(IInstanceBase):
             payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append(('json', normalize_payload(payload, self.IGlobal.normalization_rules())))
+            self.pending.append(('json', normalize_payload(payload, self.normalization_rules())))
         else:
             # Plain text / scalar JSON carries no fact — pass through verbatim.
             self.pending.append(('text', answer.getText() if answer is not None else ''))
@@ -89,7 +114,7 @@ class IInstance(IInstanceBase):
             else:
                 extras.append(data)
 
-        deduped = dedupe_facts(facts, self.IGlobal.normalization_rules().get('label_field') or 'label')
+        deduped = dedupe_facts(facts, self.normalization_rules().get('label_field') or 'label')
 
         if deduped:
             # Preserve a lone bare-dict payload's shape; otherwise emit one list.

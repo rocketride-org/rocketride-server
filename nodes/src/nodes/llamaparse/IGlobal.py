@@ -21,91 +21,53 @@
 # SOFTWARE.
 # =============================================================================
 
-import json
+"""
+Global handler for the LlamaParse node.
+
+The parse configuration (simple or advanced, the parse mode, the vision
+model, the prompt fragment, the spreadsheet switch, the raw advanced block)
+is each call's. ``LlamaParse`` binds those values at construction, so the
+control keeps a small bounded cache of clients keyed by the call's settings,
+built on first use; the API key and the parse lock are the control's.
+"""
+
 import os
 import threading
-from typing import TYPE_CHECKING
+from collections import OrderedDict
+from typing import TYPE_CHECKING, Any, Mapping
 
 from rocketlib import IGlobalBase, debug, warning
 
 if TYPE_CHECKING:
-    from llama_parse import LlamaParse
-
     from .parser import Parser
+
+# ==== Constants ==================================================================
+
+#: The most parse configurations one control keeps a client for; the least recently used goes first.
+MAX_PARSERS = 4
 
 
 class IGlobal(IGlobalBase):
-    """Global state: the shared LlamaParse client built from the resolved config."""
+    """Global state: the API key, the parse lock and the LlamaParse clients the calls have asked for."""
 
     # Private variables for internal use
     _parserLock: threading.Lock
-    _parser: 'Parser'
-    _llama_parse: 'LlamaParse'
 
     def beginGlobal(self):
+        """Install the dependencies and keep the account key; the clients are built per configuration."""
         debug('LlamaParse Global: Starting global initialization')
         from depends import depends
 
         requirements = os.path.dirname(os.path.realpath(__file__)) + '/requirements.txt'
         depends(requirements)
 
-        from llama_parse import LlamaParse
+        # The resolved config: the API key is required by the schema
+        self._api_key = self.config.api_key
 
-        from .parser import Parser
-
-        # The resolved config: the API key is required by the schema, the mode
-        # selector decides which leaves are present
-        config = self.config
-
-        # Set up the lock for thread safety
+        # Parsing is serialised on the parse lock; the cache has its own
         self._parserLock = threading.Lock()
-
-        parser_args = {'verbose': False, 'api_key': config.api_key}
-        if config.configMode == 'advanced':
-            # The raw JSON block is merged into the constructor arguments. The
-            # validator reports bad JSON at save time; here it stops the run so no
-            # tokens are spent on an unintended configuration.
-            try:
-                advanced_config = json.loads((config.advanced_config or '').strip() or '{}')
-            except json.JSONDecodeError as e:
-                raise RuntimeError(f'LlamaParse Global: advanced configuration is not valid JSON: {e}') from e
-            if not isinstance(advanced_config, dict):
-                raise RuntimeError('LlamaParse Global: advanced configuration must be a JSON object')
-            for key, value in advanced_config.items():
-                if key != 'api_key':  # Don't override API key handling
-                    parser_args[key] = value
-        else:
-            # Each parse mode branch declares only the leaves it sends, so a
-            # leaf is read inside the branch that declares it
-            parse_mode = config.parse_mode
-
-            if parse_mode == 'cost_effective':
-                parser_args['parse_mode'] = 'parse_page_with_llm'
-            elif parse_mode in ('agentic', 'agentic_plus'):
-                parser_args['parse_mode'] = 'parse_page_with_agent'
-                parser_args['vendor_multimodal_model_name'] = config.lvm_model
-            elif parse_mode == 'parse_page_with_lvm':
-                # Legacy LVM mode with special parameters
-                parser_args['parse_mode'] = parse_mode
-                parser_args['vendor_multimodal_model_name'] = config.lvm_model
-                system_prompt_append = (config.system_prompt_append or '').strip()
-                if system_prompt_append:
-                    parser_args['system_prompt_append'] = system_prompt_append
-                parser_args['page_error_tolerance'] = 0.05
-
-            if config.spreadsheet_extract_sub_tables:
-                parser_args['spreadsheet_extract_sub_tables'] = True
-
-        debug(f'LlamaParse Global: Creating LlamaParse instance with args: {list(parser_args)}')
-        try:
-            self._llama_parse = LlamaParse(**parser_args)
-        except Exception as e:
-            raise RuntimeError(f'LlamaParse Global: Error creating LlamaParse instance: {e}') from e
-
-        # The parser holds this control's LlamaParse client: nothing is shared
-        # through the endpoint bag, which every control of the engine sees
-        self._parser = Parser(self.config.node.provider, config, self._llama_parse)
-        debug('LlamaParse Global: LlamaParse initialized successfully')
+        self._cacheLock = threading.Lock()
+        self._parsers = OrderedDict()
 
         # Provenance advisory (issue #1406): this node emits flattened Markdown and
         # does not preserve cell-level provenance. Warn once at init so pipeline
@@ -118,9 +80,47 @@ class IGlobal(IGlobalBase):
             'parsing (HTML + tables with page/coordinates), use the datalab_parse node.'
         )
 
+    def parser_for(self, settings: Mapping[str, Any]) -> 'Parser':
+        """
+        The parser for one call's parse configuration, its LlamaParse client built on first use.
+
+        Args:
+            settings: The call's resolved settings (the mode selector decides which leaves are present).
+
+        Returns:
+            The cached or newly built ``Parser``.
+
+        Raises:
+            RuntimeError: The call's advanced block is not a JSON object, or the client cannot be built.
+        """
+        from llama_parse import LlamaParse
+
+        from .parser import Parser, llama_parse_args
+
+        key = tuple(sorted((name, repr(value)) for name, value in settings.items() if name != 'api_key'))
+        with self._cacheLock:
+            parser = self._parsers.get(key)
+            if parser is not None:
+                self._parsers.move_to_end(key)
+                return parser
+
+            parser_args = llama_parse_args(settings, self._api_key)
+            debug(f'LlamaParse Global: Creating LlamaParse instance with args: {list(parser_args)}')
+            try:
+                llama_parse = LlamaParse(**parser_args)
+            except Exception as e:
+                raise RuntimeError(f'LlamaParse Global: Error creating LlamaParse instance: {e}') from e
+
+            # The parser holds this control's LlamaParse client: nothing is shared
+            # through the endpoint bag, which every control of the engine sees
+            parser = Parser(settings.node.provider, settings, llama_parse)
+            self._parsers[key] = parser
+            while len(self._parsers) > MAX_PARSERS:
+                self._parsers.popitem(last=False)
+            return parser
+
     def endGlobal(self):
+        """Drop every client and the account key."""
         debug('LlamaParse Global: Starting global cleanup')
-        # Clean up resources
-        self._parser = None
-        self._llama_parse = None
-        debug('LlamaParse Global: Cleanup completed')
+        self._parsers = None
+        self._api_key = ''

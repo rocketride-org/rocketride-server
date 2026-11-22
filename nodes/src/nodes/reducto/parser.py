@@ -37,50 +37,45 @@ class Parser:
     def __init__(self, provider: str, config: Mapping, bag: Dict[str, Any]):
         """Initialize the Reducto parser with provider, the resolved config, and bag.
 
+        The mode and its options are each call's: ``parse`` takes the call's
+        settings, so one parser (one API key) serves every call.
+
         Args:
             provider: The provider identifier
-            config: The resolved node config (api_key, parse_mode and the mode's options)
+            config: The control's resolved node config (api_key)
             bag: Shared resource bag from the endpoint
         """
-        # Init the base
-
         # Store the bag explicitly
         self.bag = bag
 
-        # Keep the resolved configuration for the per-parse options
-        self.config = config
-
-        # Get configuration values
+        # The account key; a client is created per parse from it
         self._api_key = config['api_key']
-        self._parse_mode = bool(config['parse_mode'])  # False = Simple, True = Advanced
 
-        # Track whether figure summarization was requested for this parser instance
-        self._summarize_text = False
+        debug(f'Reducto Parser initialized, api_key: {"set" if self._api_key else "not set"}')
 
-        debug(
-            f'Reducto Parser initialized with parse_mode: {"Advanced" if self._parse_mode else "Simple"}, api_key: {"set" if self._api_key else "not set"}'
-        )
-
-    def read(self, file_data: bytes) -> str:
+    def read(self, file_data: bytes, settings: Mapping) -> str:
         """Read and parse document data using Reducto.
 
         The reader hook the node calls.
 
         Args:
             file_data: Document data in bytes
+            settings: The call's settings (parse_mode and the mode's options)
 
         Returns:
             str: Parsed text content
         """
         debug(f'Reducto read method called with file size: {len(file_data)} bytes')
-        text, _tables = self.parse(file_data)
+        text, _tables = self.parse(file_data, settings)
         return text
 
-    def parse(self, file_data: bytes, file_name: Optional[str] = None) -> tuple[str, List[str]]:
+    def parse(self, file_data: bytes, settings: Mapping, file_name: Optional[str] = None) -> tuple[str, List[str]]:
         """Parse document data using Reducto API.
 
         Args:
             file_data: Document data in bytes
+            settings: The call's settings: parse_mode (False = Simple, True = Advanced)
+                and the mode's switches or option dictionaries
             file_name: Optional file name for better parsing
 
         Returns:
@@ -103,24 +98,24 @@ class Parser:
             # All advanced behavior must be expressed via the 'enhance' dictionary.
             enhance_options = {}
 
-            if self._parse_mode:
+            if settings.get('parse_mode'):
                 debug('Reducto Parser: Using Advanced mode configuration')
                 import ast
 
                 # In Advanced mode, user provides raw Python dictionaries which we
                 # merge directly into the enhance_options bag.
-                if self.config.get('options'):
-                    user_options = ast.literal_eval(self.config.get('options'))
+                if settings.get('options'):
+                    user_options = ast.literal_eval(settings.get('options'))
                     if isinstance(user_options, dict):
                         enhance_options.update(user_options)
 
-                if self.config.get('advanced_options'):
-                    user_advanced_options = ast.literal_eval(self.config.get('advanced_options'))
+                if settings.get('advanced_options'):
+                    user_advanced_options = ast.literal_eval(settings.get('advanced_options'))
                     if isinstance(user_advanced_options, dict):
                         enhance_options.update(user_advanced_options)
 
-                if self.config.get('experimental_options'):
-                    user_experimental_options = ast.literal_eval(self.config.get('experimental_options'))
+                if settings.get('experimental_options'):
+                    user_experimental_options = ast.literal_eval(settings.get('experimental_options'))
                     if isinstance(user_experimental_options, dict):
                         enhance_options.update(user_experimental_options)
 
@@ -128,18 +123,16 @@ class Parser:
                 debug('Reducto Parser: Using Simple mode configuration')
 
                 # 1. OCR settings
-                if self.config.get('Contains_Handwritten_Text'):
+                if settings.get('Contains_Handwritten_Text'):
                     enhance_options['ocr_mode'] = 'agentic'
                     debug('Reducto Parser: Enabled agentic OCR mode for handwritten text')
 
-                if self.config.get('Contains_Non_English_Text'):
+                if settings.get('Contains_Non_English_Text'):
                     enhance_options['ocr_system'] = 'multilingual'
                     debug('Reducto Parser: Enabled multilingual OCR system')
 
                 # 2. AI Figure/Image summarization
-                summarize_text = bool(
-                    self.config.get('Summarize_Text') or self.config.get('reducto.Summarize_Text', False)
-                )
+                summarize_text = bool(settings.get('Summarize_Text'))
                 enhance_options['summarize_figures'] = summarize_text
                 # SDK 0.13.0 doesn't support table summaries effectively, disable it
                 enhance_options['summarize_tables'] = False
@@ -147,8 +140,8 @@ class Parser:
                 if summarize_text:
                     debug('Reducto Parser: Enabled AI figure/image summarization')
 
-            # Cache what we decided for use in extract_content()
-            self._summarize_text = bool(enhance_options.get('summarize_figures', False))
+            # What we decided, for extract_content() (this call's, never shared state)
+            summarize_figures = bool(enhance_options.get('summarize_figures', False))
 
             # Build the API call parameters
             debug('Reducto Parser: Calling reducto.parse.run() with SDK 0.13.0 API...')
@@ -181,7 +174,7 @@ class Parser:
                 raise
 
             debug('Reducto Parser: Extracting content from API response...')
-            text_content, table_content = self.extract_content(parse_result)
+            text_content, table_content = self.extract_content(parse_result, summarize_figures)
             debug(
                 f'Reducto Parser: extract_content() completed. Text length: {len(text_content)}, Tables: {len(table_content)}'
             )
@@ -194,11 +187,12 @@ class Parser:
             debug(f'Full traceback: {traceback.format_exc()}')
             return '', []
 
-    def extract_content(self, parse_response: Any) -> tuple[str, List[str]]:
+    def extract_content(self, parse_response: Any, summarize_figures: bool = False) -> tuple[str, List[str]]:
         """Extract text and table content from parse result.
 
         Args:
             parse_response: ParseResponse object from Reducto API
+            summarize_figures: The call asked for figure summaries, which are labelled as such
 
         Returns:
             Tuple containing:
@@ -246,7 +240,7 @@ class Parser:
                                     block_texts.append(f'\n{content}\n')
                                 # Figure / image summaries provided by Reducto's AI
                                 elif block_type == 'figure' or block_type_raw == 'Figure':
-                                    if self._summarize_text:
+                                    if summarize_figures:
                                         block_texts.append(f'\n[DIAGRAM/IMAGE SUMMARY]: {content}\n')
                                     else:
                                         block_texts.append(f'{content}\n')

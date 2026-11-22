@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import hashlib
 import time
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -57,6 +58,31 @@ class IInstance(IInstanceBase):
     """Node instance exposing Mem0 as agent tools."""
 
     IGlobal: IGlobal
+
+    # This call's default scope and ingest/search options, read from its settings on first use
+    _call: SimpleNamespace | None = None
+
+    def _call_options(self) -> SimpleNamespace:
+        """
+        This call's default entity scope (user, agent, run, app ids, stripped), the infer and
+        wait switches, the ingest wait budget and the search limit.
+
+        Returns:
+            The options, read once per call from its settings.
+        """
+        if self._call is None:
+            settings = self.settings
+            self._call = SimpleNamespace(
+                user_id=str(settings.user_id or '').strip(),
+                agent_id=str(settings.agent_id or '').strip(),
+                run_id=str(settings.run_id or '').strip(),
+                app_id=str(settings.app_id or '').strip(),
+                infer=settings.infer,
+                wait=settings.wait,
+                ingest_timeout=settings.ingest_timeout,
+                search_limit=settings.search_limit,
+            )
+        return self._call
 
     # ------------------------------------------------------------------
     # Tools
@@ -116,6 +142,7 @@ class IInstance(IInstanceBase):
         """Ingest conversation turns into Mem0."""
         args = normalize_tool_input(args, tool_name='remember')
         cfg = self.IGlobal
+        call = self._call_options()
 
         messages = _coerce_messages(args.get('messages'), args.get('content'), args.get('role'))
         if not messages:
@@ -138,7 +165,7 @@ class IInstance(IInstanceBase):
             'messages': messages,
             'output_format': 'v1.1',
             'version': 'v2',
-            'infer': cfg.infer,
+            'infer': call.infer,
         }
         payload.update(scope)
         metadata = args.get('metadata')
@@ -156,7 +183,7 @@ class IInstance(IInstanceBase):
         # add() queues background extraction and returns an event id; optionally
         # wait for it to finish so a following recall can see the memory.
         event_id = _event_id_of(resp)
-        if cfg.wait and event_id:
+        if call.wait and event_id:
             resp = self._await_event(event_id, cfg)
         return _shape_add(resp, event_id)
 
@@ -198,6 +225,7 @@ class IInstance(IInstanceBase):
         """Search Mem0 and return relevant memories."""
         args = normalize_tool_input(args, tool_name='recall')
         cfg = self.IGlobal
+        call = self._call_options()
 
         query = (args.get('query') or '').strip()
         if not query:
@@ -218,9 +246,9 @@ class IInstance(IInstanceBase):
                 'error': 'a scope is required — set user_id (or agent_id/run_id/app_id) on the call or in node config',
             }
 
-        raw_limit = args.get('limit', cfg.search_limit)
+        raw_limit = args.get('limit', call.search_limit)
         if isinstance(raw_limit, bool) or not isinstance(raw_limit, int):
-            raw_limit = cfg.search_limit
+            raw_limit = call.search_limit
         limit = max(1, min(100, raw_limit))
 
         payload: Dict[str, Any] = {'query': query, 'top_k': limit}
@@ -245,18 +273,18 @@ class IInstance(IInstanceBase):
         Spread top-level into both the add and search request bodies. agent_id
         and app_id come from config only.
         """
-        cfg = self.IGlobal
+        call = self._call_options()
         scope: Dict[str, str] = {}
-        uid = str(user_id or cfg.user_id or '').strip()
+        uid = str(user_id or call.user_id or '').strip()
         if uid:
             scope['user_id'] = uid
-        if cfg.agent_id:
-            scope['agent_id'] = cfg.agent_id
-        rid = str(run_id or cfg.run_id or '').strip()
+        if call.agent_id:
+            scope['agent_id'] = call.agent_id
+        rid = str(run_id or call.run_id or '').strip()
         if rid:
             scope['run_id'] = rid
-        if cfg.app_id:
-            scope['app_id'] = cfg.app_id
+        if call.app_id:
+            scope['app_id'] = call.app_id
         return scope
 
     def _await_event(self, event_id: str, cfg: IGlobal) -> Dict[str, Any]:
@@ -267,7 +295,7 @@ class IInstance(IInstanceBase):
         ``queued`` — the write was accepted, extraction just hasn't finished.
         """
         url = f'{cfg.base_url}/v1/event/{event_id}/'
-        deadline = time.monotonic() + cfg.ingest_timeout
+        deadline = time.monotonic() + self._call_options().ingest_timeout
         delay = 0.5
         event: Dict[str, Any] = {'status': 'PENDING', 'event_id': event_id}
         while True:

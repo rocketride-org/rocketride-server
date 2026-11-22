@@ -36,6 +36,7 @@
 	//
 	"propertyDefinitions": {
 		"chunker.chunk_size": {
+			"param": true,
 			"type": "integer",
 			"title": "Chunk size",
 			"description": "Maximum size of each chunk (characters for the sentence strategy, tokens for the token strategy)",
@@ -43,6 +44,7 @@
 			"minimum": 1
 		},
 		"chunker.chunk_overlap": {
+			"param": true,
 			"type": "integer",
 			"title": "Chunk overlap",
 			"description": "Number of characters or tokens to overlap between consecutive chunks; must be less than chunk size.",
@@ -58,6 +60,7 @@
 			"default": 50
 		},
 		"chunker.encoding_name": {
+			"param": true,
 			"type": "string",
 			"title": "Token encoding",
 			"description": "Tiktoken encoding name (only used with token strategy)",
@@ -77,6 +80,7 @@
 	"properties": [
 		{
 			"name": "strategy",
+			"param": true,
 			"type": "string",
 			"title": "Chunking strategy",
 			"description": "Select the text chunking strategy",

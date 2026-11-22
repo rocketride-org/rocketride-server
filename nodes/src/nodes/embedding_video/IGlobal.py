@@ -42,9 +42,8 @@ class IGlobal(IGlobalBase):
 
         This includes:
         - Loading the embedding model the selected profile pins (or the custom
-          profile names) for frame embedding.
-        - Reading the frame extraction settings (interval, max frames, etc.)
-          from the resolved config, which already applied the defaults.
+          profile names) for frame embedding. The frame extraction settings
+          (interval, max frames, window, size cap) are each call's.
         - Creating the device guard for frame embedding: a lock in-process, a no-op
           with --modelserver.
 
@@ -56,13 +55,6 @@ class IGlobal(IGlobalBase):
 
         # Instantiate the Embedding object for generating frame embeddings.
         self.embedding = Embedding(config.model)
-
-        # Store frame extraction settings from the config.
-        self.frame_interval = config.interval
-        self.max_frames = config.max_frames
-        self.start_time = config.start_time
-        self.duration = config.duration
-        self.max_video_size_bytes = config.maxVideoSizeMB * 1024 * 1024
 
         # Local inference must serialize GPU access; with --modelserver this is a
         # no-op so concurrent videos' frame requests reach the model server's

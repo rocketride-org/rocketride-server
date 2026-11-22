@@ -24,9 +24,11 @@
 """
 n8n tool node - global (shared) state.
 
-Reads the n8n instance URL, API key, webhook auth, and run options from the
-resolved node config. Tool logic lives on IInstance via @tool_function;
-pipeline lane handlers live there too (dual node).
+Reads the n8n instance URL, API key and webhook auth (the credential set its
+selector picks) from the resolved node config. The run options (default
+workflow, result mode and timeouts, payload mode, TLS verification, read-only)
+are each call's settings (``IInstance._run_options``). Tool logic lives on
+IInstance via @tool_function; pipeline lane handlers live there too (dual node).
 """
 
 from __future__ import annotations
@@ -44,20 +46,13 @@ class IGlobal(IGlobalBase):
 
     base_url: str = DEFAULT_BASE_URL
     api_key: str = ''
-    default_workflow: str = ''
-    mode: str = 'sync'
-    payload_mode: str = 'simple'
-    sync_timeout: int = 30
-    async_timeout: int = 120
-    verify_tls: bool = True
-    read_only: bool = True
     webhook_auth: Optional[Dict[str, str]] = None
 
     def beginGlobal(self) -> None:
-        # The resolved config: the selected result mode's timeout and the
-        # selected webhook auth's credential flattened beside the shared leaves,
-        # every value typed and ranged by the schema. The credentials arrive as
-        # ${ROCKETRIDE_N8N_*} references resolved per call, no process-env fallback.
+        # The resolved config: the selected webhook auth's credential flattened
+        # beside the shared leaves, every value typed by the schema. The
+        # credentials arrive as ${ROCKETRIDE_N8N_*} references resolved per call,
+        # no process-env fallback.
         cfg = self.config
 
         # NOTE: deliberately NOT validated via validate_public_url: n8n is
@@ -70,14 +65,6 @@ class IGlobal(IGlobalBase):
         if not self.base_url:
             raise ValueError('tool_n8n: baseUrl must not be blank')
         self.api_key = str(cfg.apiKey or '').strip()
-        self.default_workflow = str(cfg.workflow or '').strip()
-        self.mode = cfg.mode
-        self.payload_mode = cfg.payloadMode
-        # Only the selected mode's timeout is in the view; the other keeps its class default.
-        self.sync_timeout = cfg.get('syncTimeout', self.sync_timeout)
-        self.async_timeout = cfg.get('asyncTimeout', self.async_timeout)
-        self.verify_tls = cfg.verifyTls
-        self.read_only = cfg.readOnly
         self.webhook_auth = self._build_webhook_auth(cfg)
 
     @staticmethod

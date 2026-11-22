@@ -86,10 +86,15 @@ class IInstance(IInstanceBase):
         if not doc_texts:
             raise ValueError('No document content found to rerank')
 
-        # Rerank the documents with threshold filtering
+        # Rerank the documents with threshold filtering, by this call's model,
+        # result count and score threshold
+        settings = self.settings
         reranked = reranker.rerank_with_threshold(
             query=query_text,
             documents=doc_texts,
+            top_n=settings.top_n,
+            min_score=settings.min_score,
+            model=settings.model,
         )
 
         # Build reranked Doc objects preserving original metadata

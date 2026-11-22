@@ -23,6 +23,8 @@
 
 import json
 
+from typing import Callable
+
 from rocketlib import AVI_ACTION, Entry, IInstanceBase, error
 
 
@@ -44,11 +46,15 @@ class IInstance(IInstanceBase):
     Per-object plumbing: accumulate an image stream, split it, emit one stream per photo.
 
     Deliberately free of cv2 and numpy — every pixel touched by this node is touched behind
-    ``IGlobal.split_scan``. That keeps this class unit-testable in an environment with no
-    imaging libraries, and confines the 143 MP array to one stack frame.
+    ``split_scan``, which ``beginInstance`` binds to this call's settings. That keeps this class
+    unit-testable in an environment with no imaging libraries, and confines the 143 MP array to
+    one stack frame.
     """
 
     IGlobal: IGlobal
+
+    # split_scan(image_bytes, want_images) -> (crops, regions) | None, bound to this call's settings
+    split_scan: Callable = None
 
     # Raw bytes of the inbound image, accumulated across WRITE chunks.
     image_data: bytearray = None
@@ -62,6 +68,21 @@ class IInstance(IInstanceBase):
     # and derived_name() builds every stem from the source object, so restarting at 0 for each
     # stream would emit the same filename twice.
     _crop_index: int = 0
+
+    def beginInstance(self):
+        """
+        Bind this call's tunables (the scan type's detection values, deskew, quality) into ``split_scan``.
+
+        Imported here, not at module scope: ``process`` imports cv2, which the IGlobal installed.
+        """
+        from .process import build_split_scan
+
+        # The call's settings: defaults applied, the selected scan type's values flat
+        self.split_scan = build_split_scan(self.settings)
+
+    def endInstance(self):
+        """Release the bound callable."""
+        self.split_scan = None
 
     def open(self, obj: Entry):
         """
@@ -118,7 +139,8 @@ class IInstance(IInstanceBase):
         if not wants_image and not wants_text:
             return
 
-        result = self.IGlobal.split_scan(source, wants_image)
+        result = self.split_scan(source, wants_image)
+
         if result is None:
             error('scan_cropper: could not decode the image; forwarding it unchanged')
             self._emit_original(source, mimeType, wants_image)

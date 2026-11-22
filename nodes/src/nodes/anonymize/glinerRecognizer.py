@@ -33,7 +33,6 @@ from .Ruleparser import RuleParser
 from .anonymize import (
     anonymize as _anonymize,
     anonymize_tokens,
-    clean_entity_types,
     format_token,
 )
 
@@ -46,23 +45,14 @@ class GliNERRecognizer:
         Uses ai.common.models.GLiNER which automatically routes to model server
         if --modelserver flag is present, otherwise runs locally.
 
+        The entity types and the redaction (style and character) are each
+        call's: ``process`` and ``handleClassifications`` take them.
+
         Args:
-            config: The node's resolved config (defaults applied, the selected
-                profile's model flat): model, anonymizeChar, redactionStyle, entityTypes.
+            config: The control's resolved config (the selected profile's model flat).
             bag: The endpoint's shared runtime state.
         """
         self.model_name = config['model']
-        self.anonymize_char = config['anonymizeChar']
-
-        # Redaction style: 'mask' overwrites entities with anonymize_char (\u2588\u2588\u2588\u2588),
-        # 'token' replaces each entity with a labelled placeholder like [PERSON].
-        self.redaction_style = config['redactionStyle']
-
-        # Entity types to detect. Configurable per pipeline via the `entityTypes`
-        # field; clean_entity_types drops blank entries and falls back to the
-        # common defaults when the result is empty so detection is never
-        # silently disabled.
-        self.labels = clean_entity_types(config['entityTypes'])
 
         enginePath = expand('%execPath%')
         rule_file_path = os.path.join(enginePath, 'nucleuz', 'rulePack.dat')
@@ -210,7 +200,15 @@ class GliNERRecognizer:
 
         return unique_results
 
-    def process(self, text: str, labels: list, existing_matches: list = None) -> str:
+    def process(
+        self,
+        text: str,
+        labels: list,
+        existing_matches: list = None,
+        *,
+        redaction_style: str = 'mask',
+        anonymize_char: str = '\u2588',
+    ) -> str:
         """
         Core anonymization method - detects entities using GLiNER and masks them.
 
@@ -218,6 +216,9 @@ class GliNERRecognizer:
             text: The text to anonymize
             labels: Entity labels to detect
             existing_matches: Optional list of (offset, length) tuples from classifications
+            redaction_style: The call's style: 'mask' overwrites entities with
+                ``anonymize_char``, 'token' replaces each with a labelled placeholder like [PERSON].
+            anonymize_char: The call's mask character.
 
         Returns:
             Anonymized text. In 'mask' style detected spans are overwritten with
@@ -232,7 +233,7 @@ class GliNERRecognizer:
 
         debug(f'Anonymize: Detected {len(ner_results)} entities')
 
-        if self.redaction_style == 'token':
+        if redaction_style == 'token':
             token_matches = self.convert_ner_results_to_token_matches(ner_results)
             # Classification matches carry no per-match label -> generic token.
             fallback = [(offset, length, '[REDACTED]') for offset, length in (existing_matches or [])]
@@ -256,14 +257,21 @@ class GliNERRecognizer:
         # Sort by offset and apply masking
         all_matches_sorted = sorted(all_matches, key=lambda x: x[0])
 
-        return _anonymize(text, all_matches_sorted, self.anonymize_char)
+        return _anonymize(text, all_matches_sorted, anonymize_char)
 
     def handleClassifications(
-        self, classifications: dict, target_object_text: str, classificationPolicy: any, classificationRules: any
+        self,
+        classifications: dict,
+        target_object_text: str,
+        classificationPolicy: any,
+        classificationRules: any,
+        *,
+        redaction_style: str = 'mask',
+        anonymize_char: str = '\u2588',
     ):
         """
         Handle classifications from upstream classifier - extracts labels and matches,
-        then delegates to core anonymize method.
+        then delegates to core anonymize method with the call's redaction.
         """
         text_matches = classifications.get('textMatches', '')
 
@@ -286,4 +294,10 @@ class GliNERRecognizer:
             (m['offset'], m['length']) for m in ((m.get('location', {}).get('inChars') or m) for m in text_matches)
         )
 
-        return self.process(target_object_text, labels, existing_matches)
+        return self.process(
+            target_object_text,
+            labels,
+            existing_matches,
+            redaction_style=redaction_style,
+            anonymize_char=anonymize_char,
+        )

@@ -65,8 +65,9 @@ class IValidator(IValidatorBase):
             )
             return
 
-        for read in (node_config.read_auth, node_config.read_options):
+        # The options are params, which self.config refuses: their stored values are in the full view
+        for read, view in ((node_config.read_auth, config), (node_config.read_options, self._resolved())):
             try:
-                read(config)
+                read(view)
             except Exception as e:
                 warning(str(e))

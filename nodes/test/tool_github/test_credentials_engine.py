@@ -190,3 +190,21 @@ def test_an_encoded_slash_cannot_hide_dot_segments_through_dispatch(node):
     assert output['status'] is None
     assert '"." or ".." segment or an empty one' in output['message']
     assert node.github.calls == []
+
+
+def test_one_control_serves_a_writing_and_a_read_only_call(node):
+    """The readOnly gate is a call's setting: one control (one credential), two calls, two outcomes."""
+    from ..framework.controls import bind_call
+
+    writer = node.build({'token': TOKEN})
+    glb = writer.IGlobal
+    reader = bind_call(node.IInstance(), glb, {'readOnly': True})
+    node.github.routes[('POST', '/repos/acme/api/issues/7/labels')] = response([{'name': 'bug'}])
+
+    args = {'repo': 'acme/api', 'issue_number': 7, 'labels': ['bug']}
+    refused = _invoke(reader, 'issue_add_labels', args)
+    written = _invoke(writer, 'issue_add_labels', args)
+
+    assert refused['message'].startswith('issue_add_labels refused by readOnly')
+    assert written['status'] == 200
+    assert [call.path for call in node.github.calls] == ['/repos/acme/api/issues/7/labels']

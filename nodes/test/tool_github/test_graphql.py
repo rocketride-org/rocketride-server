@@ -63,15 +63,18 @@ def node(monkeypatch):
             auth_type='pat',
             token=TOKEN,
             private_key_pem='',
+            get_token=Mock(return_value=TOKEN),
+        )
+        inst.IGlobal.secrets = lambda: (inst.IGlobal.token, inst.IGlobal.private_key_pem)
+        # The options are the call's settings
+        inst._call_options = SimpleNamespace(
             default_repo='owner/repo',
             read_only=True,
-            get_token=Mock(return_value=TOKEN),
             tools=frozenset(),
             graphql_max_bytes=github_client.DEFAULT_GRAPHQL_MAX_BYTES,
             graphql_allow_mutations=False,
             retry_policy=github_client.RetryPolicy(sleep=sleep),
         )
-        inst.IGlobal.secrets = lambda: (inst.IGlobal.token, inst.IGlobal.private_key_pem)
         request = Mock()
         monkeypatch.setattr(github_client.requests, 'request', request)
         yield SimpleNamespace(inst=inst, request=request, client=github_client, client_guard=graphql_guard, sleep=sleep)
@@ -300,7 +303,7 @@ def test_invalid_operation_name_is_refused_before_anything_is_sent(node, operati
     [MUTATION, 'query Q { viewer { login } } mutation M { addStar(input: {starrableId: "x"}) { clientMutationId } }'],
 )
 def test_mutation_is_refused_with_read_only_off_until_mutations_are_allowed(node, query):
-    node.inst.IGlobal.read_only = False
+    node.inst._options().read_only = False
     result = node.inst.graphql({'query': query})
     assert result['status'] is None
     assert 'data' not in result
@@ -312,7 +315,7 @@ def test_mutation_is_refused_with_read_only_off_until_mutations_are_allowed(node
 
 
 def test_an_uncheckable_document_is_refused_with_read_only_off_until_mutations_are_allowed(node):
-    node.inst.IGlobal.read_only = False
+    node.inst._options().read_only = False
     result = node.inst.graphql({'query': 'query { viewer { login '})
     assert result['status'] is None
     assert 'cannot be checked for a mutation operation, and graphqlAllowMutations is off' in result['message']
@@ -320,8 +323,8 @@ def test_an_uncheckable_document_is_refused_with_read_only_off_until_mutations_a
 
 
 def test_mutation_is_sent_when_read_only_is_off_and_mutations_are_allowed(node):
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     node.request.return_value = gql_response({'data': {'addStar': {'clientMutationId': None}}})
     result = node.inst.graphql({'query': MUTATION})
     assert result['status'] == 200
@@ -332,15 +335,15 @@ def test_mutation_is_sent_when_read_only_is_off_and_mutations_are_allowed(node):
 @pytest.mark.parametrize('query', [VIEWER, MUTATION])
 @pytest.mark.parametrize('failure', ['timeout', 'connection', 'invalid-json', 'response-cap'])
 def test_ambiguous_mutation_outcome_does_not_advise_blind_retry(node, query, failure):
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     if failure in {'timeout', 'connection'}:
         error = requests.Timeout if failure == 'timeout' else requests.ConnectionError
         node.request.side_effect = error(TOKEN)
     elif failure == 'invalid-json':
         node.request.return_value = gql_response(raw=f'not JSON: {TOKEN}'.encode())
     else:
-        node.inst.IGlobal.graphql_max_bytes = 1024
+        node.inst._options().graphql_max_bytes = 1024
         node.request.return_value = gql_response({'data': {'large': 'x' * 2048}})
     result = node.inst.graphql({'query': query})
     assert result['status'] is None
@@ -358,8 +361,8 @@ def test_ambiguous_mutation_outcome_does_not_advise_blind_retry(node, query, fai
 @pytest.mark.parametrize('query', [VIEWER, MUTATION])
 @pytest.mark.parametrize('status', [500, 502, 504])
 def test_server_error_preserves_status_and_warns_only_for_mutations(node, query, status):
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     node.request.return_value = gql_response({'message': f'Upstream failure {TOKEN}'}, status=status)
     result = node.inst.graphql({'query': query})
     assert result['status'] == status
@@ -372,8 +375,8 @@ def test_server_error_preserves_status_and_warns_only_for_mutations(node, query,
 @pytest.mark.parametrize('query', [VIEWER, MUTATION])
 def test_wrong_shape_success_body_warns_only_for_mutations(node, query):
     # A 2xx JSON answer without data or errors: a mutation may still have run, a query did no harm.
-    node.inst.IGlobal.read_only = False
-    node.inst.IGlobal.graphql_allow_mutations = True
+    node.inst._options().read_only = False
+    node.inst._options().graphql_allow_mutations = True
     node.request.return_value = gql_response(raw=json.dumps({'ok': True}).encode())
     result = node.inst.graphql({'query': query})
     assert result['status'] == 200
@@ -386,7 +389,7 @@ def test_wrong_shape_success_body_warns_only_for_mutations(node, query):
 
 
 def test_oversized_response_is_an_error_naming_the_cap_and_is_not_read_in_full(node):
-    node.inst.IGlobal.graphql_max_bytes = 1024
+    node.inst._options().graphql_max_bytes = 1024
     body = json.dumps({'data': {'blob': 'x' * (640 * 1024)}}).encode()
     resp = gql_response(raw=body)
     node.request.return_value = resp
@@ -402,7 +405,7 @@ def test_oversized_response_is_an_error_naming_the_cap_and_is_not_read_in_full(n
 
 
 def test_declared_oversized_response_is_refused_without_reading(node):
-    node.inst.IGlobal.graphql_max_bytes = 1024
+    node.inst._options().graphql_max_bytes = 1024
     resp = gql_response(raw=b'{"data": {}}' + b' ' * 4096, headers={**HEADERS, 'Content-Length': '4108'})
     node.request.return_value = resp
     result = node.inst.graphql({'query': VIEWER})
@@ -413,7 +416,7 @@ def test_declared_oversized_response_is_refused_without_reading(node):
 
 def test_encoded_length_over_the_cap_is_not_trusted(node):
     # A gzip Content-Length counts compressed bytes; the decoded body is what the cap bounds.
-    node.inst.IGlobal.graphql_max_bytes = 1024
+    node.inst._options().graphql_max_bytes = 1024
     headers = {**HEADERS, 'Content-Length': '4096', 'Content-Encoding': 'gzip'}
     node.request.return_value = gql_response({'data': {'ok': True}}, headers=headers)
     assert node.inst.graphql({'query': VIEWER})['data'] == {'data': {'ok': True}, 'errors': None}
@@ -423,7 +426,7 @@ def test_response_at_the_cap_is_accepted(node):
     body = json.dumps({'data': {'v': ''}}).encode()
     body = body[:-2] + b' ' * (1024 - len(body)) + body[-2:]
     assert len(body) == 1024
-    node.inst.IGlobal.graphql_max_bytes = 1024
+    node.inst._options().graphql_max_bytes = 1024
     node.request.return_value = gql_response(raw=body)
     assert node.inst.graphql({'query': VIEWER})['data'] == {'data': {'v': ''}, 'errors': None}
 
@@ -550,7 +553,7 @@ def test_sentinel_token_never_reaches_a_result(node, case):
     elif case == 'auth':
         inst.IGlobal.get_token.side_effect = ValueError(echoed)
     else:
-        inst.IGlobal.retry_policy = node.client.RetryPolicy(max_retries=0, sleep=node.sleep)
+        inst._options().retry_policy = node.client.RetryPolicy(max_retries=0, sleep=node.sleep)
         node.request.return_value = gql_response({'message': echoed}, 403, {**HEADERS, 'Retry-After': '5'})
     result = inst.graphql({'query': VIEWER})
     assert TOKEN not in json.dumps(result)

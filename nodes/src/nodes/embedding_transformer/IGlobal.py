@@ -31,8 +31,8 @@ class IGlobal(IGlobalBase):
     def beginGlobal(self):
         """Load the sentence-transformers model named by the resolved config.
 
-        The selected profile pins the model; the custom profile adds the
-        truncation and prefix knobs, which the resolver defaults elsewhere.
+        The selected profile pins the model (the custom profile names it); the
+        custom profile's truncation and prefix knobs are each call's settings.
         """
         # Imported here: the module installs and loads sentence-transformers
         # (torch) as a side effect of being imported.

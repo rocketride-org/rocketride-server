@@ -125,9 +125,9 @@ class IInstance(
            depth and because the raw ``request`` tool carries no stamp at all.
         """
         methods = super()._collect_tool_methods()
-        enabled = self.IGlobal.tool_groups
-        allow_raw = self.IGlobal.allow_raw_request
-        read_only = self.IGlobal.read_only
+        enabled = self._options().tool_groups
+        allow_raw = self._options().allow_raw_request
+        read_only = self._options().read_only
 
         published: dict[str, Callable] = {}
         for name, method in methods.items():
@@ -227,7 +227,7 @@ class IInstance(
             # runs first (normpath keeps a leading '//'), resolve the dots, then compare
             # case-insensitively.
             normalized = posixpath.normpath(re.sub(r'/+', '/', '/' + path)).lstrip('/').lower()
-            if 'message_sending' not in self.IGlobal.tool_groups and normalized.startswith('conversations/messages'):
+            if 'message_sending' not in self._options().tool_groups and normalized.startswith('conversations/messages'):
                 raise ValueError(
                     'This operation is not permitted: writes under /conversations/messages require the '
                     'message_sending tool group'

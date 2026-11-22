@@ -134,6 +134,7 @@
 			}
 		},
 		"transcribe.language": {
+			"param": true,
 			"type": "string",
 			"title": "Language",
 			"description": "ISO 639-1 code of the spoken language (e.g. en, ru, de). Must match the audio; a mismatch produces garbled half-translated text",
@@ -155,6 +156,7 @@
 		},
 		// Buffering, passed to Transcribe(). The default is its own constant.
 		"transcribe.chunk_duration": {
+			"param": true,
 			"type": "integer",
 			"title": "Chunk Duration (s)",
 			"description": "Seconds of audio to buffer before sending a chunk to Whisper",
@@ -164,6 +166,7 @@
 		// Decode-time parameters, forwarded per request. Integer where VadOptions
 		// declares an int: JSON does not distinguish 5 from 5.0, the schema does.
 		"transcribe.beam_size": {
+			"param": true,
 			"type": "integer",
 			"title": "Beam Size",
 			"description": "Beam size for decoding. 1 is greedy (fastest); higher is slower and usually more accurate",
@@ -171,12 +174,14 @@
 			"minimum": 1
 		},
 		"transcribe.vad_filter": {
+			"param": true,
 			"type": "boolean",
 			"title": "VAD Filter",
 			"description": "Use Whisper's built-in Silero VAD to drop non-speech before transcribing",
 			"default": true
 		},
 		"transcribe.vad_threshold": {
+			"param": true,
 			"type": "number",
 			"title": "VAD Speech Threshold",
 			"description": "Silero speech probability above which audio counts as speech (0-1)",
@@ -185,6 +190,7 @@
 			"maximum": 1
 		},
 		"transcribe.vad_min_silence_duration_ms": {
+			"param": true,
 			"type": "integer",
 			"title": "VAD Minimum Silence (ms)",
 			"description": "Silence this long ends a speech chunk",
@@ -192,6 +198,7 @@
 			"minimum": 0
 		},
 		"transcribe.vad_speech_pad_ms": {
+			"param": true,
 			"type": "integer",
 			"title": "VAD Speech Padding (ms)",
 			"description": "Padding added to each side of a detected speech chunk",
@@ -199,6 +206,7 @@
 			"minimum": 0
 		},
 		"transcribe.vad_max_speech_duration_s": {
+			"param": true,
 			"type": "number",
 			"title": "VAD Maximum Speech (s)",
 			"description": "Split speech chunks longer than this. 0 means no limit",

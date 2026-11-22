@@ -21,19 +21,57 @@
 # SOFTWARE.
 # =============================================================================
 
+from typing import Any, Dict
+
 from rocketlib import Entry, IInstanceBase
 from ai.common.schema import Answer
 
-from .IGlobal import IGlobal
 from .validate import validate_payload
 
 
 class IInstance(IInstanceBase):
-    IGlobal: IGlobal  # Reference to the global context holding the normalised validation settings
+    """Validate fact answers by this call's rules; the control holds nothing (no IGlobal)."""
 
     # Validated payloads collected during the object, emitted at closing.
     # Each entry is (expectJson: bool, payload) — see writeAnswers/closing.
     pending: list = None
+
+    # This call's validation rules, built from its settings in beginInstance
+    validation: Dict[str, Any] = None
+
+    def beginInstance(self):
+        """Read this call's settings and lower-case the metric keywords, which match against lower-cased labels.
+
+        The schema supplies the defaults, the field-name lengths and the
+        severity enums. What it cannot express is checked here and fails the
+        call: a field name that is blank once stripped, and a keyword map
+        whose values are not lists.
+
+        Raises:
+            ValueError: A field name is blank, or a category's keywords are not a list.
+        """
+        settings = self.settings
+        fields = {}
+        for key in ('amount_field', 'currency_field', 'metric_field', 'category_field'):
+            fields[key] = settings[key].strip()
+            if not fields[key]:
+                raise ValueError(f'schema_validate: {key} must name a fact field; it is blank')
+        for category, keywords in settings.category_metric_map.items():
+            if not isinstance(keywords, list):
+                raise ValueError(f'schema_validate: category_metric_map[{category!r}] must be a list of keywords')
+        self.validation = {
+            **fields,
+            'category_metric_map': {
+                str(category): [str(keyword).strip().lower() for keyword in keywords]
+                for category, keywords in settings.category_metric_map.items()
+            },
+            'sign': settings.sign,
+            'require_provenance': settings.require_provenance,
+        }
+
+    def endInstance(self):
+        """Drop this call's rules."""
+        self.validation = None
 
     def open(self, obj: Entry):
         self.pending = []
@@ -67,7 +105,7 @@ class IInstance(IInstanceBase):
                 payload = None
 
         if isinstance(payload, (dict, list)):
-            self.pending.append((True, validate_payload(payload, self.IGlobal.validation_rules())))
+            self.pending.append((True, validate_payload(payload, self.validation)))
         else:
             # Plain text, empty, or non-fact JSON scalar — pass through verbatim.
             self.pending.append((False, answer.getText() if answer is not None else ''))
