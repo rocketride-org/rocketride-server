@@ -869,6 +869,9 @@ async def test_oss_sign_in_delivers_the_desktops_agents_through_the_payload(monk
     acct._deployments_backend = MagicMock()
     acct._deployments_backend.kinds_of = AsyncMock(return_value={BOT: 'pipe'})
     monkeypatch.setattr(pipe_deploy, 'reachable_pipe_entry', AsyncMock(return_value=dict(AGENT)))
+    # An open server: authenticate() checks RR_APIKEY, and refuses a server
+    # holding only the client's ROCKETRIDE_APIKEY
+    monkeypatch.delenv('RR_APIKEY', raising=False)
     monkeypatch.delenv('ROCKETRIDE_APIKEY', raising=False)
 
     signed_in = await acct.authenticate('')
