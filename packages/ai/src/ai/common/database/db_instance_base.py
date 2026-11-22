@@ -38,7 +38,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import json
 import threading
@@ -183,6 +183,14 @@ _QUERY_EXECUTION_FAILED = 'Query execution failed'
 
 class MissingLlmError(ValueError):
     """A natural-language question reached a node with no llm connected."""
+
+
+class _CommitOutcomeUnknown(RuntimeError):
+    """An insert batch failed while committing, after every statement had run.
+
+    A commit can fail after the server has already committed (a lost
+    acknowledgement), so the batch may be saved even though the call failed.
+    """
 
 
 class DatabaseLaneError(RuntimeError):
@@ -1243,13 +1251,17 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             answer.setAnswer(self._formatResultAsMarkdown(result) if executed and result else str(result))
             self.instance.writeAnswers(answer)
 
-    def _writeOutcome(self) -> str:
+    def _writeOutcome(self, failure: Optional[BaseException] = None) -> str:
         """Return what a failed batch insert says about the rows already written.
 
-        A transactional database rolls the whole batch back. ClickHouse is not
+        A failure while committing (``_CommitOutcomeUnknown``) leaves the outcome
+        unknown: the server can commit and lose the acknowledgement. Otherwise a
+        transactional database rolls the whole batch back. ClickHouse is not
         transactional (``_sessionsAreTransactions`` is False), so the runs of the
         batch that finished before the failing one are already stored.
         """
+        if isinstance(failure, _CommitOutcomeUnknown):
+            return 'the outcome is unknown and the batch may have been saved'
         if self._sessionsAreTransactions():
             return 'no rows were saved'
         return 'rows from earlier runs of the batch may already be saved'
@@ -1280,7 +1292,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # that were never written.
             error(f'Error inserting table data: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
-                f'{self._db_display_name()} table write failed; {self._writeOutcome()} (details are in the engine log)'
+                f'{self._db_display_name()} table write failed; {self._writeOutcome(e)} (details are in the engine log)'
             ) from None
 
     def writeAnswers(self, answer: Answer) -> None:
@@ -1297,7 +1309,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
             # Fail the step, same as `writeTable`.
             error(f'Error in writeAnswers: {type(e).__name__}: {e}\n{traceback.format_exc()}')
             raise DatabaseLaneError(
-                f'{self._db_display_name()} answers write failed; {self._writeOutcome()} (details are in the engine log)'
+                f'{self._db_display_name()} answers write failed; {self._writeOutcome(e)} (details are in the engine log)'
             ) from None
 
     # ------------------------------------------------------------------
@@ -1531,6 +1543,9 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                     previous_keys = keys
                 runs[-1].append(values)
 
+            # Set once every statement has run, still inside the transaction
+            # block: a failure after that point came from the commit.
+            statements_done = False
             try:
                 with self.IGlobal.engine.begin() as conn:
                     for run in runs:
@@ -1546,6 +1561,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                         # NULL into a column the database was about to fill.
                         for _ in run:
                             conn.execute(insert(table))
+                    statements_done = True
                 debug(f"Inserted {len(insert_values)} records into '{self.IGlobal.table}' in {len(runs)} run(s).")
             except Exception as e:
                 # The context manager has already rolled back every run of the
@@ -1563,7 +1579,7 @@ class DatabaseInstanceBase(IInstanceBase, ABC):
                 if not _isDbFailure(e):
                     raise
                 # `from None` keeps the driver traceback out of the message.
-                raise RuntimeError(
+                raise (_CommitOutcomeUnknown if statements_done else RuntimeError)(
                     f'Insert into "{self.IGlobal.table}" failed: {self.IGlobal._format_db_error(e)}'
                 ) from None
         else:
