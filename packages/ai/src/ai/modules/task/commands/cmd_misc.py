@@ -822,14 +822,17 @@ class MiscCommands(DAPConn):
         server = self._server
         caller_user_id = self._account_info.userId
 
-        # Snapshot tasks the caller may see (run-scoped: user-owned runs are
-        # owner-only; team-owned runs need permissions on the run's team; a
-        # key with an endpoints scope sees only the runs inside it)
+        # Snapshot tasks the caller may monitor (run-scoped: user-owned runs
+        # are owner-only; team-owned runs need task.monitor on the run's team;
+        # org-owned runs are their admins', the caller of one holding
+        # task.data alone; a key with an endpoints scope sees only the runs
+        # inside it)
         endpoints = getattr(self._account_info, 'endpoints', None)
         task_controls = [
             c
             for c in server._task_control.values()
-            if resolve_run_permissions(self._account_info, c) and in_endpoint_scope(endpoints, c.address)
+            if 'task.monitor' in resolve_run_permissions(self._account_info, c)
+            and in_endpoint_scope(endpoints, c.address)
         ]
         # Connections are user-scoped, so filter by userId
         conn_items = [

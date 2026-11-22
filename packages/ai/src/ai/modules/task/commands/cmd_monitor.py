@@ -289,17 +289,17 @@ class MonitorCommands(DAPConn):
         # Get the task by its registry key
         control = self._server.control_by_key(key)
 
-        # Verify we are allowed to receive events for this task - for SSE events, it requires data
-        # access, for all others, it's monitor access
-        if event_type == EVENT_TYPE.SSE:
-            self.verify_permission('task.data')
-        else:
-            self.verify_permission('task.monitor')
-
-        # Verify the caller may see this run (run-scoped: a user-owned run
-        # delivers only to its owner; a team-owned run to team members; a key
-        # with an endpoints scope receives only the runs inside it)
-        if not resolve_run_permissions(self._account_info, control):
+        # SSE events need data access, every other event monitor access, and
+        # both the credential and the run must grant it. The credential check
+        # holds a scoped key to its own permissions; the run check follows the
+        # run's owner (plan 8.3): a user-owned run delivers only to its owner,
+        # a team-owned run to the members holding the permission on that team,
+        # an org-owned run's monitor events to the org admins, while the
+        # caller it runs for holds task.data on it and receives its SSE only.
+        # A key with an endpoints scope receives only the runs inside it.
+        required = 'task.data' if event_type == EVENT_TYPE.SSE else 'task.monitor'
+        self.verify_permission(required)
+        if required not in resolve_run_permissions(self._account_info, control):
             return
         if not in_endpoint_scope(getattr(self._account_info, 'endpoints', None), control.address):
             return
@@ -355,25 +355,31 @@ class MonitorCommands(DAPConn):
 
         return
 
-    def _may_monitor(self) -> bool:
+    def _may_monitor(self, control: 'TaskControl | None' = None) -> bool:
         """
-        Return True when this connection holds ``task.monitor``.
+        Return True when this connection holds ``task.monitor``, on the given run when one is named.
 
         Catch-up events carry the same payloads as the live SUMMARY and TASK
-        events, so they are held to the permission ``send_task_event`` checks
-        for those types. A credential without it is skipped quietly, the way
-        ``broadcast_task_event`` skips it for live events: the subscription
-        still stands (a machine key scoped to ``task.data`` subscribes for
-        its data pipe's SSE and nothing else).
+        events, so they are held to the rule ``send_task_event`` applies to
+        those types: the credential holds ``task.monitor``, and so does the
+        caller on the run (``resolve_run_permissions``; the caller of an org
+        run holds ``task.data`` on it and nothing more). A credential without
+        it is skipped quietly, the way ``broadcast_task_event`` skips it for
+        live events: the subscription still stands (a machine key scoped to
+        ``task.data`` subscribes for its data pipe's SSE and nothing else).
+
+        Args:
+            control: The run the catch-up describes; None checks the
+                credential alone.
 
         Returns:
-            bool: True if the connection may receive monitor events.
+            bool: True if the connection may receive monitor events (of that run).
         """
         try:
             self.verify_permission('task.monitor')
         except PermissionError:
             return False
-        return True
+        return control is None or 'task.monitor' in resolve_run_permissions(self._account_info, control)
 
     async def _send_updates(
         self,
@@ -424,7 +430,7 @@ class MonitorCommands(DAPConn):
                 if control:
                     # Task is running: send current status, under the same
                     # permission as a live status update
-                    if self._may_monitor():
+                    if self._may_monitor(control):
                         # The same projection the live status carries (plan 7.5)
                         await self.send_event(
                             event='apaevt_status_update',
@@ -454,10 +460,11 @@ class MonitorCommands(DAPConn):
                 tasks: List[Dict[str, Any]] = []
                 endpoints = getattr(self._account_info, 'endpoints', None)
                 for token, target in self._server._task_control.items():
-                    # Skip runs the caller may not see (run-scoped: user-owned
-                    # runs are owner-only; team runs need team membership; a
-                    # scoped key sees only the runs inside its endpoints)
-                    if not resolve_run_permissions(self._account_info, target):
+                    # Skip runs the caller may not monitor (run-scoped:
+                    # user-owned runs are owner-only; team runs need the
+                    # permission on their team; org runs are their admins';
+                    # a scoped key sees only the runs inside its endpoints)
+                    if 'task.monitor' not in resolve_run_permissions(self._account_info, target):
                         continue
                     if not in_endpoint_scope(endpoints, target.address):
                         continue

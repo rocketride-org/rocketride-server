@@ -1333,6 +1333,28 @@ async def test_list_tasks_scopes_to_caller_permissions(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_list_tasks_leaves_an_org_run_to_the_org_admins(monkeypatch):
+    """The caller of an @org run holds task.data on it, never task.monitor: only an org admin lists it (plan 8.3)."""
+    monkeypatch.setattr(cmd_misc.time, 'time', lambda: 1000.0)
+
+    org_run = _list_control('task-9')
+    org_run.run_kind = 'deploy'
+    org_run.owner_kind = 'org'
+    org_run.owner_id = 'org-1'
+    org_run.caller_id = 'user-1'
+    server = _make_server([org_run])
+
+    member = _make_conn(account_info=_caller_account(), server=server)
+    assert (await MiscCommands.on_rrext_list_tasks(member, {'arguments': {}}))['body']['total'] == 0
+
+    admin_account = _caller_account()
+    admin_account.organization['permissions'] = ['org.admin']
+    admin_account.sysPermissions = []
+    admin = _make_conn(account_info=admin_account, server=server)
+    assert (await MiscCommands.on_rrext_list_tasks(admin, {'arguments': {}}))['body']['total'] == 1
+
+
+@pytest.mark.asyncio
 async def test_list_tasks_requires_monitor_permission():
     """If verify_permission raises, the error is logged and re-raised."""
     conn = _make_conn()

@@ -298,6 +298,65 @@ async def test_send_task_event_checks_data_permission_for_sse():
     conn.verify_permission.assert_called_with('task.data')
 
 
+def _org_control(*, caller_id='user-1'):
+    """An @org run of org-1 that runs for ``caller_id`` (plan 8.3: org-owned, one control per caller)."""
+    control = _control(run_kind='deploy', owner_kind='org', team_id='')
+    control.owner_id = 'org-1'
+    control.owner = '=org/org-1'
+    control.caller_id = caller_id
+    return control
+
+
+def _org_admin():
+    """An org admin of org-1 (full permissions on every org-owned run)."""
+    account = _account_info()
+    account.organization['permissions'] = ['org.admin']
+    return account
+
+
+@pytest.mark.asyncio
+async def test_an_org_runs_caller_receives_its_sse_and_never_its_monitor_events():
+    """The caller of an @org run holds task.data on it: task.monitor on a team of theirs never opens its status."""
+    server = MagicMock()
+    server.control_by_key = MagicMock(return_value=_org_control())
+    conn = _make_conn(account_info=_account_info(), server=server, monitors={'*': EVENT_TYPE.SUMMARY | EVENT_TYPE.SSE})
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.SUMMARY, KEY, {'event': 'status', 'body': {}})
+    conn.send_event.assert_not_called()
+    await MonitorCommands.send_task_event(conn, EVENT_TYPE.SSE, KEY, {'event': 'sse', 'body': {}})
+    conn.send_event.assert_awaited_once()
+
+    # An org admin watches it (plan 8.3)
+    admin = _make_conn(account_info=_org_admin(), server=server, monitors={'*': EVENT_TYPE.SUMMARY})
+    await MonitorCommands.send_task_event(admin, EVENT_TYPE.SUMMARY, KEY, {'event': 'status', 'body': {}})
+    admin.send_event.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_the_catch_up_leaves_out_an_org_run_its_caller_may_not_monitor():
+    """The TASK list and the SUMMARY snapshot hold an org run's caller to the live rule."""
+    control = _org_control()
+    control.task = MagicMock()
+    control.task.get_status = MagicMock(return_value=SimpleNamespace(state=TASK_STATE.RUNNING.value, name='Org run'))
+    control.task.shared = False
+    control.status_view = lambda: vars(control.task.get_status())
+    control.project_status = lambda body, shared: body
+    server = MagicMock()
+    server._task_control = {'org.org-1.user-1.acme.proj-1.src-1': control}
+
+    member = _make_conn(account_info=_account_info(), server=server)
+    await MonitorCommands._send_updates(member, control, EVENT_TYPE.NONE, EVENT_TYPE.TASK)
+    _, kwargs = member.send_event.await_args
+    assert kwargs['body']['tasks'] == []
+    member.send_event.reset_mock()
+    await MonitorCommands._send_updates(member, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY)
+    member.send_event.assert_not_called()
+
+    admin = _make_conn(account_info=_org_admin(), server=server)
+    await MonitorCommands._send_updates(admin, control, EVENT_TYPE.NONE, EVENT_TYPE.TASK)
+    _, kwargs = admin.send_event.await_args
+    assert [task['id'] for task in kwargs['body']['tasks']] == ['task-1']
+
+
 @pytest.mark.asyncio
 async def test_send_task_event_pipe_scoped_subscription():
     """A p.<proj>.<src>.<pipe> subscription matches when the event body carries that pipe_id."""
@@ -328,10 +387,13 @@ async def test_send_updates_summary_with_running_control():
     task = MagicMock()
     task.get_status = MagicMock(return_value=status)
     task.shared = False
-    # A private engine's status passes through the projection unchanged
-    control = SimpleNamespace(id='task-1', task=task, project_status=lambda body, shared: body)
+    # The caller's own run, on a private engine whose status passes through
+    # the projection unchanged
+    control = _control()
+    control.task = task
+    control.project_status = lambda body, shared: body
 
-    conn = _make_conn()
+    conn = _make_conn(account_info=_account_info())
     await MonitorCommands._send_updates(conn, control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY)
 
     conn.send_event.assert_awaited_once()
