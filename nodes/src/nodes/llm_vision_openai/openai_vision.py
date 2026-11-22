@@ -120,6 +120,8 @@ class Chat(ChatBase):
 
         # The call's model, read on this thread: the request thread below does not see the call
         model = self.call.model
+        # and its output cap, sent as max_completion_tokens (reasoning models refuse max_tokens)
+        max_tokens = self.call.output_tokens
 
         # Extract image data from context
         image_data = None
@@ -174,6 +176,7 @@ class Chat(ChatBase):
                         result[0] = client.chat.completions.create(
                             model=model,
                             messages=messages,
+                            max_completion_tokens=max_tokens,
                         )
                     except Exception as e:
                         exc[0] = e

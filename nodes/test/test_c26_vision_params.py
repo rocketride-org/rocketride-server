@@ -390,9 +390,9 @@ def _openai_sdk(sent):
         def __init__(self, **kwargs):
             self.chat = SimpleNamespace(completions=self)
 
-        def create(self, model, messages):
+        def create(self, model, messages, max_completion_tokens=None):
             system = [message['content'] for message in messages if message['role'] == 'system']
-            sent.append({'model': model, 'system': system[0] if system else ''})
+            sent.append({'model': model, 'system': system[0] if system else '', 'max_tokens': max_completion_tokens})
             return _reply('seen')
 
     errors = {'RateLimitError': type('RateLimitError', (Exception,), {})}
@@ -408,7 +408,14 @@ def _gemini_sdk(sent):
             self.models = self
 
         def generate_content(self, model, contents, config=None):
-            sent.append({'model': model, 'system': (config or {}).get('system_instruction', '')})
+            config = config or {}
+            sent.append(
+                {
+                    'model': model,
+                    'system': config.get('system_instruction', ''),
+                    'max_tokens': config.get('max_output_tokens'),
+                }
+            )
             return SimpleNamespace(text='seen')
 
     parts = SimpleNamespace(from_bytes=lambda **kwargs: kwargs, from_text=lambda **kwargs: kwargs)
@@ -430,7 +437,9 @@ def _mistral_sdk(sent):
 
         def complete(self, **request):
             system = [message['content'][0]['text'] for message in request['messages'] if message['role'] == 'system']
-            sent.append({'model': request['model'], 'system': system[0] if system else ''})
+            sent.append(
+                {'model': request['model'], 'system': system[0] if system else '', 'max_tokens': request['max_tokens']}
+            )
             return _reply('seen')
 
     tokenizers = _module('mistral_common.tokens.tokenizers.mistral', MistralTokenizer=object)
@@ -514,8 +523,8 @@ def test_each_call_reaches_the_provider_on_its_own_model(monkeypatch, node):
         with chat.calling(call):
             assert chat.chat(_image_question()).getText() == 'seen'
     assert [request['model'] for request in sent] == [other_model, default_model]
-    if node == 'llm_vision_ollama':
-        assert [request['max_tokens'] for request in sent] == [call.output_tokens for call in calls]
+    # Every driver sends the call's output cap (the branch's modelOutputTokens)
+    assert [request['max_tokens'] for request in sent] == [call.output_tokens for call in calls]
 
 
 @pytest.mark.parametrize('node', sorted(DRIVERS))

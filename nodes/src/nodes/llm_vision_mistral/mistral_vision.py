@@ -91,18 +91,6 @@ class Chat(ChatBase):
 
         return self._keyed_handle(('tokenizer', model), build)
 
-    def _getModelTokens(self, configured_tokens: int | None) -> int:
-        """Get the maximum token count for this call's vision model."""
-        model_tokens = {
-            'pixtral-12b-latest': 4096,
-            'pixtral-large-latest': 4096,
-            'mistral-medium-latest': 3025,
-            'mistral-small-latest': 3025,
-        }
-        if configured_tokens is not None:
-            return configured_tokens
-        return model_tokens.get(self.call.model, 4096)
-
     def _getModelTimeout(self, model: str) -> int:
         """Get the appropriate timeout for the specified vision model."""
         if 'large' in model:
@@ -147,10 +135,6 @@ class Chat(ChatBase):
                 base64_image = base64.b64encode(image_bytes).decode('utf-8')
                 return {'type': 'image_url', 'image_url': f'data:{mime_type};base64,{base64_image}'}
         raise ValueError('Invalid image input format. Please provide a valid URL, base64 encoded image, or file path.')
-
-    def getTotalTokens(self) -> int:
-        """Get the total token limit of the call's vision model."""
-        return self._getModelTokens(self.call.settings.get('modelTotalTokens'))
 
     def getTokens(self, value: str) -> int:
         """Count tokens using the official Mistral tokenizer SDK, for the call's model."""
@@ -225,8 +209,9 @@ class Chat(ChatBase):
         # ``writeQuestions``) runs under ``calling``, so the call carries it
         system_prompt = self.call.settings.get('systemPrompt') or ''
 
-        # The call's model and its retry configuration
+        # The call's model, its output cap and its retry configuration
         model = self.call.model
+        max_tokens = self.call.output_tokens
         max_retries, base_delay = self._getRetryConfig(model)
         last_error = None
         # Extract image data from context and prompt from questions
@@ -258,7 +243,7 @@ class Chat(ChatBase):
                     'model': model,
                     'messages': messages,
                     'temperature': 0.0,
-                    'max_tokens': None,
+                    'max_tokens': max_tokens,
                 }
                 chat_response = self._client.chat.complete(**api_params)
                 # Create and return the answer

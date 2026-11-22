@@ -51,6 +51,8 @@ import time
 import uuid
 from typing import Any, Dict, NamedTuple
 
+from rocketlib import warning
+
 
 class RateLimitError(Exception):
     """Raised when a request is rejected due to rate limiting."""
@@ -120,10 +122,20 @@ class StateRateLimiter:
         """
         Give an in-flight slot back after its request completes.
 
+        Best effort: the request has already run, so a failing state operation
+        here must not turn its response into an error, nor replace the error the
+        request raised. A slot that is not given back expires on its own,
+        ``_SLOT_TTL`` seconds after it was taken.
+
         Args:
             slot: What ``acquire`` returned.
         """
-        self._give_back(slot)
+        try:
+            self._give_back(slot)
+        except Exception as error:
+            warning(
+                f'tool_http_request: a rate-limit slot was not given back ({error}); it expires within {_SLOT_TTL} s'
+            )
 
     # ---- The in-flight slots --------------------------------------------------
 

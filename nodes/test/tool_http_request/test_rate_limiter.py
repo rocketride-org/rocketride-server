@@ -182,6 +182,38 @@ def test_a_failing_window_gives_back_what_was_taken(server, clock, window):
         limiter.release(limiter.acquire())
 
 
+class _FailingRelease:
+    """A state door whose slots lock fails once the request has run (a lost channel)."""
+
+    def __init__(self, state):
+        self._state = state
+        self.failing = False
+
+    def __getattr__(self, name):
+        return getattr(self._state, name)
+
+    def lock(self, key, *args, **kwargs):
+        if self.failing:
+            raise RuntimeError('state.lock: the channel is gone')
+        return self._state.lock(key, *args, **kwargs)
+
+
+def test_a_failing_release_keeps_the_request_result(server, clock):
+    with _binding(server) as state:
+        door = _FailingRelease(state)
+        limiter = _limiter(door, concurrent=1)
+        slot = limiter.acquire()
+        door.failing = True
+        # The request completed: giving the slot back fails quietly
+        limiter.release(slot)
+        door.failing = False
+        # The slot is still taken, and gone once its own expiry passes
+        with pytest.raises(RateLimitError, match='concurrent'):
+            limiter.acquire()
+        clock.advance(331)
+        limiter.release(limiter.acquire())
+
+
 def test_every_binding_of_one_owner_counts_against_the_same_limits(server, clock):
     # Two bindings stand for two replicas serving one control: one count
     engine = server.engine()

@@ -47,12 +47,13 @@ configured, object over the size cap, or any GCS error — comes back as a
 dictionary with a single `error` key, so an agent should check for `error`
 before reading `path`.
 
-Only the most recent download is retained: its path is the node's state, and a
-new download (on whichever engine replica serves it) deletes the previous file.
-An agent that needs a downloaded file must consume it before requesting the
-next one. Every download gets a path of its own, so two `tool_gcs` nodes of one
-owner (or two calls of one node) never overwrite or delete each other's files,
-even when they download objects of the same name.
+Only the most recent download of a node is retained: its path is the node's
+state, and a new download (on whichever engine replica serves it, concurrent
+calls included) deletes the previous file. An agent that needs a downloaded
+file must consume it before requesting the next one. Every download gets a path
+of its own, so two downloads never overwrite each other, even of objects with
+the same name, and two `tool_gcs` nodes of one owner never delete each other's
+files.
 
 ## Configuration
 

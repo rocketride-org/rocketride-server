@@ -164,7 +164,8 @@ class Chat(ChatBase):
             )
         ]
 
-        generate_config: Dict[str, Any] = {}
+        # The call's output cap (the model branch's modelOutputTokens)
+        generate_config: Dict[str, Any] = {'max_output_tokens': self.call.output_tokens}
         if system_prompt:
             generate_config['system_instruction'] = system_prompt
 
