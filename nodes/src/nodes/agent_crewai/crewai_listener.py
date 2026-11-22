@@ -119,7 +119,8 @@ def _dispatch(source: Any, event: Any) -> None:
     Singleton handler registered on every relevant event class.
 
     Reads the originating run's AgentContext from the `crewContext` contextvar
-    and forwards a 'thinking' SSE message to that run's invoker.  Events
+    and forwards a 'thinking' SSE message, marked with that run's `run_id`, to
+    the run's invoker.  Events
     emitted from outside our `CrewRunner.submit()` (e.g. CrewAI library
     internals during initialization) resolve to `crewContext = None` and are
     silently dropped -- they aren't ours to route.
@@ -154,8 +155,11 @@ def _dispatch(source: Any, event: Any) -> None:
     instance = getattr(invoker, 'instance', None)
     if instance is None:
         return
+    # Merged rather than passed as a second keyword: an event field of the same name
+    # would otherwise raise below and lose the event.
+    payload = {**(data or {}), 'run_id': context.run_id}
     try:
-        instance.sendSSE('thinking', message=message, **(data or {}))
+        instance.sendSSE('thinking', message=message, **payload)
     except Exception:
         # Never let an SSE write failure bubble up into CrewAI internals.
         pass
