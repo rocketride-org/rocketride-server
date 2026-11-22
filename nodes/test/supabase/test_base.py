@@ -32,6 +32,7 @@ from ._support import (
     is_prevent_default,
     make_global,
     make_instance,
+    require_supabase_py,
     tool_invoke,
     tool_levels,
     tool_query,
@@ -211,7 +212,7 @@ def test_end_global_skips_sub_clients_never_built_and_ignores_close_errors():
 
 def test_close_client_on_a_real_supabase_py_client():
     """The attribute names close_client relies on exist on supabase-py's client."""
-    supabase = pytest.importorskip('supabase')
+    supabase = require_supabase_py()
     from supabase.lib.client_options import SyncClientOptions
 
     client = supabase.create_client(API_CFG['url'], FAKE_SECRET_KEY, options=SyncClientOptions())
@@ -532,13 +533,13 @@ def test_postgres_connect_failure(monkeypatch):
     ],
 )
 def test_fake_client_refuses_calls_supabase_py_would_refuse(call):
-    pytest.importorskip('supabase')
+    require_supabase_py()
     with pytest.raises(AssertionError):
         call(FakeSupabaseClient())
 
 
 def test_fake_client_accepts_real_signatures():
-    pytest.importorskip('supabase')
+    require_supabase_py()
     client = FakeSupabaseClient()
     client.auth.admin.delete_user('id', should_soft_delete=True)
     client.storage.create_bucket('b', options={'public': False})

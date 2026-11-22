@@ -26,6 +26,7 @@ from ._support import (
     assert_no_secrets,
     cfg_with,
     install_fake_psycopg2,
+    require_supabase_py,
 )
 
 # supabase_client imports nothing from the engine, so no stubs are needed.
@@ -328,7 +329,7 @@ def test_build_client_options(monkeypatch):
 
 def test_build_client_with_real_supabase_py():
     """When supabase-py is installed, a client builds offline with an sb_secret_ key."""
-    pytest.importorskip('supabase')
+    require_supabase_py()
     client = sc.build_client(sc.resolve_api_connection(API_CFG))
     assert str(client.auth_url).startswith(API_CFG['url'])
     assert client.options.headers['apiKey'] == FAKE_SECRET_KEY

@@ -59,6 +59,78 @@ if str(NODES_SRC) not in sys.path:
     sys.path.insert(0, str(NODES_SRC))
 
 # -----------------------------------------------------------------------------
+# supabase-py, never this node's folder
+# -----------------------------------------------------------------------------
+
+#: The folder holding every node package. test_contracts.py and many other
+#: node tests put it on sys.path, and then a bare ``import supabase`` finds
+#: this node's own folder (nodes/src/nodes/supabase) instead of supabase-py.
+_NODE_PACKAGES = (NODES_SRC / 'nodes').resolve()
+
+
+def _in_node_packages(module: Any) -> bool:
+    """True when ``module`` was loaded from nodes/src/nodes (a node folder, not a library)."""
+    file = getattr(module, '__file__', None)
+    if not file:
+        return False
+    try:
+        return Path(file).resolve().is_relative_to(_NODE_PACKAGES)
+    except (OSError, ValueError):
+        return False
+
+
+def _resolves_to_node_packages(entry: str) -> bool:
+    try:
+        return Path(entry or '.').resolve() == _NODE_PACKAGES
+    except (OSError, ValueError):
+        return False
+
+
+def _import_supabase_py() -> Optional[types.ModuleType]:
+    """Import supabase-py once, with nodes/src/nodes taken off sys.path; None when it is not installed.
+
+    The library stays cached in ``sys.modules``, so the node's lazy
+    ``from supabase import create_client`` and these tests get supabase-py
+    whatever sys.path holds later. A ``supabase`` already imported from the
+    node folder is dropped first. Same idea as ``_import_scoped`` in
+    ``landing_ai/parse/test_parse.py``.
+    """
+    cached = sys.modules.get('supabase')
+    if cached is not None and not _in_node_packages(cached):
+        return cached
+    for name in [n for n in sys.modules if n == 'supabase' or n.startswith('supabase.')]:
+        if _in_node_packages(sys.modules[name]):
+            del sys.modules[name]
+    saved = sys.path[:]
+    sys.path[:] = [entry for entry in sys.path if not _resolves_to_node_packages(entry)]
+    try:
+        module = importlib.import_module('supabase')
+        importlib.import_module('supabase.lib.client_options')
+        return module
+    except ImportError:
+        return None
+    finally:
+        sys.path[:] = saved
+
+
+#: supabase-py, or None when it is not installed (the tests that need it skip).
+SUPABASE_PY = _import_supabase_py()
+
+
+def require_supabase_py() -> types.ModuleType:
+    """supabase-py for a test that needs the real library; skips the test when it is not installed.
+
+    Use this instead of ``pytest.importorskip('supabase')``, which can import
+    the node folder (see ``_import_supabase_py``).
+    """
+    if SUPABASE_PY is None:
+        import pytest
+
+        pytest.skip('supabase-py is not installed')
+    return SUPABASE_PY
+
+
+# -----------------------------------------------------------------------------
 # Fake settings. Obviously fake values: never put a real key in a test.
 # -----------------------------------------------------------------------------
 
@@ -389,6 +461,9 @@ def check_supabase_signature(path: str, args: tuple, kwargs: dict) -> None:
             f'FakeSupabaseClient: no supabase-py class known for {owner!r}; add it to _SUPABASE_OWNERS'
         )
     module_name, class_name = _SUPABASE_OWNERS[owner]
+    if SUPABASE_PY is None:
+        # Importing supabase.* now could load the node folder as ``supabase``.
+        return
     try:
         module = importlib.import_module(module_name)
     except ImportError:
