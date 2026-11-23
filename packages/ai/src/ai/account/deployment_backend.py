@@ -1083,11 +1083,15 @@ class FileDeploymentBackend:
         project_id: str,
         version: int,
         caps: List[str],
+        only_if: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Replace ONE registry version's ``metadata.approvedCapabilities`` (the admin's grant, #1022).
 
         Same single-field mutation as ``set_build``; the review ``state`` is
         not touched. The caller validates the names and audits the change.
+        With ``only_if`` the swap happens only while the stored grant still
+        equals it (decided inside the same registry mutation), so a rollback
+        cannot overwrite a grant someone else made since.
 
         Returns the refreshed rail entry.
         """
@@ -1103,6 +1107,8 @@ class FileDeploymentBackend:
                 raise StorageError(f'{project_id} v{version}: not in the registry')
             metadata = entry.get('metadata')
             metadata = metadata if isinstance(metadata, dict) else {}
+            if only_if is not None and metadata.get('approvedCapabilities') != list(only_if):
+                return dict(entry)
             metadata['approvedCapabilities'] = list(caps)
             entry['metadata'] = metadata
             return dict(entry)
