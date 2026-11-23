@@ -734,3 +734,89 @@ async def test_push_overlapping_refreshes_install_the_newest(monkeypatch):
     assert started == [0, 1]
     assert conn._account_info.sysPermissions == ['sys.admin', 'sys.view']
     assert [e['event'] for e in conn.sent].count('apaext_account') == 2
+
+
+# ---------------------------------------------------------------------------
+# A stalled rebuild read is bounded (REBUILD_TIMEOUT), not held under the lock
+# ---------------------------------------------------------------------------
+
+
+def _stall_rebuild(account, monkeypatch):
+    """Make every rebuild read wait forever, with a 0.05 s backstop."""
+    monkeypatch.setattr('ai.modules.task.task_server.REBUILD_TIMEOUT', 0.05, raising=False)
+
+    async def stalled(user_id, auth, capabilities=None):
+        await asyncio.Event().wait()
+
+    account._service.get_authentication_result = stalled
+
+
+@pytest.mark.asyncio
+async def test_push_stalled_rebuild_times_out_and_releases_lock(monkeypatch):
+    """A rebuild read that never returns ends the push at the timeout, the
+    live-recheck subject is marked unverified (read_failed counted), the
+    connection's lock is free, and a second push proceeds.
+    """
+
+    async def body():
+        account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+        conn = _admin(server, clock)
+        _stall_rebuild(account, monkeypatch)
+
+        await server.push_account_update('admin')
+        assert conn._authz_verified_at == 0.0
+        assert conn._revoked is False
+        assert server._authz_counters['read_failed'] == 1
+        assert not conn._identity_refresh_lock.locked()
+
+        await server.push_account_update('admin')  # not blocked by the first
+        assert server._authz_counters['read_failed'] == 2
+
+        # A recovered read installs a fresh, verified identity again.
+        async def ok(user_id, auth, capabilities=None):
+            return identity(user_id, ADMIN, auth=auth)
+
+        account._service.get_authentication_result = ok
+        assert await server._push_rebuilt(account, conn, conn._account_info, 'test') is True
+        assert conn._authz_verified_at == clock.now
+
+    await asyncio.wait_for(body(), 2)
+
+
+@pytest.mark.asyncio
+async def test_push_stalled_rebuild_does_not_block_other_connections(monkeypatch):
+    """One stalled read does not hold up the later connections in the fan-out,
+    and a non-subject keeps its identity.
+    """
+
+    async def body():
+        account, server, clock = _setup(monkeypatch, {'u': (True, frozenset())})
+        conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+        old = conn._account_info
+        _stall_rebuild(account, monkeypatch)
+
+        await server.push_account_update('u')
+        assert conn._account_info is old
+        assert conn._authenticated is True
+        conn._transport.disconnect.assert_not_called()
+        assert events(conn, 'apaext_account') == []
+        assert not conn._identity_refresh_lock.locked()
+
+    await asyncio.wait_for(body(), 2)
+
+
+@pytest.mark.asyncio
+async def test_push_stalled_rebuild_revokes_subject_without_recheck(monkeypatch):
+    """With no live re-check, a stalled rebuild revokes an authority subject."""
+
+    async def body():
+        account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+        server._authz = None
+        conn = _admin(server, clock)
+        _stall_rebuild(account, monkeypatch)
+
+        await server.push_account_update('admin')
+        conn._transport.disconnect.assert_called_once()
+        assert not conn._identity_refresh_lock.locked()
+
+    await asyncio.wait_for(body(), 2)

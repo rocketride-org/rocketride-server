@@ -64,6 +64,8 @@ if TYPE_CHECKING:
 # Sweep period (s), read budget (s; the SaaS read times out at R, the engine
 # backstop at R + 1) and the gate threshold (s): 1.2 T + (R + 1) + 1.
 T, R, THRESHOLD = 5.0, 2.0, 10.0
+# Backstop (s) on one identity rebuild read, the same R + 1 the sweep's read gets.
+REBUILD_TIMEOUT = R + 1
 JITTER = 0.2
 # At most one ``[AUTHZ] denied`` warning per connection per this many seconds.
 DENY_LOG_INTERVAL = 60.0
