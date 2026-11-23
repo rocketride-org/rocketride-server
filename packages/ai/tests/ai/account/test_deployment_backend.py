@@ -29,12 +29,13 @@ real filesystem store. The SaaS DB implementation must satisfy the same
 assertions (its suite reuses these semantics against the DB).
 """
 
+import asyncio
 import shutil
 import tempfile
 
 import pytest
 
-from ai.account.deployment_backend import FileDeploymentBackend, artifact_path
+from ai.account.deployment_backend import FileDeploymentBackend, NotOwner, artifact_path
 from ai.account.store import StorageError
 from ai.account.store_providers.filesystem import FilesystemStore
 
@@ -667,3 +668,29 @@ class TestPublishKinds:
         with pytest.raises(StorageError, match='no app publish'):
             await backend.publish_set_state('org-1', 'app', 'acme.node', ME, 'removed', ACTOR)
         assert (await backend.publish_get('org-1', 'node', 'acme.node', ME))['state'] == 'enabled'
+
+    async def test_an_app_read_does_not_return_a_node_binding(self, backend):
+        await backend.publish('org-1', 'acme.node', {'kind': 'node'}, ACTOR)
+        await backend.publish_set('org-1', 'node', 'acme.node', ME, 1, {}, ACTOR)
+
+        assert await backend.publish_get('org-1', 'app', 'acme.node', ME) is None
+        assert await backend.publish_of_app('org-1', 'app', 'acme.node') == []
+        assert (await backend.publish_get('org-1', 'node', 'acme.node', ME))['appId'] == 'acme.node'
+        assert len(await backend.publish_of_app('org-1', 'node', 'acme.node')) == 1
+
+
+class TestPublishOwner:
+    async def test_another_users_version_is_refused_and_not_written(self, backend):
+        await backend.publish('org-1', 'acme.node', {'kind': 'node'}, ACTOR, owner=ACTOR['userId'])
+        other = {**ACTOR, 'userId': 'someone-else'}
+
+        with pytest.raises(NotOwner, match='belongs to'):
+            await backend.publish('org-1', 'acme.node', {'kind': 'node', 'v': 2}, other, owner='someone-else')
+
+        assert [v['version'] for v in await backend.versions('org-1', 'acme.node')] == [1]
+        assert (await backend.publish('org-1', 'acme.node', {'kind': 'node', 'v': 2}, ACTOR, owner=ACTOR['userId']))['version'] == 2
+
+    async def test_two_first_publishes_at_once_both_land(self, backend):
+        await asyncio.gather(*(backend.publish('org-1', 'acme.p', {'n': n}, ACTOR) for n in range(5)))
+
+        assert sorted(v['version'] for v in await backend.versions('org-1', 'acme.p')) == [1, 2, 3, 4, 5]

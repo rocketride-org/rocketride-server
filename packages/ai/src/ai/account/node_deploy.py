@@ -55,7 +55,7 @@ from ai.common.node_packages import (
 from ai.constants import CONST_NODES_CONTRACT
 
 from .app_deploy import _ZIP_MAX_ZIPPED, _actor_of, _developer_id_of, _org_of, _resolve_target, _team_ids_of, _zip_guard
-from .deployment_backend import artifact_content_dir
+from .deployment_backend import NotOwner, artifact_content_dir, owner_refusal
 
 PACKAGE_FILE = 'package.rrnode'
 
@@ -89,6 +89,29 @@ _SVG_ELEMENTS = {
     'image',
 }
 _ICON_IMAGE = re.compile(r'data:image/(png|jpeg|gif|webp);base64,', re.IGNORECASE)
+# What an icon's style may set: how it draws, never where it sits or how big it is
+_ICON_STYLE = {
+    'fill',
+    'fill-opacity',
+    'fill-rule',
+    'clip-rule',
+    'stroke',
+    'stroke-width',
+    'stroke-opacity',
+    'stroke-linecap',
+    'stroke-linejoin',
+    'stroke-miterlimit',
+    'stroke-dasharray',
+    'stroke-dashoffset',
+    'opacity',
+    'stop-color',
+    'stop-opacity',
+    'color',
+    'font-family',
+    'font-size',
+    'font-weight',
+    'text-anchor',
+}
 
 _RUNG_RANK = {'team': 1, 'user': 2}
 
@@ -140,6 +163,12 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
     # A drive letter or backslash would reach outside the node on Windows
     if any(':' in entry.filename or '\\' in entry.filename for entry in entries):
         raise NodePackageInvalid('The package holds a path with ":" or "\\"')
+    # A "." or empty segment unpacks onto another entry's path, past the checks that read the first
+    names = [entry.filename.rstrip('/') for entry in entries]
+    if any(part in ('', '.', '..') for name in names for part in name.split('/')):
+        raise NodePackageInvalid('The package holds a path with an empty, "." or ".." segment')
+    if len({name.lower() for name in names}) != len(names):
+        raise NodePackageInvalid('The package holds two entries with the same path')
     roots = {entry.filename.split('/')[0] for entry in entries}
     if len(roots) != 1:
         raise NodePackageInvalid('The package must hold one folder, the node')
@@ -148,8 +177,9 @@ def inspect_package(data: bytes, developer_id: Optional[str]) -> Dict[str, Any]:
 
     if not developer_id:
         raise NodePackageInvalid('Uploading a node requires a registered developer id')
-    if not module.isidentifier() or module_of(node_id) != module or not node_id.startswith(f'{developer_id}.'):
-        raise NodePackageInvalid(f'The node id {node_id!r} must be {developer_id}.<name>')
+    # Lowercase only: the catalogue keys a node by its lowercased id, and some file systems ignore case
+    if not re.fullmatch(r'[a-z][a-z0-9_]*', module) or module_of(node_id) != module or not node_id.startswith(f'{developer_id}.'):
+        raise NodePackageInvalid(f'The node id {node_id!r} must be {developer_id}.<name>, in lowercase')
 
     files = {entry.filename[len(module) + 1 :]: entry for entry in entries if not entry.is_dir()}
     if '.rrnode' not in files:
@@ -231,11 +261,21 @@ def _check_icon(what: str, svg: str) -> None:
             inside = value.startswith('#') or (tag == 'image' and _ICON_IMAGE.match(value))
             if (
                 local.startswith('on')
+                or local == 'class'
                 or (local == 'href' and not inside)
+                or (local == 'style' and not _drawing_style(value))
+                # A backslash is a CSS escape, which could spell url( past the check below
+                or '\\' in value
                 or 'javascript:' in value.lower()
-                or re.search(r'url\(\s*[\'"]?(?!#)', value)
+                or re.search(r'url\(\s*[\'"]?(?!#)', value, re.IGNORECASE)
             ):
                 raise NodePackageInvalid(f'{what} sets {local}="{value[:40]}", which an icon may not')
+
+
+def _drawing_style(style: str) -> bool:
+    """Whether every declaration of a style attribute sets a property in _ICON_STYLE."""
+    declarations = [d for d in style.split(';') if d.strip()]
+    return all(':' in d and d.split(':', 1)[0].strip().lower() in _ICON_STYLE for d in declarations)
 
 
 def _check_definition(name: str, definition: Dict[str, Any], node_id: str, module: str) -> None:
@@ -253,11 +293,7 @@ def _check_definition(name: str, definition: Dict[str, Any], node_id: str, modul
 
 def _not_owner(conn: Any, node_id: str, versions: List[Dict[str, Any]]) -> Optional[str]:
     """Why the caller may not change a node: it belongs to whoever uploaded its first version."""
-    first = min(versions, key=lambda v: v.get('version', 0), default=None)
-    owner = (first or {}).get('publishedBy') or {}
-    if first is None or owner.get('userId') == conn._account_info.userId:
-        return None
-    return f'{node_id} belongs to {owner.get("display") or owner.get("userId")}; only they can change it'
+    return owner_refusal(node_id, versions, conn._account_info.userId)
 
 
 def _home_of(org_id: str, entry: Dict[str, Any]) -> str:
@@ -292,15 +328,20 @@ async def handle_node_add(conn: Any, request: Dict[str, Any]) -> Dict[str, Any]:
         return conn.build_error(request, refusal)
     artifact = {'kind': 'node', 'nodeId': node['nodeId'], 'module': node['module'], 'sha256': node['sha256']}
     metadata = {'node': node, 'build': {'status': 'ok'}}
-    entry = await account.deployments_publish(
-        org_id,
-        node['nodeId'],
-        artifact,
-        actor,
-        comment=str(args.get('comment') or ''),
-        metadata=metadata,
-        state='private',
-    )
+    try:
+        entry = await account.deployments_publish(
+            org_id,
+            node['nodeId'],
+            artifact,
+            actor,
+            comment=str(args.get('comment') or ''),
+            metadata=metadata,
+            state='private',
+            owner=actor['userId'],
+        )
+    except NotOwner as e:
+        # Another first upload won the race since the check above
+        return conn.build_error(request, str(e))
     try:
         await _file_store(actor['userId']).write(f'{_home_of(org_id, entry)}/{PACKAGE_FILE}', data)
     except Exception as e:
