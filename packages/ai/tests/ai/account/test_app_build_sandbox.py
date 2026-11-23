@@ -158,41 +158,65 @@ socket.once('timeout', () => { console.log('denied'); socket.destroy(); });
     assert result.stdout.strip() == 'denied'
 
 
+_SPOOF = 'bwrap: No permissions to create new namespace.ts(1,12): error TS1109: Expression expected.\n'
+
+
 @pytest.mark.parametrize(
-    'argv,code,output,expected',
+    'argv,code,output,started,expected',
     [
+        # bwrap is judged by its own status, not by its text: no child pid and a non-zero exit is a startup failure.
         (
             ['/usr/bin/bwrap', '--', 'node'],
             1,
             'bwrap: No permissions to create new namespace\n',
+            False,
             'No permissions to create new namespace',
         ),
+        (['/usr/bin/bwrap'], 1, '', False, 'bwrap exited with status 1 before the sandbox started'),
+        # The sandbox started: whatever the compiler printed, even a line shaped like bwrap's, is its own result.
+        (['/usr/bin/bwrap'], 1, _SPOOF, True, None),
+        (['/usr/bin/bwrap'], 1, 'bwrap: No permissions to create new namespace\n', True, None),
+        (['/usr/bin/bwrap'], 0, 'bwrap: noise on a successful run\n', False, None),
+        # Without the status channel nothing can be decided for bwrap.
+        (['/usr/bin/bwrap'], 1, 'bwrap: No permissions to create new namespace\n', None, None),
+        (['/usr/bin/node', 'tsc'], 1, 'bwrap: written by the app itself\n', False, None),
+        # sandbox-exec has no such channel: only pure provider lines count, and never a compiler diagnostic.
         (
             ['/usr/bin/sandbox-exec', '-p', 'x'],
             71,
             'sandbox-exec: sandbox_apply: Operation not permitted\n',
+            None,
             'sandbox_apply: Operation not permitted',
         ),
-        (['/usr/bin/bwrap'], 1, "src/a.ts(1,1): error TS2304: Cannot find name 'x'.\n", None),
-        (['/usr/bin/bwrap'], 0, 'bwrap: noise on a successful run\n', None),
-        (['/usr/bin/node', 'tsc'], 1, 'bwrap: written by the app itself\n', None),
-        # A compiler line that begins like the provider's, after other output, stays a compile error.
-        (
-            ['/usr/bin/bwrap'],
-            1,
-            "src/a.ts(1,1): error TS2304: Cannot find name 'x'.\nbwrap: x.ts(1,1): error TS1005: ';' expected.\n",
-            None,
-        ),
+        (['/usr/bin/sandbox-exec'], 1, "sandbox-exec: x.ts(1,1): error TS1005: ';' expected.\n", None, None),
         (
             ['/usr/bin/sandbox-exec'],
             1,
-            "bwrap: x.ts(1,1): error TS1005: ';' expected.\nsrc/a.ts(2,1): error TS2304: Cannot find name 'y'.\n",
+            "src/a.ts(1,1): error TS2304: Cannot find name 'x'.\nsandbox-exec: y\n",
+            None,
             None,
         ),
+        (['/usr/bin/sandbox-exec'], 0, 'sandbox-exec: noise\n', None, None),
     ],
 )
-def test_a_sandbox_that_cannot_start_is_not_a_compile_error(argv, code, output, expected):
-    assert sandbox.startup_failure(argv, code, output) == expected
+def test_a_sandbox_that_cannot_start_is_not_a_compile_error(argv, code, output, started, expected):
+    assert sandbox.startup_failure(argv, code, output, started) == expected
+
+
+def _exec_stub(monkeypatch, app_build, code, output, report_pid):
+    """Replace the process seam; a started bwrap writes its child pid to the status fd it was given."""
+    seen = {}
+
+    async def fake_exec(argv, cwd, timeout, on_line=None, pass_fds=()):
+        seen['argv'] = argv
+        if report_pid and '--info-fd' in argv:
+            flag = argv.index('--info-fd')
+            assert int(argv[flag + 1]) in pass_fds
+            os.write(int(argv[flag + 1]), b'{"child-pid": 4242}')
+        return code, output
+
+    monkeypatch.setattr(app_build, '_exec', fake_exec)
+    return seen
 
 
 async def test_exec_compiler_raises_an_infrastructure_failure_when_the_sandbox_cannot_start(monkeypatch, tmp_path):
@@ -204,21 +228,44 @@ async def test_exec_compiler_raises_an_infrastructure_failure_when_the_sandbox_c
     monkeypatch.setattr(
         app_build.app_build_sandbox, 'command', lambda argv, cwd, job_dir, env_dir: ['/usr/bin/bwrap', '--', *argv]
     )
-
-    async def fake_exec(argv, cwd, timeout, on_line=None):
-        return 1, 'bwrap: No permissions to create new namespace\n'
-
-    monkeypatch.setattr(app_build, '_exec', fake_exec)
+    errors = []
+    monkeypatch.setattr(app_build, 'error', errors.append)
+    _exec_stub(
+        monkeypatch, app_build, 1, 'bwrap: No permissions to create new namespace at /srv/host/path\n', report_pid=False
+    )
     with pytest.raises(app_build.BuildInfraFailure) as raised:
         await app_build._exec_compiler(['/usr/bin/node', 'rsbuild'], str(job), 5, str(job), str(tools))
     assert raised.value.phase == 'sandbox'
-    assert 'No permissions to create new namespace' in str(raised.value)
+    # The developer sees a fixed message; the provider's text (host paths) goes only to the operator log.
+    assert 'could not start' in str(raised.value)
+    assert '/srv/host/path' not in str(raised.value) and 'namespace' not in str(raised.value)
+    assert any('/srv/host/path' in line for line in errors)
 
-    async def compile_error(argv, cwd, timeout, on_line=None):
-        return 2, "error TS2304: Cannot find name 'x'.\n"
 
-    monkeypatch.setattr(app_build, '_exec', compile_error)
-    assert await app_build._exec_compiler(['/usr/bin/node', 'tsc'], str(job), 5, str(job), str(tools)) == (
-        2,
-        "error TS2304: Cannot find name 'x'.\n",
+async def test_a_compile_error_that_names_bwrap_stays_a_compile_error(monkeypatch, tmp_path):
+    from ai.account import app_build
+
+    job, tools = tmp_path / 'job', tmp_path / 'tools'
+    job.mkdir()
+    tools.mkdir()
+    monkeypatch.setattr(
+        app_build.app_build_sandbox, 'command', lambda argv, cwd, job_dir, env_dir: ['/usr/bin/bwrap', '--', *argv]
     )
+    # An app file named like bwrap's message makes tsc print exactly one provider-shaped line.
+    seen = _exec_stub(monkeypatch, app_build, 2, _SPOOF, report_pid=True)
+    result = await app_build._exec_compiler(['/usr/bin/node', 'tsc'], str(job), 5, str(job), str(tools))
+    assert result == (2, _SPOOF)
+    assert '--info-fd' in seen['argv']  # bwrap was asked to report its own start
+
+
+async def test_exec_compiler_passes_other_results_through(monkeypatch, tmp_path):
+    from ai.account import app_build
+
+    job, tools = tmp_path / 'job', tmp_path / 'tools'
+    job.mkdir()
+    tools.mkdir()
+    monkeypatch.setattr(
+        app_build.app_build_sandbox, 'command', lambda argv, cwd, job_dir, env_dir: ['/usr/bin/bwrap', '--', *argv]
+    )
+    _exec_stub(monkeypatch, app_build, 0, 'ok\n', report_pid=True)
+    assert await app_build._exec_compiler(['/usr/bin/node', 'tsc'], str(job), 5, str(job), str(tools)) == (0, 'ok\n')
