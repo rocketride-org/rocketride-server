@@ -1100,7 +1100,12 @@ class TaskServer(DAPBase):
             if (getattr(conn._account_info, 'auth', '') or '').startswith(('pk_', 'tk_')):
                 continue
             try:
+                # The socket may re-auth while the lookup awaits: a result for
+                # the OLD identity must never overwrite the new one.
+                epoch = getattr(conn, '_auth_epoch', 0)
                 fresh = await account._service.get_authentication_result(user_id, conn._account_info.auth)
+                if getattr(conn, '_auth_epoch', 0) != epoch:
+                    continue
                 conn._account_info = fresh
                 await conn.send_event('apaext_account', body=fresh.to_push_result())
             except Exception as e:
@@ -1136,7 +1141,11 @@ class TaskServer(DAPBase):
             if (getattr(info, 'auth', '') or '').startswith(('pk_', 'tk_')):
                 continue
             try:
+                # Same guard as push_account_update: skip if the identity changed.
+                epoch = getattr(conn, '_auth_epoch', 0)
                 fresh = await account._service.get_authentication_result(info.userId, info.auth)
+                if getattr(conn, '_auth_epoch', 0) != epoch:
+                    continue
                 conn._account_info = fresh
                 await conn.send_event('apaext_account', body=fresh.to_push_result())
                 notified += 1
