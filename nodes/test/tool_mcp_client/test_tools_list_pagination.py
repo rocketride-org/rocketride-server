@@ -1,10 +1,10 @@
 """Tests for ``tools/list`` pagination in the MCP client transports.
 
 Covers:
-- ``fetch_all_tool_entries`` (pure): cursor handling, limits, malformed pages and
-  transport failures.
+- ``fetch_all_tool_entries`` (pure): single-page requests, cursor handling, limits,
+  malformed pages and transport failures.
 - All three transports against a scripted ``_request``: every page is converted,
-  single-page traffic is unchanged, and refusals use the transport's own error type.
+  and refusals use the transport's own error type.
 - The real stdio transport against the stub server in paged mode.
 """
 
