@@ -23,7 +23,7 @@
 # SOFTWARE.
 # =============================================================================
 
-"""The two places tool_tenki reaches into tenki SDK internals, kept engine-free so test_tool_tenki_sdk.py runs them."""
+"""The places tool_tenki reaches into Luxor SDK internals, kept engine-free so test_tool_tenki_sdk.py runs them."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ class DiscardStream:
 def stop_keeping_output(process) -> None:
     """Make the SDK drop everything ``process`` prints from now on, and end the streams its readers block on."""
     # The SDK keeps every chunk until the command exits, with no limit, but looks the streams up on the process for
-    # each frame (Process._pump, tenki 1.4.1), so swapping them is what stops the keeping.
+    # each frame (Process._pump, luxor-ai 1.5.2), so swapping them is what stops the keeping.
     replaced = (process.stdout, process.stderr)
     process.stdout, process.stderr = DiscardStream(), DiscardStream()
     for stream in replaced:
@@ -79,7 +79,23 @@ class FileCallDeadline:
 
 def bound_file_calls(session, timeout: float) -> None:
     """Send every unary file call of ``session`` with a deadline; raises AttributeError if the SDK changed shape."""
-    # The SDK sends file calls with no deadline (tenki 1.0.6 to 1.4.1) and its file API takes none, so one stalled
-    # connection would hang them for good; SandboxFS._rpc is the one object they all go out through.
+    # The SDK sends file calls with no deadline (tenki 1.0.6 to luxor-ai 1.5.2) and its file API takes none, so one
+    # stalled connection would hang them for good; SandboxFS._rpc is the one object they all go out through.
     files = session.fs
     files._rpc = FileCallDeadline(files._rpc, timeout)
+
+
+def run_ended(process) -> bool:
+    """Whether ``process``'s exit or run error is in: the SDK records either before it ends the streams."""
+    # Not _done alone: luxor-ai 1.5.2 sets it only after ending the streams, which a reader sees first.
+    if getattr(process, '_result', None) is not None or getattr(process, '_error', None) is not None:
+        return True
+    done = getattr(process, '_done', None)
+    return done is not None and done.is_set()
+
+
+def reset_data_plane(session) -> None:
+    """Drop ``session``'s data-plane connection so its next use connects afresh, as a resume that returns does."""
+    # Sandbox._resume (luxor-ai 1.5.2) raises ResumeWaitTimeoutError before its own reset, though the resume may still
+    # land, possibly on another host; wait_ready keeps the old connection if the endpoint reads the same.
+    session._reset_data_plane()
