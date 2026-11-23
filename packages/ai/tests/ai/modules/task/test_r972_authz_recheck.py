@@ -466,10 +466,21 @@ async def test_r972_1b_run_sweeps_until_stopped(monkeypatch):
     server._authz = AuthzRecheck(server, account)
     make_conn(server, identity('admin', ADMIN))
 
+    # Wait for the milestone (three sweeps happened), not for a duration: a busy loop may need longer than any sleep.
+    third_sweep = asyncio.Event()
+    original = account.live_authority
+
+    async def counted(user_ids):
+        result = await original(user_ids)
+        if len(account.reads) >= 3:
+            third_sweep.set()
+        return result
+
+    account.live_authority = counted
     runner = asyncio.create_task(server._authz.run())
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(third_sweep.wait(), 30)
     await server._authz.stop()
-    await asyncio.wait_for(runner, 1)
+    await asyncio.wait_for(runner, 30)
 
     assert len(account.reads) >= 3
     assert all(batch == ['admin'] for batch in account.reads)
@@ -508,22 +519,26 @@ async def test_r972_1b_stuck_client_does_not_delay_other_stamps(monkeypatch):
     """
     from ai.modules.task import task_conn as task_conn_module
 
-    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 0.1)
+    monkeypatch.setattr(task_conn_module, 'NOTICE_SEND_TIMEOUT', 2.0)
     account, server, clock = _setup(monkeypatch, {'ok': (True, ADMIN)})
     stuck = [_admin(server, clock, f'gone-{i}', connection_id=i) for i in range(1, 4)]
     for conn in stuck:
         conn._transport.send = never_returns
     fine = _admin(server, clock, 'ok', connection_id=9, verified=False)
 
-    sweep = asyncio.ensure_future(server._authz.sweep_once())
-    await asyncio.sleep(0.02)  # well inside the first stuck notice's bound
-
-    assert sweep.done()
+    # The sweep ends while every stuck notice is still waiting on its socket.
+    # Checked by the notices' state, not by a 20 ms sleep: a Windows timer
+    # tick is about 15 ms, so a short sleep there says nothing about order.
+    await asyncio.wait_for(server._authz.sweep_once(), 1)
+    notices = list(server._authz._notices)
+    assert len(notices) == len(stuck)
+    assert not any(n.done() for n in notices), 'the sweep waited on a stuck notice'
     assert fine._authz_verified_at == clock.now
     for conn in stuck:
         assert conn._revoked is True and conn._authenticated is False
-    await asyncio.wait_for(sweep, 1)
-    await asyncio.sleep(0.3)
+        conn._transport.disconnect.assert_not_called()
+
+    await asyncio.wait_for(asyncio.gather(*notices), 5)
     for conn in stuck:
         conn._transport.disconnect.assert_called_once()
 
@@ -611,3 +626,97 @@ async def test_r972_1b_debugger_events_skip_unauthenticated_connections(monkeypa
         await task._forward_task_event(EVENT_TYPE.DEBUGGER, message)
 
         assert events(debugger, 'stopped') == []
+
+
+@pytest.mark.asyncio
+async def test_set_monitor_catchup_skipped_when_gate_stale(monkeypatch):
+    """Catch-up sends on a new subscription bit re-check live authority first."""
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    server._authz = MagicMock()
+    server._authz.gate_ok = MagicMock(return_value=False)
+    control = MagicMock()
+    control.id = 'run-1'
+
+    await conn._send_updates(control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK)
+
+    assert events(conn) == []
+    server._authz.gate_ok.assert_called_with(conn)
+
+
+@pytest.mark.asyncio
+async def test_catchup_gate_going_stale_during_summary_stops_task_list(monkeypatch):
+    """A gate that goes stale during the summary send is re-checked before the task list."""
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    calls = []
+
+    def gate_ok(c):
+        calls.append(c)
+        return len(calls) == 1  # fresh at the top, stale afterwards
+
+    server._authz = MagicMock()
+    server._authz.gate_ok = gate_ok
+    control = MagicMock()
+    control.id = 'run-1'
+
+    await conn._send_updates(control, EVENT_TYPE.NONE, EVENT_TYPE.SUMMARY | EVENT_TYPE.TASK)
+
+    assert events(conn, 'apaevt_status_update')
+    assert events(conn, 'apaevt_task') == []
+
+
+@pytest.mark.asyncio
+async def test_push_rebuild_failure_spares_a_newer_identity(monkeypatch):
+    """A failed rebuild clears the verification stamp only while the connection
+    still holds the identity that failed; a reauth that installed another
+    identity keeps its own stamp.
+    """
+    account, server, clock = _setup(monkeypatch, {'admin': (True, ADMIN)})
+    conn = _admin(server, clock)
+    newer = identity('admin', ADMIN)
+
+    async def fail_after_reauth(user_id, auth, capabilities=None):
+        conn._account_info = newer
+        conn._authz_verified_at = clock.now
+        raise RuntimeError('database unavailable')
+
+    account._service.get_authentication_result = fail_after_reauth
+    old = conn._account_info
+    await server._push_rebuilt(account, conn, old, 'test')
+
+    assert conn._account_info is newer
+    assert conn._authz_verified_at == clock.now
+
+
+@pytest.mark.asyncio
+async def test_push_overlapping_refreshes_install_the_newest(monkeypatch):
+    """Two overlapping refreshes on one connection run one after the other, and
+    the later one rebuilds from the identity the first installed, so the older
+    rebuild never ends up as the final identity.
+    """
+    account, server, clock = _setup(monkeypatch, {'u': (True, frozenset({'sys.view'}))})
+    conn = make_conn(server, identity('u'), monitors=WILDCARD_ALL)
+    release = asyncio.Event()
+    started = []
+    perms = [frozenset({'sys.view'}), frozenset({'sys.view', 'sys.admin'})]
+
+    async def rebuild(user_id, auth, capabilities=None):
+        n = len(started)
+        started.append(n)
+        if n == 0:
+            await release.wait()
+        return identity(user_id, perms[n], auth=auth)
+
+    account._service.get_authentication_result = rebuild
+    first = asyncio.create_task(server.push_account_update('u'))
+    await asyncio.sleep(0)
+    second = asyncio.create_task(server.push_account_update('u'))
+    await asyncio.sleep(0)
+    assert started == [0]  # the second waits for the first
+    release.set()
+    await asyncio.gather(first, second)
+
+    assert started == [0, 1]
+    assert conn._account_info.sysPermissions == ['sys.admin', 'sys.view']
+    assert [e['event'] for e in conn.sent].count('apaext_account') == 2

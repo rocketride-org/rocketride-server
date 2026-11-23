@@ -1182,6 +1182,35 @@ class TaskServer(DAPBase):
 
     async def _push_rebuilt(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
         """
+        Rebuild one connection's identity and push it, one refresh at a time per connection.
+
+        Refreshes on one connection are serialized by a lazily created lock, so
+        two overlapping pushes cannot interleave and leave the older rebuild
+        installed. A refresh that waited for the lock starts from the identity
+        the connection holds by then (same user, not task-scoped), so the
+        newer refresh replaces the older one; if the connection was deauthed
+        or re-authenticated as someone else meanwhile, it does nothing.
+        See ``_push_rebuilt_locked`` for the rebuild itself.
+
+        Returns:
+            bool: True when a fresh identity was installed and pushed.
+        """
+        state = vars(conn)
+        lock = state.get('_identity_refresh_lock')
+        if lock is None:
+            lock = state['_identity_refresh_lock'] = asyncio.Lock()
+        async with lock:
+            current = conn._account_info
+            if current is not info:
+                if current is None or not getattr(conn, '_authenticated', False):
+                    return False
+                if current.userId != info.userId or (getattr(current, 'auth', '') or '').startswith(('pk_', 'tk_')):
+                    return False
+                info = current
+            return await self._push_rebuilt_locked(account, conn, info, label)
+
+    async def _push_rebuilt_locked(self, account: Any, conn: TaskConn, info: AccountInfo, label: str) -> bool:
+        """
         Rebuild one connection's identity and push it (#972, F1).
 
         The rebuild starts from the identity the connection holds when it
@@ -1235,7 +1264,10 @@ class TaskServer(DAPBase):
             return False
         except Exception as e:
             if subject and authz is not None:
-                conn._authz_verified_at = 0.0
+                # Invalidate only the identity whose rebuild failed: a newer
+                # identity installed meanwhile keeps its own verification.
+                if conn._account_info is info and getattr(conn, '_authenticated', False):
+                    conn._authz_verified_at = 0.0
                 failed = self.count_authz('read_failed')
                 warning(
                     f'[AUTHZ] {label} rebuild failed conn={conn.get_connection_id()} user={info.userId} '

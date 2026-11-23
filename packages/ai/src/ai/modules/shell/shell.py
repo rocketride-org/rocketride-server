@@ -310,6 +310,16 @@ def _app_field(entry, name: str):
     return entry.get(name) if isinstance(entry, dict) else getattr(entry, name, None)
 
 
+def _is_auth_denial(result) -> bool:
+    """True when ``authenticate`` answered with a definite denial (401/403).
+
+    ``authenticate`` returns an ``(int, str)`` error tuple on failure. Only
+    401/403 are a verdict worth caching; any other code (5xx, unavailable,
+    unknown) is an outage, so callers answer anonymously WITHOUT caching (#972).
+    """
+    return isinstance(result, tuple) and bool(result) and result[0] in (401, 403)
+
+
 async def _apps_for_token(token: str) -> list:
     """The caller-visible app manifest entries — the shell's own resolution.
 
@@ -326,8 +336,10 @@ async def _apps_for_token(token: str) -> list:
         except Exception as e:
             # Not a verdict: callers answer anonymously WITHOUT caching (#972).
             raise _AuthUnavailable(str(e)) from e
-    # authenticate() returns an (int, str) error tuple on failure — treat any
-    # non-AccountInfo as anonymous rather than a hard deny.
+    # authenticate() returns an (int, str) error tuple on failure: a definite
+    # denial falls back to anonymous; anything else is an outage, not a verdict.
+    if info is not None and not hasattr(info, 'userId') and not _is_auth_denial(info):
+        raise _AuthUnavailable(f'authenticate returned {info!r}')
     if info is not None and hasattr(info, 'userId'):
         # AccountInfo carries ONE selected organization (singular field); the
         # resolver wants a list. A plural-field lookup here always returned []
@@ -502,7 +514,10 @@ async def _version_dirs_for(token: str, app_id: str, want: Optional[int] = None)
                 auth_failed = True
                 info = None
         if info is not None and not hasattr(info, 'userId'):
-            info = None  # authenticate() returns an error tuple on failure
+            # authenticate() returns an (int, str) error tuple on failure
+            if not _is_auth_denial(info):
+                auth_failed = True
+            info = None
         dirs = await entitled_version_dirs(info, app_id)
     else:
         dirs = await open_version_dirs(app_id)
