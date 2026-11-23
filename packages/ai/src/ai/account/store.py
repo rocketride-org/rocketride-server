@@ -806,6 +806,10 @@ class Store:
 
         if handle is None or handle.closed:
             return
+        # Mark closed BEFORE the backend await so a concurrent teardown (the
+        # identity sweep racing disconnect cleanup) skips this handle instead
+        # of closing it at the backend twice.
+        handle.closed = True
         try:
             # Commit/close at the backend according to the handle mode.
             if handle.mode == FileHandleMode.WRITE:
@@ -820,7 +824,6 @@ class Store:
             )
         finally:
             # Drop the registry entry and release any write lock.
-            handle.closed = True
             self._shared_handles.pop(handle.handle_id, None)
             if handle.mode == FileHandleMode.WRITE:
                 self._shared_write_locks.discard(handle.path)
