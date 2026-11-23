@@ -136,6 +136,12 @@ class TestFetchAllToolEntries:
         assert fetch_all_tool_entries(request) == ['a', 'b']
         assert request.calls == [('tools/list', {}), ('tools/list', {'cursor': 'c1'})]
 
+    def test_empty_string_next_cursor_on_the_first_page_ends_traversal(self):
+        request = _Scripted({None: {'tools': ['a'], 'nextCursor': ''}})
+
+        assert fetch_all_tool_entries(request) == ['a']
+        assert request.calls == [('tools/list', {})]
+
     def test_empty_page_with_cursor_continues(self):
         request = _Scripted(
             {
