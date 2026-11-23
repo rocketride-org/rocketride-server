@@ -2856,6 +2856,94 @@ async def test_a_republish_under_a_renamed_container_is_re_checked(registry, qui
     assert registry.publishes[('acme.brandy', 'public~')]['version'] == 1
 
 
+def _break_artifacts(monkeypatch, broken):
+    """Make deployments_artifact raise for the (project_id, version) pairs in ``broken``.
+
+    The fake registry ignores project_id, so the wrapper discriminates by it.
+    """
+    original = account_singleton.deployments_artifact
+
+    async def artifact(org_id, project_id, version):
+        if (project_id, version) in broken or (project_id, None) in broken:
+            raise RuntimeError(f'{project_id} v{version} artifact missing')
+        return await original(org_id, project_id, version)
+
+    monkeypatch.setattr(account_singleton, 'deployments_artifact', artifact, raising=False)
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_prior_artifact_never_blocks_a_repoint(registry, quiet_push, monkeypatch):
+    """The prior version's artifact is only read to see whether the name
+    changed. When that read fails the publish is not refused (the owner could
+    never repoint to a good version): it is treated as a new claim, re-checked
+    after the write, and the prior row is restored if it loses.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _foreign_public_row(registry, 'zeta.other', 100.0)
+    _break_artifacts(monkeypatch, {('acme.brandy', 1)})
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is True
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 2
+
+
+@pytest.mark.asyncio
+async def test_an_unreadable_prior_artifact_still_re_checks_and_restores(registry, quiet_push, monkeypatch):
+    """Fail closed: with the prior artifact unreadable, a rival that landed
+    meanwhile is still caught and the prior version comes back.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    registry.seed_publish(AUD_PUBLIC, 1)
+    registry.publishes[('acme.brandy', 'public~')]['createdAt'] = 150.0
+    _break_artifacts(monkeypatch, {('acme.brandy', 1)})
+    original = account_singleton.publish_set
+
+    async def publish_set_with_rival(org_id, kind, app_id, audience, *rest):
+        if 'acme_brandy' not in {a for a, _ in registry.publishes}:
+            _foreign_public_row(registry, 'acme_brandy', 100.0)
+        return await original(org_id, kind, app_id, audience, *rest)
+
+    monkeypatch.setattr(account_singleton, 'publish_set', publish_set_with_rival, raising=False)
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is False
+    assert "'acme_brandy' already holds" in result['message']
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('stored_module_id', ['acme_brandy', None])
+async def test_a_same_name_repoint_ignores_an_unrelated_broken_artifact(
+    registry, quiet_push, monkeypatch, stored_module_id
+):
+    """A same-name repoint of a serving row claims nothing new, so the claim
+    lookup (one artifact read per other app) is skipped: another app's broken
+    artifact cannot refuse it. When the served artifact stores no moduleId the
+    derived name stands in for it (None case), which must also read as the same
+    name.
+    """
+    registry.add_version(1, '1.0.0', publisher_id='u1', state='ready')
+    registry.add_version(2, '1.0.1', publisher_id='u1', state='ready')
+    if stored_module_id is None:
+        del registry.artifacts[1]['moduleId']
+    registry.seed_publish(AUD_PUBLIC, 1)
+    _foreign_public_row(registry, 'zeta.other', 100.0)
+    _break_artifacts(monkeypatch, {('zeta.other', None)})
+    owner = _FakeConn(teams=_TEAMS, developer_id='acme')
+
+    result = await handle_deploy_app(owner, _request('publish', version=2, target='@public'))
+
+    assert result['success'] is True
+    assert registry.publishes[('acme.brandy', 'public~')]['version'] == 2
+
+
 @pytest.mark.asyncio
 async def test_resolve_keeps_the_earlier_bound_app_on_a_derived_collision(registry, monkeypatch):
     """Two apps deriving one name: the one bound first keeps it, the later one
