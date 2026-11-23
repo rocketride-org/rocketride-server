@@ -156,11 +156,15 @@ def _full_schemas(prompt: str) -> set:
     names = set()
     for line in prompt.splitlines():
         line = line.strip()
-        if line.startswith('{"name": '):
-            try:
-                names.add(json.loads(line)['name'])
-            except (ValueError, KeyError, TypeError):
-                pass
+        if not line.startswith('{'):
+            continue
+        try:
+            td = json.loads(line)
+        except ValueError:
+            continue
+        # An exported catalog keeps its own key order, so name need not come first.
+        if isinstance(td, dict) and isinstance(td.get('name'), str) and 'inputSchema' in td:
+            names.add(td['name'])
     return names
 
 
@@ -272,7 +276,7 @@ def report(rows: Sequence[Tuple[str, int, RunReport]]) -> str:
         '|---|---:|---|---:|---|---:|---:|---:|---:|',
     ]
     for label, budget, run in rows:
-        plans = [r for r in run.requests if r.kind != 'synthesis']
+        plans = [r for r in run.requests if r.kind == 'plan']
         picks = [('first step', plans[0] if plans else None), ('second step', plans[1] if len(plans) > 1 else None)]
         picks.append(('whole run', run.total()))
         for name, m in picks:

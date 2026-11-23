@@ -275,7 +275,8 @@ def test_eager_mode_never_skips_and_sends_tools_load_to_the_host(wave):
     state = _state(wave, compact=False)
     results, host = _execute(wave, [_call(_name(1), id='1'), _call(LOAD, names=[_name(2)])], state=state)
 
-    assert host.calls == [(_name(1), {'id': '1'}), (LOAD, {'names': [_name(2)]})]
+    # One wave runs its calls on worker threads, so the host may see them in either order.
+    assert sorted(host.calls, key=repr) == sorted([(_name(1), {'id': '1'}), (LOAD, {'names': [_name(2)]})], key=repr)
     assert all('summary' in r for r in results)
     assert state.loaded_tools is None
 
@@ -731,7 +732,8 @@ def test_compact_run_matches_eager_run_with_one_more_step(wave, monkeypatch):
     compact = _scripted(wave, monkeypatch, 1)
 
     assert eager.answer == compact.answer == 'Both read.'
-    assert eager.host_calls == compact.host_calls == [(_name(3), {'id': '3'}), (_name(4), {'id': '4'})]
+    both = sorted([(_name(3), {'id': '3'}), (_name(4), {'id': '4'})], key=repr)
+    assert sorted(eager.host_calls, key=repr) == sorted(compact.host_calls, key=repr) == both
     assert compact.planning_steps == eager.planning_steps + 1
     assert compact.loaded_tools == [_name(3), _name(4)]
     assert eager.loaded_tools is None
