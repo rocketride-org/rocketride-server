@@ -766,9 +766,11 @@ class TestFetchSigningKeyStaysInTheEngine:
     _PUBLIC_DEFAULT = '<your signing key here -- replace in production>'
 
     @pytest.mark.parametrize('key', ['weak-secret', 'x' * 31, 'é' * 15])
-    def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, key):
+    def test_configured_weak_key_refuses_task_module_before_workers(self, monkeypatch, tmp_path, key):
         from ai.modules import task
 
+        # Only the filesystem backend validates the key: pin it, whatever the process inherited.
+        monkeypatch.setenv('RR_STORE_URL', 'filesystem://' + str(tmp_path))
         _set_signing_key(monkeypatch, key)
         started = []
         monkeypatch.setattr(task, 'TaskServer', lambda *args, **kwargs: started.append(True))
