@@ -129,7 +129,8 @@ _FRAME_ANCESTORS_DEFAULT = ("'self'", 'vscode-webview:', 'vscode-file:')
 # whose name is not a bare or top-level wildcard. Anything else (keywords,
 # paths, separators, quotes, '*', web schemes) would widen or break the policy.
 _FRAME_ANCESTOR_SCHEME = re.compile(r'^[a-z][a-z0-9+.-]*:$')
-_FRAME_ANCESTOR_HOST = re.compile(r'^https?://(\*\.[a-z0-9-]+(\.[a-z0-9-]+)+|[a-z0-9-]+(\.[a-z0-9-]+)*)(:\d{1,5})?$')
+_FRAME_ANCESTOR_HOST = re.compile(r'^https?://(\*\.[a-z0-9-]+(\.[a-z0-9-]+)+|[a-z0-9-]+(\.[a-z0-9-]+)*)(:[0-9]{1,5})?$')
+_FRAME_ANCESTOR_PORT = re.compile(r':[0-9]{1,5}$')
 _FRAME_ANCESTOR_WEB_SCHEMES = frozenset(
     {'http:', 'https:', 'ws:', 'wss:', 'data:', 'blob:', 'filesystem:', 'javascript:'}
 )
@@ -155,6 +156,9 @@ def _frame_ancestor_sources(value: str) -> str:
         token = raw.lower()
         is_scheme = bool(_FRAME_ANCESTOR_SCHEME.match(token)) and token not in _FRAME_ANCESTOR_WEB_SCHEMES
         if not (is_scheme or _FRAME_ANCESTOR_HOST.match(token)):
+            raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {raw}')
+        port = token.rpartition(':')[2] if not is_scheme and _FRAME_ANCESTOR_PORT.search(token) else ''
+        if port and not 1 <= int(port) <= 65535:
             raise ValueError(f'invalid RR_SHELL_FRAME_ANCESTORS_EXTRA: {raw}')
         if token not in sources:
             sources.append(token)

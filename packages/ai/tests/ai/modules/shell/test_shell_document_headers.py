@@ -169,6 +169,7 @@ def test_hashed_static_asset_has_no_document_csp(shell_root):
         ('https://a.example', f'{CSP} https://a.example'),
         ('https://a.example  http://localhost:3000', f'{CSP} https://a.example http://localhost:3000'),
         ('HTTPS://*.Code-Server.Example:8443', f'{CSP} https://*.code-server.example:8443'),
+        ('https://a.example:443', f'{CSP} https://a.example:443'),
         ('vscode-webview: vscode-file:', CSP),
         ('', CSP),
     ],
@@ -205,6 +206,9 @@ def test_frame_ancestors_extra_env_is_appended(shell_root, reload_shell, monkeyp
         'wss:',
         'filesystem:',
         'javascript:',
+        'https://example.com:0',
+        'https://example.com:99999',
+        'https://example.com:' + chr(0xFF14) + chr(0xFF14) + chr(0xFF13),
     ],
 )
 def test_invalid_frame_ancestors_extra_refuses_import(reload_shell, bad):
