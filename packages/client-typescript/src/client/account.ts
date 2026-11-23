@@ -32,7 +32,7 @@
 
 import type { RocketRideClient } from './client.js';
 import type { ConnectResult } from './types/client.js';
-import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, InviteMemberParams, InvitedMember, TeamMemberParams } from './types/account.js';
+import type { OrgDetail, DeleteOrgPrecheck, ApiKeyRecord, MemberRecord, TeamRecord, TeamDetail, ProfileUpdate, CreateKeyParams, CreateKeyResult, InviteMemberParams, InvitedMember, TeamMemberParams } from './types/account.js';
 
 // =============================================================================
 // ACCOUNT API CLASS
@@ -194,13 +194,22 @@ export class AccountApi {
 	}
 
 	/**
-	 * Creates a new API key and returns the raw key string.
+	 * Creates a new API key and returns the raw key string and its real expiry.
 	 *
 	 * @param params - Key creation parameters (name, permissions, expiresAt).
-	 * @returns Object containing the raw key string.
+	 * @returns The raw key, and the expiry the server granted (`expiresAt`,
+	 *   which may be earlier than requested; absent when the server did not
+	 *   report it).
 	 */
-	async createKey(params: CreateKeyParams): Promise<{ key: string }> {
+	async createKey(params: CreateKeyParams): Promise<CreateKeyResult> {
 		const body = await this.client.call('rrext_account_keys', { subcommand: 'create', ...params });
+		const record = body.record;
+		// null (or a missing value on a present record) is "never expires"; anything
+		// but a non-blank string is not a usable expiry, so it is reported as absent.
+		if (record && typeof record === 'object' && 'expiresAt' in record) {
+			const granted = record.expiresAt ?? null;
+			if (granted === null || (typeof granted === 'string' && granted.trim() !== '')) return { key: body.key, expiresAt: granted };
+		}
 		return { key: body.key };
 	}
 

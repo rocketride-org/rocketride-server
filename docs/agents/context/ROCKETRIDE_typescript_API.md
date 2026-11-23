@@ -901,7 +901,7 @@ Typed wrapper for profile, organization, API keys, members, teams, and environme
 
 **Organization:** `getOrg(orgId?): Promise<OrgDetail>` (id, name, plan, memberCount, teamCount) · `updateOrgName(orgId, name)` · `leaveOrg(orgId)` (removes the caller from that organization; refused for its last admin; leaving the active org switches you to another membership and refreshes all your connections)
 
-**API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<{ key: string }>` (raw key string, shown once) · `revokeKey(keyId)`
+**API keys:** `listKeys(): Promise<ApiKeyRecord[]>` · `createKey(params): Promise<CreateKeyResult>` — `{ key: string; expiresAt?: string | null }`: the raw key (shown once) and the expiry the server granted as an ISO timestamp, or `null` when the key does not expire. The granted expiry can be earlier than the requested one: a key created over a sign-in session expires with that session's bound (the key `rocketride login` mints works this way). A timestamp without an offset is UTC. `expiresAt` is absent when an older server did not report it, so do not read a missing value as "never expires" · `revokeKey(keyId)`
 
 **Members:** `listMembers(orgId): Promise<MemberRecord[]>` · `invite(orgId, { email, givenName, familyName, role, teamAssignments?, devTeamId? }): Promise<InvitedMember>` (returns `{ userId, displayName, email, role, status, devTeamId }`; `inviteMember` is the deprecated form that returns nothing) · `updateMemberRole(orgId, userId, role)` · `removeMember(orgId, userId)` · `resendInvite(orgId, userId)`
 

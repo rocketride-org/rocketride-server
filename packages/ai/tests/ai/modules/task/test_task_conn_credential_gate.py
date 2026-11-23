@@ -301,6 +301,7 @@ def _wire_real_auth(conn):
         _server=_web_server_with_authenticators(_task_server()),
         broadcast_server_event=AsyncMock(),
         release_unauthed_slot=lambda ip: None,
+        acquire_unauthed_slot=lambda ip: None,
         _unauthed_by_ip={},
     )
 
@@ -340,10 +341,12 @@ async def test_gate_follows_the_connection_through_reauth_and_deauth():
     await _dispatch(conn, 'rrext_deploy_app')
     assert spies['rrext_deploy_app'].await_count == 1
 
-    # 3. Deauth drops identity entirely (nothing dispatches, socket is closed on the next request)...
+    # 3. Deauth drops identity entirely (nothing dispatches, socket is closed on the next request);
+    #    the connection holds the bare identity, which matches no user, org or credential class...
     await _dispatch(conn, 'deauth')
     assert conn._authenticated is False
-    assert conn._account_info is None
+    assert conn._account_info.userId == '' and conn._account_info.auth == ''
+    assert conn._account_info.waitlisted is True
 
     # 4. ...and re-auth as the full user regains the full command set.
     await TaskConn.on_receive(
