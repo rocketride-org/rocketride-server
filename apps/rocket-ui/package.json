@@ -14,7 +14,6 @@
 		"readme": "./README.md",
 		"icon": "./icon.svg",
 		"categories": [
-			"pipelines",
 			"ai"
 		],
 		"mode": "paywall",
