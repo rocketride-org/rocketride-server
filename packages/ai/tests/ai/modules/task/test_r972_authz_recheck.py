@@ -770,10 +770,8 @@ async def test_push_stalled_rebuild_times_out_and_releases_lock(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_push_stalled_rebuild_does_not_block_other_connections(monkeypatch):
-    """One stalled read does not hold up the later connections in the fan-out,
-    and a non-subject keeps its identity.
-    """
+async def test_push_stalled_rebuild_keeps_a_non_subject_identity(monkeypatch):
+    """A stalled read ends at the timeout, and a non-subject keeps its identity."""
 
     async def body():
         account, server, clock = _setup(monkeypatch, {'u': (True, frozenset())})
@@ -806,3 +804,11 @@ async def test_push_stalled_rebuild_revokes_subject_without_recheck(monkeypatch)
         assert not conn._identity_refresh_lock.locked()
 
     await asyncio.wait_for(body(), 2)
+
+
+def test_rebuild_timeout_ends_before_the_outage_threshold():
+    """The bound is the sweep's read budget, so a stalled rebuild ends before the gate's threshold."""
+    from ai.modules.task.authz_recheck import R, REBUILD_TIMEOUT, THRESHOLD
+
+    assert REBUILD_TIMEOUT == R + 1
+    assert REBUILD_TIMEOUT < THRESHOLD
