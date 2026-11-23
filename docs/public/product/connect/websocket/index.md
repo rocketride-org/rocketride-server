@@ -31,14 +31,17 @@ send so you can debug, trace, or build your own client.
 The default port is applied only when the URI omits one, point the client at a
 different host or port to reach a remote or self-hosted engine.
 
-Cloud engines keep checking the exact API key used by an open connection,
-including ordinary users and scoped keys. Expired, revoked, deleted, or
-session-cap-evicted keys lose their open connections; a known expiry blocks
-new authenticated requests and events immediately at that deadline. Changes
-made on another replica are checked periodically. If the account store cannot
-be read for ten seconds, authenticated requests and events pause until a
-successful verification. Reconnect with a valid key after revocation; these
-checks never widen a key's scope or extend its lifetime.
+Cloud engines keep checking the exact API key used by an open connection for
+every `rr_` key, including scoped PATs. Task keys (`tk_`/`pk_`) are not
+rechecked. Expired, revoked, deleted, or session-cap-evicted keys lose their
+open connections; a known expiry blocks new authenticated requests and drops
+events at that deadline. Changes made on another replica are checked
+periodically. If the account store cannot be read, an already-verified open
+connection keeps working for up to ten seconds; after that its requests are
+refused and its events are dropped (not queued) until a successful
+verification. During an outage, new or re-sent `rr_` auths are refused
+immediately. Reconnect with a valid key after revocation; these checks never
+widen a key's scope or extend its lifetime.
 
 ### Pre-auth probe (`rrext_public_probe`)
 
