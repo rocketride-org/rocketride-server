@@ -31,6 +31,8 @@
 // (raw or percent-encoded), no backslash and no control character.
 // =============================================================================
 
+// The control characters are the point of this pattern.
+// eslint-disable-next-line no-control-regex
 const CONTROL_OR_BACKSLASH = /[\u0000-\u001f\u007f\\]/;
 
 /** Percent-decodings tried before a segment that still decodes further is refused. */

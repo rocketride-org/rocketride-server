@@ -34,7 +34,7 @@ import type { DAPMessage } from 'rocketride';
 import { ENTRY_A, makeRoot, refAppKey } from './__test__/fixtures';
 import type { ITestRoot } from './__test__/fixtures';
 import { clientRequest, dap, settle } from './__test__/realm';
-import { brief, denialOf, outcome, startRun } from './__test__/util';
+import { assertDenied, assertDeniedOp, brief, denialOf, outcome, startRun } from './__test__/util';
 
 const execMsg = (): DAPMessage => dap('execute', { pipeline: { components: [], source: 'chat_1' }, args: [], ttl: 60 });
 
@@ -239,4 +239,244 @@ test('G4R3-L3 a hung engine call is dropped from teardown tracking after a timed
 	assert.equal(t.logs.length, logged, `a second teardown has nothing left to wait for and does not time out, logs: ${brief(t.logs.slice(logged))}`);
 	release();
 	await pending;
+});
+
+// =============================================================================
+// Review round — orphan and lost-run termination, stale status, unreceived answers, monitor counts
+// =============================================================================
+
+const terminatedTokens = (t: ITestRoot): string[] => t.cm.engine.messagesFor('terminate').map((r) => String((r.message.arguments as { token?: string }).token));
+
+test('R-orphan a late run whose terminate answers success:false is retried, not forgotten', async (tt) => {
+	const { t, advance } = rootWithTimers();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const releaseExec = engine.hold('execute');
+	tt.after(() => releaseExec());
+	// The detach aborts the realm's side of the request; the root's own call is what this test is about.
+	const pending = clientRequest(A, execMsg()).catch(() => undefined);
+	await settle();
+	A.detach();
+	await settle();
+	engine.failWith('terminate', { message: 'engine busy' });
+	releaseExec();
+	await pending;
+	await settle();
+	const token = engine.runs.at(-1)!.token;
+	assert.equal(terminatedTokens(t).filter((x) => x === token).length, 1, 'the late run is terminated once, and that answer is a failure');
+	await advance(30_000);
+	assert.equal(terminatedTokens(t).filter((x) => x === token).length, 2, 'the failed termination is tried again');
+});
+
+test('R-lost a lost run whose terminate answers success:false stays counted and is ended on a later lookup', async (tt) => {
+	const { t, advance } = rootWithTimers();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const client = engine.client as { request: (m: DAPMessage, timeout?: number) => Promise<DAPMessage> };
+	const original = client.request;
+	client.request = async (m, timeout) => {
+		const r = await original(m, timeout);
+		if (m.command === 'execute') throw new Error('Request timed out');
+		return r;
+	};
+	engine.failWith('terminate', { message: 'engine busy' });
+	assert.equal((await clientRequest(A, execMsg())).ok, false, 'the realm sees the failure');
+	await settle();
+	client.request = original;
+	const lost = engine.runs.at(-1)!.token;
+	assert.equal(terminatedTokens(t).filter((x) => x === lost).length, 1, 'the first termination failed');
+	for (let i = 0; i < 7; i++) await startRun(A);
+	assert.equal(denialOf(await clientRequest(A, execMsg()))?.code, 'quota', 'a run that could not be ended still counts');
+	await advance(30_000);
+	assert.equal(terminatedTokens(t).filter((x) => x === lost).length, 2, 'the next lookup ends it');
+	assert.equal((await clientRequest(A, execMsg())).ok, true, 'once ended, the slot is free');
+});
+
+test('R-restart a status answer from before a restart does not expire the restarted run', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const run = await startRun(A);
+	engine.setStatus({ completed: true });
+	const release = engine.hold('rrext_get_task_status');
+	tt.after(() => release());
+	const stale = clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
+	await settle();
+	const restarted = await clientRequest(A, dap('restart', { token: run.token, projectId: run.projectId, source: run.source, pipeline: { components: [], source: run.source } }));
+	assert.equal(restarted.ok, true, 'the restart is accepted');
+	release();
+	assert.equal((await stale).ok, true, 'the stale status is still delivered');
+	t.clock.advance(121_000);
+	assert.equal((await clientRequest(A, dap('rrext_get_task_status', { token: run.token }))).ok, true, 'the restarted run is still owned after the grace period');
+});
+
+test('R-unreceived an execute answer the realm cannot receive leaves no run held, and the run is ended', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	engine.extendBody('execute', { big: 'x'.repeat(9 * 1024 * 1024) });
+	for (let i = 0; i < 9; i++) assertDenied(await clientRequest(A, execMsg()), ['too_large', 'credential'], `execute answer ${i} that is too large`);
+	await settle();
+	assert.equal(terminatedTokens(t).length, 9, 'every run the realm could not be told about is terminated');
+	engine.extendBody('execute', { big: '' });
+	assert.equal((await clientRequest(A, execMsg())).ok, true, 'no run quota is held for the refused answers');
+});
+
+test('R-unreceived a restart answer the realm cannot receive drops the run and ends the restarted token', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const run = await startRun(A);
+	engine.extendBody('restart', { big: 'x'.repeat(9 * 1024 * 1024) });
+	const restarted = await clientRequest(A, dap('restart', { token: run.token, projectId: run.projectId, source: run.source, pipeline: { components: [], source: run.source } }));
+	assertDenied(restarted, ['too_large', 'credential'], 'the restart answer that is too large');
+	await settle();
+	assert.ok(terminatedTokens(t).length >= 1, 'the restarted token is terminated');
+	assert.equal((await clientRequest(A, dap('rrext_get_task_status', { token: run.token }))).ok, false, 'the run is gone from the ledger, not held with a dead token');
+});
+
+test('R-unreceived a file handle whose close fails is closed again on the retry schedule', async (tt) => {
+	const { t, advance } = rootWithTimers();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	const client = engine.client as { request: (m: DAPMessage, timeout?: number) => Promise<DAPMessage> };
+	const original = client.request;
+	let closes = 0;
+	client.request = async (m, timeout) => {
+		if ((m.arguments as { subcommand?: string } | undefined)?.subcommand === 'fs_close' && ++closes === 1) throw new Error('engine unreachable');
+		return original(m, timeout);
+	};
+	tt.after(() => {
+		client.request = original;
+	});
+	const key = refAppKey(ENTRY_A.id);
+	engine.extendBody('rrext_store', { big: 'x'.repeat(9 * 1024 * 1024) });
+	assertDenied(await clientRequest(A, dap('rrext_store', { subcommand: 'fs_open', path: `apps/${key}/f`, mode: 'w' })), ['too_large', 'credential'], 'the fs_open answer that is too large');
+	await settle();
+	assert.equal(closes, 1, 'the first close was sent (and failed)');
+	await advance(30_000);
+	assert.equal(closes, 2, 'the failed close is tried again');
+});
+
+test('R-monitor a failed monitor removal changes nothing, so a retry removes exactly one reference', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: run.token }, types });
+	// The realm holds two references on t0.
+	await A.request('client.addMonitor', { key: { token: run.token }, types: ['t0'] });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const original = client.removeMonitor;
+	client.removeMonitor = async () => {
+		throw new Error('engine unreachable');
+	};
+	const failed = await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }));
+	assert.equal(failed.ok, false, 'the realm sees the removal fail');
+	client.removeMonitor = original;
+	const removeCalls = (): number => t.cm.engine.monitorCalls.filter((c) => c.kind === 'remove').length;
+	const before = removeCalls();
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }))).ok, true, 'the retry succeeds');
+	assert.equal(removeCalls() - before, 1, 'the retry removes one reference');
+	// One reference on t0 is left: the type is still subscribed and still holds its slot.
+	await assertDeniedOp(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }), 'quota', 'the type still holds its slot');
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }))).ok, true, 'the last reference is removed');
+	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }))).ok, true, 'the slot is free once the last reference is gone');
+});
+
+test('R-monitor when the reference cannot be put back, the ledger follows the lowered SDK count', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: run.token }, types });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void>; addMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const { removeMonitor, addMonitor } = client;
+	client.removeMonitor = async () => {
+		throw new Error('engine unreachable');
+	};
+	client.addMonitor = async () => {
+		throw new Error('engine unreachable');
+	};
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }))).ok, false, 'the realm sees the removal fail');
+	client.removeMonitor = removeMonitor;
+	client.addMonitor = addMonitor;
+	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: run.token }, types: ['extra'] }))).ok, true, 'the slot is free: that removal counts as done');
+});
+
+test('R-monitor a failed removal re-adds only the types the realm held, so the SDK never exceeds the quota', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: run.token }, types });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const original = client.removeMonitor;
+	// As the SDK: it lowers its counts, then the sync to the engine fails.
+	client.removeMonitor = async (k, ty) => {
+		await original.call(client, k, ty);
+		throw new Error('sync failed');
+	};
+	const extra = Array.from({ length: 20 }, (_, i) => `x${i}`);
+	assert.equal((await outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0', ...extra] }))).ok, false, 'the realm sees the removal fail');
+	client.removeMonitor = original;
+	const sdkTypes = [...t.cm.engine.monitors.values()].reduce((n, m) => n + m.size, 0);
+	assert.ok(sdkTypes <= 16, `the SDK holds ${sdkTypes} types, more than the 16-key quota`);
+});
+
+test('R-monitor a removal that fails after teardown does not put its reference back', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const run = await startRun(A);
+	await A.request('client.addMonitor', { key: { token: run.token }, types: ['t0'] });
+	const client = t.cm.engine.client as { removeMonitor: (k: unknown, ty: string[]) => Promise<void> };
+	const original = client.removeMonitor;
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	let calls = 0;
+	client.removeMonitor = async (k, ty) => {
+		if (++calls > 1) return original.call(client, k, ty);
+		await gate;
+		throw new Error('sync failed');
+	};
+	tt.after(() => {
+		client.removeMonitor = original;
+		release();
+	});
+	const pending = outcome(A.request('client.removeMonitor', { key: { token: run.token }, types: ['t0'] }));
+	await settle();
+	await t.root.teardownAll(500);
+	const adds = (): number => t.cm.engine.monitorCalls.filter((c) => c.kind === 'add').length;
+	const before = adds();
+	release();
+	assert.equal((await pending).ok, false, 'the removal fails');
+	await settle();
+	assert.equal(adds(), before, 'nothing is subscribed again for a run the teardown ended');
+});
+
+test('R-ledger an expired run no longer counts its monitor keys against the quota', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const A = t.open(ENTRY_A);
+	const first = await startRun(A);
+	const second = await startRun(A, 'chat_2');
+	const types = Array.from({ length: 16 }, (_, i) => `t${i}`);
+	await A.request('client.addMonitor', { key: { token: first.token }, types });
+	await assertDeniedOp(A.request('client.addMonitor', { key: { token: second.token }, types: ['extra'] }), 'quota', 'a 17th monitor key while the first run lives');
+	t.cm.engine.setStatus({ completed: true });
+	assert.equal((await clientRequest(A, dap('rrext_get_task_status', { token: first.token }))).ok, true, 'the completing status is delivered');
+	t.clock.advance(121_000);
+	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: second.token }, types: ['extra'] }))).ok, true, 'the expired run holds no monitor slots');
 });

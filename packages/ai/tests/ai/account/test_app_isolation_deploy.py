@@ -519,3 +519,93 @@ async def test_capabilities_accepts_known_names_and_absent(capabilities_file, de
     # a request is not a grant: nothing in the stored metadata approves it
     assert 'approvedCapabilities' not in deploy_registry.publish_calls[0]['metadata']
     assert 'approvedCapabilities' not in deploy_registry.publish_calls[0]['metadata']['manifest']
+
+
+def _grant_account(*, previous=None, read_fails=False, rollback_fails=False):
+    """A fake account whose registry records every grant write (``(caps, only_if)``) and whose history write fails."""
+    writes = []
+
+    class _Backend:
+        async def set_approved_capabilities(self, org_id, app_id, version, caps, only_if=None):
+            writes.append((list(caps), None if only_if is None else list(only_if)))
+            if only_if is not None and rollback_fails:
+                raise RuntimeError('registry down')
+            return {'version': version, 'metadata': {'approvedCapabilities': list(caps)}}
+
+    class _Account:
+        def _deployment_backend(self):
+            return _Backend()
+
+        async def deployments_versions(self, org_id, app_id):
+            if read_fails:
+                raise RuntimeError('registry read failed')
+            return [{'version': 1, 'metadata': {'approvedCapabilities': list(previous)} if previous else {}}]
+
+        async def deployments_history_append(self, *args, **kwargs):
+            raise RuntimeError('audit store down')
+
+    return _Account(), writes
+
+
+@pytest.mark.asyncio
+async def test_a_grant_whose_audit_entry_fails_is_rolled_back_only_if_still_the_stored_grant(monkeypatch):
+    """The audit write fails: the earlier grant is restored, but only while the stored value is still this call's."""
+    from ai.account.base import AccountBase
+
+    ao = _ao()
+    monkeypatch.setattr(ao, 'known_capabilities', lambda: frozenset({'core', 'pipelines.run'}))
+    account, writes = _grant_account(previous=['core'])
+
+    with pytest.raises(RuntimeError, match='audit store down'):
+        await AccountBase.set_approved_capabilities(
+            account, 'org', 'acme.app', 1, ['core', 'pipelines.run'], {'id': 'admin'}
+        )
+    assert writes == [(['core', 'pipelines.run'], None), (['core'], ['core', 'pipelines.run'])]
+
+
+@pytest.mark.asyncio
+async def test_a_failed_rollback_is_logged_and_the_audit_error_still_surfaces(monkeypatch):
+    """A rollback that fails does not hide the audit failure, and it is logged at warning level."""
+    import rocketlib
+    from ai.account.base import AccountBase
+
+    ao = _ao()
+    monkeypatch.setattr(ao, 'known_capabilities', lambda: frozenset({'core', 'pipelines.run'}))
+    logged = []
+    monkeypatch.setattr(rocketlib, 'warning', lambda message: logged.append(message), raising=False)
+    account, writes = _grant_account(rollback_fails=True)
+
+    with pytest.raises(RuntimeError, match='audit store down'):
+        await AccountBase.set_approved_capabilities(
+            account, 'org', 'acme.app', 1, ['core', 'pipelines.run'], {'id': 'admin'}
+        )
+    assert len(writes) == 2
+    assert len(logged) == 1 and 'could not be rolled back' in logged[0] and 'registry down' in logged[0]
+
+
+@pytest.mark.asyncio
+async def test_a_grant_is_not_written_when_the_earlier_grant_cannot_be_read(monkeypatch):
+    """A read error stops the call before any write: it never becomes a rollback to the default grant."""
+    from ai.account.base import AccountBase
+
+    ao = _ao()
+    monkeypatch.setattr(ao, 'known_capabilities', lambda: frozenset({'core', 'pipelines.run'}))
+    account, writes = _grant_account(read_fails=True)
+
+    with pytest.raises(RuntimeError, match='registry read failed'):
+        await AccountBase.set_approved_capabilities(
+            account, 'org', 'acme.app', 1, ['core', 'pipelines.run'], {'id': 'admin'}
+        )
+    assert writes == []
+
+
+@pytest.mark.asyncio
+async def test_approved_capabilities_still_defaults_to_core_on_a_read_error():
+    """The reading side keeps its fail-safe answer: an unreadable registry grants only ``core``."""
+    from ai.account.base import AccountBase
+
+    class _Account:
+        async def deployments_versions(self, org_id, app_id):
+            raise RuntimeError('registry read failed')
+
+    assert await AccountBase.approved_capabilities(_Account(), 'org', 'acme.app', 1) == ['core']

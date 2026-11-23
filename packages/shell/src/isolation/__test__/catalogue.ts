@@ -114,6 +114,8 @@ export async function prepareCtx(realm: IOpenedRealm, appKey: string): Promise<I
 	const path = (name: string): string => `apps/${appKey}/${name}`;
 	const pipeId = await openPipe(realm, run.token);
 	const fsHandle = await openFs(realm, path('open.txt'), 'w');
+	// client.removeMonitor only reaches the engine for a type the realm holds.
+	await realm.request('client.addMonitor', { key: { token: run.token }, types: ['summary'] });
 	return { token: run.token, projectId: run.projectId, source: run.source, pipeId, fsHandle, path };
 }
 

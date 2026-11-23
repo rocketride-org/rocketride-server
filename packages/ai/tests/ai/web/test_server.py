@@ -90,6 +90,23 @@ class TestDotenvLoading:
         load.assert_not_called()
 
 
+class TestAppHostConfigStaysOutOfTaskServers:
+    """RR_APP_ISOLATION can reach a task subprocess through RR_SUBPROCESS_ENV; its config must not."""
+
+    def test_a_task_server_never_reads_the_app_origin_config(self, monkeypatch):
+        read = MagicMock(name='current_config')
+        monkeypatch.setattr('ai.modules.shell.app_origin.current_config', read)
+        WebServer(config={'host': '127.0.0.1', 'port': 0}, load_env=False)
+        read.assert_not_called()
+
+    def test_the_engine_server_reads_it(self, monkeypatch):
+        read = MagicMock(name='current_config')
+        read.return_value = SimpleNamespace(mode='off')
+        monkeypatch.setattr('ai.modules.shell.app_origin.current_config', read)
+        WebServer(config={'host': '127.0.0.1', 'port': 0})
+        read.assert_called_once()
+
+
 @pytest.fixture
 def uvicorn_loggers_without_redactor():
     """Start with no RequestTargetRedactor on either uvicorn logger; restore the filter lists afterwards.

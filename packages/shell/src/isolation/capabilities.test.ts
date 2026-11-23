@@ -37,7 +37,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { loadTable, rowFor } from './capabilities';
+import { loadTable, matchRow, rowFor } from './capabilities';
 import { readCapabilityJson, SHELL_ROOT } from './__test__/util';
 
 const KNOWN_CAPS = ['core', 'pipelines.run', 'fs.app'];
@@ -63,7 +63,12 @@ test('T2 the capability table has known capabilities, ops and type names; an unk
 		if (row.top !== undefined) {
 			assert.ok(row.top.length === 0 || (row.top.length === 1 && row.top[0] === 'token'), `${where}: top must be [] or ["token"], got ${JSON.stringify(row.top)}`);
 		}
-		assert.ok(rowFor(row.op, row.command, row.subcommand), `${where}: rowFor finds no row for a row of the table`);
+		// Each declared subcommand resolves to its own row; a row without subcommands resolves strictly.
+		for (const sub of row.subcommands ?? [undefined]) {
+			const found = matchRow(row.op, row.command, sub);
+			assert.ok(found && found.cap === row.cap && (sub === undefined ? found.subcommands === undefined : found.subcommands?.includes(sub) === true), `${where} ${sub ?? ''}: matchRow does not find this row`);
+			assert.ok(rowFor(row.op, row.command, sub), `${where} ${sub ?? ''}: rowFor finds no row for a row of the table`);
+		}
 	}
 
 	assert.throws(() => loadTable({ v: 1, rows: [{ cap: 'core', op: 'client.request', command: 'rrext_ping', args: { x: 'no-such-type' } }] }), /no-such-type|unknown type/i, 'an unknown type name must fail the load');
@@ -111,6 +116,14 @@ test('T3 every DAP command in the SDK client has a row or is on the denied list'
 	);
 	for (const denied of DENIED_COMMANDS) {
 		assert.ok(!rowCommands.has(denied), `${denied} is on the denied list and also has a row`);
+	}
+
+	// A refused subcommand has no row under any command (the denied lists stay in step with the table).
+	const tableSubcommands = new Set(readCapabilityJson().rows.flatMap((r) => r.subcommands ?? []));
+	for (const denied of [...DENIED_SUBCOMMANDS, ...DEPLOY_SUBCOMMANDS]) {
+		assert.ok(!tableSubcommands.has(denied), `${denied} is on the denied list and also has a table row`);
+		assert.equal(rowFor('client.request', 'rrext_store', denied), undefined, `rrext_store ${denied} must have no row`);
+		assert.equal(rowFor('client.request', 'rrext_process', denied), undefined, `rrext_process ${denied} must have no row`);
 	}
 
 	const literals = sdkCommandLiterals();
