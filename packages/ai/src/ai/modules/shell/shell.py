@@ -657,7 +657,12 @@ async def _serve_versioned(request: Request, app_id: str, version: int, rest: li
     except Exception:
         raise HTTPException(status_code=404, detail='Not found')
     media_type = _bundle_media_type(rest[-1])
-    return Response(content=data, media_type=media_type, headers=_bundle_headers(media_type))
+    headers = _bundle_headers(media_type)
+    if media_type == 'text/html':
+        # Pages reach search through the shell; an HTML file of the build (a snapshot's raw template, wherever
+        # the manifest put it, .htm or any case included) is never one to index.
+        headers['X-Robots-Tag'] = 'noindex'
+    return Response(content=data, media_type=media_type, headers=headers)
 
 
 async def apps_session(request: Request):

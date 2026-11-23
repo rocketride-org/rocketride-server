@@ -51,7 +51,7 @@ This node declares GPU capability. It creates the pose-estimation facade with no
 
 ### Output and failures
 
-The text and image outputs are emitted only when their lanes have listeners. If an image cannot be decoded or inference fails, the node logs a warning, drops the frame, and prevents default forwarding instead of producing a partial pose result.
+The text and image outputs are emitted only when their lanes have listeners. If a frame cannot be decoded, or pose estimation or writing the outputs fails, the node raises an error that names the cause, and the engine marks the object as failed: the image, or the whole video the frame came from. The task goes on with the next object. Output already written is not withdrawn, such as the poses JSON when only the annotated image fails, or other frames of the same video.
 
 ## Upstream docs
 
