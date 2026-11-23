@@ -638,7 +638,7 @@ async def test_job_builds_a_scaffolded_shell_spec_end_to_end(monkeypatch, build_
 
     await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
     final = rail.stamps[-1]
-    assert final['status'] != 'failed', final
+    assert final['status'] == 'ok', final
     assert any(any('tsc' in str(a) for a in c['argv']) for c in fake.calls)
     assert any('build' in c['argv'] for c in fake.calls)
 
@@ -1156,6 +1156,25 @@ async def test_zip_entries_under_node_modules_are_refused(monkeypatch, build_sto
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['Node_Modules/typescript/bin/tsc', 'apps/brandy-ui/NODE_MODULES/x.js'])
+async def test_zip_node_modules_check_is_case_insensitive(monkeypatch, build_store, toolchain, entry):
+    zip_bytes = _hardening_zip({entry: '// inert placeholder'})
+    rail, fake = await _run_capturing(monkeypatch, zip_bytes)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['node_modules./x/a.js', 'node_modules /x/a.js'])
+async def test_zip_node_modules_check_strips_win32_trailing_chars(monkeypatch, build_store, toolchain, entry):
+    rail, fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
 async def test_zip_entries_with_a_bang_in_the_path_are_refused(monkeypatch, build_store, toolchain):
     """No app path may contain '!', the bundler's request separator, so a
     resolved request cannot be forged by a file or folder name.
@@ -1561,6 +1580,22 @@ def test_package_json_pnpm_and_browserslist_keys_are_removed(tmp_path):
         assert data['a'] == 1
 
 
+def test_package_json_package_manager_pins_are_removed(tmp_path):
+    """`packageManager` / `devEngines` (honored by a Corepack pnpm shim) are
+    stripped; a manifest without any neutralized key is not rewritten.
+    """
+    ws = tmp_path / 'ws'
+    pinned = {'name': 'x', 'packageManager': 'pnpm@1.0.0', 'devEngines': {'packageManager': {'name': 'pnpm'}}, 'a': 1}
+    _write(ws / 'package.json', json.dumps(pinned))
+    plain_text = '{"name":"y","a":2}'
+    _write(ws / 'apps' / 'y' / 'package.json', plain_text)
+    out = app_build._neutralize_tool_configs(str(ws), str(ws))
+    data = json.loads((ws / 'package.json').read_text(encoding='utf-8'))
+    assert 'packageManager' not in data and 'devEngines' not in data and data['a'] == 1
+    assert {'package.json:packageManager', 'package.json:devEngines'} <= set(out)
+    assert (ws / 'apps' / 'y' / 'package.json').read_text(encoding='utf-8') == plain_text
+
+
 @pytest.mark.parametrize('spec', ['link:../x', 'link:./local', 'file:/etc', 'file:../x', 'file:a/../../x', 'FILE:///x'])
 @pytest.mark.parametrize(
     'table', ['dependencies', 'devDependencies', 'optionalDependencies', 'peerDependencies', 'overrides']
@@ -1606,22 +1641,6 @@ def test_package_json_refuses_specs_escaping_the_workspace_root(tmp_path, rel, s
     _write(ws / rel, json.dumps({'dependencies': {'shell': spec}}))
     with pytest.raises(BuildFailure):
         app_build._neutralize_tool_configs(str(ws), str(ws))
-
-
-@pytest.mark.parametrize(
-    'text',
-    [
-        '{"dependencies": ' + '{"a": ' * 5000 + '"1"' + '}' * 5000 + '}',
-        '{"a": ' + '[' * 20000,
-    ],
-    ids=['deep-dependencies-table', 'deep-array'],
-)
-def test_deeply_nested_package_json_is_a_build_failure_not_a_crash(tmp_path, text):
-    ws = tmp_path / 'ws'
-    _write(ws / 'apps/x/package.json', text)
-    with pytest.raises(BuildFailure, match='nested too deeply') as info:
-        app_build._neutralize_tool_configs(str(ws), str(ws))
-    assert info.value.phase == 'materialize'
 
 
 def test_package_manifest_is_parsed_once_however_many_configs_it_owns(tmp_path, monkeypatch):
@@ -1748,6 +1767,186 @@ def test_env_files_drop_public_lines_with_command_substitution(tmp_path):
     _write(app / '.env', 'PUBLIC_A=ok\nPUBLIC_B=$(id)\nPUBLIC_C=`id`\nexport PUBLIC_D=x$(y)\nPUBLIC_E=$VAR\n')
     app_build._filter_env_files(str(app))
     assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok', 'PUBLIC_E=$VAR']
+
+
+def test_config_and_env_name_checks_are_case_insensitive(tmp_path):
+    """Case-insensitive filesystems resolve 'Postcss.config.js', '.NPMRC',
+    'Package.json' and '.ENV.local' to the real tool files; every name check
+    folds case, and a lookalike directory name is left alone.
+    """
+    ws = tmp_path / 'ws'
+    _write(ws / 'Postcss.config.js', 'MARKER-plugin\n')
+    _write(ws / '.NPMRC', 'x\n')
+    _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
+    _write(ws / '.ENV.local', 'PUBLIC_A=ok\nSECRET=x\n')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert 'MARKER' not in (ws / 'Postcss.config.js').read_text(encoding='utf-8')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.NPMRC']
+    app_build._filter_env_files(str(ws))
+    assert (ws / '.ENV.local').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=ok']
+    assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
+
+
+def test_package_json_name_is_matched_case_insensitively(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / 'Package.json', json.dumps({'name': 'x', 'dependencies': {'dep': 'link:../x'}}))
+    with pytest.raises(BuildFailure):
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+
+
+def test_env_filter_accepts_the_colon_assignment_form(tmp_path):
+    """Rsbuild reads `KEY: value` too: PUBLIC_ colon lines are kept (with the
+    same value checks), every other colon line is dropped.
+    """
+    app = tmp_path / 'app'
+    _write(app / '.env', 'PUBLIC_API: https://x\nNODE_OPTIONS: --x\nPUBLIC_BAD: $(id)\nPUBLIC_TICK: `id`\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_API: https://x']
+
+
+def test_corepack_env_file_is_removed_from_the_tree(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / '.corepack.env', 'COREPACK_HOME=/evil\n')
+    _write(ws / 'apps' / 'x' / '.corepack.env', 'COREPACK_NPM_REGISTRY=http://evil\n')
+    assert app_build._remove_pnpm_configs(str(ws)) == ['.corepack.env', 'apps/x/.corepack.env']
+
+
+def _hermetic_corepack_env(monkeypatch):
+    for key in ('COREPACK_HOME', 'XDG_CACHE_HOME', 'LOCALAPPDATA'):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _default_corepack_home():
+    sub = 'AppData/Local' if os.name == 'nt' else '.cache'
+    return os.path.join(os.path.expanduser('~'), sub, 'node', 'corepack')
+
+
+def test_build_env_pins_corepack_to_the_workers_values(monkeypatch, tmp_path):
+    """The Corepack walk can read an app's .corepack.env; the build env pins
+    the keys it could set, using the WORKER's home and never the job's.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    env = app_build._build_env()
+    assert env['COREPACK_ENV_FILE'] == '0'
+    assert env['COREPACK_HOME'] == _default_corepack_home()
+    assert 'COREPACK_ENABLE_NETWORK' not in env and 'COREPACK_DEFAULT_TO_LATEST' not in env
+    explicit = str(tmp_path / 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', explicit)
+    assert app_build._build_env()['COREPACK_HOME'] == explicit
+
+
+def test_corepack_home_follows_corepacks_own_resolution_order(monkeypatch, tmp_path):
+    """COREPACK_HOME, else XDG_CACHE_HOME, else (Windows) LOCALAPPDATA, else
+    the worker home's cache dir. Read from the worker's env only.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    assert app_build._corepack_home() == _default_corepack_home()
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'xdg'), 'node', 'corepack')
+    monkeypatch.setenv('COREPACK_HOME', str(tmp_path / 'explicit'))
+    assert app_build._corepack_home() == str(tmp_path / 'explicit')
+
+
+def test_corepack_home_uses_localappdata_on_windows(monkeypatch, tmp_path):
+    _hermetic_corepack_env(monkeypatch)
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'local'), 'node', 'corepack')
+
+
+def test_corepack_home_ignores_relative_values(monkeypatch, tmp_path):
+    """The job install's cwd is the uploaded tree, so a relative cache dir
+    would land inside it: only absolute values are accepted.
+    """
+    _hermetic_corepack_env(monkeypatch)
+    monkeypatch.setenv('COREPACK_HOME', 'rel/corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', str(tmp_path / 'xdg'))
+    assert app_build._corepack_home() == os.path.join(str(tmp_path / 'xdg'), 'node', 'corepack')
+    monkeypatch.setenv('XDG_CACHE_HOME', 'rel/xdg')
+    assert app_build._corepack_home() == _default_corepack_home()
+    monkeypatch.setenv('COREPACK_HOME', '')
+    assert os.path.isabs(app_build._corepack_home())
+    monkeypatch.setenv('LOCALAPPDATA', 'rel/local')
+    monkeypatch.setattr(app_build.os, 'name', 'nt')
+    assert os.path.isabs(app_build._corepack_home())
+
+
+def test_job_install_env_also_pins_corepack_network_and_latest():
+    token = app_build._JOB_INSTALL.set(True)
+    try:
+        env = app_build._build_env()
+    finally:
+        app_build._JOB_INSTALL.reset(token)
+    assert env['COREPACK_ENABLE_NETWORK'] == '0' and env['COREPACK_DEFAULT_TO_LATEST'] == '0'
+    assert 'COREPACK_ENABLE_NETWORK' not in app_build._build_env()
+
+
+def test_win32_trailing_dot_config_names_are_removed(tmp_path):
+    ws = tmp_path / 'ws'
+    _write(ws / '.npmrc.', 'x\n')
+    _write(ws / 'node_modules_extra' / 'keep.txt', 'k')
+    app_build._neutralize_tool_configs(str(ws), str(ws))
+    # Win32 strips the trailing dot when the file is created, so the walk may
+    # report either spelling; the file must be gone in both.
+    removed = app_build._remove_pnpm_configs(str(ws))
+    assert len(removed) == 1 and removed[0] in ('.npmrc.', '.npmrc')
+    assert not any(name.startswith('.npmrc') for name in os.listdir(ws))
+    assert (ws / 'node_modules_extra' / 'keep.txt').is_file()
+
+
+def test_fold_name_matches_ntfs_uppercase_comparison():
+    """NTFS compares names by uppercasing: a dotless i uppercases to I."""
+    assert app_build._fold_name('postcss.conf' + chr(0x131) + 'g.js') == 'postcss.config.js'
+    assert app_build._fold_name('po' + chr(0x17F) + 'tcss.config.js') == 'postcss.config.js'
+    assert app_build._fold_name('.npmrc. ') == '.npmrc'
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    'entry', ['node_modules:$I30:$INDEX_ALLOCATION/x.js', 'apps/a:b/x.js', 'C:/x.js'], ids=['ads', 'segment', 'drive']
+)
+async def test_zip_entry_with_a_colon_in_any_segment_is_refused(monkeypatch, build_store, toolchain, entry):
+    rail, fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('entry', ['/x.js'])
+async def test_zip_entry_leading_slash_still_refused(monkeypatch, build_store, toolchain, entry):
+    rail, _fake = await _run_capturing(monkeypatch, _hardening_zip({entry: '// inert'}))
+    assert rail.stamps[-1]['status'] == 'failed'
+
+
+def test_env_filter_drops_lines_with_js_only_line_separators(tmp_path):
+    """Rsbuild's dotenv regex treats U+2028/U+2029 (and Python NEL) as line
+    breaks, so one kept line could smuggle a second, non-PUBLIC_ assignment.
+    """
+    ls, ps, nel = chr(0x2028), chr(0x2029), chr(0x85)
+    app = tmp_path / 'app'
+    text = (
+        f"PUBLIC_A='x'{ls}NODE_OPTIONS=--require ./evil.js\n"
+        f"PUBLIC_B: 'x'{ps}RSPACK_X=1\n"
+        f'PUBLIC_C=y{nel}SECRET=1\n'
+        'PUBLIC_SAFE=ok\n'
+    )
+    _write(app / '.env', text)
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_SAFE=ok']
+    _write(app / '.env', 'PUBLIC_A=1\nPUBLIC_B: 2\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.env').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=1', 'PUBLIC_B: 2']
+
+
+def test_env_filter_only_touches_dotenv_names(tmp_path):
+    """`.env` and `.env.*` are filtered; `.environment.json` is not an env file."""
+    app = tmp_path / 'app'
+    _write(app / '.environment.json', '{"SECRET": "x"}\n')
+    _write(app / '.env.production', 'PUBLIC_A=1\nSECRET=x\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.environment.json').read_text(encoding='utf-8') == '{"SECRET": "x"}\n'
+    assert (app / '.env.production').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=1']
 
 
 def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
@@ -2075,5 +2274,50 @@ async def test_install_lockfile_is_checked_before_typecheck_and_bundle(monkeypat
     worker = AppBuildWorker(server=None)
     await worker._run_job('org1', 'acme.brandy', 1)
 
-    assert rail.stamps[-1]['status'] == 'failed'
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'install')
     assert not any(any('tsc' in str(a) for a in c['argv']) or 'build' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.asyncio
+async def test_packed_lockfile_with_an_escaping_path_fails_in_materialize(monkeypatch, build_store, toolchain):
+    """The same check on the PACKED lockfile (before install) reports materialize."""
+    lock = (
+        "lockfileVersion: '9.0'\n"
+        'packages:\n  evil@1.0.0:\n    resolution: {directory: ../../outside, type: directory}\n'
+    )
+    rail = _FakeRail(_app_source_zip(with_lock=True, lock_text=lock), {'status': 'queued', 'attempt': 0})
+    rail.install(monkeypatch)
+    await _seed_zip(rail.zip_bytes)
+    fake = _FakeExec()
+    monkeypatch.setattr(app_build, '_exec', fake)
+    await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
+    final = rail.stamps[-1]
+    assert (final['status'], final['phase']) == ('failed', 'materialize')
+    assert not any('install' in c['argv'] for c in fake.calls)
+
+
+@pytest.mark.parametrize('depth', [400, 3000])
+def test_workspace_yaml_deep_nesting_is_a_build_failure_not_a_crash(depth):
+    """Plain deep nesting (no aliases) must not escape as a RecursionError."""
+    text = 'overrides:\n  ' + '{a: ' * depth + 'x' + '}' * depth + '\n'
+    with pytest.raises(BuildFailure, match='nested') as info:
+        _patched_workspace_yaml(text, 'apps/x', [])
+    assert info.value.phase == 'materialize'
+
+
+@pytest.mark.parametrize('depth', [5000, 100000])
+@pytest.mark.parametrize('shape', ['array', 'object'])
+def test_deeply_nested_package_json_is_a_build_failure_not_a_crash(tmp_path, depth, shape):
+    """json.load / the spec walk / the rewrite must not leak a RecursionError."""
+    if shape == 'array':
+        # Parses, then recurses in the rewrite that strips the postcss key.
+        text = '{"postcss": 1, "keep": ' + '[' * depth + ']' * depth + '}'
+    else:
+        text = '{"dependencies": ' + '{"a":' * depth + '1' + '}' * depth + '}'
+    ws = tmp_path / 'ws'
+    ws.mkdir()
+    (ws / 'package.json').write_text(text, encoding='utf-8')
+    with pytest.raises(BuildFailure, match='nested') as info:
+        app_build._neutralize_tool_configs(str(ws), str(ws))
+    assert info.value.phase == 'materialize'

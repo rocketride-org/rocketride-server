@@ -75,6 +75,7 @@ typescript < 5.6).
 """
 
 import asyncio
+import contextvars
 import glob
 import json
 import os
@@ -199,7 +200,10 @@ _NEUTRALIZED_CONFIGS = (
 # babel as config (plugins by name); `pnpm` carries pnpm settings (hooks,
 # patches, overrides, ...) that are developer configuration; `browserslist`
 # steers the transpiler's target resolution (the platform sets its own).
-_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist')
+# `packageManager` and `devEngines` pin a package manager: a Corepack shim
+# (which _find_pnpm may resolve from PATH) honors the pin and would fetch and
+# run whatever version the app names instead of the platform's pnpm.
+_NEUTRALIZED_PACKAGE_KEYS = ('postcss', 'babel', 'pnpm', 'browserslist', 'packageManager', 'devEngines')
 
 # Dependency tables whose specs are checked for link:/file: escapes.
 _DEPENDENCY_TABLES = (
@@ -220,7 +224,17 @@ _BROWSERSLIST_DEFAULT = ('chrome >= 107', 'edge >= 107', 'firefox >= 104', 'safa
 # name a pnpmfile; pnpmfiles are code. --ignore-pnpmfile is the second lock.
 # .swcrc configures the SWC transpiler (plugins load by path) and the
 # browserslist files steer target resolution.
-_REMOVED_CONFIG_FILES = ('.npmrc', '.pnpmfile.cjs', '.pnpmfile.mjs', '.swcrc', '.browserslistrc', 'browserslist')
+# .corepack.env is read by Corepack's upward walk and can set COREPACK_HOME,
+# COREPACK_NPM_REGISTRY or COREPACK_INTEGRITY_KEYS.
+_REMOVED_CONFIG_FILES = (
+    '.npmrc',
+    '.pnpmfile.cjs',
+    '.pnpmfile.mjs',
+    '.swcrc',
+    '.browserslistrc',
+    'browserslist',
+    '.corepack.env',
+)
 
 # The pnpm-workspace.yaml keys that survive into the scratch workspace —
 # workspace layout and resolution only. Everything else (pnpm 10 accepts
@@ -248,7 +262,13 @@ _WORKSPACE_YAML_KEYS = (
 
 # rsbuild copies the app dir's .env files into its OWN process env; only
 # PUBLIC_ entries are meant for the bundle, so only those survive.
-_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*\s*=(.*)$')
+# Rsbuild's dotenv parser also accepts the colon form (`PUBLIC_X: value`).
+# Characters a JS /gm regex (Rsbuild's dotenv parser) treats as line breaks but
+# text-mode reading does not split on (U+2028, U+2029), plus NEL, which Python
+# splits on and JS does not. A kept line containing one could carry a second,
+# non-PUBLIC_ assignment, so such lines are dropped.
+_JS_LINE_BREAKS = (chr(0x2028), chr(0x2029), chr(0x85))
+_ENV_PUBLIC_LINE = re.compile(r'^\s*(?:export\s+)?PUBLIC_[A-Za-z0-9_]*(?:\s*=|:\s)(.*)$')
 
 
 def _scratch_root() -> str:
@@ -347,6 +367,32 @@ class BuildInfraFailure(Exception):
 # =============================================================================
 
 
+# True only around the job's `pnpm install` (see _build_env).
+_JOB_INSTALL: 'contextvars.ContextVar[bool]' = contextvars.ContextVar('rr_build_job_install', default=False)
+
+
+def _corepack_home() -> str:
+    """Corepack's cache dir as the WORKER's own environment resolves it.
+
+    Corepack's order: COREPACK_HOME, XDG_CACHE_HOME, (Windows) LOCALAPPDATA,
+    then the home directory's cache dir. A relative value is ignored (the
+    job install runs inside the uploaded tree, which would then hold the
+    cache), so every result is absolute.
+    """
+    explicit = os.environ.get('COREPACK_HOME')
+    if explicit and os.path.isabs(explicit):
+        return explicit
+    xdg = os.environ.get('XDG_CACHE_HOME')
+    if xdg and os.path.isabs(xdg):
+        return os.path.join(xdg, 'node', 'corepack')
+    local = os.environ.get('LOCALAPPDATA')
+    if os.name == 'nt' and local and os.path.isabs(local):
+        return os.path.join(local, 'node', 'corepack')
+    return os.path.join(
+        os.path.abspath(os.path.expanduser('~')), 'AppData/Local' if os.name == 'nt' else '.cache', 'node', 'corepack'
+    )
+
+
 def _build_env() -> Dict[str, str]:
     """The scrubbed environment build subprocesses run in.
 
@@ -375,6 +421,18 @@ def _build_env() -> Dict[str, str]:
     )
     env = {key: os.environ[key] for key in keep if key in os.environ}
     env['NO_COLOR'] = '1'
+    # A pnpm that is a Corepack shim walks up from cwd and loads the app's
+    # .corepack.env. The file is removed from the tree and ignored here, and
+    # COREPACK_HOME is the WORKER's (never derived from the job's dir/HOME).
+    env['COREPACK_ENV_FILE'] = '0'
+    env['COREPACK_HOME'] = _corepack_home()
+    if _JOB_INSTALL.get():
+        # Job install only: the toolchain bootstrap may legitimately need the
+        # network to fetch pnpm through a shim the first time, so these pins
+        # are not applied to it. The job install runs the already-cached pnpm
+        # and must not fetch a "latest" or app-chosen package manager.
+        env['COREPACK_ENABLE_NETWORK'] = '0'
+        env['COREPACK_DEFAULT_TO_LATEST'] = '0'
     return env
 
 
@@ -1038,6 +1096,16 @@ def _inert_config(name: str, module_package: bool = False) -> str:
     return '{}\n'  # JSON / YAML / extensionless rc
 
 
+def _fold_name(name: str) -> str:
+    """A filename as a case-insensitive Windows/macOS filesystem resolves it.
+
+    Uppercased then casefolded (NTFS compares by uppercasing: a dotless
+    ``\u0131`` is ``I``; ``po\u017ftcss`` is ``postcss``), with the trailing dots
+    and spaces Win32 strips (``.npmrc.`` is ``.npmrc``) removed.
+    """
+    return name.rstrip(' .').upper().casefold()
+
+
 def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     """Make every auto-loaded postcss/babel config in the tree inert.
 
@@ -1045,7 +1113,7 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     forms and the package.json ``postcss`` key load plugins by name — all
     developer code. The WHOLE source tree is walked (``app_dir`` lies inside
     ``ws_dir``): existing config files get inert content and the config keys
-    (postcss, babel, pnpm, browserslist) are stripped from every package.json,
+    (postcss, babel, pnpm, browserslist, packageManager, devEngines) are stripped from every package.json,
     whose dependency specs must not use ``link:`` or out-of-tree ``file:``.
     Absent files are not created.
 
@@ -1063,6 +1131,9 @@ def _neutralize_tool_configs(ws_dir: str, app_dir: str) -> List[str]:
     for dirpath, _dirs, files in os.walk(ws_dir):
         for name in files:
             path = os.path.join(dirpath, name)
+            # Case-insensitive: on a case-insensitive filesystem 'Postcss.config.js'
+            # is the file the loader finds. `path` keeps the real spelling.
+            name = _fold_name(name)
             if name in names:
                 with open(path, 'w', encoding='utf-8') as handle:
                     handle.write(_inert_config(name, _package_is_module(path, ws_dir, module_cache)))
@@ -1102,7 +1173,7 @@ def _remove_pnpm_configs(ws_dir: str) -> List[str]:
     removed: List[str] = []
     for dirpath, _dirs, files in os.walk(ws_dir):
         for name in files:
-            if name in _REMOVED_CONFIG_FILES:
+            if _fold_name(name) in _REMOVED_CONFIG_FILES:
                 path = os.path.join(dirpath, name)
                 os.remove(path)
                 removed.append(os.path.relpath(path, ws_dir).replace(os.sep, '/'))
@@ -1116,7 +1187,8 @@ def _filter_env_files(app_dir: str) -> None:
     PUBLIC_ keys such as NODE_OPTIONS or RSPACK_* would steer the build
     process itself); only PUBLIC_ entries are meant for the bundle, and a
     value containing command substitution (``$(`` or a backtick) is dropped.
-    Multi-line values are not supported in server builds.
+    Multi-line values are not supported in server builds. A line holding U+2028,
+    U+2029 or NEL is dropped: the dotenv parser would see it as several lines.
     """
     try:
         names = os.listdir(app_dir)
@@ -1124,12 +1196,15 @@ def _filter_env_files(app_dir: str) -> None:
         return
     for name in names:
         path = os.path.join(app_dir, name)
-        if not (name == '.env' or name.startswith('.env.')) or not os.path.isfile(path):
+        lowered = _fold_name(name)
+        if not (lowered == '.env' or lowered.startswith('.env.')) or not os.path.isfile(path):
             continue
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
             kept = []
             for line in handle:
                 match = _ENV_PUBLIC_LINE.match(line.rstrip('\r\n'))
+                if any(sep in line for sep in _JS_LINE_BREAKS):
+                    continue
                 if match and '$(' not in match.group(1) and '`' not in match.group(1):
                     kept.append(line.rstrip('\r\n'))
         with open(path, 'w', encoding='utf-8') as handle:
@@ -2038,11 +2113,12 @@ class AppBuildWorker:
         archive = zipfile.ZipFile(io.BytesIO(zip_bytes))
         for item in archive.infolist():
             name = item.filename.replace('\\', '/')
-            if name.startswith('/') or '..' in name.split('/') or (len(name) > 1 and name[1] == ':'):
+            # ':' in any segment: a drive letter, or an NTFS alternate data stream.
+            if name.startswith('/') or '..' in name.split('/') or ':' in name:
                 raise BuildFailure('materialize', f'zip entry has an unsafe path: {item.filename!r}')
             # A shipped package tree would be resolved (and its code run)
             # in place of what pnpm installs — the client never packs one.
-            if 'node_modules' in name.split('/'):
+            if 'node_modules' in [_fold_name(part) for part in name.split('/')]:
                 raise BuildFailure(
                     'materialize', f'zip entry {item.filename!r} is inside node_modules — packs must not ship packages'
                 )
@@ -2140,7 +2216,11 @@ class AppBuildWorker:
                 if os.path.isfile(os.path.join(ws_dir, *inc.split('/'), 'package.json')):
                     argv += ['--filter', f'./{inc}']
         await feed.set_phase('install')
-        code, out = await _exec(argv, ws_dir, _PHASE_TIMEOUTS['install'], on_line=feed.line)
+        token = _JOB_INSTALL.set(True)
+        try:
+            code, out = await _exec(argv, ws_dir, _PHASE_TIMEOUTS['install'], on_line=feed.line)
+        finally:
+            _JOB_INSTALL.reset(token)
         await feed.flush()
         log_parts.append(f'== install ==\n$ {" ".join(argv)}\n{out}')
         if code != 0:
@@ -2152,7 +2232,11 @@ class AppBuildWorker:
             raise BuildFailure('install', 'pnpm install did not write pnpm-lock.yaml')
         with open(lock_path, 'r', encoding='utf-8') as handle:
             installed_lock = handle.read()
-        _refuse_lockfile_paths(installed_lock)
+        try:
+            _refuse_lockfile_paths(installed_lock)
+        except BuildFailure as exc:
+            # The install wrote this lockfile, so the failure belongs to the install phase.
+            raise BuildFailure('install', str(exc)) from exc
         if pins_before:
             drift = _drift_of(pins_before, _lockfile_importer_pins(installed_lock))
             if drift:
