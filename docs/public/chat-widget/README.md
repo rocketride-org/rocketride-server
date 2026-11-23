@@ -98,8 +98,7 @@ Don't have a pipeline yet? Visit [RocketRide on GitHub](https://github.com/rocke
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
-Build, test and publish durable agents that scale in production.
+[RocketRide](https://rocketride.ai) is an AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 
 - **Ready-to-use nodes** - LLM providers, vector databases, OCR, NER, PII anonymization, and more
 - **High-performance C++ engine** - production-grade speed and reliability

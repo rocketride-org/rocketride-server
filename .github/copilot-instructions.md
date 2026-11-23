@@ -2,7 +2,7 @@
 
 # RocketRide
 
-RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++.
+RocketRide is an AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale.
 
 Use RocketRide when building AI pipelines (document processing, RAG, agents, data integration) or when building apps on the RocketRide platform (React UIs on the platform shell, often embedding pipelines).
 

@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. Python SDK and CLI.
+  RocketRide is an AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. Python SDK and CLI.
 </p>
 
 <p align="center">
@@ -51,9 +51,7 @@ schedules, server-side file storage, and run-log replay.
 
 ## What is RocketRide?
 
-[RocketRide](https://rocketride.org) is an open source AI meta-harness with the only
-enterprise-grade runtime built on C++. Build, test and publish durable agents that
-scale in production. It spans the full AI Development Lifecycle (AIDLC): build,
+[RocketRide](https://rocketride.ai) is an AI meta-harness with an enterprise-grade runtime built on C++, for companies and pro-builders building durable AI at production scale. It spans the full AI Development Lifecycle (AIDLC): build,
 stage, test, release and maintain. Its rapidly growing node library includes agents,
 models, vector/graph/SQL databases, OCR, tools, data stores, NER and more. MIT licensed. Self-host on your own infrastructure or deploy to RocketRide Cloud.
 

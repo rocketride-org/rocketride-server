@@ -30,8 +30,8 @@ const SITE_WHEN = [
 	'- You want to run CrewAI, LangChain, LlamaIndex or Deep Agent agents as nodes in one pipeline.',
 ];
 const SITE_DESC =
-	'RocketRide is an open source AI meta-harness with the only enterprise-grade runtime built on C++. ' +
-	'Build, test and publish durable agents that scale in production.';
+	'RocketRide is an AI meta-harness with an enterprise-grade runtime built on C++, ' +
+	'for companies and pro-builders building durable AI at production scale.';
 // Absolute base for llms.txt links. The llms.txt format specifies URLs, and an
 // agent that fetched the file on its own has no base to resolve against.
 // Mirrors `url` in docusaurus.config.ts.
