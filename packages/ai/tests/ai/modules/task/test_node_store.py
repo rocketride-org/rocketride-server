@@ -45,6 +45,8 @@ def server(tmp_path, monkeypatch):
     monkeypatch.setattr(node_store, '_nodes', {})
     monkeypatch.setattr(node_store, '_providers', {})
     monkeypatch.setattr(node_store, '_definitions', {})
+    monkeypatch.setattr(node_store, '_index', {})
+    monkeypatch.setattr(node_store, '_on_disk', {})
     monkeypatch.setattr(node_store, 'getServiceDefinition', lambda p: {'on': 'disk'} if p == 'webhook' else None)
     monkeypatch.setattr(node_store, 'getServiceDefinitions', calls['parsed'].append)
     monkeypatch.setattr(node_store, 'warning', calls['warnings'].append)
@@ -279,6 +281,19 @@ def test_a_read_only_install_serves_nothing_and_says_so_once(server, monkeypatch
     assert 'not writable' in server['warnings'][0] and 'llm_x' in server['warnings'][0]
 
 
+def test_a_read_only_install_still_names_the_copies_on_disk(server, monkeypatch):
+    """Nothing more can be unpacked, but the copies an earlier run left load in every run."""
+    _unpacked_before(server, 'webhook', 'w')
+
+    def read_only(dir=None, **kwargs):
+        raise OSError(30, 'Read-only file system', dir)
+
+    monkeypatch.setattr(node_store.tempfile, 'NamedTemporaryFile', read_only)
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'webhook'}, {'provider': 'provider_x'}]}) == ['webhook']
+
+
 def _unpacked_before(server, name, digest):
     """A folder an earlier EaaS unpacked into nodes/, with the digest of the package it came from."""
     os.makedirs(os.path.join(server['nodes'], name))
@@ -311,9 +326,11 @@ def test_a_copy_replaced_at_start_comes_with_the_nodes_it_now_imports(server, mo
 
     node_store.start()
 
-    # What it imports first; a pipeline naming llm_x places nothing, as the engine has it
+    # What it imports first; a pipeline naming llm_x places nothing, as the engine has it, but names
+    # the copy its run loads (webhook is the server's own; this fake unpack leaves no embed_y folder)
     assert [args[0] for args in server['unpacked']] == ['embed_y', 'llm_x']
-    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == []
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x']
+    assert [args[0] for args in server['unpacked']] == ['embed_y', 'llm_x']
 
 
 def test_a_copy_with_this_releases_digest_is_left_alone(server):
@@ -330,6 +347,36 @@ def test_a_node_folder_the_server_carries_is_left_alone(server):
     node_store.start()
 
     assert server['unpacked'] == [] and server['warnings'] == []
+
+
+def test_a_copy_an_earlier_run_unpacked_is_named_after_the_nodes_placed(server):
+    # After a restart the scan loaded webhook from the copy an earlier run unpacked, so EaaS no longer
+    # serves it; a run in a container of its own still needs that folder
+    _unpacked_before(server, 'webhook', 'w')
+    node_store.start()
+
+    placed = node_store.place({'components': [{'provider': 'webhook'}, {'provider': 'provider_x'}]})
+
+    assert placed == ['llm_x', 'webhook']
+    assert server['unpacked'] == [('llm_x', b'llm_x:x', 'x', server['nodes'])]
+
+
+def test_a_node_folder_the_server_carries_is_not_named(server):
+    os.makedirs(os.path.join(server['nodes'], 'webhook'))
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'webhook'}, {'provider': 'provider_x'}]}) == ['llm_x']
+
+
+def test_a_placed_node_comes_with_the_copy_an_earlier_run_unpacked_of_what_it_imports(server, monkeypatch):
+    index = _index()
+    index['nodes']['llm_x']['requires'] = ['webhook']
+    monkeypatch.setattr(node_store.account, 'node_index', lambda: index)
+    _unpacked_before(server, 'webhook', 'w')
+    node_store.start()
+
+    assert node_store.place({'components': [{'provider': 'provider_x'}]}) == ['llm_x', 'webhook']
+    assert [args[0] for args in server['unpacked']] == ['llm_x']
 
 
 def test_an_earlier_copy_that_cannot_be_replaced_names_its_folder(server, monkeypatch):
