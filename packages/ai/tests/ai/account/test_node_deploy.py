@@ -478,6 +478,29 @@ async def test_switching_the_rail_off_leaves_only_the_release_nodes(rail, monkey
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize('switch', ['unset', '0'])
+async def test_a_server_whose_rail_is_off_takes_no_node_and_publishes_none(rail, monkeypatch, switch):
+    await _published('@me')
+    if switch == 'unset':
+        monkeypatch.delenv('RR_NODE_RAIL_ENABLED')
+    else:
+        monkeypatch.setenv('RR_NODE_RAIL_ENABLED', switch)
+
+    replies = [
+        await _add(_Conn(), _package(files={'IGlobal.py': '# v2'})),
+        await _deploy(_Conn(), subcommand='publish', version=1, target='@team/research'),
+        await _deploy(_Conn(), subcommand='unpublish', target='@me'),
+        await _deploy(_Conn(), subcommand='versions'),
+    ]
+
+    for reply in replies:
+        assert not reply['success'] and 'RR_NODE_RAIL_ENABLED' in reply['message']
+    assert len(await account.deployments_versions('org1', 'acme.echo')) == 1
+    monkeypatch.setenv('RR_NODE_RAIL_ENABLED', '1')
+    assert [row['audience']['type'] for row in await account.publish_of_app('org1', 'node', 'acme.echo')] == ['user']
+
+
+@pytest.mark.asyncio
 async def test_the_rail_is_off_unless_switched_on(rail, monkeypatch):
     await _published('@me')
     monkeypatch.delenv('RR_NODE_RAIL_ENABLED')
