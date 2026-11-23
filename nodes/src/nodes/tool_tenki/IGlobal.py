@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import os
 import re
+import socket
 import threading
 import time
 import urllib.parse
@@ -144,9 +145,20 @@ _MAX_DOMAINS = 256
 _MAX_DOMAIN_CHARS = 253
 
 
+def _is_ip_address(host: str) -> bool:
+    """Whether host is an IPv4 address in any form inet_aton reads (0x7f000001, 127.1), or ends in an all-digit label."""
+    if host.rsplit('.', 1)[-1].isdigit():
+        return True
+    try:
+        socket.inet_aton(host)
+    except OSError:
+        return False
+    return True
+
+
 def _allowed_domains(raw) -> list[str]:
     """The outbound allowlist, lowercase and without a trailing dot as Luxor stores it; any refused entry raises."""
-    domains, refused, positions = [], [], []
+    domains, refused, positions, addresses, address_positions = [], [], [], [], []
     for position, name in enumerate(_names(raw, 'allow_domains'), 1):
         domain = name.lower().rstrip('.')
         # ASCII is checked before lowercasing could make it so (the Kelvin sign lowercases to "k").
@@ -154,17 +166,38 @@ def _allowed_domains(raw) -> list[str]:
             # An entry with an "@" may be a URL that carries credentials: say where it is, not what it says.
             refused.append(f'entry {position} (not shown: it may hold a credential)' if '@' in name else name)
             positions.append(str(position))
+        elif _is_ip_address(domain.removeprefix('*.')):  # the wildcard label hides an address from inet_aton
+            addresses.append(domain)  # passes the label rule and the API takes it, but never matches any traffic
+            address_positions.append(str(position))
         elif domain not in domains:
             domains.append(domain)
+    # One error names every kind of refusal, every rule before any entry: the engine cuts a startup error at its
+    # first asterisk, and entries of both kinds may hold one.
+    rules, lists = [], []
     if refused:
-        # The rule before any entry: the engine cuts a startup error at its first asterisk.
         one = len(positions) == 1
-        raise ValueError(
+        rules.append(
             f'tenki.allow_domains has {"an entry" if one else "entries"} Luxor refuses '
             f'({"entry" if one else "entries"} {", ".join(positions)}). Use bare hostnames such as pypi.org, '
-            'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port. '
-            f'Refused: {", ".join(refused)}'
+            'optionally starting with one wildcard label (an asterisk and a dot), with no scheme, path or port.'
         )
+        lists.append(f'Refused: {", ".join(refused)}')
+    if addresses:
+        if len(addresses) > 1:
+            noun, entry, label = 'IP addresses', 'entries', 'IP addresses'
+        else:
+            noun, entry, label = 'an IP address', 'entry', 'IP address'
+        if refused:
+            opening = 'It also lists'
+        else:
+            opening, label = 'tenki.allow_domains lists', 'Refused'
+        rules.append(
+            f"{opening} {noun} ({entry} {', '.join(address_positions)}), which the sandbox's egress filter never "
+            'matches: it matches hostnames only, so list the hostname instead.'
+        )
+        lists.append(f'{label}: {", ".join(addresses)}')
+    if rules:
+        raise ValueError(f'{" ".join(rules)} {"; ".join(lists)}')
     if len(domains) > _MAX_DOMAINS:
         raise ValueError(f'tenki.allow_domains lists {len(domains)} hosts, and Luxor accepts up to {_MAX_DOMAINS}')
     return domains
@@ -234,6 +267,11 @@ def _git_auth_url(raw: str) -> str:
             'tenki.git_auth_url must be an https URL with a host and, optionally, a path, such as '
             'https://github.com/acme/, with no credentials, port, query or fragment (the value is not shown: '
             'it may hold a credential)'
+        )
+    if _is_ip_address(host):
+        raise ValueError(
+            f"tenki.git_auth_url is on {host}, an IP address, which tenki.allow_domains cannot list: the sandbox's "
+            "egress filter matches hostnames only, so use the git server's hostname"
         )
     return f'https://{host}{path if path.endswith("/") else path + "/"}'
 
