@@ -326,6 +326,21 @@ test('R-unreceived an execute answer the realm cannot receive leaves no run held
 	assert.equal((await clientRequest(A, execMsg())).ok, true, 'no run quota is held for the refused answers');
 });
 
+test('R-unreceived an execute answer refused at the choke point for holding the API key gives the run back and ends it', async (tt) => {
+	const t = makeRoot();
+	tt.after(() => t.cleanup());
+	const key = `rr_${'k'.repeat(40)}`;
+	t.cm.apiKey = key;
+	const A = t.open(ENTRY_A);
+	const engine = t.cm.engine;
+	engine.extendBody('execute', { leak: key });
+	for (let i = 0; i < 9; i++) await assertDeniedOp(clientRequest(A, execMsg()), 'credential', `execute answer ${i} that holds the key`);
+	await settle();
+	assert.equal(terminatedTokens(t).length, 9, 'every run whose answer the realm was refused is terminated');
+	engine.extendBody('execute', { leak: '' });
+	assert.equal((await clientRequest(A, execMsg())).ok, true, 'no run quota is held for the refused answers');
+});
+
 test('R-unreceived a restart answer the realm cannot receive drops the run and ends the restarted token', async (tt) => {
 	const t = makeRoot();
 	tt.after(() => t.cleanup());
@@ -479,4 +494,100 @@ test('R-ledger an expired run no longer counts its monitor keys against the quot
 	assert.equal((await clientRequest(A, dap('rrext_get_task_status', { token: first.token }))).ok, true, 'the completing status is delivered');
 	t.clock.advance(121_000);
 	assert.equal((await outcome(A.request('client.addMonitor', { key: { token: second.token }, types: ['extra'] }))).ok, true, 'the expired run holds no monitor slots');
+});
+
+test('R-gate a request waiting on the API key is not sent once its realm detached or its run went', async (tt) => {
+	await tt.test('detach', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const release = t.cm.holdApiKey();
+		st.after(() => release());
+		const A = t.open(ENTRY_A);
+		const pending = clientRequest(A, execMsg()).catch(() => undefined);
+		await settle();
+		A.detach();
+		release();
+		await pending;
+		await settle();
+		assert.equal(t.cm.engine.messagesFor('execute').length, 0, "the detached realm's request never reaches the engine");
+	});
+	await tt.test('logout', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const run = await startRun(A);
+		const release = t.cm.holdApiKey();
+		st.after(() => release());
+		t.cm.emit('shell:login', { user: {} });
+		const before = t.cm.engine.received.length;
+		const pending = clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
+		await settle();
+		t.cm.emit('shell:logout', {});
+		release();
+		assertDenied(await pending, 'capability', 'a status request sent before logout');
+		assert.equal(t.cm.engine.received.length, before, "nothing is sent for the earlier session's run");
+	});
+});
+
+test('R-gate2 a request waiting on the API key is not sent once a terminate, an fs_close or a logout landed during the wait', async (tt) => {
+	const key = refAppKey(ENTRY_A.id);
+	await tt.test('terminate of its run (the run is gone, the realm and epoch are not)', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const run = await startRun(A);
+		const releaseEngine = t.cm.engine.hold('terminate');
+		st.after(() => releaseEngine());
+		const terminating = clientRequest(A, dap('terminate', { token: run.token }));
+		await settle();
+		const releaseKey = t.cm.holdApiKey();
+		st.after(() => releaseKey());
+		t.cm.emit('shell:login', { user: {} });
+		const waiting = clientRequest(A, dap('rrext_get_task_status', { token: run.token }));
+		await settle();
+		releaseEngine();
+		assert.equal((await terminating).ok, true, 'the terminate itself is answered');
+		const before = t.cm.engine.received.length;
+		releaseKey();
+		assertDenied(await waiting, 'capability', 'a status request whose run was terminated during the key wait');
+		assert.equal(t.cm.engine.received.length, before, 'nothing is sent for the terminated run');
+	});
+	await tt.test('fs_close of its handle (the handle is gone, the run and epoch are not)', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const opened = await clientRequest(A, dap('rrext_store', { subcommand: 'fs_open', path: `apps/${key}/g`, mode: 'r' }));
+		assert.equal(opened.ok, true, 'the file opens');
+		const handle = t.cm.engine.fsHandles[0];
+		const releaseEngine = t.cm.engine.hold('rrext_store');
+		st.after(() => releaseEngine());
+		const closing = clientRequest(A, dap('rrext_store', { subcommand: 'fs_close', handle, mode: 'r' }));
+		await settle();
+		const releaseKey = t.cm.holdApiKey();
+		st.after(() => releaseKey());
+		t.cm.emit('shell:login', { user: {} });
+		const waiting = clientRequest(A, dap('rrext_store', { subcommand: 'fs_read', handle, offset: 0, length: 16 }));
+		await settle();
+		releaseEngine();
+		assert.equal((await closing).ok, true, 'the close itself is answered');
+		const before = t.cm.engine.received.length;
+		releaseKey();
+		assertDenied(await waiting, 'capability', 'a read of a handle closed during the key wait');
+		assert.equal(t.cm.engine.received.length, before, 'nothing is sent for the closed handle');
+	});
+	await tt.test('logout (no run, no handle: only the epoch tells the request is stale)', async (st) => {
+		const t = makeRoot();
+		st.after(() => t.cleanup());
+		const A = t.open(ENTRY_A);
+		const releaseKey = t.cm.holdApiKey();
+		st.after(() => releaseKey());
+		t.cm.emit('shell:login', { user: {} });
+		const before = t.cm.engine.received.length;
+		const waiting = clientRequest(A, execMsg());
+		await settle();
+		t.cm.emit('shell:logout', {});
+		releaseKey();
+		assertDenied(await waiting, 'capability', 'an execute asked before a logout');
+		assert.equal(t.cm.engine.received.length, before, 'nothing is started for the earlier session');
+	});
 });

@@ -39,8 +39,14 @@
 // substituted on the way to the engine only. `shell.event.*` is the only
 // connection state an app sees, as allowlisted payloads.
 //
-// INERT in PR2a-1: nothing outside `src/isolation/` imports this module
-// (T30 guards it) until PR2b wires it in `Shell.tsx`.
+// N1 (PR2a-2): every response, engine event and error text is scrubbed for
+// the realm it goes to (scrub.ts): aliases for project and task ids, the
+// grant's user alias, no team or run-kind fields, and a backstop. Engine
+// events reach a gated realm only for runs it owns, only while attached.
+// Inbound strings holding a credential or a real id are refused (N1-f).
+//
+// INERT in PR2a-1/PR2a-2: nothing outside `src/isolation/` imports this
+// module (T30 guards it) until PR2b wires it in `Shell.tsx`.
 // =============================================================================
 
 import type { DAPMessage } from 'rocketride';
@@ -51,6 +57,8 @@ import { createGatedBusRouter } from '../ops/busBridge';
 import type { IBusEndpoint } from '../ops/busBridge';
 import { createOpBus } from '../ops/busOps';
 import type { IOpBus } from '../ops/busOps';
+import { createBoundedSet, createIdentityIds, createKnownProjects, isEngineShaped, isHighEntropy } from './aliases';
+import type { IdentityKind } from './aliases';
 import { appKeyOf, isCanonicalAppId } from './appKey';
 import { KNOWN_CAPS } from './capabilities';
 import { CapabilityDeniedError } from './capabilityDenied';
@@ -58,14 +66,26 @@ import type { DenyCode } from './capabilityDenied';
 import { deniedEnvelope, deniedMessage, deny, sanitizeEnvelope } from './denial';
 import { admitValue, asDenial, DAP_TIMEOUT_MAX_MS, directMonitorKey, gateClientRequest, gateOp } from './gate';
 import type { IGateContext, IGatedRequest } from './gate';
-import { base64url, createLedger } from './ledger';
+import { base64url, createLedger, mintProjectAlias } from './ledger';
 import type { ILedger, IRunEntry } from './ledger';
 import { createRateLimiter, QUOTAS, SIZES } from './rate';
+import { createScrubRoot, REDACTED, scrubErrorText, scrubEvent, scrubOutbound, scrubResponse } from './scrub';
+import type { IScrubContext } from './scrub';
 import type { IAppRoot, IAppRootCm, IAppRootOptions, IRealmGrant, IsolatedEntry, RealmId, RealmInfo } from './types';
-import { isWireBinary, measure } from './walk';
+import { measure } from './walk';
 
-/** The outbound backstop's credential pattern (Appendix L). */
-const BACKSTOP_RE = /(?:tk|pk)_[A-Za-z0-9_-]{16,}/;
+/** The shortest exact value the root remembers (shorter values would match ordinary text). */
+const NEEDLE_MIN = 8;
+/** Longest wait of the first client.request for the host.apiKey answer (DA F9), ms. */
+const API_KEY_WAIT_MS = 3000;
+/** Events buffered per execute still waiting on its answer (DA F8). */
+const PENDING_EVENTS_MAX = 64;
+/** A real task id (`<hash8>.<source>`, `task_server.py:1540`): only that shape of a status event's `id` is remembered. */
+const TASK_ID_RE = /^[0-9a-f]{8}\.\S{1,128}$/;
+/** The engine's status update, whose `id` is a real task id (`task_engine.py:1841`). */
+const STATUS_EVENT = 'apaevt_status_update';
+/** The guest op engine events are delivered on (`clientOps.ts` CLIENT_EVENT_OP; a literal, as in busBridge.ts). */
+const CLIENT_EVENT_OP = 'client.event';
 /** Later lookups of a lost run (ms after the previous one): at 30 s and 150 s. After the last one answers TASK_NOT_REGISTERED the run stops counting. */
 const LOST_RUN_RETRY_MS = [30_000, 120_000];
 /** The engine's code for a project/source with no live run (`TaskError.NOT_REGISTERED`, `modules/task/types.py`). */
@@ -82,6 +102,10 @@ interface IRealmState {
 	info: RealmInfo;
 	ledger: ILedger;
 	gate: IGateContext;
+	/** What the scrubber reads for this realm (N1). */
+	scrub: IScrubContext;
+	/** Executes waiting on their answer: minted project → events that arrived first (DA F8). */
+	pending: Map<string, DAPMessage[]>;
 	inflight: number;
 	/** Pref keys this realm's app has written (shared by its realms, kept across reattach). */
 	prefKeys: Set<string>;
@@ -93,25 +117,6 @@ interface IRealmState {
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
-
-/** Calls `cb` for every string (values and keys), skipping exact binary members only. Throws what `cb` throws. */
-function scanStrings(value: unknown, cb: (s: string) => void): void {
-	const seen = new Set<object>();
-	const stack: unknown[] = [value];
-	while (stack.length > 0) {
-		const v = stack.pop();
-		if (typeof v === 'string') cb(v);
-		else if (typeof v === 'object' && v !== null && !seen.has(v) && !isWireBinary(v) && !ArrayBuffer.isView(v)) {
-			seen.add(v);
-			if (Array.isArray(v)) stack.push(...v);
-			else
-				for (const [k, x] of Object.entries(v)) {
-					cb(k);
-					stack.push(x);
-				}
-		}
-	}
-}
 
 /** A hostname without trailing dots (`example.com.` and `example.com` are one host). */
 const dotless = (host: string): string => host.toLowerCase().replace(/\.+$/, '');
@@ -160,6 +165,114 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 	/** Pref keys written per app, for the 256-key cap (outlives any one realm). */
 	const prefKeysByApp = new Map<string, Set<string>>();
+
+	// ── N1 state (plan sections 2 and 4.4), root-wide, cleared at logout ────
+	/** Foreign project ids, from the root's own engine-event stream only (security M1). */
+	const known = createKnownProjects();
+	/** Every token and real task id the root saw (bounded): exact-match backstop and N1-f. */
+	const seen = createBoundedSet();
+	/** Real high-entropy user, team and org ids, from the SDK account info only: replaced in free text (DA F1, security N1). */
+	const identities = createIdentityIds();
+	/** The shell API keys (fetched at attach and on shell:login). */
+	const apiKeys = new Set<string>();
+	/** Engine events no attached realm owns (test counter). */
+	let eventsDropped = 0;
+	/** Root-made envelopes and event params already scrubbed: the choke point passes or refuses them without a second scan. */
+	const verdicts = new WeakMap<object, 'ok' | 'deny'>();
+	/** Settles when the latest host.apiKey answer arrived (or after API_KEY_WAIT_MS); null when none is pending. */
+	let apiKeyReady: Promise<void> | null = null;
+
+	const remember = (...values: unknown[]): void => {
+		for (const v of values) if (typeof v === 'string' && v.length >= NEEDLE_MIN) seen.add(v);
+	};
+	/** The client's own key, read live (the SDK accessor, `client.ts:3420`). */
+	const clientApiKey = (): string | undefined => {
+		try {
+			const key = (cm.getClient() as { getApiKey?: () => unknown } | null | undefined)?.getApiKey?.();
+			return typeof key === 'string' ? key : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	const addApiKey = (key: unknown): void => {
+		if (typeof key === 'string' && key.length >= NEEDLE_MIN) apiKeys.add(key);
+	};
+	/** Fetches the API key from both sources: `getClient().getApiKey()` and `host.apiKey` (`hostOps.ts:122`). */
+	const refreshApiKeys = (): void => {
+		addApiKey(clientApiKey());
+		// A logout or teardown bumps the epoch: an answer from the session before it must not re-add that session's key.
+		const askedIn = epoch;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const answered = Promise.resolve()
+			.then(() => cm.ops().request('host.apiKey', {}))
+			.then(
+				(answer) => {
+					if (epoch === askedIn) addApiKey(isPlainObject(answer) ? answer.apiKey : undefined);
+				},
+				() => undefined
+			);
+		const waited = new Promise<void>((resolve) => {
+			timer = setTimeout(resolve, API_KEY_WAIT_MS);
+			(timer as { unref?: () => void }).unref?.();
+		});
+		const ready: Promise<void> = Promise.race([answered, waited]).then(() => {
+			clearTimeout(timer);
+			if (apiKeyReady === ready) apiKeyReady = null;
+		});
+		apiKeyReady = ready;
+	};
+	/** The account's own ids (`ConnectResult`: userId, devTeam, organization.id and its teams), read live. */
+	const accountIds = (): Array<[unknown, IdentityKind]> => {
+		try {
+			const info = (cm.getClient() as { getAccountInfo?: () => unknown } | null | undefined)?.getAccountInfo?.() as { userId?: unknown; devTeam?: unknown; organization?: { id?: unknown; teams?: Array<{ id?: unknown }> } | null } | undefined;
+			if (!info) return [];
+			const out: Array<[unknown, IdentityKind]> = [
+				[info.userId, 'user'],
+				[info.devTeam, 'team'],
+				[info.organization?.id, 'org'],
+			];
+			for (const team of Array.isArray(info.organization?.teams) ? info.organization.teams : []) out.push([team?.id, 'team']);
+			return out;
+		} catch {
+			return [];
+		}
+	};
+	/** Whether any attached realm's ledger holds this project id as its own run's. */
+	const ownedByAnyRealm = (projectId: string): boolean => [...realms.values()].some((st) => st.ledger.runs().some((r) => r.projectId === projectId));
+	/** Every attached realm's live ledger values (N1-L: never evicted while the handle lives). */
+	const liveValues = (): string[] => {
+		const out: string[] = [];
+		for (const st of realms.values())
+			for (const r of st.ledger.runs()) {
+				out.push(r.token, r.publicToken, r.taskId);
+				if (isHighEntropy(r.projectId)) out.push(r.projectId);
+			}
+		return out;
+	};
+	const scrubRoot = createScrubRoot({
+		known,
+		seen,
+		identities,
+		sessionToken: () => cm.loadToken(),
+		apiKeys: () => {
+			const live = clientApiKey();
+			return live !== undefined && live.length >= NEEDLE_MIN && !apiKeys.has(live) ? [...apiKeys, live] : [...apiKeys];
+		},
+		liveValues,
+		accountIds,
+	});
+
+	/** Scrubs one owned event for a realm and delivers it (a hit or an over-budget event is dropped and logged). */
+	const deliverEvent = (st: IRealmState, event: DAPMessage): void => {
+		const scrubbed = scrubEvent(st.scrub, event);
+		if (scrubbed === null) {
+			logDrop(st, CLIENT_EVENT_OP, 'credential');
+			return;
+		}
+		const params = { message: scrubbed };
+		verdicts.set(params, 'ok');
+		router.deliver(st.info.realmId, CLIENT_EVENT_OP, params);
+	};
 
 	/** Root-internal timers (see `IAppRootOptions.schedule`). */
 	const schedule =
@@ -366,6 +479,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'execute': {
 				if (!body || typeof body.token !== 'string') return response;
 				const pipeline = req.args.pipeline as Record<string, unknown>;
+				remember(body.token, body.publicToken, body.id);
 				const run = st.ledger.addRun({
 					token: body.token,
 					publicToken: typeof body.publicToken === 'string' ? body.publicToken : '',
@@ -380,6 +494,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				run.completedAt = undefined;
 				run.generation++;
 				if (!body) return response;
+				remember(body.token, body.publicToken, body.id);
 				if (typeof body.token === 'string') run.token = body.token;
 				if (typeof body.publicToken === 'string') run.publicToken = body.publicToken;
 				if (typeof body.id === 'string') run.taskId = body.id;
@@ -388,7 +503,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'rrext_get_token': {
 				if (!body) return response;
 				const { token, publicToken: _public, ...rest } = body;
-				void _public;
+				remember(token, _public);
 				const run = typeof token === 'string' ? st.ledger.runByToken(token) : undefined;
 				return withBody(run ? { ...rest, token: run.handle } : rest);
 			}
@@ -422,21 +537,20 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 		}
 	};
 
-	// ── Outbound backstop (the scrubber is PR2a-2) ──────────────────────────
+	// ── Outbound choke point (N1-e): scrub, then the backstop ────────────────
 
 	const outboundFor =
 		(st: IRealmState) =>
 		(message: unknown): unknown => {
 			if (opts.__throwIn === 'outbound') throw new Error('test hook: outbound');
-			const needles = [cm.loadToken(), ...st.ledger.secrets()].filter((s) => typeof s === 'string' && s.length >= 8);
-			// The pattern is not applied to the app's own file content (plan section 4.4); exact matches still are.
-			const m = message as { __rrbus?: string; result?: { ok?: boolean; value?: { command?: string } } };
-			const storeReply = m?.__rrbus === 'response' && m.result?.ok === true && m.result.value?.command === 'rrext_store';
-			scanStrings(message, (s) => {
-				for (const needle of needles) if (s.includes(needle)) throw deny('credential', 'outbound');
-				if (!storeReply && BACKSTOP_RE.test(s)) throw deny('credential', 'outbound');
-			});
-			return message;
+			// What the root already scrubbed (a client.request envelope, event params) is marked by
+			// reference, never recognised by shape (DA F5): passed or refused without a second scan.
+			const m = message as { __rrbus?: string; result?: unknown; params?: unknown };
+			const marked = m?.__rrbus === 'response' ? m.result : m?.__rrbus === 'emitOp' ? m.params : undefined;
+			const verdict = typeof marked === 'object' && marked !== null ? verdicts.get(marked) : undefined;
+			if (verdict === 'ok') return message;
+			if (verdict === 'deny') throw deny('credential', 'outbound');
+			return scrubOutbound(st.scrub, message);
 		};
 
 	// ── Per-realm handlers ──────────────────────────────────────────────────
@@ -520,6 +634,16 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				const startedIn = epoch;
 				const runGeneration = req.run?.generation;
 				try {
+					// DA F9: the API key fetched at attach (or login) is known before any answer is scrubbed.
+					if (apiKeyReady) {
+						await apiKeyReady;
+						// Admitted before a detach, teardown, logout or terminate that happened during the wait: ownership is checked again.
+						const runGone = req.run !== undefined && st.ledger.run(req.run.handle) !== req.run;
+						const fsGone = typeof req.fs?.handle === 'string' && st.ledger.fs(req.fs.handle) === undefined;
+						if (st.detached || closing > 0 || epoch !== startedIn || runGone || fsGone) throw deny('capability', 'client.request', { command: req.command });
+					}
+					// DA F8: events for this run that arrive before the answer are buffered, not dropped.
+					if (req.mintedProject) st.pending.set(req.mintedProject, []);
 					let response: DAPMessage;
 					let reachedClient = false;
 					try {
@@ -548,8 +672,16 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 						throw err;
 					}
 					// The answer is recorded already: if the realm cannot receive it, what it allocated is taken back and ended, not left held.
+					// N1-a: scrubbed for this realm (over budget: too_large). A backstop hit outside notes and
+					// error text is refused at the choke point, on the same request id (N1-e).
+					let hit: boolean;
 					let encoded: ReturnType<typeof encodeMessageData>;
 					try {
+						try {
+							({ message: recorded, hit } = scrubResponse(st.scrub, req, recorded));
+						} catch (err) {
+							throw err instanceof CapabilityDeniedError ? err : deny('credential', 'client.request', { command: req.command });
+						}
 						encoded = encodeMessageData(recorded);
 						const size = measure(encoded);
 						if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
@@ -558,11 +690,41 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 						endOrphan(req, response);
 						throw err;
 					}
-					return { ok: true, value: encoded } satisfies IWireEnvelope;
+					if (hit) {
+						// The choke point refuses this answer (a credential outside notes): the realm never learns of what it allocated.
+						unrecord(st, req, response);
+						endOrphan(req, response);
+					}
+					const envelope = { ok: true, value: encoded } satisfies IWireEnvelope;
+					verdicts.set(envelope, hit ? 'deny' : 'ok');
+					// The run is in the ledger now: events that came first are delivered (DA F8).
+					const early = req.mintedProject ? st.pending.get(req.mintedProject) : undefined;
+					if (early) {
+						st.pending.delete(req.mintedProject!);
+						// A refused answer (hit): the realm never learns of this run, so its early events are dropped too.
+						if (hit) eventsDropped += early.length;
+						else for (const event of early) deliverEvent(st, event);
+					}
+					return envelope;
 				} catch (err) {
 					if (err instanceof CapabilityDeniedError) return deniedEnvelope(err);
-					return sanitizeEnvelope({ ok: false, error: serializeError(err) });
+					// N1-c: a thrown engine error loses its stack and has its text scrubbed.
+					const envelope = sanitizeEnvelope({ ok: false, error: serializeError(err) });
+					if (!envelope.ok) {
+						try {
+							envelope.error.message = scrubErrorText(st.scrub, envelope.error.message, req.run);
+						} catch {
+							envelope.error.message = REDACTED;
+						}
+					}
+					return envelope;
 				} finally {
+					// An execute that started nothing: its buffered events are dropped.
+					const left = req.mintedProject ? st.pending.get(req.mintedProject) : undefined;
+					if (left) {
+						st.pending.delete(req.mintedProject!);
+						eventsDropped += left.length;
+					}
 					req.release();
 				}
 			},
@@ -709,7 +871,46 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	// A logout that bypassed teardownAll: the token is already gone, so only the ledgers are cleared.
 	cm.on('shell:logout', () => {
 		epoch++;
-		for (const st of realms.values()) st.ledger.clear();
+		for (const st of realms.values()) {
+			st.ledger.clear();
+			st.scrub.aliases.clear();
+			st.scrub.sighted.clear();
+			st.pending.clear();
+		}
+		known.clear();
+		seen.clear();
+		identities.clear();
+		apiKeys.clear();
+	});
+	cm.on('shell:login', () => refreshApiKeys());
+
+	// ── client.event (N1-b): owned runs only, scrubbed, only while attached ─
+	cm.on('shell:event', (payload: unknown) => {
+		const event = isPlainObject(payload) && isPlainObject(payload.event) ? payload.event : undefined;
+		const body = event && isPlainObject(event.body) ? event.body : undefined;
+		// Root-wide sets take engine-shaped values only (security N1): a task-id-shaped status id here,
+		// an engine-shaped project id below. Event bodies never feed the identity store.
+		if (event && event.event === STATUS_EVENT && typeof event.id === 'string' && TASK_ID_RE.test(event.id)) remember(event.id);
+		const projectId = body && typeof body.project_id === 'string' && body.project_id !== '' ? body.project_id : undefined;
+		const owners = projectId === undefined ? [] : [...realms.values()].filter((st) => !st.detached && st.ledger.runs().some((r) => r.projectId === projectId));
+		if (owners.length === 0) {
+			// A run whose execute answer is still in flight (DA F8): buffered, not foreign.
+			const waiting = projectId === undefined ? undefined : [...realms.values()].find((st) => !st.detached && st.pending.has(projectId));
+			const buffer = waiting?.pending.get(projectId!);
+			if (buffer && buffer.length < PENDING_EVENTS_MAX) {
+				buffer.push(event as unknown as DAPMessage);
+				return;
+			}
+			eventsDropped++;
+			// Only the root's own engine-event stream feeds the foreign set (security M1), and only with
+			// engine-shaped ids, a UUID or a minted rrapp. id (security N1, round 2). The engine accepts any
+			// caller-supplied project_id (task_server.py:1463-1465), so other ids exist; aliasing guessable
+			// ones would make the scrubber a membership oracle. Such ids in free-text engine errors are a
+			// documented residual (PR2_PLAN.md section 8).
+			if (projectId !== undefined && !waiting && isEngineShaped(projectId)) known.add(projectId);
+			return;
+		}
+		for (const st of owners) deliverEvent(st, event as unknown as DAPMessage);
 	});
 
 	return {
@@ -733,7 +934,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			const st: IRealmState = {
 				info,
 				ledger,
-				gate: { info, ledger, rate: createRateLimiter(opts.now), sessionToken: () => cm.loadToken(), random: opts.random, ...(opts.__throwIn ? { throwIn: opts.__throwIn } : {}) },
+				gate: { info, ledger, rate: createRateLimiter(opts.now), sessionToken: () => cm.loadToken(), inbound: () => scrubRoot.inbound(), random: opts.random, ...(opts.__throwIn ? { throwIn: opts.__throwIn } : {}) },
+				scrub: { root: scrubRoot, ledger, grant, aliases: new Map(), sighted: createKnownProjects(), mintAlias: () => mintProjectAlias(opts.random), ownedByAnyRealm },
+				pending: new Map(),
 				inflight: 0,
 				prefKeys: prefKeysByApp.get(entry.id) ?? prefKeysByApp.set(entry.id, new Set()).get(entry.id)!,
 				loggedDrops: new Set(),
@@ -750,6 +953,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				},
 			});
 			realms.set(realmId, st);
+			refreshApiKeys();
 			return realmId;
 		},
 
@@ -800,5 +1004,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				closing--;
 			}
 		},
+
+		__stats: () => ({ eventsDropped, knownProjects: known.size() }),
 	};
 }

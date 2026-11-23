@@ -171,9 +171,11 @@ export function bodyOfResponse(envelope: unknown): Record<string, unknown> {
 
 /**
  * Best-of-`n` wall-clock times of a measured run and its control, taken in
- * alternating rounds so both see the same host load.
+ * alternating rounds so both see the same host load. A run that returns a
+ * number reports the time of just the operation under test (its setup and
+ * clean-up stay outside); one that returns nothing is timed whole.
  */
-export async function bestPair(n: number, control: () => Promise<void>, measured: () => Promise<void>): Promise<{ control: number; measured: number }> {
+export async function bestPair(n: number, control: () => Promise<void | number>, measured: () => Promise<void | number>): Promise<{ control: number; measured: number }> {
 	const out = { control: Infinity, measured: Infinity };
 	for (let i = 0; i < n; i++) {
 		for (const [key, run] of [
@@ -181,8 +183,8 @@ export async function bestPair(n: number, control: () => Promise<void>, measured
 			['measured', measured],
 		] as const) {
 			const start = performance.now();
-			await run();
-			out[key] = Math.min(out[key], performance.now() - start);
+			const own = await run();
+			out[key] = Math.min(out[key], typeof own === 'number' ? own : performance.now() - start);
 		}
 	}
 	return out;

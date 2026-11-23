@@ -39,7 +39,7 @@ import type { IOpBus } from '../../ops/busOps';
 import type { IRetainedPort } from '../../ops/retained';
 import { isWireError, openEnvelope } from '../../connection/errorWire';
 import type { IWireEnvelope } from '../../connection/errorWire';
-import type { IAppRoot, IsolatedEntry } from '../types';
+import type { IAppRoot, IRealmGrant, IsolatedEntry } from '../types';
 
 const ENVELOPE = '__rrbus';
 
@@ -124,6 +124,8 @@ export interface IOpenRealmOptions {
 	caps?: readonly string[];
 	viewId?: string;
 	version?: number;
+	/** The loader's grant (PR2a-2: `frame` with the identity aliases); `caps`, `viewId` and `version` above win. */
+	grant?: IRealmGrant;
 }
 
 /** What a test drives. */
@@ -150,7 +152,7 @@ let rawSeq = 0;
 export function openRealm(root: IAppRoot, entry: IsolatedEntry, options: IOpenRealmOptions = {}): IOpenedRealm {
 	const channel = createChannel();
 	const grant = { caps: options.caps ?? ['core', 'pipelines.run', 'fs.app'] };
-	const realmId = root.attach(entry, channel.a, { capabilities: grant.caps, viewId: options.viewId ?? `view-${entry.id}`, version: options.version ?? entry.registryVersion ?? 1 });
+	const realmId = root.attach(entry, channel.a, { ...options.grant, capabilities: grant.caps, viewId: options.viewId ?? `view-${entry.id}`, version: options.version ?? entry.registryVersion ?? 1 });
 	const bus = createOpBus();
 	let attachment: IRealmAttachment | null = null;
 	if (!options.raw) attachment = attachRealmToRoot(bus, channel.b);
