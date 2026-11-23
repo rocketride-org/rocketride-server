@@ -973,7 +973,8 @@ def _filter_env_files(app_dir: str) -> None:
         return
     for name in names:
         path = os.path.join(app_dir, name)
-        if not name.lower().startswith('.env') or not os.path.isfile(path):
+        lowered = name.lower()
+        if not (lowered == '.env' or lowered.startswith('.env.')) or not os.path.isfile(path):
             continue
         with open(path, 'r', encoding='utf-8', errors='replace') as handle:
             kept = []

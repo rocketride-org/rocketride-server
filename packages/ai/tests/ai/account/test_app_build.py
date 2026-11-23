@@ -1470,6 +1470,16 @@ def test_package_json_name_is_matched_case_insensitively(tmp_path):
         app_build._neutralize_tool_configs(str(ws), str(ws))
 
 
+def test_env_filter_only_touches_dotenv_names(tmp_path):
+    """`.env` and `.env.*` are filtered; `.environment.json` is not an env file."""
+    app = tmp_path / 'app'
+    _write(app / '.environment.json', '{"SECRET": "x"}\n')
+    _write(app / '.env.production', 'PUBLIC_A=1\nSECRET=x\n')
+    app_build._filter_env_files(str(app))
+    assert (app / '.environment.json').read_text(encoding='utf-8') == '{"SECRET": "x"}\n'
+    assert (app / '.env.production').read_text(encoding='utf-8').splitlines() == ['PUBLIC_A=1']
+
+
 def test_neutralize_reports_what_it_ignored_and_tolerates_a_bom(tmp_path):
     """Neutralized configs and stripped package.json keys are returned for the
     build log, and a manifest with a UTF-8 BOM (which pnpm accepts) is read.
