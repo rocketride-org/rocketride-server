@@ -32,7 +32,7 @@
 // default block names none.
 // =============================================================================
 
-import { defaultStoreBlock, pipeReadmeStub } from 'rocketride';
+import { defaultStoreBlock, normalizePosixPath, pipeReadmeStub } from 'rocketride';
 import { scopedFileSystem } from 'shared/modules/vfs/scopedFileSystem';
 import { getWorkspaceVfs } from '../workspace/vfs/workspace';
 
@@ -90,4 +90,33 @@ export async function scaffoldPipe(dir: string, pipeId: string, displayName: str
 		throw err;
 	}
 	return { folder, pipePath, files };
+}
+
+// =============================================================================
+// STARTER README (beside a pipe that was just given the default block)
+// =============================================================================
+
+/**
+ * Writes the starter README beside a pipe that was just given the default
+ * store block outside the scaffold (the Explorer's inline create, a save that
+ * stamps a pipe which had none), unless the folder already has that file.
+ * The block names `./README.md`, and the file it names exists from the
+ * start; an author who wants no README removes the path from the block and
+ * deletes the file. A README that is already there is never replaced: two
+ * pipes may share a folder and its README.
+ *
+ * @param pipePath - The pipe's path under the pipelines mount (`<dir>/<name>.pipe`).
+ * @param displayName - The README's title: the pipeline's name, or its file stem.
+ * @returns The README's path when this call wrote it, null when one was there.
+ * @throws Error when the store refuses the read or the write.
+ */
+export async function ensurePipeReadme(pipePath: string, displayName: string): Promise<string | null> {
+	const rel = normalizePosixPath(defaultStoreBlock().readme ?? '');
+	if (!rel) return null;
+	const view = scopedFileSystem(getWorkspaceVfs(), 'pipelines');
+	const slash = pipePath.lastIndexOf('/');
+	const readme = slash >= 0 ? `${pipePath.slice(0, slash)}/${rel}` : rel;
+	if ((await view.stat(readme)) !== null) return null;
+	await view.write(readme, pipeReadmeStub(displayName));
+	return readme;
 }

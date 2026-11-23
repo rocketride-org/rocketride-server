@@ -55,7 +55,7 @@ import type { NewPipelineIdentity } from 'shared/tools/pipelines/components/NewP
 import type { ViewState } from 'shared/tools/pipelines';
 import { displayName as projectDisplayName } from '../workspace/projectStore';
 import { packPipe } from './packBundle';
-import { scaffoldPipe } from './scaffoldPipe';
+import { ensurePipeReadme, scaffoldPipe } from './scaffoldPipe';
 import { createProjectVfs } from '../workspace/projectVfs';
 import { defaultStoreBlock } from 'rocketride';
 import type { PipelineTraceLevel } from 'rocketride';
@@ -198,6 +198,23 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 	const stampStoreBlock = useCallback((project: PipelineConfig): PipelineConfig => (project.store ? project : { ...project, store: defaultStoreBlock() }), []);
 
 	/**
+	 * Writes the starter README beside a pipe a save just stamped: the block
+	 * it was given names `./README.md`, and the file it names exists from the
+	 * start (a README already in the folder is left as it is). A failure is
+	 * told, never thrown: the pipeline itself is saved.
+	 *
+	 * @param pipePath - The saved pipe's path under the pipelines mount.
+	 * @param config - The pipeline as saved; its name titles the README.
+	 */
+	const writeStarterReadme = useCallback(async (pipePath: string, config: PipelineConfig): Promise<void> => {
+		try {
+			await ensurePipeReadme(pipePath, String(config.name || pipeStemOf(pipePath) || 'Pipeline'));
+		} catch (err) {
+			setPipelineError(`The pipeline is saved, but its starter README could not be written: ${err instanceof Error ? err.message : String(err)}`);
+		}
+	}, []);
+
+	/**
 	 * Saves the pipeline to disk and marks the document clean.
 	 *
 	 * @param saveFilename - The file path to save to.
@@ -226,6 +243,8 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				// Mark clean in Documents model
 				await getDocs()?.saveDocument(uri);
 				window.dispatchEvent(new CustomEvent('project:saved', { detail: { projectId } }));
+				// The block this save stamped names a README: it exists from the start
+				if (stamped !== project) await writeStarterReadme(saveFilename, stamped);
 			} catch (err) {
 				console.error('[PipelineProvider] Save failed:', err);
 				// Surface the failure — a silent catch leaves the user believing
@@ -234,7 +253,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				if (opts?.rethrow) throw err;
 			}
 		},
-		[client, isConnected, projectId, uri, projectVfs, onContentChanged, stampStoreBlock]
+		[client, isConnected, projectId, uri, projectVfs, onContentChanged, stampStoreBlock, writeStarterReadme]
 	);
 
 	// --- Pipeline run/stop/restart -------------------------------------------
@@ -344,6 +363,8 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				deferredRunRef.current = null;
 				return;
 			}
+			// The block this save stamped names a README: it exists from the start
+			if (saved !== pipeline) await writeStarterReadme(fileRelPath, saved);
 
 			// Close old tab and open the new file so the tab name updates
 			const docs = getDocs();
@@ -366,7 +387,7 @@ const PipelineProvider: React.FC<ProjectPageProps> = ({ uri, pipeline, isDirty, 
 				executePipelineAction(deferredRun.action, deferredRun.source, saved);
 			}
 		},
-		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs, stampStoreBlock]
+		[pipeline, client, isConnected, uri, projectId, executePipelineAction, projectVfs, stampStoreBlock, writeStarterReadme]
 	);
 
 	/** Pipeline action with the dirty-save prompt choreography. */
