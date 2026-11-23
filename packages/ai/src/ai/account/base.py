@@ -821,7 +821,11 @@ class AccountBase(ABC):
         from binding twice when several engines share one registry): a
         returned write is visible to every engine's next publish_list /
         publish_of_app (read-your-writes), and the row's ``createdAt`` is set
-        once and survives repoints.
+        once and survives repoints. The re-check also compares ``createdAt``
+        across engines, so those timestamps must be comparable: a clock shared
+        by all engines, or store-assigned timestamps. A back-out writes
+        'removed' through publish_set_state even when the audience's previous
+        row was disabled.
         """
         return await self._deployment_backend().publish_set(org_id, kind, app_id, audience, version, snapshot, actor)
 
