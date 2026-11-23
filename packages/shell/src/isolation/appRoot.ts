@@ -191,16 +191,55 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	/** One DAP request on the root's own behalf (teardown, recovery). */
 	const sendEngine = (command: string, args: Record<string, unknown>, timeout = DAP_TIMEOUT_MAX_MS): Promise<DAPMessage> => Promise.resolve().then(() => client().request({ type: 'request', seq: 0, command, arguments: args } as DAPMessage, timeout) as Promise<DAPMessage>);
 
+	/** Whether a terminate answer means the run is gone: it succeeded, or the engine says the run is no longer registered. */
+	const terminated = (r: DAPMessage | undefined): boolean => isPlainObject(r) && (r.success !== false || (r as { code?: unknown }).code === TASK_NOT_REGISTERED);
+
+	/**
+	 * Ends what no ledger can hold: a run (terminate) or an open handle (fs_close,
+	 * pipe close). A transport failure and a negative DAP answer are both failures
+	 * (the SDK resolves the latter): the call is retried on the lost-run schedule,
+	 * then logged. For a handle (fs_close, pipe close) a retry helps only when
+	 * the call never reached the engine (transport failure): the engine releases
+	 * a handle even when its close fails, so a retry after a negative answer is
+	 * answered as an unknown handle, which this treats as a failure, not as closed.
+	 */
+	const endOrphanCall = (what: string, command: string, args: Record<string, unknown>, retriesLeft: number[] = [...LOST_RUN_RETRY_MS]): void => {
+		track(sendEngine(command, args).then(terminated, () => false)).then((done) => {
+			if (done) return;
+			if (retriesLeft.length === 0) {
+				opts.log('warn', `[isolation] could not end an unrecorded ${what}`);
+				return;
+			}
+			const [delay, ...rest] = retriesLeft;
+			schedule(() => endOrphanCall(what, command, args, rest), delay);
+		});
+	};
+	const endOrphanRun = (token: string): void => endOrphanCall('run', 'terminate', { token });
+
 	/** Best-effort end of what an answer started when it cannot be recorded (late, detached, or a record failure). */
 	const endOrphan = (req: IGatedRequest, response: DAPMessage): void => {
 		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
 		if (!body) return;
-		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
-			track(sendEngine('terminate', { token: body.token }).catch(() => opts.log('warn', '[isolation] could not end an unrecorded run')));
-		}
+		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') endOrphanRun(body.token);
 		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') {
-			track(sendEngine('rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode }).catch(() => undefined));
+			endOrphanCall('file handle', 'rrext_store', { subcommand: 'fs_close', handle: body.handle, mode: req.fs!.mode });
 		}
+		if (req.command === 'rrext_process' && req.subcommand === 'open' && Number.isSafeInteger(body.pipe_id) && req.run) {
+			endOrphanCall('pipe', 'rrext_process', { subcommand: 'close', token: req.run.token, pipe_id: body.pipe_id });
+		}
+	};
+
+	/** Takes back what `record` allocated for an answer the realm will never receive (it was refused after recording). */
+	const unrecord = (st: IRealmState, req: IGatedRequest, response: DAPMessage): void => {
+		const body = isPlainObject(response) && response.success !== false && isPlainObject(response.body) ? response.body : undefined;
+		if (!body) return;
+		// A restart's token is the one endOrphan terminates: the run it renewed is gone with it.
+		if ((req.command === 'execute' || req.command === 'restart') && typeof body.token === 'string') {
+			const run = st.ledger.runByToken(body.token);
+			if (run) st.ledger.dropRun(run.handle);
+		}
+		if (req.command === 'rrext_store' && req.subcommand === 'fs_open' && typeof body.handle === 'string') st.ledger.dropFs(body.handle);
+		if (req.command === 'rrext_process' && req.subcommand === 'open' && Number.isSafeInteger(body.pipe_id)) req.run?.pipeIds.delete(body.pipe_id as number);
 	};
 
 	/**
@@ -222,7 +261,9 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				if (r.success === false) return (r as { code?: unknown }).code === TASK_NOT_REGISTERED ? 'absent' : 'error';
 				const token = isPlainObject(r.body) ? r.body.token : undefined;
 				if (typeof token !== 'string') return 'error';
-				await sendEngine('terminate', { token });
+				// A failed termination keeps the run in recovery (counted, looked up again); only a
+				// success, or the engine saying the run is no longer registered, ends it.
+				if (!terminated(await sendEngine('terminate', { token }))) return 'error';
 				ledger.lostRuns.delete(project);
 				return 'found';
 			})
@@ -316,7 +357,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 	};
 
 	/** Records what the engine answered and rewrites what the realm may see. */
-	const record = (st: IRealmState, req: IGatedRequest, response: DAPMessage): DAPMessage => {
+	const record = (st: IRealmState, req: IGatedRequest, response: DAPMessage, runGeneration?: number): DAPMessage => {
 		if (opts.__throwIn === 'ledger') throw new Error('test hook: ledger');
 		if (!isPlainObject(response) || response.success === false) return response;
 		const body = isPlainObject(response.body) ? response.body : undefined;
@@ -337,6 +378,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			case 'restart': {
 				const run = req.run!;
 				run.completedAt = undefined;
+				run.generation++;
 				if (!body) return response;
 				if (typeof body.token === 'string') run.token = body.token;
 				if (typeof body.publicToken === 'string') run.publicToken = body.publicToken;
@@ -354,7 +396,8 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 				st.ledger.dropRun(req.run!.handle);
 				return response;
 			case 'rrext_get_task_status':
-				if (body && (body.completed === true || body.final === true)) st.ledger.complete(req.run!.handle);
+				// A status asked before a restart describes the run it replaced: it must not expire the restarted one.
+				if (body && (body.completed === true || body.final === true) && req.run!.generation === runGeneration) st.ledger.complete(req.run!.handle);
 				return response;
 			case 'rrext_monitor': {
 				// A run that ended during the call keeps no subscription record (DA N1).
@@ -475,6 +518,7 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					return deniedEnvelope(asDenial(err, 'client.request'));
 				}
 				const startedIn = epoch;
+				const runGeneration = req.run?.generation;
 				try {
 					let response: DAPMessage;
 					let reachedClient = false;
@@ -498,14 +542,22 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 					}
 					let recorded: DAPMessage;
 					try {
-						recorded = record(st, req, response);
+						recorded = record(st, req, response, runGeneration);
 					} catch (err) {
 						endOrphan(req, response);
 						throw err;
 					}
-					const encoded = encodeMessageData(recorded);
-					const size = measure(encoded);
-					if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
+					// The answer is recorded already: if the realm cannot receive it, what it allocated is taken back and ended, not left held.
+					let encoded: ReturnType<typeof encodeMessageData>;
+					try {
+						encoded = encodeMessageData(recorded);
+						const size = measure(encoded);
+						if (size.json + size.bin > SIZES.response) throw deny('too_large', 'client.request', { command: req.command });
+					} catch (err) {
+						unrecord(st, req, response);
+						endOrphan(req, response);
+						throw err;
+					}
 					return { ok: true, value: encoded } satisfies IWireEnvelope;
 				} catch (err) {
 					if (err instanceof CapabilityDeniedError) return deniedEnvelope(err);
@@ -516,6 +568,17 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 			},
 			(err) => deniedEnvelope(asDenial(err, 'client.request'))
 		);
+
+		const lowerLedger = (run: IRunEntry, types: string[]): void => {
+			const counts = st.ledger.monitors.get(run.handle);
+			if (!counts) return;
+			for (const t of types) {
+				const n = (counts.get(t) ?? 0) - 1;
+				if (n > 0) counts.set(t, n);
+				else counts.delete(t);
+			}
+			if (counts.size === 0) st.ledger.monitors.delete(run.handle);
+		};
 
 		requestOp('client.addMonitor', async (params, run) => {
 			const types = [...new Set(params.types as string[])];
@@ -546,15 +609,23 @@ export function createAppRoot(cm: IAppRootCm, opts: IAppRootOptions): IAppRoot {
 
 		requestOp('client.removeMonitor', async (params, run) => {
 			const types = [...new Set(params.types as string[])];
-			await client().removeMonitor({ token: run!.token }, types);
-			const counts = st.ledger.monitors.get(run!.handle);
-			if (!counts) return;
-			for (const t of types) {
-				const n = (counts.get(t) ?? 0) - 1;
-				if (n > 0) counts.set(t, n);
-				else counts.delete(t);
+			try {
+				await client().removeMonitor({ token: run!.token }, types);
+			} catch (err) {
+				// The SDK lowers its own counts before it tells the engine, so a failed call leaves them one
+				// lower. Put the reference back (addMonitor raises the count again) so the failure changes
+				// nothing and a retry removes one reference, not two. If that cannot be done either, the SDK's
+				// count stays lowered and the ledger follows it, so the two agree: the reference then counts as removed.
+				const restored = await client()
+					.addMonitor({ token: run!.token }, types)
+					.then(
+						() => true,
+						() => false
+					);
+				if (!restored) lowerLedger(run!, types);
+				throw err;
 			}
-			if (counts.size === 0) st.ledger.monitors.delete(run!.handle);
+			lowerLedger(run!, types);
 		});
 
 		requestOp('shell.frameToken.refresh', () => fetchFrame(st.info.appId, st.info.version));
