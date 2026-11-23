@@ -24,7 +24,7 @@
 // FROZEN rocketride SDK contract — floor v2.0 — never edit by hand
 // =============================================================================
 // Floor key:     2.0 (MAJOR.MINOR of packages/client-typescript/package.json)
-// Source commit: 1765df2a3d5dfba3db818d2498b23771cdb14c1b
+// Source commit: 36ea08044c7d600e9010d5adf4fc90c463dbafed
 // Generator:     dts-bundle-generator@9.5.1
 // Produced by:   ./builder client-typescript:freeze
 //
@@ -1317,9 +1317,10 @@ export interface PipelineConfig {
     /** Project identifier for organization and permissions */
     project_id?: string;
     /** The store listing (tagline, categories, tags, icon, readme, links,
-        mode, billing). Every deployed pipeline carries one: the packers and
-        the deploy door add the default block to a pipe that has none. The
-        engine never sees it. */
+        mode, billing). A pipeline carries one when it is deployed: the
+        packers and the deploy door add the default block to a pipe that has
+        none (a version stored by an earlier release can lack it). The engine
+        never sees it. */
     store?: PipeStoreBlock;
     /** Per-call params: public name -> `nodeId.configKey` */
     parameters?: Record<string, string>;
