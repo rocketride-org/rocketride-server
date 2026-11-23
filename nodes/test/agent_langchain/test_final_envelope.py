@@ -243,7 +243,13 @@ def test_a_run_with_no_answer_ends_as_an_error(run, case):
     assert 'It broke here' not in result.content
     assert result.written == [result.content]
     assert result.payload['stack'][0]['kind'] == 'RocketRide.agent.error.v1'
-    assert result.sse[-1] == ('thinking', {'message': 'The run failed.', 'stop_reason': 'error'})
+    # The last event is the stop status. The run's id may ride on it (#3360) and is not this test's subject.
+    kind, status = result.sse[-1]
+    assert kind == 'thinking'
+    assert {key: value for key, value in status.items() if key != 'run_id'} == {
+        'message': 'The run failed.',
+        'stop_reason': 'error',
+    }
     assert len(result.prompts) == 3
     assert result.invocations == []
 
