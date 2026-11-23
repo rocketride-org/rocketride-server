@@ -899,25 +899,40 @@ const PackagePanel: React.FC<IPackagePanelProps> = (props) => {
 		try {
 			// Step 1: the README's last keystrokes are still in the pane's debounce; let them reach the draft
 			if (latest.current.section === 'assets') await new Promise((resolve) => setTimeout(resolve, README_WRITE_DEBOUNCE_MS + 50));
-			// Step 2: the files, each leaving the draft as it lands, so a retry
-			// writes only what is left. An entry rewritten while its write was in
-			// flight stays: the host holds the older content, and it is still pending.
-			const held = latest.current.files;
-			for (const [relPath, data] of assetsHost ? [...held] : []) {
-				await assetsHost?.writeFile(relPath, data);
-				if (held.get(relPath) === data) held.delete(relPath);
-				setPendingFiles(held.size);
-			}
-			// Step 3: a pipeline without a store block gets one at Save; whether the
-			// block being added may name its README is asked of the files first.
+			// Steps 2 and 3 repeat until both hold with nothing awaited since: every
+			// wait lets a pane stage another file or change the README path, and the
+			// document must never take a declaration whose bytes are still pending,
+			// nor a verdict on a README path that is no longer the one declared.
+			let readmeChecked: string | undefined;
 			let readmePresent = false;
-			if (!latest.current.project.store) {
-				const readme = ((latest.current.pending.store as PipeStoreBlock | undefined) ?? defaultStoreBlock()).readme;
-				readmePresent = readme && assetsHost ? await assetsHost.readFile(readme).then((text) => text !== null, () => true) : false;
+			for (;;) {
+				// Step 2: the files, each leaving the draft as it lands, so a retry
+				// writes only what is left. An entry rewritten while its write was in
+				// flight stays, and the next pass writes its newer content.
+				const held = latest.current.files;
+				if (assetsHost && held.size > 0) {
+					for (const [relPath, data] of [...held]) {
+						await assetsHost.writeFile(relPath, data);
+						if (held.get(relPath) === data) held.delete(relPath);
+						setPendingFiles(held.size);
+					}
+					continue;
+				}
+				// Step 3: a pipeline without a store block gets one at Save; whether the
+				// block being added may name its README is asked of the files, for the
+				// path the block names now.
+				const readme = latest.current.project.store ? undefined : ((latest.current.pending.store as PipeStoreBlock | undefined) ?? defaultStoreBlock()).readme;
+				if (readme !== undefined && readme !== readmeChecked) {
+					readmePresent = assetsHost ? await assetsHost.readFile(readme).then((text) => text !== null, () => true) : false;
+					readmeChecked = readme;
+					continue;
+				}
+				break;
 			}
 			// Step 4: the write, onto the document as the host holds it NOW. Nothing
 			// below awaits, so an edit made elsewhere during the waits above (a
-			// component added on the canvas) is in the document this patch lands on.
+			// component added on the canvas) is in the document this patch lands on,
+			// no file is pending, and the README verdict is for the path in the patch.
 			const document = latest.current.project;
 			let next = prunePatch(document, latest.current.pending);
 			if (!document.store) {
