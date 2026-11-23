@@ -573,7 +573,7 @@ async def test_job_builds_a_scaffolded_shell_spec_end_to_end(monkeypatch, build_
 
     await AppBuildWorker(server=None)._run_job('org1', 'acme.brandy', 1)
     final = rail.stamps[-1]
-    assert final['status'] != 'failed', final
+    assert final['status'] == 'ok', final
     assert any(any('tsc' in str(a) for a in c['argv']) for c in fake.calls)
     assert any('build' in c['argv'] for c in fake.calls)
 
