@@ -811,6 +811,11 @@ class TestRetryHint:
             ('{"type":"task","args":{"type":"tool_call","x":"a "b" c"}}', None),
             # No type of its own to read: the text is searched, and a tool call wins.
             ('{"note":"x "y z","args":{"type":"tool_call"', 'tool_call'),
+            # The first tool-call type named wins, also when `final` is named before it.
+            (
+                '{"note":"x "y z","content":{"type":"final"},"args":{"type":"tool_call"},"calls":{"type":"tool_calls"',
+                'tool_call',
+            ),
             ('{"content":"abc', None),
             ('no braces at all', None),
         ],
@@ -985,6 +990,8 @@ class TestRunModelTurn:
                 'Here is the result:\n{"name":"crm.create","args":{}}\nFINAL>>> Created.',
                 'named a tool and its arguments with no "type"',
             ),
+            # A type written out anywhere in the reply counts, also when the first object parses and is no envelope.
+            ('Two objects.\n{"note":"first"}\n' + BROKEN_TOOL_CALL, 'not valid JSON'),
             # The marker alone is protocol text, not an answer.
             (FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
             ('Let me think.\n' + FINAL_SENTINEL, f'ended at {FINAL_SENTINEL} with no answer after it'),
@@ -1010,6 +1017,36 @@ class TestRunModelTurn:
             assert instruction not in message
         # It is logged and returned to the caller, so it quotes nothing of the reply either.
         assert 'It broke here' not in message
+
+    @pytest.mark.parametrize(
+        'text, asked_for, said',
+        [
+            (
+                'Sure, creating it now.\n'
+                '{"type":"tool\\u005fcall","name":"crm.create","args":{"note":"a "quoted" word"}}',
+                'Send the SAME tool call again',
+                'not valid JSON',
+            ),
+            (
+                'Here is the answer:\n{"type":"fin\\u0061l","content":"Acme reported revenue of 12',
+                f'send the answer as {FINAL_SENTINEL} followed by plain text',
+                'Unterminated string',
+            ),
+        ],
+    )
+    def test_an_envelope_whose_type_is_spelled_with_an_escape_is_not_prose_to_deliver(self, text, asked_for, said):
+        """
+        Each hint took the reply for the envelope it is: the call was asked for again, the answer was
+        asked for after the marker. The third copy fails the turn like the plain spelling does.
+        """
+        ask, feedback = scripted(text)
+
+        with pytest.raises(ValueError, match='No valid tool call or final answer after 3 attempts') as failure:
+            reply._run_model_turn(ask)
+
+        assert said in str(failure.value)
+        assert len(feedback) == reply._MAX_ATTEMPTS == 3
+        assert feedback[2].count(asked_for) == 2
 
     def test_the_text_around_the_break_goes_to_the_model_and_not_into_the_error(self):
         ask, feedback = scripted('{"type":"final","content":"Card 4111 belongs to Jane Roe, and')

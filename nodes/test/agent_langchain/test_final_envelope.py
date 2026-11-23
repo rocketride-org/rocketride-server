@@ -96,6 +96,14 @@ FAILED = {
         '{"type":"final","content":"Example:\nFINAL>>> partial',
         'not valid JSON',
     ),
+    'broken_tool_call_with_an_escaped_type_after_a_line_of_prose': (
+        'Sure, creating it now.\n{"type":"tool\\u005fcall","name":"crm.get_deal","args":{"note":"a "quoted" word"}}',
+        'not valid JSON',
+    ),
+    'cut_off_final_with_an_escaped_type_after_a_line_of_prose': (
+        'Here is the answer:\n{"type":"fin\\u0061l","content":"Acme reported revenue of 12',
+        'not valid JSON',
+    ),
 }
 
 

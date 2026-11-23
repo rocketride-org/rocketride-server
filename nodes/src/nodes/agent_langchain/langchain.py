@@ -356,6 +356,9 @@ def _tool_call_protocol_prompt(bound_tools: List[Dict[str, Any]]) -> str:
 # This follows the reply handling in `agent_deepagent/deepagent.py` and is this
 # node's own code: the two nodes are kept apart, so a change here does not change
 # that one.
+#
+# TODO(#935): this is a second copy of that node's reply handling. Bring the two
+# together when the tool-call envelope helpers are consolidated.
 # ────────────────────────────────────────────────────────────────────────────────
 
 #: How a final answer is announced, in place of a JSON envelope.
@@ -487,7 +490,10 @@ def _attempted_kind(text: str) -> Optional[str]:
     if own is not None:
         return own if own in _ENVELOPE_KINDS else None
     kinds = [match.group(1) for match in _ATTEMPTED_TYPE.finditer(text)]
-    return next((kind for kind in kinds if kind != 'final'), kinds[0] if kinds else None)
+    for kind in kinds:
+        if kind != 'final':
+            return kind
+    return kinds[0] if kinds else None
 
 
 def _attempted_tool_call(text: str) -> bool:
@@ -802,17 +808,21 @@ def _envelope_before(raw: str, at: int) -> str:
     return 'open' if _looks_like_envelope(before) and _attempted_kind(before) == 'final' else 'closed'
 
 
-def _reads_sentinel(text: str, marker: Any) -> bool:
+def _standing_before(text: str, at: int) -> str:
     """
-    Whether the parser reads the ``FINAL>>>`` line `marker` matched as the sentinel.
+    What stands before position `at`, where a ``FINAL>>>`` line starts. It decides how the line is read.
 
-    It does not after a tool call, a broken one and one that lost its ``"type"`` included: the line
-    is a claim about work that has not run. Nor inside an envelope that is still open, where the
-    line is the answer's own text.
+    - ``'tool_call'``: a tool call, a broken one and one that lost its ``"type"`` included. The line
+      is a claim about work that has not run, and the reply is read as the call.
+    - ``'open'``, ``'closed'`` or ``'unclear'``: no tool call, and this is how a `final` envelope
+      stands there (``_envelope_before``).
+
+    The line is the sentinel after ``'closed'`` only. The parser and the retry hint both read this
+    one value, so they cannot disagree about a marker.
     """
-    if _attempted_tool_call(text[: marker.start()]):
-        return False
-    return _envelope_before(text, marker.start()) == 'closed'
+    if _attempted_tool_call(text[:at]):
+        return 'tool_call'
+    return _envelope_before(text, at)
 
 
 def _parse_tool_call_envelope(raw: Any) -> Any:
@@ -856,13 +866,10 @@ def _parse_tool_call_envelope(raw: Any) -> Any:
         return None
 
     marker = _SENTINEL_LINE.search(raw)
-    if (
-        marker
-        and not _attempted_tool_call(raw[: marker.start()])
-        and _envelope_before(raw, marker.start()) == 'unclear'
-    ):
+    standing = _standing_before(raw, marker.start()) if marker else None
+    if standing == 'unclear':
         return None
-    if marker and _reads_sentinel(raw, marker):
+    if standing == 'closed':
         # Delivered as written: only the separator comes off, never the answer's own whitespace.
         answer = _after_sentinel(raw[marker.end() :])
         # A sentinel with nothing after it is not an answer. Returning it would
@@ -912,7 +919,7 @@ def _diagnose(raw: Any) -> Tuple[str, str, str]:
     marker = _SENTINEL_LINE.search(text)
     # A marker the parser does not read as the sentinel (stacked onto a tool call, or a line of an
     # answer that was cut off) is not what went wrong either.
-    if marker and _reads_sentinel(text, marker) and not text[marker.end() :].strip():
+    if marker and _standing_before(text, marker.start()) == 'closed' and not text[marker.end() :].strip():
         return f'ended at {_FINAL_SENTINEL} with no answer after it.', '', f'Write the answer after {_FINAL_SENTINEL}.'
 
     attempted = _attempted_kind(text)
@@ -1022,6 +1029,9 @@ def _run_model_turn(ask: Callable[[str], Any]) -> Any:
         or lost_its_type
         or _looks_like_envelope(raw)
         or _ATTEMPTED_TYPE.search(raw)
+        # The envelope's own type as JSON reads it, which is how each hint took the reply: a type
+        # spelled with an escape is the same attempt.
+        or _attempted_kind(raw) is not None
         or _SENTINEL_LINE.search(raw)
     )
     if undeliverable:
